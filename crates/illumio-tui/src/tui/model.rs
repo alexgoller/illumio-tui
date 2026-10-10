@@ -3,7 +3,7 @@ use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::table::{Column, SortKey, TableView};
 use crate::tui::ui::theme::Theme;
 use pce::StatsSnapshot;
-use pce::traffic::ResolvedFlow;
+use pce::traffic::{BlockedGroup, FlowGroup, ResolvedFlow, blocked_summary, group_by_labels};
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
@@ -103,6 +103,10 @@ pub enum Overlay {
     Confirm {
         reason: String,
         action: PendingAction,
+    },
+    /// Comma-separated label keys for the app-to-app view.
+    GroupKeys {
+        input: String,
     },
 }
 
@@ -236,6 +240,194 @@ fn short_time_narrow(s: &str) -> String {
         .unwrap_or_else(|| s.to_string())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrafficView {
+    Flows,
+    Aggregate,
+    Blocked,
+}
+
+impl TrafficView {
+    pub fn next(self) -> Self {
+        match self {
+            TrafficView::Flows => TrafficView::Aggregate,
+            TrafficView::Aggregate => TrafficView::Blocked,
+            TrafficView::Blocked => TrafficView::Flows,
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            TrafficView::Flows => "Flows",
+            TrafficView::Aggregate => "App-to-app",
+            TrafficView::Blocked => "Blocked",
+        }
+    }
+}
+
+pub fn group_columns() -> Vec<Column<FlowGroup>> {
+    vec![
+        Column {
+            title: "src",
+            width: 26,
+            cell: |g| g.src.join("/"),
+            key: |g| SortKey::Text(g.src.join("/")),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 16,
+        },
+        Column {
+            title: "dst",
+            width: 26,
+            cell: |g| g.dst.join("/"),
+            key: |g| SortKey::Text(g.dst.join("/")),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 16,
+        },
+        Column {
+            title: "flows",
+            width: 6,
+            cell: |g| g.flows.to_string(),
+            key: |g| SortKey::Num(g.flows),
+            right: true,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 5,
+        },
+        Column {
+            title: "conns",
+            width: 8,
+            cell: |g| g.connections.to_string(),
+            key: |g| SortKey::Num(g.connections),
+            right: true,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 6,
+        },
+        Column {
+            title: "allowed",
+            width: 7,
+            cell: |g| g.allowed.to_string(),
+            key: |g| SortKey::Num(g.allowed),
+            right: true,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "pot.bl",
+            width: 6,
+            cell: |g| g.potentially_blocked.to_string(),
+            key: |g| SortKey::Num(g.potentially_blocked),
+            right: true,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "blocked",
+            width: 7,
+            cell: |g| g.blocked.to_string(),
+            key: |g| SortKey::Num(g.blocked),
+            right: true,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+    ]
+}
+
+pub fn blocked_columns() -> Vec<Column<BlockedGroup>> {
+    vec![
+        Column {
+            title: "last seen",
+            width: 16,
+            cell: |b| {
+                b.last_detected
+                    .as_deref()
+                    .map(short_time)
+                    .unwrap_or_default()
+            },
+            key: |b| SortKey::Text(b.last_detected.clone().unwrap_or_default()),
+            right: false,
+            hide_below: 0,
+            narrow: Some(|b| {
+                b.last_detected
+                    .as_deref()
+                    .map(short_time_narrow)
+                    .unwrap_or_default()
+            }),
+            narrow_width: 11,
+        },
+        Column {
+            title: "dst",
+            width: 22,
+            cell: |b| b.dst.clone(),
+            key: |b| SortKey::Text(b.dst.clone()),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 16,
+        },
+        Column {
+            title: "dst labels",
+            width: 0,
+            cell: |b| b.dst_labels.clone(),
+            key: |b| SortKey::Text(b.dst_labels.clone()),
+            right: false,
+            hide_below: 120,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "service",
+            width: 10,
+            cell: |b| match b.port {
+                Some(p) => format!("{p}/{}", b.proto),
+                None => b.proto.clone(),
+            },
+            key: |b| SortKey::Num(u64::from(b.port.unwrap_or(0))),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 9,
+        },
+        Column {
+            title: "flows",
+            width: 6,
+            cell: |b| b.flows.to_string(),
+            key: |b| SortKey::Num(b.flows),
+            right: true,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 5,
+        },
+        Column {
+            title: "conns",
+            width: 7,
+            cell: |b| b.connections.to_string(),
+            key: |b| SortKey::Num(b.connections),
+            right: true,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 5,
+        },
+        Column {
+            title: "sources",
+            width: 30,
+            cell: |b| b.sources.join(", "),
+            key: |b| SortKey::Text(b.sources.join(", ")),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 20,
+        },
+    ]
+}
+
 #[derive(Debug)]
 pub struct TrafficState {
     pub filter: TrafficFilter,
@@ -244,6 +436,12 @@ pub struct TrafficState {
     pub seq: u64,
     pub flows: TableView<ResolvedFlow>,
     pub show_detail: bool,
+    pub view: TrafficView,
+    pub group_keys: Vec<String>,
+    pub groups: TableView<FlowGroup>,
+    pub blocked: TableView<BlockedGroup>,
+    /// Aggregate pair (src, dst group keys) the Flows view is narrowed to.
+    pub drill: Option<(Vec<String>, Vec<String>)>,
 }
 
 impl TrafficState {
@@ -255,6 +453,45 @@ impl TrafficState {
             seq: 0,
             flows: TableView::new(flow_columns()),
             show_detail: false,
+            view: TrafficView::Flows,
+            group_keys: vec!["app".into(), "env".into()],
+            groups: TableView::new(group_columns()),
+            blocked: TableView::new(blocked_columns()),
+            drill: None,
+        }
+    }
+
+    /// Recomputes every view from `data`. Pure; never requests.
+    pub fn rebuild_views(&mut self) {
+        let flows: Vec<ResolvedFlow> = self
+            .data
+            .as_ref()
+            .map(|d| d.flows.clone())
+            .unwrap_or_default();
+        let shown: Vec<ResolvedFlow> = match &self.drill {
+            Some((src, dst)) => flows
+                .iter()
+                .filter(|f| {
+                    group_by_labels(std::slice::from_ref(f), &self.group_keys)
+                        .first()
+                        .is_some_and(|g| &g.src == src && &g.dst == dst)
+                })
+                .cloned()
+                .collect(),
+            None => flows.clone(),
+        };
+        self.flows.set_rows(shown);
+        self.groups
+            .set_rows(group_by_labels(&flows, &self.group_keys));
+        self.blocked.set_rows(blocked_summary(&flows));
+    }
+
+    /// Whether the active view's table is capturing keys for a search.
+    pub fn is_searching(&self) -> bool {
+        match self.view {
+            TrafficView::Flows => self.flows.is_searching(),
+            TrafficView::Aggregate => self.groups.is_searching(),
+            TrafficView::Blocked => self.blocked.is_searching(),
         }
     }
 

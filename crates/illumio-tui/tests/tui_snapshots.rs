@@ -176,3 +176,18 @@ fn traffic_flows_truncated_shows_warning() {
     let out = render_to_string(&m, 80, 24);
     assert!(out.contains("⚠ truncated"), "{out}");
 }
+
+#[test]
+fn traffic_aggregate_and_blocked_80x24() {
+    use illumio_tui::tui::model::TrafficView;
+    let mut m = model_with_flows();
+    m.traffic.view = TrafficView::Aggregate;
+    m.traffic.rebuild_views();
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("shop/prod"), "{out}");
+    insta::assert_snapshot!("traffic_aggregate_80x24", out);
+    m.traffic.view = TrafficView::Blocked;
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("8443/tcp"), "{out}");
+    insta::assert_snapshot!("traffic_blocked_80x24", out);
+}

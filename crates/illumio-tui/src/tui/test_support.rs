@@ -56,7 +56,6 @@ pub fn fixture_flows() -> Vec<ResolvedFlow> {
 pub fn model_with_flows() -> Model {
     let mut m = model_fixture();
     let flows = fixture_flows();
-    m.traffic.flows.set_rows(flows.clone());
     m.traffic.data = Some(TrafficData {
         flows,
         truncated: false,
@@ -67,6 +66,7 @@ pub fn model_with_flows() -> Model {
         filter: m.traffic.filter.clone(),
     });
     m.traffic.query = QueryState::Idle;
+    m.traffic.rebuild_views();
     m
 }
 

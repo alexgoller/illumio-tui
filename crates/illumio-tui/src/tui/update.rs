@@ -3,6 +3,7 @@ use crate::tui::commands::{self, Command};
 use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::model::{
     Connection, Model, Overlay, PendingAction, QueryState, Screen, StatusLine, TrafficData,
+    TrafficView,
 };
 use crate::tui::msg::{Cmd, Msg, QueryOutcome};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -115,14 +116,8 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         fetched_at: Instant::now(),
                         filter,
                     });
-                    model.traffic.flows.set_rows(
-                        model
-                            .traffic
-                            .data
-                            .as_ref()
-                            .map(|d| d.flows.clone())
-                            .unwrap_or_default(),
-                    );
+                    model.traffic.drill = None;
+                    model.traffic.rebuild_views();
                     model.traffic.show_detail = false;
                     model.traffic.query = QueryState::Idle;
                     model.status = if truncated {
@@ -220,6 +215,39 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             }
             _ => Vec::new(),
         },
+        Overlay::GroupKeys { mut input } => match k.code {
+            KeyCode::Esc => {
+                model.overlay = Overlay::None;
+                Vec::new()
+            }
+            KeyCode::Enter => {
+                model.overlay = Overlay::None;
+                let mut keys: Vec<String> = input
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(String::from)
+                    .collect();
+                if keys.is_empty() {
+                    keys = vec!["app".into(), "env".into()];
+                }
+                model.traffic.group_keys = keys;
+                model.traffic.drill = None;
+                model.traffic.rebuild_views();
+                Vec::new()
+            }
+            KeyCode::Backspace => {
+                input.pop();
+                model.overlay = Overlay::GroupKeys { input };
+                Vec::new()
+            }
+            KeyCode::Char(c) => {
+                input.push(c);
+                model.overlay = Overlay::GroupKeys { input };
+                Vec::new()
+            }
+            _ => Vec::new(),
+        },
         Overlay::FilterEditor(mut e) => {
             match k.code {
                 KeyCode::Esc => model.overlay = Overlay::None,
@@ -274,7 +302,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
 fn on_screen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     // An active table search captures every key except Ctrl-C.
     if model.screen == Screen::Traffic
-        && model.traffic.flows.is_searching()
+        && model.traffic.is_searching()
         && !(k.code == KeyCode::Char('c') && k.modifiers.contains(KeyModifiers::CONTROL))
     {
         return traffic_key(model, k);
@@ -311,26 +339,20 @@ fn traffic_page(model: &Model) -> usize {
         .max(1)
 }
 
-fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
-    let page = traffic_page(model);
-    let table = &mut model.traffic.flows;
-    if table.is_searching() {
-        match k.code {
-            KeyCode::Esc => table.search_clear(),
-            KeyCode::Enter => table.search_commit(),
-            KeyCode::Backspace => table.search_pop(),
-            KeyCode::Char(c) => table.search_push(c),
-            _ => {}
-        }
-        table.ensure_visible(page);
-        return Vec::new();
-    }
+/// Search editing keys, shared by every view's table.
+fn search_key<T>(table: &mut crate::tui::table::TableView<T>, k: KeyEvent) {
     match k.code {
-        KeyCode::Char('f') => {
-            model.overlay = Overlay::FilterEditor(FilterEditor::from_filter(&model.traffic.filter));
-            return Vec::new();
-        }
-        KeyCode::Char('r') => return update(model, Msg::RunNow),
+        KeyCode::Esc => table.search_clear(),
+        KeyCode::Enter => table.search_commit(),
+        KeyCode::Backspace => table.search_pop(),
+        KeyCode::Char(c) => table.search_push(c),
+        _ => {}
+    }
+}
+
+/// Navigation, sort and search-start keys, shared by every view's table.
+fn table_key<T>(table: &mut crate::tui::table::TableView<T>, k: KeyEvent, page: usize) {
+    match k.code {
         KeyCode::Down | KeyCode::Char('j') => table.select_next(),
         KeyCode::Up | KeyCode::Char('k') => table.select_prev(),
         KeyCode::PageDown => table.page_down(page),
@@ -339,10 +361,75 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         KeyCode::End => table.end(),
         KeyCode::Char('s') => table.sort_next(),
         KeyCode::Char('/') => table.start_search(),
-        KeyCode::Enter => model.traffic.show_detail = !model.traffic.show_detail,
         _ => {}
     }
-    model.traffic.flows.ensure_visible(page);
+}
+
+fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
+    let page = traffic_page(model);
+    if model.traffic.is_searching() {
+        let t = &mut model.traffic;
+        match t.view {
+            TrafficView::Flows => {
+                search_key(&mut t.flows, k);
+                t.flows.ensure_visible(page);
+            }
+            TrafficView::Aggregate => {
+                search_key(&mut t.groups, k);
+                t.groups.ensure_visible(page);
+            }
+            TrafficView::Blocked => {
+                search_key(&mut t.blocked, k);
+                t.blocked.ensure_visible(page);
+            }
+        }
+        return Vec::new();
+    }
+    match k.code {
+        KeyCode::Char('f') => {
+            model.overlay = Overlay::FilterEditor(FilterEditor::from_filter(&model.traffic.filter));
+            return Vec::new();
+        }
+        KeyCode::Char('r') => return update(model, Msg::RunNow),
+        KeyCode::Char('v') => model.traffic.view = model.traffic.view.next(),
+        KeyCode::Char('g') => {
+            model.overlay = Overlay::GroupKeys {
+                input: model.traffic.group_keys.join(","),
+            };
+            return Vec::new();
+        }
+        KeyCode::Enter => match model.traffic.view {
+            TrafficView::Aggregate => {
+                if let Some(g) = model.traffic.groups.selected_item() {
+                    model.traffic.drill = Some((g.src.clone(), g.dst.clone()));
+                    model.traffic.view = TrafficView::Flows;
+                    model.traffic.rebuild_views();
+                }
+            }
+            TrafficView::Flows => model.traffic.show_detail = !model.traffic.show_detail,
+            TrafficView::Blocked => {}
+        },
+        KeyCode::Esc | KeyCode::Backspace
+            if model.traffic.view == TrafficView::Flows && model.traffic.drill.is_some() =>
+        {
+            model.traffic.drill = None;
+            model.traffic.rebuild_views();
+        }
+        _ => {
+            let t = &mut model.traffic;
+            match t.view {
+                TrafficView::Flows => table_key(&mut t.flows, k, page),
+                TrafficView::Aggregate => table_key(&mut t.groups, k, page),
+                TrafficView::Blocked => table_key(&mut t.blocked, k, page),
+            }
+        }
+    }
+    let t = &mut model.traffic;
+    match t.view {
+        TrafficView::Flows => t.flows.ensure_visible(page),
+        TrafficView::Aggregate => t.groups.ensure_visible(page),
+        TrafficView::Blocked => t.blocked.ensure_visible(page),
+    }
     Vec::new()
 }
 
@@ -413,6 +500,97 @@ mod tests {
 
     fn key(c: char) -> Msg {
         Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))
+    }
+
+    #[test]
+    fn v_cycles_views_and_g_sets_group_keys_without_requests() {
+        use crate::tui::model::{Overlay, TrafficView};
+        use crate::tui::test_support::model_with_flows;
+        let mut m = model_with_flows();
+        assert_eq!(m.traffic.view, TrafficView::Flows);
+        assert!(update(&mut m, key('v')).is_empty());
+        assert_eq!(m.traffic.view, TrafficView::Aggregate);
+        assert!(
+            m.traffic.groups.len() >= 3,
+            "groups built from data: {}",
+            m.traffic.groups.len()
+        );
+        assert_eq!(m.traffic.group_keys, vec!["app", "env"]);
+        update(&mut m, key('g'));
+        assert!(matches!(m.overlay, Overlay::GroupKeys { .. }));
+        for _ in 0..7 {
+            update(
+                &mut m,
+                Msg::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
+            );
+        }
+        for c in "role".chars() {
+            update(&mut m, key(c));
+        }
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        assert_eq!(m.traffic.group_keys, vec!["role"]);
+        assert!(
+            m.traffic.groups.rows().iter().any(|g| g.src == vec!["web"]),
+            "{:?}",
+            m.traffic.groups.rows()
+        );
+        update(&mut m, key('v'));
+        assert_eq!(m.traffic.view, TrafficView::Blocked);
+        assert_eq!(m.traffic.blocked.len(), 2);
+        update(&mut m, key('v'));
+        assert_eq!(m.traffic.view, TrafficView::Flows);
+        assert_eq!(m.stats.calls, 5);
+    }
+
+    #[test]
+    fn enter_in_aggregate_drills_into_the_pair_and_esc_clears() {
+        use crate::tui::model::TrafficView;
+        use crate::tui::test_support::model_with_flows;
+        let mut m = model_with_flows();
+        update(&mut m, key('v'));
+        // first group is the 310-connection shop/prod -> shop/prod pair
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        assert_eq!(m.traffic.view, TrafficView::Flows);
+        assert!(m.traffic.drill.is_some());
+        assert_eq!(m.traffic.flows.len(), 1);
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        );
+        assert!(m.traffic.drill.is_none());
+        assert_eq!(m.traffic.flows.len(), 4);
+    }
+
+    #[test]
+    fn query_done_rebuilds_all_views() {
+        use crate::tui::filter::TrafficFilter;
+        use crate::tui::test_support::fixture_flows;
+        let mut m = model_fixture();
+        let f = TrafficFilter::defaults("1h", 50);
+        update(&mut m, Msg::ApplyFilter(f.clone()));
+        let outcome = crate::tui::msg::QueryOutcome {
+            flows: fixture_flows(),
+            truncated: false,
+            matches_count: Some(4),
+            elapsed: std::time::Duration::from_secs(1),
+            hit: false,
+            filter: f,
+        };
+        update(
+            &mut m,
+            Msg::QueryDone {
+                seq: 1,
+                result: Ok(outcome),
+            },
+        );
+        assert!(!m.traffic.groups.is_empty());
+        assert_eq!(m.traffic.blocked.len(), 2);
     }
 
     #[test]

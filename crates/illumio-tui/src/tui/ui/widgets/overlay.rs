@@ -76,6 +76,23 @@ pub fn render_prompt(model: &Model, input: &str, f: &mut Frame, area: Rect) {
     f.render_widget(Paragraph::new(line).style(t.base()), r);
 }
 
+pub fn render_group_prompt(model: &Model, input: &str, f: &mut Frame, area: Rect) {
+    let t = &model.theme;
+    let r = Rect::new(
+        area.x,
+        area.y + area.height.saturating_sub(1),
+        area.width,
+        1,
+    );
+    f.render_widget(Clear, r);
+    let line = Line::from(vec![
+        Span::styled("group keys: ", t.header_style()),
+        Span::styled(input.to_string(), t.base()),
+        Span::styled("▏", t.dim_style()),
+    ]);
+    f.render_widget(Paragraph::new(line).style(t.base()), r);
+}
+
 pub fn render_filter_editor(model: &Model, e: &FilterEditor, f: &mut Frame, area: Rect) {
     let t = &model.theme;
     let r = centered(area, 70, 12);

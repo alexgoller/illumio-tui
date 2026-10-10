@@ -1,5 +1,5 @@
 //! The Traffic screen: filter bar, result stats, flow table and detail pane.
-use crate::tui::model::{Model, QueryState};
+use crate::tui::model::{Model, QueryState, TrafficView};
 use crate::tui::ui::widgets::bars;
 use crate::tui::ui::widgets::panel::panel;
 use pce::models::PolicyDecision;
@@ -46,9 +46,16 @@ pub fn render(model: &Model, f: &mut Frame, body: Rect) {
     let l = layout(body);
     render_filter_bar(model, f, l.filter);
     render_stats(model, f, l.stats);
-    render_flows(model, f, l.table);
-    if l.detail.height > 0 {
-        render_detail(model, f, l.detail);
+    match model.traffic.view {
+        TrafficView::Flows => {
+            render_flows(model, f, l.table);
+            if l.detail.height > 0 {
+                render_detail(model, f, l.detail);
+            }
+        }
+        // The detail pane belongs to the Flows view; the others use its space.
+        TrafficView::Aggregate => render_groups(model, f, l.table.union(l.detail)),
+        TrafficView::Blocked => render_blocked(model, f, l.table.union(l.detail)),
     }
 }
 
@@ -132,11 +139,58 @@ fn render_stats(model: &Model, f: &mut Frame, area: Rect) {
 
 fn render_flows(model: &Model, f: &mut Frame, area: Rect) {
     let t = &model.theme;
-    let meta = crate::tui::ui::widgets::table::header_meta(&model.traffic.flows);
-    let block = panel("Flows", &meta, t, true);
+    let mut meta = crate::tui::ui::widgets::table::header_meta(&model.traffic.flows);
+    let title = match &model.traffic.drill {
+        Some((src, dst)) => {
+            let badge = "Esc clears";
+            meta = if meta.is_empty() {
+                badge.to_string()
+            } else {
+                format!("{badge} · {meta}")
+            };
+            format!("Flows ▸ {} → {}", src.join("/"), dst.join("/"))
+        }
+        None => TrafficView::Flows.title().to_string(),
+    };
+    let block = panel(&title, &meta, t, true);
     let theme = t.clone();
     crate::tui::ui::widgets::table::render(f, area, &model.traffic.flows, t, block, &move |fl| {
         theme.decision_style(fl.policy_decision)
+    });
+}
+
+/// Rows are styled by their dominant decision: blocked > potentially blocked > allowed.
+fn render_groups(model: &Model, f: &mut Frame, area: Rect) {
+    let t = &model.theme;
+    let meta = crate::tui::ui::widgets::table::header_meta(&model.traffic.groups);
+    let meta = format!(
+        "keys {} · Enter drills{}{}",
+        model.traffic.group_keys.join(","),
+        if meta.is_empty() { "" } else { " · " },
+        meta
+    );
+    let block = panel(TrafficView::Aggregate.title(), &meta, t, true);
+    let theme = t.clone();
+    crate::tui::ui::widgets::table::render(f, area, &model.traffic.groups, t, block, &move |g| {
+        let decision = if g.blocked > 0 {
+            PolicyDecision::Blocked
+        } else if g.potentially_blocked > 0 {
+            PolicyDecision::PotentiallyBlocked
+        } else {
+            PolicyDecision::Allowed
+        };
+        theme.decision_style(decision)
+    });
+}
+
+/// Every row here is blocked or potentially blocked; both read as `bad`.
+fn render_blocked(model: &Model, f: &mut Frame, area: Rect) {
+    let t = &model.theme;
+    let meta = crate::tui::ui::widgets::table::header_meta(&model.traffic.blocked);
+    let block = panel(TrafficView::Blocked.title(), &meta, t, true);
+    let bad = Style::new().fg(t.bad);
+    crate::tui::ui::widgets::table::render(f, area, &model.traffic.blocked, t, block, &move |_| {
+        bad
     });
 }
 
