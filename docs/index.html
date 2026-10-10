@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>illumio-tui</title>
+<meta name="description" content="A Rust CLI and upcoming btop-style terminal UI for the Illumio Core PCE: Explorer traffic, policy, labels and workloads, with throttling, caching and cost guards that keep the PCE safe. Built in one day by one person directing AI agents.">
+<meta name="theme-color" content="#0e1622">
+<link rel="canonical" href="https://alexgoller.github.io/illumio-tui/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="illumio-tui: the Illumio PCE at terminal speed">
+<meta property="og:description" content="Read-only CLI for Illumio Core PCE traffic and policy today, btop-style TUI next. Throttled, cached, counted. Built in one day by a person directing AI agents.">
+<meta property="og:url" content="https://alexgoller.github.io/illumio-tui/">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="assets/mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&amp;family=Martian+Mono:wdth,wght@75..112.5,400..800&amp;display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="topbar">
+  <div class="wrap">
+    <a class="brand" href="./"><img src="assets/mark.svg" alt="" width="20" height="20">illumio-tui</a>
+    <nav aria-label="Sections">
+      <a href="#today"><kbd>1</kbd>today</a>
+      <a href="#protection"><kbd>2</kbd>protection</a>
+      <a href="#next"><kbd>3</kbd>next</a>
+      <a href="#made"><kbd>4</kbd>made</a>
+      <a href="#install"><kbd>5</kbd>install</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="hero">
+  <div class="wrap">
+    <h1>The Illumio PCE at terminal speed.</h1>
+    <p class="promise">Traffic, policy, labels and workloads from your shell, every href resolved to a name, every API call counted, and a PCE that never notices you were there.</p>
+
+    <div class="decision-bar" role="img" aria-label="Decision colours: allowed, potentially blocked, blocked"><span class="a"></span><span class="p"></span><span class="b"></span></div>
+
+    <p class="thin-air">Built out of thin air in one day.</p>
+    <p>On 10 October 2026 one person sat down with an empty repository and a team of AI agents. By the end of the day there was a reviewed, tested Rust systems tool talking to a real PCE. Not a demo, not a toy, not a single line of Rust typed by hand.</p>
+
+    <dl class="statline" aria-label="Build facts">
+      <div><dt>tests</dt><dd class="ok">103 passing</dd></div>
+      <div><dt>clippy</dt><dd class="ok">clean</dd></div>
+      <div><dt>cargo-deny</dt><dd class="ok">clean</dd></div>
+      <div><dt>live PCE</dt><dd>50 flows in 9 API calls</dd></div>
+      <div><dt>tasks</dt><dd>21, each independently reviewed</dd></div>
+    </dl>
+
+    <div class="cta">
+      <a class="btn solid" href="#install">Install it</a>
+      <a class="btn" href="https://github.com/alexgoller/illumio-tui">Source on GitHub</a>
+    </div>
+  </div>
+</section>
+
+<div class="wrap">
+
+<section class="panel" id="today" aria-labelledby="today-h">
+  <h2 id="today-h"><span class="key">1</span>What it does today</h2>
+  <p class="lede">A fast, scriptable, read-only CLI for the PCE. It speaks JSON to agents and tables to humans.</p>
+  <p>Every command below is real and merged on <code>main</code>. Output is a table when you are at a terminal and JSON when stdout is piped; force either with <code>--table</code> or <code>--json</code>. Nothing in this release can change your PCE: it is read-only by design.</p>
+
+<pre><code><span class="c"># connectivity, objects, workloads</span>
+<span class="p">$ </span>illumio-tui health
+<span class="p">$ </span>illumio-tui labels --key app
+<span class="p">$ </span>illumio-tui label-groups
+<span class="p">$ </span>illumio-tui iplists
+<span class="p">$ </span>illumio-tui services
+<span class="p">$ </span>illumio-tui workloads --label app=web --online true
+
+<span class="c"># policy, draft by default, every href resolved to a name</span>
+<span class="p">$ </span>illumio-tui policy rulesets
+<span class="p">$ </span>illumio-tui policy rules "Web-DB"
+<span class="p">$ </span>illumio-tui policy pending
+
+<span class="c"># Explorer traffic: flows, app-to-app, blocked</span>
+<span class="p">$ </span>illumio-tui traffic query --window 24h --src app=web --dst app=db --json
+<span class="p">$ </span>illumio-tui traffic query --window 1h --group app,env
+<span class="p">$ </span>illumio-tui traffic query --window 1h --blocked
+<span class="p">$ </span>illumio-tui traffic query --window 30d --dry-run
+
+<span class="c"># connection profiles</span>
+<span class="p">$ </span>illumio-tui profile list
+<span class="p">$ </span>illumio-tui profile use prod</code></pre>
+
+  <div class="cols">
+    <div>
+      <h3>Explorer, without the clicking</h3>
+      <p><code>traffic query</code> runs the PCE's asynchronous Explorer query for you: it submits, polls with backoff, downloads, flags truncation, and resolves every label href to <code>key=value</code>.</p>
+      <p>Filters read like you think: <code>app=web</code>, <code>ip:10.0.0.5</code>, <code>ipl:NAME</code>, <code>wl:HOST</code>, <code>fqdn:NAME</code>. A comma means AND, repeating the flag means OR. Add <code>--exclude-src</code>, <code>--exclude-dst</code>, <code>--port</code>, <code>--proto</code>, <code>--process</code> and <code>--decision</code> as needed. An unknown label value fails locally, before the PCE sees anything.</p>
+      <p><code>--group app,env</code> folds flows into app-to-app pairs with allowed, potentially blocked and blocked counts. <code>--blocked</code> keeps only blocked and potentially blocked flows, grouped by destination and port. Both run on the downloaded result, with zero extra requests.</p>
+    </div>
+    <div>
+      <h3>Built for agents</h3>
+      <p>Every command prints one stable envelope on stdout: your data, plus a <code>meta</code> block that says exactly what it cost.</p>
+<pre><code><span class="p">$ </span>illumio-tui traffic query \
+    --window 1h --group app,env --json
+{
+  <span class="k">"data"</span>: [
+    {
+      <span class="k">"src"</span>: ["web", "prod"],
+      <span class="k">"dst"</span>: ["db", "prod"],
+      <span class="k">"flows"</span>: 412,
+      <span class="k">"connections"</span>: 9841,
+      <span class="k">"allowed"</span>: <span class="ok">398</span>,
+      <span class="k">"potentially_blocked"</span>: <span class="warn">14</span>,
+      <span class="k">"blocked"</span>: <span class="bad">0</span>
+    }
+  ],
+  <span class="k">"meta"</span>: {
+    <span class="k">"profile"</span>: "prod",
+    <span class="k">"elapsed_ms"</span>: 4120,
+    <span class="k">"api_calls"</span>: 8,
+    <span class="k">"bytes"</span>: 412733,
+    <span class="k">"cache"</span>: "miss",
+    <span class="k">"truncated"</span>: false,
+    <span class="k">"window"</span>: {
+      <span class="k">"start"</span>: "2026-10-10T11:00:00Z",
+      <span class="k">"end"</span>: "2026-10-10T12:00:00Z"
+    }
+  }
+}</code></pre>
+      <p class="caption">Envelope shape with illustrative values. <code>cache</code> is one of <code>hit</code>, <code>miss</code>, <code>bypass</code> or <code>none</code>.</p>
+      <p>Errors go to stderr as JSON, so a pipeline never mistakes a failure for data:</p>
+<pre class="wrap"><code>{"error":{"exit_code":2,"kind":"args","message":"expensive query: window is 30d (&gt; 7d); re-run with --yes to confirm"}}</code></pre>
+      <dl class="codes">
+        <dt>1</dt><dd>generic failure</dd>
+        <dt>2</dt><dd>arguments or configuration</dd>
+        <dt>3</dt><dd>authentication</dd>
+        <dt>4</dt><dd>PCE error</dd>
+        <dt>5</dt><dd>rate limited</dd>
+      </dl>
+    </div>
+  </div>
+
+  <h3>Underneath: the <code>pce</code> library</h3>
+  <p>The CLI is a thin layer over a standalone Rust crate with no terminal code in it: a throttled HTTP client with backoff, a TTL cache, typed models checked against anonymised recordings from a real PCE, the async Explorer poller with cancellation, href-to-name resolution, and the label-pair and blocked aggregations. The TUI will reuse every piece of it.</p>
+</section>
+
+<section class="panel" id="protection" aria-labelledby="protection-h">
+  <h2 id="protection-h"><span class="key">2</span>Gentle on the PCE, by construction</h2>
+  <p class="lede">Your PCE is shared, expensive and important. This tool treats it that way.</p>
+  <p>Most tools that hammer a management plane do it by accident: a refresh loop nobody asked for, a retry storm, an Explorer query over ninety days that someone fired off to see what happens. illumio-tui is built so that none of that can happen quietly. Every request is caused by you, throttled, cached where it can be, counted, and shown back to you.</p>
+
+  <ul class="guards">
+    <li><b>2 req/s, burst 5</b><span>One token bucket shared by every request. 429 and 503 pause the whole client with exponential backoff and jitter, honouring <code>Retry-After</code>. POSTs are never retried.</span></li>
+    <li><b>Counted, always</b><span>Every call and every byte goes into <code>meta.api_calls</code> and <code>meta.bytes</code>. You always know what a command cost.</span></li>
+    <li><b>Cached 15 / 5 min</b><span>Labels, label groups, IP lists and services for 15 minutes; policy and workloads for 5. One traffic result set is kept until the filter changes.</span></li>
+    <li><b>24 h, 1000 rows</b><span>Explorer queries default to a 24-hour window and a 1000-row cap. Truncation is always reported.</span></li>
+    <li><b><code>--yes</code> above 7 days or 10 000 rows</b><span>Expensive queries stop with exit code 2 and tell you why, until you confirm on purpose.</span></li>
+    <li><b><code>--dry-run</code></b><span>Prints the exact Explorer request body and sends nothing to the PCE. See the query before the PCE does.</span></li>
+  </ul>
+</section>
+
+<section class="panel" id="next" aria-labelledby="next-h">
+  <h2 id="next-h"><span class="key">3</span>What's next: the TUI</h2>
+  <span class="status-tag">in progress, not shipped yet</span>
+  <p class="lede">Explorer, policy and inventory in one keyboard-driven screen, in the spirit of btop.</p>
+  <p>The interactive terminal UI is the next plan. Boxed panels with titled borders, dense stats, decision bars, one dark and one light palette. It sits on the same library the CLI already uses, so every protection above carries over unchanged. Run <code>illumio-tui</code> with no subcommand today and it tells you the TUI is on its way.</p>
+
+<pre class="mock" aria-label="Concept mockup of the traffic screen in app-to-app view"><code><span class="frame">┌─ illumio-tui ────────────────────── prod  org 1  draft  api 9 calls  1.2 MB ─┐</span>
+│ <span class="hl">1 traffic</span>   2 policy   3 objects   4 workloads<span class="dim">                       ? help</span>  │
+<span class="frame">├─ filter ───────────────────────────────────────────────────── 24h  cap 1000 ─┤</span>
+│ <span class="dim">src </span>app=web<span class="dim">   dst </span>any<span class="dim">   svc </span>any<span class="dim">   decisions </span>all                              │
+<span class="frame">├─ app-to-app  group app,env ─────────────────────────────── 812 rows  age 2m ─┤</span>
+│ <span class="dim">src         dst           flows    conns  decisions</span>                          │
+│ web/prod    db/prod         412     9841  <span class="ok">██████████████████</span><span class="warn">██</span><span class="bad"></span><span class="dim"></span>               │
+│ web/prod    cache/prod      188     3302  <span class="ok">███████████████</span><span class="warn">█████</span><span class="bad"></span><span class="dim"></span>               │
+│ web/prod    auth/prod       121     1904  <span class="ok">████████████</span><span class="warn">██████</span><span class="bad">██</span><span class="dim"></span>               │
+│ web/prod    legacy/dev       64      388  <span class="ok">██</span><span class="warn">████████</span><span class="bad">██████████</span><span class="dim"></span>               │
+│ web/prod    ldap/core        27      152  <span class="ok"></span><span class="warn"></span><span class="bad">████████████████████</span><span class="dim"></span>               │
+│                                                                              │
+│ <span class="ok">█ allowed</span><span class="warn">   █ potentially blocked</span><span class="bad">   █ blocked</span>                                │
+<span class="frame">└─ done 4.1s   v view  g group  enter drill  f filter  r run  a auto ──────────┘</span></code></pre>
+  <p class="caption">Concept of the Traffic screen in its app-to-app view, drawn from the design spec. Final layout may differ.</p>
+
+  <div class="cols">
+    <div>
+      <h3>Four screens</h3>
+      <ul class="screens">
+        <li><kbd>1</kbd><strong>Traffic.</strong> One filter, one query, three views on <code>v</code>: the flow table, the app-to-app aggregate with a drill-down on <code>enter</code>, and a blocked focus grouped by destination and port.</li>
+        <li><kbd>2</kbd><strong>Policy.</strong> Rulesets on the left, resolved rules on the right, deny rules in their own section, draft and active on <code>d</code>, pending changes on <code>p</code>.</li>
+        <li><kbd>3</kbd><strong>Labels &amp; objects.</strong> Labels, label groups, IP lists and services, with cache age shown and per-type refresh.</li>
+        <li><kbd>4</kbd><strong>Workloads.</strong> Enforcement, visibility, online state, VEN status. <code>t</code> jumps to Traffic with that workload as source.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Still gentle</h3>
+      <ul>
+        <li>A <code>:</code> command prompt: <code>:traffic</code>, <code>:filter</code>, <code>:window</code>, <code>:profile</code>, <code>:draft</code>, <code>:active</code>.</li>
+        <li>View switches, sorting, searching and grouping never re-query.</li>
+        <li>Auto-refresh is opt-in per screen with <code>a</code>, never faster than every 60 seconds, and it shows a countdown.</li>
+        <li>The API call count and byte count live in the header, all the time.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="panel" id="made" aria-labelledby="made-h">
+  <h2 id="made-h"><span class="key">4</span>How it was made</h2>
+  <p class="lede">One day. One person. A team of AI agents. A working systems tool.</p>
+  <p>This is the part worth pausing on. The owner of this project does not write Rust. He wrote none of this code by hand. He wrote the intent, approved the design, and held the line on quality, while AI agents in Claude Code did the implementing and, just as importantly, the reviewing. This is how it went on 10 October 2026:</p>
+
+  <ol class="timeline">
+    <li><strong>A design spec, approved section by section.</strong> Purpose, constraints, architecture, screens, PCE protection, CLI, config, testing. Nothing was built until the design was agreed.</li>
+    <li><strong>A 21-task implementation plan.</strong> Small, testable steps, each with a clear definition of done.</li>
+    <li><strong>One fresh agent per task, one independent reviewer per task.</strong> Every task was implemented by a new AI agent with a clean context, then checked by a separate AI reviewer before the next task could start. Four of the 21 tasks needed one fix round.</li>
+    <li><strong>A whole-branch review and one fix wave.</strong> The finished branch was reviewed end to end, and the findings were fixed in a single pass.</li>
+    <li><strong>103 automated tests, clippy clean, cargo-deny clean.</strong> Offline tests run against hand-written fixtures, mocked HTTP and anonymised recordings from a real PCE.</li>
+    <li><strong>A live smoke test against a real PCE.</strong> Health, object load, one Explorer query: 50 flows back in 9 API calls.</li>
+  </ol>
+
+  <p class="manifesto">The bottleneck is no longer typing code. It is knowing exactly what you want and refusing to accept less.</p>
+  <p>That is a new kind of leverage for the people who know a domain best. A PCE expert can now direct a tool into existence that would once have needed a small team and several weeks, and keep every decision traceable in plain documents. Read them yourself: the <a href="https://github.com/alexgoller/illumio-tui/blob/main/docs/superpowers/specs/2026-10-10-illumio-tui-design.md">design spec</a>, the <a href="https://github.com/alexgoller/illumio-tui/tree/main/docs/superpowers/plans">implementation plans</a>, and the <a href="https://github.com/alexgoller/illumio-tui/blob/main/docs/architecture.md">architecture notes</a>, which walk a single traffic query from argument parsing to JSON.</p>
+</section>
+
+<section class="panel" id="install" aria-labelledby="install-h">
+  <h2 id="install-h"><span class="key">5</span>Install</h2>
+  <p>You need a stable Rust toolchain and an API key for your PCE. Build from source:</p>
+<pre><code><span class="p">$ </span>git clone https://github.com/alexgoller/illumio-tui
+<span class="p">$ </span>cd illumio-tui
+<span class="p">$ </span>cargo install --path crates/illumio-tui</code></pre>
+
+  <div class="cols">
+    <div>
+      <h3>Configure with environment variables</h3>
+      <p>The same names as <a href="https://github.com/alexgoller/illumio-mcp-server">illumio-mcp-server</a>, so an existing setup just works:</p>
+<pre><code>PCE_HOST=pce.example
+PCE_PORT=443
+PCE_ORG_ID=1
+API_KEY=api_xxxxxxxxxxxx
+API_SECRET=xxxxxxxxxxxxxxxx</code></pre>
+      <p><code>PCE_TLS_VERIFY</code> is honoured too. <code>--env-file .env</code> loads a dotenv file for a single run.</p>
+    </div>
+    <div>
+      <h3>Or with profiles</h3>
+      <p>In <code>~/.config/illumio-tui/config.toml</code>:</p>
+<pre><code>default_profile = "prod"
+
+[profiles.prod]
+host = "pce.example"
+org_id = 1
+api_key = "api_..."
+api_secret_cmd = "op read op://vault/pce/secret"</code></pre>
+      <p><code>api_secret_cmd</code> fetches the secret from your password manager at run time. Switch with <code>profile use</code> or <code>--profile</code>.</p>
+    </div>
+  </div>
+  <p>Per-run overrides: <code>--host</code>, <code>--pce-port</code>, <code>--org-id</code>, <code>--profile</code>, <code>--config</code>, <code>--insecure</code>, <code>--no-cache</code>. The connection port flag is <code>--pce-port</code> because <code>traffic query</code> has its own <code>--port</code> filter.</p>
+</section>
+
+<section class="panel" id="licence" aria-labelledby="licence-h">
+  <h2 id="licence-h">Licence and links</h2>
+  <p>illumio-tui is free software under the <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU General Public License v3.0 only</a>. It is an independent project and is not an official Illumio product.</p>
+  <ul>
+    <li><a href="https://github.com/alexgoller/illumio-tui">illumio-tui on GitHub</a>: source and issues.</li>
+    <li><a href="https://github.com/alexgoller/illumio-mcp-server">illumio-mcp-server</a>: the same PCE, exposed to AI assistants over the Model Context Protocol, by the same author.</li>
+    <li><a href="https://github.com/alexgoller/illumio-tui/blob/main/docs/superpowers/specs/2026-10-10-illumio-tui-design.md">Design spec</a> and <a href="https://github.com/alexgoller/illumio-tui/tree/main/docs/superpowers/plans">implementation plans</a>: how it was made.</li>
+  </ul>
+</section>
+
+</div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>illumio-tui, GPL-3.0-only</span>
+    <span>Directed by Alex Goller, built with AI agents in Claude Code.</span>
+  </div>
+</footer>
+</body>
+</html>

@@ -3,6 +3,8 @@
 Terminal UI and CLI for the Illumio Core PCE, built for administrators,
 Illumio Professional Services, and agents. Read-only in this release.
 
+Website: https://alexgoller.github.io/illumio-tui/
+
 ## Install
 
     cargo install --path crates/illumio-tui
