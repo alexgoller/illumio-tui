@@ -1,0 +1,15 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+pce = { path = "../pce" }
+tokio.workspace = true
+tokio-util.workspace = true
+serde_json.workspace = true
+clap.workspace = true
+dotenvy.workspace = true

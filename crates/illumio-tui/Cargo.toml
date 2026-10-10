@@ -1,0 +1,32 @@
+[package]
+name = "illumio-tui"
+description = "Terminal UI and CLI for the Illumio Core PCE"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "illumio-tui"
+path = "src/main.rs"
+
+[dependencies]
+pce = { path = "../pce" }
+tokio.workspace = true
+tokio-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+clap.workspace = true
+toml.workspace = true
+dirs.workspace = true
+dotenvy.workspace = true
+jiff.workspace = true
+humantime.workspace = true
+ratatui.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true
+tempfile.workspace = true
+wiremock.workspace = true
