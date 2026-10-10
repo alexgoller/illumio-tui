@@ -18,18 +18,36 @@ pub struct TrafficFilter {
     pub max_results: u32,
 }
 
+/// `a,b | c` is (a AND b) OR c. Empty expressions and groups that end up empty
+/// (`,` or ` | `) are dropped, so blank-ish text parses to no groups at all.
 fn parse_groups(text: &str) -> Result<Vec<Vec<FilterExpr>>, String> {
-    text.split('|')
-        .map(str::trim)
-        .filter(|g| !g.is_empty())
-        .map(|g| {
-            g.split(',')
-                .map(str::trim)
-                .filter(|e| !e.is_empty())
-                .map(|e| FilterExpr::parse(e).map_err(|err| err.to_string()))
-                .collect()
-        })
-        .collect()
+    let mut groups = Vec::new();
+    for g in text.split('|') {
+        let group = g
+            .split(',')
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+            .map(|e| FilterExpr::parse(e).map_err(|err| err.to_string()))
+            .collect::<Result<Vec<_>, _>>()?;
+        if !group.is_empty() {
+            groups.push(group);
+        }
+    }
+    Ok(groups)
+}
+
+/// `all` when every decision is selected (or none, which the PCE treats the same),
+/// else the list in order.
+fn decisions_text(decisions: &[PolicyDecision]) -> String {
+    if decisions.is_empty() || PolicyDecision::ALL.iter().all(|d| decisions.contains(d)) {
+        "all".to_string()
+    } else {
+        decisions
+            .iter()
+            .map(|d| d.as_str())
+            .collect::<Vec<_>>()
+            .join(",")
+    }
 }
 
 impl TrafficFilter {
@@ -96,8 +114,17 @@ impl TrafficFilter {
         Ok(())
     }
 
+    /// No source, destination or service restriction, judged from the parsed groups
+    /// so `,` or ` | ` counts as empty. Unparseable text is not unbounded (it fails
+    /// validation instead).
     pub fn is_unbounded(&self) -> bool {
-        self.src.trim().is_empty() && self.dst.trim().is_empty() && self.service.trim().is_empty()
+        let empty = |g: Result<Vec<Vec<FilterExpr>>, String>| g.is_ok_and(|g| g.is_empty());
+        empty(self.src_groups()) && empty(self.dst_groups()) && self.service.trim().is_empty()
+    }
+
+    /// The decisions as shown in the summary, the filter bar and the editor.
+    pub fn decisions_text(&self) -> String {
+        decisions_text(&self.decisions)
     }
 
     pub fn cost_hint(&self) -> String {
@@ -140,16 +167,7 @@ impl TrafficFilter {
                 s.trim().to_string()
             }
         };
-        let decision =
-            if self.decisions.len() == PolicyDecision::ALL.len() || self.decisions.is_empty() {
-                "all".to_string()
-            } else {
-                self.decisions
-                    .iter()
-                    .map(|d| d.as_str())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            };
+        let decision = self.decisions_text();
         format!(
             "window {}  src {}  dst {}  svc {}  decision {}",
             self.window,
@@ -199,15 +217,7 @@ pub struct FilterEditor {
 
 impl FilterEditor {
     pub fn from_filter(f: &TrafficFilter) -> Self {
-        let decisions = if f.decisions.len() == PolicyDecision::ALL.len() {
-            "all".to_string()
-        } else {
-            f.decisions
-                .iter()
-                .map(|d| d.as_str())
-                .collect::<Vec<_>>()
-                .join(",")
-        };
+        let decisions = f.decisions_text();
         Self {
             values: [
                 f.window.clone(),
@@ -227,15 +237,16 @@ impl FilterEditor {
         let decisions = if decisions_text.is_empty() || decisions_text == "all" {
             PolicyDecision::ALL.to_vec()
         } else {
-            decisions_text
-                .split(',')
-                .map(str::trim)
-                .map(|d| {
-                    PolicyDecision::parse(d).ok_or_else(|| {
-                        format!("decision: unknown {d:?} (allowed, potentially_blocked, blocked)")
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()?
+            let mut out: Vec<PolicyDecision> = Vec::new();
+            for d in decisions_text.split(',').map(str::trim) {
+                let d = PolicyDecision::parse(d).ok_or_else(|| {
+                    format!("decision: unknown {d:?} (allowed, potentially_blocked, blocked)")
+                })?;
+                if !out.contains(&d) {
+                    out.push(d);
+                }
+            }
+            out
         };
         let max_results = self.values[5]
             .trim()
@@ -314,6 +325,48 @@ mod tests {
         assert!(!f.is_unbounded());
         f.src = "justaword".into();
         assert!(f.src_groups().unwrap_err().contains("cannot parse"));
+    }
+
+    #[test]
+    fn separator_only_text_is_unbounded() {
+        let mut f = TrafficFilter::defaults("24h", 1000);
+        for text in [",", " | ", ", | ,", "|"] {
+            f.src = text.into();
+            f.dst = text.into();
+            assert_eq!(f.src_groups().unwrap(), Vec::<Vec<FilterExpr>>::new());
+            assert!(f.is_unbounded(), "{text:?}");
+            assert!(f.cost_hint().ends_with("unbounded"), "{text:?}");
+        }
+        f.src = "app=web | ,".into();
+        assert_eq!(
+            f.src_groups().unwrap().len(),
+            1,
+            "the empty group is dropped"
+        );
+        assert!(!f.is_unbounded());
+        f.src = "justaword".into();
+        assert!(!f.is_unbounded(), "unparseable text is not unbounded");
+    }
+
+    #[test]
+    fn duplicate_decisions_are_deduplicated_and_not_all() {
+        let mut e = FilterEditor::from_filter(&TrafficFilter::defaults("24h", 1000));
+        assert_eq!(e.values[4], "all");
+        e.values[4] = "allowed,blocked,allowed".into();
+        let f = e.to_filter().unwrap();
+        assert_eq!(
+            f.decisions,
+            vec![PolicyDecision::Allowed, PolicyDecision::Blocked]
+        );
+        assert_eq!(f.decisions_text(), "allowed,blocked");
+        assert!(f.summary().ends_with("decision allowed,blocked"));
+        assert_eq!(FilterEditor::from_filter(&f).values[4], "allowed,blocked");
+        // A hand-built filter with duplicates still is not `all`.
+        let mut dup = f.clone();
+        dup.decisions.push(PolicyDecision::Allowed);
+        assert_eq!(dup.decisions_text(), "allowed,blocked,allowed");
+        e.values[4] = "blocked, potentially_blocked, allowed".into();
+        assert_eq!(e.to_filter().unwrap().decisions_text(), "all");
     }
 
     #[test]

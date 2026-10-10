@@ -23,7 +23,14 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::Tick(now) => {
             if model.traffic.is_running() {
                 refresh_running_status_at(model, now);
-            } else if model.screen == Screen::Traffic
+            }
+            // Auto-refresh only on a live connection (never while connecting or
+            // after a failed connect or profile switch).
+            if !model.is_connected() {
+                return Vec::new();
+            }
+            if !model.traffic.is_running()
+                && model.screen == Screen::Traffic
                 && model.focused
                 && model.overlay == Overlay::None
                 && model.traffic.data.is_some()
@@ -155,6 +162,11 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::Command(c) => on_command(model, c),
         Msg::ApplyFilter(f) => {
             model.screen = Screen::Traffic;
+            // Key auto-repeat on `t` would otherwise restart (and re-POST) the same query.
+            if model.traffic.is_running() && model.traffic.filter == f {
+                model.status = StatusLine::info("query already running");
+                return Vec::new();
+            }
             model.traffic.filter = f.clone();
             start_query(model, f, CacheMode::Use)
         }
@@ -164,9 +176,17 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 return Vec::new();
             }
             let f = model.traffic.filter.clone();
-            let cmds = start_query(model, f, CacheMode::Bypass);
-            model.traffic.auto.rearm();
-            cmds
+            // The cost guard applies unless this exact filter produced the data on
+            // screen (e.g. profile defaults above the thresholds, never confirmed).
+            let fetched_with = model.traffic.data.as_ref().is_some_and(|d| d.filter == f);
+            if !fetched_with && let Some(reason) = f.needs_confirmation() {
+                model.overlay = Overlay::Confirm {
+                    reason: format!("{reason}. Run anyway? (y/n)"),
+                    action: PendingAction::RunNow(f),
+                };
+                return Vec::new();
+            }
+            run_now(model, f)
         }
         Msg::QueryProgress { seq, progress } => {
             if let QueryState::Running {
@@ -390,6 +410,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             }
         },
         Msg::PendingLoaded(result) => {
+            model.policy.pending_loading = false;
             match result {
                 Ok(p) => {
                     model.status = StatusLine::info(format!("{} pending changes", p.len()));
@@ -415,6 +436,13 @@ fn fail(model: &mut Model, context: &str, e: &str, auto_off: bool) {
     if model.overlay == Overlay::None && (e.len() > 60 || e.contains("authentication failed")) {
         model.overlay = Overlay::Error(format!("{context}: {e}"));
     }
+}
+
+/// `r`: reruns the current filter past the cache (after the cost guard).
+fn run_now(model: &mut Model, f: TrafficFilter) -> Vec<Cmd> {
+    let cmds = start_query(model, f, CacheMode::Bypass);
+    model.traffic.auto.rearm();
+    cmds
 }
 
 fn start_query(model: &mut Model, filter: TrafficFilter, mode: CacheMode) -> Vec<Cmd> {
@@ -558,6 +586,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 model.overlay = Overlay::None;
                 match action {
                     PendingAction::RunQuery(f) => update(model, Msg::ApplyFilter(f)),
+                    PendingAction::RunNow(f) => run_now(model, f),
                 }
             }
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
@@ -757,14 +786,7 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         KeyCode::Char('r') => return update(model, Msg::RunNow),
         KeyCode::Char('v') => model.traffic.view = model.traffic.view.next(),
         KeyCode::Char('a') => {
-            let a = &mut model.traffic.auto;
-            a.enabled = !a.enabled;
-            a.tripped = false;
-            model.status = if a.enabled {
-                StatusLine::info(format!("auto-refresh every {}s", a.interval.as_secs()))
-            } else {
-                StatusLine::info("auto-refresh off")
-            };
+            model.status = model.traffic.auto.toggle();
         }
         KeyCode::Char('g') => {
             model.overlay = Overlay::GroupKeys {
@@ -949,6 +971,10 @@ fn policy_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     if !model.policy.is_searching() {
         match k.code {
             KeyCode::Char('d') => {
+                if model.policy.loading {
+                    model.status = StatusLine::info("already loading");
+                    return Vec::new();
+                }
                 model.policy.scope = match model.policy.scope {
                     PolicyScope::Draft => PolicyScope::Active,
                     PolicyScope::Active => PolicyScope::Draft,
@@ -967,18 +993,16 @@ fn policy_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 return load_rule_sets(model, CacheMode::Bypass);
             }
             KeyCode::Char('p') => {
+                if model.policy.pending_loading {
+                    model.status = StatusLine::info("pending changes already loading");
+                    return Vec::new();
+                }
+                model.policy.pending_loading = true;
                 model.status = StatusLine::info("loading pending changes");
                 return vec![Cmd::LoadPending(CacheMode::Use)];
             }
             KeyCode::Char('a') => {
-                let a = &mut model.policy.auto;
-                a.enabled = !a.enabled;
-                a.tripped = false;
-                model.status = if a.enabled {
-                    StatusLine::info(format!("auto-refresh every {}s", a.interval.as_secs()))
-                } else {
-                    StatusLine::info("auto-refresh off")
-                };
+                model.status = model.policy.auto.toggle();
                 return Vec::new();
             }
             KeyCode::Tab | KeyCode::BackTab => {
@@ -1080,11 +1104,27 @@ fn workloads_page(model: &Model) -> usize {
         .max(1)
 }
 
-/// What the traffic filter calls this workload. `,` and `|` separate filter
-/// terms, so a name containing them is addressed by its href id instead.
-fn workload_filter_ref(w: &pce::models::Workload) -> String {
+/// What the traffic filter calls this workload: its readable name when that
+/// resolves to exactly this workload, else its href id. `,` and `|` separate
+/// filter terms, and the resolver takes the first hostname, name or href-suffix
+/// match, so a name with those characters or shared with another loaded
+/// workload is addressed by the id.
+fn workload_filter_ref(w: &pce::models::Workload, loaded: &[pce::models::Workload]) -> String {
     let name = w.display_name();
-    let name = if name.contains([',', '|']) {
+    let ambiguous = loaded.iter().any(|o| {
+        o.href != w.href
+            && (o
+                .hostname
+                .as_deref()
+                .is_some_and(|h| h.eq_ignore_ascii_case(&name))
+                || o.name
+                    .as_deref()
+                    .is_some_and(|n| n.eq_ignore_ascii_case(&name))
+                || o.href
+                    .to_ascii_lowercase()
+                    .ends_with(&name.to_ascii_lowercase()))
+    });
+    let name = if ambiguous || name.contains([',', '|']) {
         pce::models::Ref::new(&w.href).id().to_string()
     } else {
         name
@@ -1099,6 +1139,7 @@ fn workloads_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             KeyCode::Char('r') => {
                 if model.index().is_none() {
                     if model.workloads.index_failed {
+                        model.objects.index_failed = false;
                         model.workloads.index_failed = false;
                         model.status = StatusLine::info("loading name index…");
                         return vec![Cmd::LoadIndex(CacheMode::Use)];
@@ -1129,21 +1170,14 @@ fn workloads_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 return Vec::new();
             }
             KeyCode::Char('a') => {
-                let a = &mut model.workloads.auto;
-                a.enabled = !a.enabled;
-                a.tripped = false;
-                model.status = if a.enabled {
-                    StatusLine::info(format!("auto-refresh every {}s", a.interval.as_secs()))
-                } else {
-                    StatusLine::info("auto-refresh off")
-                };
+                model.status = model.workloads.auto.toggle();
                 return Vec::new();
             }
             KeyCode::Char(c @ ('t' | 'T')) => {
                 let Some(w) = model.workloads.table.selected_item() else {
                     return Vec::new();
                 };
-                let expr = workload_filter_ref(&w.workload);
+                let expr = workload_filter_ref(&w.workload, &model.workloads.raw);
                 let mut f = model.traffic.filter.clone();
                 if c == 't' {
                     f.src = expr;
@@ -1229,14 +1263,7 @@ fn events_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 return Vec::new();
             }
             KeyCode::Char('a') => {
-                let a = &mut model.events.auto;
-                a.enabled = !a.enabled;
-                a.tripped = false;
-                model.status = if a.enabled {
-                    StatusLine::info(format!("auto-refresh every {}s", a.interval.as_secs()))
-                } else {
-                    StatusLine::info("auto-refresh off")
-                };
+                model.status = model.events.auto.toggle();
                 return Vec::new();
             }
             _ => {}
@@ -1282,6 +1309,7 @@ fn objects_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 if model.index().is_none() {
                     if model.objects.index_failed {
                         model.objects.index_failed = false;
+                        model.workloads.index_failed = false;
                         model.status = StatusLine::info("loading name index…");
                         return vec![Cmd::LoadIndex(CacheMode::Use)];
                     }
@@ -1300,14 +1328,7 @@ fn objects_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 return Vec::new();
             }
             KeyCode::Char('a') => {
-                let a = &mut model.objects.auto;
-                a.enabled = !a.enabled;
-                a.tripped = false;
-                model.status = if a.enabled {
-                    StatusLine::info(format!("auto-refresh every {}s", a.interval.as_secs()))
-                } else {
-                    StatusLine::info("auto-refresh off")
-                };
+                model.status = model.objects.auto.toggle();
                 return Vec::new();
             }
             _ => {}
@@ -1323,19 +1344,23 @@ fn objects_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     Vec::new()
 }
 
-/// `:draft` / `:active`: like `d` on the Policy screen, but explicit.
+/// `:draft` / `:active`: like `d` on the Policy screen, but explicit. The scope
+/// already shown is not reloaded (like `2`); a load in flight is not doubled.
 fn show_policy(model: &mut Model, scope: PolicyScope) -> Vec<Cmd> {
     if !model.is_connected() {
         model.status = StatusLine::error("not connected");
         return Vec::new();
     }
-    model.screen = Screen::Policy;
     if model.policy.scope != scope {
+        if model.policy.loading {
+            model.screen = Screen::Policy;
+            model.status = StatusLine::info("already loading");
+            return Vec::new();
+        }
         model.policy.scope = scope;
         model.policy.clear();
     }
-    model.policy.loaded_at = None;
-    load_rule_sets(model, CacheMode::Use)
+    switch(model, Screen::Policy)
 }
 
 pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
@@ -1403,20 +1428,26 @@ mod tests {
             m.traffic.groups.len()
         );
         assert_eq!(m.traffic.group_keys, vec!["app", "env"]);
-        update(&mut m, key('g'));
+        assert!(update(&mut m, key('g')).is_empty());
         assert!(matches!(m.overlay, Overlay::GroupKeys { .. }));
         for _ in 0..7 {
-            update(
-                &mut m,
-                Msg::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
+            assert!(
+                update(
+                    &mut m,
+                    Msg::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
+                )
+                .is_empty()
             );
         }
         for c in "role".chars() {
-            update(&mut m, key(c));
+            assert!(update(&mut m, key(c)).is_empty());
         }
-        update(
-            &mut m,
-            Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        assert!(
+            update(
+                &mut m,
+                Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            )
+            .is_empty()
         );
         assert_eq!(m.traffic.group_keys, vec!["role"]);
         assert!(
@@ -1424,12 +1455,11 @@ mod tests {
             "{:?}",
             m.traffic.groups.rows()
         );
-        update(&mut m, key('v'));
+        assert!(update(&mut m, key('v')).is_empty());
         assert_eq!(m.traffic.view, TrafficView::Blocked);
         assert_eq!(m.traffic.blocked.len(), 2);
-        update(&mut m, key('v'));
+        assert!(update(&mut m, key('v')).is_empty());
         assert_eq!(m.traffic.view, TrafficView::Flows);
-        assert_eq!(m.stats.calls, 5);
     }
 
     #[test]
@@ -1643,40 +1673,51 @@ mod tests {
             .is_empty()
         );
         assert_eq!(m.traffic.flows.selected_pos(), 1);
-        update(&mut m, key('j'));
+        assert!(update(&mut m, key('j')).is_empty());
         assert_eq!(m.traffic.flows.selected_pos(), 2);
-        update(&mut m, key('k'));
-        update(
-            &mut m,
-            Msg::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)),
+        assert!(update(&mut m, key('k')).is_empty());
+        assert!(
+            update(
+                &mut m,
+                Msg::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)),
+            )
+            .is_empty()
         );
         assert_eq!(m.traffic.flows.selected_pos(), 3);
         assert!(update(&mut m, key('s')).is_empty());
         assert_eq!(m.traffic.flows.sort(), Some((0, false)));
-        update(&mut m, key('/'));
+        assert!(update(&mut m, key('/')).is_empty());
         assert!(m.traffic.flows.is_searching());
         for c in "nas".chars() {
-            update(&mut m, key(c));
+            assert!(update(&mut m, key(c)).is_empty());
         }
         assert_eq!(m.traffic.flows.len(), 1);
-        update(
-            &mut m,
-            Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        assert!(
+            update(
+                &mut m,
+                Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            )
+            .is_empty()
         );
         assert!(!m.traffic.flows.is_searching());
-        update(&mut m, key('/'));
-        update(
-            &mut m,
-            Msg::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        assert!(update(&mut m, key('/')).is_empty());
+        assert!(
+            update(
+                &mut m,
+                Msg::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+            )
+            .is_empty()
         );
         assert_eq!(m.traffic.flows.len(), 4, "Esc clears the search");
         assert!(!m.traffic.show_detail);
-        update(
-            &mut m,
-            Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        assert!(
+            update(
+                &mut m,
+                Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            )
+            .is_empty()
         );
         assert!(m.traffic.show_detail);
-        assert_eq!(m.stats.calls, 5, "no request was made by any of this");
     }
 
     #[test]
@@ -2294,9 +2335,17 @@ mod tests {
         use pce::models::PolicyScope;
         let mut m = model_fixture();
         update(&mut m, key('2'));
-        update(&mut m, key('d')); // Active now loading
         let rs: Vec<pce::models::RuleSet> =
             serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
+        update(
+            &mut m,
+            Msg::RuleSetsLoaded {
+                scope: PolicyScope::Draft,
+                result: Ok((rs.clone(), 0)),
+            },
+        );
+        update(&mut m, key('d')); // Active now loading
+        // A late draft answer (e.g. a duplicate) must not land in the active scope.
         update(
             &mut m,
             Msg::RuleSetsLoaded {
@@ -2529,16 +2578,15 @@ mod tests {
     fn objects_search_and_detail_are_local() {
         use crate::tui::test_support::model_with_objects;
         let mut m = model_with_objects();
-        update(&mut m, key('3'));
-        update(&mut m, key('/'));
+        assert!(update(&mut m, key('3')).is_empty());
+        assert!(update(&mut m, key('/')).is_empty());
         for c in "role".chars() {
-            update(&mut m, key(c));
+            assert!(update(&mut m, key(c)).is_empty());
         }
         assert_eq!(m.objects.labels.len(), 2);
-        update(&mut m, kc(KeyCode::Enter));
-        update(&mut m, kc(KeyCode::Enter));
+        assert!(update(&mut m, kc(KeyCode::Enter)).is_empty());
+        assert!(update(&mut m, kc(KeyCode::Enter)).is_empty());
         assert!(m.objects.show_detail);
-        assert_eq!(m.stats.calls, 5);
     }
 
     #[test]
@@ -2995,18 +3043,18 @@ mod tests {
     fn h_toggles_unhealthy_only_and_capital_h_sorts_by_health() {
         use crate::tui::test_support::model_with_workloads;
         let mut m = model_with_workloads();
-        update(&mut m, key('4'));
+        assert!(update(&mut m, key('4')).is_empty());
         assert_eq!(m.workloads.table.len(), 4);
-        update(&mut m, key('h'));
+        assert!(update(&mut m, key('h')).is_empty());
         assert!(m.workloads.unhealthy_only);
         assert_eq!(
             m.workloads.table.len(),
             2,
             "host-2 (offline) and host-4 (suspended) are unhealthy at the fixed test clock"
         );
-        update(&mut m, key('h'));
+        assert!(update(&mut m, key('h')).is_empty());
         assert_eq!(m.workloads.table.len(), 4);
-        update(&mut m, key('H'));
+        assert!(update(&mut m, key('H')).is_empty());
         assert_eq!(
             m.workloads
                 .table
@@ -3018,7 +3066,6 @@ mod tests {
             Some("host-2.example"),
             "worst health first"
         );
-        assert_eq!(m.stats.calls, 5, "pure projections: no request");
     }
 
     #[test]
@@ -3561,16 +3608,15 @@ mod tests {
         use crate::tui::test_support::model_with_flows;
         use crossterm::event::{MouseButton, MouseEventKind};
         let mut m = model_with_flows();
-        update(&mut m, Msg::Resize(80, 24));
-        update(&mut m, mouse(MouseEventKind::ScrollDown, 10, 10));
-        update(&mut m, mouse(MouseEventKind::ScrollDown, 10, 10));
+        assert!(update(&mut m, Msg::Resize(80, 24)).is_empty());
+        assert!(update(&mut m, mouse(MouseEventKind::ScrollDown, 10, 10)).is_empty());
+        assert!(update(&mut m, mouse(MouseEventKind::ScrollDown, 10, 10)).is_empty());
         assert_eq!(m.traffic.flows.selected_pos(), 2);
-        update(&mut m, mouse(MouseEventKind::ScrollUp, 10, 10));
+        assert!(update(&mut m, mouse(MouseEventKind::ScrollUp, 10, 10)).is_empty());
         assert_eq!(m.traffic.flows.selected_pos(), 1);
         let x = crate::tui::ui::tab_x(Screen::Policy);
         update(&mut m, mouse(MouseEventKind::Down(MouseButton::Left), x, 1));
         assert_eq!(m.screen, Screen::Policy);
-        assert_eq!(m.stats.calls, 5);
     }
 
     #[test]
@@ -3761,14 +3807,14 @@ mod tests {
         use crate::tui::model::Overlay;
         use crate::tui::test_support::model_with_events;
         let mut m = model_with_events();
-        update(&mut m, key('5'));
+        assert!(update(&mut m, key('5')).is_empty());
         assert_eq!(m.events.table.len(), 4);
         m.events.filter.event_type = "agent.".into();
         m.events.rebuild();
         assert_eq!(m.events.table.len(), 1);
         m.events.filter.event_type.clear();
         m.events.rebuild();
-        update(&mut m, key('S'));
+        assert!(update(&mut m, key('S')).is_empty());
         assert_eq!(
             m.events
                 .table
@@ -3779,13 +3825,15 @@ mod tests {
             Some("agent.tampering"),
             "worst severity first"
         );
-        update(&mut m, enter());
+        assert!(update(&mut m, enter()).is_empty());
         assert!(matches!(m.overlay, Overlay::EventDetail(_)));
-        update(
-            &mut m,
-            Msg::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        assert!(
+            update(
+                &mut m,
+                Msg::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+            )
+            .is_empty()
         );
-        assert_eq!(m.stats.calls, 5);
         assert_eq!(
             crate::tui::commands::parse("events").unwrap(),
             crate::tui::commands::Command::Screen(Screen::Events)
@@ -3935,5 +3983,210 @@ mod tests {
             }
         )));
         assert!(cmds.iter().any(|c| matches!(c, Cmd::LoadIndex(_))));
+    }
+
+    fn query_done_with(m: &mut Model, filter: TrafficFilter) {
+        let seq = m.traffic.seq;
+        update(
+            m,
+            Msg::QueryDone {
+                seq,
+                result: Ok(QueryOutcome {
+                    flows: crate::tui::test_support::fixture_flows(),
+                    truncated: false,
+                    matches_count: Some(4),
+                    elapsed: std::time::Duration::from_secs(1),
+                    hit: false,
+                    filter,
+                }),
+            },
+        );
+    }
+
+    fn is_bypass_run(cmds: &[Cmd]) -> bool {
+        matches!(
+            cmds,
+            [Cmd::RunQuery {
+                mode: CacheMode::Bypass,
+                ..
+            }]
+        )
+    }
+
+    #[test]
+    fn r_honours_the_cost_guard_unless_the_filter_produced_the_data() {
+        use crate::tui::model::Limits;
+        let mut m = model_fixture();
+        // Profile defaults above the confirmation cap: nothing confirmed them yet.
+        m.limits = Limits {
+            traffic_max_results: 20_000,
+            ..m.limits.clone()
+        };
+        m.reset_data();
+        assert_eq!(m.traffic.filter.max_results, 20_000);
+        let cmds = update(&mut m, key('r'));
+        assert!(cmds.is_empty(), "{cmds:?}");
+        assert!(
+            matches!(&m.overlay, Overlay::Confirm { reason, action: PendingAction::RunNow(_) } if reason.contains("20000"))
+        );
+        // Declining sends nothing.
+        assert!(update(&mut m, key('n')).is_empty());
+        assert_eq!(m.overlay, Overlay::None);
+        update(&mut m, key('r'));
+        let cmds = update(&mut m, key('y'));
+        assert!(is_bypass_run(&cmds), "{cmds:?}");
+        assert!(m.traffic.is_running());
+        let f = m.traffic.filter.clone();
+        query_done_with(&mut m, f);
+        // The same filter produced the data on screen: `r` reruns it directly.
+        let cmds = update(&mut m, key('r'));
+        assert!(is_bypass_run(&cmds), "{cmds:?}");
+        assert_eq!(m.overlay, Overlay::None);
+    }
+
+    #[test]
+    fn r_with_a_long_default_window_asks_first() {
+        let mut m = model_fixture();
+        m.traffic.filter = TrafficFilter::defaults("30d", 1000);
+        assert!(update(&mut m, key('r')).is_empty());
+        assert!(matches!(m.overlay, Overlay::Confirm { .. }));
+        assert!(is_bypass_run(&update(&mut m, key('y'))));
+    }
+
+    #[test]
+    fn an_identical_filter_does_not_restart_the_running_query() {
+        use crate::tui::test_support::model_with_workloads;
+        let mut m = model_fixture();
+        let f = TrafficFilter::defaults("1h", 50);
+        assert_eq!(update(&mut m, Msg::ApplyFilter(f.clone())).len(), 1);
+        let seq = m.traffic.seq;
+        let again = update(&mut m, Msg::ApplyFilter(f));
+        assert!(again.is_empty(), "{again:?}");
+        assert_eq!(m.status.text, "query already running");
+        assert_eq!(m.traffic.seq, seq);
+        assert!(m.traffic.is_running());
+        // Key auto-repeat on `t` from Workloads: one query, not one per repeat.
+        let mut m = model_with_workloads();
+        update(&mut m, key('4'));
+        assert_eq!(update(&mut m, key('t')).len(), 1);
+        update(&mut m, key('4'));
+        assert!(update(&mut m, key('t')).is_empty());
+        assert_eq!(m.screen, Screen::Traffic);
+    }
+
+    #[test]
+    fn jump_uses_the_href_id_when_the_name_is_not_unique() {
+        use crate::tui::test_support::model_with_workloads;
+        let mut m = model_with_workloads();
+        m.workloads.raw[1].hostname = m.workloads.raw[0].hostname.clone();
+        m.workloads.rebuild();
+        update(&mut m, key('4'));
+        update(&mut m, key('t'));
+        assert_eq!(m.traffic.filter.src, "wl:aaaa-1");
+        update(&mut m, key('4'));
+        update(&mut m, key('j'));
+        update(&mut m, key('t'));
+        assert_eq!(m.traffic.filter.src, "wl:aaaa-2");
+        // A unique name stays readable.
+        update(&mut m, key('4'));
+        update(&mut m, key('j'));
+        update(&mut m, key('T'));
+        assert_eq!(m.traffic.filter.dst, "wl:unmanaged-nas");
+    }
+
+    #[test]
+    fn policy_d_and_p_do_not_double_a_load_in_flight() {
+        use crate::tui::test_support::model_with_policy;
+        let mut m = model_with_policy();
+        update(&mut m, key('2'));
+        assert_eq!(update(&mut m, key('r')).len(), 1);
+        assert!(m.policy.loading);
+        assert!(update(&mut m, key('d')).is_empty());
+        assert_eq!(m.status.text, "already loading");
+        assert_eq!(m.policy.scope, PolicyScope::Draft);
+
+        let mut m = model_with_policy();
+        update(&mut m, key('2'));
+        assert_eq!(
+            update(&mut m, key('p')),
+            vec![Cmd::LoadPending(CacheMode::Use)]
+        );
+        assert!(m.policy.pending_loading);
+        assert!(update(&mut m, key('p')).is_empty());
+        update(&mut m, Msg::PendingLoaded(Err("boom".into())));
+        assert!(!m.policy.pending_loading, "cleared on Err");
+        assert_eq!(update(&mut m, key('p')).len(), 1);
+        update(&mut m, Msg::PendingLoaded(Ok(Vec::new())));
+        assert!(!m.policy.pending_loading, "cleared on Ok");
+        m.policy.pending_loading = true;
+        m.policy.clear();
+        assert!(!m.policy.pending_loading, "reset by clear()");
+    }
+
+    #[test]
+    fn auto_refresh_ticks_only_while_connected() {
+        use crate::tui::test_support::model_with_flows;
+        use std::time::{Duration, Instant};
+        let mut m = model_with_flows();
+        update(&mut m, key('a'));
+        let later = Instant::now() + Duration::from_secs(61);
+        m.connection = Connection::Disconnected {
+            error: "gone".into(),
+        };
+        assert!(update(&mut m, Msg::Tick(later)).is_empty());
+        m.connection = Connection::Connecting;
+        assert!(update(&mut m, Msg::Tick(later)).is_empty());
+        m.connection = Connection::Connected {
+            index: Some(crate::tui::test_support::fixture_index()),
+            index_age_secs: 0,
+        };
+        assert!(is_bypass_run(&update(&mut m, Msg::Tick(later))));
+    }
+
+    #[test]
+    fn draft_and_active_commands_reuse_the_loaded_scope() {
+        use crate::tui::commands::Command;
+        use crate::tui::test_support::model_with_policy;
+        let mut m = model_with_policy();
+        m.screen = Screen::Traffic;
+        let cmds = update(&mut m, Msg::Command(Command::Draft));
+        assert!(cmds.is_empty(), "draft already loaded: {cmds:?}");
+        assert_eq!(m.screen, Screen::Policy);
+        assert!(!m.policy.rulesets.is_empty());
+        assert_eq!(
+            update(&mut m, Msg::Command(Command::Active)),
+            vec![Cmd::LoadRuleSets {
+                scope: PolicyScope::Active,
+                mode: CacheMode::Use
+            }]
+        );
+        // In flight: neither the same nor the other scope requests again.
+        assert!(update(&mut m, Msg::Command(Command::Active)).is_empty());
+        assert!(update(&mut m, Msg::Command(Command::Draft)).is_empty());
+        assert_eq!(m.status.text, "already loading");
+        assert_eq!(m.policy.scope, PolicyScope::Active);
+    }
+
+    #[test]
+    fn index_retry_from_either_screen_clears_both_flags() {
+        let mut m = model_fixture();
+        m.connection = Connection::Connected {
+            index: None,
+            index_age_secs: 0,
+        };
+        update(&mut m, Msg::IndexFailed("boom".into()));
+        update(&mut m, key('3'));
+        assert_eq!(
+            update(&mut m, key('r')),
+            vec![Cmd::LoadIndex(CacheMode::Use)]
+        );
+        assert!(!m.objects.index_failed && !m.workloads.index_failed);
+        update(&mut m, Msg::IndexFailed("boom".into()));
+        update(&mut m, key('4'));
+        assert_eq!(
+            update(&mut m, key('r')),
+            vec![Cmd::LoadIndex(CacheMode::Use)]
+        );
+        assert!(!m.objects.index_failed && !m.workloads.index_failed);
     }
 }

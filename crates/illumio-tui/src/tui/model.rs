@@ -176,7 +176,10 @@ impl Eq for Overlay {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PendingAction {
+    /// A new filter from the editor or a command: runs through the cache.
     RunQuery(TrafficFilter),
+    /// `r` on a filter that did not produce the data on screen: bypasses the cache.
+    RunNow(TrafficFilter),
 }
 
 #[derive(Debug)]
@@ -526,6 +529,18 @@ impl AutoRefresh {
         was
     }
 
+    /// `a`: switches auto-refresh on or off (clearing a tripped state) and
+    /// returns the status line to show.
+    pub fn toggle(&mut self) -> StatusLine {
+        self.enabled = !self.enabled;
+        self.tripped = false;
+        if self.enabled {
+            StatusLine::info(format!("auto-refresh every {}s", self.interval.as_secs()))
+        } else {
+            StatusLine::info("auto-refresh off")
+        }
+    }
+
     /// A manual refresh re-enables what a failed tick switched off.
     pub fn rearm(&mut self) {
         if std::mem::take(&mut self.tripped) {
@@ -820,6 +835,8 @@ pub struct PolicyState {
     /// Set by an explicit `r`: the next ruleset reload also bypasses the cache for deny rules.
     pub bypass_deny: bool,
     pub pending: Option<Vec<PendingChange>>,
+    /// A pending-changes request is in flight (`p` does not send another).
+    pub pending_loading: bool,
     pub auto: AutoRefresh,
 }
 
@@ -838,6 +855,7 @@ impl PolicyState {
             loading: false,
             bypass_deny: false,
             pending: None,
+            pending_loading: false,
             auto: AutoRefresh::new(min_refresh),
         }
     }
@@ -870,6 +888,7 @@ impl PolicyState {
         self.loaded_at = None;
         self.age_secs = 0;
         self.bypass_deny = false;
+        self.pending_loading = false;
     }
 
     /// Rules of the selected ruleset: allow rules, then deny rules (inline or fetched fallback).

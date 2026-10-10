@@ -299,15 +299,7 @@ pub fn render_filter_bar(model: &Model, f: &mut Frame, area: Rect) {
             s.trim().to_string()
         }
     };
-    let decision = if fl.decisions.len() == PolicyDecision::ALL.len() {
-        "all".to_string()
-    } else {
-        fl.decisions
-            .iter()
-            .map(|d| d.as_str())
-            .collect::<Vec<_>>()
-            .join(",")
-    };
+    let decision = fl.decisions_text();
     let line = Line::from(vec![
         Span::styled("window ", t.dim_style()),
         Span::styled(fl.window.clone(), Style::new().fg(t.accent)),
