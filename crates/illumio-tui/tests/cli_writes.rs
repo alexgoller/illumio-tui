@@ -621,4 +621,184 @@ mod iplists {
             .assert()
             .success();
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn empty_update_is_exit_2_without_requests() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        let a = writer(&server, state.path())
+            .args(["iplists", "update", "Corp", "--yes"])
+            .assert()
+            .code(2);
+        assert!(
+            stderr_json(&a)["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("nothing to change")
+        );
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+}
+
+mod services {
+    use super::*;
+
+    fn pg() -> Value {
+        json!({"href": "/orgs/5/sec_policy/draft/services/7", "name": "PostgreSQL",
+               "service_ports": [{"port": 5432, "proto": 6}]})
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn add_dry_run_body_has_only_service_ports() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "services",
+                    "add",
+                    "PostgreSQL",
+                    "--port",
+                    "5432/tcp",
+                    "--port",
+                    "8000-8100/udp",
+                    "--port",
+                    "icmp",
+                    "--description",
+                    "db",
+                    "--dry-run",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(
+            out["data"]["body"],
+            json!({"name": "PostgreSQL", "description": "db",
+                   "service_ports": [{"port": 5432, "proto": 6}, {"port": 8000, "to_port": 8100, "proto": 17}, {"proto": 1}]})
+        );
+        assert!(out["data"]["body"].get("windows_services").is_none());
+        let a = writer(&server, state.path())
+            .args(["services", "add", "X", "--port", "443", "--dry-run"])
+            .assert()
+            .code(2);
+        assert!(
+            stderr_json(&a)["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("443")
+        );
+        // --port is required.
+        writer(&server, state.path())
+            .args(["services", "add", "X", "--dry-run"])
+            .assert()
+            .code(2);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn add_reports_dropped_fields() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        let mut dropped = pg();
+        dropped["service_ports"] = json!([]);
+        Mock::given(method("POST"))
+            .and(path("/api/v2/orgs/5/sec_policy/draft/services"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(dropped))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "services",
+                    "add",
+                    "PostgreSQL",
+                    "--port",
+                    "5432/tcp",
+                    "--yes",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["dropped_fields"], json!(["service_ports"]));
+        assert_eq!(out["data"]["pending"], true);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn update_by_name_and_delete() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_index(&server, json!([]), json!([]), json!([pg()])).await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/sec_policy/draft/services/7"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(pg()))
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/api/v2/orgs/5/sec_policy/draft/services/7"))
+            .and(body_json(json!({"name": "PostgreSQL",
+                 "service_ports": [{"port": 5432, "proto": 6}, {"port": 5433, "proto": 6}]})))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "services",
+                    "update",
+                    "PostgreSQL",
+                    "--add-port",
+                    "5433/tcp",
+                    "--yes",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["status"], 204);
+        let a = writer(&server, state.path())
+            .args([
+                "services",
+                "update",
+                "PostgreSQL",
+                "--remove-port",
+                "5432/tcp",
+                "--yes",
+            ])
+            .assert()
+            .code(2);
+        assert!(
+            stderr_json(&a)["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("at least one")
+        );
+        Mock::given(method("DELETE"))
+            .and(path("/api/v2/orgs/5/sec_policy/draft/services/7"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        writer(&server, state.path())
+            .args(["services", "delete", "PostgreSQL", "--yes"])
+            .assert()
+            .success();
+        assert_eq!(audit_lines(state.path()).len(), 2);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn empty_update_is_exit_2_without_requests() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        let a = writer(&server, state.path())
+            .args(["services", "update", "PostgreSQL", "--yes"])
+            .assert()
+            .code(2);
+        assert!(
+            stderr_json(&a)["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("nothing to change")
+        );
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
 }

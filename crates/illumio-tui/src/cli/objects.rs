@@ -2,10 +2,15 @@
 use super::context::{Context, cache_label};
 use super::error::CliError;
 use super::output::TableRows;
-use super::write::{self, WriteFlags, parse_kv, resolve_ip_list, resolve_label, run_plan};
+use super::write::{
+    self, WriteFlags, parse_kv, resolve_ip_list, resolve_label, resolve_service, run_plan,
+};
 use clap::{Args, Subcommand};
 use pce::models::{IpList, Label, LabelGroup, Service};
-use pce::write::{IfMissing, IpListDraft, IpListPatch, IpRangeSpec, LabelDraft};
+use pce::write::{
+    IfMissing, IpListDraft, IpListPatch, IpRangeSpec, LabelDraft, PortSpec, ServiceDraft,
+    ServicePatch,
+};
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct LabelsArgs {
@@ -346,6 +351,11 @@ async fn ip_list_update(ctx: &Context, a: &IpListUpdateArgs) -> Result<(), CliEr
         add_fqdns: a.add_fqdns.clone(),
         remove_fqdns: a.remove_fqdns.clone(),
     };
+    if patch.is_empty() {
+        return Err(CliError::Args(
+            "nothing to change; pass --name, --description, --add-range, --remove-range, --add-exclude, --remove-exclude, --add-fqdn or --remove-fqdn".into(),
+        ));
+    }
     let href = resolve_ip_list(ctx, &a.target).await?;
     let plan = ctx
         .pce
@@ -370,6 +380,132 @@ pub async fn ip_lists(ctx: &Context) -> Result<(), CliError> {
         c.truncated,
         None,
     )
+}
+
+#[derive(Args, Debug)]
+pub struct ServicesCmd {
+    #[command(subcommand)]
+    pub action: Option<ServicesAction>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ServicesAction {
+    /// Create a service in draft (needs writes enabled and --allow-writes)
+    Add(ServiceAddArgs),
+    /// Add or remove ports; the full port list is re-sent
+    Update(ServiceUpdateArgs),
+    /// Delete a service from draft
+    Delete(ServiceDeleteArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct ServiceAddArgs {
+    /// Service name
+    pub name: String,
+    /// Port: P/PROTO, P-Q/PROTO, icmp, or a bare protocol (repeatable, at least one)
+    #[arg(long = "port", required = true)]
+    pub ports: Vec<String>,
+    /// Description
+    #[arg(long)]
+    pub description: Option<String>,
+    /// Do nothing when a service with exactly this name exists
+    #[arg(long)]
+    pub if_missing: bool,
+    #[command(flatten)]
+    pub write: WriteFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct ServiceUpdateArgs {
+    /// Service name or href
+    pub target: String,
+    /// New name
+    #[arg(long)]
+    pub name: Option<String>,
+    /// New description
+    #[arg(long)]
+    pub description: Option<String>,
+    /// Port to add (repeatable)
+    #[arg(long = "add-port")]
+    pub add_ports: Vec<String>,
+    /// Port to remove; must match an existing entry exactly (repeatable)
+    #[arg(long = "remove-port")]
+    pub remove_ports: Vec<String>,
+    #[command(flatten)]
+    pub write: WriteFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct ServiceDeleteArgs {
+    /// Service name or href
+    pub target: String,
+    #[command(flatten)]
+    pub write: WriteFlags,
+}
+
+fn parse_ports(specs: &[String]) -> Result<Vec<PortSpec>, CliError> {
+    specs
+        .iter()
+        .map(|s| PortSpec::parse(s).map_err(CliError::Args))
+        .collect()
+}
+
+pub async fn services_cmd(ctx: &Context, cmd: &ServicesCmd) -> Result<(), CliError> {
+    match &cmd.action {
+        None => services(ctx).await,
+        Some(ServicesAction::Add(a)) => service_add(ctx, a).await,
+        Some(ServicesAction::Update(a)) => service_update(ctx, a).await,
+        Some(ServicesAction::Delete(a)) => service_delete(ctx, a).await,
+    }
+}
+
+async fn service_add(ctx: &Context, a: &ServiceAddArgs) -> Result<(), CliError> {
+    let guard = write::prepare(ctx, &a.write)?;
+    let draft = ServiceDraft {
+        name: a.name.clone(),
+        description: a.description.clone(),
+        ports: parse_ports(&a.ports)?,
+    };
+    let if_missing = if a.if_missing {
+        IfMissing::SkipExisting
+    } else {
+        IfMissing::Create
+    };
+    let plan = ctx
+        .pce
+        .writer(&guard)
+        .plan_create_service(&draft, if_missing)
+        .await?;
+    run_plan(ctx, &a.write, &guard, plan).await
+}
+
+async fn service_update(ctx: &Context, a: &ServiceUpdateArgs) -> Result<(), CliError> {
+    let guard = write::prepare(ctx, &a.write)?;
+    let patch = ServicePatch {
+        name: a.name.clone(),
+        description: a.description.clone(),
+        add_ports: parse_ports(&a.add_ports)?,
+        remove_ports: parse_ports(&a.remove_ports)?,
+    };
+    if patch.is_empty() {
+        return Err(CliError::Args(
+            "nothing to change; pass --name, --description, --add-port or --remove-port".into(),
+        ));
+    }
+    let href = resolve_service(ctx, &a.target).await?;
+    let plan = ctx
+        .pce
+        .writer(&guard)
+        .plan_update_service(&href, &patch)
+        .await?;
+    run_plan(ctx, &a.write, &guard, plan).await
+}
+
+async fn service_delete(ctx: &Context, a: &ServiceDeleteArgs) -> Result<(), CliError> {
+    let guard = write::prepare(ctx, &a.write)?;
+    let href = resolve_service(ctx, &a.target).await?;
+    let plan = ctx.pce.writer(&guard).plan_delete_service(&href)?;
+    run_plan(ctx, &a.write, &guard, plan).await
 }
 
 pub async fn services(ctx: &Context) -> Result<(), CliError> {
