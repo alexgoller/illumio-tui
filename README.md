@@ -134,9 +134,13 @@ config, 3 auth, 4 PCE error, 5 rate limited, 6 write refused by the guard.
 Writes are off until two things say yes: the profile (`writes = true`, or
 `ILLUMIO_WRITES=1` in the environment) and the invocation (`--allow-writes`).
 Every write command prints the exact request with `--dry-run` and needs
-`--yes` to send it. Each sent request is appended to
-`~/.local/state/illumio-tui/writes.jsonl` (or `$XDG_STATE_HOME/illumio-tui/`),
-mode 0600, with the body sent and the status received. Nothing is ever retried.
+`--yes` to send it (the two flags conflict). A dry run's `data` is
+`{method, path, body, summary}`: the method, the API path, the JSON body that
+would be sent (absent for a delete) and a one-line summary. Each sent request
+is appended to `~/.local/state/illumio-tui/writes.jsonl` (or
+`$XDG_STATE_HOME/illumio-tui/`), mode 0600, with the body sent and the status
+received; with neither `$XDG_STATE_HOME` nor `$HOME` set, writes are refused.
+Nothing is ever retried.
 IP lists and services are written to draft and wait for provisioning
 (`"pending": true`); labels and workloads take effect at once.
 
@@ -149,14 +153,20 @@ IP lists and services are written to draft and wait for provisioning
     illumio-tui --allow-writes workloads update printer-1 --add-label env=lab --yes
     illumio-tui --allow-writes workloads delete printer-1 --yes
 
-Names resolve by exact match; an ambiguous or unknown name is exit code 2
-with the candidates listed, before any request. An update with no change
-flags is exit code 2 as well. Update commands re-fetch the object and send
-the full list the PCE expects (`ip_ranges`, `service_ports`, `labels`), so
-`--remove-range` and friends must match an existing entry. Updates of IP lists
-and services refuse (exit 2) objects carrying fields this tool cannot
-preserve: services with `windows_services`, `icmp_type`/`icmp_code`, or a port
-without a protocol. Only unmanaged workloads can be written: one that the PCE
+`--port` takes `P/PROTO`, `P-Q/PROTO` (`443/tcp`, `8000-8100/udp`, `53/17`)
+or a protocol name (`tcp`, `udp`, `icmp`, `icmpv6`); a bare number such as
+`22` is refused as ambiguous.
+
+Names resolve by exact match against the one list they name (draft objects
+pending deletion excluded); an ambiguous or unknown name is exit code 2 with
+the candidates (or up to five similar names) listed, before any request. An
+update with no change flags is exit code 2 as well. Update commands re-fetch
+the object and send only the keys that change; a changed list (`ip_ranges`,
+`fqdns`, `service_ports`, workload `labels` or `interfaces`) is sent whole,
+with existing entries carried through, so `--remove-range` and friends must
+match an existing entry. A service update that changes ports refuses (exit 2)
+services carrying fields this tool cannot preserve: `windows_services`,
+`icmp_type`/`icmp_code`, or a port without a protocol. Only unmanaged workloads can be written: one that the PCE
 reports as managed, or that has a VEN, is refused locally, and a hostname or
 name matching more than one workload is refused ("use the href").
 

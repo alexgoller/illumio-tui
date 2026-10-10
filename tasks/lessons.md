@@ -29,3 +29,5 @@ Captured after corrections and review findings, so the same mistake is not repea
 - Managed checks must fail closed: a missing `managed` flag or a present VEN means refuse, never write.
 - `--if-missing` must propagate lookup errors instead of treating them as "absent", or it creates duplicates.
 - An audit line must go out in a single `write` syscall, so concurrent appends cannot interleave.
+- hrefs are parsed strictly by component, never by substring; writes disable redirects. A substring check let `/orgs/5/labels/../workloads/x` pass as a label href, and URL normalisation then sent the write to another object; a followed 302 turned a PUT into a GET reported as success.
+- An update sends only the keys it changes. Re-sending unchanged lists is how fields get lost.
