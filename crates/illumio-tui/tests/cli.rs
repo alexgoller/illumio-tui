@@ -4,6 +4,10 @@ use serde_json::{Value, json};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+/// Distinctive so a leak check cannot trip on the word "secret" in prose
+/// such as "check API key, secret and org id".
+const TEST_SECRET: &str = "s3cr3t-cli-test-9f2a";
+
 pub fn cmd(server: &MockServer) -> Command {
     let url = url::Url::parse(&server.uri()).unwrap();
     let mut c = Command::cargo_bin("illumio-tui").unwrap();
@@ -14,7 +18,7 @@ pub fn cmd(server: &MockServer) -> Command {
         .env("PCE_PORT", url.port().unwrap().to_string())
         .env("PCE_ORG_ID", "5")
         .env("API_KEY", "key")
-        .env("API_SECRET", "secret")
+        .env("API_SECRET", TEST_SECRET)
         .env(
             "XDG_CONFIG_HOME",
             std::env::temp_dir().join("illumio-tui-no-config"),
@@ -24,6 +28,18 @@ pub fn cmd(server: &MockServer) -> Command {
 
 pub fn stdout_json(assert: assert_cmd::assert::Assert) -> Value {
     serde_json::from_slice(&assert.get_output().stdout).expect("stdout is JSON")
+}
+
+/// No output may carry the API secret the command was given.
+pub fn assert_no_secret(assert: &assert_cmd::assert::Assert) {
+    let out = assert.get_output();
+    for (name, bytes) in [("stdout", &out.stdout), ("stderr", &out.stderr)] {
+        let text = String::from_utf8_lossy(bytes);
+        assert!(
+            !text.contains(TEST_SECRET),
+            "{name} leaks the secret: {text}"
+        );
+    }
 }
 
 #[test]
@@ -53,7 +69,9 @@ async fn health_json_envelope() {
         )
         .mount(&server)
         .await;
-    let out = stdout_json(cmd(&server).args(["health", "--json"]).assert().success());
+    let assert = cmd(&server).args(["health", "--json"]).assert().success();
+    assert_no_secret(&assert);
+    let out = stdout_json(assert);
     assert_eq!(out["data"]["ok"], true);
     assert_eq!(out["data"]["org_id"], 5);
     assert_eq!(out["data"]["status"][0]["status"], "normal");
@@ -105,6 +123,7 @@ async fn auth_failure_exits_3_with_json_error() {
         .mount(&server)
         .await;
     let assert = cmd(&server).arg("health").assert().code(3);
+    assert_no_secret(&assert);
     let err: Value = serde_json::from_slice(&assert.get_output().stderr).unwrap();
     assert_eq!(err["error"]["kind"], "auth");
     assert!(err["error"]["message"].as_str().unwrap().contains("401"));

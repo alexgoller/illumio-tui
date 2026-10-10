@@ -122,6 +122,61 @@ async fn get_retries_after_429_then_succeeds() {
 }
 
 #[tokio::test]
+async fn get_retries_after_503_then_succeeds() {
+    let server = MockServer::start().await;
+    Mock::given(path("/api/v2/orgs/5/x"))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(path("/api/v2/orgs/5/x"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
+        .mount(&server)
+        .await;
+    let c = client_for(&server);
+    let r = c.get::<Value>("/orgs/5/x", &[]).await.unwrap();
+    assert_eq!(r.body["ok"], true);
+    assert_eq!(c.stats().calls, 2, "503 then 200");
+}
+
+/// A `Retry-After` pause is client-wide: a request on another path that
+/// starts while the pause is in force waits for it too. The paths are hit
+/// concurrently because the throttled GET itself only returns after the
+/// pause has elapsed.
+#[tokio::test]
+async fn retry_after_pauses_the_whole_client() {
+    let server = MockServer::start().await;
+    Mock::given(path("/api/v2/orgs/5/x"))
+        .respond_with(ResponseTemplate::new(429).insert_header("Retry-After", "1"))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(path("/api/v2/orgs/5/x"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"x": true})))
+        .mount(&server)
+        .await;
+    Mock::given(path("/api/v2/orgs/5/y"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"y": true})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let c = client_for(&server);
+    let started = tokio::time::Instant::now();
+    let (x, y_done) = tokio::join!(c.get::<Value>("/orgs/5/x", &[]), async {
+        // Let the 429 land first, then ask for an unrelated path.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        c.get::<Value>("/orgs/5/y", &[]).await.unwrap();
+        started.elapsed()
+    });
+    assert_eq!(x.unwrap().body["x"], true);
+    assert!(
+        y_done >= Duration::from_millis(900),
+        "y returned after {y_done:?}, before the 1 s pause ended"
+    );
+    assert_eq!(c.stats().calls, 3, "x, x again, y");
+}
+
+#[tokio::test]
 async fn get_gives_up_after_max_retries() {
     let server = MockServer::start().await;
     Mock::given(path("/api/v2/orgs/5/x"))
