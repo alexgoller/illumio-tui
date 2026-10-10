@@ -305,6 +305,12 @@ impl Runtime {
     /// tasks it spawns (connect, index) run against the new PCE and whatever the
     /// old one still reports is dropped.
     fn finish_switch(&mut self, result: SwitchResult) {
+        // Results the old PCE queued before this point passed the old
+        // generation check, so they belong to the old model: apply them
+        // before the swap rather than letting them land in the reset one.
+        while let Ok(m) = self.rx.try_recv() {
+            self.apply(m);
+        }
         let msg = match result {
             Ok((pce, info, limits)) => {
                 self.pce = Arc::new(pce);

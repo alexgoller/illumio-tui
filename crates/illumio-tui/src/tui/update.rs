@@ -396,6 +396,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         }
         Msg::ProfileSwitched(result) => match result {
             Ok((info, limits)) => {
+                model.switching = false;
                 model.profile = info;
                 model.limits = limits;
                 model.reset_data();
@@ -405,6 +406,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 vec![Cmd::Connect]
             }
             Err(e) => {
+                model.switching = false;
                 model.status = StatusLine::error(format!("profile: {e}"));
                 Vec::new()
             }
@@ -1396,7 +1398,14 @@ pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
                 }
             }
         }
-        Command::Profile(name) => vec![Cmd::SwitchProfile(name)],
+        Command::Profile(name) => {
+            if model.switching {
+                model.status = StatusLine::info("profile switch in progress");
+                return Vec::new();
+            }
+            model.switching = true;
+            vec![Cmd::SwitchProfile(name)]
+        }
         Command::Draft => show_policy(model, PolicyScope::Draft),
         Command::Active => show_policy(model, PolicyScope::Active),
     }
@@ -3143,6 +3152,26 @@ mod tests {
         assert!(
             update(&mut m, Msg::Tick(now)).is_empty(),
             "only on its own screen"
+        );
+    }
+
+    #[test]
+    fn a_second_profile_switch_waits_for_the_pending_one() {
+        use crate::tui::commands::Command;
+        use crate::tui::test_support::model_with_flows;
+        let mut m = model_with_flows();
+        assert_eq!(
+            update(&mut m, Msg::Command(Command::Profile("a".into()))),
+            vec![Cmd::SwitchProfile("a".into())]
+        );
+        assert!(m.switching);
+        assert!(update(&mut m, Msg::Command(Command::Profile("b".into()))).is_empty());
+        assert_eq!(m.status.text, "profile switch in progress");
+        update(&mut m, Msg::ProfileSwitched(Err("boom".into())));
+        assert!(!m.switching);
+        assert_eq!(
+            update(&mut m, Msg::Command(Command::Profile("b".into()))),
+            vec![Cmd::SwitchProfile("b".into())]
         );
     }
 

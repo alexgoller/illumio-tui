@@ -1665,6 +1665,9 @@ pub struct Model {
     pub status: StatusLine,
     /// Number of background tasks in flight; the runtime ticks at 250 ms while > 0.
     pub busy: usize,
+    /// A `:profile` switch is being built off the event loop; a second one
+    /// waits until it lands so two switches cannot race.
+    pub switching: bool,
     pub quit: bool,
     pub started: Instant,
 }
@@ -1709,6 +1712,7 @@ impl Model {
             focused: true,
             status: StatusLine::info("connecting…"),
             busy: 0,
+            switching: false,
             quit: false,
             started: Instant::now(),
         }
