@@ -37,6 +37,24 @@ pub fn table_rows(body: Rect, show_detail: bool) -> usize {
 }
 
 pub fn render_screen(model: &Model, f: &mut Frame, body: Rect) {
+    if model.index().is_none() {
+        let t = &model.theme;
+        let note = if model.objects.index_failed {
+            "no objects loaded · r retries"
+        } else {
+            "loading objects…"
+        };
+        f.render_widget(
+            Paragraph::new(Span::styled(note, t.dim_style())).block(panel(
+                "Labels & objects",
+                "",
+                t,
+                true,
+            )),
+            body,
+        );
+        return;
+    }
     let (strip, table, detail) = layout(body, model.objects.show_detail);
     render_strip(model, f, strip);
     render_table(model, f, table);
@@ -159,10 +177,10 @@ fn render_detail(model: &Model, f: &mut Frame, area: Rect) {
         .into_iter()
         .map(|(head, body)| match head {
             Some(h) => Line::from(vec![
-                Span::styled(format!("{h:<7}"), t.header_style()),
+                Span::styled(format!("{h:<8}"), t.header_style()),
                 Span::raw(body),
             ]),
-            None => Line::from(vec![Span::raw("       "), Span::raw(body)]),
+            None => Line::from(vec![Span::raw("        "), Span::raw(body)]),
         })
         .collect();
     f.render_widget(Paragraph::new(text).block(block), area);

@@ -1076,6 +1076,8 @@ pub struct ObjectsState {
     pub loaded_at: [Option<Instant>; 4],
     pub loading: [bool; 4],
     pub show_detail: bool,
+    /// The startup index load failed; `r` retries it.
+    pub index_failed: bool,
     pub auto: AutoRefresh,
 }
 
@@ -1091,6 +1093,7 @@ impl ObjectsState {
             loaded_at: [None; 4],
             loading: [false; 4],
             show_detail: false,
+            index_failed: false,
             auto: AutoRefresh::new(min_refresh),
         }
     }

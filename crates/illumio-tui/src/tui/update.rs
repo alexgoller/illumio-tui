@@ -79,6 +79,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 index_age_secs: age_secs,
             };
             model.status = StatusLine::info("ready");
+            model.objects.index_failed = false;
             let mut cmds = Vec::new();
             // Rulesets that arrived before the names could be resolved.
             if !model.policy.raw.is_empty()
@@ -97,6 +98,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         }
         Msg::IndexFailed(e) => {
             model.status = StatusLine::error(format!("could not load objects: {e}"));
+            model.objects.index_failed = true;
             Vec::new()
         }
         Msg::Stats(s) => {
@@ -218,6 +220,8 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     deny_fallback(model, mode)
                 }
                 Err(e) => {
+                    // The explicit refresh failed: its bypass must not leak into a later reload.
+                    model.policy.bypass_deny = false;
                     model.status = StatusLine::error(format!("rulesets: {e}"));
                     Vec::new()
                 }
@@ -786,6 +790,11 @@ fn objects_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             }
             KeyCode::Char('r') => {
                 if model.index().is_none() {
+                    if model.objects.index_failed {
+                        model.objects.index_failed = false;
+                        model.status = StatusLine::info("loading name index…");
+                        return vec![Cmd::LoadIndex(CacheMode::Use)];
+                    }
                     model.status = StatusLine::info("objects are still loading");
                 } else if model.objects.loading[kind.index()] {
                     model.status = StatusLine::info(format!("{} already loading", kind.title()));
@@ -2196,5 +2205,80 @@ mod tests {
         // a scope switch still forgets everything
         update(&mut m, key('d'));
         assert!(m.policy.rules.is_empty());
+    }
+
+    #[test]
+    fn objects_recover_from_a_failed_index_with_r() {
+        use crate::tui::model::ObjectKind;
+        let mut m = model_fixture();
+        let Connection::Connected { index, .. } = &mut m.connection else {
+            unreachable!()
+        };
+        let idx = index.take().unwrap();
+        update(&mut m, Msg::IndexFailed("boom".into()));
+        update(&mut m, key('1'));
+        assert!(update(&mut m, Msg::SwitchScreen(Screen::Objects)).is_empty());
+        assert_eq!(
+            update(&mut m, key('r')),
+            vec![Cmd::LoadIndex(pce::CacheMode::Use)]
+        );
+        assert_eq!(m.status.text, "loading name index…");
+        assert!(
+            update(&mut m, key('r')).is_empty(),
+            "no second index request while it is in flight"
+        );
+        let cmds = update(
+            &mut m,
+            Msg::IndexLoaded {
+                index: idx,
+                age_secs: 0,
+            },
+        );
+        assert_eq!(cmds.len(), 4);
+        assert!(cmds.contains(&Cmd::LoadObjects {
+            kind: ObjectKind::Labels,
+            mode: pce::CacheMode::Use
+        }));
+    }
+
+    #[test]
+    fn a_failed_explicit_policy_refresh_does_not_leak_its_bypass() {
+        use crate::tui::test_support::model_with_policy;
+        use pce::models::PolicyScope;
+        use std::time::Duration;
+        let mut m = model_with_policy();
+        update(&mut m, key('2'));
+        update(&mut m, key('r'));
+        update(
+            &mut m,
+            Msg::RuleSetsLoaded {
+                scope: PolicyScope::Draft,
+                result: Err("boom".into()),
+            },
+        );
+        update(&mut m, key('a'));
+        m.policy.auto.last_run = Some(Instant::now());
+        let now = Instant::now() + Duration::from_secs(120);
+        assert!(matches!(
+            update(&mut m, Msg::Tick(now)).as_slice(),
+            [Cmd::LoadRuleSets { .. }]
+        ));
+        let mut rs: Vec<pce::models::RuleSet> =
+            serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
+        rs[0].deny_rules.clear();
+        let cmds = update(
+            &mut m,
+            Msg::RuleSetsLoaded {
+                scope: PolicyScope::Draft,
+                result: Ok((rs, 0)),
+            },
+        );
+        assert_eq!(
+            cmds,
+            vec![Cmd::LoadDenyRules {
+                href: "/orgs/5/sec_policy/draft/rule_sets/100".into(),
+                mode: pce::CacheMode::Use
+            }]
+        );
     }
 }
