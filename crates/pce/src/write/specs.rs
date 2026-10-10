@@ -31,6 +31,8 @@ pub struct IpRangeSpec {
     pub from_ip: String,
     pub to_ip: Option<String>,
     pub exclusion: bool,
+    /// Per-range comment; kept so a full PUT does not erase it.
+    pub description: Option<String>,
 }
 
 impl IpRangeSpec {
@@ -49,6 +51,7 @@ impl IpRangeSpec {
                 from_ip: format!("{ip}/{bits}"),
                 to_ip: None,
                 exclusion,
+                description: None,
             });
         }
         if let Some((a, b)) = s.split_once('-') {
@@ -64,6 +67,7 @@ impl IpRangeSpec {
                 from_ip: from.to_string(),
                 to_ip: Some(to.to_string()),
                 exclusion,
+                description: None,
             });
         }
         let ip = parse_ip(s)?;
@@ -71,6 +75,7 @@ impl IpRangeSpec {
             from_ip: ip.to_string(),
             to_ip: None,
             exclusion,
+            description: None,
         })
     }
 
@@ -79,6 +84,7 @@ impl IpRangeSpec {
             from_ip: r.from_ip.clone(),
             to_ip: r.to_ip.clone(),
             exclusion: r.exclusion.unwrap_or(false),
+            description: r.description.clone(),
         }
     }
 
@@ -89,6 +95,9 @@ impl IpRangeSpec {
         }
         if self.exclusion {
             v["exclusion"] = json!(true);
+        }
+        if let Some(d) = &self.description {
+            v["description"] = json!(d);
         }
         v
     }
@@ -101,8 +110,11 @@ impl IpRangeSpec {
         }
     }
 
+    /// Identity ignores the description.
     pub fn same_range(&self, other: &Self) -> bool {
-        self == other
+        self.from_ip == other.from_ip
+            && self.to_ip == other.to_ip
+            && self.exclusion == other.exclusion
     }
 }
 

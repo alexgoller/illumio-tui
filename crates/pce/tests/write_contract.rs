@@ -900,4 +900,38 @@ mod ip_lists {
                 .is_err()
         );
     }
+
+    #[tokio::test]
+    async fn update_keeps_range_descriptions_and_remove_ignores_them() {
+        let server = MockServer::start().await;
+        let mut l = corp();
+        l["ip_ranges"][0]["description"] = json!("DMZ");
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/sec_policy/draft/ip_lists/3"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(l.clone()))
+            .mount(&server)
+            .await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let patch = IpListPatch {
+            add_fqdns: vec!["db.corp.example".into()],
+            ..IpListPatch::default()
+        };
+        let plan = pce
+            .writer(&guard)
+            .plan_update_ip_list("/orgs/5/sec_policy/draft/ip_lists/3", &patch)
+            .await
+            .unwrap();
+        let body = plan.request().unwrap().body.clone().unwrap();
+        assert_eq!(
+            body["ip_ranges"][0],
+            json!({"from_ip": "10.0.0.0/8", "description": "DMZ"})
+        );
+        let current: pce::models::IpList = serde_json::from_value(l).unwrap();
+        let patch = IpListPatch {
+            remove_ranges: vec![IpRangeSpec::parse("10.0.0.0/8", false).unwrap()],
+            ..IpListPatch::default()
+        };
+        assert_eq!(patch.apply(&current).unwrap().ranges.len(), 1);
+    }
 }
