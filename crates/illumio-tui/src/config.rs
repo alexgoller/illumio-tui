@@ -11,6 +11,10 @@ pub struct ConfigFile {
     pub default_profile: Option<String>,
     #[serde(default)]
     pub profiles: BTreeMap<String, Profile>,
+    /// Keys this version does not know, kept so `profile use` can rewrite
+    /// the file without dropping them.
+    #[serde(default, flatten)]
+    pub extra: toml::Table,
 }
 
 #[derive(Default, Clone, Serialize, Deserialize)]
@@ -24,8 +28,11 @@ pub struct Profile {
     pub api_secret: Option<String>,
     /// Shell command whose stdout is the API secret (e.g. `op read ...`).
     pub api_secret_cmd: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Limits::is_empty")]
     pub limits: Limits,
+    /// Unknown keys, round-tripped verbatim.
+    #[serde(default, flatten)]
+    pub extra: toml::Table,
 }
 
 /// Manual `Debug` so a profile never prints its plaintext secret, even
@@ -45,6 +52,8 @@ impl std::fmt::Debug for Profile {
             )
             .field("api_secret_cmd", &self.api_secret_cmd)
             .field("limits", &self.limits)
+            // Unknown keys could be anything; print their names only.
+            .field("extra", &self.extra.keys().collect::<Vec<_>>())
             .finish()
     }
 }
@@ -55,6 +64,15 @@ pub struct Limits {
     pub auto_refresh_min_seconds: Option<u64>,
     pub traffic_max_results: Option<u32>,
     pub traffic_default_window: Option<String>,
+}
+
+impl Limits {
+    pub fn is_empty(&self) -> bool {
+        self.requests_per_second.is_none()
+            && self.auto_refresh_min_seconds.is_none()
+            && self.traffic_max_results.is_none()
+            && self.traffic_default_window.is_none()
+    }
 }
 
 /// Values given on the command line.
@@ -462,7 +480,7 @@ api_secret_cmd = "echo   from-command  "
     fn default_profile_pointing_at_missing_profile_is_an_error() {
         let f = ConfigFile {
             default_profile: Some("ghost".into()),
-            profiles: BTreeMap::new(),
+            ..Default::default()
         };
         let err = resolve(&f, &Overrides::default(), &env(&[]))
             .unwrap_err()
@@ -472,15 +490,36 @@ api_secret_cmd = "echo   from-command  "
 
     #[test]
     fn profile_debug_redacts_secret() {
-        let p = Profile {
+        let mut p = Profile {
             api_key: Some("k".into()),
             api_secret: Some("very-secret".into()),
             ..Default::default()
         };
+        p.extra
+            .insert("mystery".into(), toml::Value::String("hidden-value".into()));
         let out = format!("{p:?}");
         assert!(out.contains('k'), "{out}");
         assert!(out.contains("<redacted>"), "{out}");
         assert!(!out.contains("very-secret"), "{out}");
+        assert!(out.contains("mystery"), "{out}");
+        assert!(!out.contains("hidden-value"), "{out}");
+    }
+
+    #[test]
+    fn unknown_keys_round_trip_and_empty_limits_are_omitted() {
+        let f: ConfigFile = toml::from_str(
+            "top_level_unknown = 1\n[profiles.a]\nhost = \"h\"\nunknown_key = \"kept\"\n",
+        )
+        .unwrap();
+        assert_eq!(f.extra["top_level_unknown"].as_integer(), Some(1));
+        assert_eq!(f.profiles["a"].extra["unknown_key"].as_str(), Some("kept"));
+        assert!(f.profiles["a"].limits.is_empty());
+        let text = toml::to_string_pretty(&f).unwrap();
+        assert!(text.contains("unknown_key = \"kept\""), "{text}");
+        assert!(text.contains("top_level_unknown = 1"), "{text}");
+        assert!(!text.contains("limits"), "{text}");
+        let again: ConfigFile = toml::from_str(&text).unwrap();
+        assert_eq!(again.profiles["a"].host.as_deref(), Some("h"));
     }
 
     #[test]

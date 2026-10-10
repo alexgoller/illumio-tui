@@ -746,7 +746,7 @@ async fn no_cache_fetches_each_object_list_once() {
 fn profile_list_and_use_without_credentials() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = dir.path().join("config.toml");
-    std::fs::write(&cfg, "default_profile = \"a\"\n\n[profiles.a]\nhost = \"a.example\"\norg_id = 1\n\n[profiles.b]\nhost = \"b.example\"\norg_id = 2\n").unwrap();
+    std::fs::write(&cfg, "default_profile = \"a\"\n\n[profiles.a]\nhost = \"a.example\"\norg_id = 1\nunknown_key = \"kept\"\n\n[profiles.b]\nhost = \"b.example\"\norg_id = 2\n").unwrap();
     let out = stdout_json(
         Command::cargo_bin("illumio-tui")
             .unwrap()
@@ -775,6 +775,14 @@ fn profile_list_and_use_without_credentials() {
     assert!(
         text.contains("host = \"a.example\""),
         "other profiles survive: {text}"
+    );
+    assert!(
+        text.contains("unknown_key = \"kept\""),
+        "unknown keys survive: {text}"
+    );
+    assert!(
+        !text.contains("[profiles.a.limits]"),
+        "no empty limits table: {text}"
     );
 
     Command::cargo_bin("illumio-tui")
