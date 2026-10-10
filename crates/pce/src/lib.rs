@@ -74,6 +74,7 @@ pub struct Pce {
     client: PceClient,
     cache: TtlCache,
     ttls: CacheTtls,
+    poll: traffic::PollConfig,
 }
 
 impl Pce {
@@ -86,7 +87,12 @@ impl Pce {
             client,
             cache: TtlCache::new(),
             ttls,
+            poll: traffic::PollConfig::default(),
         }
+    }
+
+    pub fn set_poll_config(&mut self, poll: traffic::PollConfig) {
+        self.poll = poll;
     }
 
     pub fn client(&self) -> &PceClient {
@@ -231,6 +237,74 @@ impl Pce {
             hit: false,
             truncated: false,
         })
+    }
+
+    /// Runs (or reuses) one Explorer query. The cache key is the full query
+    /// body, so the same filter never runs twice until invalidated.
+    pub async fn traffic(
+        &self,
+        query: &models::TrafficQuery,
+        mode: CacheMode,
+        cancel: &tokio_util::sync::CancellationToken,
+        progress: Option<&tokio::sync::mpsc::UnboundedSender<traffic::QueryProgress>>,
+    ) -> Result<Cached<traffic::TrafficResult>> {
+        let key = format!(
+            "traffic:{}",
+            serde_json::to_string(query).map_err(|e| PceError::Invalid(e.to_string()))?
+        );
+        if mode == CacheMode::Use
+            && let Some((value, age)) = self.cache.get::<traffic::TrafficResult>(&key)
+        {
+            let truncated = value.truncated;
+            return Ok(Cached {
+                value,
+                age,
+                hit: true,
+                truncated,
+            });
+        }
+        let result =
+            traffic::run_traffic_query(&self.client, query, &self.poll, cancel, progress).await?;
+        // Traffic is kept until the filter changes or the user refreshes; a
+        // long TTL stands in for "forever" within one session.
+        self.cache
+            .insert(&key, result.clone(), Duration::from_secs(24 * 3600));
+        let truncated = result.truncated;
+        Ok(Cached {
+            value: result,
+            age: Duration::ZERO,
+            hit: false,
+            truncated,
+        })
+    }
+
+    /// Resolves filter expressions (OR of AND-groups) to actor matches,
+    /// loading workloads only when a `wl:` expression needs them.
+    pub async fn resolve_filter_groups(
+        &self,
+        groups: &[Vec<traffic::FilterExpr>],
+        mode: CacheMode,
+    ) -> Result<Vec<Vec<models::ActorMatch>>> {
+        let idx = self.name_index(mode).await?;
+        let workloads = if groups
+            .iter()
+            .flatten()
+            .any(traffic::FilterExpr::needs_workloads)
+        {
+            self.workloads(&models::WorkloadFilter::default(), mode)
+                .await?
+                .value
+        } else {
+            Vec::new()
+        };
+        groups
+            .iter()
+            .map(|g| {
+                g.iter()
+                    .map(|e| traffic::resolve_actor(e, &idx, &workloads))
+                    .collect()
+            })
+            .collect()
     }
 
     /// Fetches a JSON array with an explicit `max_results`, caching under

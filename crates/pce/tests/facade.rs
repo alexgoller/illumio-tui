@@ -267,3 +267,116 @@ async fn policy_reads_use_scope_and_cache() {
     );
     assert_eq!(p.stats().calls, 4);
 }
+
+#[tokio::test]
+async fn traffic_is_cached_by_query_and_filters_resolve() {
+    use pce::traffic::{FilterExpr, TrafficQueryBuilder, poll::PollConfig};
+    use tokio_util::sync::CancellationToken;
+    let server = MockServer::start().await;
+    for (p, body) in [
+        (
+            "/api/v2/orgs/5/labels",
+            include_str!("../../../fixtures/labels.json"),
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/label_groups",
+            include_str!("../../../fixtures/label_groups.json"),
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/ip_lists",
+            include_str!("../../../fixtures/ip_lists.json"),
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/services",
+            include_str!("../../../fixtures/services.json"),
+        ),
+        (
+            "/api/v2/orgs/5/workloads",
+            include_str!("../../../fixtures/workloads.json"),
+        ),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(p))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(body)
+                    .insert_header("Content-Type", "application/json"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/traffic_flows/async_queries"))
+        .respond_with(ResponseTemplate::new(202).set_body_json(
+            json!({"href": "/orgs/5/traffic_flows/async_queries/q-9", "status": "queued"}),
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/traffic_flows/async_queries/q-9"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "completed", "result": "/orgs/5/traffic_flows/async_queries/q-9/download"})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/api/v2/orgs/5/traffic_flows/async_queries/q-9/download",
+        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/traffic_flows.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut p = pce_for(&server);
+    p.set_poll_config(PollConfig {
+        initial: Duration::from_millis(1),
+        factor: 1.5,
+        cap: Duration::from_millis(5),
+        grace: Duration::from_millis(100),
+    });
+    let groups = vec![vec![
+        FilterExpr::parse("app=shop").unwrap(),
+        FilterExpr::parse("wl:host-1.example").unwrap(),
+    ]];
+    let actors = p
+        .resolve_filter_groups(&groups, CacheMode::Use)
+        .await
+        .unwrap();
+    assert_eq!(actors[0].len(), 2);
+    let no_wl = p
+        .resolve_filter_groups(
+            &[vec![FilterExpr::parse("env=prod").unwrap()]],
+            CacheMode::Use,
+        )
+        .await
+        .unwrap();
+    assert_eq!(no_wl[0].len(), 1);
+    let q = TrafficQueryBuilder::between(
+        "2026-10-09T00:00:00Z".parse().unwrap(),
+        "2026-10-10T00:00:00Z".parse().unwrap(),
+    )
+    .source(actors[0].clone())
+    .build()
+    .unwrap();
+    let r1 = p
+        .traffic(&q, CacheMode::Use, &CancellationToken::new(), None)
+        .await
+        .unwrap();
+    assert!(!r1.hit);
+    assert_eq!(r1.value.flows.len(), 4);
+    let r2 = p
+        .traffic(&q, CacheMode::Use, &CancellationToken::new(), None)
+        .await
+        .unwrap();
+    assert!(r2.hit);
+    assert_eq!(
+        p.stats().calls,
+        5 + 3,
+        "4 object lists + workloads once, then POST + poll + download once"
+    );
+}
