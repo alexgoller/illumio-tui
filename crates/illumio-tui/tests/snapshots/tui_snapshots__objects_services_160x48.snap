@@ -3,7 +3,7 @@ source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: "render_to_string(&m, 160, 48)"
 ---
  illumio-tui pce.example · org 5 ●                                                                                                        api 5 calls · 20.8 KB
-  1 Traffic  │  2 Policy  │  3 Labels & objects  │  4 Workloads
+  1 Traffic  │  2 Policy  │  3 Labels & objects  │  4 Workloads  │  5 Events
   Labels  │  Label groups  │  IP lists  │  Services
 ╭ Services ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── cached 3s ago · 3 rows ╮
 │  name                         ports                                                                                                                   pending│

@@ -2,13 +2,13 @@
 use crate::tui::commands::{self, Command};
 use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::model::{
-    Connection, Model, ObjectKind, Overlay, PendingAction, PolicyPane, QueryState, Screen,
-    StatusLine, TrafficData, TrafficView,
+    Connection, EventsFilterEdit, Model, ObjectKind, Overlay, PendingAction, PolicyPane,
+    QueryState, Screen, StatusLine, TrafficData, TrafficView,
 };
 use crate::tui::msg::{Cmd, Msg, ObjectsPayload, QueryOutcome};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use pce::CacheMode;
-use pce::models::PolicyScope;
+use pce::models::{EventFilter, PolicyScope};
 use pce::traffic::QueryProgress;
 use std::time::Instant;
 
@@ -70,6 +70,17 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 model.workloads.auto.from_tick = true;
                 return cmds;
             }
+            if model.screen == Screen::Events
+                && model.focused
+                && model.overlay == Overlay::None
+                && model.events.loaded_at.is_some()
+                && !model.events.loading
+                && model.events.auto.due(now)
+            {
+                let cmds = load_events(model, CacheMode::Bypass);
+                model.events.auto.from_tick = !cmds.is_empty();
+                return cmds;
+            }
             Vec::new()
         }
         Msg::Focus(f) => {
@@ -83,7 +94,13 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             };
             model.status =
                 StatusLine::info("connected; loading labels, label groups, IP lists, services");
-            vec![Cmd::LoadIndex(CacheMode::Use)]
+            let mut cmds = vec![Cmd::LoadIndex(CacheMode::Use)];
+            // Events do not need the name index, only a connection: the screen was
+            // opened while connecting.
+            if model.screen == Screen::Events {
+                cmds.extend(load_missing_events(model));
+            }
+            cmds
         }
         Msg::ConnectFailed(e) => {
             fail(model, "not connected", &e, false);
@@ -298,6 +315,26 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 Err(e) => {
                     let tripped = model.workloads.auto.take_tick_failure();
                     fail(model, "could not load workloads", &e, tripped);
+                }
+            }
+            Vec::new()
+        }
+        Msg::EventsLoaded(result) => {
+            model.events.loading = false;
+            match result {
+                Ok((rows, age, window)) => {
+                    let e = &mut model.events;
+                    e.raw = rows;
+                    e.rebuild();
+                    e.window = Some(window);
+                    e.loaded_at = Some(Instant::now());
+                    e.auto.from_tick = false;
+                    e.age_secs = age;
+                    model.status = StatusLine::info(format!("{} events", model.events.table.len()));
+                }
+                Err(e) => {
+                    let tripped = model.events.auto.take_tick_failure();
+                    fail(model, "could not load events", &e, tripped);
                 }
             }
             Vec::new()
@@ -530,7 +567,60 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             }
             _ => Vec::new(),
         },
-        Overlay::RuleDetail(_) | Overlay::Pending | Overlay::Error(_) => {
+        Overlay::EventsEditor {
+            mut values,
+            mut active,
+            ..
+        } => {
+            let editor =
+                |values: [String; 3], active: usize, error: Option<String>| Overlay::EventsEditor {
+                    values,
+                    active,
+                    error,
+                };
+            match k.code {
+                KeyCode::Esc => model.overlay = Overlay::None,
+                KeyCode::Tab | KeyCode::Down => {
+                    active = (active + 1) % values.len();
+                    model.overlay = editor(values, active, None);
+                }
+                KeyCode::BackTab | KeyCode::Up => {
+                    active = (active + values.len() - 1) % values.len();
+                    model.overlay = editor(values, active, None);
+                }
+                KeyCode::Backspace => {
+                    values[active].pop();
+                    model.overlay = editor(values, active, None);
+                }
+                KeyCode::Char(c) => {
+                    values[active].push(c);
+                    model.overlay = editor(values, active, None);
+                }
+                KeyCode::Enter => {
+                    let edit = EventsFilterEdit {
+                        severity: values[0].trim().to_string(),
+                        event_type: values[1].trim().to_string(),
+                        window: values[2].trim().to_string(),
+                    };
+                    let applied = match edit.to_filter(jiff::Timestamp::now()) {
+                        Ok(_) if model.events.loading => Err("events are still loading".into()),
+                        other => other,
+                    };
+                    match applied {
+                        Ok(filter) => {
+                            model.overlay = Overlay::None;
+                            model.events.filter = edit;
+                            model.events.rebuild();
+                            return request_events(model, filter, CacheMode::Use);
+                        }
+                        Err(err) => model.overlay = editor(values, active, Some(err)),
+                    }
+                }
+                _ => model.overlay = editor(values, active, None),
+            }
+            Vec::new()
+        }
+        Overlay::RuleDetail(_) | Overlay::EventDetail(_) | Overlay::Pending | Overlay::Error(_) => {
             if matches!(k.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) {
                 model.overlay = Overlay::None;
             }
@@ -555,6 +645,9 @@ fn on_screen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         }
         if model.screen == Screen::Workloads && model.workloads.table.is_searching() {
             return workloads_key(model, k);
+        }
+        if model.screen == Screen::Events && model.events.table.is_searching() {
+            return events_key(model, k);
         }
     }
     if k.code == KeyCode::Char('r')
@@ -582,10 +675,12 @@ fn on_screen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         (KeyCode::Char('2'), _) => switch(model, Screen::Policy),
         (KeyCode::Char('3'), _) => switch(model, Screen::Objects),
         (KeyCode::Char('4'), _) => switch(model, Screen::Workloads),
+        (KeyCode::Char('5'), _) => switch(model, Screen::Events),
         _ if model.screen == Screen::Traffic => traffic_key(model, k),
         _ if model.screen == Screen::Policy => policy_key(model, k),
         _ if model.screen == Screen::Objects => objects_key(model, k),
         _ if model.screen == Screen::Workloads => workloads_key(model, k),
+        _ if model.screen == Screen::Events => events_key(model, k),
         _ => Vec::new(),
     }
 }
@@ -797,6 +892,10 @@ fn scroll_focused(model: &mut Model, down: bool) {
             let page = workloads_page(model);
             step(&mut model.workloads.table, down, page);
         }
+        Screen::Events => {
+            let page = events_page(model);
+            step(&mut model.events.table, down, page);
+        }
     }
 }
 
@@ -813,6 +912,7 @@ fn switch(model: &mut Model, s: Screen) -> Vec<Cmd> {
         }
         Screen::Objects => load_missing_objects(model),
         Screen::Workloads => load_missing_workloads(model),
+        Screen::Events => load_missing_events(model),
         _ => Vec::new(),
     }
 }
@@ -1058,6 +1158,91 @@ fn workloads_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         }
     }
     drive_table(&mut model.workloads.table, k, page);
+    Vec::new()
+}
+
+/// Loads the events once. Unlike the other lists they are not in the startup
+/// index, and they need no name index: a connection is enough.
+fn load_missing_events(model: &mut Model) -> Vec<Cmd> {
+    if !model.is_connected() || model.events.loaded_at.is_some() || model.events.loading {
+        return Vec::new();
+    }
+    load_events(model, CacheMode::Use)
+}
+
+/// Requests the events for the applied filter. A filter that no longer
+/// validates (it was validated when applied) is reported, never sent.
+fn load_events(model: &mut Model, mode: CacheMode) -> Vec<Cmd> {
+    match model.events.filter.to_filter(jiff::Timestamp::now()) {
+        Ok(filter) => request_events(model, filter, mode),
+        Err(e) => {
+            model.status = StatusLine::error(e);
+            Vec::new()
+        }
+    }
+}
+
+fn request_events(model: &mut Model, filter: EventFilter, mode: CacheMode) -> Vec<Cmd> {
+    model.events.loading = true;
+    model.events.auto.last_run = Some(Instant::now());
+    model.events.auto.from_tick = false;
+    vec![Cmd::LoadEvents { filter, mode }]
+}
+
+fn events_page(model: &Model) -> usize {
+    let area = ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1);
+    crate::tui::ui::layout::chrome(area)
+        .map(|c| crate::tui::ui::screens::events::table_rows(c.body))
+        .unwrap_or(10)
+        .max(1)
+}
+
+fn events_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
+    let page = events_page(model);
+    if !model.events.table.is_searching() {
+        match k.code {
+            KeyCode::Char('f') => {
+                let f = &model.events.filter;
+                model.overlay = Overlay::EventsEditor {
+                    values: [f.severity.clone(), f.event_type.clone(), f.window.clone()],
+                    active: 0,
+                    error: None,
+                };
+                return Vec::new();
+            }
+            KeyCode::Char('r') => {
+                if model.events.loading {
+                    model.status = StatusLine::info("events already loading");
+                    return Vec::new();
+                }
+                model.events.auto.rearm();
+                return load_events(model, CacheMode::Bypass);
+            }
+            KeyCode::Enter => {
+                if let Some(e) = model.events.table.selected_item() {
+                    model.overlay = Overlay::EventDetail(e.clone());
+                }
+                return Vec::new();
+            }
+            KeyCode::Char('S') => {
+                model.events.sort_by_severity();
+                return Vec::new();
+            }
+            KeyCode::Char('a') => {
+                let a = &mut model.events.auto;
+                a.enabled = !a.enabled;
+                a.tripped = false;
+                model.status = if a.enabled {
+                    StatusLine::info(format!("auto-refresh every {}s", a.interval.as_secs()))
+                } else {
+                    StatusLine::info("auto-refresh off")
+                };
+                return Vec::new();
+            }
+            _ => {}
+        }
+    }
+    drive_table(&mut model.events.table, k, page);
     Vec::new()
 }
 
@@ -3507,5 +3692,248 @@ mod tests {
         m.screen = Screen::Workloads;
         m.workloads.table.set_rows(Vec::new());
         assert!(update(&mut m, down()).is_empty());
+    }
+
+    fn enter() -> Msg {
+        Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+    }
+
+    #[test]
+    fn opening_events_loads_once_and_editor_reloads() {
+        use crate::tui::model::Overlay;
+        use crate::tui::msg::Cmd;
+        let mut m = model_fixture();
+        let cmds = update(&mut m, key('5'));
+        assert_eq!(cmds.len(), 1);
+        assert!(
+            matches!(&cmds[0], Cmd::LoadEvents { mode: pce::CacheMode::Use, filter } if filter.severity.is_none() && filter.since.is_some())
+        );
+        assert_eq!(m.screen, Screen::Events);
+        let events: Vec<pce::models::Event> =
+            serde_json::from_str(include_str!("../../../../fixtures/events.json")).unwrap();
+        update(
+            &mut m,
+            Msg::EventsLoaded(Ok((
+                events,
+                0,
+                ("2026-10-09T08:00:00Z".into(), "2026-10-10T08:00:00Z".into()),
+            ))),
+        );
+        assert_eq!(m.events.table.len(), 4);
+        assert!(update(&mut m, key('1')).is_empty());
+        assert!(update(&mut m, key('5')).is_empty(), "already loaded");
+        update(&mut m, key('f'));
+        assert!(matches!(m.overlay, Overlay::EventsEditor { .. }));
+        for c in "err".chars() {
+            update(&mut m, key(c));
+        }
+        let cmds = update(&mut m, enter());
+        assert!(
+            matches!(&cmds[0], Cmd::LoadEvents { filter, .. } if filter.severity.as_deref() == Some("err"))
+        );
+        assert!(matches!(m.overlay, Overlay::None));
+        update(&mut m, key('f'));
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)),
+        );
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)),
+        );
+        for _ in 0..3 {
+            update(
+                &mut m,
+                Msg::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
+            );
+        }
+        for c in "soon".chars() {
+            update(&mut m, key(c));
+        }
+        update(&mut m, enter());
+        assert!(
+            matches!(&m.overlay, Overlay::EventsEditor { error: Some(e), .. } if e.contains("window"))
+        );
+    }
+
+    #[test]
+    fn events_type_filter_detail_and_severity_sort_are_local() {
+        use crate::tui::model::Overlay;
+        use crate::tui::test_support::model_with_events;
+        let mut m = model_with_events();
+        update(&mut m, key('5'));
+        assert_eq!(m.events.table.len(), 4);
+        m.events.filter.event_type = "agent.".into();
+        m.events.rebuild();
+        assert_eq!(m.events.table.len(), 1);
+        m.events.filter.event_type.clear();
+        m.events.rebuild();
+        update(&mut m, key('S'));
+        assert_eq!(
+            m.events
+                .table
+                .selected_item()
+                .unwrap()
+                .event_type
+                .as_deref(),
+            Some("agent.tampering"),
+            "worst severity first"
+        );
+        update(&mut m, enter());
+        assert!(matches!(m.overlay, Overlay::EventDetail(_)));
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        );
+        assert_eq!(m.stats.calls, 5);
+        assert_eq!(
+            crate::tui::commands::parse("events").unwrap(),
+            crate::tui::commands::Command::Screen(Screen::Events)
+        );
+    }
+
+    #[test]
+    fn events_invalid_window_sends_nothing_and_enter_needs_a_selection() {
+        use crate::tui::model::Overlay;
+        use crate::tui::test_support::model_with_events;
+        let mut m = model_with_events();
+        m.screen = Screen::Events;
+        update(&mut m, key('f'));
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE)),
+        );
+        for _ in 0..3 {
+            update(
+                &mut m,
+                Msg::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
+            );
+        }
+        assert!(
+            update(&mut m, enter()).is_empty(),
+            "invalid window: no request"
+        );
+        assert!(!m.events.loading);
+        assert!(matches!(
+            &m.overlay,
+            Overlay::EventsEditor { error: Some(_), .. }
+        ));
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        );
+        assert_eq!(
+            m.events.filter.window, "24h",
+            "a rejected edit is not stored"
+        );
+        m.events.filter.event_type = "no.such.type".into();
+        m.events.rebuild();
+        assert!(update(&mut m, enter()).is_empty());
+        assert!(
+            matches!(m.overlay, Overlay::None),
+            "nothing selected, no detail"
+        );
+    }
+
+    #[test]
+    fn events_r_bypasses_once_and_not_while_loading() {
+        use crate::tui::test_support::model_with_events;
+        let mut m = model_with_events();
+        m.screen = Screen::Events;
+        let cmds = update(&mut m, key('r'));
+        assert!(matches!(
+            &cmds[..],
+            [Cmd::LoadEvents {
+                mode: pce::CacheMode::Bypass,
+                ..
+            }]
+        ));
+        assert!(m.events.loading);
+        assert!(update(&mut m, key('r')).is_empty(), "already loading");
+    }
+
+    #[test]
+    fn events_auto_refresh_obeys_the_guards_and_trips_on_failure() {
+        use crate::tui::model::Overlay;
+        use crate::tui::test_support::model_with_events;
+        use std::time::Duration;
+        let mut m = model_with_events();
+        update(&mut m, key('5'));
+        let now = Instant::now() + Duration::from_secs(120);
+        m.events.auto.last_run = Some(Instant::now());
+        assert!(update(&mut m, Msg::Tick(now)).is_empty(), "opt-in only");
+        update(&mut m, key('a'));
+        assert!(m.events.auto.enabled);
+        assert!(m.any_auto_enabled());
+        assert!(update(&mut m, Msg::Tick(Instant::now() + Duration::from_secs(10))).is_empty());
+        m.focused = false;
+        assert!(update(&mut m, Msg::Tick(now)).is_empty(), "not unfocused");
+        m.focused = true;
+        m.overlay = Overlay::Help;
+        assert!(update(&mut m, Msg::Tick(now)).is_empty(), "no overlay");
+        m.overlay = Overlay::None;
+        m.events.loading = true;
+        assert!(
+            update(&mut m, Msg::Tick(now)).is_empty(),
+            "not while loading"
+        );
+        m.events.loading = false;
+        let cmds = update(&mut m, Msg::Tick(now));
+        assert!(matches!(
+            &cmds[..],
+            [Cmd::LoadEvents {
+                mode: pce::CacheMode::Bypass,
+                ..
+            }]
+        ));
+        assert!(m.events.auto.from_tick);
+        update(&mut m, Msg::EventsLoaded(Err("boom".into())));
+        assert!(!m.events.auto.enabled && m.events.auto.tripped);
+        assert!(
+            m.status.text.contains("auto-refresh off"),
+            "{}",
+            m.status.text
+        );
+        assert!(!m.events.loading);
+        m.events.auto.enabled = true;
+        m.events.loading = false;
+        m.events.auto.last_run = Some(Instant::now());
+        m.screen = Screen::Traffic;
+        assert!(
+            update(&mut m, Msg::Tick(now)).is_empty(),
+            "only its own screen"
+        );
+    }
+
+    #[test]
+    fn events_mouse_wheel_scrolls_without_requests_and_reset_clears_state() {
+        use crate::tui::test_support::model_with_events;
+        use crossterm::event::MouseEventKind;
+        let mut m = model_with_events();
+        m.screen = Screen::Events;
+        assert!(update(&mut m, mouse(MouseEventKind::ScrollDown, 10, 10)).is_empty());
+        assert_eq!(m.events.table.selected_pos(), 1);
+        m.events.auto.enabled = true;
+        m.events.filter.window = "7d".into();
+        m.reset_data();
+        assert!(m.events.table.is_empty() && m.events.raw.is_empty());
+        assert!(m.events.loaded_at.is_none() && !m.events.auto.enabled);
+        assert_eq!(m.events.filter.window, "24h");
+    }
+
+    #[test]
+    fn events_open_while_connecting_loads_when_connected() {
+        let mut m = model_fixture();
+        m.connection = Connection::Connecting;
+        assert!(update(&mut m, key('5')).is_empty(), "not connected yet");
+        let cmds = update(&mut m, Msg::Connected);
+        assert!(cmds.iter().any(|c| matches!(
+            c,
+            Cmd::LoadEvents {
+                mode: pce::CacheMode::Use,
+                ..
+            }
+        )));
+        assert!(cmds.iter().any(|c| matches!(c, Cmd::LoadIndex(_))));
     }
 }

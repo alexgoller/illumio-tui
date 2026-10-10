@@ -41,6 +41,7 @@ pub fn parse(input: &str) -> Result<Command, String> {
         "policy" | "p" => no_arg(Command::Screen(Screen::Policy)),
         "objects" | "o" | "labels" => no_arg(Command::Screen(Screen::Objects)),
         "workloads" | "w" => no_arg(Command::Screen(Screen::Workloads)),
+        "events" | "e" => no_arg(Command::Screen(Screen::Events)),
         "filter" | "f" => with_arg(
             Command::Filter,
             "filter <src expr>  (e.g. app=web,env=prod)",
@@ -69,6 +70,8 @@ mod tests {
             parse("workloads").unwrap(),
             Command::Screen(Screen::Workloads)
         );
+        assert_eq!(parse("events").unwrap(), Command::Screen(Screen::Events));
+        assert_eq!(parse("e").unwrap(), Command::Screen(Screen::Events));
         assert_eq!(
             parse("filter app=web,env=prod").unwrap(),
             Command::Filter("app=web,env=prod".into())

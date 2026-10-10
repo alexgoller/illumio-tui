@@ -172,7 +172,7 @@ fn interface_text(i: &pce::models::Interface) -> String {
 
 /// VEN-supplied text is shown verbatim, minus control characters that could
 /// move the cursor or inject terminal escapes.
-fn plain(s: &str) -> String {
+pub(crate) fn plain(s: &str) -> String {
     s.chars()
         .map(|c| if c.is_control() { ' ' } else { c })
         .collect()

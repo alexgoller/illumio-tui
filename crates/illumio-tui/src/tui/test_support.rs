@@ -119,6 +119,21 @@ pub fn model_with_workloads() -> Model {
     m
 }
 
+/// A connected model with the four fixture events loaded (age 5 s, window 24h).
+pub fn model_with_events() -> Model {
+    let mut m = model_fixture();
+    m.events.raw = serde_json::from_str(include_str!("../../../../fixtures/events.json"))
+        .expect("events fixture");
+    m.events.rebuild();
+    m.events.loaded_at = Some(Instant::now() - Duration::from_secs(5));
+    m.events.age_secs = 0;
+    m.events.window = Some((
+        "2026-10-09T08:00:00Z".to_string(),
+        "2026-10-10T08:00:00Z".to_string(),
+    ));
+    m
+}
+
 /// Renders the model into a `w`×`h` test terminal and returns the text.
 pub fn render_to_string(model: &Model, w: u16, h: u16) -> String {
     let mut term = Terminal::new(TestBackend::new(w, h)).expect("test terminal");

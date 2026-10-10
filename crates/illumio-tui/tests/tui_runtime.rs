@@ -517,6 +517,86 @@ async fn r_on_workloads_bypasses_the_cache_exactly_once() {
     assert_eq!(model.busy, 0);
 }
 
+async fn mount_events(server: &MockServer, times: u64) {
+    use wiremock::matchers::query_param;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/events"))
+        .and(query_param("max_results", "500"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/events.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(times)
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn opening_events_is_one_request_and_reentry_costs_nothing() {
+    // Events are not part of the startup index, so the first visit is the one
+    // real request; leaving and coming back must not repeat it.
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    mount_events(&server, 1).await;
+    let model = objects_session(
+        &server,
+        &[
+            (500, '5'),
+            (300, '1'),
+            (100, '5'),
+            (100, '3'),
+            (100, '5'),
+            (300, 'q'),
+        ],
+    )
+    .await;
+    assert_eq!(
+        model.stats.calls, 6,
+        "health + four lists + one events list"
+    );
+    assert_eq!(model.events.table.len(), 4);
+    assert!(model.events.window.is_some());
+    assert!(!model.events.loading);
+    assert_eq!(model.busy, 0);
+}
+
+#[tokio::test]
+async fn r_on_events_bypasses_the_cache_exactly_once() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    mount_events(&server, 2).await; // open (Use) + r (Bypass)
+    let model = objects_session(&server, &[(500, '5'), (400, 'r'), (400, 'q')]).await;
+    assert_eq!(model.stats.calls, 7);
+    assert_eq!(model.events.table.len(), 4);
+    assert_eq!(model.busy, 0);
+}
+
+#[tokio::test]
+async fn load_events_command_round_trips() {
+    use illumio_tui::tui::msg::Msg;
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    mount_events(&server, 1).await;
+    let pce = pce_for(&server);
+    let mut m = model();
+    m.connection = Connection::Connected {
+        index: Some(pce.name_index(pce::CacheMode::Use).await.unwrap()),
+        index_age_secs: 0,
+    };
+    let (mut rt, tx) = Runtime::new(pce, m);
+    tx.send(Msg::SwitchScreen(illumio_tui::tui::model::Screen::Events))
+        .unwrap();
+    let events = stream::once(async {
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
+    });
+    let model = run_loop(&mut rt, Box::pin(events), &mut |_| {}).await;
+    assert_eq!(model.events.table.len(), 4);
+    assert!(model.events.window.is_some());
+    assert_eq!(model.busy, 0);
+}
+
 fn two_profile_config(dir: &std::path::Path, b: &MockServer) -> std::path::PathBuf {
     let ub = url::Url::parse(&b.uri()).unwrap();
     let cfg = dir.join("config.toml");

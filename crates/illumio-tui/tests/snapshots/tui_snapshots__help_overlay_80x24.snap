@@ -3,10 +3,10 @@ source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
 ╭ Keys ──────────────────────────────────────────────────────────── Esc closes ╮
-│1 2 3 4                 Traffic · Policy · Labels & objects · Workloads       │
+│1 2 3 4 5               Traffic · Policy · Objects · Workloads · Events       │
 │:                       command prompt: :traffic :policy :objects :workloads  │
-│                        :filter <expr>  :window <dur>  :profile <name>        │
-│                        :draft  :active  :help  :q                            │
+│                        :events  :filter <expr>  :window <dur>                │
+│                        :profile <name>  :draft  :active  :help  :q           │
 │?                       this help                                             │
 │q / Ctrl-C              quit                                                  │
 │↑ ↓ PgUp PgDn Home End  move in the current table                             │
@@ -20,9 +20,9 @@ expression: out
 │Traffic  Enter          detail (flows) · drill into a pair (aggregate)        │
 │Policy   d              toggle draft / active                                 │
 │Policy   p              pending changes                                       │
-│Policy   Tab / Enter    switch pane · rule detail                             │
+│Policy   Tab / Enter    pane · rule detail · on a ruleset: load deny rules    │
 │Objects  Tab / Enter    next object type · detail                             │
 │Workloads t / T         jump to Traffic with workload as src / dst            │
+│Events   f / Enter / S  filter · event as JSON · sort by severity             │
 │Esc                     close overlay / cancel                                │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-ready          f filter  r run  a auto  v view  s sort  / search  : cmd  ? help

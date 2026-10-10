@@ -368,3 +368,39 @@ fn workloads_health_summary_and_columns_160x48() {
     assert!(out.contains("syncing"), "{out}");
     insta::assert_snapshot!("workloads_health_160x48", out);
 }
+
+#[test]
+fn events_screen_80x24_and_detail_160x48() {
+    use illumio_tui::tui::model::{Overlay, Screen};
+    use illumio_tui::tui::test_support::model_with_events;
+    let mut m = model_with_events();
+    m.screen = Screen::Events;
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("agent.tampering"), "{out}");
+    assert!(out.contains("user:user-1"), "{out}");
+    insta::assert_snapshot!("events_80x24", out);
+    m.overlay = Overlay::EventDetail(m.events.table.rows()[2].clone());
+    let out = render_to_string(&m, 160, 48);
+    assert!(out.contains("\"event_type\": \"agent.tampering\""), "{out}");
+    insta::assert_snapshot!("events_detail_160x48", out);
+}
+
+#[test]
+fn events_wide_editor_and_light_styled() {
+    use illumio_tui::tui::model::{Overlay, Screen};
+    use illumio_tui::tui::test_support::model_with_events;
+    let mut m = model_with_events();
+    m.screen = Screen::Events;
+    let out = render_to_string(&m, 160, 48);
+    assert!(out.contains("cached 5s ago · 4 rows · window 24h"), "{out}");
+    assert!(out.contains("resource"), "{out}");
+    m.overlay = Overlay::EventsEditor {
+        values: ["err".into(), "agent".into(), "24h".into()],
+        active: 1,
+        error: None,
+    };
+    insta::assert_snapshot!("events_editor_80x24", render_to_string(&m, 80, 24));
+    m.overlay = Overlay::None;
+    m.set_theme("light");
+    insta::assert_snapshot!("light_events_160x48", render_styled(&m, 160, 48));
+}

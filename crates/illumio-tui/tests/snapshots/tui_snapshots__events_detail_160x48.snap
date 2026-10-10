@@ -1,0 +1,52 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                                                                                                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Labels & objects  │  4 Workloads  │  5 Events
+╭ Events ───────────────────────────────────────────────────────────────────────────────────────────────────────────────── cached 5s ago · 4 rows · window 24h ╮
+│  timestamp            severity type                         actor                  resource                                                          status  │
+│▸ 2026-10-10 07:30:00  info     user.login                   user:user-1                                                                              success │
+│  2026-10-10 07:31:00  info     sec_policy.create            user:user-2            sec_policy 42                                                     success │
+│  2026-10-10 07:32:00  err      agent.tampering              agent:host-1.example   workload host-1.example                                           failure │
+│  2026-10-10 07:33:00  warning  system.license_expiring      system                                                                                           │
+│                             ╭ agent.tampering ───────────────────────────────────────────────────────────────────── Esc closes ╮                             │
+│                             │{                                                                                                 │                             │
+│                             │  "href": "/orgs/5/events/e3",                                                                    │                             │
+│                             │  "timestamp": "2026-10-10T07:32:00Z",                                                            │                             │
+│                             │  "event_type": "agent.tampering",                                                                │                             │
+│                             │  "severity": "err",                                                                              │                             │
+│                             │  "status": "failure",                                                                            │                             │
+│                             │  "created_by": {                                                                                 │                             │
+│                             │    "agent": {                                                                                    │                             │
+│                             │      "hostname": "host-1.example",                                                               │                             │
+│                             │      "href": "/orgs/5/agents/9"                                                                  │                             │
+│                             │    }                                                                                             │                             │
+│                             │  },                                                                                              │                             │
+│                             │  "notifications": [],                                                                            │                             │
+│                             │  "resource_changes": [                                                                           │                             │
+│                             │    {                                                                                             │                             │
+│                             │      "changes": {},                                                                              │                             │
+│                             │      "resource": {                                                                               │                             │
+│                             │        "workload": {                                                                             │                             │
+│                             │          "hostname": "host-1.example",                                                           │                             │
+│                             │          "href": "/orgs/5/workloads/aaaa-1"                                                      │                             │
+│                             │        }                                                                                         │                             │
+│                             │      }                                                                                           │                             │
+│                             │    }                                                                                             │                             │
+│                             │  ]                                                                                               │                             │
+│                             │}                                                                                                 │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯                             │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ready                                                                                      f filter  r refresh  a auto  S severity  Enter detail  : cmd  ? help

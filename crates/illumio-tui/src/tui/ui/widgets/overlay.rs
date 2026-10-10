@@ -11,10 +11,13 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
 
 pub const HELP_LINES: &[(&str, &str)] = &[
-    ("1 2 3 4", "Traffic · Policy · Labels & objects · Workloads"),
+    (
+        "1 2 3 4 5",
+        "Traffic · Policy · Objects · Workloads · Events",
+    ),
     (":", "command prompt: :traffic :policy :objects :workloads"),
-    ("", ":filter <expr>  :window <dur>  :profile <name>"),
-    ("", ":draft  :active  :help  :q"),
+    ("", ":events  :filter <expr>  :window <dur>"),
+    ("", ":profile <name>  :draft  :active  :help  :q"),
     ("?", "this help"),
     ("q / Ctrl-C", "quit"),
     ("↑ ↓ PgUp PgDn Home End", "move in the current table"),
@@ -34,11 +37,18 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ),
     ("Policy   d", "toggle draft / active"),
     ("Policy   p", "pending changes"),
-    ("Policy   Tab / Enter", "switch pane · rule detail"),
+    (
+        "Policy   Tab / Enter",
+        "pane · rule detail · on a ruleset: load deny rules",
+    ),
     ("Objects  Tab / Enter", "next object type · detail"),
     (
         "Workloads t / T",
         "jump to Traffic with workload as src / dst",
+    ),
+    (
+        "Events   f / Enter / S",
+        "filter · event as JSON · sort by severity",
     ),
     ("Esc", "close overlay / cancel"),
 ];
@@ -131,6 +141,85 @@ pub fn render_filter_editor(model: &Model, e: &FilterEditor, f: &mut Frame, area
         }
     }
     f.render_widget(Paragraph::new(lines).block(block).style(t.base()), r);
+}
+
+/// Field names of the events editor, in the order of `Overlay::EventsEditor::values`.
+const EVENTS_FIELDS: [&str; 3] = ["severity", "type", "window"];
+
+pub fn render_events_editor(
+    model: &Model,
+    values: &[String; 3],
+    active: usize,
+    error: &Option<String>,
+    f: &mut Frame,
+    area: Rect,
+) {
+    let t = &model.theme;
+    let r = centered(area, 70, 9);
+    f.render_widget(Clear, r);
+    let block = panel(
+        "Edit events",
+        "Tab next · Enter apply · Esc cancel",
+        t,
+        true,
+    );
+    let mut lines: Vec<Line> = EVENTS_FIELDS
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let on = i == active;
+            let cursor = if on { "▏" } else { "" };
+            Line::from(vec![
+                Span::styled(if on { "▸ " } else { "  " }, Style::new().fg(t.accent)),
+                Span::styled(format!("{name:<12}"), t.header_style()),
+                Span::styled(
+                    format!("{}{cursor}", values[i]),
+                    if on {
+                        Style::new().fg(t.fg).bg(t.selected_bg)
+                    } else {
+                        t.base()
+                    },
+                ),
+            ])
+        })
+        .collect();
+    lines.push(Line::from(""));
+    lines.push(match error {
+        Some(err) => Line::from(Span::styled(err.clone(), Style::new().fg(t.bad))),
+        None => Line::from(Span::styled(
+            "severity empty = any · type matches locally · window e.g. 24h",
+            t.dim_style(),
+        )),
+    });
+    f.render_widget(Paragraph::new(lines).block(block).style(t.base()), r);
+}
+
+/// Lines of JSON shown for one event; the rest is cut.
+const EVENT_DETAIL_LINES: usize = 30;
+
+pub fn render_event_detail(model: &Model, event: &pce::models::Event, f: &mut Frame, area: Rect) {
+    let t = &model.theme;
+    let r = centered(area, 100, EVENT_DETAIL_LINES as u16 + 2);
+    f.render_widget(Clear, r);
+    let json = serde_json::to_string_pretty(event).unwrap_or_default();
+    let total = json.lines().count();
+    let lines: Vec<Line> = json
+        .lines()
+        .take(EVENT_DETAIL_LINES)
+        .map(|l| Line::from(crate::tui::ui::screens::workloads::plain(l)))
+        .collect();
+    let meta = if total > EVENT_DETAIL_LINES {
+        format!("first {EVENT_DETAIL_LINES} of {total} lines · Esc closes")
+    } else {
+        "Esc closes".to_string()
+    };
+    let title = event.event_type.as_deref().unwrap_or("event");
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(panel(title, &meta, t, true))
+            .style(t.base()),
+        r,
+    );
 }
 
 pub fn render_confirm(model: &Model, reason: &str, f: &mut Frame, area: Rect) {
@@ -284,5 +373,6 @@ pub fn screen_hint(screen: Screen) -> &'static str {
         Screen::Policy => "d scope  p pending  Enter detail  Tab pane  a auto",
         Screen::Objects => "Tab type  Enter detail  r refresh  a auto  / search",
         Screen::Workloads => "t/T to traffic  / search  r refresh",
+        Screen::Events => "f filter  r refresh  a auto  S severity  Enter detail",
     }
 }

@@ -3,8 +3,8 @@ use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::table::{Column, SortKey, TableView};
 use crate::tui::ui::theme::Theme;
 use pce::models::{
-    DenyRule, IpList, Label, LabelGroup, PendingChange, PolicyScope, RuleSet, Service, VenHealth,
-    Workload,
+    DenyRule, Event, EventFilter, IpList, Label, LabelGroup, PendingChange, PolicyScope, RuleSet,
+    Service, VenHealth, Workload,
 };
 use pce::traffic::{BlockedGroup, FlowGroup, ResolvedFlow, blocked_summary, group_by_labels};
 use pce::{NameIndex, RuleKind, RuleSetView, RuleView, StatsSnapshot};
@@ -18,14 +18,16 @@ pub enum Screen {
     Policy,
     Objects,
     Workloads,
+    Events,
 }
 
 impl Screen {
-    pub const ALL: [Screen; 4] = [
+    pub const ALL: [Screen; 5] = [
         Screen::Traffic,
         Screen::Policy,
         Screen::Objects,
         Screen::Workloads,
+        Screen::Events,
     ];
 
     pub fn title(self) -> &'static str {
@@ -34,6 +36,7 @@ impl Screen {
             Screen::Policy => "Policy",
             Screen::Objects => "Labels & objects",
             Screen::Workloads => "Workloads",
+            Screen::Events => "Events",
         }
     }
 
@@ -119,6 +122,14 @@ pub enum Overlay {
     Pending,
     /// A failure too long for the status line, or an authentication failure.
     Error(String),
+    /// Events filter: severity, type (local), window.
+    EventsEditor {
+        values: [String; 3],
+        active: usize,
+        error: Option<String>,
+    },
+    /// The selected audit event as pretty JSON.
+    EventDetail(Event),
 }
 
 impl PartialEq for Overlay {
@@ -143,6 +154,19 @@ impl PartialEq for Overlay {
             ) => ra == rb && aa == ab,
             // `RuleView` is not `PartialEq`; a rule is identified by its href.
             (Overlay::RuleDetail(a), Overlay::RuleDetail(b)) => a.href == b.href,
+            (
+                Overlay::EventsEditor {
+                    values: va,
+                    active: aa,
+                    error: ea,
+                },
+                Overlay::EventsEditor {
+                    values: vb,
+                    active: ab,
+                    error: eb,
+                },
+            ) => va == vb && aa == ab && ea == eb,
+            (Overlay::EventDetail(a), Overlay::EventDetail(b)) => a.href == b.href,
             _ => false,
         }
     }
@@ -1425,6 +1449,175 @@ impl WorkloadsState {
     }
 }
 
+/// The severity column, the target of `S`.
+const SEVERITY_COL: usize = 1;
+
+pub fn event_columns() -> Vec<Column<Event>> {
+    vec![
+        Column {
+            title: "timestamp",
+            width: 20,
+            cell: |e| {
+                e.timestamp
+                    .as_deref()
+                    .map(|t| t.get(..19).unwrap_or(t).replace('T', " "))
+                    .unwrap_or_default()
+            },
+            key: |e| SortKey::Text(e.timestamp.clone().unwrap_or_default()),
+            right: false,
+            hide_below: 0,
+            narrow: Some(|e| {
+                e.timestamp
+                    .as_deref()
+                    .map(|t| t.get(5..19).unwrap_or(t).replace('T', " "))
+                    .unwrap_or_default()
+            }),
+            narrow_width: 14,
+        },
+        Column {
+            title: "severity",
+            width: 8,
+            cell: |e| e.severity.clone().unwrap_or_default(),
+            key: |e| SortKey::Num(u64::from(e.severity_rank())),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "type",
+            width: 28,
+            cell: |e| e.event_type.clone().unwrap_or_default(),
+            key: |e| SortKey::Text(e.event_type.clone().unwrap_or_default()),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 24,
+        },
+        Column {
+            title: "actor",
+            width: 22,
+            cell: |e| e.actor(),
+            key: |e| SortKey::Text(e.actor()),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 20,
+        },
+        Column {
+            title: "resource",
+            width: 0,
+            cell: |e| e.resource(),
+            key: |e| SortKey::Text(e.resource()),
+            right: false,
+            // Secondary: only on wide terminals.
+            hide_below: 120,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "status",
+            width: 8,
+            cell: |e| e.status.clone().unwrap_or_default(),
+            key: |e| SortKey::Text(e.status.clone().unwrap_or_default()),
+            right: false,
+            hide_below: 100,
+            narrow: None,
+            narrow_width: 0,
+        },
+    ]
+}
+
+/// What the events editor holds: the server-side severity and window, and the
+/// local `type` substring.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventsFilterEdit {
+    pub severity: String,
+    pub event_type: String,
+    pub window: String,
+}
+
+impl EventsFilterEdit {
+    /// The request filter. `since` is rounded down to the whole minute and
+    /// `until` is left open, so applying the same filter again within the cache
+    /// TTL produces the same query (and a cache hit) instead of a new one every second.
+    pub fn to_filter(&self, now: jiff::Timestamp) -> Result<EventFilter, String> {
+        let w = pce::traffic::parse_window(&self.window).map_err(|e| format!("window: {e}"))?;
+        let span = jiff::Span::try_from(w).map_err(|e| format!("window: {e}"))?;
+        let minute = jiff::Timestamp::from_second(now.as_second().div_euclid(60) * 60)
+            .map_err(|e| e.to_string())?;
+        let since = minute
+            .checked_sub(span)
+            .map_err(|e| format!("window: {e}"))?;
+        Ok(EventFilter {
+            severity: Some(self.severity.trim().to_string()).filter(|s| !s.is_empty()),
+            event_type: None,
+            status: None,
+            since: Some(since),
+            until: None,
+            max_results: None,
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct EventsState {
+    pub table: TableView<Event>,
+    /// The events as fetched; `table` is the local `type` projection of these.
+    pub raw: Vec<Event>,
+    pub filter: EventsFilterEdit,
+    /// The `since` and `until` of the last answered request (`until` is empty when open).
+    pub window: Option<(String, String)>,
+    pub loaded_at: Option<Instant>,
+    pub age_secs: u64,
+    pub loading: bool,
+    pub auto: AutoRefresh,
+}
+
+impl EventsState {
+    pub fn new(min_refresh: u64) -> Self {
+        Self {
+            table: TableView::new(event_columns()),
+            raw: Vec::new(),
+            filter: EventsFilterEdit {
+                severity: String::new(),
+                event_type: String::new(),
+                window: "24h".into(),
+            },
+            window: None,
+            loaded_at: None,
+            age_secs: 0,
+            loading: false,
+            auto: AutoRefresh::new(min_refresh),
+        }
+    }
+
+    /// Applies the local type substring filter.
+    pub fn rebuild(&mut self) {
+        let needle = self.filter.event_type.trim().to_ascii_lowercase();
+        let rows: Vec<Event> = self
+            .raw
+            .iter()
+            .filter(|e| {
+                needle.is_empty()
+                    || e.event_type
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_ascii_lowercase()
+                        .contains(&needle)
+            })
+            .cloned()
+            .collect();
+        self.table.set_rows(rows);
+    }
+
+    /// `S`: worst severity first; pressing it again flips the direction.
+    pub fn sort_by_severity(&mut self) {
+        let desc = self.table.sort() != Some((SEVERITY_COL, true));
+        self.table.sort_by(SEVERITY_COL, desc);
+    }
+}
+
 /// Limits copied from the resolved profile so `update` never touches config.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Limits {
@@ -1445,6 +1638,7 @@ pub struct Model {
     pub policy: PolicyState,
     pub objects: ObjectsState,
     pub workloads: WorkloadsState,
+    pub events: EventsState,
     pub connection: Connection,
     pub stats: StatsSnapshot,
     pub size: (u16, u16),
@@ -1473,6 +1667,7 @@ impl Model {
         let policy = PolicyState::new(auto_refresh_min_seconds);
         let objects = ObjectsState::new(auto_refresh_min_seconds);
         let workloads = WorkloadsState::new(auto_refresh_min_seconds);
+        let events = EventsState::new(auto_refresh_min_seconds);
         Self {
             profile,
             theme_name,
@@ -1488,6 +1683,7 @@ impl Model {
             policy,
             objects,
             workloads,
+            events,
             connection: Connection::Connecting,
             stats: StatsSnapshot { calls: 0, bytes: 0 },
             size: (80, 24),
@@ -1517,6 +1713,7 @@ impl Model {
             || self.policy.auto.enabled
             || self.objects.auto.enabled
             || self.workloads.auto.enabled
+            || self.events.auto.enabled
     }
 
     pub fn is_connected(&self) -> bool {
@@ -1541,8 +1738,74 @@ impl Model {
         self.policy = PolicyState::new(min);
         self.objects = ObjectsState::new(min);
         self.workloads = WorkloadsState::new(min);
+        self.events = EventsState::new(min);
         self.stats = StatsSnapshot { calls: 0, bytes: 0 };
         self.busy = 0;
         self.overlay = Overlay::None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(s: &str) -> jiff::Timestamp {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn events_window_is_whole_minutes_and_open_ended_so_the_cache_can_hit() {
+        let edit = EventsFilterEdit {
+            severity: " err ".into(),
+            event_type: "agent".into(),
+            window: "24h".into(),
+        };
+        let a = edit.to_filter(at("2026-10-10T08:00:07Z")).unwrap();
+        let b = edit.to_filter(at("2026-10-10T08:00:52Z")).unwrap();
+        assert_eq!(a.to_query(), b.to_query(), "same minute, same query");
+        assert_eq!(
+            a.to_query(),
+            vec![
+                ("severity", "err".to_string()),
+                ("timestamp[gte]", "2026-10-09T08:00:00Z".to_string()),
+            ],
+            "severity trimmed, `until` left open, the local type not sent"
+        );
+        let c = edit.to_filter(at("2026-10-10T08:01:00Z")).unwrap();
+        assert_ne!(
+            a.to_query(),
+            c.to_query(),
+            "the next minute moves the window"
+        );
+    }
+
+    #[test]
+    fn events_empty_severity_is_none_and_a_bad_window_is_an_error() {
+        let mut edit = EventsFilterEdit {
+            severity: "  ".into(),
+            event_type: String::new(),
+            window: "1h".into(),
+        };
+        assert!(
+            edit.to_filter(at("2026-10-10T08:00:00Z"))
+                .unwrap()
+                .severity
+                .is_none()
+        );
+        edit.window = "soon".into();
+        assert!(
+            edit.to_filter(at("2026-10-10T08:00:00Z"))
+                .unwrap_err()
+                .starts_with("window:")
+        );
+    }
+
+    #[test]
+    fn an_event_without_a_timestamp_renders_blank() {
+        let e: Event = serde_json::from_str(r#"{"href":"/orgs/5/events/x"}"#).unwrap();
+        for c in event_columns() {
+            assert!((c.cell)(&e).len() < 5, "{}", c.title);
+        }
+        assert_eq!((event_columns()[0].cell)(&e), "");
     }
 }

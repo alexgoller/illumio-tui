@@ -256,6 +256,23 @@ impl Runtime {
                     let _ = tx.send(Msg::Stats(pce.stats()));
                 });
             }
+            Cmd::LoadEvents { filter, mode } => {
+                self.model.busy += 1;
+                let (pce, tx) = self.task_ctx();
+                tokio::spawn(async move {
+                    let stamp = |t: Option<jiff::Timestamp>| {
+                        t.map(pce::traffic::format_timestamp).unwrap_or_default()
+                    };
+                    let window = (stamp(filter.since), stamp(filter.until));
+                    let result = pce
+                        .events(&filter, mode)
+                        .await
+                        .map(|c| (c.value, c.age.as_secs(), window))
+                        .map_err(|e| e.to_string());
+                    let _ = tx.send(Msg::EventsLoaded(result));
+                    let _ = tx.send(Msg::Stats(pce.stats()));
+                });
+            }
             Cmd::LoadIndex(mode) => {
                 self.model.busy += 1;
                 let (pce, tx) = self.task_ctx();
@@ -285,6 +302,7 @@ impl Runtime {
                 | Msg::PendingLoaded(_)
                 | Msg::ObjectsLoaded { .. }
                 | Msg::WorkloadsLoaded(_)
+                | Msg::EventsLoaded(_)
                 | Msg::ProfileSwitched(_)
         );
         let cmds = update(&mut self.model, msg);
@@ -364,6 +382,24 @@ where
     )
 }
 
+/// Runs `restore` first on every panic, then the hook that was installed
+/// before (ratatui's, which leaves raw mode and the alternate screen).
+fn chain_panic_hook(restore: impl Fn() + Send + Sync + 'static) {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        restore();
+        previous(info);
+    }));
+}
+
+/// Without this a panic would leave the shell with mouse and focus reporting
+/// on, because ratatui's hook restores only raw mode and the screen.
+fn install_panic_hook() {
+    chain_panic_hook(|| {
+        let _ = crossterm::execute!(std::io::stdout(), DisableMouseCapture, DisableFocusChange);
+    });
+}
+
 /// Real entry point: builds the connection from the same config path as the
 /// CLI, takes over the terminal, and restores it on every exit path.
 pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
@@ -386,6 +422,7 @@ pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
     rt.execute(Cmd::Connect);
 
     let mut terminal = ratatui::init();
+    install_panic_hook(); // after ratatui's, so mouse reporting is switched off first
     let _ = crossterm::execute!(std::io::stdout(), EnableMouseCapture, EnableFocusChange);
     let result = {
         let mut draw = |m: &Model| {
@@ -398,4 +435,27 @@ pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
     ratatui::restore();
     let _ = result;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    #[test]
+    fn panic_hook_restores_first_and_then_calls_the_previous_hook() {
+        let seen: Arc<Mutex<Vec<&'static str>>> = Arc::default();
+        let original = std::panic::take_hook();
+        let before = seen.clone();
+        std::panic::set_hook(Box::new(move |_| before.lock().unwrap().push("previous")));
+        let restore = seen.clone();
+        chain_panic_hook(move || restore.lock().unwrap().push("restore"));
+        let _ = std::panic::catch_unwind(|| panic!("boom"));
+        let _ = std::panic::take_hook();
+        std::panic::set_hook(original);
+        let seen = seen.lock().unwrap();
+        let first = |what| seen.iter().position(|s| *s == what);
+        assert!(first("restore").is_some(), "{seen:?}");
+        assert!(first("restore") < first("previous"), "{seen:?}");
+    }
 }

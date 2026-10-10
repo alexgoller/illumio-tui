@@ -3,7 +3,8 @@ use crate::tui::filter::TrafficFilter;
 use crate::tui::model::{Limits, ObjectKind, ProfileInfo, Screen};
 use crossterm::event::{KeyEvent, MouseEvent};
 use pce::models::{
-    DenyRule, IpList, Label, LabelGroup, PendingChange, PolicyScope, RuleSet, Service, Workload,
+    DenyRule, Event, EventFilter, IpList, Label, LabelGroup, PendingChange, PolicyScope, RuleSet,
+    Service, Workload,
 };
 use pce::traffic::{QueryProgress, ResolvedFlow};
 use pce::{CacheMode, StatsSnapshot};
@@ -29,6 +30,9 @@ pub enum ObjectsPayload {
     IpLists(Vec<IpList>, u64),
     Services(Vec<Service>, u64),
 }
+
+/// Events, the cache age in seconds and the `(since, until)` the request used.
+pub type EventsPayload = (Vec<Event>, u64, (String, String));
 
 #[derive(Debug)]
 pub enum Msg {
@@ -77,6 +81,8 @@ pub enum Msg {
     },
     /// Workloads with the cache age in seconds.
     WorkloadsLoaded(Result<(Vec<Workload>, u64), String>),
+    /// Events, the cache age in seconds and the `(since, until)` the request used.
+    EventsLoaded(Result<EventsPayload, String>),
     /// The runtime rebuilt the connection for `:profile <name>` (or could not);
     /// the new profile's PCE-load limits come with it.
     ProfileSwitched(Result<(ProfileInfo, Limits), String>),
@@ -109,6 +115,10 @@ pub enum Cmd {
         mode: CacheMode,
     },
     LoadWorkloads(CacheMode),
+    LoadEvents {
+        filter: EventFilter,
+        mode: CacheMode,
+    },
     /// Rebuild the client for another profile from the config (no request).
     SwitchProfile(String),
     Quit,
@@ -152,6 +162,16 @@ impl PartialEq for Cmd {
                 ka == kb && ma == mb
             }
             (Cmd::LoadWorkloads(a), Cmd::LoadWorkloads(b)) => a == b,
+            (
+                Cmd::LoadEvents {
+                    filter: fa,
+                    mode: ma,
+                },
+                Cmd::LoadEvents {
+                    filter: fb,
+                    mode: mb,
+                },
+            ) => fa == fb && ma == mb,
             (Cmd::SwitchProfile(a), Cmd::SwitchProfile(b)) => a == b,
             _ => false,
         }

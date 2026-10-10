@@ -49,6 +49,12 @@ pub fn view(model: &Model, f: &mut Frame) {
         Overlay::RuleDetail(rule) => widgets::overlay::render_rule_detail(model, rule, f, area),
         Overlay::Pending => widgets::overlay::render_pending(model, f, area),
         Overlay::Error(text) => widgets::overlay::render_error(model, text, f, area),
+        Overlay::EventsEditor {
+            values,
+            active,
+            error,
+        } => widgets::overlay::render_events_editor(model, values, *active, error, f, area),
+        Overlay::EventDetail(event) => widgets::overlay::render_event_detail(model, event, f, area),
     }
 }
 
@@ -180,6 +186,10 @@ fn render_body(model: &Model, f: &mut Frame, area: Rect) {
     }
     if model.screen == Screen::Workloads && model.is_connected() {
         screens::workloads::render_screen(model, f, area);
+        return;
+    }
+    if model.screen == Screen::Events && model.is_connected() {
+        screens::events::render_screen(model, f, area);
         return;
     }
     let block = widgets::panel::panel(model.screen.title(), "", t, true);

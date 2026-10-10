@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Labels & objects  │  4 Workloads  │  5 Events
+╭ Events ───────────────────────────────── cached 5s ago · 4 rows · window 24h ╮
+│  timestamp      severity type                     actor                      │
+│▸ 10-10 07:30:00 info     user.login               user:user-1                │
+│  10-10 07:31:00 info     sec_policy.create        user:user-2                │
+│  10-10 07:32:00 err      agent.tampering          agent:host-1.example       │
+│  10-10 07:33:00 warning  system.license_expiring  system                     │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ready      f filter  r refresh  a auto  S severity  Enter detail  : cmd  ? help
