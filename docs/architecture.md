@@ -1,10 +1,10 @@
-# Architecture notes (Plan 1: library and CLI)
+# Architecture notes
 
 ## Crates
 
 - `crates/pce`: the library. No terminal code, no process-global state.
 - `crates/illumio-tui`: the binary. `cli/` is the non-interactive mode;
-  the TUI (Plan 2) will sit next to it and reuse every library type.
+  the TUI (`tui/`) sits next to it and reuses every library type.
 - `crates/xtask`: developer tooling (`cargo xtask record`).
 
 ## One request, top to bottom
@@ -34,6 +34,46 @@ selected profile. The global override flag is `--pce-port`, not `--port`:
 `--port` on `traffic query` is the service-port filter in step 1-3 above,
 a different thing entirely, so the connection override was named
 `--pce-port` to keep the two unambiguous on the same command line.
+
+## TUI
+
+Module map under `crates/illumio-tui/src/tui/`:
+
+| Module | Role |
+|---|---|
+| `model` | all state: screens, tables, overlays, counters, theme |
+| `msg` | the `Msg` enum (keys, mouse, ticks, query and fetch results) |
+| `update` | pure `update(&mut Model, Msg) -> Vec<Cmd>`; no I/O |
+| `app` | the runtime: terminal setup, event loop, spawns tasks for `Cmd`s |
+| `commands` | parser for the `:` prompt |
+| `filter` | the filter editor and its conversion to a traffic query |
+| `table` | sortable, searchable table state shared by every screen |
+| `ui/` | theme, layout, per-screen drawing and widgets (panels, overlays) |
+
+One message, top to bottom: pressing `r` on Traffic.
+
+1. `app` reads a crossterm event and turns it into `Msg::Key`.
+2. `update` handles it, marks the screen busy and returns `Cmd::RunQuery`.
+3. `app` spawns a task that runs `filter.to_query` and `pce.traffic`,
+   sending `Msg::QueryProgress` while it polls and `Msg::QueryDone` at the end.
+4. `update` stores the result and calls `rebuild_views`, which derives the
+   Flows, App-to-app and Blocked tables from the one result.
+5. `app` draws the model once, after draining whatever else is queued.
+
+Tick policy: no timer at all while idle; 250 ms while a request is in
+flight (spinner, progress); 1 s when any screen has auto-refresh on. Auto-refresh
+is opt-in per screen, at least 60 s apart, and turns itself off after a failure.
+There is one in-flight task per resource, so the TUI never issues concurrent
+misses for the same data. The first visit to Workloads and to Events fetches
+once; later visits use the cache.
+
+Testing: `update` is a pure function, so most behaviour is tested by feeding
+messages to a `Model` and asserting on the model and the returned commands.
+Screens are checked with ratatui's `TestBackend` and `insta` snapshots at
+80x24 and 160x48 in the dark theme, plus styled snapshots that include colours
+for dark and light (`tests/tui_snapshots.rs`). The runtime is tested with an
+injectable event stream and a mock PCE (`tests/tui_runtime.rs`), so no
+terminal is needed.
 
 ## PCE protection, where it lives
 

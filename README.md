@@ -70,6 +70,38 @@ also be overridden per run with global flags: `--host`, `--pce-port`,
 connection-port flag is `--pce-port`, not `--port`, because `traffic query`
 has its own `--port` service-port filter).
 
+## TUI
+
+    illumio-tui                      # opens the interactive UI on the default profile
+    illumio-tui --profile prod
+    illumio-tui --theme light        # dark is the default
+
+Five screens: `1` Traffic, `2` Policy, `3` Labels & objects, `4` Workloads, `5` Events. The
+`:` prompt takes `:traffic`, `:policy`, `:objects`, `:workloads`, `:events`, `:filter <expr>`,
+`:window <dur>`, `:profile <name>`, `:draft`, `:active`, `:help` and `:q`. `?` shows the full
+key map, `Esc` closes overlays, `q` or `Ctrl-C` quits. The mouse wheel scrolls the current
+table and a click on a tab switches screen.
+
+- **Traffic**: `f` edit the filter, `r` run (bypasses the cache), `v` cycle Flows / App-to-app /
+  Blocked, `g` change the group keys, `s` sort, `/` search, `Enter` detail (flows) or drill into
+  a pair (app-to-app), `a` auto-refresh. A filter that would be expensive asks for
+  confirmation first.
+- **Policy**: `d` toggle draft / active, `p` pending changes, `Tab` switch panes, `Enter` rule
+  detail, or on a ruleset load its deny rules.
+- **Labels & objects**: `Tab` next object type, `Enter` detail.
+- **Workloads**: VEN health columns and a summary line, `h` unhealthy only, `H` sort by
+  severity, `t` / `T` jump to Traffic with the workload as source / destination.
+- **Events**: severity-coloured audit events, `f` edit severity / type / window, `S` sort by
+  severity, `Enter` the event as JSON.
+
+Auto-refresh (`a`) is opt-in per screen, has a 60 s minimum, shows a countdown in the panel
+title, and switches itself off after a failed refresh.
+
+Startup makes exactly five requests (health plus the four object lists). The first visit to
+Workloads and to Events costs one request each; going back to them costs none. Everything
+else is caused by a key you press. The header shows the API call and byte counters at all
+times.
+
 ## CLI
 
     illumio-tui health
