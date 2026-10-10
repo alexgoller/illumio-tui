@@ -1144,4 +1144,42 @@ mod services {
         }))
         .await;
     }
+
+    #[tokio::test]
+    async fn update_refuses_a_port_without_proto() {
+        refuses_unpreservable(json!({
+            "href": "/orgs/5/sec_policy/draft/services/7", "name": "P",
+            "service_ports": [{"port": 5432, "proto": 6}, {"port": 1}]
+        }))
+        .await;
+    }
+
+    #[tokio::test]
+    async fn null_icmp_and_windows_fields_do_not_refuse() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/sec_policy/draft/services/7"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "href": "/orgs/5/sec_policy/draft/services/7", "name": "N",
+                "service_ports": [{"port": 5432, "proto": 6, "icmp_type": null, "icmp_code": null}],
+                "windows_services": null
+            })))
+            .mount(&server)
+            .await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let patch = ServicePatch {
+            description: Some("d".into()),
+            ..ServicePatch::default()
+        };
+        let plan = pce
+            .writer(&guard)
+            .plan_update_service("/orgs/5/sec_policy/draft/services/7", &patch)
+            .await
+            .unwrap();
+        assert_eq!(
+            plan.request().unwrap().body.clone().unwrap()["service_ports"],
+            json!([{"port": 5432, "proto": 6}])
+        );
+    }
 }

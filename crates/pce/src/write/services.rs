@@ -139,13 +139,14 @@ impl Writer<'_> {
             .get("service_ports")
             .and_then(Value::as_array)
             .is_some_and(|a| {
+                let set = |p: &Value, k: &str| p.get(k).is_some_and(|v| !v.is_null());
                 a.iter()
-                    .any(|p| p.get("icmp_type").is_some() || p.get("icmp_code").is_some())
+                    .any(|p| set(p, "icmp_type") || set(p, "icmp_code") || !set(p, "proto"))
             });
         if has_windows || has_icmp {
             let name = raw.get("name").and_then(Value::as_str).unwrap_or(&href);
             return Err(WriteError::invalid(format!(
-                "{name} has fields this tool cannot preserve (windows_services or icmp_type/icmp_code); edit it in the PCE UI"
+                "{name} has fields this tool cannot preserve (windows_services, icmp_type/icmp_code or a port without a protocol); edit it in the PCE UI"
             )));
         }
         let current: Service = serde_json::from_value(raw)
