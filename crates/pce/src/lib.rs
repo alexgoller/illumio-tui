@@ -15,6 +15,7 @@ pub mod cache;
 pub mod client;
 pub mod error;
 pub mod limiter;
+pub mod models;
 
 use std::time::Duration;
 
@@ -109,10 +110,33 @@ impl Pce {
             .body)
     }
 
-    /// Temporary until Task 6 adds typed labels.
-    pub async fn labels(&self, mode: CacheMode) -> Result<Cached<Vec<serde_json::Value>>> {
+    pub async fn labels(&self, mode: CacheMode) -> Result<Cached<Vec<models::Label>>> {
         let path = self.client.org_path("labels");
-        self.cached_list("labels", &path, vec![], self.ttls.objects, mode)
+        self.cached_list("objects:labels", &path, vec![], self.ttls.objects, mode)
+            .await
+    }
+
+    pub async fn label_groups(&self, mode: CacheMode) -> Result<Cached<Vec<models::LabelGroup>>> {
+        let path = self.client.org_path("sec_policy/draft/label_groups");
+        self.cached_list(
+            "objects:label_groups",
+            &path,
+            vec![],
+            self.ttls.objects,
+            mode,
+        )
+        .await
+    }
+
+    pub async fn ip_lists(&self, mode: CacheMode) -> Result<Cached<Vec<models::IpList>>> {
+        let path = self.client.org_path("sec_policy/draft/ip_lists");
+        self.cached_list("objects:ip_lists", &path, vec![], self.ttls.objects, mode)
+            .await
+    }
+
+    pub async fn services(&self, mode: CacheMode) -> Result<Cached<Vec<models::Service>>> {
+        let path = self.client.org_path("sec_policy/draft/services");
+        self.cached_list("objects:services", &path, vec![], self.ttls.objects, mode)
             .await
     }
 

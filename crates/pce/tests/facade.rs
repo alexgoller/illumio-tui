@@ -64,3 +64,44 @@ async fn cached_list_hits_cache_and_reports_truncation() {
     assert!(!fourth.hit, "clear_cache forces a fetch");
     assert_eq!(p.stats().calls, 3);
 }
+
+#[tokio::test]
+async fn object_lists_are_cached_separately() {
+    let server = MockServer::start().await;
+    for (p, body) in [
+        (
+            "/api/v2/orgs/5/labels",
+            include_str!("../../../fixtures/labels.json"),
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/label_groups",
+            include_str!("../../../fixtures/label_groups.json"),
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/ip_lists",
+            include_str!("../../../fixtures/ip_lists.json"),
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/services",
+            include_str!("../../../fixtures/services.json"),
+        ),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(p))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(body)
+                    .insert_header("Content-Type", "application/json"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+    let p = pce_for(&server);
+    assert_eq!(p.labels(CacheMode::Use).await.unwrap().value.len(), 6);
+    assert_eq!(p.label_groups(CacheMode::Use).await.unwrap().value.len(), 1);
+    assert_eq!(p.ip_lists(CacheMode::Use).await.unwrap().value.len(), 2);
+    assert_eq!(p.services(CacheMode::Use).await.unwrap().value.len(), 3);
+    assert!(p.services(CacheMode::Use).await.unwrap().hit);
+    assert_eq!(p.stats().calls, 4);
+}

@@ -1,0 +1,8 @@
+[
+  {"href":"/orgs/5/labels/1","key":"role","value":"web","created_at":"2025-01-01T00:00:00Z","updated_at":"2025-01-01T00:00:00Z","deleted":false},
+  {"href":"/orgs/5/labels/2","key":"role","value":"db","deleted":false},
+  {"href":"/orgs/5/labels/3","key":"app","value":"shop","deleted":false},
+  {"href":"/orgs/5/labels/4","key":"env","value":"prod","deleted":false},
+  {"href":"/orgs/5/labels/5","key":"loc","value":"eu","deleted":false},
+  {"href":"/orgs/5/labels/6","key":"app","deleted":true}
+]

@@ -1,0 +1,4 @@
+[
+  {"href":"/orgs/5/sec_policy/draft/ip_lists/20","name":"Any (0.0.0.0/0 and ::/0)","ip_ranges":[{"from_ip":"0.0.0.0/0"},{"from_ip":"::/0"}],"fqdns":[]},
+  {"href":"/orgs/5/sec_policy/draft/ip_lists/21","name":"Corp","description":"Office ranges","ip_ranges":[{"from_ip":"10.1.0.0","to_ip":"10.1.255.255","exclusion":false}],"fqdns":[{"fqdn":"*.corp.example"}],"update_type":"create"}
+]
