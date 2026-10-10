@@ -54,3 +54,20 @@
 - Final gate green: `cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`.
 - Events fixture recorded once from the test PCE (the recorder records every set, so 15 read calls, not one) into a scratch directory; the anonymiser was extended for `pce_fqdn`, `src_ip` and `api_key_id`, an `xtask anonymise` subcommand added, the file re-processed, audited per key and committed as `fixtures/recorded/events.json`. `cargo test -p pce --test recorded` green.
 - Manual run against the test PCE at 100x30 through a pseudo-terminal: connect 5 calls; `r` 9 calls (1000 flows, truncation warning visible); `v` `v` no calls; `2` 10; `3` 10 (cache hits); `4` 11 (206 workloads, health summary shown); `h` no calls; `5` 12; `?` overlay; `q` exit 0. Final header: 12 API calls. Alternate screen left and mouse reporting disabled on exit.
+
+## Plan 3: writes (labels, IP lists, services, unmanaged workloads)
+Spec: docs/superpowers/specs/2026-10-10-pce-writes-design.md · Plan: docs/superpowers/plans/2026-10-10-pce-writes.md
+- [ ] Task 1 PceClient::write, PceError::Rejected
+- [ ] Task 2 Audit sink (JSONL 0600, memory, null)
+- [ ] Task 3 WriteGuard, Plan/Written/Outcome, Writer::execute
+- [ ] Task 4 Spec parsers (IP ranges, ports, interfaces)
+- [ ] Task 5 Labels planners
+- [ ] Task 6 IP list planners and patch
+- [ ] Task 7 Service planners and patch
+- [ ] Task 8 Unmanaged workload planners, lookup, patch
+- [ ] Task 9 CLI plumbing: writes setting, --allow-writes, exit 6, envelope, write.rs
+- [ ] Task 10 labels add/update/delete
+- [ ] Task 11 iplists add/update/delete
+- [ ] Task 12 services add/update/delete
+- [ ] Task 13 workloads add/update/delete
+- [ ] Task 14 Live opt-in smoke, docs, review, final gate
