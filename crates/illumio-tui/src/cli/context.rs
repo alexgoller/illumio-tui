@@ -33,7 +33,7 @@ impl Context {
         let overrides = Overrides {
             profile: global.profile.clone(),
             host: global.host.clone(),
-            port: global.port,
+            port: global.pce_port,
             org_id: global.org_id,
             tls_verify: if global.insecure { Some(false) } else { None },
         };

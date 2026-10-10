@@ -6,6 +6,7 @@ pub mod health;
 pub mod objects;
 pub mod output;
 pub mod policy;
+pub mod traffic;
 pub mod workloads;
 
 use clap::{Args, Parser, Subcommand};
@@ -40,8 +41,9 @@ pub struct GlobalArgs {
     pub env_file: Option<PathBuf>,
     #[arg(long, global = true)]
     pub host: Option<String>,
-    #[arg(long, global = true)]
-    pub port: Option<u16>,
+    /// PCE port override (named --pce-port: `traffic query` has its own --port)
+    #[arg(long = "pce-port", global = true)]
+    pub pce_port: Option<u16>,
     #[arg(long, global = true)]
     pub org_id: Option<u64>,
     /// Skip TLS certificate verification
@@ -75,6 +77,9 @@ pub enum Command {
     /// Rulesets, rules, pending changes
     #[command(subcommand)]
     Policy(policy::PolicyCmd),
+    /// Explorer traffic queries
+    #[command(subcommand)]
+    Traffic(traffic::TrafficCmd),
 }
 
 pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
@@ -87,5 +92,6 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
         Command::Services => objects::services(&ctx).await,
         Command::Workloads(a) => workloads::run(&ctx, &a).await,
         Command::Policy(p) => policy::run(&ctx, &p).await,
+        Command::Traffic(t) => traffic::run(&ctx, &t).await,
     }
 }

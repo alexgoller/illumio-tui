@@ -459,3 +459,181 @@ async fn policy_pending_lists_changes() {
     assert_eq!(out["data"][0]["object_type"], "rule_sets");
     assert_eq!(out["data"][1]["name"], "Corp");
 }
+
+const QHREF: &str = "/orgs/5/traffic_flows/async_queries/q-1";
+
+async fn mount_traffic(server: &MockServer, expect_post: u64) {
+    mount_objects(server).await;
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/traffic_flows/async_queries"))
+        .respond_with(
+            ResponseTemplate::new(202).set_body_json(json!({"href": QHREF, "status": "queued"})),
+        )
+        .expect(expect_post)
+        .mount(server)
+        .await;
+    Mock::given(method("GET")).and(path(format!("/api/v2{QHREF}"))).respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "completed", "result": {"href": format!("{QHREF}/download")}, "matches_count": 4}))).mount(server).await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}/download")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/traffic_flows.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .mount(server)
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn traffic_query_flows_json() {
+    let server = MockServer::start().await;
+    mount_traffic(&server, 1).await;
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "traffic",
+                "query",
+                "--window",
+                "2h",
+                "--src",
+                "app=shop,env=prod",
+                "--decision",
+                "allowed,blocked",
+            ])
+            .assert()
+            .success(),
+    );
+    let flows = out["data"].as_array().unwrap();
+    assert_eq!(flows.len(), 4);
+    assert_eq!(flows[0]["src"]["hostname"], "host-1.example");
+    assert_eq!(flows[0]["src"]["labels"][0]["key"], "app");
+    assert_eq!(flows[0]["dst"]["labels"][2]["value"], "db");
+    assert_eq!(flows[2]["proto"], "icmp");
+    assert!(flows[2]["port"].is_null());
+    assert_eq!(out["meta"]["truncated"], false);
+    assert!(
+        out["meta"]["window"]["start"]
+            .as_str()
+            .unwrap()
+            .ends_with('Z')
+    );
+    assert_eq!(out["meta"]["cache"], "miss");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn traffic_query_group_and_blocked_views() {
+    let server = MockServer::start().await;
+    mount_traffic(&server, 3).await; // three separate processes, no shared cache
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "traffic",
+                "query",
+                "--from",
+                "2026-10-09",
+                "--to",
+                "2026-10-09",
+                "--group",
+                "app,env",
+            ])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"][0]["src"], json!(["shop", "prod"]));
+    assert_eq!(out["data"][0]["connections"], 310);
+    assert_eq!(out["meta"]["window"]["start"], "2026-10-09T00:00:00Z");
+    assert_eq!(out["meta"]["window"]["end"], "2026-10-09T23:59:59Z");
+    let out = stdout_json(
+        cmd(&server)
+            .args(["traffic", "query", "--window", "1h", "--blocked"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"].as_array().unwrap().len(), 2);
+    assert_eq!(out["data"][0]["dst"], "host-1.example");
+    assert_eq!(out["data"][0]["port"], 8443);
+    cmd(&server)
+        .args(["traffic", "query", "--window", "1h", "--blocked", "--table"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("8443/tcp"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn traffic_dry_run_prints_body_without_submitting() {
+    let server = MockServer::start().await;
+    mount_traffic(&server, 0).await;
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "traffic",
+                "query",
+                "--window",
+                "1h",
+                "--src",
+                "ipl:corp",
+                "--dst",
+                "10.0.0.5",
+                "--port",
+                "443",
+                "--proto",
+                "tcp",
+                "--dry-run",
+            ])
+            .assert()
+            .success(),
+    );
+    assert_eq!(
+        out["data"]["sources"]["include"],
+        json!([[{"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/21"}}]])
+    );
+    assert_eq!(
+        out["data"]["destinations"]["include"],
+        json!([[{"ip_address": "10.0.0.5"}]])
+    );
+    assert_eq!(
+        out["data"]["services"]["include"],
+        json!([{"port": 443, "proto": 6}])
+    );
+    assert_eq!(out["data"]["max_results"], 1000);
+    assert_eq!(out["meta"]["cache"], "none");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn traffic_guards_exit_2() {
+    let server = MockServer::start().await;
+    mount_traffic(&server, 0).await;
+    let assert = cmd(&server)
+        .args(["traffic", "query", "--window", "30d"])
+        .assert()
+        .code(2);
+    let err: Value = serde_json::from_slice(&assert.get_output().stderr).unwrap();
+    assert!(err["error"]["message"].as_str().unwrap().contains("--yes"));
+    let assert = cmd(&server)
+        .args([
+            "traffic",
+            "query",
+            "--from",
+            "2026-10-09",
+            "--to",
+            "2026-10-01",
+        ])
+        .assert()
+        .code(2);
+    let err: Value = serde_json::from_slice(&assert.get_output().stderr).unwrap();
+    assert!(err["error"]["message"].as_str().unwrap().contains("before"));
+    let assert = cmd(&server)
+        .args(["traffic", "query", "--src", "app=nope"])
+        .assert()
+        .code(2);
+    let err: Value = serde_json::from_slice(&assert.get_output().stderr).unwrap();
+    assert!(err["error"]["message"].as_str().unwrap().contains("shop"));
+    cmd(&server)
+        .args(["traffic", "query", "--decision", "maybe"])
+        .assert()
+        .code(2);
+    cmd(&server)
+        .args(["traffic", "query", "--max-results", "20000"])
+        .assert()
+        .code(2);
+}
