@@ -89,6 +89,9 @@ impl Event {
         }
     }
 
+    /// The PCE's syslog severities ranked for colouring: emerg/alert/crit 3, err 2,
+    /// warning 1, everything else (notice, info, debug) 0. `critical`, `error` and
+    /// `warn` are accepted as aliases.
     pub fn severity_rank(&self) -> u8 {
         match self
             .severity
@@ -96,7 +99,7 @@ impl Event {
             .map(str::to_ascii_lowercase)
             .as_deref()
         {
-            Some("critical") | Some("crit") => 3,
+            Some("emerg") | Some("alert") | Some("crit") | Some("critical") => 3,
             Some("err") | Some("error") => 2,
             Some("warning") | Some("warn") => 1,
             _ => 0,
@@ -161,6 +164,27 @@ mod tests {
         assert_eq!(e[3].severity_rank(), 1);
         assert_eq!(e[0].severity_rank(), 0);
         assert!(e[0].extra.is_empty());
+    }
+
+    #[test]
+    fn severity_rank_follows_the_syslog_set() {
+        let rank = |s: &str| {
+            let mut e = fixture().remove(0);
+            e.severity = Some(s.into());
+            e.severity_rank()
+        };
+        for s in ["emerg", "alert", "crit", "critical", "CRIT"] {
+            assert_eq!(rank(s), 3, "{s}");
+        }
+        for s in ["err", "error"] {
+            assert_eq!(rank(s), 2, "{s}");
+        }
+        for s in ["warning", "warn"] {
+            assert_eq!(rank(s), 1, "{s}");
+        }
+        for s in ["notice", "info", "debug", "other"] {
+            assert_eq!(rank(s), 0, "{s}");
+        }
     }
 
     #[test]

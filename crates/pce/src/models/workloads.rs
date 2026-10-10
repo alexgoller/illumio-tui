@@ -120,6 +120,49 @@ fn health_item(v: &Value) -> String {
     }
 }
 
+/// `agent_health` severities that count as errors; any other severity is a warning.
+fn is_error_severity(sev: &str) -> bool {
+    ["err", "error", "critical", "crit"]
+        .iter()
+        .any(|e| sev.eq_ignore_ascii_case(e))
+}
+
+/// Merges the legacy `agent_health_errors {errors, warnings}` lists with the current
+/// `agent_health: [{type, severity, audit_event}]` items. An `agent_health` item renders
+/// as `<type>` (plus `: <audit_event>`) and is dropped when the same type is already
+/// reported in that bucket (by the legacy lists or an earlier item).
+fn fold_health(
+    legacy_errors: &[Value],
+    legacy_warnings: &[Value],
+    agent_health: &[Value],
+) -> (Vec<String>, Vec<String>) {
+    let item_type = |v: &Value| v.get("type").and_then(Value::as_str).map(str::to_string);
+    let mut errors: Vec<String> = legacy_errors.iter().map(health_item).collect();
+    let mut warnings: Vec<String> = legacy_warnings.iter().map(health_item).collect();
+    let mut error_types: Vec<String> = legacy_errors.iter().filter_map(item_type).collect();
+    let mut warning_types: Vec<String> = legacy_warnings.iter().filter_map(item_type).collect();
+    for item in agent_health {
+        let Some(t) = item.get("type").and_then(Value::as_str) else {
+            continue;
+        };
+        let sev = item.get("severity").and_then(Value::as_str).unwrap_or("");
+        let (out, seen) = if is_error_severity(sev) {
+            (&mut errors, &mut error_types)
+        } else {
+            (&mut warnings, &mut warning_types)
+        };
+        if seen.iter().any(|s| s == t) {
+            continue;
+        }
+        seen.push(t.to_string());
+        out.push(match item.get("audit_event").and_then(Value::as_str) {
+            Some(ev) => format!("{t}: {ev}"),
+            None => t.to_string(),
+        });
+    }
+    (errors, warnings)
+}
+
 fn parse_ts(s: &str) -> Option<jiff::Timestamp> {
     s.parse().ok()
 }
@@ -171,13 +214,21 @@ impl Workload {
 
     pub fn agent_status_view(&self) -> Option<AgentStatus> {
         let st = self.agent.as_ref()?.get("status")?;
-        let list = |k: &str| {
+        let legacy = |k: &str| {
             st.get("agent_health_errors")
                 .and_then(|e| e.get(k))
                 .and_then(Value::as_array)
-                .map(|a| a.iter().map(health_item).collect::<Vec<_>>())
+                .cloned()
                 .unwrap_or_default()
         };
+        let (errors, warnings) = fold_health(
+            &legacy("errors"),
+            &legacy("warnings"),
+            st.get("agent_health")
+                .and_then(Value::as_array)
+                .map(Vec::as_slice)
+                .unwrap_or_default(),
+        );
         let s = |k: &str| st.get(k).and_then(Value::as_str).map(str::to_string);
         Some(AgentStatus {
             status: s("status"),
@@ -187,8 +238,8 @@ impl Workload {
             version: s("agent_version"),
             uptime_seconds: st.get("uptime_seconds").and_then(Value::as_u64),
             fw_config_current: st.get("fw_config_current").and_then(Value::as_bool),
-            errors: list("errors"),
-            warnings: list("warnings"),
+            errors,
+            warnings,
         })
     }
 
@@ -384,6 +435,54 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&VenHealth::Offline).unwrap(),
             "\"offline\""
+        );
+    }
+
+    #[test]
+    fn agent_health_items_fold_into_errors_and_warnings_by_severity() {
+        let w = fixture();
+        let now: jiff::Timestamp = "2026-10-10T08:00:00Z".parse().unwrap();
+        let with_health = |items: serde_json::Value| {
+            let mut x = w[0].clone();
+            let st = &mut x.agent.as_mut().unwrap()["status"];
+            st.as_object_mut().unwrap().remove("agent_health_errors");
+            st["agent_health"] = items;
+            x
+        };
+        let err = with_health(serde_json::json!([{"type": "tampering", "severity": "error"}]));
+        assert_eq!(err.ven_health(now), VenHealth::Error);
+        assert_eq!(err.agent_status_view().unwrap().errors, vec!["tampering"]);
+        let warn = with_health(serde_json::json!([{"type": "tampering", "severity": "warning"}]));
+        assert_eq!(warn.ven_health(now), VenHealth::Warning);
+        assert_eq!(
+            warn.agent_status_view().unwrap().warnings,
+            vec!["tampering"]
+        );
+        for sev in ["err", "crit", "critical", "ERROR"] {
+            let x = with_health(serde_json::json!([{"type": "t", "severity": sev}]));
+            assert_eq!(x.ven_health(now), VenHealth::Error, "{sev}");
+        }
+        // An unknown severity is a warning; audit_event is appended.
+        let odd = with_health(serde_json::json!([
+            {"type": "t", "severity": "info", "audit_event": "/orgs/5/events/9"}
+        ]));
+        assert_eq!(
+            odd.agent_status_view().unwrap().warnings,
+            vec!["t: /orgs/5/events/9"]
+        );
+        // Deduplicated against agent_health_errors by type (fixture workload 2 carries both).
+        let a2 = w[1].agent_status_view().unwrap();
+        assert_eq!(a2.warnings, vec!["policy_sync: policy out of date"]);
+        assert!(a2.errors.is_empty());
+        // The recorded fixture (agent_health: []) is unchanged.
+        let recorded: Vec<Workload> =
+            serde_json::from_str(include_str!("../../../../fixtures/recorded/workloads.json"))
+                .unwrap();
+        assert!(
+            recorded
+                .iter()
+                .filter_map(Workload::agent_status_view)
+                .all(|a| a.errors.is_empty() && a.warnings.is_empty())
         );
     }
 

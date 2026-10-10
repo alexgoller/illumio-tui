@@ -9,7 +9,7 @@ use pce::traffic::{format_timestamp, parse_window};
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct EventsArgs {
-    /// info, warning, err, critical (PCE-side filter)
+    /// emerg, alert, crit, err, warning, notice, info, debug (PCE-side filter)
     #[arg(long)]
     pub severity: Option<String>,
     /// Event type substring, case-insensitive, e.g. agent. or sec_policy (local filter)
