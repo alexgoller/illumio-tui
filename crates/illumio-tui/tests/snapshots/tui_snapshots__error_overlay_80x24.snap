@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Labels & objects  │  4 Workloads
+╭ Filters ────────────────────────────────── window 24h · cap 1000 · unbounded ╮
+│window 24h  src *  dst *  svc *  decision all                                 │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭ Result ────────────────────────────────────────────── no query yet · press r ╮
+│run a query with r, edit the filter with f                                    │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭ Flo╭ Error ───────────────────────────────────────────────── Esc closes ╮────╮
+│no r│rulesets: request to the PCE failed: connection reset by peer while │    │
+│    │reading the response body; the load balancer closed the connection  │    │
+│    │after 30 seconds, retry with a narrower filter or try again later   │    │
+│    │                                                                    │    │
+│    │                                                                    │    │
+│    ╰────────────────────────────────────────────────────────────────────╯    │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭ Detail ───────────────────────────────────────────────────────── Enter shows ╮
+│select a flow and press Enter                                                 │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ready          f filter  r run  a auto  v view  s sort  / search  : cmd  ? help

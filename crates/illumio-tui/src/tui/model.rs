@@ -116,6 +116,8 @@ pub enum Overlay {
     RuleDetail(RuleView),
     /// Pending (unprovisioned) changes; the list lives in `PolicyState::pending`.
     Pending,
+    /// A failure too long for the status line, or an authentication failure.
+    Error(String),
 }
 
 impl PartialEq for Overlay {
@@ -125,7 +127,8 @@ impl PartialEq for Overlay {
             | (Overlay::Help, Overlay::Help)
             | (Overlay::Pending, Overlay::Pending) => true,
             (Overlay::Prompt { input: a }, Overlay::Prompt { input: b })
-            | (Overlay::GroupKeys { input: a }, Overlay::GroupKeys { input: b }) => a == b,
+            | (Overlay::GroupKeys { input: a }, Overlay::GroupKeys { input: b })
+            | (Overlay::Error(a), Overlay::Error(b)) => a == b,
             (Overlay::FilterEditor(a), Overlay::FilterEditor(b)) => a == b,
             (
                 Overlay::Confirm {
@@ -470,6 +473,10 @@ pub struct AutoRefresh {
     pub enabled: bool,
     pub interval: Duration,
     pub last_run: Option<Instant>,
+    /// The request in flight was started by the auto-refresh tick.
+    pub from_tick: bool,
+    /// A failed tick switched auto-refresh off; a manual `r` re-arms it.
+    pub tripped: bool,
 }
 
 impl AutoRefresh {
@@ -478,6 +485,26 @@ impl AutoRefresh {
             enabled: false,
             interval: Duration::from_secs(min_seconds.max(60)),
             last_run: None,
+            from_tick: false,
+            tripped: false,
+        }
+    }
+
+    /// A failed auto-refresh request: disable, never retry unattended.
+    /// Returns whether this failure was the tick's own.
+    pub fn take_tick_failure(&mut self) -> bool {
+        let was = std::mem::take(&mut self.from_tick);
+        if was {
+            self.enabled = false;
+            self.tripped = true;
+        }
+        was
+    }
+
+    /// A manual refresh re-enables what a failed tick switched off.
+    pub fn rearm(&mut self) {
+        if std::mem::take(&mut self.tripped) {
+            self.enabled = true;
         }
     }
 
@@ -578,6 +605,7 @@ impl TrafficState {
         }
         self.seq += 1;
         self.auto.last_run = Some(now);
+        self.auto.from_tick = false;
         let cancel = CancellationToken::new();
         self.query = QueryState::Running {
             seq: self.seq,
@@ -1340,5 +1368,30 @@ impl Model {
 
     pub fn is_connected(&self) -> bool {
         matches!(self.connection, Connection::Connected { .. })
+    }
+
+    /// Forgets everything loaded from the previous PCE: a running query is
+    /// cancelled, every screen starts empty with auto-refresh off, counters and
+    /// overlay are cleared. Keeps the traffic filter's window and cap.
+    pub fn reset_data(&mut self) {
+        if let QueryState::Running { cancel, .. } = &self.traffic.query {
+            cancel.cancel();
+        }
+        let min = self.limits.auto_refresh_min_seconds;
+        let mut traffic = TrafficState::new(
+            &self.limits.traffic_default_window,
+            self.limits.traffic_max_results,
+            min,
+        );
+        traffic.filter.window = self.traffic.filter.window.clone();
+        traffic.filter.max_results = self.traffic.filter.max_results;
+        traffic.seq = self.traffic.seq + 1; // a late result of the old query is stale
+        self.traffic = traffic;
+        self.policy = PolicyState::new(min);
+        self.objects = ObjectsState::new(min);
+        self.workloads = WorkloadsState::new(min);
+        self.stats = StatsSnapshot { calls: 0, bytes: 0 };
+        self.busy = 0;
+        self.overlay = Overlay::None;
     }
 }

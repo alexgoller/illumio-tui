@@ -283,3 +283,18 @@ fn workloads_screen_80x24_and_detail_160x48() {
     assert!(out.contains("eth0"), "{out}");
     insta::assert_snapshot!("workloads_160x48_detail", out);
 }
+
+#[test]
+fn error_overlay_80x24() {
+    use illumio_tui::tui::model::Overlay;
+    let mut m = model_fixture();
+    m.overlay = Overlay::Error(format!(
+        "rulesets: {}",
+        "request to the PCE failed: connection reset by peer while reading the response body; \
+         the load balancer closed the connection after 30 seconds, retry with a narrower filter or try again later"
+    ));
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("Error"), "{out}");
+    assert!(out.contains("Esc"), "{out}");
+    insta::assert_snapshot!("error_overlay_80x24", out);
+}

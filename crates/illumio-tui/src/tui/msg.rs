@@ -1,6 +1,6 @@
 //! Every event the TUI reacts to, and every side effect it may request.
 use crate::tui::filter::TrafficFilter;
-use crate::tui::model::{ObjectKind, Screen};
+use crate::tui::model::{ObjectKind, ProfileInfo, Screen};
 use crossterm::event::{KeyEvent, MouseEvent};
 use pce::models::{
     DenyRule, IpList, Label, LabelGroup, PendingChange, PolicyScope, RuleSet, Service, Workload,
@@ -77,6 +77,8 @@ pub enum Msg {
     },
     /// Workloads with the cache age in seconds.
     WorkloadsLoaded(Result<(Vec<Workload>, u64), String>),
+    /// The runtime rebuilt the connection for `:profile <name>` (or could not).
+    ProfileSwitched(Result<ProfileInfo, String>),
 }
 
 #[derive(Debug, Clone)]
@@ -106,6 +108,8 @@ pub enum Cmd {
         mode: CacheMode,
     },
     LoadWorkloads(CacheMode),
+    /// Rebuild the client for another profile from the config (no request).
+    SwitchProfile(String),
     Quit,
 }
 
@@ -147,6 +151,7 @@ impl PartialEq for Cmd {
                 ka == kb && ma == mb
             }
             (Cmd::LoadWorkloads(a), Cmd::LoadWorkloads(b)) => a == b,
+            (Cmd::SwitchProfile(a), Cmd::SwitchProfile(b)) => a == b,
             _ => false,
         }
     }

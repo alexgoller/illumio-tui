@@ -8,7 +8,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
 
 pub const HELP_LINES: &[(&str, &str)] = &[
     ("1 2 3 4", "Traffic · Policy · Labels & objects · Workloads"),
@@ -146,6 +146,37 @@ pub fn render_confirm(model: &Model, reason: &str, f: &mut Frame, area: Rect) {
         .block(block)
         .style(t.base())
         .wrap(Wrap { trim: true }),
+        r,
+    );
+}
+
+/// Longest message drawn; the panel holds five wrapped lines.
+const ERROR_MAX_CHARS: usize = 300;
+
+pub fn render_error(model: &Model, text: &str, f: &mut Frame, area: Rect) {
+    let t = &model.theme;
+    let r = centered(area, 70, 7);
+    f.render_widget(Clear, r);
+    let shown: String = if text.chars().count() > ERROR_MAX_CHARS {
+        let cut: String = text.chars().take(ERROR_MAX_CHARS - 1).collect();
+        format!("{cut}…")
+    } else {
+        text.to_string()
+    };
+    let bad = Style::new().fg(t.bad);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(bad)
+        .title(Line::from(Span::styled(
+            " Error ",
+            bad.add_modifier(ratatui::style::Modifier::BOLD),
+        )))
+        .title_top(Line::from(Span::styled(" Esc closes ", t.dim_style())).right_aligned());
+    f.render_widget(
+        Paragraph::new(shown)
+            .block(block)
+            .style(t.base())
+            .wrap(Wrap { trim: true }),
         r,
     );
 }

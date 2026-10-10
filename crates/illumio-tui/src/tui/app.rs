@@ -15,26 +15,65 @@ use futures::{Stream, StreamExt};
 use pce::models::WorkloadFilter;
 use pce::{CacheMode, Pce};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 pub const BUSY_TICK: Duration = Duration::from_millis(250);
 pub const IDLE_TICK: Duration = Duration::from_secs(1);
 
+/// The sender a spawned task reports through. It belongs to one connection
+/// generation: after a profile switch, whatever the old PCE's tasks still
+/// report is dropped, so it can neither repopulate the screens nor skew `busy`.
+#[derive(Clone)]
+struct TaskTx {
+    tx: UnboundedSender<Msg>,
+    generation: Arc<AtomicU64>,
+    mine: u64,
+}
+
+impl TaskTx {
+    /// Whether the message was queued (false: stale generation or closed channel).
+    fn send(&self, msg: Msg) -> bool {
+        self.generation.load(Ordering::SeqCst) == self.mine && self.tx.send(msg).is_ok()
+    }
+}
+
 pub struct Runtime {
     pub pce: Arc<Pce>,
     pub model: Model,
+    /// The flags the TUI started with; `:profile` rebuilds the connection from them.
+    global: Option<GlobalArgs>,
+    generation: Arc<AtomicU64>,
     tx: UnboundedSender<Msg>,
     rx: UnboundedReceiver<Msg>,
 }
 
 impl Runtime {
     pub fn new(pce: Arc<Pce>, model: Model) -> (Self, UnboundedSender<Msg>) {
+        Self::build(pce, model, None)
+    }
+
+    pub fn with_args(
+        pce: Arc<Pce>,
+        model: Model,
+        global: GlobalArgs,
+    ) -> (Self, UnboundedSender<Msg>) {
+        Self::build(pce, model, Some(global))
+    }
+
+    fn build(
+        pce: Arc<Pce>,
+        model: Model,
+        global: Option<GlobalArgs>,
+    ) -> (Self, UnboundedSender<Msg>) {
         let (tx, rx) = unbounded_channel();
         (
             Self {
                 pce,
                 model,
+                global,
+                generation: Arc::new(AtomicU64::new(0)),
                 tx: tx.clone(),
                 rx,
             },
@@ -42,14 +81,50 @@ impl Runtime {
         )
     }
 
+    /// The client and result channel for a task spawned now.
+    fn task_ctx(&self) -> (Arc<Pce>, TaskTx) {
+        let tx = TaskTx {
+            tx: self.tx.clone(),
+            generation: self.generation.clone(),
+            mine: self.generation.load(Ordering::SeqCst),
+        };
+        (self.pce.clone(), tx)
+    }
+
     /// Executes one side effect. Tasks report back over the channel and
     /// always finish with `Msg::Stats` so the header counters stay current.
     pub fn execute(&mut self, cmd: Cmd) {
         match cmd {
             Cmd::Quit => self.model.quit = true,
+            Cmd::SwitchProfile(name) => {
+                self.model.busy += 1;
+                // Only the profile name carries over: a startup `--host`, `--port`
+                // or `--org-id` would otherwise pin the new profile to the old PCE.
+                let mut global = self.global.clone().unwrap_or_default();
+                global.profile = Some(name);
+                global.host = None;
+                global.pce_port = None;
+                global.org_id = None;
+                // Config and client construction are synchronous and cheap, and
+                // issue no request.
+                let msg = match Context::new(&global) {
+                    Ok(ctx) => {
+                        let info = ProfileInfo {
+                            name: ctx.config.profile_name.clone(),
+                            host: ctx.config.host.clone(),
+                            org_id: ctx.config.org_id,
+                        };
+                        self.pce = Arc::new(ctx.pce);
+                        self.generation.fetch_add(1, Ordering::SeqCst);
+                        Msg::ProfileSwitched(Ok(info))
+                    }
+                    Err(e) => Msg::ProfileSwitched(Err(e.to_string())),
+                };
+                let _ = self.tx.send(msg);
+            }
             Cmd::Connect => {
                 self.model.busy += 1;
-                let (pce, tx) = (self.pce.clone(), self.tx.clone());
+                let (pce, tx) = self.task_ctx();
                 tokio::spawn(async move {
                     let msg = match pce.health().await {
                         Ok(_) => Msg::Connected,
@@ -66,7 +141,7 @@ impl Runtime {
                 cancel,
             } => {
                 self.model.busy += 1;
-                let (pce, tx) = (self.pce.clone(), self.tx.clone());
+                let (pce, tx) = self.task_ctx();
                 tokio::spawn(async move {
                     let (ptx, mut prx) = tokio::sync::mpsc::unbounded_channel();
                     let forward_tx = tx.clone();
@@ -99,7 +174,7 @@ impl Runtime {
             }
             Cmd::LoadRuleSets { scope, mode } => {
                 self.model.busy += 1;
-                let (pce, tx) = (self.pce.clone(), self.tx.clone());
+                let (pce, tx) = self.task_ctx();
                 tokio::spawn(async move {
                     let result = pce
                         .rule_sets(scope, mode)
@@ -112,7 +187,7 @@ impl Runtime {
             }
             Cmd::LoadDenyRules { href, mode } => {
                 self.model.busy += 1;
-                let (pce, tx) = (self.pce.clone(), self.tx.clone());
+                let (pce, tx) = self.task_ctx();
                 tokio::spawn(async move {
                     let result = pce
                         .deny_rules(&href, mode)
@@ -125,7 +200,7 @@ impl Runtime {
             }
             Cmd::LoadPending(mode) => {
                 self.model.busy += 1;
-                let (pce, tx) = (self.pce.clone(), self.tx.clone());
+                let (pce, tx) = self.task_ctx();
                 tokio::spawn(async move {
                     let result = pce
                         .pending_changes(mode)
@@ -138,7 +213,7 @@ impl Runtime {
             }
             Cmd::LoadObjects { kind, mode } => {
                 self.model.busy += 1;
-                let (pce, tx) = (self.pce.clone(), self.tx.clone());
+                let (pce, tx) = self.task_ctx();
                 tokio::spawn(async move {
                     let result = match kind {
                         ObjectKind::Labels => pce
@@ -165,7 +240,7 @@ impl Runtime {
             }
             Cmd::LoadWorkloads(mode) => {
                 self.model.busy += 1;
-                let (pce, tx) = (self.pce.clone(), self.tx.clone());
+                let (pce, tx) = self.task_ctx();
                 tokio::spawn(async move {
                     let result = pce
                         .workloads(&WorkloadFilter::default(), mode)
@@ -178,7 +253,7 @@ impl Runtime {
             }
             Cmd::LoadIndex(mode) => {
                 self.model.busy += 1;
-                let (pce, tx) = (self.pce.clone(), self.tx.clone());
+                let (pce, tx) = self.task_ctx();
                 tokio::spawn(async move {
                     let msg = match pce.name_index(mode).await {
                         Ok(index) => Msg::IndexLoaded { index, age_secs: 0 },
@@ -205,6 +280,7 @@ impl Runtime {
                 | Msg::PendingLoaded(_)
                 | Msg::ObjectsLoaded { .. }
                 | Msg::WorkloadsLoaded(_)
+                | Msg::ProfileSwitched(_)
         );
         let cmds = update(&mut self.model, msg);
         if task_result {
@@ -301,7 +377,7 @@ pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
         cfg.traffic_max_results,
         cfg.traffic_default_window.clone(),
     );
-    let (mut rt, _tx) = Runtime::new(Arc::new(ctx.pce), model);
+    let (mut rt, _tx) = Runtime::with_args(Arc::new(ctx.pce), model, global);
     rt.execute(Cmd::Connect);
 
     let mut terminal = ratatui::init();

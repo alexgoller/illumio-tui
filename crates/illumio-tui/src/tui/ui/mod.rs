@@ -48,6 +48,7 @@ pub fn view(model: &Model, f: &mut Frame) {
         Overlay::Confirm { reason, .. } => widgets::overlay::render_confirm(model, reason, f, area),
         Overlay::RuleDetail(rule) => widgets::overlay::render_rule_detail(model, rule, f, area),
         Overlay::Pending => widgets::overlay::render_pending(model, f, area),
+        Overlay::Error(text) => widgets::overlay::render_error(model, text, f, area),
     }
 }
 
@@ -108,7 +109,7 @@ fn render_body(model: &Model, f: &mut Frame, area: Rect) {
             Line::from(Span::styled(error.clone(), Style::new().fg(t.bad))),
             Line::from(""),
             Line::from(Span::styled(
-                "Use :profile <name> to switch profile, or q to quit.",
+                "r reconnects · :profile <name> switches profile · q quits.",
                 t.dim_style(),
             )),
         ];

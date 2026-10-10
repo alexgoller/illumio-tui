@@ -516,3 +516,147 @@ async fn r_on_workloads_bypasses_the_cache_exactly_once() {
     assert_eq!(model.workloads.table.len(), 3);
     assert_eq!(model.busy, 0);
 }
+
+fn two_profile_config(dir: &std::path::Path, b: &MockServer) -> std::path::PathBuf {
+    let ub = url::Url::parse(&b.uri()).unwrap();
+    let cfg = dir.join("config.toml");
+    std::fs::write(
+        &cfg,
+        format!(
+            "[profiles.a]\nhost = \"a.invalid\"\norg_id = 1\napi_key = \"k\"\napi_secret = \"s\"\n\n[profiles.b]\nscheme = \"http\"\nhost = \"{}\"\nport = {}\norg_id = 5\napi_key = \"k\"\napi_secret = \"s\"\n",
+            ub.host_str().unwrap(),
+            ub.port().unwrap()
+        ),
+    )
+    .unwrap();
+    cfg
+}
+
+#[tokio::test]
+async fn switch_profile_rebuilds_the_connection_from_config() {
+    use illumio_tui::cli::GlobalArgs;
+    use illumio_tui::tui::msg::Msg;
+    let a = MockServer::start().await;
+    let b = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/health"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .expect(1)
+        .mount(&b)
+        .await;
+    mount_objects(&b).await;
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = two_profile_config(dir.path(), &b);
+    let global = GlobalArgs {
+        config: Some(cfg),
+        profile: Some("a".into()),
+        ..Default::default()
+    };
+    let (mut rt, tx) = Runtime::with_args(pce_for(&a), model(), global);
+    tx.send(Msg::Command(illumio_tui::tui::commands::Command::Profile(
+        "b".into(),
+    )))
+    .unwrap();
+    let events = stream::once(async {
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
+    });
+    let model = run_loop(&mut rt, Box::pin(events), &mut |_| {}).await;
+    assert_eq!(model.profile.name, "b");
+    assert_eq!(model.profile.org_id, 5);
+    assert!(
+        matches!(
+            model.connection,
+            Connection::Connected { index: Some(_), .. }
+        ),
+        "{:?}",
+        model.connection
+    );
+    assert_eq!(model.stats.calls, 5, "health + four lists, nothing else");
+    assert_eq!(model.busy, 0);
+    assert!(
+        a.received_requests().await.unwrap_or_default().is_empty(),
+        "the old PCE sees nothing"
+    );
+    assert_eq!(
+        b.received_requests().await.unwrap().len(),
+        5,
+        "the new PCE sees exactly the startup sequence"
+    );
+}
+
+#[tokio::test]
+async fn failed_switch_issues_no_request_and_keeps_the_model() {
+    use illumio_tui::cli::GlobalArgs;
+    use illumio_tui::tui::msg::Msg;
+    let a = MockServer::start().await;
+    let b = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = two_profile_config(dir.path(), &b);
+    let global = GlobalArgs {
+        config: Some(cfg),
+        profile: Some("a".into()),
+        ..Default::default()
+    };
+    let (mut rt, tx) = Runtime::with_args(pce_for(&a), model(), global);
+    tx.send(Msg::Command(illumio_tui::tui::commands::Command::Profile(
+        "nope".into(),
+    )))
+    .unwrap();
+    let events = stream::once(async {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
+    });
+    let model = run_loop(&mut rt, Box::pin(events), &mut |_| {}).await;
+    assert_eq!(model.profile.name, "t");
+    assert!(model.status.text.contains("nope"), "{}", model.status.text);
+    assert_eq!(model.busy, 0);
+    assert!(a.received_requests().await.unwrap_or_default().is_empty());
+    assert!(b.received_requests().await.unwrap_or_default().is_empty());
+}
+
+#[tokio::test]
+async fn results_from_the_old_pce_are_ignored_after_a_switch() {
+    use illumio_tui::cli::GlobalArgs;
+    use illumio_tui::tui::msg::Msg;
+    let a = MockServer::start().await;
+    let b = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/health"))
+        .respond_with(ResponseTemplate::new(401).set_delay(Duration::from_millis(400)))
+        .mount(&a)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/health"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .mount(&b)
+        .await;
+    mount_objects(&b).await;
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = two_profile_config(dir.path(), &b);
+    let global = GlobalArgs {
+        config: Some(cfg),
+        profile: Some("a".into()),
+        ..Default::default()
+    };
+    let (mut rt, tx) = Runtime::with_args(pce_for(&a), model(), global);
+    rt.execute(Cmd::Connect); // slow, failing health on the old PCE
+    tx.send(Msg::Command(illumio_tui::tui::commands::Command::Profile(
+        "b".into(),
+    )))
+    .unwrap();
+    let events = stream::once(async {
+        tokio::time::sleep(Duration::from_millis(900)).await;
+        Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
+    });
+    let model = run_loop(&mut rt, Box::pin(events), &mut |_| {}).await;
+    assert!(
+        matches!(
+            model.connection,
+            Connection::Connected { index: Some(_), .. }
+        ),
+        "the late 401 from the old PCE must not disconnect: {:?}",
+        model.connection
+    );
+    assert_eq!(model.busy, 0);
+}
