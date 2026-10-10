@@ -21,8 +21,11 @@ pub enum PolicyCmd {
 #[derive(Args, Debug, Clone, Default)]
 pub struct RulesetsArgs {
     /// Read active policy instead of draft
-    #[arg(long)]
+    #[arg(long, conflicts_with = "draft")]
     pub active: bool,
+    /// Read draft policy (the default; explicit for scripts)
+    #[arg(long)]
+    pub draft: bool,
     /// Case-insensitive substring of the ruleset name
     #[arg(long)]
     pub name: Option<String>,
@@ -32,8 +35,12 @@ pub struct RulesetsArgs {
 pub struct RulesArgs {
     /// Ruleset name (exact, case-insensitive) or href
     pub ruleset: String,
-    #[arg(long)]
+    /// Read active policy instead of draft
+    #[arg(long, conflicts_with = "draft")]
     pub active: bool,
+    /// Read draft policy (the default; explicit for scripts)
+    #[arg(long)]
+    pub draft: bool,
 }
 
 #[derive(Debug, Serialize)]

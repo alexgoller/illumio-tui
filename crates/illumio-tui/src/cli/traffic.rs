@@ -42,10 +42,13 @@ pub struct QueryArgs {
     /// Destination filter, same syntax as --src
     #[arg(long = "dst")]
     pub dst: Vec<String>,
+    /// Exclude sources matching this filter (same syntax as --src; repeatable)
     #[arg(long = "exclude-src")]
     pub exclude_src: Vec<String>,
+    /// Exclude destinations matching this filter (same syntax as --src; repeatable)
     #[arg(long = "exclude-dst")]
     pub exclude_dst: Vec<String>,
+    /// Destination port
     #[arg(long)]
     pub port: Option<u16>,
     /// tcp, udp, icmp or a protocol number

@@ -12,6 +12,7 @@ pub struct WorkloadsArgs {
     /// Hostname (PCE substring match)
     #[arg(long)]
     pub hostname: Option<String>,
+    /// Workload name (PCE substring match)
     #[arg(long)]
     pub name: Option<String>,
     /// Interface IP address
@@ -23,10 +24,13 @@ pub struct WorkloadsArgs {
     /// full | visibility_only | selective | idle
     #[arg(long)]
     pub enforcement: Option<String>,
+    /// Only online (true) or offline (false) workloads
     #[arg(long)]
     pub online: Option<bool>,
+    /// Only managed (true) or unmanaged (false) workloads
     #[arg(long)]
     pub managed: Option<bool>,
+    /// Row cap sent to the PCE (default 10000)
     #[arg(long)]
     pub max_results: Option<u32>,
 }

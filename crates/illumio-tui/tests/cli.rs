@@ -43,6 +43,34 @@ pub fn assert_no_secret(assert: &assert_cmd::assert::Assert) {
 }
 
 #[test]
+fn every_flag_has_help_text() {
+    for args in [
+        vec!["--help"],
+        vec!["workloads", "--help"],
+        vec!["traffic", "query", "--help"],
+        vec!["policy", "rulesets", "--help"],
+        vec!["policy", "rules", "--help"],
+    ] {
+        let out = Command::cargo_bin("illumio-tui")
+            .unwrap()
+            .env_clear()
+            .args(&args)
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&out.stdout);
+        for line in text.lines() {
+            let t = line.trim_start();
+            // clap prints an option line as `--flag <VALUE>  description`; a
+            // bare flag with nothing after it has no doc comment.
+            if t.starts_with("--") {
+                let after = t.split_once("  ").map(|(_, d)| d.trim()).unwrap_or("");
+                assert!(!after.is_empty(), "{args:?}: no help for {t:?}");
+            }
+        }
+    }
+}
+
+#[test]
 fn version_and_no_subcommand() {
     Command::cargo_bin("illumio-tui")
         .unwrap()
@@ -439,6 +467,21 @@ async fn policy_rulesets_resolve_scopes_and_filter_by_name() {
             .success(),
     );
     assert_eq!(out["data"].as_array().unwrap().len(), 0);
+    let out = stdout_json(
+        cmd(&server)
+            .args(["policy", "rulesets", "--draft"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(
+        out["data"].as_array().unwrap().len(),
+        2,
+        "--draft is the default"
+    );
+    cmd(&server)
+        .args(["policy", "rulesets", "--draft", "--active"])
+        .assert()
+        .code(2);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -490,6 +533,13 @@ async fn policy_rules_include_deny_rules_and_tolerate_missing_endpoint() {
         .args(["policy", "rules", "ghost"])
         .assert()
         .code(2);
+    let out = stdout_json(
+        cmd(&server)
+            .args(["policy", "rules", "shop-prod", "--draft"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"]["rules"].as_array().unwrap().len(), 4);
     cmd(&server)
         .args(["policy", "rules", "shop-prod", "--table"])
         .assert()

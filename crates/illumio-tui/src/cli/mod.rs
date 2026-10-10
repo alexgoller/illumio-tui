@@ -40,11 +40,13 @@ pub struct GlobalArgs {
     /// dotenv file with PCE_HOST, PCE_ORG_ID, API_KEY, API_SECRET, ...
     #[arg(long, global = true)]
     pub env_file: Option<PathBuf>,
+    /// PCE hostname (env: PCE_HOST)
     #[arg(long, global = true)]
     pub host: Option<String>,
     /// PCE port override (named --pce-port: `traffic query` has its own --port)
     #[arg(long = "pce-port", global = true)]
     pub pce_port: Option<u16>,
+    /// PCE organisation id (env: PCE_ORG_ID)
     #[arg(long, global = true)]
     pub org_id: Option<u64>,
     /// Skip TLS certificate verification
