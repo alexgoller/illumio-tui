@@ -1,0 +1,22 @@
+[
+  {"src":{"ip":"10.0.1.10","workload":{"href":"/orgs/5/workloads/aaaa-1","hostname":"host-1.example","name":"web01","labels":[{"href":"/orgs/5/labels/1"},{"href":"/orgs/5/labels/3"},{"href":"/orgs/5/labels/4"}]}},
+   "dst":{"ip":"10.0.2.20","workload":{"href":"/orgs/5/workloads/aaaa-2","hostname":"host-2.example","labels":[{"href":"/orgs/5/labels/2"},{"href":"/orgs/5/labels/3"},{"href":"/orgs/5/labels/4"}]}},
+   "service":{"port":5432,"proto":6,"process_name":"postgres","user_name":"postgres"},
+   "policy_decision":"allowed","flow_direction":"outbound","num_connections":310,"dst_bi":120000,"dst_bo":4000,"state":"closed",
+   "timestamp_range":{"first_detected":"2026-10-07T08:00:00Z","last_detected":"2026-10-10T07:31:02Z"}},
+  {"src":{"ip":"10.1.4.9","ip_lists":[{"href":"/orgs/5/sec_policy/draft/ip_lists/21","name":"Corp"}]},
+   "dst":{"ip":"10.0.1.10","workload":{"href":"/orgs/5/workloads/aaaa-1","hostname":"host-1.example","labels":[{"href":"/orgs/5/labels/1"},{"href":"/orgs/5/labels/3"},{"href":"/orgs/5/labels/4"}]}},
+   "service":{"port":8443,"proto":6},
+   "policy_decision":"potentially_blocked","flow_direction":"inbound","num_connections":12,
+   "timestamp_range":{"first_detected":"2026-10-10T07:00:00Z","last_detected":"2026-10-10T07:30:58Z"}},
+  {"src":{"ip":"10.0.3.30","workload":{"href":"/orgs/5/workloads/aaaa-3","name":"unmanaged-nas","labels":[]}},
+   "dst":{"ip":"10.0.2.20","workload":{"href":"/orgs/5/workloads/aaaa-2","hostname":"host-2.example","labels":[{"href":"/orgs/5/labels/2"},{"href":"/orgs/5/labels/3"},{"href":"/orgs/5/labels/4"}]}},
+   "service":{"proto":1},
+   "policy_decision":"blocked","flow_direction":"inbound","num_connections":3,
+   "timestamp_range":{"first_detected":"2026-10-10T06:00:00Z","last_detected":"2026-10-10T06:05:00Z"}},
+  {"src":{"ip":"10.0.1.10","workload":{"href":"/orgs/5/workloads/aaaa-1","hostname":"host-1.example","labels":[{"href":"/orgs/5/labels/1"},{"href":"/orgs/5/labels/3"},{"href":"/orgs/5/labels/4"}]}},
+   "dst":{"ip":"93.184.216.34","fqdn":"fqdn-1.example"},
+   "service":{"port":443,"proto":6,"process_name":"curl","user_name":"root"},
+   "policy_decision":"allowed","flow_direction":"outbound","num_connections":5,"draft_policy_decision":"allowed","rules":[{"href":"/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/2"}],
+   "timestamp_range":{"first_detected":"2026-10-10T07:20:00Z","last_detected":"2026-10-10T07:29:00Z"}}
+]
