@@ -3,6 +3,8 @@
 //! agents.
 use clap::Parser;
 
+mod config;
+
 #[derive(Parser)]
 #[command(
     name = "illumio-tui",
