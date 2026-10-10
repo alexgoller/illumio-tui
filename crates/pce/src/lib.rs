@@ -1,16 +1,165 @@
 //! `pce` is a read-only, PCE-friendly client library for the Illumio Core
 //! Policy Compute Engine REST API v2.
 //!
-//! Everything that talks to a PCE goes through [`client::PceClient`], which
-//! throttles, counts and retries requests. Higher-level typed reads with
-//! caching live on the [`Pce`] facade (added in Task 5).
-
+//! Layers, bottom up:
+//! - [`client::PceClient`]: HTTP with Basic auth, a token-bucket throttle,
+//!   request counting and backoff. The only place network I/O happens.
+//! - [`cache::TtlCache`]: in-memory cache so the same list is never fetched
+//!   twice within its TTL.
+//! - [`Pce`]: the facade the TUI and CLI use. Typed reads, cached, with
+//!   truncation reporting.
+//! - `models`, `resolve`, `traffic`: data types, href-to-name resolution, and
+//!   the Explorer traffic query (builder, poller, aggregation).
 pub mod auth;
+pub mod cache;
 pub mod client;
 pub mod error;
 pub mod limiter;
 
+use std::time::Duration;
+
 pub use auth::Credentials;
+pub use cache::TtlCache;
 pub use client::{ApiResponse, ClientConfig, PceClient, StatsSnapshot};
 pub use error::{PceError, Result};
 pub use limiter::RateLimiter;
+
+/// Whether a read may be served from cache.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheMode {
+    Use,
+    Bypass,
+}
+
+/// A value plus where it came from.
+#[derive(Debug, Clone)]
+pub struct Cached<T> {
+    pub value: T,
+    pub age: Duration,
+    pub hit: bool,
+    /// The PCE holds more rows than were returned.
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CacheTtls {
+    pub objects: Duration,
+    pub policy: Duration,
+    pub workloads: Duration,
+}
+
+impl Default for CacheTtls {
+    fn default() -> Self {
+        Self {
+            objects: Duration::from_secs(15 * 60),
+            policy: Duration::from_secs(5 * 60),
+            workloads: Duration::from_secs(5 * 60),
+        }
+    }
+}
+
+pub const DEFAULT_MAX_RESULTS: u32 = 10_000;
+
+/// The facade: typed, cached reads on top of one [`PceClient`].
+pub struct Pce {
+    client: PceClient,
+    cache: TtlCache,
+    ttls: CacheTtls,
+}
+
+impl Pce {
+    pub fn new(client: PceClient) -> Self {
+        Self::with_ttls(client, CacheTtls::default())
+    }
+
+    pub fn with_ttls(client: PceClient, ttls: CacheTtls) -> Self {
+        Self {
+            client,
+            cache: TtlCache::new(),
+            ttls,
+        }
+    }
+
+    pub fn client(&self) -> &PceClient {
+        &self.client
+    }
+
+    pub fn ttls(&self) -> CacheTtls {
+        self.ttls
+    }
+
+    pub fn stats(&self) -> StatsSnapshot {
+        self.client.stats()
+    }
+
+    pub fn clear_cache(&self) {
+        self.cache.clear();
+    }
+
+    pub fn invalidate(&self, prefix: &str) {
+        self.cache.invalidate_prefix(prefix);
+    }
+
+    /// `GET /api/v2/health`. Never cached: it is the liveness probe.
+    pub async fn health(&self) -> Result<serde_json::Value> {
+        Ok(self
+            .client
+            .get::<serde_json::Value>("/health", &[])
+            .await?
+            .body)
+    }
+
+    /// Temporary until Task 6 adds typed labels.
+    pub async fn labels(&self, mode: CacheMode) -> Result<Cached<Vec<serde_json::Value>>> {
+        let path = self.client.org_path("labels");
+        self.cached_list("labels", &path, vec![], self.ttls.objects, mode)
+            .await
+    }
+
+    /// Fetches a JSON array with an explicit `max_results`, caching under
+    /// `key` (plus the query string). `truncated` is set when the PCE reports
+    /// more rows than it returned.
+    pub(crate) async fn cached_list<T>(
+        &self,
+        key: &str,
+        api_path: &str,
+        mut query: Vec<(&str, String)>,
+        ttl: Duration,
+        mode: CacheMode,
+    ) -> Result<Cached<Vec<T>>>
+    where
+        T: serde::de::DeserializeOwned + Clone + Send + Sync + 'static,
+    {
+        if !query.iter().any(|(k, _)| *k == "max_results") {
+            query.push(("max_results", DEFAULT_MAX_RESULTS.to_string()));
+        }
+        let qs: Vec<String> = query.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        let cache_key = format!("{key}?{}", qs.join("&"));
+        if mode == CacheMode::Use
+            && let Some(((value, truncated), age)) = self.cache.get::<(Vec<T>, bool)>(&cache_key)
+        {
+            return Ok(Cached {
+                value,
+                age,
+                hit: true,
+                truncated,
+            });
+        }
+        let resp = self.client.get::<Vec<T>>(api_path, &query).await?;
+        let len = resp.body.len() as u64;
+        let max: u64 = query
+            .iter()
+            .find(|(k, _)| *k == "max_results")
+            .and_then(|(_, v)| v.parse().ok())
+            .unwrap_or(u64::from(DEFAULT_MAX_RESULTS));
+        let truncated = resp.total_count.is_some_and(|t| t > len) || len >= max;
+        self.cache
+            .insert(&cache_key, (resp.body.clone(), truncated), ttl);
+        Ok(Cached {
+            value: resp.body,
+            age: Duration::ZERO,
+            hit: false,
+            truncated,
+        })
+    }
+}
