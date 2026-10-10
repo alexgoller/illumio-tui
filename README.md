@@ -97,6 +97,12 @@ table and a click on a tab switches screen.
 Auto-refresh (`a`) is opt-in per screen, has a 60 s minimum, shows a countdown in the panel
 title, and switches itself off after a failed refresh.
 
+`:profile <name>` reconnects to another profile from the config file. It runs that profile's
+`api_secret_cmd`, so the command must be non-interactive (no prompts): the TUI owns the
+terminal. Exported `PCE_HOST`, `PCE_PORT`, `PCE_ORG_ID`, `API_KEY` and `API_SECRET` still
+outrank the target profile on a switch, as they do at startup; the header shows the host
+actually in use.
+
 Startup makes exactly five requests (health plus the four object lists). The first visit to
 Workloads and to Events costs one request each; going back to them costs none. Everything
 else is caused by a key you press. The header shows the API call and byte counters at all
