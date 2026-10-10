@@ -5,6 +5,7 @@ pub mod error;
 pub mod health;
 pub mod objects;
 pub mod output;
+pub mod workloads;
 
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
@@ -68,6 +69,8 @@ pub enum Command {
     Iplists,
     /// List services
     Services,
+    /// List workloads
+    Workloads(workloads::WorkloadsArgs),
 }
 
 pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
@@ -78,5 +81,6 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
         Command::LabelGroups => objects::label_groups(&ctx).await,
         Command::Iplists => objects::ip_lists(&ctx).await,
         Command::Services => objects::services(&ctx).await,
+        Command::Workloads(a) => workloads::run(&ctx, &a).await,
     }
 }

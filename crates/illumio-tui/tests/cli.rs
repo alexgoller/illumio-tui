@@ -269,3 +269,77 @@ fn render_table_is_aligned() {
     assert_eq!(lines[3], "longer  22");
     assert_eq!(render_table(&["x"], &[]).lines().last(), Some("(no rows)"));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn workloads_with_label_filter_resolve_hrefs() {
+    use wiremock::matchers::query_param;
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .and(query_param(
+            "labels",
+            r#"[["/orgs/5/labels/3","/orgs/5/labels/4"]]"#,
+        ))
+        .and(query_param("online", "true"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/workloads.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(2)
+        .mount(&server)
+        .await;
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "workloads",
+                "--label",
+                "app=shop",
+                "--label",
+                "env=prod",
+                "--online",
+                "true",
+            ])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"].as_array().unwrap().len(), 3);
+    assert_eq!(out["data"][0]["hostname"], "host-1.example");
+    cmd(&server)
+        .args([
+            "workloads",
+            "--label",
+            "app=shop",
+            "--label",
+            "env=prod",
+            "--online",
+            "true",
+            "--table",
+        ])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("host-1.example")
+                .and(predicate::str::contains("app=shop env=prod role=web"))
+                .and(predicate::str::contains("active")),
+        );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn workloads_unknown_label_exits_2_without_querying() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let assert = cmd(&server)
+        .args(["workloads", "--label", "app=nope"])
+        .assert()
+        .code(2);
+    let err: Value = serde_json::from_slice(&assert.get_output().stderr).unwrap();
+    assert!(err["error"]["message"].as_str().unwrap().contains("shop"));
+}
