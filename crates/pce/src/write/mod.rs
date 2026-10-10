@@ -167,34 +167,47 @@ pub enum IfMissing {
     SkipExisting,
 }
 
-/// Rewrites an active policy href to its draft twin; refuses any other
-/// `sec_policy` scope (draft is the only write target).
-pub fn draft_href(href: &str) -> Result<String, WriteError> {
-    const ACTIVE: &str = "/sec_policy/active/";
-    const DRAFT: &str = "/sec_policy/draft/";
-    if href.contains(ACTIVE) {
-        return Ok(href.replacen(ACTIVE, DRAFT, 1));
-    }
-    if let Some(rest) = href.split_once("/sec_policy/").map(|(_, r)| r)
-        && !rest.starts_with("draft/")
-    {
-        return Err(WriteError::invalid(format!(
-            "{href}: only draft policy objects can be written"
-        )));
-    }
-    Ok(href.to_string())
-}
-
 /// An href of the expected kind (`labels`, `ip_lists`, `services`,
-/// `workloads`), rewritten to draft where that applies.
-pub fn checked_href(href: &str, segment: &str) -> Result<String, WriteError> {
+/// `workloads`) in the profile's org, parsed strictly by component:
+/// `/orgs/<org>/<segment>/<id>` or `/orgs/<org>/sec_policy/<scope>/<segment>/<id>`
+/// where `<org>` is digits, `<id>` is `[A-Za-z0-9-]+` and `<scope>` is
+/// `draft` or `active` (rewritten to draft: the only write target). Dot
+/// segments, percent escapes, extra segments and foreign orgs are refused,
+/// so URL normalisation can never turn the href into another object.
+pub fn checked_href(href: &str, segment: &str, org_id: u64) -> Result<String, WriteError> {
     let href = href.trim().trim_end_matches('/');
-    if !href.starts_with("/orgs/") || !href.contains(&format!("/{segment}/")) {
+    let bad = || {
+        WriteError::invalid(format!(
+            "{href:?} is not a {segment} href (expected /orgs/<org>/{segment}/<id> or /orgs/<org>/sec_policy/draft/{segment}/<id>)"
+        ))
+    };
+    let parts: Vec<&str> = href.split('/').collect();
+    let ["", "orgs", org, rest @ ..] = parts.as_slice() else {
+        return Err(bad());
+    };
+    let (scope, kind, id) = match rest {
+        [kind, id] => (None, *kind, *id),
+        ["sec_policy", scope, kind, id] => (Some(*scope), *kind, *id),
+        _ => return Err(bad()),
+    };
+    let id_ok = !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
+    let org_ok = !org.is_empty() && org.bytes().all(|b| b.is_ascii_digit());
+    if kind != segment || !id_ok || !org_ok {
+        return Err(bad());
+    }
+    let org: u64 = org.parse().map_err(|_| bad())?;
+    if org != org_id {
         return Err(WriteError::invalid(format!(
-            "{href:?} is not a {segment} href (expected /orgs/<org>/.../{segment}/<id>)"
+            "{href} belongs to org {org}, profile is org {org_id}"
         )));
     }
-    draft_href(href)
+    match scope {
+        None => Ok(format!("/orgs/{org}/{segment}/{id}")),
+        Some("draft" | "active") => Ok(format!("/orgs/{org}/sec_policy/draft/{segment}/{id}")),
+        Some(_) => Err(WriteError::invalid(format!(
+            "{href}: only draft policy objects can be written"
+        ))),
+    }
 }
 
 /// A value counts as "present" for `dropped_fields` when it is not null,

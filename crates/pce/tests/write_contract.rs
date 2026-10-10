@@ -363,18 +363,98 @@ async fn unwritable_audit_refuses_before_sending() {
     let _ = pce;
 }
 
-#[test]
-fn draft_href_rewrites_active_and_refuses_other_scopes() {
-    use pce::write::draft_href;
-    assert_eq!(
-        draft_href("/orgs/5/sec_policy/active/ip_lists/3").unwrap(),
-        "/orgs/5/sec_policy/draft/ip_lists/3"
-    );
-    assert_eq!(draft_href("/orgs/5/labels/1").unwrap(), "/orgs/5/labels/1");
-    assert!(matches!(
-        draft_href("/orgs/5/sec_policy/42/ip_lists/3").unwrap_err(),
-        WriteError::Invalid(_)
-    ));
+mod hrefs {
+    use super::*;
+    use pce::write::checked_href;
+
+    fn invalid(href: &str, segment: &str) -> String {
+        match checked_href(href, segment, 5).unwrap_err() {
+            WriteError::Invalid(m) => m.join("; "),
+            other => panic!("{href}: expected Invalid, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn plain_and_policy_hrefs_pass() {
+        assert_eq!(
+            checked_href(" /orgs/5/labels/1/ ", "labels", 5).unwrap(),
+            "/orgs/5/labels/1"
+        );
+        assert_eq!(
+            checked_href("/orgs/5/workloads/0a1B-c9", "workloads", 5).unwrap(),
+            "/orgs/5/workloads/0a1B-c9",
+            "uppercase and dashes in the id are fine"
+        );
+        assert_eq!(
+            checked_href("/orgs/5/sec_policy/draft/ip_lists/3", "ip_lists", 5).unwrap(),
+            "/orgs/5/sec_policy/draft/ip_lists/3"
+        );
+    }
+
+    #[test]
+    fn active_is_rewritten_to_draft_and_other_scopes_are_refused() {
+        assert_eq!(
+            checked_href("/orgs/5/sec_policy/active/services/7", "services", 5).unwrap(),
+            "/orgs/5/sec_policy/draft/services/7"
+        );
+        for scope in ["42", "Draft", "", "pending"] {
+            let href = format!("/orgs/5/sec_policy/{scope}/ip_lists/3");
+            invalid(&href, "ip_lists");
+        }
+    }
+
+    #[test]
+    fn dot_segments_are_refused() {
+        for href in [
+            "/orgs/5/labels/../workloads/x",
+            "/orgs/5/labels/1/../../workloads/x",
+            "/orgs/5/sec_policy/draft/ip_lists/../../../labels/1",
+            "/orgs/5/./labels/1",
+            "/orgs/5/labels/.",
+        ] {
+            invalid(href, "labels");
+            invalid(href, "workloads");
+        }
+    }
+
+    #[test]
+    fn percent_encoded_dots_are_refused() {
+        for href in [
+            "/orgs/5/labels/%2e%2e/workloads/x",
+            "/orgs/5/labels/%2E%2E",
+            "/orgs/5/workloads/%2e%2e",
+        ] {
+            invalid(href, "labels");
+            invalid(href, "workloads");
+        }
+    }
+
+    #[test]
+    fn extra_or_missing_segments_are_refused() {
+        invalid("/orgs/5/labels/1/extra", "labels");
+        invalid("/orgs/5/labels/1?x=1", "labels");
+        invalid("/orgs/5/labels", "labels");
+        invalid("/orgs/5/sec_policy/draft/ip_lists", "ip_lists");
+        invalid("/orgs/5/labels//1", "labels");
+        invalid("orgs/5/labels/1", "labels");
+        invalid("/orgs/x/labels/1", "labels");
+        invalid("https://pce/orgs/5/labels/1", "labels");
+    }
+
+    #[test]
+    fn wrong_kind_is_refused() {
+        invalid("/orgs/5/sec_policy/draft/ip_lists/1", "labels");
+        invalid("/orgs/5/labels/1", "workloads");
+        invalid("/orgs/5/sec_policy/draft/services/1", "ip_lists");
+    }
+
+    #[test]
+    fn a_foreign_org_is_refused_with_both_org_ids() {
+        let msg = invalid("/orgs/7/labels/1", "labels");
+        assert!(msg.contains("belongs to org 7"), "{msg}");
+        assert!(msg.contains("profile is org 5"), "{msg}");
+        invalid("/orgs/99999999999999999999999/labels/1", "labels");
+    }
 }
 
 #[tokio::test]

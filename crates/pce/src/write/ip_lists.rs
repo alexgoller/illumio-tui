@@ -145,7 +145,7 @@ impl Writer<'_> {
         href: &str,
         patch: &IpListPatch,
     ) -> Result<Plan, WriteError> {
-        let href = checked_href(href, "ip_lists")?;
+        let href = checked_href(href, "ip_lists", self.pce().client().org_id())?;
         if patch.is_empty() {
             return Err(WriteError::invalid("nothing to change"));
         }
@@ -164,7 +164,7 @@ impl Writer<'_> {
     }
 
     pub fn plan_delete_ip_list(&self, href: &str) -> Result<Plan, WriteError> {
-        let href = checked_href(href, "ip_lists")?;
+        let href = checked_href(href, "ip_lists", self.pce().client().org_id())?;
         Ok(Plan::Send {
             request: WriteRequest {
                 method: WriteMethod::Delete,

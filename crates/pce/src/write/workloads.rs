@@ -365,7 +365,7 @@ impl Writer<'_> {
         patch: &WorkloadPatch,
         idx: &NameIndex,
     ) -> Result<Plan, WriteError> {
-        let href = checked_href(href, "workloads")?;
+        let href = checked_href(href, "workloads", self.pce().client().org_id())?;
         if patch.is_empty() {
             return Err(WriteError::invalid("nothing to change"));
         }
@@ -389,7 +389,7 @@ impl Writer<'_> {
     }
 
     pub async fn plan_delete_workload(&self, href: &str) -> Result<Plan, WriteError> {
-        let href = checked_href(href, "workloads")?;
+        let href = checked_href(href, "workloads", self.pce().client().org_id())?;
         let current = self.fetch_workload(&href).await?;
         require_unmanaged(&current)?;
         let who = current

@@ -69,7 +69,7 @@ impl Writer<'_> {
     }
 
     pub fn plan_update_label(&self, href: &str, value: &str) -> Result<Plan, WriteError> {
-        let href = checked_href(href, "labels")?;
+        let href = checked_href(href, "labels", self.pce().client().org_id())?;
         let value = value.trim();
         if value.is_empty() {
             return Err(WriteError::invalid("label value must not be empty"));
@@ -86,7 +86,7 @@ impl Writer<'_> {
     }
 
     pub fn plan_delete_label(&self, href: &str) -> Result<Plan, WriteError> {
-        let href = checked_href(href, "labels")?;
+        let href = checked_href(href, "labels", self.pce().client().org_id())?;
         Ok(Plan::Send {
             request: WriteRequest {
                 method: WriteMethod::Delete,

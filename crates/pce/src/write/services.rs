@@ -126,7 +126,7 @@ impl Writer<'_> {
         href: &str,
         patch: &ServicePatch,
     ) -> Result<Plan, WriteError> {
-        let href = checked_href(href, "services")?;
+        let href = checked_href(href, "services", self.pce().client().org_id())?;
         if patch.is_empty() {
             return Err(WriteError::invalid("nothing to change"));
         }
@@ -164,7 +164,7 @@ impl Writer<'_> {
     }
 
     pub fn plan_delete_service(&self, href: &str) -> Result<Plan, WriteError> {
-        let href = checked_href(href, "services")?;
+        let href = checked_href(href, "services", self.pce().client().org_id())?;
         Ok(Plan::Send {
             request: WriteRequest {
                 method: WriteMethod::Delete,
