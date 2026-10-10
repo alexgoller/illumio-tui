@@ -1,6 +1,7 @@
 //! The interactive TUI. Elm-style: `model` holds all state, `msg` lists
 //! every event, `update` is a pure state transition that returns `Cmd`s,
 //! `ui` renders `&Model`, and `app` is the only place I/O happens.
+pub mod app;
 pub mod model;
 pub mod msg;
 pub mod test_support;

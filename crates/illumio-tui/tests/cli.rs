@@ -78,12 +78,22 @@ fn version_and_no_subcommand() {
         .assert()
         .success()
         .stdout(predicate::str::starts_with("illumio-tui "));
-    Command::cargo_bin("illumio-tui")
+    let assert = Command::cargo_bin("illumio-tui")
         .unwrap()
         .env_clear()
+        .env(
+            "XDG_CONFIG_HOME",
+            std::env::temp_dir().join("illumio-tui-no-config"),
+        )
         .assert()
-        .success()
-        .stdout(predicate::str::contains("Plan 2"));
+        .code(2);
+    let err: Value = serde_json::from_slice(&assert.get_output().stderr).unwrap();
+    assert!(
+        err["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("PCE_HOST")
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
