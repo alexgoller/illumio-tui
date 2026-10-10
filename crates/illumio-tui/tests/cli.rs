@@ -365,6 +365,7 @@ async fn mount_policy(server: &MockServer) {
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
         .mount(server)
         .await;
+    // Ruleset 100 carries its deny rules inline, so the endpoint is never hit.
     Mock::given(method("GET"))
         .and(path(
             "/api/v2/orgs/5/sec_policy/draft/rule_sets/100/deny_rules",
@@ -374,6 +375,7 @@ async fn mount_policy(server: &MockServer) {
                 .set_body_string(include_str!("../../../fixtures/deny_rules.json"))
                 .insert_header("Content-Type", "application/json"),
         )
+        .expect(0)
         .mount(server)
         .await;
     Mock::given(method("GET"))
@@ -401,7 +403,8 @@ async fn policy_rulesets_resolve_scopes_and_filter_by_name() {
     let out = stdout_json(cmd(&server).args(["policy", "rulesets"]).assert().success());
     assert_eq!(out["data"].as_array().unwrap().len(), 2);
     assert_eq!(out["data"][0]["scopes"][0], "app=shop & env=prod");
-    assert_eq!(out["data"][0]["rule_count"], 2);
+    assert_eq!(out["data"][0]["rule_count"], 4);
+    assert_eq!(out["data"][0]["deny_count"], 2);
     assert_eq!(out["data"][1]["update_type"], "create");
     let out = stdout_json(
         cmd(&server)
@@ -435,6 +438,7 @@ async fn policy_rules_include_deny_rules_and_tolerate_missing_endpoint() {
     assert_eq!(rules[1]["consumers"][0], "ipl:Corp");
     assert_eq!(rules[1]["services"][1], "8000-8099/tcp");
     assert_eq!(rules[3]["kind"], "override_deny");
+    assert_eq!(out["meta"]["api_calls"], 5, "four object lists + rulesets");
     let out = stdout_json(
         cmd(&server)
             .args(["policy", "rules", "/orgs/5/sec_policy/draft/rule_sets/101"])
@@ -443,6 +447,10 @@ async fn policy_rules_include_deny_rules_and_tolerate_missing_endpoint() {
     );
     assert_eq!(out["data"]["rules"].as_array().unwrap().len(), 1);
     assert_eq!(out["data"]["rules"][0]["providers"][0], "All workloads");
+    assert_eq!(
+        out["meta"]["api_calls"], 6,
+        "no inline deny rules: the endpoint is tried and its 404 tolerated"
+    );
     cmd(&server)
         .args(["policy", "rules", "ghost"])
         .assert()

@@ -274,7 +274,9 @@ pub struct RuleSetView {
     pub enabled: bool,
     /// One string per scope, `app=shop & env=prod`; `All` for an empty scope.
     pub scopes: Vec<String>,
+    /// Allow plus deny rules.
     pub rule_count: usize,
+    pub deny_count: usize,
     pub update_type: Option<String>,
 }
 
@@ -304,7 +306,8 @@ impl RuleSetView {
             description: rs.description.clone(),
             enabled: rs.enabled,
             scopes,
-            rule_count: rs.rules.len(),
+            rule_count: rs.rules.len() + rs.deny_rules.len(),
+            deny_count: rs.deny_rules.len(),
             update_type: rs.update_type.clone(),
         }
     }
@@ -453,7 +456,13 @@ mod tests {
         );
         let set = RuleSetView::from_rule_set(&rs[0], &idx);
         assert_eq!(set.scopes, vec!["app=shop & env=prod"]);
-        assert_eq!(set.rule_count, 2);
-        assert_eq!(RuleSetView::from_rule_set(&rs[1], &idx).scopes, vec!["All"]);
+        assert_eq!(
+            set.rule_count, 4,
+            "two allow rules plus two inline deny rules"
+        );
+        assert_eq!(set.deny_count, 2);
+        let infra = RuleSetView::from_rule_set(&rs[1], &idx);
+        assert_eq!(infra.scopes, vec!["All"]);
+        assert_eq!((infra.rule_count, infra.deny_count), (1, 0));
     }
 }

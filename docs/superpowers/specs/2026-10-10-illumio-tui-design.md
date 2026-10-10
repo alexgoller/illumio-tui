@@ -92,7 +92,9 @@ Pure library, no terminal code. Reusable by future tools (MCP server, scripts).
   display names from the cache; never issues per-row requests.
 
 Policy reads default to `sec_policy/draft`; the caller selects `Draft | Active`.
-Deny rules are fetched per ruleset from `{ruleset.href}/deny_rules`.
+Deny rules come from the ruleset's inline `deny_rules` list; the per-ruleset
+`{ruleset.href}/deny_rules` endpoint is only a fallback when that list is empty
+(a 404 there is tolerated).
 Collection listing sends an explicit `max_results` (default 10 000) and reads
 `X-Total-Count` to detect truncation; no implicit two-request pattern.
 

@@ -131,6 +131,10 @@ pub struct RuleSet {
     pub scopes: Vec<Vec<Actor>>,
     #[serde(default)]
     pub rules: Vec<Rule>,
+    /// Rulesets carry their deny rules inline; `Pce::deny_rules` is the
+    /// per-ruleset endpoint for PCEs that leave this empty.
+    #[serde(default)]
+    pub deny_rules: Vec<DenyRule>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -191,6 +195,9 @@ mod tests {
             serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
         assert_eq!(rs.len(), 2);
         assert_eq!(rs[0].rules.len(), 2);
+        assert_eq!(rs[0].deny_rules.len(), 2);
+        assert!(rs[0].deny_rules[1].override_);
+        assert!(rs[1].deny_rules.is_empty());
         assert_eq!(rs[0].scopes[0].len(), 2);
         assert_eq!(
             rs[0].rules[0].ingress_services[0],

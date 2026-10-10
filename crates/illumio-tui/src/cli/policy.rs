@@ -175,10 +175,16 @@ async fn rules(ctx: &Context, args: &RulesArgs) -> Result<(), CliError> {
         .iter()
         .map(|r| RuleView::from_rule(r, &idx))
         .collect();
-    match ctx.pce.deny_rules(&rs.href, ctx.cache_mode).await {
-        Ok(d) => views.extend(d.value.iter().map(|r| RuleView::from_deny(r, &idx))),
-        Err(PceError::NotFound { .. }) => {}
-        Err(e) => return Err(e.into()),
+    if rs.deny_rules.is_empty() {
+        // Older PCEs leave the inline list empty and serve deny rules from
+        // a per-ruleset endpoint; others have no such endpoint at all.
+        match ctx.pce.deny_rules(&rs.href, ctx.cache_mode).await {
+            Ok(d) => views.extend(d.value.iter().map(|r| RuleView::from_deny(r, &idx))),
+            Err(PceError::NotFound { .. }) => {}
+            Err(e) => return Err(e.into()),
+        }
+    } else {
+        views.extend(rs.deny_rules.iter().map(|r| RuleView::from_deny(r, &idx)));
     }
     let out = RulesOutput {
         ruleset: RuleSetView::from_rule_set(rs, &idx),
