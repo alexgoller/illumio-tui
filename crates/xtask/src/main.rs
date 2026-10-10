@@ -27,6 +27,13 @@ enum Cmd {
         #[arg(long, default_value = "fixtures/recorded")]
         out: PathBuf,
     },
+    /// Re-run the anonymiser over a JSON file (e.g. after extending its rules).
+    Anonymise {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
 }
 
 /// Replaces hostnames, IPs, FQDNs, workload names, process user names and
@@ -100,9 +107,10 @@ impl Anonymiser {
                         ("hostname", Value::String(s)) if !s.is_empty() => {
                             *s = Self::map(&mut self.hosts, s, |n| format!("host-{n}.example"))
                         }
-                        ("fqdn" | "active_pce_fqdn" | "target_pce_fqdn", Value::String(s))
-                            if !s.is_empty() =>
-                        {
+                        (
+                            "fqdn" | "active_pce_fqdn" | "target_pce_fqdn" | "pce_fqdn",
+                            Value::String(s),
+                        ) if !s.is_empty() => {
                             *s = Self::map(&mut self.fqdns, s, |n| format!("fqdn-{n}.example"))
                         }
                         (
@@ -111,6 +119,7 @@ impl Anonymiser {
                             | "from_ip"
                             | "to_ip"
                             | "ip_address"
+                            | "src_ip"
                             | "default_gateway_address",
                             Value::String(s),
                         ) => *s = self.ip(s),
@@ -129,7 +138,7 @@ impl Anonymiser {
                         ("process_name", Value::String(s)) => *s = self.process_name(s),
                         ("changes", Value::Object(m)) if is_resource_change => m.clear(),
                         ("info", Value::Object(m)) if is_notification => m.clear(),
-                        ("description", Value::String(s)) => s.clear(),
+                        ("description" | "api_key_id", Value::String(s)) => s.clear(),
                         ("public_ip", Value::String(s)) => *s = self.ip(s),
                         _ => self.walk(child),
                     }
@@ -177,6 +186,14 @@ async fn raw_list(pce: &Pce, path: &str, max: u32) -> Value {
 async fn main() {
     let args = Xtask::parse();
     match args.cmd {
+        Cmd::Anonymise { input, output } => {
+            let raw = std::fs::read_to_string(&input).expect("read input");
+            let mut value: Value = serde_json::from_str(&raw).expect("parse input");
+            Anonymiser::default().walk(&mut value);
+            let text = serde_json::to_string_pretty(&value).expect("serialise");
+            std::fs::write(&output, text).expect("write output");
+            println!("wrote {}", output.display());
+        }
         Cmd::Record { env_file, out } => {
             let env = env_map(env_file.as_ref());
             let get = |k: &str| env.get(k).cloned().unwrap_or_else(|| panic!("{k} not set"));
@@ -311,7 +328,10 @@ mod tests {
             {"resource_changes": [{"resource": {"label": {"href": "/orgs/5/labels/1", "name": "Web"}}}]},
             {"resource_changes": [{"resource": {"workload": {"hostname": "web01"}},
                 "changes": {"hostname": {"before": "web01", "after": "web02"}, "ip_address": {"after": "192.0.2.77"}}}],
-             "notifications": [{"notification_type": "user.login", "info": {"ip": "192.0.2.78", "user": "bob@corp.com"}}]}
+             "notifications": [{"notification_type": "user.login", "info": {"ip": "192.0.2.78", "user": "bob@corp.com"}}]},
+            {"pce_fqdn": "pce.corp.example.net", "api_key_id": "1fb47cef2dcdc192f",
+             "notifications": [{"notification_type": "x", "info": {}}],
+             "created_by": {"user": {"username": "carol"}, "src_ip": "87.162.78.186"}}
         ]);
         let mut anon = Anonymiser::default();
         anon.walk(&mut v);
@@ -328,7 +348,19 @@ mod tests {
         assert_eq!(v[4]["notifications"][0]["info"], json!({}));
         assert_eq!(v[4]["notifications"][0]["notification_type"], "user.login");
         let all = v.to_string();
-        for leak in ["web02", "192.0.2.77", "192.0.2.78", "bob@corp.com", "web01"] {
+        assert!(v[5]["pce_fqdn"].as_str().unwrap().ends_with(".example"));
+        assert_eq!(v[5]["api_key_id"], "");
+        assert_ne!(v[5]["created_by"]["src_ip"], "87.162.78.186");
+        for leak in [
+            "web02",
+            "192.0.2.77",
+            "192.0.2.78",
+            "bob@corp.com",
+            "web01",
+            "pce.corp.example.net",
+            "1fb47cef2dcdc192f",
+            "87.162.78.186",
+        ] {
             assert!(!all.contains(leak), "{leak} leaked: {all}");
         }
     }

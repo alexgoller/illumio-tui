@@ -1,0 +1,4296 @@
+[
+  {
+    "action": {
+      "api_endpoint": null,
+      "api_method": null,
+      "http_status_code": null,
+      "src_ip": "10.0.0.1",
+      "uuid": "0eb614a4-7939-4ce1-b5e6-92cd9167ce07"
+    },
+    "created_by": {
+      "system": {}
+    },
+    "event_type": "system_task.inactive_ven_cleanup",
+    "href": "/orgs/5636114/events/c894049a-78e7-4ed1-b51d-5f975ab3902f",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "org_setting": {
+            "audit_event_min_severity": "informational",
+            "audit_event_retention_seconds": 2592000,
+            "format": "JSON",
+            "label_display": "icon"
+          }
+        },
+        "uuid": "6be8d296-d57a-46e8-920d-077a8e8aa486"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-10T15:27:00.569Z"
+  },
+  {
+    "action": {
+      "api_endpoint": null,
+      "api_method": null,
+      "http_status_code": null,
+      "src_ip": "10.0.0.2",
+      "uuid": "9491d984-8c90-46d7-b6f7-fc2c1ef3a677"
+    },
+    "created_by": {
+      "system": {}
+    },
+    "event_type": "system_task.inactive_ven_cleanup",
+    "href": "/orgs/5636114/events/c03c1e47-c643-4516-8c69-239c90b67a83",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "org_setting": {
+            "audit_event_min_severity": "informational",
+            "audit_event_retention_seconds": 2592000,
+            "format": "JSON",
+            "label_display": "icon"
+          }
+        },
+        "uuid": "98b2e28c-f286-4b2a-858c-e5e02801c0f3"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-10T11:26:56.005Z"
+  },
+  {
+    "action": {
+      "api_endpoint": null,
+      "api_method": null,
+      "http_status_code": null,
+      "src_ip": "10.0.0.3",
+      "uuid": "1b26df29-efb8-442c-94ad-8a5c00b2b8d6"
+    },
+    "created_by": {
+      "system": {}
+    },
+    "event_type": "system_task.inactive_ven_cleanup",
+    "href": "/orgs/5636114/events/2c0470a8-d0a0-4626-b813-321159d6254c",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "org_setting": {
+            "audit_event_min_severity": "informational",
+            "audit_event_retention_seconds": 2592000,
+            "format": "JSON",
+            "label_display": "icon"
+          }
+        },
+        "uuid": "fc89c8f5-6cfc-4f84-b317-43f7e0ff3912"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-10T07:26:44.073Z"
+  },
+  {
+    "action": {
+      "api_endpoint": null,
+      "api_method": null,
+      "http_status_code": null,
+      "src_ip": "10.0.0.2",
+      "uuid": "91f95af8-102e-482f-9f73-4307be7c8983"
+    },
+    "created_by": {
+      "system": {}
+    },
+    "event_type": "system_task.inactive_ven_cleanup",
+    "href": "/orgs/5636114/events/2d84fc7a-5fb7-451c-a30e-550b225e2939",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "org_setting": {
+            "audit_event_min_severity": "informational",
+            "audit_event_retention_seconds": 2592000,
+            "format": "JSON",
+            "label_display": "icon"
+          }
+        },
+        "uuid": "1461bf24-60fa-4c82-8be0-7709af5fa7c9"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T23:26:37.245Z"
+  },
+  {
+    "action": {
+      "api_endpoint": null,
+      "api_method": null,
+      "http_status_code": null,
+      "src_ip": "10.0.0.4",
+      "uuid": "50457d85-06da-4e29-84fd-d7785f0b4f0f"
+    },
+    "created_by": {
+      "system": {}
+    },
+    "event_type": "system_task.inactive_ven_cleanup",
+    "href": "/orgs/5636114/events/698ca186-e71a-46d7-9d7d-40301544ca0e",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "org_setting": {
+            "audit_event_min_severity": "informational",
+            "audit_event_retention_seconds": 2592000,
+            "format": "JSON",
+            "label_display": "icon"
+          }
+        },
+        "uuid": "5d9b42f3-1d4f-4e62-a416-e0a2effc1007"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T19:26:15.916Z"
+  },
+  {
+    "action": {
+      "api_endpoint": null,
+      "api_method": null,
+      "http_status_code": null,
+      "src_ip": "10.0.0.3",
+      "uuid": "c07adaa3-e594-4ca4-93a7-7efe3a9f6ea6"
+    },
+    "created_by": {
+      "system": {}
+    },
+    "event_type": "system_task.inactive_ven_cleanup",
+    "href": "/orgs/5636114/events/29c621dd-8909-4123-a22a-56b3287265e9",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "org_setting": {
+            "audit_event_min_severity": "informational",
+            "audit_event_retention_seconds": 2592000,
+            "format": "JSON",
+            "label_display": "icon"
+          }
+        },
+        "uuid": "bb4f5612-bda9-4093-9a46-4d591c7518d3"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T15:25:44.432Z"
+  },
+  {
+    "action": {
+      "api_endpoint": null,
+      "api_method": null,
+      "http_status_code": null,
+      "src_ip": "10.0.0.2",
+      "uuid": "7e7570ef-6321-4ed4-aaa4-be1b1da0f306"
+    },
+    "created_by": {
+      "system": {}
+    },
+    "event_type": "system_task.inactive_ven_cleanup",
+    "href": "/orgs/5636114/events/e167ceea-74e1-4abe-bb0d-19820679a1b3",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "org_setting": {
+            "audit_event_min_severity": "informational",
+            "audit_event_retention_seconds": 2592000,
+            "format": "JSON",
+            "label_display": "icon"
+          }
+        },
+        "uuid": "e3ef2588-1d9d-4c92-9285-85c4c86c0675"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:25:29.304Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119198",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "09abfc85-ea9c-4026-b1d7-9ededdd39bbd"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.delete",
+    "href": "/orgs/5636114/events/981f1e2d-2a09-46b9-867f-8cc31c5e2b50",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119198",
+            "name": "__mcp_test_deny_ud__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "d9ef0f83-1c1c-4c0d-b882-8423465167f1"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:12:34.837Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119198/deny_rules/24206847997119212",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "5ac05d01-7802-41fc-bfa1-f9ef63f9b383"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "deny_rule.delete",
+    "href": "/orgs/5636114/events/d2b9d6d2-5205-4256-a2cc-5d57468246ec",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "deny_rule": {
+            "consumers": [
+              {
+                "actors": "ams",
+                "provider": false
+              }
+            ],
+            "enabled": false,
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119198/deny_rules/24206847997119212",
+            "ingress_services": [],
+            "name": null,
+            "network_type": "brn",
+            "providers": [
+              {
+                "actors": "ams",
+                "provider": true
+              }
+            ],
+            "rule_set": {
+              "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119198",
+              "name": "__mcp_test_deny_ud__"
+            }
+          }
+        },
+        "uuid": "38055845-8001-4dc3-a724-da75216124d4"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:12:34.448Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119198/deny_rules/24206847997119212",
+      "api_method": "PUT",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "51e7bdfe-eb42-47cc-859c-6dd5b1265f9a"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "deny_rule.update",
+    "href": "/orgs/5636114/events/a8d4171e-b066-4f3a-992c-4edd54cd4feb",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "deny_rule": {
+            "consumers": [
+              {
+                "actors": "ams",
+                "provider": false
+              }
+            ],
+            "enabled": false,
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119198/deny_rules/24206847997119212",
+            "ingress_services": [],
+            "name": null,
+            "network_type": "brn",
+            "providers": [
+              {
+                "actors": "ams",
+                "provider": true
+              }
+            ],
+            "rule_set": {
+              "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119198",
+              "name": "__mcp_test_deny_ud__"
+            }
+          }
+        },
+        "uuid": "8e33dedf-fc82-4bab-9eda-70f628dc7ccf"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:12:34.216Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119198/deny_rules",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "7b231b60-8ff3-4735-9dde-be9cd16db5ff"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "deny_rule.create",
+    "href": "/orgs/5636114/events/894a3228-2f15-4b7c-aa80-8542027924b0",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "deny_rule": {
+            "consumers": [
+              {
+                "actors": "ams",
+                "provider": false
+              }
+            ],
+            "enabled": true,
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119198/deny_rules/24206847997119212",
+            "ingress_services": [],
+            "name": null,
+            "network_type": "brn",
+            "providers": [
+              {
+                "actors": "ams",
+                "provider": true
+              }
+            ],
+            "rule_set": {
+              "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119198",
+              "name": "__mcp_test_deny_ud__"
+            }
+          }
+        },
+        "uuid": "a061d0f2-6776-4bcb-850e-f4f569b96524"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:12:33.959Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "421e021b-359a-437e-b021-cbef1e40c0a4"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.create",
+    "href": "/orgs/5636114/events/229817a0-8c65-49b6-801f-a41d16c53039",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119198",
+            "name": "__mcp_test_deny_ud__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "29b92467-4935-4d41-bc9e-3fe0cc966e84"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:12:33.460Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/services/24206847997146431",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "9c3437e4-054a-4efa-a25d-223d8e18acf6"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "service.delete",
+    "href": "/orgs/5636114/events/88b214c0-880e-4854-abc8-ffb06928a236",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "service": {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997146431",
+            "name": "__mcp_test_service___updated"
+          }
+        },
+        "uuid": "33506a32-0b8e-4fef-8f5e-ea54acecf534"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:12:32.082Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/services/24206847997146431",
+      "api_method": "PUT",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "c3f3d4aa-4cc8-4d91-ace3-6323c2c55eee"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "service.update",
+    "href": "/orgs/5636114/events/345899f7-c416-44c8-9e8a-940e69ebb699",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "service": {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997146431",
+            "name": "__mcp_test_service___updated"
+          }
+        },
+        "uuid": "cdd0ecbd-f127-486e-aeb6-9c02d967f696"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:12:31.840Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/services",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "b264d9a2-7f4c-4503-97e0-93e1c36698f9"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "service.create",
+    "href": "/orgs/5636114/events/9fc17e18-4f0b-4b52-84e4-b8550b7170ac",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "service": {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997146431",
+            "name": "__mcp_test_service__"
+          }
+        },
+        "uuid": "24fcb811-e923-4d72-b332-f792a0ad8a2f"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:12:31.382Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119196",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "033532db-ca2d-4a7a-b607-ed6a93b21e37"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.delete",
+    "href": "/orgs/5636114/events/66b676dd-8cfa-4b62-b699-33170c198c16",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119196",
+            "name": "__mcp_test_deny_rules__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "84b06e46-7a19-4064-a3b0-19657b4aa65c"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:11:57.782Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119196/deny_rules",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "0bed7a92-204e-467f-ac9b-a2c2fe499fd1"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "deny_rule.create",
+    "href": "/orgs/5636114/events/35e63f88-781d-49f2-8eeb-6ac98427a27a",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "deny_rule": {
+            "consumers": [
+              {
+                "actors": "ams",
+                "provider": false
+              }
+            ],
+            "enabled": true,
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119196/deny_rules/24206847997119210",
+            "ingress_services": [],
+            "name": null,
+            "network_type": "brn",
+            "providers": [
+              {
+                "actors": "ams",
+                "provider": true
+              }
+            ],
+            "rule_set": {
+              "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119196",
+              "name": "__mcp_test_deny_rules__"
+            }
+          }
+        },
+        "uuid": "b96c7168-181c-4d1a-9b31-c57213ae69c9"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:11:57.328Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "ebb5ac7f-7ae4-43e6-92fd-cf3dbddc0172"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.create",
+    "href": "/orgs/5636114/events/4dd4aa1d-68ba-49f6-8cf7-3a322568cab7",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119196",
+            "name": "__mcp_test_deny_rules__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "f57f273b-3c90-4cd7-b197-9365403a7ccb"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:11:56.675Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119194",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "e9bd34de-0961-45f2-979d-a2dafcf722b4"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.delete",
+    "href": "/orgs/5636114/events/4a16e78c-06e4-4a1f-bc1c-f8a923e94518",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119194",
+            "name": "__mcp_test_deny_rules__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "aac5beeb-53ed-47a2-9502-d839c650e544"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:11:55.490Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119194/deny_rules",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "22af2188-9769-4ad5-91f0-920eb37598e3"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "deny_rule.create",
+    "href": "/orgs/5636114/events/aa66148c-7343-4338-b0da-6ca572cea17f",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "deny_rule": {
+            "consumers": [
+              {
+                "actors": "ams",
+                "provider": false
+              }
+            ],
+            "enabled": true,
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119194/deny_rules/24206847997119208",
+            "ingress_services": [],
+            "name": null,
+            "network_type": "brn",
+            "providers": [
+              {
+                "actors": "ams",
+                "provider": true
+              }
+            ],
+            "rule_set": {
+              "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119194",
+              "name": "__mcp_test_deny_rules__"
+            }
+          }
+        },
+        "uuid": "d5d83855-ceeb-4752-8b69-1b6527c51055"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:11:54.634Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119194/deny_rules",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "6443d454-e65d-4f86-979e-548627b3c699"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "deny_rule.create",
+    "href": "/orgs/5636114/events/eba1ec98-56ab-451d-9bde-a6a2ea0b64d4",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "deny_rule": {
+            "consumers": [
+              {
+                "actors": "ams",
+                "provider": false
+              }
+            ],
+            "enabled": true,
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119194/deny_rules/24206847997119206",
+            "ingress_services": [],
+            "name": null,
+            "network_type": "brn",
+            "providers": [
+              {
+                "actors": "ams",
+                "provider": true
+              }
+            ],
+            "rule_set": {
+              "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119194",
+              "name": "__mcp_test_deny_rules__"
+            }
+          }
+        },
+        "uuid": "e639fb63-6d8c-4427-aee3-9346e91531c9"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:11:54.147Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119194/deny_rules",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "b2906e65-bb43-4604-aef2-2aab6869fe10"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "deny_rule.create",
+    "href": "/orgs/5636114/events/2e35ed00-7250-4341-b345-ba701b68d965",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "deny_rule": {
+            "consumers": [
+              {
+                "actors": "ams",
+                "provider": false
+              }
+            ],
+            "enabled": true,
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119194/deny_rules/24206847997119204",
+            "ingress_services": [],
+            "name": null,
+            "network_type": "brn",
+            "providers": [
+              {
+                "actors": "ams",
+                "provider": true
+              }
+            ],
+            "rule_set": {
+              "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119194",
+              "name": "__mcp_test_deny_rules__"
+            }
+          }
+        },
+        "uuid": "0a2ff105-0187-4b28-8c67-741b6a082235"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:11:53.656Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "291be402-f75a-42e5-808c-75d449bc11ed"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.create",
+    "href": "/orgs/5636114/events/599e61e9-fe1f-4306-9436-dbade9f70a04",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119194",
+            "name": "__mcp_test_deny_rules__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "486e620b-1927-428e-b4f8-a9fe5099fc85"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:11:53.380Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119192",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "b1680bf5-4357-4117-a3e7-5fcee2f761e3"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.delete",
+    "href": "/orgs/5636114/events/50e22f79-07ca-4890-a529-1b350a54707c",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119192",
+            "name": "__mcp_test_ruleset__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "66e24122-cb38-4261-8db9-207b84b7f4fc"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:11:51.841Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119192",
+      "api_method": "PUT",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "49cd10bb-00c8-4e65-8ae3-8b2aaa4c7d56"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.update",
+    "href": "/orgs/5636114/events/5bdffce5-bbab-40f1-8e3e-ffaf3875356e",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119192",
+            "name": "__mcp_test_ruleset__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "12b4e1c8-c7be-4035-a335-abf1f02314e1"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:11:51.206Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119192/sec_rules",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "9e91a302-c8da-4ea2-b467-7578cab4e222"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "sec_rule.create",
+    "href": "/orgs/5636114/events/1cc1218c-32b2-405a-9ace-1902dc4a15f9",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "sec_rule": {
+            "consumers": [
+              {
+                "actors": "ams",
+                "provider": false
+              }
+            ],
+            "description": null,
+            "enabled": true,
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119192/sec_rules/24206847997120087",
+            "ingress_services": [],
+            "network_type": "brn",
+            "providers": [
+              {
+                "actors": "ams",
+                "provider": true
+              }
+            ],
+            "rule_set": {
+              "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119192",
+              "name": "__mcp_test_ruleset__"
+            }
+          }
+        },
+        "uuid": "31018445-f9f1-4702-87c4-5cbdf5c89b92"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:11:50.408Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "aa14aa08-f676-49f0-9ba9-a980b4fc6a25"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.create",
+    "href": "/orgs/5636114/events/56d2d72e-b436-40ac-b42f-aff3a5c0f717",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119192",
+            "name": "__mcp_test_ruleset__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "e1a7e176-ce0a-4873-b316-fc14519e277a"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:11:50.088Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/ip_lists/24206847997118183",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "b3d61864-c088-4294-bf20-09444acdbc54"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "ip_list.delete",
+    "href": "/orgs/5636114/events/def4dc74-2b53-456c-bafe-a10fbea67af0",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "ip_list": {
+            "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997118183",
+            "name": "__mcp_test_iplist__"
+          }
+        },
+        "uuid": "ebd93ffa-1da1-4de0-b905-c26f7242109e"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:11:40.560Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/ip_lists/24206847997118183",
+      "api_method": "PUT",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "ca9c68dc-c974-4839-85fd-1d9d6135cb3c"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "ip_list.update",
+    "href": "/orgs/5636114/events/e9198cb1-754e-40e3-94d7-8e13abdf0bb0",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "ip_list": {
+            "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997118183",
+            "name": "__mcp_test_iplist__"
+          }
+        },
+        "uuid": "1c7398d5-90a0-477a-8f8c-b5ba1f73a6c1"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:11:39.972Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/ip_lists",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "54fc4e86-b63f-4396-a62e-e18d5da3ebd0"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "ip_list.create",
+    "href": "/orgs/5636114/events/2f9c9bd7-bf0a-44f1-8c1d-a1c793694adc",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "ip_list": {
+            "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997118183",
+            "name": "__mcp_test_iplist__"
+          }
+        },
+        "uuid": "67e218f6-2733-47a9-b7e1-0ff61bc6624e"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:11:39.531Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/workloads/39781d9e-deae-48c7-82a4-90b424f122d6",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "e2c45240-647a-4c5a-802f-67f93e6b7b0b"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "workload.delete",
+    "href": "/orgs/5636114/events/c49d9e98-9a38-4b5d-a1c7-5f77f04be2f3",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "workload": {
+            "hostname": "host-1.example",
+            "href": "/orgs/5636114/workloads/39781d9e-deae-48c7-82a4-90b424f122d6",
+            "labels": [],
+            "name": "host-1.example"
+          }
+        },
+        "uuid": "fcba6dca-95a6-45e1-ad90-be0bf38c4802"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:11:36.988Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/workloads",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "b7f638f9-6977-45d7-8f9e-b4b0f7efcd4a"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "workload.create",
+    "href": "/orgs/5636114/events/0db58e1c-6741-48b6-b5ba-e06f268436af",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "workload": {
+            "hostname": "host-1.example",
+            "href": "/orgs/5636114/workloads/39781d9e-deae-48c7-82a4-90b424f122d6",
+            "labels": [],
+            "name": "host-1.example"
+          }
+        },
+        "uuid": "f8998c8d-56f9-4f74-9e10-25853bf97bd4"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:11:36.500Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/labels/24206847997125335",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "9bad6659-cd72-447c-8aa2-9b0e912a82b1"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "label.delete",
+    "href": "/orgs/5636114/events/dcd18ccd-248d-46be-8679-80b63c2ea479",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "label": {
+            "href": "/orgs/5636114/labels/24206847997125335",
+            "key": "app",
+            "value": "__mcp_test_label___updated"
+          }
+        },
+        "uuid": "93a94a52-6fbb-484c-a8ee-59badbb356f4"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:11:33.106Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/labels/24206847997125335",
+      "api_method": "PUT",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "625fd5cd-e46c-4e39-9acf-f5f7485b43cf"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "label.update",
+    "href": "/orgs/5636114/events/24fa0bb5-344c-4ef8-9f40-82858864413e",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "label": {
+            "href": "/orgs/5636114/labels/24206847997125335",
+            "key": "app",
+            "value": "__mcp_test_label___updated"
+          }
+        },
+        "uuid": "c2882d5e-0386-4e75-8e58-7e25d3044c68"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:11:31.339Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/labels",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "e26c16be-1f1c-43dc-b53d-334f8779168e"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "label.create",
+    "href": "/orgs/5636114/events/1000cc1c-dd61-4e25-b11b-2b755cae9edf",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "label": {
+            "href": "/orgs/5636114/labels/24206847997125335",
+            "key": "app",
+            "value": "__mcp_test_label__"
+          }
+        },
+        "uuid": "b1528808-988f-41c9-8a33-8fbc2712d1b2"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T11:11:30.752Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119186",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "a2a2bd34-e81c-40e6-9fd7-bb54fc01e5d0"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.delete",
+    "href": "/orgs/5636114/events/10927d18-2d06-4a79-9ada-a312de974f87",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119186",
+            "name": "__mcp_test_deny_ud__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "f7936d4f-deae-40e8-a8f8-2be741e16773"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:07:17.857Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119186/deny_rules/24206847997119182",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "92dd7a4a-56bd-4fc0-8fd7-6fcf06f3ac2c"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "deny_rule.delete",
+    "href": "/orgs/5636114/events/ac5fb7d8-8523-4981-9462-1efbc4e5fec2",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "deny_rule": {
+            "consumers": [
+              {
+                "actors": "ams",
+                "provider": false
+              }
+            ],
+            "enabled": false,
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119186/deny_rules/24206847997119182",
+            "ingress_services": [],
+            "name": null,
+            "network_type": "brn",
+            "providers": [
+              {
+                "actors": "ams",
+                "provider": true
+              }
+            ],
+            "rule_set": {
+              "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119186",
+              "name": "__mcp_test_deny_ud__"
+            }
+          }
+        },
+        "uuid": "42210e84-4549-4f1e-882b-eeeb86c3823c"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:07:17.427Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119186/deny_rules/24206847997119182",
+      "api_method": "PUT",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "1ba11b3d-b649-4f27-9bbf-eeda8ed3686d"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "deny_rule.update",
+    "href": "/orgs/5636114/events/15710539-b558-4872-9a2d-019947467482",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "deny_rule": {
+            "consumers": [
+              {
+                "actors": "ams",
+                "provider": false
+              }
+            ],
+            "enabled": false,
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119186/deny_rules/24206847997119182",
+            "ingress_services": [],
+            "name": null,
+            "network_type": "brn",
+            "providers": [
+              {
+                "actors": "ams",
+                "provider": true
+              }
+            ],
+            "rule_set": {
+              "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119186",
+              "name": "__mcp_test_deny_ud__"
+            }
+          }
+        },
+        "uuid": "ec11a21b-0a34-4838-9b00-0fa72f7c9260"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:07:17.165Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119186/deny_rules",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "9f7cc8d4-2e59-4c6e-8423-f6ba3a35d114"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "deny_rule.create",
+    "href": "/orgs/5636114/events/c951830e-2773-40c3-b192-9a5150c6c3dd",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "deny_rule": {
+            "consumers": [
+              {
+                "actors": "ams",
+                "provider": false
+              }
+            ],
+            "enabled": true,
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119186/deny_rules/24206847997119182",
+            "ingress_services": [],
+            "name": null,
+            "network_type": "brn",
+            "providers": [
+              {
+                "actors": "ams",
+                "provider": true
+              }
+            ],
+            "rule_set": {
+              "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119186",
+              "name": "__mcp_test_deny_ud__"
+            }
+          }
+        },
+        "uuid": "93072229-0d52-456f-8199-ad13a2f589e9"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:07:16.953Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "09a22009-f8ba-406c-a6cc-964a01b9f839"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.create",
+    "href": "/orgs/5636114/events/b10db336-c26d-4607-918a-86751d072f80",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119186",
+            "name": "__mcp_test_deny_ud__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "4ab39c22-b622-4281-a3fc-bc759a959f09"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:07:16.465Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/services/24206847997146423",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "21193751-cccd-4f48-a7ec-bef82b7ddafd"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "service.delete",
+    "href": "/orgs/5636114/events/3476d4de-5b45-4694-8d7d-e8932cd32ca2",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "service": {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997146423",
+            "name": "__mcp_test_service___updated"
+          }
+        },
+        "uuid": "f63d2d09-8fdc-4b84-a02f-8c214aebecdc"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:07:14.924Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/services/24206847997146423",
+      "api_method": "PUT",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "b561b052-1dd0-4aa5-ae04-5710e46f050b"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "service.update",
+    "href": "/orgs/5636114/events/6a2ceb1a-8bb0-4ed2-a932-d3bea60b25a6",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "service": {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997146423",
+            "name": "__mcp_test_service___updated"
+          }
+        },
+        "uuid": "eab3f685-3094-4b94-a6dc-cb378c547504"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:07:14.707Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/services",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "65e54eee-1feb-4803-a699-579d822e9929"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "service.create",
+    "href": "/orgs/5636114/events/4bde2d9b-5a93-4f80-853d-5c35bfec18ab",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "service": {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997146423",
+            "name": "__mcp_test_service__"
+          }
+        },
+        "uuid": "71935ff0-77b4-47f7-91e3-000a8325d288"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:07:14.281Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119184",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "dcf146d2-1b3b-446c-a26a-8d84ccabea7b"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.delete",
+    "href": "/orgs/5636114/events/bfa6769c-0bd9-4cc1-b1c3-13a510e2dc01",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119184",
+            "name": "__mcp_test_deny_rules__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "f165683f-4bed-4f2f-bf1b-13cbe3b631c8"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:06:42.766Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119184/deny_rules",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "c9939186-37f4-4f97-acdc-b344c4b8a71b"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "deny_rule.create",
+    "href": "/orgs/5636114/events/af5b05e7-ef84-4565-ac80-1c1ad9ff9628",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "deny_rule": {
+            "consumers": [
+              {
+                "actors": "ams",
+                "provider": false
+              }
+            ],
+            "enabled": true,
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119184/deny_rules/24206847997119180",
+            "ingress_services": [],
+            "name": null,
+            "network_type": "brn",
+            "providers": [
+              {
+                "actors": "ams",
+                "provider": true
+              }
+            ],
+            "rule_set": {
+              "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119184",
+              "name": "__mcp_test_deny_rules__"
+            }
+          }
+        },
+        "uuid": "1388c170-5d17-44fc-af69-721b89e088a8"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:06:42.371Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "0375d950-f17e-4118-9fdd-ad6b3e76fb9f"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.create",
+    "href": "/orgs/5636114/events/8eb05d42-a75f-44c3-b290-cde1f24fa246",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119184",
+            "name": "__mcp_test_deny_rules__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "93b50745-9f55-4f2f-8a37-e3dcc68c3417"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:06:41.755Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119182",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "36c670f2-5c2b-44e0-98fe-8f9b85e43cd3"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.delete",
+    "href": "/orgs/5636114/events/19189e38-0c25-4320-bc38-5cf580bd6766",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119182",
+            "name": "__mcp_test_deny_rules__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "e5c8c027-8667-453f-a3da-17d568eff8c9"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:06:40.631Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119182/deny_rules",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "4bdedaf8-baa8-4b8b-8111-8c57637d6152"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "deny_rule.create",
+    "href": "/orgs/5636114/events/8c1679fd-801b-4e4d-b719-611f71849124",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "deny_rule": {
+            "consumers": [
+              {
+                "actors": "ams",
+                "provider": false
+              }
+            ],
+            "enabled": true,
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119182/deny_rules/24206847997119178",
+            "ingress_services": [],
+            "name": null,
+            "network_type": "brn",
+            "providers": [
+              {
+                "actors": "ams",
+                "provider": true
+              }
+            ],
+            "rule_set": {
+              "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119182",
+              "name": "__mcp_test_deny_rules__"
+            }
+          }
+        },
+        "uuid": "08758c05-e2e6-4660-8e40-76714594872d"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:06:39.772Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119182/deny_rules",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "aa7f26cb-7b2b-4905-8c69-d03533c913d8"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "deny_rule.create",
+    "href": "/orgs/5636114/events/86ff24ab-1a27-423b-8b01-02cfb6168578",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "deny_rule": {
+            "consumers": [
+              {
+                "actors": "ams",
+                "provider": false
+              }
+            ],
+            "enabled": true,
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119182/deny_rules/24206847997119176",
+            "ingress_services": [],
+            "name": null,
+            "network_type": "brn",
+            "providers": [
+              {
+                "actors": "ams",
+                "provider": true
+              }
+            ],
+            "rule_set": {
+              "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119182",
+              "name": "__mcp_test_deny_rules__"
+            }
+          }
+        },
+        "uuid": "3046c24a-4d76-4fd8-9056-e7dffe954751"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:06:39.307Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119182/deny_rules",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "a8c6cae1-a5fd-4c9a-a92a-70b12c925d2a"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "deny_rule.create",
+    "href": "/orgs/5636114/events/44914736-f45b-4ed9-a360-4cdb68e2d911",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "deny_rule": {
+            "consumers": [
+              {
+                "actors": "ams",
+                "provider": false
+              }
+            ],
+            "enabled": true,
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119182/deny_rules/24206847997119174",
+            "ingress_services": [],
+            "name": null,
+            "network_type": "brn",
+            "providers": [
+              {
+                "actors": "ams",
+                "provider": true
+              }
+            ],
+            "rule_set": {
+              "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119182",
+              "name": "__mcp_test_deny_rules__"
+            }
+          }
+        },
+        "uuid": "e42998de-a905-4061-a48b-078e89ca7f0b"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:06:38.857Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "076b3b25-4741-4b87-82e5-1272712abddf"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.create",
+    "href": "/orgs/5636114/events/302945d7-582b-4fe8-99a4-be26b2523abf",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119182",
+            "name": "__mcp_test_deny_rules__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "d6aa3111-dbe2-417e-9a63-12fdcf50f854"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:06:38.626Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119180",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "fac2d126-3b72-4a30-9962-71edbda3dcdb"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.delete",
+    "href": "/orgs/5636114/events/812cd84c-2cf9-47bd-95f8-0126b7d4d1ff",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119180",
+            "name": "__mcp_test_ruleset__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "63fd461b-597b-4087-a61d-02242e1a7769"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:06:37.111Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119180",
+      "api_method": "PUT",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "79205891-8e09-4b8e-9bcb-90e477a78f7c"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.update",
+    "href": "/orgs/5636114/events/367c1039-c56e-476d-8341-dfdf26c9ce7b",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119180",
+            "name": "__mcp_test_ruleset__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "e95eeed7-c751-4cc5-a7d5-dc7fb966d884"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:06:36.418Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119180/sec_rules",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "52b82078-af6a-4a2b-a514-b18492250c35"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "sec_rule.create",
+    "href": "/orgs/5636114/events/4a3f3d7f-811c-4c27-ae4d-c7f9156a607f",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "sec_rule": {
+            "consumers": [
+              {
+                "actors": "ams",
+                "provider": false
+              }
+            ],
+            "description": null,
+            "enabled": true,
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119180/sec_rules/24206847997120085",
+            "ingress_services": [],
+            "network_type": "brn",
+            "providers": [
+              {
+                "actors": "ams",
+                "provider": true
+              }
+            ],
+            "rule_set": {
+              "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119180",
+              "name": "__mcp_test_ruleset__"
+            }
+          }
+        },
+        "uuid": "b5432ddf-a2ab-4abf-89cb-cbe48940476c"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:06:35.632Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "5eda9775-7f0c-42c2-9827-af721940aed2"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.create",
+    "href": "/orgs/5636114/events/135eb048-e2ad-4a06-b5d6-dcdddff8b04a",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119180",
+            "name": "__mcp_test_ruleset__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "85dd053c-ba1f-43ba-a7d8-b191e675dba6"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:06:35.379Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/ip_lists/24206847997118181",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "c1f9535f-42ac-482f-ab28-23df7403e89f"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "ip_list.delete",
+    "href": "/orgs/5636114/events/defb5397-f020-43c2-bacd-3f1e48a0735d",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "ip_list": {
+            "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997118181",
+            "name": "__mcp_test_iplist__"
+          }
+        },
+        "uuid": "a25f38cc-c288-445b-849f-ba34901b1788"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:06:27.147Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/ip_lists/24206847997118181",
+      "api_method": "PUT",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "b99ab38e-8186-4f5e-8c71-aa91f9d87d69"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "ip_list.update",
+    "href": "/orgs/5636114/events/35733436-d3e9-416b-ba11-6d2fc2a909ca",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "ip_list": {
+            "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997118181",
+            "name": "__mcp_test_iplist__"
+          }
+        },
+        "uuid": "14a91cb6-eedb-4a93-acad-f3748f8ecbf3"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:06:26.570Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/ip_lists",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "54b91f81-e23c-485d-8b13-edd800c3280d"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "ip_list.create",
+    "href": "/orgs/5636114/events/c215ac70-58b8-4011-b201-173ff83a65b7",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "ip_list": {
+            "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997118181",
+            "name": "__mcp_test_iplist__"
+          }
+        },
+        "uuid": "c0224ba4-bea4-4e39-8af5-03b794f2d34e"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:06:26.145Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/workloads/8e2fd2a6-f427-4771-9538-a3d3047e5875",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "d564dc9f-7acc-4041-853d-fc71b60102bb"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "workload.delete",
+    "href": "/orgs/5636114/events/8816a65f-8dcc-415e-aba5-36defc790e72",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "workload": {
+            "hostname": "host-1.example",
+            "href": "/orgs/5636114/workloads/8e2fd2a6-f427-4771-9538-a3d3047e5875",
+            "labels": [],
+            "name": "host-1.example"
+          }
+        },
+        "uuid": "12c26c7b-8c65-45fa-b088-84ae00139bc0"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:06:23.663Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/workloads",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "28fd3998-4c46-45f8-82a6-14a000a4b74e"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "workload.create",
+    "href": "/orgs/5636114/events/051a0cdc-5b7d-420b-95a1-71826a75335f",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "workload": {
+            "hostname": "host-1.example",
+            "href": "/orgs/5636114/workloads/8e2fd2a6-f427-4771-9538-a3d3047e5875",
+            "labels": [],
+            "name": "host-1.example"
+          }
+        },
+        "uuid": "d3eb970f-f46e-487a-bbca-41cff77e6fcd"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:06:23.189Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/labels/24206847997125314",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "391c3d75-bdee-4d0f-a9f3-9f4f4dda063c"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "label.delete",
+    "href": "/orgs/5636114/events/d2b4e170-686f-46b4-896b-1bd4cdd2cf70",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "label": {
+            "href": "/orgs/5636114/labels/24206847997125314",
+            "key": "app",
+            "value": "__mcp_test_label___updated"
+          }
+        },
+        "uuid": "08a98d35-29a8-4b8d-8b51-35fd64cf71af"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:06:19.759Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/labels/24206847997125314",
+      "api_method": "PUT",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "e1dc95e3-eba3-45fa-b393-eae292419567"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "label.update",
+    "href": "/orgs/5636114/events/75273e70-f6d1-4fea-afab-688936ee3097",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "label": {
+            "href": "/orgs/5636114/labels/24206847997125314",
+            "key": "app",
+            "value": "__mcp_test_label___updated"
+          }
+        },
+        "uuid": "4b174b6e-a56f-437b-ac53-d9b3428ccd4f"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:06:19.015Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/labels",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "39b22b25-d1b7-4346-a2df-f40d49c44e2b"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "label.create",
+    "href": "/orgs/5636114/events/5a4d8e78-a032-4c65-b587-2f12c5fca21b",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "label": {
+            "href": "/orgs/5636114/labels/24206847997125314",
+            "key": "app",
+            "value": "__mcp_test_label__"
+          }
+        },
+        "uuid": "3cd25844-4e34-4022-b2dc-e60d77e0be64"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T08:06:18.436Z"
+  },
+  {
+    "action": {
+      "api_endpoint": null,
+      "api_method": null,
+      "http_status_code": null,
+      "src_ip": "10.0.0.2",
+      "uuid": "7f835207-b1ec-4945-847e-dcf44102db31"
+    },
+    "created_by": {
+      "system": {}
+    },
+    "event_type": "system_task.inactive_ven_cleanup",
+    "href": "/orgs/5636114/events/bc4526e7-8258-4bcf-b0ba-a45d9d9a9a71",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "org_setting": {
+            "audit_event_min_severity": "informational",
+            "audit_event_retention_seconds": 2592000,
+            "format": "JSON",
+            "label_display": "icon"
+          }
+        },
+        "uuid": "2835fd30-9f03-4615-a354-6cbbcf72b205"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:25:03.727Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119176",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "395b9413-94e3-4108-9ebf-6986b30dc299"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.delete",
+    "href": "/orgs/5636114/events/998deb20-90ce-4fac-b099-c608d23e29c7",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119176",
+            "name": "__mcp_test_deny_ud__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "ca490aa1-5d39-4def-a7ba-e8bf8bdac204"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:16:35.441Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119176/deny_rules/24206847997119172",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "a1274629-eb61-483e-8489-ffa8e69a283a"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "deny_rule.delete",
+    "href": "/orgs/5636114/events/879aa06a-239c-46c0-9bd0-c7ad9bdbddc4",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "deny_rule": {
+            "consumers": [
+              {
+                "actors": "ams",
+                "provider": false
+              }
+            ],
+            "enabled": false,
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119176/deny_rules/24206847997119172",
+            "ingress_services": [],
+            "name": null,
+            "network_type": "brn",
+            "providers": [
+              {
+                "actors": "ams",
+                "provider": true
+              }
+            ],
+            "rule_set": {
+              "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119176",
+              "name": "__mcp_test_deny_ud__"
+            }
+          }
+        },
+        "uuid": "95668741-15c5-4eed-8740-862084b9b972"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:16:35.083Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119176/deny_rules/24206847997119172",
+      "api_method": "PUT",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "523593db-cd6f-4f5b-91da-19672f7e0d69"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "deny_rule.update",
+    "href": "/orgs/5636114/events/4642782f-79ca-4c55-bed2-609e96a04358",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "deny_rule": {
+            "consumers": [
+              {
+                "actors": "ams",
+                "provider": false
+              }
+            ],
+            "enabled": false,
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119176/deny_rules/24206847997119172",
+            "ingress_services": [],
+            "name": null,
+            "network_type": "brn",
+            "providers": [
+              {
+                "actors": "ams",
+                "provider": true
+              }
+            ],
+            "rule_set": {
+              "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119176",
+              "name": "__mcp_test_deny_ud__"
+            }
+          }
+        },
+        "uuid": "bcae237a-6d6e-4d47-9faf-1a38a72445bd"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:16:34.881Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119176/deny_rules",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "b60a1024-e657-40bb-99f6-117e6f24e924"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "deny_rule.create",
+    "href": "/orgs/5636114/events/aa4631ea-347f-46b2-b578-aba85e3c0de7",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "deny_rule": {
+            "consumers": [
+              {
+                "actors": "ams",
+                "provider": false
+              }
+            ],
+            "enabled": true,
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119176/deny_rules/24206847997119172",
+            "ingress_services": [],
+            "name": null,
+            "network_type": "brn",
+            "providers": [
+              {
+                "actors": "ams",
+                "provider": true
+              }
+            ],
+            "rule_set": {
+              "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119176",
+              "name": "__mcp_test_deny_ud__"
+            }
+          }
+        },
+        "uuid": "66bc53d3-30ec-4b35-9d2d-d9f18a91d8a3"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:16:34.663Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "feda0be0-3ae4-49a7-bb3b-740aad080722"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.create",
+    "href": "/orgs/5636114/events/605dc0fd-9160-4fa3-91aa-686ecc090837",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119176",
+            "name": "__mcp_test_deny_ud__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "18529a3b-1067-4f5b-961e-c84d1951e6cc"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:16:34.225Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/services/24206847997146421",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "de00ee40-e2de-4041-9d08-bc14bad35541"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "service.delete",
+    "href": "/orgs/5636114/events/3cd4c19e-4001-43a9-b632-31f52d5af1de",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "service": {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997146421",
+            "name": "__mcp_test_service___updated"
+          }
+        },
+        "uuid": "349b1d4d-6499-401d-a4a1-4b9345f85726"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:16:33.030Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/services/24206847997146421",
+      "api_method": "PUT",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "0160e765-60e3-4b04-bd5c-f83a88adcd6f"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "service.update",
+    "href": "/orgs/5636114/events/307f8b66-54b3-43da-81dc-d9831430f43a",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "service": {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997146421",
+            "name": "__mcp_test_service___updated"
+          }
+        },
+        "uuid": "03d4d467-339f-4427-b4a3-6c7642a1d617"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:16:32.831Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/services",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "5bef5330-735b-46fb-ad43-612bc64070b1"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "service.create",
+    "href": "/orgs/5636114/events/c00e2d2a-bfef-4988-b8cb-1582fae20517",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "service": {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997146421",
+            "name": "__mcp_test_service__"
+          }
+        },
+        "uuid": "55119a5f-61a3-47a6-bd4e-21f97a8f9ac2"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:16:32.446Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119174",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "1e787477-4add-4052-8c47-2d7bff9a198c"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.delete",
+    "href": "/orgs/5636114/events/31e43a00-981c-4c16-9ec2-c2e7cc5fb01a",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119174",
+            "name": "__mcp_test_deny_rules__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "4c2a514d-8179-4ea1-b67b-b9e696167a5c"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:16:02.794Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119174/deny_rules",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "fa5a20be-a410-4b17-a305-67d1538c1265"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "deny_rule.create",
+    "href": "/orgs/5636114/events/a36c9b6a-587e-48e7-bfe8-5a762d5dc30f",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "deny_rule": {
+            "consumers": [
+              {
+                "actors": "ams",
+                "provider": false
+              }
+            ],
+            "enabled": true,
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119174/deny_rules/24206847997119170",
+            "ingress_services": [],
+            "name": null,
+            "network_type": "brn",
+            "providers": [
+              {
+                "actors": "ams",
+                "provider": true
+              }
+            ],
+            "rule_set": {
+              "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119174",
+              "name": "__mcp_test_deny_rules__"
+            }
+          }
+        },
+        "uuid": "58fe2223-1135-4f25-8552-33cbbbceb743"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:16:02.430Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "1c4bb6d1-0d5f-4840-9619-624bf2fd7f30"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.create",
+    "href": "/orgs/5636114/events/26a7ed6c-3da5-4da6-aa86-101bebe3db35",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119174",
+            "name": "__mcp_test_deny_rules__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "05090b2d-a8a6-49b8-8264-aee90e3fdae6"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:16:01.802Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119172",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "e8960b69-1d44-4048-94ba-817bd918b79a"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.delete",
+    "href": "/orgs/5636114/events/6b933b06-608c-4e46-980a-971210337d81",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119172",
+            "name": "__mcp_test_deny_rules__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "c62d95f0-969b-4162-8ebd-f6bfdb8469aa"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:16:00.728Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119172/deny_rules",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "b46dca9c-a4b3-4161-a8d4-8a8a94468e8f"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "deny_rule.create",
+    "href": "/orgs/5636114/events/92abd74a-2c1d-4a57-a50a-091f3a5ac99e",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "deny_rule": {
+            "consumers": [
+              {
+                "actors": "ams",
+                "provider": false
+              }
+            ],
+            "enabled": true,
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119172/deny_rules/24206847997119168",
+            "ingress_services": [],
+            "name": null,
+            "network_type": "brn",
+            "providers": [
+              {
+                "actors": "ams",
+                "provider": true
+              }
+            ],
+            "rule_set": {
+              "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119172",
+              "name": "__mcp_test_deny_rules__"
+            }
+          }
+        },
+        "uuid": "db52c83f-8382-4ec5-9ca5-1c23c2717b4f"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:15:59.961Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119172/deny_rules",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "bcd3ee8d-b2b4-40a8-b472-2558562ed97d"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "deny_rule.create",
+    "href": "/orgs/5636114/events/0565e371-f09c-4662-b36c-51a87122d408",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "deny_rule": {
+            "consumers": [
+              {
+                "actors": "ams",
+                "provider": false
+              }
+            ],
+            "enabled": true,
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119172/deny_rules/24206847997119166",
+            "ingress_services": [],
+            "name": null,
+            "network_type": "brn",
+            "providers": [
+              {
+                "actors": "ams",
+                "provider": true
+              }
+            ],
+            "rule_set": {
+              "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119172",
+              "name": "__mcp_test_deny_rules__"
+            }
+          }
+        },
+        "uuid": "394f8c13-01af-465e-87ef-08a6d0683bad"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:15:59.531Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119172/deny_rules",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "faaf3912-a6e8-473e-b16d-6a0610405252"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "deny_rule.create",
+    "href": "/orgs/5636114/events/6589b583-83b5-4891-a11f-c0e79f9e27fe",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "deny_rule": {
+            "consumers": [
+              {
+                "actors": "ams",
+                "provider": false
+              }
+            ],
+            "enabled": true,
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119172/deny_rules/24206847997119164",
+            "ingress_services": [],
+            "name": null,
+            "network_type": "brn",
+            "providers": [
+              {
+                "actors": "ams",
+                "provider": true
+              }
+            ],
+            "rule_set": {
+              "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119172",
+              "name": "__mcp_test_deny_rules__"
+            }
+          }
+        },
+        "uuid": "a15c7b9d-afc3-4083-82d0-db2e7424b2cd"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:15:59.056Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "7ce1d970-411c-4f3f-8325-78629088c76d"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.create",
+    "href": "/orgs/5636114/events/85901213-7e21-4061-9de2-43429221a940",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119172",
+            "name": "__mcp_test_deny_rules__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "51171f01-6ba3-415e-a225-e0d1ddb55634"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:15:58.789Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119170",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "95d71ada-68da-4f97-b912-d56df76d081f"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.delete",
+    "href": "/orgs/5636114/events/280c91b4-8930-4131-b157-25f531c376dd",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119170",
+            "name": "__mcp_test_ruleset__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "d95ef8ea-e044-4847-9137-fb14ae234c50"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:15:57.384Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119170",
+      "api_method": "PUT",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "a14f7ac3-c45c-47ff-a91b-6e3e11939ff6"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.update",
+    "href": "/orgs/5636114/events/0d887a1b-5493-4f99-8e3f-9d5ddf5b029e",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119170",
+            "name": "__mcp_test_ruleset__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "eb559669-c3be-4fd2-9c5c-fb977cec7c9f"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:15:56.806Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets/24206847997119170/sec_rules",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "c28f450f-e720-4880-9521-28041422e161"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "sec_rule.create",
+    "href": "/orgs/5636114/events/1d09e4ca-a7b5-48e1-bfc7-2d401cb448e8",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "sec_rule": {
+            "consumers": [
+              {
+                "actors": "ams",
+                "provider": false
+              }
+            ],
+            "description": null,
+            "enabled": true,
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119170/sec_rules/24206847997120083",
+            "ingress_services": [],
+            "network_type": "brn",
+            "providers": [
+              {
+                "actors": "ams",
+                "provider": true
+              }
+            ],
+            "rule_set": {
+              "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119170",
+              "name": "__mcp_test_ruleset__"
+            }
+          }
+        },
+        "uuid": "054ff94f-856d-453b-a6fb-27ebcaacc928"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:15:56.110Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/rule_sets",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "bc3aa707-1db7-473f-ab09-767b63abe3cc"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "rule_set.create",
+    "href": "/orgs/5636114/events/a6c5694c-649c-4f92-87f6-3987925a9783",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "rule_set": {
+            "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997119170",
+            "name": "__mcp_test_ruleset__",
+            "scopes": [
+              []
+            ]
+          }
+        },
+        "uuid": "150e1578-6cf4-49bf-9d34-eb7044d2aada"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:15:55.873Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/ip_lists/24206847997118179",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "f243c7a2-e381-4e4d-b410-1f7c0df1f388"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "ip_list.delete",
+    "href": "/orgs/5636114/events/142df203-8c7e-4b33-b57f-34c18f6973d7",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "ip_list": {
+            "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997118179",
+            "name": "__mcp_test_iplist__"
+          }
+        },
+        "uuid": "6aafbae4-9e33-487e-9e00-5e4dfbc0f122"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:15:47.951Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/ip_lists/24206847997118179",
+      "api_method": "PUT",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "64e39e0f-2fe0-4b4c-b361-8076457d1b6d"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "ip_list.update",
+    "href": "/orgs/5636114/events/546241aa-9a1b-49fb-880a-b59314722c8e",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "ip_list": {
+            "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997118179",
+            "name": "__mcp_test_iplist__"
+          }
+        },
+        "uuid": "e05f16fe-7cdf-4b18-8451-1824f46e4178"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:15:47.416Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/sec_policy/draft/ip_lists",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "22a74450-d8da-4b54-9ac8-c0af191ae0fb"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "ip_list.create",
+    "href": "/orgs/5636114/events/4d716ebe-0b6f-41a3-9ea0-4eadae774c48",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "ip_list": {
+            "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997118179",
+            "name": "__mcp_test_iplist__"
+          }
+        },
+        "uuid": "e0f60ba8-6a87-4074-9991-dce90dd874d4"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:15:46.966Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/workloads/87af5b12-0af2-45c1-a6c4-28fded3e0636",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "6a8f42f3-ffa2-4005-9222-f8296cb01d50"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "workload.delete",
+    "href": "/orgs/5636114/events/01ebf530-d73d-4815-bb1e-ca8e9c67bf66",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "workload": {
+            "hostname": "host-1.example",
+            "href": "/orgs/5636114/workloads/87af5b12-0af2-45c1-a6c4-28fded3e0636",
+            "labels": [],
+            "name": "host-1.example"
+          }
+        },
+        "uuid": "207c885d-c72a-4a2c-ac22-43f3a27e3e9f"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:15:44.556Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/workloads",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "58a8ec8b-c7d8-468c-ae4c-70cbb4950fc6"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "workload.create",
+    "href": "/orgs/5636114/events/3181e962-e5e7-46d8-b833-08481c9ee0ef",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "workload": {
+            "hostname": "host-1.example",
+            "href": "/orgs/5636114/workloads/87af5b12-0af2-45c1-a6c4-28fded3e0636",
+            "labels": [],
+            "name": "host-1.example"
+          }
+        },
+        "uuid": "d01ef369-d561-4cf5-9579-13e68107b879"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:15:44.131Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/labels/24206847997125313",
+      "api_method": "DELETE",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "438fd391-db54-4e03-97f3-6718d9503179"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "label.delete",
+    "href": "/orgs/5636114/events/5b163b5f-479f-4ecf-bceb-cdab8cb1407c",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "delete",
+        "changes": null,
+        "resource": {
+          "label": {
+            "href": "/orgs/5636114/labels/24206847997125313",
+            "key": "app",
+            "value": "__mcp_test_label___updated"
+          }
+        },
+        "uuid": "83246eb4-fb26-4e93-a69b-bbabf1ac461f"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:15:40.703Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/labels/24206847997125313",
+      "api_method": "PUT",
+      "http_status_code": 204,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "a9f6828c-e35a-4735-9058-d1bb8258f4f8"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "label.update",
+    "href": "/orgs/5636114/events/3a051bea-4add-470a-bfc2-637bf73925c0",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "label": {
+            "href": "/orgs/5636114/labels/24206847997125313",
+            "key": "app",
+            "value": "__mcp_test_label___updated"
+          }
+        },
+        "uuid": "49852ca8-5ded-4899-bb7b-a4abbcaec921"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:15:39.967Z"
+  },
+  {
+    "action": {
+      "api_endpoint": "/api/v2/orgs/5636114/labels",
+      "api_method": "POST",
+      "http_status_code": 201,
+      "info": {
+        "api_key_id": ""
+      },
+      "src_ip": "10.0.0.5",
+      "uuid": "6677909f-4481-41a1-8cda-be3d6cf980bf"
+    },
+    "created_by": {
+      "user": {
+        "href": "/users/56294995342162285",
+        "username": "user-1"
+      }
+    },
+    "event_type": "label.create",
+    "href": "/orgs/5636114/events/df45ee27-b817-43ad-b8b5-ba31672dc439",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "create",
+        "changes": {},
+        "resource": {
+          "label": {
+            "href": "/orgs/5636114/labels/24206847997125313",
+            "key": "app",
+            "value": "__mcp_test_label__"
+          }
+        },
+        "uuid": "82c83e26-0ad5-468d-aba5-f76caf6f95c0"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T07:15:39.404Z"
+  },
+  {
+    "action": {
+      "api_endpoint": null,
+      "api_method": null,
+      "http_status_code": null,
+      "src_ip": "10.0.0.4",
+      "uuid": "9c9dd27b-9a96-408d-8427-56f1357fde77"
+    },
+    "created_by": {
+      "system": {}
+    },
+    "event_type": "system_task.inactive_ven_cleanup",
+    "href": "/orgs/5636114/events/ba5278a5-37e4-40a1-99ab-acf787472ea9",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "org_setting": {
+            "audit_event_min_severity": "informational",
+            "audit_event_retention_seconds": 2592000,
+            "format": "JSON",
+            "label_display": "icon"
+          }
+        },
+        "uuid": "88617362-1e95-4dbb-b604-08c34dce9463"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-09T03:24:38.321Z"
+  },
+  {
+    "action": {
+      "api_endpoint": null,
+      "api_method": null,
+      "http_status_code": null,
+      "src_ip": "10.0.0.4",
+      "uuid": "f5272e46-17e0-4c35-b4cb-f468e868ce7c"
+    },
+    "created_by": {
+      "system": {}
+    },
+    "event_type": "system_task.inactive_ven_cleanup",
+    "href": "/orgs/5636114/events/ebb87b8b-16ee-4ab1-95c4-bfc112b077ff",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "org_setting": {
+            "audit_event_min_severity": "informational",
+            "audit_event_retention_seconds": 2592000,
+            "format": "JSON",
+            "label_display": "icon"
+          }
+        },
+        "uuid": "39395d2a-a24c-488e-a4e1-e3919177560c"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-08T19:24:06.397Z"
+  },
+  {
+    "action": {
+      "api_endpoint": null,
+      "api_method": null,
+      "http_status_code": null,
+      "src_ip": "10.0.0.4",
+      "uuid": "8daf3b71-3706-43c9-9a9e-b3e4b17f8088"
+    },
+    "created_by": {
+      "system": {}
+    },
+    "event_type": "system_task.inactive_ven_cleanup",
+    "href": "/orgs/5636114/events/b0306a73-1691-477b-a2fe-e9bf86170066",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "org_setting": {
+            "audit_event_min_severity": "informational",
+            "audit_event_retention_seconds": 2592000,
+            "format": "JSON",
+            "label_display": "icon"
+          }
+        },
+        "uuid": "fd485395-04ab-48d9-9dbd-457e72b6a8af"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-08T11:24:09.151Z"
+  },
+  {
+    "action": {
+      "api_endpoint": null,
+      "api_method": null,
+      "http_status_code": null,
+      "src_ip": "10.0.0.2",
+      "uuid": "71057014-6b2e-429c-90de-5d4bbd2e80ca"
+    },
+    "created_by": {
+      "system": {}
+    },
+    "event_type": "system_task.inactive_ven_cleanup",
+    "href": "/orgs/5636114/events/cfb88bc5-70ab-47bf-ad2a-08d125459e93",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "org_setting": {
+            "audit_event_min_severity": "informational",
+            "audit_event_retention_seconds": 2592000,
+            "format": "JSON",
+            "label_display": "icon"
+          }
+        },
+        "uuid": "49270678-311d-420b-9a3a-02bf8c01844b"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-08T07:23:45.427Z"
+  },
+  {
+    "action": {
+      "api_endpoint": null,
+      "api_method": null,
+      "http_status_code": null,
+      "src_ip": "10.0.0.4",
+      "uuid": "b262982a-b930-4181-b69f-7220d329e16e"
+    },
+    "created_by": {
+      "system": {}
+    },
+    "event_type": "system_task.inactive_ven_cleanup",
+    "href": "/orgs/5636114/events/7d2ff22d-c676-4e4b-8d9b-c2cf9865e82f",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "org_setting": {
+            "audit_event_min_severity": "informational",
+            "audit_event_retention_seconds": 2592000,
+            "format": "JSON",
+            "label_display": "icon"
+          }
+        },
+        "uuid": "b10e9898-92ff-43a3-a548-cc6c7ba61ced"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-07T23:23:10.390Z"
+  },
+  {
+    "action": {
+      "api_endpoint": null,
+      "api_method": null,
+      "http_status_code": null,
+      "src_ip": "10.0.0.3",
+      "uuid": "a6e34ab9-d332-4434-89c7-ea05140f41d6"
+    },
+    "created_by": {
+      "system": {}
+    },
+    "event_type": "system_task.inactive_ven_cleanup",
+    "href": "/orgs/5636114/events/800b000f-caac-47e8-bf08-1e58d8680ee2",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "org_setting": {
+            "audit_event_min_severity": "informational",
+            "audit_event_retention_seconds": 2592000,
+            "format": "JSON",
+            "label_display": "icon"
+          }
+        },
+        "uuid": "fbf5ffcd-9744-4cba-b82c-645735d4fd34"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-07T15:22:54.787Z"
+  },
+  {
+    "action": {
+      "api_endpoint": null,
+      "api_method": null,
+      "http_status_code": null,
+      "src_ip": "10.0.0.4",
+      "uuid": "cf094bcf-d785-47db-b4f6-fe0585ec357c"
+    },
+    "created_by": {
+      "system": {}
+    },
+    "event_type": "system_task.inactive_ven_cleanup",
+    "href": "/orgs/5636114/events/b55f53d9-7401-42dc-8aaf-37fb5f9782cc",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "org_setting": {
+            "audit_event_min_severity": "informational",
+            "audit_event_retention_seconds": 2592000,
+            "format": "JSON",
+            "label_display": "icon"
+          }
+        },
+        "uuid": "d4d0586a-fde0-4e40-838d-617910ca32c3"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-07T07:23:07.510Z"
+  },
+  {
+    "action": {
+      "api_endpoint": null,
+      "api_method": null,
+      "http_status_code": null,
+      "src_ip": "10.0.0.1",
+      "uuid": "e45239a9-85fc-458b-84e8-72af52c6da8e"
+    },
+    "created_by": {
+      "system": {}
+    },
+    "event_type": "system_task.inactive_ven_cleanup",
+    "href": "/orgs/5636114/events/eca47ae9-e153-4e37-8f05-57509c963928",
+    "notifications": [],
+    "pce_fqdn": "fqdn-1.example",
+    "resource_changes": [
+      {
+        "change_type": "update",
+        "changes": {},
+        "resource": {
+          "org_setting": {
+            "audit_event_min_severity": "informational",
+            "audit_event_retention_seconds": 2592000,
+            "format": "JSON",
+            "label_display": "icon"
+          }
+        },
+        "uuid": "7a692c06-2ba6-48c5-aca0-bf0656d23b19"
+      }
+    ],
+    "severity": "info",
+    "status": "success",
+    "timestamp": "2026-10-07T03:22:48.959Z"
+  }
+]
