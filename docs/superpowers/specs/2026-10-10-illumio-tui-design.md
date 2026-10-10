@@ -57,7 +57,9 @@ Pure library, no terminal code. Reusable by future tools (MCP server, scripts).
 - `error.rs` — `PceError` enum: `Auth`, `NotFound`, `RateLimited { retry_after }`,
   `Timeout`, `Network`, `InvalidFilter(String)`, `Server { status, body }`,
   `QueryFailed(String)`.
-- `models/` — serde types with real-fixture coverage:
+- `models/` — serde types with real-fixture coverage (plus `events.rs` —
+  `Event` with an `extra` map, `EventFilter`; and on `Workload` the derived
+  `AgentStatus` and `VenHealth`, see §4.4):
   - `traffic.rs` — `TrafficQuery` request body, `AsyncQueryStatus`, `Flow` row
     (`src`/`dst` endpoint with `ip`, `fqdn`, `workload{href,hostname,name,labels}`,
     `ip_lists[{href,name}]`; `service{port,proto,process_name,windows_service_name,user_name}`;
@@ -169,9 +171,35 @@ type only.
 
 ### 4.4 Workloads
 
-Table: hostname, name, labels, enforcement mode, visibility, online, VEN status.
-Detail: interfaces, OS. `t` jumps to Traffic with the workload preset as source
-(`T` as destination).
+Table: hostname, name, labels, enforcement mode, visibility, online, VEN status,
+plus VEN health: `sync` (policy sync state), `heartbeat` (age of the last
+heartbeat), `health` (a coloured state with error/warning counts), `ven`
+(version). Rows are coloured by health. A summary tile above the table shows
+counts by state (healthy, warning, error, offline, unmanaged) as a stacked bar.
+`h` toggles "unhealthy only" (local filter, no request); `H` sorts by health
+severity. Detail: interfaces, OS, VEN version and uptime, policy sync and
+heartbeat timestamps, and the agent's error and warning messages verbatim.
+`t` jumps to Traffic with the workload preset as source (`T` as destination).
+
+VEN health is derived entirely from the workload payload's `agent.status`
+(`status`, `last_heartbeat_on`, `security_policy_sync_state`,
+`agent_health`, `agent_health_errors`, `agent_version`, `uptime_seconds`,
+`fw_config_current`) and `ven`; it costs no extra request. Rule: unmanaged
+when there is no agent; offline when `online == false` or the heartbeat is
+older than 15 minutes; error when any agent error exists or the sync state has
+not been `applied` for more than 10 minutes; warning when any agent warning
+exists; otherwise healthy.
+
+### 4.5 Events (audit)
+
+Screen `5`. Table: timestamp, severity (coloured), event type, actor (user,
+agent or system), resource, status. `/` search, `s` sort, `f` opens a filter
+editor (severity, event type substring, window), `Enter` opens a detail overlay
+with the full event pretty-printed, `r` refreshes (bypasses the cache), `a`
+auto-refresh with the usual 60 s minimum and countdown. Opening the screen
+makes one request (`GET /orgs/{org}/events` with `severity`, `event_type`,
+`status`, `timestamp[gte]`, `timestamp[lte]`, `max_results`); default window
+24 h, default cap 500. Nothing refreshes on its own.
 
 ## 5. PCE protection
 
@@ -198,6 +226,7 @@ labels, label groups, IP lists, services.
 | labels, label groups, ip lists, services | 15 min | `r` on objects screen |
 | rulesets + rules (per draft/active) | 5 min | `r` on policy screen |
 | workloads | 5 min | `r` on workloads screen |
+| events | 60 s | `r` on events screen |
 | traffic result set | until filter changes | `r` on traffic screen |
 
 View switches, sorting, searching, grouping, drill-downs never re-query.
@@ -224,7 +253,8 @@ policy rules <ruleset name or href> [--draft|--active]
 policy pending
 labels [--key K] [--value V]
 label-groups | iplists | services
-workloads [--hostname H] [--label key=value]...
+workloads [--hostname H] [--label key=value]... [--unhealthy]
+events [--severity S] [--type <substr>] [--status S] [--since 24h] [--max-results N]
 health
 profile list | profile use <name>
 ```
@@ -298,7 +328,7 @@ GitHub Actions on macOS + Linux.
 
 ## 9. Out of scope for step 1
 
-All writes and provisioning; events and audit; VEN/agent health; container
+All writes and provisioning (see GitHub issue #1 for stages 3 and 4); container
 clusters; Illumio Cloud / FQS; plugins; themes beyond dark and light; mouse
 drag; multi-PCE simultaneous views.
 
