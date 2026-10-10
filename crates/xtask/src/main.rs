@@ -29,13 +29,15 @@ enum Cmd {
     },
 }
 
-/// Replaces hostnames, IPs, FQDNs, workload names and descriptions with
-/// stable placeholders. Label keys/values and rule names are kept.
+/// Replaces hostnames, IPs, FQDNs, workload names, process user names and
+/// descriptions with stable placeholders. Label keys/values and rule names
+/// are kept.
 #[derive(Default)]
 struct Anonymiser {
     hosts: HashMap<String, String>,
     ips: HashMap<String, String>,
     fqdns: HashMap<String, String>,
+    users: HashMap<String, String>,
 }
 
 impl Anonymiser {
@@ -97,6 +99,9 @@ impl Anonymiser {
                         ) => *s = self.ip(s),
                         ("name", Value::String(s)) if has_hostname && !s.is_empty() => {
                             *s = Self::map(&mut self.hosts, s, |n| format!("host-{n}.example"))
+                        }
+                        ("user_name", Value::String(s)) if !s.is_empty() => {
+                            *s = Self::map(&mut self.users, s, |n| format!("user-{n}"))
                         }
                         ("description", Value::String(s)) => s.clear(),
                         ("public_ip", Value::String(s)) => *s = self.ip(s),

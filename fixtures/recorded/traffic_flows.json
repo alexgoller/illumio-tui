@@ -57,7 +57,7 @@
       "port": 3306,
       "process_name": "/usr/bin/mysql",
       "proto": 6,
-      "user_name": "root",
+      "user_name": "user-1",
       "windows_service_name": ""
     },
     "src": {
@@ -157,7 +157,7 @@
       "port": 514,
       "process_name": "/usr/sbin/rsyslogd",
       "proto": 6,
-      "user_name": "syslog",
+      "user_name": "user-2",
       "windows_service_name": ""
     },
     "src": {
@@ -260,7 +260,7 @@
       "port": 8070,
       "process_name": "/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.322.b06-1.el7_9.x86_64/jre/bin/java",
       "proto": 6,
-      "user_name": "tomcat",
+      "user_name": "user-3",
       "windows_service_name": ""
     },
     "src": {
@@ -360,7 +360,7 @@
       "port": 22,
       "process_name": "/usr/sbin/sshd",
       "proto": 6,
-      "user_name": "root",
+      "user_name": "user-1",
       "windows_service_name": "ssh"
     },
     "src": {
@@ -458,7 +458,7 @@
       "port": 443,
       "process_name": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
       "proto": 6,
-      "user_name": "csmith",
+      "user_name": "user-4",
       "windows_service_name": ""
     },
     "src": {
@@ -559,7 +559,7 @@
       "port": 3389,
       "process_name": "C:\\Users\\ghernandez\\AppData\\Local\\Programs\\cursor\\Cursor.exe",
       "proto": 6,
-      "user_name": "CRYSTAL\\ghernandez",
+      "user_name": "user-5",
       "windows_service_name": "agentic-ai"
     },
     "src": {
@@ -662,7 +662,7 @@
       "port": 445,
       "process_name": "System",
       "proto": 6,
-      "user_name": "NT AUTHORITY\\SYSTEM",
+      "user_name": "user-6",
       "windows_service_name": "smb"
     },
     "src": {
@@ -734,7 +734,7 @@
       "port": 514,
       "process_name": "/usr/sbin/rsyslogd",
       "proto": 17,
-      "user_name": "syslog",
+      "user_name": "user-2",
       "windows_service_name": ""
     },
     "src": {
@@ -834,7 +834,7 @@
       "port": 443,
       "process_name": "/usr/sbin/httpd",
       "proto": 6,
-      "user_name": "apache",
+      "user_name": "user-7",
       "windows_service_name": ""
     },
     "src": {
@@ -907,7 +907,7 @@
       "port": 3389,
       "process_name": "C:\\Users\\hlee\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
       "proto": 6,
-      "user_name": "CRYSTAL\\hlee",
+      "user_name": "user-8",
       "windows_service_name": "ide"
     },
     "src": {
@@ -1007,7 +1007,7 @@
       "port": 22,
       "process_name": "C:\\Windows\\System32\\svchost.exe",
       "proto": 6,
-      "user_name": "NT AUTHORITY\\NETWORK SERVICE",
+      "user_name": "user-9",
       "windows_service_name": ""
     },
     "src": {
@@ -1108,7 +1108,7 @@
       "port": 514,
       "process_name": "",
       "proto": 17,
-      "user_name": "root",
+      "user_name": "user-1",
       "windows_service_name": ""
     },
     "src": {
@@ -1181,7 +1181,7 @@
       "port": 22,
       "process_name": "/usr/bin/ssh",
       "proto": 6,
-      "user_name": "root",
+      "user_name": "user-1",
       "windows_service_name": ""
     },
     "src": {
@@ -1279,7 +1279,7 @@
       "port": 5432,
       "process_name": "/usr/bin/psql",
       "proto": 6,
-      "user_name": "root",
+      "user_name": "user-1",
       "windows_service_name": ""
     },
     "src": {
@@ -1376,7 +1376,7 @@
       "port": 443,
       "process_name": "/usr/sbin/httpd",
       "proto": 6,
-      "user_name": "apache",
+      "user_name": "user-7",
       "windows_service_name": ""
     },
     "src": {
@@ -1473,7 +1473,7 @@
       "port": 8070,
       "process_name": "/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.322.b06-1.el7_9.x86_64/jre/bin/java",
       "proto": 6,
-      "user_name": "tomcat",
+      "user_name": "user-3",
       "windows_service_name": ""
     },
     "src": {
@@ -1570,7 +1570,7 @@
       "port": 8070,
       "process_name": "/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.322.b06-1.el7_9.x86_64/jre/bin/java",
       "proto": 6,
-      "user_name": "tomcat",
+      "user_name": "user-3",
       "windows_service_name": ""
     },
     "src": {
@@ -1667,7 +1667,7 @@
       "port": 3306,
       "process_name": "/usr/sbin/mysqld",
       "proto": 6,
-      "user_name": "mysql",
+      "user_name": "user-10",
       "windows_service_name": ""
     },
     "src": {
@@ -1739,7 +1739,7 @@
       "port": 3306,
       "process_name": "/usr/sbin/mysqld",
       "proto": 6,
-      "user_name": "mysql",
+      "user_name": "user-10",
       "windows_service_name": ""
     },
     "src": {
@@ -1836,7 +1836,7 @@
       "port": 5432,
       "process_name": "/usr/lib/postgresql/14/bin/postgres",
       "proto": 6,
-      "user_name": "postgres",
+      "user_name": "user-11",
       "windows_service_name": "postgres"
     },
     "src": {
@@ -1934,7 +1934,7 @@
       "port": 8070,
       "process_name": "",
       "proto": 6,
-      "user_name": "root",
+      "user_name": "user-1",
       "windows_service_name": ""
     },
     "src": {
@@ -2031,7 +2031,7 @@
       "port": 3306,
       "process_name": "/usr/sbin/mysqld",
       "proto": 6,
-      "user_name": "mysql",
+      "user_name": "user-10",
       "windows_service_name": ""
     },
     "src": {
@@ -2128,7 +2128,7 @@
       "port": 21,
       "process_name": "",
       "proto": 6,
-      "user_name": "root",
+      "user_name": "user-1",
       "windows_service_name": ""
     },
     "src": {
@@ -2226,7 +2226,7 @@
       "port": 22,
       "process_name": "C:\\Windows\\System32\\OpenSSH\\ssh.exe",
       "proto": 6,
-      "user_name": "NT AUTHORITY\\SYSTEM",
+      "user_name": "user-6",
       "windows_service_name": ""
     },
     "src": {
@@ -2323,7 +2323,7 @@
       "port": 389,
       "process_name": "C:\\Windows\\System32\\lsass.exe",
       "proto": 6,
-      "user_name": "NT AUTHORITY\\SYSTEM",
+      "user_name": "user-6",
       "windows_service_name": "LDAPServer"
     },
     "src": {
@@ -2421,7 +2421,7 @@
       "port": 88,
       "process_name": "",
       "proto": 17,
-      "user_name": "root",
+      "user_name": "user-1",
       "windows_service_name": ""
     },
     "src": {
@@ -2519,7 +2519,7 @@
       "port": 3306,
       "process_name": "/usr/bin/mysql",
       "proto": 6,
-      "user_name": "root",
+      "user_name": "user-1",
       "windows_service_name": ""
     },
     "src": {
@@ -2617,7 +2617,7 @@
       "port": 3306,
       "process_name": "/usr/bin/mysql",
       "proto": 6,
-      "user_name": "root",
+      "user_name": "user-1",
       "windows_service_name": ""
     },
     "src": {
@@ -2715,7 +2715,7 @@
       "port": 3389,
       "process_name": "/Applications/Microsoft Remote Desktop.app/Contents/MacOS/Microsoft Remote Desktop",
       "proto": 6,
-      "user_name": "csmith",
+      "user_name": "user-4",
       "windows_service_name": ""
     },
     "src": {
@@ -2816,7 +2816,7 @@
       "port": 514,
       "process_name": "",
       "proto": 6,
-      "user_name": "root",
+      "user_name": "user-1",
       "windows_service_name": ""
     },
     "src": {
@@ -2913,7 +2913,7 @@
       "port": 443,
       "process_name": "/usr/sbin/nginx",
       "proto": 6,
-      "user_name": "www-data",
+      "user_name": "user-12",
       "windows_service_name": "https"
     },
     "src": {
@@ -3010,7 +3010,7 @@
       "port": 3306,
       "process_name": "/usr/sbin/mysqld",
       "proto": 6,
-      "user_name": "mysql",
+      "user_name": "user-10",
       "windows_service_name": ""
     },
     "src": {
@@ -3111,7 +3111,7 @@
       "port": 8443,
       "process_name": "",
       "proto": 6,
-      "user_name": "root",
+      "user_name": "user-1",
       "windows_service_name": ""
     },
     "src": {
@@ -3211,7 +3211,7 @@
       "port": 53,
       "process_name": "C:\\Windows\\System32\\dns.exe",
       "proto": 17,
-      "user_name": "NT AUTHORITY\\SYSTEM",
+      "user_name": "user-6",
       "windows_service_name": "DNS"
     },
     "src": {
@@ -3311,7 +3311,7 @@
       "port": 5666,
       "process_name": "/usr/sbin/nrpe",
       "proto": 6,
-      "user_name": "nagios",
+      "user_name": "user-13",
       "windows_service_name": "nrpe"
     },
     "src": {
@@ -3409,7 +3409,7 @@
       "port": 8070,
       "process_name": "",
       "proto": 6,
-      "user_name": "root",
+      "user_name": "user-1",
       "windows_service_name": ""
     },
     "src": {
@@ -3506,7 +3506,7 @@
       "port": 443,
       "process_name": "/usr/sbin/nginx",
       "proto": 6,
-      "user_name": "www-data",
+      "user_name": "user-12",
       "windows_service_name": "https"
     },
     "src": {
@@ -3603,7 +3603,7 @@
       "port": 53,
       "process_name": "C:\\Windows\\System32\\dns.exe",
       "proto": 17,
-      "user_name": "NT AUTHORITY\\SYSTEM",
+      "user_name": "user-6",
       "windows_service_name": "DNS"
     },
     "src": {
@@ -3700,7 +3700,7 @@
       "port": 5666,
       "process_name": "/usr/sbin/nrpe",
       "proto": 6,
-      "user_name": "nagios",
+      "user_name": "user-13",
       "windows_service_name": "nrpe"
     },
     "src": {
@@ -3797,7 +3797,7 @@
       "port": 53,
       "process_name": "C:\\Windows\\System32\\dns.exe",
       "proto": 17,
-      "user_name": "NT AUTHORITY\\SYSTEM",
+      "user_name": "user-6",
       "windows_service_name": "DNS"
     },
     "src": {
@@ -3898,7 +3898,7 @@
       "port": 3702,
       "process_name": "",
       "proto": 17,
-      "user_name": "root",
+      "user_name": "user-1",
       "windows_service_name": ""
     },
     "src": {
@@ -3995,7 +3995,7 @@
       "port": 53,
       "process_name": "C:\\Windows\\System32\\dns.exe",
       "proto": 17,
-      "user_name": "NT AUTHORITY\\SYSTEM",
+      "user_name": "user-6",
       "windows_service_name": "DNS"
     },
     "src": {
@@ -4068,7 +4068,7 @@
       "port": 443,
       "process_name": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
       "proto": 6,
-      "user_name": "csmith",
+      "user_name": "user-4",
       "windows_service_name": "deepseek"
     },
     "src": {
@@ -4169,7 +4169,7 @@
       "port": 5666,
       "process_name": "",
       "proto": 6,
-      "user_name": "root",
+      "user_name": "user-1",
       "windows_service_name": ""
     },
     "src": {
@@ -4267,7 +4267,7 @@
       "port": 3306,
       "process_name": "/usr/bin/mysql",
       "proto": 6,
-      "user_name": "root",
+      "user_name": "user-1",
       "windows_service_name": ""
     },
     "src": {
@@ -4365,7 +4365,7 @@
       "port": 514,
       "process_name": "",
       "proto": 17,
-      "user_name": "root",
+      "user_name": "user-1",
       "windows_service_name": ""
     },
     "src": {
@@ -4438,7 +4438,7 @@
       "port": 53,
       "process_name": "/usr/bin/dig",
       "proto": 17,
-      "user_name": "root",
+      "user_name": "user-1",
       "windows_service_name": ""
     },
     "src": {
@@ -4535,7 +4535,7 @@
       "port": 3306,
       "process_name": "/usr/sbin/mysqld",
       "proto": 6,
-      "user_name": "mysql",
+      "user_name": "user-10",
       "windows_service_name": ""
     },
     "src": {
@@ -4633,7 +4633,7 @@
       "port": 5666,
       "process_name": "",
       "proto": 6,
-      "user_name": "root",
+      "user_name": "user-1",
       "windows_service_name": ""
     },
     "src": {
@@ -4730,7 +4730,7 @@
       "port": 22,
       "process_name": "/usr/sbin/sshd",
       "proto": 6,
-      "user_name": "root",
+      "user_name": "user-1",
       "windows_service_name": "ssh"
     },
     "src": {
