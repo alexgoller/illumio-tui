@@ -5,14 +5,13 @@ use crate::tui::ui::widgets::panel::panel;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Paragraph, Wrap};
+use ratatui::widgets::{Clear, Paragraph};
 
 pub const HELP_LINES: &[(&str, &str)] = &[
     ("1 2 3 4", "Traffic · Policy · Labels & objects · Workloads"),
-    (
-        ":",
-        "command prompt  (:traffic :policy :objects :workloads :filter <expr> :window <dur> :profile <name> :draft :active :q)",
-    ),
+    (":", "command prompt: :traffic :policy :objects :workloads"),
+    ("", ":filter <expr>  :window <dur>  :profile <name>"),
+    ("", ":draft  :active  :help  :q"),
     ("?", "this help"),
     ("q / Ctrl-C", "quit"),
     ("↑ ↓ PgUp PgDn Home End", "move in the current table"),
@@ -23,7 +22,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ("Traffic  v", "cycle Flows · App-to-app · Blocked"),
     (
         "Traffic  f",
-        "edit the filter (window, src, dst, service, decisions, cap)",
+        "edit filter: window src dst service decisions",
     ),
     ("Traffic  g", "change the aggregate label keys"),
     (
@@ -36,32 +35,26 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ("Objects  Tab", "next object type"),
     (
         "Workloads t / T",
-        "jump to Traffic with this workload as source / destination",
+        "jump to Traffic with workload as src / dst",
     ),
     ("Esc", "close overlay / cancel"),
 ];
 
 pub fn render_help(model: &Model, f: &mut Frame, area: Rect) {
     let t = &model.theme;
-    let r = centered(area, 78, (HELP_LINES.len() as u16) + 4);
+    let r = centered(area, area.width.min(84), (HELP_LINES.len() as u16) + 2);
     f.render_widget(Clear, r);
     let block = panel("Keys", "Esc closes", t, true);
     let lines: Vec<Line> = HELP_LINES
         .iter()
         .map(|(k, d)| {
             Line::from(vec![
-                Span::styled(format!("{k:<22}"), t.header_style()),
+                Span::styled(format!("{k:<24}"), t.header_style()),
                 Span::styled(*d, t.base()),
             ])
         })
         .collect();
-    f.render_widget(
-        Paragraph::new(lines)
-            .block(block)
-            .style(t.base())
-            .wrap(Wrap { trim: false }),
-        r,
-    );
+    f.render_widget(Paragraph::new(lines).block(block).style(t.base()), r);
 }
 
 pub fn render_prompt(model: &Model, input: &str, f: &mut Frame, area: Rect) {

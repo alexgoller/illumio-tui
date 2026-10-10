@@ -104,7 +104,10 @@ fn help_overlay_80x24() {
     use illumio_tui::tui::model::Overlay;
     let mut m = model_fixture();
     m.overlay = Overlay::Help;
-    insta::assert_snapshot!("help_overlay_80x24", render_to_string(&m, 80, 24));
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("close overlay"), "last line visible: {out}");
+    assert!(out.contains("move in the current table"), "{out}");
+    insta::assert_snapshot!("help_overlay_80x24", out);
 }
 
 #[test]
