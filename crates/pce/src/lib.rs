@@ -265,8 +265,10 @@ impl Pce {
         }
         let result =
             traffic::run_traffic_query(&self.client, query, &self.poll, cancel, progress).await?;
-        // Traffic is kept until the filter changes or the user refreshes; a
-        // long TTL stands in for "forever" within one session.
+        // Traffic is kept until the filter changes or the user refreshes:
+        // exactly one result set lives in the cache, and a long TTL stands in
+        // for "forever" within one session.
+        self.cache.invalidate_prefix("traffic:");
         self.cache
             .insert(&key, result.clone(), Duration::from_secs(24 * 3600));
         let truncated = result.truncated;

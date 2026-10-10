@@ -380,3 +380,93 @@ async fn traffic_is_cached_by_query_and_filters_resolve() {
         "4 object lists + workloads once, then POST + poll + download once"
     );
 }
+
+#[tokio::test]
+async fn only_the_latest_traffic_result_is_cached() {
+    use pce::models::ActorMatch;
+    use pce::traffic::{TrafficQueryBuilder, poll::PollConfig};
+    use tokio_util::sync::CancellationToken;
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/traffic_flows/async_queries"))
+        .respond_with(ResponseTemplate::new(202).set_body_json(
+            json!({"href": "/orgs/5/traffic_flows/async_queries/q-9", "status": "queued"}),
+        ))
+        .expect(4) // q1, q2, q1 again, q2 again: each a miss
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/traffic_flows/async_queries/q-9"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "completed", "result": "/orgs/5/traffic_flows/async_queries/q-9/download"})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/api/v2/orgs/5/traffic_flows/async_queries/q-9/download",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+    let mut p = pce_for(&server);
+    p.set_poll_config(PollConfig {
+        initial: Duration::from_millis(1),
+        factor: 1.5,
+        cap: Duration::from_millis(5),
+        grace: Duration::from_millis(100),
+    });
+    let bounds = || {
+        TrafficQueryBuilder::between(
+            "2026-10-09T00:00:00Z".parse().unwrap(),
+            "2026-10-10T00:00:00Z".parse().unwrap(),
+        )
+    };
+    let q1 = bounds()
+        .source(vec![ActorMatch::IpAddress {
+            ip_address: "10.0.0.1".into(),
+        }])
+        .build()
+        .unwrap();
+    let q2 = bounds()
+        .source(vec![ActorMatch::IpAddress {
+            ip_address: "10.0.0.2".into(),
+        }])
+        .build()
+        .unwrap();
+    let cancel = CancellationToken::new();
+    assert!(
+        !p.traffic(&q1, CacheMode::Use, &cancel, None)
+            .await
+            .unwrap()
+            .hit
+    );
+    assert!(
+        p.traffic(&q1, CacheMode::Use, &cancel, None)
+            .await
+            .unwrap()
+            .hit
+    );
+    let after_first = p.stats().calls;
+    assert!(
+        !p.traffic(&q2, CacheMode::Use, &cancel, None)
+            .await
+            .unwrap()
+            .hit
+    );
+    let after_second = p.stats().calls;
+    assert!(after_second > after_first);
+    assert!(
+        !p.traffic(&q1, CacheMode::Use, &cancel, None)
+            .await
+            .unwrap()
+            .hit,
+        "the first query was evicted when the second ran"
+    );
+    assert!(p.stats().calls > after_second);
+    assert!(
+        !p.traffic(&q2, CacheMode::Use, &cancel, None)
+            .await
+            .unwrap()
+            .hit,
+        "and the second is gone again now"
+    );
+}
