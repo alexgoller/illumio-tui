@@ -1,4 +1,4 @@
-//! `pce` is a read-only, PCE-friendly client library for the Illumio Core
+//! `pce` is a PCE-friendly client library for the Illumio Core
 //! Policy Compute Engine REST API v2.
 //!
 //! Layers, bottom up:
@@ -18,6 +18,7 @@ pub mod limiter;
 pub mod models;
 pub mod resolve;
 pub mod traffic;
+pub mod write;
 
 use std::sync::Arc;
 use std::time::Duration;
