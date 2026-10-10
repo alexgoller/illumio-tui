@@ -103,11 +103,20 @@ pub enum ConfigError {
         path: PathBuf,
         source: std::io::Error,
     },
-    #[error("cannot parse {path}: {source}")]
+    /// Reports the parser's message and byte offset only: the `Display` of
+    /// `toml::de::Error` quotes the offending line, which may hold a secret.
+    #[error("cannot parse {}: {}", path.display(), parse_summary(source))]
     Parse {
         path: PathBuf,
         source: toml::de::Error,
     },
+}
+
+fn parse_summary(e: &toml::de::Error) -> String {
+    match e.span() {
+        Some(span) => format!("{} at byte {}", e.message(), span.start),
+        None => e.message().to_string(),
+    }
 }
 
 pub fn default_config_path() -> PathBuf {
@@ -511,6 +520,21 @@ api_secret_cmd = "echo   from-command  "
             .unwrap_err()
             .to_string();
         assert!(err.contains("PCE_PORT"), "{err}");
+    }
+
+    #[test]
+    fn broken_config_error_does_not_echo_the_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.toml");
+        std::fs::write(
+            &p,
+            "[profiles.a]\nhost = \"h\"\napi_secret = \"SUPERSECRET123\n",
+        )
+        .unwrap();
+        let err = load_config_file(&p).unwrap_err().to_string();
+        assert!(err.contains("cannot parse"), "{err}");
+        assert!(err.contains("config.toml"), "{err}");
+        assert!(!err.contains("SUPERSECRET123"), "{err}");
     }
 
     #[test]
