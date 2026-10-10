@@ -170,8 +170,14 @@ pub fn load_env_file(path: &Path) -> Result<HashMap<String, String>, ConfigError
     })?;
     let mut map = HashMap::new();
     for item in iter {
-        let (k, v) =
-            item.map_err(|e| ConfigError::Message(format!("bad line in {}: {e}", path.display())))?;
+        let (k, v) = item.map_err(|e| {
+            // `LineParse` displays the raw line, which may be a secret.
+            let what = match e {
+                dotenvy::Error::LineParse(_, idx) => format!("parse error at index {idx}"),
+                other => other.to_string(),
+            };
+            ConfigError::Message(format!("bad line in {} ({what})", path.display()))
+        })?;
         map.insert(k, v);
     }
     Ok(map)
@@ -574,6 +580,18 @@ api_secret_cmd = "echo   from-command  "
         assert!(err.contains("cannot parse"), "{err}");
         assert!(err.contains("config.toml"), "{err}");
         assert!(!err.contains("SUPERSECRET123"), "{err}");
+    }
+
+    #[test]
+    fn broken_env_file_error_does_not_echo_the_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("bad.env");
+        std::fs::write(&p, "PCE_HOST=h\nAPI_SECRET=abc def!\n").unwrap();
+        let err = load_env_file(&p).unwrap_err().to_string();
+        assert!(err.contains("bad line"), "{err}");
+        assert!(err.contains("bad.env"), "{err}");
+        assert!(!err.contains("abc def"), "{err}");
+        assert!(!err.contains("API_SECRET"), "{err}");
     }
 
     #[test]

@@ -663,3 +663,50 @@ async fn results_from_the_old_pce_are_ignored_after_a_switch() {
     );
     assert_eq!(model.busy, 0);
 }
+
+#[tokio::test]
+async fn unparsable_env_file_fails_the_switch_without_echoing_it() {
+    use illumio_tui::cli::GlobalArgs;
+    use illumio_tui::tui::msg::Msg;
+    let a = MockServer::start().await;
+    let b = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = two_profile_config(dir.path(), &b);
+    let env = dir.path().join("bad.env");
+    std::fs::write(&env, "API_SECRET=abc def!\n").unwrap();
+    let global = GlobalArgs {
+        config: Some(cfg),
+        env_file: Some(env),
+        profile: Some("a".into()),
+        ..Default::default()
+    };
+    let (mut rt, tx) = Runtime::with_args(pce_for(&a), model(), global);
+    tx.send(Msg::Command(illumio_tui::tui::commands::Command::Profile(
+        "b".into(),
+    )))
+    .unwrap();
+    let events = stream::once(async {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
+    });
+    let model = run_loop(&mut rt, Box::pin(events), &mut |_| {}).await;
+    assert_eq!(model.profile.name, "t", "model unchanged");
+    assert!(
+        model.status.text.contains("bad line"),
+        "{}",
+        model.status.text
+    );
+    assert!(
+        model.status.text.contains("parse error at index"),
+        "{}",
+        model.status.text
+    );
+    assert!(
+        !model.status.text.contains("abc def"),
+        "{}",
+        model.status.text
+    );
+    assert_eq!(model.busy, 0);
+    assert!(a.received_requests().await.unwrap_or_default().is_empty());
+    assert!(b.received_requests().await.unwrap_or_default().is_empty());
+}

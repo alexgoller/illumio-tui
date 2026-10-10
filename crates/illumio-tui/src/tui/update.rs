@@ -115,6 +115,13 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             if model.screen == Screen::Workloads {
                 cmds.extend(load_missing_workloads(model));
             }
+            // After a reconnect or profile switch nothing else would load Policy.
+            if model.screen == Screen::Policy
+                && model.policy.loaded_at.is_none()
+                && !model.policy.loading
+            {
+                cmds.extend(load_rule_sets(model, CacheMode::Use));
+            }
             cmds
         }
         Msg::IndexFailed(e) => {
@@ -3135,5 +3142,69 @@ mod tests {
         assert!(matches!(cmds.as_slice(), [Cmd::RunQuery { .. }]));
         assert_eq!(m.screen, Screen::Traffic);
         assert_eq!(m.traffic.filter.src, "wl:host-1.example");
+    }
+
+    #[test]
+    fn policy_reloads_after_a_profile_switch_once_the_index_is_back() {
+        use crate::tui::commands::Command;
+        use crate::tui::model::{Limits, ProfileInfo};
+        use crate::tui::test_support::{fixture_index, model_with_policy, render_to_string};
+        let mut m = model_with_policy();
+        update(&mut m, key('2'));
+        assert_eq!(
+            update(&mut m, Msg::Command(Command::Profile("other".into()))),
+            vec![Cmd::SwitchProfile("other".into())]
+        );
+        let cmds = update(
+            &mut m,
+            Msg::ProfileSwitched(Ok((
+                ProfileInfo {
+                    name: "other".into(),
+                    host: "o.example".into(),
+                    org_id: 7,
+                },
+                Limits {
+                    auto_refresh_min_seconds: 60,
+                    traffic_max_results: 1000,
+                    traffic_default_window: "24h".into(),
+                },
+            ))),
+        );
+        assert_eq!(cmds, vec![Cmd::Connect]);
+        assert_eq!(m.screen, Screen::Policy);
+        assert!(!m.policy.loading && m.policy.loaded_at.is_none());
+        let out = render_to_string(&m, 80, 24);
+        assert!(out.contains("connecting"), "{out}");
+        assert!(!out.contains("ruleset-"), "no stale rows: {out}");
+        assert_eq!(
+            update(&mut m, Msg::Connected),
+            vec![Cmd::LoadIndex(CacheMode::Use)]
+        );
+        let cmds = update(
+            &mut m,
+            Msg::IndexLoaded {
+                index: fixture_index(),
+                age_secs: 0,
+            },
+        );
+        assert_eq!(
+            cmds,
+            vec![Cmd::LoadRuleSets {
+                scope: PolicyScope::Draft,
+                mode: CacheMode::Use
+            }]
+        );
+        assert!(m.policy.loading);
+        let out = render_to_string(&m, 80, 24);
+        assert!(out.contains("loading…"), "{out}");
+        // A second index event does not double-load.
+        let again = update(
+            &mut m,
+            Msg::IndexLoaded {
+                index: fixture_index(),
+                age_secs: 0,
+            },
+        );
+        assert!(again.is_empty(), "{again:?}");
     }
 }
