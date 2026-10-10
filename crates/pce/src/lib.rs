@@ -6,9 +6,11 @@
 //! caching live on the [`Pce`] facade (added in Task 5).
 
 pub mod auth;
+pub mod client;
 pub mod error;
 pub mod limiter;
 
 pub use auth::Credentials;
+pub use client::{ApiResponse, ClientConfig, PceClient, StatsSnapshot};
 pub use error::{PceError, Result};
 pub use limiter::RateLimiter;
