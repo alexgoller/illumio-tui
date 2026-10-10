@@ -383,6 +383,9 @@ fn events_screen_80x24_and_detail_160x48() {
     let out = render_to_string(&m, 160, 48);
     assert!(out.contains("\"event_type\": \"agent.tampering\""), "{out}");
     insta::assert_snapshot!("events_detail_160x48", out);
+    // At 80x24 the box holds 22 JSON lines and its note says so.
+    let small = render_to_string(&m, 80, 24);
+    assert!(small.contains("first 22 of"), "{small}");
 }
 
 #[test]

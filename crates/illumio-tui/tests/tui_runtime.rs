@@ -22,7 +22,13 @@ fn pce_for(server: &MockServer) -> Arc<Pce> {
     cfg.port = url.port().unwrap();
     cfg.requests_per_second = 1000.0;
     cfg.burst = 1000;
-    Arc::new(Pce::new(PceClient::new(cfg).unwrap()))
+    let mut pce = Pce::new(PceClient::new(cfg).unwrap());
+    // The 1 s default first poll would eat most of the tests' sleep margins.
+    pce.set_poll_config(pce::traffic::PollConfig {
+        initial: Duration::from_millis(10),
+        ..pce::traffic::PollConfig::default()
+    });
+    Arc::new(pce)
 }
 
 fn model() -> Model {
@@ -789,4 +795,71 @@ async fn unparsable_env_file_fails_the_switch_without_echoing_it() {
     assert_eq!(model.busy, 0);
     assert!(a.received_requests().await.unwrap_or_default().is_empty());
     assert!(b.received_requests().await.unwrap_or_default().is_empty());
+}
+
+/// `:profile` builds the client off the event loop: a slow `api_secret_cmd`
+/// must not freeze the screen. A Resize sent while the command still runs is
+/// drawn before the switch lands.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_slow_profile_switch_does_not_block_the_event_loop() {
+    use illumio_tui::cli::GlobalArgs;
+    use illumio_tui::tui::msg::Msg;
+    let a = MockServer::start().await;
+    let b = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/health"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .expect(1)
+        .mount(&b)
+        .await;
+    mount_objects(&b).await;
+    let ub = url::Url::parse(&b.uri()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = dir.path().join("config.toml");
+    std::fs::write(
+        &cfg,
+        format!(
+            "[profiles.a]\nhost = \"a.invalid\"\norg_id = 1\napi_key = \"k\"\napi_secret = \"s\"\n\n[profiles.slow]\nscheme = \"http\"\nhost = \"{}\"\nport = {}\norg_id = 5\napi_key = \"k\"\napi_secret_cmd = \"sleep 1; echo s\"\n",
+            ub.host_str().unwrap(),
+            ub.port().unwrap()
+        ),
+    )
+    .unwrap();
+    let global = GlobalArgs {
+        config: Some(cfg),
+        profile: Some("a".into()),
+        ..Default::default()
+    };
+    let (mut rt, tx) = Runtime::with_args(pce_for(&a), model(), global);
+    tx.send(Msg::Command(illumio_tui::tui::commands::Command::Profile(
+        "slow".into(),
+    )))
+    .unwrap();
+    let events = stream::iter([
+        (200u64, Event::Resize(99, 33)),
+        (
+            1600u64,
+            Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)),
+        ),
+    ])
+    .then(|(ms, e)| async move {
+        tokio::time::sleep(Duration::from_millis(ms)).await;
+        e
+    });
+    let mut resized_before_switch = false;
+    let model = run_loop(&mut rt, Box::pin(events), &mut |m| {
+        if m.size == (99, 33) && m.profile.name == "t" {
+            resized_before_switch = true;
+        }
+    })
+    .await;
+    assert!(
+        resized_before_switch,
+        "the Resize was handled while the switch was running"
+    );
+    assert_eq!(model.profile.name, "slow", "the switch still lands");
+    assert_eq!(model.stats.calls, 5, "health + four lists on the new PCE");
+    assert_eq!(model.busy, 0);
+    assert!(a.received_requests().await.unwrap_or_default().is_empty());
 }

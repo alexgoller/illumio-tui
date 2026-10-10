@@ -22,7 +22,7 @@ expression: out
 │Policy   p              pending changes                                       │
 │Policy   Tab / Enter    pane · rule detail · on a ruleset: load deny rules    │
 │Objects  Tab / Enter    next object type · detail                             │
-│Workloads t / T         jump to Traffic with workload as src / dst            │
+│Workloads t/T h H Enter Traffic as src/dst · unhealthy · health sort · detail │
 │Events   f / Enter / S  filter · event as JSON · sort by severity             │
 │Esc                     close overlay / cancel                                │
 ╰──────────────────────────────────────────────────────────────────────────────╯

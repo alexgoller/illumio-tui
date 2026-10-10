@@ -43,8 +43,8 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ),
     ("Objects  Tab / Enter", "next object type · detail"),
     (
-        "Workloads t / T",
-        "jump to Traffic with workload as src / dst",
+        "Workloads t/T h H Enter",
+        "Traffic as src/dst · unhealthy · health sort · detail",
     ),
     (
         "Events   f / Enter / S",
@@ -194,22 +194,24 @@ pub fn render_events_editor(
     f.render_widget(Paragraph::new(lines).block(block).style(t.base()), r);
 }
 
-/// Lines of JSON shown for one event; the rest is cut.
+/// Most lines of JSON shown for one event; the rest is cut. A smaller
+/// terminal shows fewer: the cut follows the box height.
 const EVENT_DETAIL_LINES: usize = 30;
 
 pub fn render_event_detail(model: &Model, event: &pce::models::Event, f: &mut Frame, area: Rect) {
     let t = &model.theme;
     let r = centered(area, 100, EVENT_DETAIL_LINES as u16 + 2);
     f.render_widget(Clear, r);
+    let shown = (r.height.saturating_sub(2) as usize).min(EVENT_DETAIL_LINES);
     let json = serde_json::to_string_pretty(event).unwrap_or_default();
     let total = json.lines().count();
     let lines: Vec<Line> = json
         .lines()
-        .take(EVENT_DETAIL_LINES)
+        .take(shown)
         .map(|l| Line::from(crate::tui::ui::screens::workloads::plain(l)))
         .collect();
-    let meta = if total > EVENT_DETAIL_LINES {
-        format!("first {EVENT_DETAIL_LINES} of {total} lines · Esc closes")
+    let meta = if total > shown {
+        format!("first {shown} of {total} lines · Esc closes")
     } else {
         "Esc closes".to_string()
     };
@@ -372,7 +374,7 @@ pub fn screen_hint(screen: Screen) -> &'static str {
         Screen::Traffic => "f filter  r run  a auto  v view  s sort  / search",
         Screen::Policy => "d scope  p pending  Enter detail  Tab pane  a auto",
         Screen::Objects => "Tab type  Enter detail  r refresh  a auto  / search",
-        Screen::Workloads => "t/T to traffic  / search  r refresh",
+        Screen::Workloads => "t/T traffic  h/H health  Enter detail  r refresh",
         Screen::Events => "f filter  r refresh  a auto  S severity  Enter detail",
     }
 }

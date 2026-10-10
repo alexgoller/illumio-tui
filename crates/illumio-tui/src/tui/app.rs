@@ -39,6 +39,10 @@ impl TaskTx {
     }
 }
 
+/// What a `:profile` switch built off the event loop: the new client and what
+/// the model needs to know about it, or the error to show.
+type SwitchResult = Result<(Pce, ProfileInfo, Limits), String>;
+
 pub struct Runtime {
     pub pce: Arc<Pce>,
     pub model: Model,
@@ -47,6 +51,10 @@ pub struct Runtime {
     generation: Arc<AtomicU64>,
     tx: UnboundedSender<Msg>,
     rx: UnboundedReceiver<Msg>,
+    /// Runtime-internal: finished profile switches. Kept off the `Msg` channel
+    /// because the runtime, not `update`, swaps the client.
+    switch_tx: UnboundedSender<SwitchResult>,
+    switch_rx: UnboundedReceiver<SwitchResult>,
 }
 
 impl Runtime {
@@ -68,6 +76,7 @@ impl Runtime {
         global: Option<GlobalArgs>,
     ) -> (Self, UnboundedSender<Msg>) {
         let (tx, rx) = unbounded_channel();
+        let (switch_tx, switch_rx) = unbounded_channel();
         (
             Self {
                 pce,
@@ -76,6 +85,8 @@ impl Runtime {
                 generation: Arc::new(AtomicU64::new(0)),
                 tx: tx.clone(),
                 rx,
+                switch_tx,
+                switch_rx,
             },
             tx,
         )
@@ -105,27 +116,28 @@ impl Runtime {
                 global.host = None;
                 global.pce_port = None;
                 global.org_id = None;
-                // Config and client construction are synchronous and cheap, and
-                // issue no request.
-                let msg = match Context::new(&global) {
-                    Ok(ctx) => {
-                        let info = ProfileInfo {
-                            name: ctx.config.profile_name.clone(),
-                            host: ctx.config.host.clone(),
-                            org_id: ctx.config.org_id,
-                        };
-                        let limits = Limits {
-                            auto_refresh_min_seconds: ctx.config.auto_refresh_min_seconds,
-                            traffic_max_results: ctx.config.traffic_max_results,
-                            traffic_default_window: ctx.config.traffic_default_window.clone(),
-                        };
-                        self.pce = Arc::new(ctx.pce);
-                        self.generation.fetch_add(1, Ordering::SeqCst);
-                        Msg::ProfileSwitched(Ok((info, limits)))
-                    }
-                    Err(e) => Msg::ProfileSwitched(Err(e.to_string())),
-                };
-                let _ = self.tx.send(msg);
+                // Config and client construction issue no request, but may run
+                // `api_secret_cmd` through `sh`: off the event loop, so the screen
+                // keeps drawing. `finish_switch` swaps the client when it is done.
+                let done = self.switch_tx.clone();
+                tokio::task::spawn_blocking(move || {
+                    let result = Context::new(&global)
+                        .map(|ctx| {
+                            let info = ProfileInfo {
+                                name: ctx.config.profile_name.clone(),
+                                host: ctx.config.host.clone(),
+                                org_id: ctx.config.org_id,
+                            };
+                            let limits = Limits {
+                                auto_refresh_min_seconds: ctx.config.auto_refresh_min_seconds,
+                                traffic_max_results: ctx.config.traffic_max_results,
+                                traffic_default_window: ctx.config.traffic_default_window.clone(),
+                            };
+                            (ctx.pce, info, limits)
+                        })
+                        .map_err(|e| e.to_string());
+                    let _ = done.send(result);
+                });
             }
             Cmd::Connect => {
                 self.model.busy += 1;
@@ -288,6 +300,22 @@ impl Runtime {
         }
     }
 
+    /// A finished `:profile` switch: the new client replaces the old one and the
+    /// generation moves on *before* `update` sees `ProfileSwitched`, so the
+    /// tasks it spawns (connect, index) run against the new PCE and whatever the
+    /// old one still reports is dropped.
+    fn finish_switch(&mut self, result: SwitchResult) {
+        let msg = match result {
+            Ok((pce, info, limits)) => {
+                self.pce = Arc::new(pce);
+                self.generation.fetch_add(1, Ordering::SeqCst);
+                Msg::ProfileSwitched(Ok((info, limits)))
+            }
+            Err(e) => Msg::ProfileSwitched(Err(e)),
+        };
+        self.apply(msg);
+    }
+
     fn apply(&mut self, msg: Msg) {
         // A task result always lowers `busy`; terminal events do not.
         let task_result = matches!(
@@ -327,8 +355,13 @@ impl Runtime {
 }
 
 fn to_msg(e: Event) -> Option<Msg> {
+    use crossterm::event::MouseEventKind;
     match e {
         Event::Key(k) => Some(Msg::Key(k)),
+        // Motion changes nothing; dropping it here saves a redraw per event.
+        Event::Mouse(m) if matches!(m.kind, MouseEventKind::Moved | MouseEventKind::Drag(_)) => {
+            None
+        }
         Event::Mouse(m) => Some(Msg::Mouse(m)),
         Event::Resize(w, h) => Some(Msg::Resize(w, h)),
         Event::FocusGained => Some(Msg::Focus(true)),
@@ -356,6 +389,7 @@ where
                 None => break,
             },
             Some(m) = rt.rx.recv() => rt.apply(m),
+            Some(r) = rt.switch_rx.recv() => rt.finish_switch(r),
             _ = async { match tick { Some(d) => tokio::time::sleep(d).await, None => std::future::pending::<()>().await } } => {
                 rt.apply(Msg::Tick(Instant::now()));
             }
@@ -428,7 +462,13 @@ pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
         let mut draw = |m: &Model| {
             let _ = terminal.draw(|f| view(m, f));
         };
-        let events = Box::pin(EventStream::new().filter_map(|r| async move { r.ok() }));
+        // A terminal read error ends the stream (and the loop) through the normal
+        // restore path below instead of being skipped forever.
+        let events = Box::pin(
+            EventStream::new()
+                .take_while(|r| std::future::ready(r.is_ok()))
+                .filter_map(|r| std::future::ready(r.ok())),
+        );
         run_loop(&mut rt, events, &mut draw).await
     };
     let _ = crossterm::execute!(std::io::stdout(), DisableMouseCapture, DisableFocusChange);
@@ -441,6 +481,29 @@ pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    #[test]
+    fn mouse_motion_is_dropped_and_the_wheel_kept() {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        let ev = |kind| {
+            Event::Mouse(MouseEvent {
+                kind,
+                column: 3,
+                row: 4,
+                modifiers: KeyModifiers::NONE,
+            })
+        };
+        assert!(to_msg(ev(MouseEventKind::Moved)).is_none());
+        assert!(to_msg(ev(MouseEventKind::Drag(MouseButton::Left))).is_none());
+        assert!(matches!(
+            to_msg(ev(MouseEventKind::ScrollDown)),
+            Some(Msg::Mouse(_))
+        ));
+        assert!(matches!(
+            to_msg(ev(MouseEventKind::Down(MouseButton::Left))),
+            Some(Msg::Mouse(_))
+        ));
+    }
 
     #[test]
     fn panic_hook_restores_first_and_then_calls_the_previous_hook() {
