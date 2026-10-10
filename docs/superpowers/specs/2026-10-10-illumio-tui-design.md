@@ -250,13 +250,20 @@ File `~/.config/illumio-tui/config.toml` (mode 0600), kubeconfig-style profiles:
 
 ```toml
 default_profile = "demo100"
+
 [profiles.demo100]
-host = "demo100.illum.io"; port = 443; org_id = 5636114; tls_verify = true
+host = "demo100.illum.io"
+port = 443
+org_id = 5636114
+tls_verify = true
 api_key = "…"                 # optional
 api_secret_cmd = "op read …"  # optional, run to obtain the secret
+
 [profiles.demo100.limits]
-requests_per_second = 2; auto_refresh_min_seconds = 60
-traffic_max_results = 1000; traffic_default_window = "24h"
+requests_per_second = 2
+auto_refresh_min_seconds = 60
+traffic_max_results = 1000
+traffic_default_window = "24h"
 ```
 
 Resolution per value: CLI flag → env (`PCE_HOST`, `PCE_PORT`, `PCE_ORG_ID`,
