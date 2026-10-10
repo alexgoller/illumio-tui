@@ -9,7 +9,7 @@
 <link rel="canonical" href="https://alexgoller.github.io/illumio-tui/">
 <meta property="og:type" content="website">
 <meta property="og:title" content="illumio-tui: the Illumio PCE at terminal speed">
-<meta property="og:description" content="Read-only CLI for Illumio Core PCE traffic and policy today, btop-style TUI next. Throttled, cached, counted.">
+<meta property="og:description" content="CLI and TUI for Illumio Core PCE traffic and policy, with opt-in writes for labels, IP lists, services and unmanaged workloads. Throttled, cached, counted.">
 <meta property="og:url" content="https://alexgoller.github.io/illumio-tui/">
 <meta name="twitter:card" content="summary">
 <link rel="icon" href="assets/mark.svg" type="image/svg+xml">
@@ -60,8 +60,8 @@
 
 <section class="panel" id="today" aria-labelledby="today-h">
   <h2 id="today-h"><span class="key">1</span>What it does today</h2>
-  <p class="lede">A fast, scriptable, read-only CLI for the PCE. It speaks JSON to agents and tables to humans.</p>
-  <p>Every command below is real and merged on <code>main</code>. Output is a table when you are at a terminal and JSON when stdout is piped; force either with <code>--table</code> or <code>--json</code>. Nothing in this release can change your PCE: it is read-only by design.</p>
+  <p class="lede">A fast, scriptable CLI for the PCE: reads by default, writes only when you opt in. It speaks JSON to agents and tables to humans.</p>
+  <p>Every command below is real and merged on <code>main</code>. Output is a table when you are at a terminal and JSON when stdout is piped; force either with <code>--table</code> or <code>--json</code>. Reads are the default. Writes exist for labels, IP lists, services and unmanaged workloads, and only when your profile and the invocation both allow them.</p>
 
 <pre><code><span class="c"># connectivity, objects, workloads</span>
 <span class="p">$ </span>illumio-tui health
@@ -84,7 +84,15 @@
 
 <span class="c"># connection profiles</span>
 <span class="p">$ </span>illumio-tui profile list
-<span class="p">$ </span>illumio-tui profile use prod</code></pre>
+<span class="p">$ </span>illumio-tui profile use prod
+
+<span class="c"># writes: off unless the profile allows them and --allow-writes is given</span>
+<span class="p">$ </span>illumio-tui --allow-writes labels add app=web --yes
+<span class="p">$ </span>illumio-tui --allow-writes iplists update Corp --add-range 10.2.0.0/16 --dry-run</code></pre>
+
+  <ul>
+    <li>Writes labels, IP lists, services and unmanaged workloads from the CLI: profile opt-in plus <code>--allow-writes</code>, <code>--dry-run</code> shows the request, <code>--yes</code> sends it once, every write lands in a local audit log.</li>
+  </ul>
 
   <div class="cols">
     <div>
@@ -132,6 +140,7 @@
         <dt>3</dt><dd>authentication</dd>
         <dt>4</dt><dd>PCE error</dd>
         <dt>5</dt><dd>rate limited</dd>
+        <dt>6</dt><dd>write refused by the guard</dd>
       </dl>
     </div>
   </div>

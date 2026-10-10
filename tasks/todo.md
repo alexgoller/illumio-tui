@@ -57,17 +57,23 @@
 
 ## Plan 3: writes (labels, IP lists, services, unmanaged workloads)
 Spec: docs/superpowers/specs/2026-10-10-pce-writes-design.md · Plan: docs/superpowers/plans/2026-10-10-pce-writes.md
-- [ ] Task 1 PceClient::write, PceError::Rejected
-- [ ] Task 2 Audit sink (JSONL 0600, memory, null)
-- [ ] Task 3 WriteGuard, Plan/Written/Outcome, Writer::execute
-- [ ] Task 4 Spec parsers (IP ranges, ports, interfaces)
-- [ ] Task 5 Labels planners
-- [ ] Task 6 IP list planners and patch
-- [ ] Task 7 Service planners and patch
-- [ ] Task 8 Unmanaged workload planners, lookup, patch
-- [ ] Task 9 CLI plumbing: writes setting, --allow-writes, exit 6, envelope, write.rs
-- [ ] Task 10 labels add/update/delete
-- [ ] Task 11 iplists add/update/delete
-- [ ] Task 12 services add/update/delete
-- [ ] Task 13 workloads add/update/delete
-- [ ] Task 14 Live opt-in smoke, docs, review, final gate
+- [x] Task 1 PceClient::write, PceError::Rejected
+- [x] Task 2 Audit sink (JSONL 0600, memory, null)
+- [x] Task 3 WriteGuard, Plan/Written/Outcome, Writer::execute
+- [x] Task 4 Spec parsers (IP ranges, ports, interfaces)
+- [x] Task 5 Labels planners
+- [x] Task 6 IP list planners and patch
+- [x] Task 7 Service planners and patch
+- [x] Task 8 Unmanaged workload planners, lookup, patch
+- [x] Task 9 CLI plumbing: writes setting, --allow-writes, exit 6, envelope, write.rs
+- [x] Task 10 labels add/update/delete
+- [x] Task 11 iplists add/update/delete
+- [x] Task 12 services add/update/delete
+- [x] Task 13 workloads add/update/delete
+- [x] Task 14 Live opt-in smoke, docs, review, final gate
+
+## Review (Plan 3)
+- Shipped: `pce::write` (`WriteGuard`, `Writer`, planners for labels, IP lists, services and unmanaged workloads, JSONL audit) and CLI `labels|iplists|services|workloads add|update|delete` with `--allow-writes`, `--dry-run`, `--yes`, `--if-missing`, exit code 6, and `meta.write` in the envelope. Docs: README "Writes", architecture "Writes", website section 1.
+- Safety model: profile opt-in plus per-run flag, audit log must open before anything is sent, no retries, ambiguous or managed targets refused locally, updates that cannot preserve unknown fields refused locally.
+- Final gate: `cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` (see commit for counts: 391 tests passing).
+- The live write smoke (`PCE_LIVE_WRITES=1 cargo test -p pce --test live_writes`) was NOT run against any PCE: the shared demo PCE is approved for reads only. Without the env it prints the skip line and passes. Writes are unproven against a real PCE until it is run on a designated non-production one.

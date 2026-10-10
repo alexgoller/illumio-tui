@@ -22,3 +22,10 @@ Captured after corrections and review findings, so the same mistake is not repea
 - Headless TUI smoke: drive the binary through a Python `pty.fork` with `TIOCSWINSZ`, reconstruct screens with `pyte`. Grepping the raw byte stream is wrong: ratatui rewrites only changed cells, so first-frame text persists.
 - Mouse events must stay request-free; when that hides data (deny rules for a wheel-selected ruleset), say so in the panel meta rather than fetching.
 - Auto-refresh that fails switches itself off (`auto off · failed`), so a struggling PCE is never polled unattended.
+
+## Plan 3 (writes), 2026-10-10
+
+- Every "full list PUT" round trip (IP ranges, services, interfaces) first dropped fields the model did not carry; reviewers caught three silent-data-loss paths. Either carry unknown fields through (`extra` maps) or refuse the update locally.
+- Managed checks must fail closed: a missing `managed` flag or a present VEN means refuse, never write.
+- `--if-missing` must propagate lookup errors instead of treating them as "absent", or it creates duplicates.
+- An audit line must go out in a single `write` syscall, so concurrent appends cannot interleave.

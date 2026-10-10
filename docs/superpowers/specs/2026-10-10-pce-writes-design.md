@@ -305,7 +305,7 @@ remove flags. `workloads add` without `--hostname` sends `hostname = NAME`.
 | Area | Files |
 | --- | --- |
 | client | `crates/pce/src/client.rs` (`write`, `WriteMethod`), `error.rs` (`Rejected`) |
-| write layer | `crates/pce/src/write/{mod.rs, guard.rs, audit.rs, drafts.rs, labels.rs, ip_lists.rs, services.rs, workloads.rs}` |
+| write layer | `crates/pce/src/write/{mod.rs, guard.rs, audit.rs, specs.rs, labels.rs, ip_lists.rs, services.rs, workloads.rs}` |
 | config | `crates/illumio-tui/src/config.rs` (`writes`), `cli/mod.rs` (`--allow-writes`), `cli/error.rs` (`Refused`) |
 | commands | `crates/illumio-tui/src/cli/{objects.rs, workloads.rs}` gain subcommands; `cli/write.rs` shares the guard, dry-run and envelope logic |
 | tests | `crates/pce/tests/write_contract.rs`, `crates/illumio-tui/tests/cli_writes.rs`, `crates/pce/tests/live_writes.rs` (opt-in) |

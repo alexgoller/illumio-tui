@@ -1,7 +1,7 @@
 # illumio-tui
 
 Terminal UI and CLI for the Illumio Core PCE, built for administrators,
-Illumio Professional Services, and agents. Read-only in this release.
+Illumio Professional Services, and agents. Reads by default; writes for labels, IP lists, services and unmanaged workloads are opt-in (see Writes).
 
 Website: https://alexgoller.github.io/illumio-tui/
 
@@ -63,6 +63,7 @@ or a profile in `~/.config/illumio-tui/config.toml`:
     org_id = 1
     api_key = "api_..."
     api_secret_cmd = "op read op://vault/pce/secret"
+    writes = true    # optional: allow write commands (they still need --allow-writes)
 
 `--env-file .env` loads a dotenv file for one run. Connection settings can
 also be overridden per run with global flags: `--host`, `--pce-port`,
@@ -126,7 +127,49 @@ times.
 JSON output (default when piped) is `{"data": ..., "meta": {...}}` where
 `meta` reports API calls, bytes, cache status, truncation, and the query
 window. Errors go to stderr as JSON. Exit codes: 1 generic, 2 arguments or
-config, 3 auth, 4 PCE error, 5 rate limited.
+config, 3 auth, 4 PCE error, 5 rate limited, 6 write refused by the guard.
+
+## Writes
+
+Writes are off until two things say yes: the profile (`writes = true`, or
+`ILLUMIO_WRITES=1` in the environment) and the invocation (`--allow-writes`).
+Every write command prints the exact request with `--dry-run` and needs
+`--yes` to send it. Each sent request is appended to
+`~/.local/state/illumio-tui/writes.jsonl` (or `$XDG_STATE_HOME/illumio-tui/`),
+mode 0600, with the body sent and the status received. Nothing is ever retried.
+IP lists and services are written to draft and wait for provisioning
+(`"pending": true`); labels and workloads take effect at once.
+
+    illumio-tui --allow-writes labels add app=web --yes
+    illumio-tui --allow-writes labels add app=web --if-missing --yes     # no-op when it exists
+    illumio-tui --allow-writes iplists add Corp --range 10.0.0.0/8 --fqdn '*.corp.example' --yes
+    illumio-tui --allow-writes iplists update Corp --add-range 10.2.0.0/16 --dry-run
+    illumio-tui --allow-writes services add PostgreSQL --port 5432/tcp --yes
+    illumio-tui --allow-writes workloads add printer-1 --ip 10.0.0.50/24 --label app=print --yes
+    illumio-tui --allow-writes workloads update printer-1 --add-label env=lab --yes
+    illumio-tui --allow-writes workloads delete printer-1 --yes
+
+Names resolve by exact match; an ambiguous or unknown name is exit code 2
+with the candidates listed, before any request. An update with no change
+flags is exit code 2 as well. Update commands re-fetch the object and send
+the full list the PCE expects (`ip_ranges`, `service_ports`, `labels`), so
+`--remove-range` and friends must match an existing entry. Updates of IP lists
+and services refuse (exit 2) objects carrying fields this tool cannot
+preserve: services with `windows_services`, `icmp_type`/`icmp_code`, or a port
+without a protocol. Only unmanaged workloads can be written: one that the PCE
+reports as managed, or that has a VEN, is refused locally, and a hostname or
+name matching more than one workload is refused ("use the href").
+
+A sent write returns `data` with `href`, `pending`, `status`, `object`,
+`dropped_fields` and `warnings`, and `meta.write` with the method, path,
+status and audit location. `warnings` is how a write the PCE accepted but
+whose re-fetch failed, a POST answered without an href, or an audit append
+failure is reported: still success, never a retry. A timeout, lost
+connection, gateway status (502/503/504) or undecodable 2xx body is
+`write_unanswered` (exit 4, "write may have applied; check the PCE before
+retrying"), audited with `phase: "sent"`. Exit code 6 means the guard refused
+(profile, flag, or audit log not writable). `health --json` reports
+`"writes": true|false`. Rulesets, rules and provisioning are the next stage.
 
 ## PCE protection
 
@@ -140,6 +183,7 @@ body without sending it.
     cargo test --workspace
     cargo xtask record --env-file ../illumio-mcp-server/.env   # refresh fixtures/recorded
     PCE_LIVE=1 cargo test -p pce --test live                    # needs PCE_* env
+    PCE_LIVE_WRITES=1 cargo test -p pce --test live_writes      # creates and deletes one label; non-production PCE only
 
 Design: `docs/superpowers/specs/2026-10-10-illumio-tui-design.md`.
 

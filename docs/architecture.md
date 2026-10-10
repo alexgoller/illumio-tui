@@ -87,6 +87,28 @@ terminal is needed.
 | confirm big queries | `TrafficQuery::needs_confirmation` |
 | show the request without sending | `traffic query --dry-run` |
 
+## Writes
+
+`pce::write` is the only path that mutates the PCE. A `Writer` exists only
+through `Pce::writer(&WriteGuard)`, and a `WriteGuard` cannot be built unless
+the profile allows writes, the caller passed `--allow-writes`, and the audit
+log opens for append. Writes are two-phase: `plan_create_*`, `plan_update_*`
+and `plan_delete_*` build a `Plan` (the exact `WriteRequest`, or a `Noop` when
+`--if-missing` found an exact match) without sending anything; `execute` sends
+it once through `PceClient::write` (no retry, 400/406/409/422 -> `Rejected`),
+appends the audit entry in a single write, invalidates the cache prefix of the
+kind (`objects:` or `workloads`), and re-fetches the object after a 204. A
+timeout, connection loss, gateway status or undecodable 2xx body after the
+request left is reported as `write_unanswered` ("may have applied") and
+audited with `phase: "sent"`; a failed re-fetch, a POST without an href or an
+audit append failure is success with `warnings`. Updates of IP lists, services
+and workload labels compute the full replacement list locally because the PCE
+replaces those arrays wholesale; unknown fields are carried through, or the
+update is refused when they cannot be preserved. Workloads are written only
+when the PCE reports `managed: false` and no VEN. The CLI layer
+(`cli/write.rs`) owns `--dry-run`/`--yes`, exact name resolution and the
+envelope (`meta.write`).
+
 ## Testing
 
 Offline tests use `fixtures/*.json` (hand-written, deterministic) and
@@ -97,3 +119,5 @@ time (e.g. `label_groups.json`) is committed as an empty list, and the
 recorded-shape test treats an empty recorded list as a pass (it prints a
 note rather than failing), since an empty list is a valid shape, not a
 recording error. `PCE_LIVE=1` enables the single live test.
+
+`crates/pce/tests/write_contract.rs` pins every write body with wiremock; `crates/illumio-tui/tests/cli_writes.rs` covers the guard, exit codes 2/4/6, dry runs and the audit file. `live_writes.rs` is opt-in (`PCE_LIVE_WRITES=1`) and only ever creates and deletes one label.
