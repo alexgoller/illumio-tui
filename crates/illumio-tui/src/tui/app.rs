@@ -133,6 +133,8 @@ impl Runtime {
     pub fn tick_period(&self) -> Option<Duration> {
         if self.model.busy > 0 {
             Some(BUSY_TICK)
+        } else if self.model.any_auto_enabled() {
+            Some(IDLE_TICK)
         } else {
             None
         }

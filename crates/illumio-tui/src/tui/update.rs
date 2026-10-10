@@ -22,6 +22,16 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::Tick(now) => {
             if model.traffic.is_running() {
                 refresh_running_status_at(model, now);
+                return Vec::new();
+            }
+            if model.screen == Screen::Traffic
+                && model.focused
+                && model.overlay == Overlay::None
+                && model.traffic.data.is_some()
+                && model.traffic.auto.due(now)
+            {
+                let f = model.traffic.filter.clone();
+                return start_query(model, f, CacheMode::Bypass);
             }
             Vec::new()
         }
@@ -392,6 +402,15 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         }
         KeyCode::Char('r') => return update(model, Msg::RunNow),
         KeyCode::Char('v') => model.traffic.view = model.traffic.view.next(),
+        KeyCode::Char('a') => {
+            let a = &mut model.traffic.auto;
+            a.enabled = !a.enabled;
+            model.status = if a.enabled {
+                StatusLine::info(format!("auto-refresh every {}s", a.interval.as_secs()))
+            } else {
+                StatusLine::info("auto-refresh off")
+            };
+        }
         KeyCode::Char('g') => {
             model.overlay = Overlay::GroupKeys {
                 input: model.traffic.group_keys.join(","),
@@ -591,6 +610,132 @@ mod tests {
         );
         assert!(!m.traffic.groups.is_empty());
         assert_eq!(m.traffic.blocked.len(), 2);
+    }
+
+    #[test]
+    fn auto_refresh_respects_interval_running_and_focus() {
+        use crate::tui::test_support::model_with_flows;
+        use std::time::{Duration, Instant};
+        let mut m = model_with_flows();
+        let t0 = Instant::now();
+        assert!(update(&mut m, Msg::Tick(t0)).is_empty(), "off by default");
+        update(&mut m, key('a'));
+        assert!(m.traffic.auto.enabled);
+        assert!(m.status.text.contains("60s"), "{}", m.status.text);
+        // first tick after enabling: not due, last_run is the data's fetch time, 3 s ago.
+        assert!(update(&mut m, Msg::Tick(t0)).is_empty());
+        let later = t0 + Duration::from_secs(61);
+        let cmds = update(&mut m, Msg::Tick(later));
+        assert!(
+            matches!(
+                cmds.as_slice(),
+                [Cmd::RunQuery {
+                    mode: pce::CacheMode::Bypass,
+                    ..
+                }]
+            ),
+            "{cmds:?}"
+        );
+        // while running, no second run
+        assert!(update(&mut m, Msg::Tick(later + Duration::from_secs(120))).is_empty());
+        let seq = m.traffic.seq;
+        update(
+            &mut m,
+            Msg::QueryDone {
+                seq,
+                result: Err("boom".into()),
+            },
+        );
+        // unfocused: no run even when due
+        update(&mut m, Msg::Focus(false));
+        assert!(update(&mut m, Msg::Tick(later + Duration::from_secs(200))).is_empty());
+        update(&mut m, Msg::Focus(true));
+        assert!(!update(&mut m, Msg::Tick(later + Duration::from_secs(200))).is_empty());
+        let seq = m.traffic.seq;
+        update(
+            &mut m,
+            Msg::QueryDone {
+                seq,
+                result: Err("boom".into()),
+            },
+        );
+        update(&mut m, key('a'));
+        assert!(!m.traffic.auto.enabled);
+        assert_eq!(m.status.text, "auto-refresh off");
+        assert!(update(&mut m, Msg::Tick(later + Duration::from_secs(1000))).is_empty());
+    }
+
+    #[test]
+    fn auto_refresh_interval_never_below_profile_minimum() {
+        use crate::tui::model::AutoRefresh;
+        let a = AutoRefresh::new(10);
+        assert_eq!(a.interval, std::time::Duration::from_secs(60));
+        let b = AutoRefresh::new(300);
+        assert_eq!(b.interval, std::time::Duration::from_secs(300));
+    }
+
+    #[test]
+    fn auto_refresh_without_data_does_nothing() {
+        use std::time::{Duration, Instant};
+        let mut m = model_fixture();
+        update(&mut m, key('a'));
+        assert!(
+            update(&mut m, Msg::Tick(Instant::now() + Duration::from_secs(600))).is_empty(),
+            "nothing to refresh until a query ran"
+        );
+    }
+
+    #[test]
+    fn result_panel_shows_countdown_only_while_auto_is_enabled() {
+        use crate::tui::test_support::{model_with_flows, render_to_string};
+        let mut m = model_with_flows();
+        assert!(!render_to_string(&m, 120, 30).contains("auto in"));
+        update(&mut m, key('a'));
+        assert!(render_to_string(&m, 120, 30).contains("auto in 5"));
+    }
+
+    #[test]
+    fn auto_refresh_is_held_back_by_overlay_and_other_screens() {
+        use crate::tui::test_support::model_with_flows;
+        use std::time::{Duration, Instant};
+        let mut m = model_with_flows();
+        update(&mut m, key('a'));
+        let due = Instant::now() + Duration::from_secs(600);
+        m.overlay = Overlay::Help;
+        assert!(update(&mut m, Msg::Tick(due)).is_empty());
+        m.overlay = Overlay::None;
+        m.screen = Screen::Policy;
+        assert!(update(&mut m, Msg::Tick(due)).is_empty());
+    }
+
+    #[test]
+    fn search_captures_keys_on_aggregate_and_blocked_views() {
+        use crate::tui::test_support::model_with_flows;
+        for presses in [1, 2] {
+            let mut m = model_with_flows();
+            for _ in 0..presses {
+                update(&mut m, key('v'));
+            }
+            update(&mut m, key('/'));
+            for c in ['q', ':', '?'] {
+                update(&mut m, key(c));
+            }
+            assert_eq!(m.screen, Screen::Traffic);
+            assert!(!m.quit);
+            assert_eq!(m.overlay, Overlay::None);
+            let table_search = |m: &Model| match m.traffic.view {
+                TrafficView::Aggregate => m.traffic.groups.search_text().to_string(),
+                TrafficView::Blocked => m.traffic.blocked.search_text().to_string(),
+                TrafficView::Flows => unreachable!("v moved off Flows"),
+            };
+            assert_eq!(table_search(&m), "q:?");
+            update(
+                &mut m,
+                Msg::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+            );
+            assert!(!m.traffic.is_searching());
+            assert_eq!(table_search(&m), "");
+        }
     }
 
     #[test]

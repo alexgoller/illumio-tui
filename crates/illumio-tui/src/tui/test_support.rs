@@ -66,6 +66,7 @@ pub fn model_with_flows() -> Model {
         filter: m.traffic.filter.clone(),
     });
     m.traffic.query = QueryState::Idle;
+    m.traffic.auto.last_run = Some(Instant::now() - Duration::from_secs(3));
     m.traffic.rebuild_views();
     m
 }

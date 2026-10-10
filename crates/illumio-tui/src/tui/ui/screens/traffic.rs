@@ -9,6 +9,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
+use std::time::Instant;
 
 #[derive(Debug, Clone, Copy)]
 pub struct TrafficLayout {
@@ -66,12 +67,20 @@ fn query_meta(model: &Model) -> String {
         } => format!("running {:.1}s · {status}", started.elapsed().as_secs_f64()),
         QueryState::Failed(_) => "failed".into(),
         QueryState::Idle => match &model.traffic.data {
-            Some(d) => format!(
-                "{} flows · {}{}",
-                d.flows.len(),
-                bars::age_text(d.fetched_at.elapsed()),
-                if d.cache_hit { " · cached" } else { "" }
-            ),
+            Some(d) => {
+                let auto = &model.traffic.auto;
+                format!(
+                    "{} flows · {}{}{}",
+                    d.flows.len(),
+                    bars::age_text(d.fetched_at.elapsed()),
+                    if d.cache_hit { " · cached" } else { "" },
+                    if auto.enabled {
+                        format!(" · auto in {}s", auto.remaining(Instant::now()).as_secs())
+                    } else {
+                        String::new()
+                    }
+                )
+            }
             None => "no query yet · press r".into(),
         },
     }

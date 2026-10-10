@@ -242,3 +242,95 @@ async fn refresh_only_reruns_the_traffic_query() {
         "4 lists once, then POST + poll + download twice"
     );
 }
+
+#[tokio::test]
+async fn tick_period_follows_busy_and_auto_state() {
+    use illumio_tui::tui::app::{BUSY_TICK, IDLE_TICK};
+    let server = MockServer::start().await;
+    let (mut rt, _tx) = Runtime::new(pce_for(&server), model());
+    assert_eq!(rt.tick_period(), None);
+    rt.model.traffic.auto.enabled = true;
+    assert_eq!(rt.tick_period(), Some(IDLE_TICK));
+    rt.model.busy = 1;
+    assert_eq!(rt.tick_period(), Some(BUSY_TICK));
+}
+
+/// Runs one initial query, then a far-future Tick; `auto` presses `a` first.
+/// Returns the number of async-query POSTs the PCE saw.
+async fn posts_after_far_future_tick(auto: bool) -> usize {
+    use illumio_tui::tui::filter::TrafficFilter;
+    use illumio_tui::tui::msg::Msg;
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    const QHREF: &str = "/orgs/5/traffic_flows/async_queries/q-1";
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/traffic_flows/async_queries"))
+        .respond_with(
+            ResponseTemplate::new(202).set_body_json(json!({"href": QHREF, "status": "queued"})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "completed", "result": {"href": format!("{QHREF}/download")}, "matches_count": 4})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}/download")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/traffic_flows.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .mount(&server)
+        .await;
+    let pce = pce_for(&server);
+    let mut m = model();
+    m.connection = Connection::Connected {
+        index: Some(pce.name_index(pce::CacheMode::Use).await.unwrap()),
+        index_age_secs: 0,
+    };
+    let (mut rt, tx) = Runtime::new(pce, m);
+    let mut f = TrafficFilter::defaults("1h", 50);
+    f.src = "app=shop".into();
+    tx.send(Msg::ApplyFilter(f)).unwrap();
+    // Ticks are injected with a far-future clock: the real interval is >= 60 s.
+    let tick_tx = tx.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+        let _ = tick_tx.send(Msg::Tick(
+            std::time::Instant::now() + Duration::from_secs(3600),
+        ));
+    });
+    let keys: Vec<(u64, Option<KeyCode>)> = if auto {
+        vec![
+            (1800, Some(KeyCode::Char('a'))),
+            (3700, Some(KeyCode::Char('q'))),
+        ]
+    } else {
+        vec![(4500, Some(KeyCode::Char('q')))]
+    };
+    let events = stream::iter(keys).then(|(ms, code)| async move {
+        tokio::time::sleep(Duration::from_millis(ms)).await;
+        Event::Key(KeyEvent::new(code.unwrap(), KeyModifiers::NONE))
+    });
+    let model = run_loop(&mut rt, Box::pin(events), &mut |_| {}).await;
+    assert_eq!(model.traffic.auto.enabled, auto);
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.method.as_str() == "POST")
+        .count()
+}
+
+#[tokio::test]
+async fn auto_refresh_off_never_requeries_on_tick() {
+    assert_eq!(posts_after_far_future_tick(false).await, 1);
+}
+
+#[tokio::test]
+async fn auto_refresh_on_requeries_exactly_once_when_due() {
+    assert_eq!(posts_after_far_future_tick(true).await, 2);
+}

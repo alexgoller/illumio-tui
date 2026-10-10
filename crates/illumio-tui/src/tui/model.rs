@@ -428,6 +428,40 @@ pub fn blocked_columns() -> Vec<Column<BlockedGroup>> {
     ]
 }
 
+/// Opt-in periodic refresh. Never below 60 s nor the profile minimum.
+#[derive(Debug, Clone)]
+pub struct AutoRefresh {
+    pub enabled: bool,
+    pub interval: Duration,
+    pub last_run: Option<Instant>,
+}
+
+impl AutoRefresh {
+    pub fn new(min_seconds: u64) -> Self {
+        Self {
+            enabled: false,
+            interval: Duration::from_secs(min_seconds.max(60)),
+            last_run: None,
+        }
+    }
+
+    pub fn due(&self, now: Instant) -> bool {
+        self.enabled
+            && self
+                .last_run
+                .is_none_or(|l| now.saturating_duration_since(l) >= self.interval)
+    }
+
+    pub fn remaining(&self, now: Instant) -> Duration {
+        self.last_run
+            .map(|l| {
+                self.interval
+                    .saturating_sub(now.saturating_duration_since(l))
+            })
+            .unwrap_or(Duration::ZERO)
+    }
+}
+
 #[derive(Debug)]
 pub struct TrafficState {
     pub filter: TrafficFilter,
@@ -442,10 +476,11 @@ pub struct TrafficState {
     pub blocked: TableView<BlockedGroup>,
     /// Aggregate pair (src, dst group keys) the Flows view is narrowed to.
     pub drill: Option<(Vec<String>, Vec<String>)>,
+    pub auto: AutoRefresh,
 }
 
 impl TrafficState {
-    pub fn new(window: &str, max_results: u32) -> Self {
+    pub fn new(window: &str, max_results: u32, auto_min_seconds: u64) -> Self {
         Self {
             filter: TrafficFilter::defaults(window, max_results),
             query: QueryState::Idle,
@@ -458,6 +493,7 @@ impl TrafficState {
             groups: TableView::new(group_columns()),
             blocked: TableView::new(blocked_columns()),
             drill: None,
+            auto: AutoRefresh::new(auto_min_seconds),
         }
     }
 
@@ -505,6 +541,7 @@ impl TrafficState {
             cancel.cancel();
         }
         self.seq += 1;
+        self.auto.last_run = Some(now);
         let cancel = CancellationToken::new();
         self.query = QueryState::Running {
             seq: self.seq,
@@ -553,7 +590,11 @@ impl Model {
         traffic_default_window: String,
     ) -> Self {
         let theme = Theme::from_name(&theme_name);
-        let traffic = TrafficState::new(&traffic_default_window, traffic_max_results);
+        let traffic = TrafficState::new(
+            &traffic_default_window,
+            traffic_max_results,
+            auto_refresh_min_seconds,
+        );
         Self {
             profile,
             theme_name,
@@ -587,6 +628,11 @@ impl Model {
             Connection::Connected { index, .. } => index.as_ref(),
             _ => None,
         }
+    }
+
+    /// Whether any screen has opted in to auto-refresh (drives the idle tick).
+    pub fn any_auto_enabled(&self) -> bool {
+        self.traffic.auto.enabled
     }
 
     pub fn is_connected(&self) -> bool {
