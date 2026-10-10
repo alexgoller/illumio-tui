@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: "render_to_string(&m, 80, 24)"
 ---
- illumio-tui pce.example · org 5 ●                       api 5 calls · 20.8 KB
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
   1 Traffic  │  2 Policy  │  3 Labels & objects  │  4 Workloads
 ╭ Traffic ─────────────────────────────────────────────────────────────────────╮
 │                                                                              │

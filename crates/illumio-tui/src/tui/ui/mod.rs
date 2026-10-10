@@ -57,7 +57,7 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect) {
         conn,
     ]);
     let left_w = left.width() as u16;
-    let right_w = right.len() as u16;
+    let right_w = Line::from(right.as_str()).width() as u16;
     f.render_widget(Paragraph::new(left).style(t.base()), area);
     if area.width > left_w + right_w {
         let r = Rect::new(area.x + area.width - right_w, area.y, right_w, 1);

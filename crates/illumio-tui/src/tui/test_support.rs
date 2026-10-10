@@ -45,7 +45,7 @@ pub fn model_fixture() -> Model {
 
 /// Renders the model into a `w`×`h` test terminal and returns the text.
 pub fn render_to_string(model: &Model, w: u16, h: u16) -> String {
-    let mut term = Terminal::new(TestBackend::new(w.max(1), h.max(1))).expect("test terminal");
+    let mut term = Terminal::new(TestBackend::new(w, h)).expect("test terminal");
     term.draw(|f| view(model, f)).expect("draw");
     let buf = term.backend().buffer();
     (0..buf.area.height)
@@ -62,7 +62,7 @@ pub fn render_to_string(model: &Model, w: u16, h: u16) -> String {
 
 /// Text plus, per line, the distinct (fg, bg) runs: makes theme differences visible in snapshots.
 pub fn render_styled(model: &Model, w: u16, h: u16) -> String {
-    let mut term = Terminal::new(TestBackend::new(w.max(1), h.max(1))).expect("test terminal");
+    let mut term = Terminal::new(TestBackend::new(w, h)).expect("test terminal");
     term.draw(|f| view(model, f)).expect("draw");
     let buf = term.backend().buffer();
     let mut out = String::new();
