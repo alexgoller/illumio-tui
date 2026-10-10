@@ -5,6 +5,7 @@
 //! through [`crate::Pce::writer`] with a [`WriteGuard`].
 pub mod audit;
 pub mod guard;
+pub mod specs;
 
 use crate::client::WriteMethod;
 use crate::error::PceError;
@@ -14,6 +15,7 @@ use serde_json::Value;
 
 pub use audit::{AuditEntry, AuditSink, JsonlAudit, MemoryAudit, NullAudit};
 pub use guard::{WriteContext, WriteGuard, WriteRefused};
+pub use specs::{InterfaceSpec, IpRangeSpec, PortSpec};
 
 /// What kind of object a plan touches; decides the cache prefix and whether
 /// the result waits for provisioning.
