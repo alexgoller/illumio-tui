@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>illumio-tui</title>
-<meta name="description" content="A Rust CLI and upcoming btop-style terminal UI for the Illumio Core PCE: Explorer traffic, policy, labels and workloads, with throttling, caching and cost guards that keep the PCE safe. Built in one day by one person directing AI agents.">
+<meta name="description" content="A Rust CLI and upcoming btop-style terminal UI for the Illumio Core PCE: Explorer traffic, policy, labels and workloads, with throttling, caching and cost guards that keep the PCE safe.">
 <meta name="theme-color" content="#0e1622">
 <link rel="canonical" href="https://alexgoller.github.io/illumio-tui/">
 <meta property="og:type" content="website">
 <meta property="og:title" content="illumio-tui: the Illumio PCE at terminal speed">
-<meta property="og:description" content="Read-only CLI for Illumio Core PCE traffic and policy today, btop-style TUI next. Throttled, cached, counted. Built in one day by a person directing AI agents.">
+<meta property="og:description" content="Read-only CLI for Illumio Core PCE traffic and policy today, btop-style TUI next. Throttled, cached, counted.">
 <meta property="og:url" content="https://alexgoller.github.io/illumio-tui/">
 <meta name="twitter:card" content="summary">
 <link rel="icon" href="assets/mark.svg" type="image/svg+xml">
@@ -42,15 +42,11 @@
 
     <div class="decision-bar" role="img" aria-label="Decision colours: allowed, potentially blocked, blocked"><span class="a"></span><span class="p"></span><span class="b"></span></div>
 
-    <p class="thin-air">Built out of thin air in one day.</p>
-    <p>On 10 October 2026 one person sat down with an empty repository and a team of AI agents. By the end of the day there was a reviewed, tested Rust systems tool talking to a real PCE. Not a demo, not a toy, not a single line of Rust typed by hand.</p>
-
     <dl class="statline" aria-label="Build facts">
       <div><dt>tests</dt><dd class="ok">103 passing</dd></div>
       <div><dt>clippy</dt><dd class="ok">clean</dd></div>
       <div><dt>cargo-deny</dt><dd class="ok">clean</dd></div>
       <div><dt>live PCE</dt><dd>50 flows in 9 API calls</dd></div>
-      <div><dt>tasks</dt><dd>21, each independently reviewed</dd></div>
     </dl>
 
     <div class="cta">
@@ -205,20 +201,7 @@
 
 <section class="panel" id="made" aria-labelledby="made-h">
   <h2 id="made-h"><span class="key">4</span>How it was made</h2>
-  <p class="lede">One day. One person. A team of AI agents. A working systems tool.</p>
-  <p>This is the part worth pausing on. The owner of this project does not write Rust. He wrote none of this code by hand. He wrote the intent, approved the design, and held the line on quality, while AI agents in Claude Code did the implementing and, just as importantly, the reviewing. This is how it went on 10 October 2026:</p>
-
-  <ol class="timeline">
-    <li><strong>A design spec, approved section by section.</strong> Purpose, constraints, architecture, screens, PCE protection, CLI, config, testing. Nothing was built until the design was agreed.</li>
-    <li><strong>A 21-task implementation plan.</strong> Small, testable steps, each with a clear definition of done.</li>
-    <li><strong>One fresh agent per task, one independent reviewer per task.</strong> Every task was implemented by a new AI agent with a clean context, then checked by a separate AI reviewer before the next task could start. Four of the 21 tasks needed one fix round.</li>
-    <li><strong>A whole-branch review and one fix wave.</strong> The finished branch was reviewed end to end, and the findings were fixed in a single pass.</li>
-    <li><strong>103 automated tests, clippy clean, cargo-deny clean.</strong> Offline tests run against hand-written fixtures, mocked HTTP and anonymised recordings from a real PCE.</li>
-    <li><strong>A live smoke test against a real PCE.</strong> Health, object load, one Explorer query: 50 flows back in 9 API calls.</li>
-  </ol>
-
-  <p class="manifesto">The bottleneck is no longer typing code. It is knowing exactly what you want and refusing to accept less.</p>
-  <p>That is a new kind of leverage for the people who know a domain best. A PCE expert can now direct a tool into existence that would once have needed a small team and several weeks, and keep every decision traceable in plain documents. Read them yourself: the <a href="https://github.com/alexgoller/illumio-tui/blob/main/docs/superpowers/specs/2026-10-10-illumio-tui-design.md">design spec</a>, the <a href="https://github.com/alexgoller/illumio-tui/tree/main/docs/superpowers/plans">implementation plans</a>, and the <a href="https://github.com/alexgoller/illumio-tui/blob/main/docs/architecture.md">architecture notes</a>, which walk a single traffic query from argument parsing to JSON.</p>
+  <p>The design was written up as a spec and approved before any code existed. Implementation then followed a task plan, and every task was implemented and then independently reviewed before the next one started. AI coding agents in Claude Code did the implementation and review work, under the owner's direction. The result: 103 automated tests, clippy and cargo-deny clean, and a live smoke test against a real PCE that returned 50 flows in 9 API calls. The <a href="https://github.com/alexgoller/illumio-tui/blob/main/docs/superpowers/specs/2026-10-10-illumio-tui-design.md">design spec</a>, <a href="https://github.com/alexgoller/illumio-tui/tree/main/docs/superpowers/plans">implementation plans</a> and <a href="https://github.com/alexgoller/illumio-tui/blob/main/docs/architecture.md">architecture notes</a> are all in the repository.</p>
 </section>
 
 <section class="panel" id="install" aria-labelledby="install-h">
@@ -271,7 +254,7 @@ api_secret_cmd = "op read op://vault/pce/secret"</code></pre>
 <footer>
   <div class="wrap">
     <span>illumio-tui, GPL-3.0-only</span>
-    <span>Directed by Alex Goller, built with AI agents in Claude Code.</span>
+    <span>By Alex Goller. Built with Claude Code.</span>
   </div>
 </footer>
 </body>
