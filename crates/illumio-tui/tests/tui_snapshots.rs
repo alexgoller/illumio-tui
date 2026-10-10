@@ -121,3 +121,18 @@ fn prompt_overlay_80x24() {
     assert!(out.contains(":filter app=web"), "{out}");
     insta::assert_snapshot!("prompt_overlay_80x24", out);
 }
+
+#[test]
+fn traffic_filter_bar_and_editor_80x24() {
+    use illumio_tui::tui::filter::FilterEditor;
+    use illumio_tui::tui::model::Overlay;
+    let mut m = model_fixture();
+    m.traffic.filter.src = "app=shop,env=prod".into();
+    m.traffic.filter.service = "5432/tcp".into();
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("app=shop,env=prod"), "{out}");
+    assert!(out.contains("cap 1000"), "{out}");
+    insta::assert_snapshot!("traffic_filter_bar_80x24", out);
+    m.overlay = Overlay::FilterEditor(FilterEditor::from_filter(&m.traffic.filter));
+    insta::assert_snapshot!("traffic_filter_editor_80x24", render_to_string(&m, 80, 24));
+}

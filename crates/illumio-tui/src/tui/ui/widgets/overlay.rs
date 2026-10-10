@@ -1,11 +1,13 @@
 //! Modal overlays drawn on top of the current screen: help and the `:` prompt.
+use crate::tui::filter::{FIELD_NAMES, FilterEditor};
 use crate::tui::model::{Model, Screen};
 use crate::tui::ui::layout::centered;
 use crate::tui::ui::widgets::panel::panel;
 use ratatui::Frame;
 use ratatui::layout::Rect;
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Paragraph};
+use ratatui::widgets::{Clear, Paragraph, Wrap};
 
 pub const HELP_LINES: &[(&str, &str)] = &[
     ("1 2 3 4", "Traffic · Policy · Labels & objects · Workloads"),
@@ -72,6 +74,62 @@ pub fn render_prompt(model: &Model, input: &str, f: &mut Frame, area: Rect) {
         Span::styled("▏", t.dim_style()),
     ]);
     f.render_widget(Paragraph::new(line).style(t.base()), r);
+}
+
+pub fn render_filter_editor(model: &Model, e: &FilterEditor, f: &mut Frame, area: Rect) {
+    let t = &model.theme;
+    let r = centered(area, 70, 12);
+    f.render_widget(Clear, r);
+    let block = panel("Edit filter", "Tab next · Enter run · Esc cancel", t, true);
+    let mut lines: Vec<Line> = FIELD_NAMES
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let active = i == e.active;
+            let cursor = if active { "▏" } else { "" };
+            Line::from(vec![
+                Span::styled(if active { "▸ " } else { "  " }, Style::new().fg(t.accent)),
+                Span::styled(format!("{name:<12}"), t.header_style()),
+                Span::styled(
+                    format!("{}{cursor}", e.values[i]),
+                    if active {
+                        Style::new().fg(t.fg).bg(t.selected_bg)
+                    } else {
+                        t.base()
+                    },
+                ),
+            ])
+        })
+        .collect();
+    lines.push(Line::from(""));
+    match &e.error {
+        Some(err) => lines.push(Line::from(Span::styled(
+            err.clone(),
+            Style::new().fg(t.bad),
+        ))),
+        None => {
+            let preview = e.to_filter().map(|f| f.cost_hint()).unwrap_or_default();
+            lines.push(Line::from(Span::styled(preview, t.dim_style())));
+        }
+    }
+    f.render_widget(Paragraph::new(lines).block(block).style(t.base()), r);
+}
+
+pub fn render_confirm(model: &Model, reason: &str, f: &mut Frame, area: Rect) {
+    let t = &model.theme;
+    let r = centered(area, 64, 5);
+    f.render_widget(Clear, r);
+    let block = panel("Confirm", "y / n", t, true);
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            reason.to_string(),
+            Style::new().fg(t.warn),
+        )))
+        .block(block)
+        .style(t.base())
+        .wrap(Wrap { trim: true }),
+        r,
+    );
 }
 
 pub fn screen_hint(screen: Screen) -> &'static str {

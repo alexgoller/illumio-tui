@@ -1,6 +1,7 @@
 //! Pure state transitions. Never performs I/O; returns `Cmd`s instead.
 use crate::tui::commands::{self, Command};
-use crate::tui::model::{Connection, Model, Overlay, Screen, StatusLine};
+use crate::tui::filter::{FilterEditor, TrafficFilter};
+use crate::tui::model::{Connection, Model, Overlay, PendingAction, Screen, StatusLine};
 use crate::tui::msg::{Cmd, Msg};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use pce::CacheMode;
@@ -53,6 +54,12 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             Vec::new()
         }
         Msg::Command(c) => on_command(model, c),
+        Msg::ApplyFilter(f) => {
+            model.traffic.filter = f;
+            model.status =
+                StatusLine::info(format!("filter set: {}", model.traffic.filter.summary()));
+            Vec::new()
+        }
     }
 }
 
@@ -101,6 +108,53 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             }
             _ => Vec::new(),
         },
+        Overlay::FilterEditor(mut e) => {
+            match k.code {
+                KeyCode::Esc => model.overlay = Overlay::None,
+                KeyCode::Tab | KeyCode::Down => {
+                    e.next();
+                    model.overlay = Overlay::FilterEditor(e);
+                }
+                KeyCode::BackTab | KeyCode::Up => {
+                    e.prev();
+                    model.overlay = Overlay::FilterEditor(e);
+                }
+                KeyCode::Backspace => {
+                    e.pop();
+                    model.overlay = Overlay::FilterEditor(e);
+                }
+                KeyCode::Char(c) => {
+                    e.push(c);
+                    model.overlay = Overlay::FilterEditor(e);
+                }
+                KeyCode::Enter => match e.to_filter() {
+                    Ok(f) => {
+                        model.overlay = Overlay::None;
+                        return request_query(model, f);
+                    }
+                    Err(err) => {
+                        e.error = Some(err);
+                        model.overlay = Overlay::FilterEditor(e);
+                    }
+                },
+                _ => model.overlay = Overlay::FilterEditor(e),
+            }
+            Vec::new()
+        }
+        Overlay::Confirm { action, .. } => match k.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                model.overlay = Overlay::None;
+                match action {
+                    PendingAction::RunQuery(f) => update(model, Msg::ApplyFilter(f)),
+                }
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                model.overlay = Overlay::None;
+                model.status = StatusLine::info("cancelled");
+                Vec::new()
+            }
+            _ => Vec::new(),
+        },
         Overlay::None => on_screen_key(model, k),
     }
 }
@@ -125,8 +179,31 @@ fn on_screen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         (KeyCode::Char('2'), _) => switch(model, Screen::Policy),
         (KeyCode::Char('3'), _) => switch(model, Screen::Objects),
         (KeyCode::Char('4'), _) => switch(model, Screen::Workloads),
+        _ if model.screen == Screen::Traffic => traffic_key(model, k),
         _ => Vec::new(),
     }
+}
+
+fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
+    match k.code {
+        KeyCode::Char('f') => {
+            model.overlay = Overlay::FilterEditor(FilterEditor::from_filter(&model.traffic.filter));
+            Vec::new()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Validated filter from the editor or a command: confirm if expensive, else apply.
+fn request_query(model: &mut Model, f: TrafficFilter) -> Vec<Cmd> {
+    if let Some(reason) = f.needs_confirmation() {
+        model.overlay = Overlay::Confirm {
+            reason: format!("{reason}. Run anyway? (y/n)"),
+            action: PendingAction::RunQuery(f),
+        };
+        return Vec::new();
+    }
+    update(model, Msg::ApplyFilter(f))
 }
 
 fn switch(model: &mut Model, s: Screen) -> Vec<Cmd> {
@@ -145,11 +222,29 @@ pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
             model.overlay = Overlay::Help;
             Vec::new()
         }
-        Command::Filter(_)
-        | Command::Window(_)
-        | Command::Profile(_)
-        | Command::Draft
-        | Command::Active => {
+        Command::Filter(expr) => {
+            let mut f = model.traffic.filter.clone();
+            f.src = expr;
+            match f.validate() {
+                Ok(()) => request_query(model, f),
+                Err(e) => {
+                    model.status = StatusLine::error(e);
+                    Vec::new()
+                }
+            }
+        }
+        Command::Window(w) => {
+            let mut f = model.traffic.filter.clone();
+            f.window = w;
+            match f.validate() {
+                Ok(()) => request_query(model, f),
+                Err(e) => {
+                    model.status = StatusLine::error(e);
+                    Vec::new()
+                }
+            }
+        }
+        Command::Profile(_) | Command::Draft | Command::Active => {
             model.status = StatusLine::warn("not available yet");
             Vec::new()
         }
@@ -300,5 +395,106 @@ mod tests {
         assert!(
             update(&mut m, Msg::Command(crate::tui::commands::Command::Quit)).contains(&Cmd::Quit)
         );
+    }
+
+    #[test]
+    fn f_opens_editor_enter_applies_or_confirms() {
+        use crate::tui::model::{Overlay, PendingAction};
+        let mut m = model_fixture();
+        update(&mut m, key('f'));
+        assert!(matches!(m.overlay, Overlay::FilterEditor(_)));
+        // Type a source filter into field 1.
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)),
+        );
+        for c in "app=shop".chars() {
+            update(&mut m, key(c));
+        }
+        let msgs = update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        assert!(matches!(m.overlay, Overlay::None));
+        assert_eq!(m.traffic.filter.src, "app=shop");
+        assert!(
+            msgs.is_empty(),
+            "Task 6 turns the applied filter into Cmd::RunQuery; for now nothing is emitted"
+        );
+
+        // A big window asks for confirmation before anything happens.
+        update(&mut m, key('f'));
+        // field 0 = window: clear and type 30d
+        for _ in 0..3 {
+            update(
+                &mut m,
+                Msg::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
+            );
+        }
+        for c in "30d".chars() {
+            update(&mut m, key(c));
+        }
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        match &m.overlay {
+            Overlay::Confirm {
+                reason,
+                action: PendingAction::RunQuery(f),
+            } => {
+                assert!(reason.contains("30d"), "{reason}");
+                assert_eq!(f.window, "30d");
+            }
+            other => panic!("{other:?}"),
+        }
+        update(&mut m, key('n'));
+        assert!(matches!(m.overlay, Overlay::None));
+        assert_eq!(m.traffic.filter.window, "24h", "declined: filter unchanged");
+        update(&mut m, key('f'));
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        );
+        assert!(matches!(m.overlay, Overlay::None));
+    }
+
+    #[test]
+    fn editor_shows_validation_error_and_stays_open() {
+        use crate::tui::model::Overlay;
+        let mut m = model_fixture();
+        update(&mut m, key('f'));
+        for _ in 0..3 {
+            update(
+                &mut m,
+                Msg::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
+            );
+        }
+        for c in "soon".chars() {
+            update(&mut m, key(c));
+        }
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        match &m.overlay {
+            Overlay::FilterEditor(e) => {
+                assert!(e.error.as_deref().unwrap_or("").contains("window"))
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn filter_and_window_commands_apply_without_the_editor() {
+        use crate::tui::commands::Command;
+        let mut m = model_fixture();
+        update(&mut m, Msg::Command(Command::Filter("env=prod".into())));
+        assert_eq!(m.traffic.filter.src, "env=prod");
+        update(&mut m, Msg::Command(Command::Window("2h".into())));
+        assert_eq!(m.traffic.filter.window, "2h");
+        update(&mut m, Msg::Command(Command::Window("never".into())));
+        assert_eq!(m.status.kind, StatusKind::Error);
+        assert_eq!(m.traffic.filter.window, "2h");
     }
 }

@@ -1,4 +1,5 @@
 //! All TUI state. No I/O, no terminal types beyond sizes.
+use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::ui::theme::Theme;
 use pce::StatsSnapshot;
 use std::time::Instant;
@@ -87,13 +88,37 @@ impl StatusLine {
     }
 }
 
-/// A modal drawn on top of the current screen. Later tasks add `FilterEditor`,
-/// `Confirm`, `Error`, `Detail`.
+/// A modal drawn on top of the current screen. Later tasks add `Error`, `Detail`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Overlay {
     None,
     Help,
-    Prompt { input: String },
+    Prompt {
+        input: String,
+    },
+    FilterEditor(FilterEditor),
+    Confirm {
+        reason: String,
+        action: PendingAction,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PendingAction {
+    RunQuery(TrafficFilter),
+}
+
+#[derive(Debug)]
+pub struct TrafficState {
+    pub filter: TrafficFilter,
+}
+
+impl TrafficState {
+    pub fn new(window: &str, max_results: u32) -> Self {
+        Self {
+            filter: TrafficFilter::defaults(window, max_results),
+        }
+    }
 }
 
 /// Limits copied from the resolved profile so `update` never touches config.
@@ -112,6 +137,7 @@ pub struct Model {
     pub limits: Limits,
     pub screen: Screen,
     pub overlay: Overlay,
+    pub traffic: TrafficState,
     pub connection: Connection,
     pub stats: StatsSnapshot,
     pub size: (u16, u16),
@@ -132,6 +158,7 @@ impl Model {
         traffic_default_window: String,
     ) -> Self {
         let theme = Theme::from_name(&theme_name);
+        let traffic = TrafficState::new(&traffic_default_window, traffic_max_results);
         Self {
             profile,
             theme_name,
@@ -143,6 +170,7 @@ impl Model {
             },
             screen: Screen::Traffic,
             overlay: Overlay::None,
+            traffic,
             connection: Connection::Connecting,
             stats: StatsSnapshot { calls: 0, bytes: 0 },
             size: (80, 24),

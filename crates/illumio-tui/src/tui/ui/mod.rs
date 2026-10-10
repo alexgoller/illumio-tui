@@ -1,6 +1,7 @@
 //! `view(&Model, &mut Frame)`: pure rendering. Screens are added in later
 //! tasks; this file owns the chrome (header, tabs, status, too-small notice).
 pub mod layout;
+pub mod screens;
 pub mod theme;
 pub mod widgets;
 
@@ -40,6 +41,8 @@ pub fn view(model: &Model, f: &mut Frame) {
         Overlay::None => {}
         Overlay::Help => widgets::overlay::render_help(model, f, area),
         Overlay::Prompt { input } => widgets::overlay::render_prompt(model, input, f, area),
+        Overlay::FilterEditor(e) => widgets::overlay::render_filter_editor(model, e, f, area),
+        Overlay::Confirm { reason, .. } => widgets::overlay::render_confirm(model, reason, f, area),
     }
 }
 
@@ -108,6 +111,10 @@ fn render_body(model: &Model, f: &mut Frame, area: Rect) {
             Paragraph::new(text).block(block).wrap(Wrap { trim: true }),
             area,
         );
+        return;
+    }
+    if model.screen == Screen::Traffic && model.is_connected() {
+        screens::traffic::render(model, f, area);
         return;
     }
     let block = widgets::panel::panel(model.screen.title(), "", t, true);

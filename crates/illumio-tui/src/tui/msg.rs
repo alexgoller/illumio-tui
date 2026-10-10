@@ -24,6 +24,8 @@ pub enum Msg {
     Stats(StatsSnapshot),
     SwitchScreen(Screen),
     Command(crate::tui::commands::Command),
+    /// The editor or a command applied a validated filter (confirmed if needed).
+    ApplyFilter(crate::tui::filter::TrafficFilter),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
