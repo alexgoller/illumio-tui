@@ -17,6 +17,7 @@ pub mod error;
 pub mod limiter;
 pub mod models;
 pub mod resolve;
+pub mod traffic;
 
 use std::sync::Arc;
 use std::time::Duration;
