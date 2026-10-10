@@ -1,7 +1,7 @@
 //! Every file under fixtures/recorded/ must still deserialise into its
 //! model. Re-record with `cargo xtask record` when the PCE API changes.
 use pce::models::{
-    DenyRule, Flow, IpList, Label, LabelGroup, PendingChange, RuleSet, Service, Workload,
+    DenyRule, Event, Flow, IpList, Label, LabelGroup, PendingChange, RuleSet, Service, Workload,
     parse_pending,
 };
 use std::path::Path;
@@ -35,6 +35,7 @@ fn recorded_fixtures_still_parse() {
     check::<RuleSet>("rule_sets.json");
     check::<DenyRule>("deny_rules.json");
     check::<Flow>("traffic_flows.json");
+    check::<Event>("events.json");
 }
 
 /// `sec_policy/pending` is a list on some PCEs and a map on others; both

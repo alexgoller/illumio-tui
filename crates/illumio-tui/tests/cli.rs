@@ -947,3 +947,62 @@ fn profile_list_and_use_without_credentials() {
         .success()
         .stdout(predicate::str::contains("b.example"));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn events_command_filters_and_renders() {
+    use wiremock::matchers::query_param;
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/events"))
+        .and(query_param("severity", "err"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/events.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(3)
+        .mount(&server)
+        .await;
+    let out = stdout_json(
+        cmd(&server)
+            .args(["events", "--severity", "err", "--since", "2h"])
+            .assert()
+            .success(),
+    );
+    let rows = out["data"].as_array().unwrap();
+    assert_eq!(
+        rows.len(),
+        4,
+        "the mock returns the whole fixture; the PCE does the severity filtering"
+    );
+    assert_eq!(rows[2]["event_type"], "agent.tampering");
+    assert!(
+        out["meta"]["window"]["start"]
+            .as_str()
+            .unwrap()
+            .ends_with('Z')
+    );
+    let out = stdout_json(
+        cmd(&server)
+            .args(["events", "--severity", "err", "--type", "agent."])
+            .assert()
+            .success(),
+    );
+    assert_eq!(
+        out["data"].as_array().unwrap().len(),
+        1,
+        "--type is a local substring filter"
+    );
+    cmd(&server)
+        .args(["events", "--severity", "err", "--table"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("agent:host-1.example")
+                .and(predicate::str::contains("warning")),
+        );
+    cmd(&server)
+        .args(["events", "--severity", "err", "--since", "soon"])
+        .assert()
+        .code(2);
+}

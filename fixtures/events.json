@@ -1,0 +1,6 @@
+[
+  {"href":"/orgs/5/events/e1","timestamp":"2026-10-10T07:30:00.123Z","event_type":"user.login","severity":"info","status":"success","created_by":{"user":{"href":"/users/1","username":"user-1"}},"notifications":[{"notification_type":"user.login","info":{"ip":"10.0.9.9"}}],"resource_changes":[]},
+  {"href":"/orgs/5/events/e2","timestamp":"2026-10-10T07:31:00Z","event_type":"sec_policy.create","severity":"info","status":"success","created_by":{"user":{"username":"user-2"}},"notifications":[],"resource_changes":[{"resource":{"sec_policy":{"href":"/orgs/5/sec_policy/42"}},"changes":{}}]},
+  {"href":"/orgs/5/events/e3","timestamp":"2026-10-10T07:32:00Z","event_type":"agent.tampering","severity":"err","status":"failure","created_by":{"agent":{"href":"/orgs/5/agents/9","hostname":"host-1.example"}},"notifications":[],"resource_changes":[{"resource":{"workload":{"href":"/orgs/5/workloads/aaaa-1","hostname":"host-1.example"}},"changes":{}}]},
+  {"href":"/orgs/5/events/e4","timestamp":"2026-10-10T07:33:00Z","event_type":"system.license_expiring","severity":"warning","status":null,"created_by":{"system":{}},"notifications":[],"resource_changes":[]}
+]

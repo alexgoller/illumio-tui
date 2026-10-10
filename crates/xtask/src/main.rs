@@ -88,6 +88,7 @@ impl Anonymiser {
         match v {
             Value::Object(map) => {
                 let has_hostname = map.contains_key("hostname");
+                let has_user = map.contains_key("username") || map.contains_key("email");
                 let keys: Vec<String> = map.keys().cloned().collect();
                 for k in keys {
                     let child = map.get_mut(&k).expect("key exists");
@@ -111,6 +112,12 @@ impl Anonymiser {
                         ) => *s = self.ip(s),
                         ("name", Value::String(s)) if has_hostname && !s.is_empty() => {
                             *s = Self::map(&mut self.hosts, s, |n| format!("host-{n}.example"))
+                        }
+                        ("username" | "email", Value::String(s)) if !s.is_empty() => {
+                            *s = Self::map(&mut self.users, s, |n| format!("user-{n}"))
+                        }
+                        ("name", Value::String(s)) if has_user && !s.is_empty() => {
+                            *s = Self::map(&mut self.users, s, |n| format!("user-{n}"))
                         }
                         ("user_name", Value::String(s)) if !s.is_empty() => {
                             *s = Self::map(&mut self.users, s, |n| format!("user-{n}"))
@@ -202,6 +209,10 @@ async fn main() {
                     raw_list(&pce, &format!("{org}workloads"), 25).await,
                 ),
                 (
+                    "events.json",
+                    raw_list(&pce, &format!("{org}events"), 100).await,
+                ),
+                (
                     "rule_sets.json",
                     raw_list(
                         &pce,
@@ -212,7 +223,7 @@ async fn main() {
                 ),
             ];
             let mut deny = Vec::new();
-            if let Some(rs) = sets[5].1.as_array() {
+            if let Some(rs) = sets[6].1.as_array() {
                 for r in rs.iter().take(3) {
                     if let Some(href) = r.get("href").and_then(Value::as_str) {
                         match pce.deny_rules(href, CacheMode::Bypass).await {
@@ -283,5 +294,26 @@ mod tests {
         assert_eq!(v[2]["service"]["process_name"], "/usr/bin/sshd");
         assert_eq!(v[3]["service"]["user_name"], "");
         assert_eq!(v[3]["service"]["process_name"], "C:\\Users\\user-3\\b.exe");
+    }
+
+    #[test]
+    fn event_actors_are_anonymised() {
+        let mut v = json!([
+            {"created_by": {"user": {"href": "/users/1", "username": "alice@corp.com", "name": "Alice A"}}},
+            {"created_by": {"user": {"username": "alice@corp.com"}}},
+            {"created_by": {"agent": {"hostname": "web01"}}},
+            {"resource_changes": [{"resource": {"label": {"href": "/orgs/5/labels/1", "name": "Web"}}}]}
+        ]);
+        let mut anon = Anonymiser::default();
+        anon.walk(&mut v);
+        let username = v[0]["created_by"]["user"]["username"].clone();
+        let name = v[0]["created_by"]["user"]["name"].clone();
+        assert!(username.as_str().unwrap().starts_with("user-"));
+        assert!(name.as_str().unwrap().starts_with("user-"));
+        assert_ne!(username, name);
+        assert_eq!(v[1]["created_by"]["user"]["username"], username);
+        assert_eq!(v[2]["created_by"]["agent"]["hostname"], "host-1.example");
+        let label = &v[3]["resource_changes"][0]["resource"]["label"]["name"];
+        assert_eq!(label, "Web", "plain names are left alone");
     }
 }

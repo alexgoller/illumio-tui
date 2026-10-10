@@ -2,6 +2,7 @@
 //! and gets a `Context`.
 pub mod context;
 pub mod error;
+pub mod events;
 pub mod health;
 pub mod objects;
 pub mod output;
@@ -78,6 +79,8 @@ pub enum Command {
     Iplists,
     /// List services
     Services,
+    /// List audit events
+    Events(events::EventsArgs),
     /// List workloads
     Workloads(workloads::WorkloadsArgs),
     /// Rulesets, rules, pending changes
@@ -102,6 +105,7 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
         Command::LabelGroups => objects::label_groups(&ctx).await,
         Command::Iplists => objects::ip_lists(&ctx).await,
         Command::Services => objects::services(&ctx).await,
+        Command::Events(a) => events::run(&ctx, &a).await,
         Command::Workloads(a) => workloads::run(&ctx, &a).await,
         Command::Policy(p) => policy::run(&ctx, &p).await,
         Command::Traffic(t) => traffic::run(&ctx, &t).await,

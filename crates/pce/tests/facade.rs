@@ -470,3 +470,29 @@ async fn only_the_latest_traffic_result_is_cached() {
         "and the second is gone again now"
     );
 }
+
+#[tokio::test]
+async fn events_are_cached_briefly_and_default_to_500_rows() {
+    use pce::models::EventFilter;
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/events"))
+        .and(query_param("severity", "err"))
+        .and(query_param("max_results", "500"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/events.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let p = pce_for(&server);
+    let f = EventFilter {
+        severity: Some("err".into()),
+        ..Default::default()
+    };
+    assert_eq!(p.events(&f, CacheMode::Use).await.unwrap().value.len(), 4);
+    assert!(p.events(&f, CacheMode::Use).await.unwrap().hit);
+    assert_eq!(p.ttls().events, Duration::from_secs(60));
+}

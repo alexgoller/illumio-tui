@@ -55,6 +55,7 @@ pub struct CacheTtls {
     pub objects: Duration,
     pub policy: Duration,
     pub workloads: Duration,
+    pub events: Duration,
 }
 
 impl Default for CacheTtls {
@@ -63,6 +64,7 @@ impl Default for CacheTtls {
             objects: Duration::from_secs(15 * 60),
             policy: Duration::from_secs(5 * 60),
             workloads: Duration::from_secs(5 * 60),
+            events: Duration::from_secs(60),
         }
     }
 }
@@ -185,6 +187,24 @@ impl Pce {
             mode,
         )
         .await
+    }
+
+    pub const DEFAULT_EVENTS_MAX_RESULTS: u32 = 500;
+
+    pub async fn events(
+        &self,
+        filter: &models::EventFilter,
+        mode: CacheMode,
+    ) -> Result<Cached<Vec<models::Event>>> {
+        let path = self.client.org_path("events");
+        let mut query = filter.to_query();
+        // `cached_list` only appends its 10 000 default when `max_results`
+        // is absent, so the events default must be pushed first.
+        if !query.iter().any(|(k, _)| *k == "max_results") {
+            query.push(("max_results", Self::DEFAULT_EVENTS_MAX_RESULTS.to_string()));
+        }
+        self.cached_list("events", &path, query, self.ttls.events, mode)
+            .await
     }
 
     pub async fn rule_sets(
