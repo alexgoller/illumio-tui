@@ -3,6 +3,7 @@
 pub mod context;
 pub mod error;
 pub mod health;
+pub mod objects;
 pub mod output;
 
 use clap::{Args, Parser, Subcommand};
@@ -59,11 +60,23 @@ pub struct GlobalArgs {
 pub enum Command {
     /// Check connectivity and credentials
     Health,
+    /// List labels
+    Labels(objects::LabelsArgs),
+    /// List label groups
+    LabelGroups,
+    /// List IP lists
+    Iplists,
+    /// List services
+    Services,
 }
 
 pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
     let ctx = Context::new(&global)?;
     match command {
         Command::Health => health::run(&ctx).await,
+        Command::Labels(a) => objects::labels(&ctx, &a).await,
+        Command::LabelGroups => objects::label_groups(&ctx).await,
+        Command::Iplists => objects::ip_lists(&ctx).await,
+        Command::Services => objects::services(&ctx).await,
     }
 }

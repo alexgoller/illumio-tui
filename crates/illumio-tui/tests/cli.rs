@@ -164,6 +164,94 @@ async fn env_file_flag_supplies_credentials() {
     assert_eq!(out["data"]["ok"], true);
 }
 
+async fn mount_objects(server: &MockServer) {
+    for (p, body) in [
+        (
+            "/api/v2/orgs/5/labels",
+            include_str!("../../../fixtures/labels.json"),
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/label_groups",
+            include_str!("../../../fixtures/label_groups.json"),
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/ip_lists",
+            include_str!("../../../fixtures/ip_lists.json"),
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/services",
+            include_str!("../../../fixtures/services.json"),
+        ),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(p))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(body)
+                    .insert_header("Content-Type", "application/json"),
+            )
+            .mount(server)
+            .await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn labels_filter_exactly_and_hide_deleted() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    let out = stdout_json(
+        cmd(&server)
+            .args(["labels", "--key", "app"])
+            .assert()
+            .success(),
+    );
+    let rows = out["data"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["value"], "shop");
+    assert_eq!(out["meta"]["cache"], "miss");
+    let out = stdout_json(
+        cmd(&server)
+            .args(["labels", "--key", "app", "--include-deleted"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"].as_array().unwrap().len(), 2);
+    let out = stdout_json(
+        cmd(&server)
+            .args(["labels", "--value", "prod"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"][0]["key"], "env");
+    cmd(&server)
+        .args(["labels", "--table"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("role  web"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn other_object_lists() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    let out = stdout_json(cmd(&server).arg("label-groups").assert().success());
+    assert_eq!(out["data"][0]["name"], "All prod envs");
+    let out = stdout_json(cmd(&server).arg("iplists").assert().success());
+    assert_eq!(out["data"][1]["name"], "Corp");
+    cmd(&server)
+        .args(["iplists", "--table"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "10.1.0.0-10.1.255.255, *.corp.example",
+        ));
+    cmd(&server)
+        .args(["services", "--table"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("8000-8099/tcp"));
+}
+
 #[test]
 fn render_table_is_aligned() {
     use illumio_tui::cli::output::render_table;
