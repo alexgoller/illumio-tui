@@ -18,6 +18,9 @@ pub enum PceError {
     InvalidFilter(String),
     #[error("PCE server error (HTTP {status}): {body}")]
     Server { status: u16, body: String },
+    /// A write the PCE refused on validation grounds (HTTP 400, 406, 409, 422).
+    #[error("the PCE rejected the write (HTTP {status}): {body}")]
+    Rejected { status: u16, body: String },
     #[error("traffic query failed: {0}")]
     QueryFailed(String),
     #[error("cancelled")]
@@ -39,6 +42,7 @@ impl PceError {
             PceError::Network(_) => "network",
             PceError::InvalidFilter(_) => "invalid_filter",
             PceError::Server { .. } => "server",
+            PceError::Rejected { .. } => "rejected",
             PceError::QueryFailed(_) => "query_failed",
             PceError::Cancelled => "cancelled",
             PceError::Invalid(_) => "invalid",
@@ -61,6 +65,14 @@ mod tests {
             "rate_limited"
         );
         assert_eq!(PceError::Invalid("x".into()).kind(), "invalid");
+        assert_eq!(
+            PceError::Rejected {
+                status: 406,
+                body: "x".into()
+            }
+            .kind(),
+            "rejected"
+        );
         assert_eq!(PceError::QueryFailed("x".into()).kind(), "query_failed");
     }
 

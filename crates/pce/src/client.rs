@@ -60,6 +60,26 @@ pub struct StatsSnapshot {
     pub bytes: u64,
 }
 
+/// HTTP method of a mutation. Serialises as the method name so it can be
+/// printed in dry runs and audit entries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum WriteMethod {
+    Post,
+    Put,
+    Delete,
+}
+
+impl WriteMethod {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WriteMethod::Post => "POST",
+            WriteMethod::Put => "PUT",
+            WriteMethod::Delete => "DELETE",
+        }
+    }
+}
+
 #[derive(Default)]
 struct Stats {
     calls: AtomicU64,
@@ -166,6 +186,42 @@ impl PceClient {
         };
         let (status, hdrs, bytes) = self.send(build, false).await?;
         Self::decode(api_path, status, &hdrs, &bytes)
+    }
+
+    /// Sends one mutation. Never retried: a 429 or 503 comes back as an
+    /// error, because a repeated write could apply a change twice. 400, 406,
+    /// 409 and 422 map to [`PceError::Rejected`]; a 204 or empty body decodes
+    /// to `Value::Null`.
+    pub async fn write(
+        &self,
+        method: WriteMethod,
+        api_path: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<ApiResponse<serde_json::Value>> {
+        let url = self.url_for(api_path);
+        let payload = match body {
+            Some(b) => Some(serde_json::to_vec(b).map_err(|e| PceError::Invalid(e.to_string()))?),
+            None => None,
+        };
+        let build = || {
+            let r = match method {
+                WriteMethod::Post => self.http.post(url.clone()),
+                WriteMethod::Put => self.http.put(url.clone()),
+                WriteMethod::Delete => self.http.delete(url.clone()),
+            };
+            match &payload {
+                Some(p) => r.header("Content-Type", "application/json").body(p.clone()),
+                None => r,
+            }
+        };
+        let (status, headers, bytes) = self.send(build, false).await?;
+        match status.as_u16() {
+            400 | 406 | 409 | 422 => Err(PceError::Rejected {
+                status: status.as_u16(),
+                body: pce_error_message(&bytes),
+            }),
+            _ => Self::decode(api_path, status, &headers, &bytes),
+        }
     }
 
     async fn send<F>(&self, build: F, retry: bool) -> Result<(StatusCode, HeaderMap, bytes::Bytes)>

@@ -226,3 +226,137 @@ async fn retry_after_http_date_is_ignored() {
         Some(Duration::from_secs(12))
     );
 }
+
+use pce::client::WriteMethod;
+
+#[tokio::test]
+async fn write_sends_json_body_once_and_decodes_201() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/labels"))
+        .and(header("Authorization", "Basic a2V5OnNlY3JldA=="))
+        .and(header("Content-Type", "application/json"))
+        .and(wiremock::matchers::body_json(
+            json!({"key": "app", "value": "web"}),
+        ))
+        .respond_with(
+            ResponseTemplate::new(201)
+                .set_body_json(json!({"href": "/orgs/5/labels/9", "key": "app", "value": "web"})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let c = client_for(&server);
+    let r = c
+        .write(
+            WriteMethod::Post,
+            &c.org_path("labels"),
+            Some(&json!({"key": "app", "value": "web"})),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status, 201);
+    assert_eq!(r.body["href"], "/orgs/5/labels/9");
+    assert_eq!(c.stats().calls, 1);
+}
+
+#[tokio::test]
+async fn write_treats_204_as_null_body() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v2/orgs/5/labels/9"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path("/api/v2/orgs/5/labels/9"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&server)
+        .await;
+    let c = client_for(&server);
+    let r = c
+        .write(
+            WriteMethod::Put,
+            "/orgs/5/labels/9",
+            Some(&json!({"value": "x"})),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status, 204);
+    assert!(r.body.is_null());
+    let r = c
+        .write(WriteMethod::Delete, "/orgs/5/labels/9", None)
+        .await
+        .unwrap();
+    assert_eq!(r.status, 204);
+    assert!(r.body.is_null());
+}
+
+#[tokio::test]
+async fn write_maps_validation_statuses_to_rejected() {
+    let server = MockServer::start().await;
+    for (p, status) in [("a", 400), ("b", 406), ("c", 409), ("d", 422)] {
+        Mock::given(method("POST"))
+            .and(path(format!("/api/v2/orgs/5/{p}")))
+            .respond_with(ResponseTemplate::new(status).set_body_json(
+                json!([{"token": "name_must_be_unique", "message": "Name must be unique"}]),
+            ))
+            .mount(&server)
+            .await;
+    }
+    let c = client_for(&server);
+    for (p, status) in [("a", 400u16), ("b", 406), ("c", 409), ("d", 422)] {
+        let err = c
+            .write(WriteMethod::Post, &c.org_path(p), Some(&json!({})))
+            .await
+            .unwrap_err();
+        match err {
+            PceError::Rejected { status: s, body } => {
+                assert_eq!(s, status);
+                assert_eq!(body, "name_must_be_unique: Name must be unique");
+            }
+            other => panic!("{p}: expected Rejected, got {other:?}"),
+        }
+        assert_eq!(err_kind(&c, p).await, "rejected");
+    }
+}
+
+async fn err_kind(c: &PceClient, p: &str) -> &'static str {
+    c.write(WriteMethod::Post, &c.org_path(p), Some(&json!({})))
+        .await
+        .unwrap_err()
+        .kind()
+}
+
+#[tokio::test]
+async fn write_is_never_retried_on_429_or_503() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v2/orgs/5/x"))
+        .respond_with(ResponseTemplate::new(429).insert_header("Retry-After", "1"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path("/api/v2/orgs/5/y"))
+        .respond_with(ResponseTemplate::new(503))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let c = client_for(&server);
+    let err = c
+        .write(WriteMethod::Put, "/orgs/5/x", Some(&json!({})))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, PceError::RateLimited { .. }), "{err:?}");
+    // A write 429 sets no client pause (nothing is retried); the DELETE is sent once.
+    let err = c
+        .write(WriteMethod::Delete, "/orgs/5/y", None)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, PceError::Server { status: 503, .. }),
+        "{err:?}"
+    );
+    assert_eq!(c.stats().calls, 2);
+}

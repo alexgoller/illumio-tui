@@ -29,7 +29,7 @@ pub use resolve::{
 
 pub use auth::Credentials;
 pub use cache::TtlCache;
-pub use client::{ApiResponse, ClientConfig, PceClient, StatsSnapshot};
+pub use client::{ApiResponse, ClientConfig, PceClient, StatsSnapshot, WriteMethod};
 pub use error::{PceError, Result};
 pub use limiter::RateLimiter;
 
