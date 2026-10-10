@@ -670,3 +670,234 @@ mod labels {
         ));
     }
 }
+
+mod ip_lists {
+    use super::*;
+    use pce::write::{IpListDraft, IpListPatch, IpRangeSpec};
+
+    fn corp() -> Value {
+        json!({
+            "href": "/orgs/5/sec_policy/draft/ip_lists/3", "name": "Corp", "description": "corp nets",
+            "ip_ranges": [{"from_ip": "10.0.0.0/8"}, {"from_ip": "192.168.1.1", "to_ip": "192.168.1.9", "exclusion": true}],
+            "fqdns": [{"fqdn": "*.corp.example"}]
+        })
+    }
+
+    #[test]
+    fn draft_validates_and_builds_the_body() {
+        let d = IpListDraft {
+            name: "Corp".into(),
+            description: None,
+            ranges: vec![IpRangeSpec::parse("10.0.0.0/8", false).unwrap()],
+            fqdns: vec!["*.corp.example".into()],
+        };
+        assert!(d.validate().is_ok());
+        let empty = IpListDraft {
+            name: " ".into(),
+            description: None,
+            ranges: vec![],
+            fqdns: vec![],
+        };
+        let errs = empty.validate().unwrap_err();
+        assert_eq!(errs.len(), 2, "{errs:?}");
+    }
+
+    #[tokio::test]
+    async fn create_plan_body_uses_pce_field_names() {
+        let server = MockServer::start().await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let d = IpListDraft {
+            name: "Corp".into(),
+            description: Some("corp nets".into()),
+            ranges: vec![
+                IpRangeSpec::parse("10.0.0.0/8", false).unwrap(),
+                IpRangeSpec::parse("192.168.1.1-192.168.1.9", true).unwrap(),
+            ],
+            fqdns: vec!["*.corp.example".into()],
+        };
+        let plan = pce
+            .writer(&guard)
+            .plan_create_ip_list(&d, IfMissing::Create)
+            .await
+            .unwrap();
+        let req = plan.request().unwrap();
+        assert_eq!(req.method, WriteMethod::Post);
+        assert_eq!(req.path, "/orgs/5/sec_policy/draft/ip_lists");
+        assert_eq!(
+            req.body,
+            Some(json!({
+                "name": "Corp", "description": "corp nets",
+                "ip_ranges": [{"from_ip": "10.0.0.0/8"}, {"from_ip": "192.168.1.1", "to_ip": "192.168.1.9", "exclusion": true}],
+                "fqdns": [{"fqdn": "*.corp.example"}]
+            }))
+        );
+        assert_eq!(req.summary, "create ip_list Corp");
+    }
+
+    #[tokio::test]
+    async fn if_missing_matches_names_exactly_and_case_sensitively() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/sec_policy/draft/ip_lists"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([corp()])))
+            .mount(&server)
+            .await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let d = |name: &str| IpListDraft {
+            name: name.into(),
+            description: None,
+            ranges: vec![IpRangeSpec::parse("10.0.0.0/8", false).unwrap()],
+            fqdns: vec![],
+        };
+        let plan = pce
+            .writer(&guard)
+            .plan_create_ip_list(&d("Corp"), IfMissing::SkipExisting)
+            .await
+            .unwrap();
+        assert!(matches!(plan, Plan::Noop { .. }));
+        let plan = pce
+            .writer(&guard)
+            .plan_create_ip_list(&d("corp"), IfMissing::SkipExisting)
+            .await
+            .unwrap();
+        assert!(plan.request().is_some(), "case differs: not the same list");
+    }
+
+    #[test]
+    fn patch_applies_adds_and_removes_to_the_current_list() {
+        let current: pce::models::IpList = serde_json::from_value(corp()).unwrap();
+        let patch = IpListPatch {
+            name: None,
+            description: Some("updated".into()),
+            add_ranges: vec![IpRangeSpec::parse("10.2.0.0/16", false).unwrap()],
+            remove_ranges: vec![IpRangeSpec::parse("192.168.1.1-192.168.1.9", true).unwrap()],
+            add_fqdns: vec!["db.corp.example".into()],
+            remove_fqdns: vec!["*.corp.example".into()],
+        };
+        let d = patch.apply(&current).unwrap();
+        assert_eq!(d.name, "Corp");
+        assert_eq!(d.description.as_deref(), Some("updated"));
+        assert_eq!(
+            d.ranges
+                .iter()
+                .map(IpRangeSpec::display)
+                .collect::<Vec<_>>(),
+            vec!["10.0.0.0/8", "10.2.0.0/16"]
+        );
+        assert_eq!(d.fqdns, vec!["db.corp.example"]);
+        // Adding a duplicate is a no-op, not a second entry.
+        let dup = IpListPatch {
+            add_ranges: vec![IpRangeSpec::parse("10.0.0.0/8", false).unwrap()],
+            ..IpListPatch::default()
+        };
+        assert_eq!(dup.apply(&current).unwrap().ranges.len(), 2);
+    }
+
+    #[test]
+    fn remove_range_matches_a_cidr() {
+        let current: pce::models::IpList = serde_json::from_value(corp()).unwrap();
+        let patch = IpListPatch {
+            remove_ranges: vec![IpRangeSpec::parse("10.0.0.0/8", false).unwrap()],
+            ..IpListPatch::default()
+        };
+        let d = patch.apply(&current).unwrap();
+        assert_eq!(d.ranges.len(), 1);
+        assert_eq!(d.ranges[0].display(), "!192.168.1.1-192.168.1.9");
+    }
+
+    #[test]
+    fn removing_something_absent_or_the_last_range_is_refused() {
+        let current: pce::models::IpList = serde_json::from_value(corp()).unwrap();
+        let patch = IpListPatch {
+            remove_ranges: vec![IpRangeSpec::parse("172.16.0.1", false).unwrap()],
+            ..IpListPatch::default()
+        };
+        let errs = patch.apply(&current).unwrap_err();
+        assert!(errs[0].contains("172.16.0.1"), "{errs:?}");
+        let patch = IpListPatch {
+            remove_fqdns: vec!["nope".into()],
+            ..IpListPatch::default()
+        };
+        assert!(patch.apply(&current).is_err());
+        // Remove everything: the draft no longer validates.
+        let patch = IpListPatch {
+            remove_ranges: vec![
+                IpRangeSpec::parse("10.0.0.0/8", false).unwrap(),
+                IpRangeSpec::parse("192.168.1.1-192.168.1.9", true).unwrap(),
+            ],
+            remove_fqdns: vec!["*.corp.example".into()],
+            ..IpListPatch::default()
+        };
+        let errs = patch.apply(&current).unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("at least one")), "{errs:?}");
+        assert!(IpListPatch::default().is_empty());
+    }
+
+    #[tokio::test]
+    async fn update_plan_fetches_current_and_puts_the_full_list() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/sec_policy/draft/ip_lists/3"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(corp()))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let patch = IpListPatch {
+            add_fqdns: vec!["db.corp.example".into()],
+            ..IpListPatch::default()
+        };
+        let plan = pce
+            .writer(&guard)
+            .plan_update_ip_list("/orgs/5/sec_policy/active/ip_lists/3", &patch)
+            .await
+            .unwrap();
+        let req = plan.request().unwrap();
+        assert_eq!(req.method, WriteMethod::Put);
+        assert_eq!(
+            req.path, "/orgs/5/sec_policy/draft/ip_lists/3",
+            "active is rewritten to draft"
+        );
+        let body = req.body.clone().unwrap();
+        assert_eq!(body["name"], "Corp");
+        assert_eq!(body["ip_ranges"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            body["fqdns"],
+            json!([{"fqdn": "*.corp.example"}, {"fqdn": "db.corp.example"}])
+        );
+        let err = pce
+            .writer(&guard)
+            .plan_update_ip_list(
+                "/orgs/5/sec_policy/draft/ip_lists/3",
+                &IpListPatch::default(),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, WriteError::Invalid(_)),
+            "an empty patch is refused: {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_plan() {
+        let server = MockServer::start().await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let plan = pce
+            .writer(&guard)
+            .plan_delete_ip_list("/orgs/5/sec_policy/draft/ip_lists/3")
+            .unwrap();
+        let req = plan.request().unwrap();
+        assert_eq!(req.method, WriteMethod::Delete);
+        assert_eq!(req.path, "/orgs/5/sec_policy/draft/ip_lists/3");
+        assert!(
+            pce.writer(&guard)
+                .plan_delete_ip_list("/orgs/5/labels/3")
+                .is_err()
+        );
+    }
+}
