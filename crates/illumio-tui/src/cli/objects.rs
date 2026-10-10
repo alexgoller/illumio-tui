@@ -402,7 +402,7 @@ pub enum ServicesAction {
 pub struct ServiceAddArgs {
     /// Service name
     pub name: String,
-    /// Port: P/PROTO, P-Q/PROTO, icmp, or a bare protocol (repeatable, at least one)
+    /// Port: P/PROTO, P-Q/PROTO, or a protocol name such as icmp (repeatable, at least one)
     #[arg(long = "port", required = true)]
     pub ports: Vec<String>,
     /// Description

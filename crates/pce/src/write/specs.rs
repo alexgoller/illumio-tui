@@ -126,7 +126,9 @@ pub struct PortSpec {
 }
 
 impl PortSpec {
-    /// `P/PROTO`, `P-Q/PROTO`, or a bare protocol (`icmp`, `udp`, `47`).
+    /// `P/PROTO`, `P-Q/PROTO`, or a bare protocol by name (`icmp`, `udp`).
+    /// A bare number is refused: `22` reads as a port but would mean "all
+    /// ports of IP protocol 22".
     pub fn parse(s: &str) -> Result<Self, String> {
         let s = s.trim();
         if s.is_empty() {
@@ -138,6 +140,11 @@ impl PortSpec {
         };
         if proto.is_empty() {
             return Err(format!("{s:?}: missing protocol"));
+        }
+        if ports.is_none() && proto.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(format!(
+                "{s:?}: a bare number is ambiguous; use {s}/tcp, {s}/udp, or a protocol name (tcp, udp, icmp, icmpv6)"
+            ));
         }
         let proto = i64::from(
             proto_number(proto).ok_or_else(|| format!("{s:?}: unknown protocol {proto:?}"))?,
@@ -347,9 +354,10 @@ mod tests {
             PortSpec::parse("tcp").unwrap().to_json(),
             json!({"proto": 6})
         );
+        let err = PortSpec::parse("47").unwrap_err();
         assert_eq!(
-            PortSpec::parse("47").unwrap().to_json(),
-            json!({"proto": 47})
+            err,
+            "\"47\": a bare number is ambiguous; use 47/tcp, 47/udp, or a protocol name (tcp, udp, icmp, icmpv6)"
         );
         assert_eq!(PortSpec::parse("53/17").unwrap().display(), "53/udp");
         assert_eq!(
@@ -362,6 +370,9 @@ mod tests {
     fn bad_ports_are_rejected() {
         for bad in [
             "",
+            "22",
+            "80",
+            " 22 ",
             "443",
             "443/",
             "/tcp",
