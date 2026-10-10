@@ -802,3 +802,290 @@ mod services {
         assert!(server.received_requests().await.unwrap().is_empty());
     }
 }
+
+mod workloads {
+    use super::*;
+
+    fn printer() -> Value {
+        json!({
+            "href": "/orgs/5/workloads/u1", "name": "printer-1", "hostname": "printer-1.lab",
+            "managed": false, "interfaces": [{"name": "eth0", "address": "10.0.0.50", "cidr_block": 24}],
+            "labels": [{"href": "/orgs/5/labels/1", "key": "app", "value": "print"}]
+        })
+    }
+
+    fn labels() -> Value {
+        json!([
+            {"href": "/orgs/5/labels/1", "key": "app", "value": "print"},
+            {"href": "/orgs/5/labels/2", "key": "env", "value": "lab"}
+        ])
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn add_dry_run_resolves_labels() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_index(&server, labels(), json!([]), json!([])).await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "workloads",
+                    "add",
+                    "printer-1",
+                    "--hostname",
+                    "printer-1.lab",
+                    "--ip",
+                    "10.0.0.50/24",
+                    "--ip",
+                    "fe80::1",
+                    "--label",
+                    "app=print",
+                    "--label",
+                    "env=lab",
+                    "--description",
+                    "lobby",
+                    "--dry-run",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["method"], "POST");
+        assert_eq!(out["data"]["path"], "/orgs/5/workloads");
+        assert_eq!(
+            out["data"]["body"],
+            json!({
+                "name": "printer-1", "hostname": "printer-1.lab", "description": "lobby",
+                "interfaces": [{"name": "eth0", "address": "10.0.0.50", "cidr_block": 24}, {"name": "eth1", "address": "fe80::1"}],
+                "labels": [{"href": "/orgs/5/labels/1"}, {"href": "/orgs/5/labels/2"}]
+            })
+        );
+        let a = writer(&server, state.path())
+            .args(["workloads", "add", "p", "--label", "app=nope", "--dry-run"])
+            .assert()
+            .code(2);
+        assert!(
+            stderr_json(&a)["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("print")
+        );
+        assert!(
+            server
+                .received_requests()
+                .await
+                .unwrap()
+                .iter()
+                .all(|r| r.method.as_str() == "GET")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn add_sends_and_is_not_pending() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        Mock::given(method("POST"))
+            .and(path("/api/v2/orgs/5/workloads"))
+            .and(body_json(json!({"name": "printer-1", "hostname": "printer-1", "interfaces": [], "labels": []})))
+            .respond_with(ResponseTemplate::new(201).set_body_json(printer()))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args(["workloads", "add", "printer-1", "--yes"])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["pending"], false);
+        assert_eq!(out["data"]["href"], "/orgs/5/workloads/u1");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn update_by_hostname_sends_only_changed_keys() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_index(&server, labels(), json!([]), json!([])).await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/workloads"))
+            .and(wiremock::matchers::query_param("hostname", "printer-1.lab"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([printer()])))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/workloads/u1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(printer()))
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/api/v2/orgs/5/workloads/u1"))
+            .and(body_json(json!({
+                "description": "moved",
+                "labels": [{"href": "/orgs/5/labels/1"}, {"href": "/orgs/5/labels/2"}]
+            })))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "workloads",
+                    "update",
+                    "printer-1.lab",
+                    "--description",
+                    "moved",
+                    "--add-label",
+                    "env=lab",
+                    "--yes",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["status"], 204);
+        assert_eq!(out["data"]["object"]["hostname"], "printer-1.lab");
+        // --set-labels conflicts with --add-label (clap, exit 2).
+        writer(&server, state.path())
+            .args([
+                "workloads",
+                "update",
+                "printer-1.lab",
+                "--set-labels",
+                "env=lab",
+                "--add-label",
+                "env=lab",
+                "--yes",
+            ])
+            .assert()
+            .code(2);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn managed_workloads_are_refused_locally() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_index(&server, labels(), json!([]), json!([])).await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/workloads/m1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                json!({"href": "/orgs/5/workloads/m1", "hostname": "web-1", "managed": true}),
+            ))
+            .mount(&server)
+            .await;
+        let a = writer(&server, state.path())
+            .args(["workloads", "delete", "/orgs/5/workloads/m1", "--yes"])
+            .assert()
+            .code(2);
+        assert!(
+            stderr_json(&a)["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("VEN-managed")
+        );
+        let a = writer(&server, state.path())
+            .args([
+                "workloads",
+                "update",
+                "/orgs/5/workloads/m1",
+                "--description",
+                "x",
+                "--yes",
+            ])
+            .assert()
+            .code(2);
+        assert_eq!(stderr_json(&a)["error"]["kind"], "invalid");
+        assert!(
+            server
+                .received_requests()
+                .await
+                .unwrap()
+                .iter()
+                .all(|r| r.method.as_str() == "GET")
+        );
+        assert!(audit_lines(state.path()).is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn removing_the_last_interface_without_a_hostname_is_refused() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        let mut no_host = printer();
+        no_host["hostname"] = Value::Null;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/workloads/u1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(no_host))
+            .mount(&server)
+            .await;
+        mount_index(&server, labels(), json!([]), json!([])).await;
+        let a = writer(&server, state.path())
+            .args([
+                "workloads",
+                "update",
+                "/orgs/5/workloads/u1",
+                "--remove-ip",
+                "10.0.0.50",
+                "--yes",
+            ])
+            .assert()
+            .code(2);
+        assert_eq!(stderr_json(&a)["error"]["kind"], "invalid");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn delete_by_href() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/workloads/u1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(printer()))
+            .mount(&server)
+            .await;
+        Mock::given(method("DELETE"))
+            .and(path("/api/v2/orgs/5/workloads/u1"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args(["workloads", "delete", "/orgs/5/workloads/u1", "--yes"])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["href"], "/orgs/5/workloads/u1");
+        assert_eq!(audit_lines(state.path())[0]["method"], "DELETE");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn listing_still_works_without_a_subcommand() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/workloads"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([printer()])))
+            .mount(&server)
+            .await;
+        let out = stdout_json(
+            cmd(&server)
+                .args(["workloads", "--managed", "false", "--json"])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"][0]["hostname"], "printer-1.lab");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn update_with_nothing_to_change_sends_no_request() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        let a = writer(&server, state.path())
+            .args(["workloads", "update", "printer-1.lab", "--yes"])
+            .assert()
+            .code(2);
+        assert!(
+            stderr_json(&a)["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("nothing to change")
+        );
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+}

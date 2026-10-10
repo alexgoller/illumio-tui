@@ -85,8 +85,8 @@ pub enum Command {
     Services(objects::ServicesCmd),
     /// List audit events
     Events(events::EventsArgs),
-    /// List workloads
-    Workloads(workloads::WorkloadsArgs),
+    /// List workloads; add, update or delete an unmanaged one
+    Workloads(workloads::WorkloadsCmd),
     /// Rulesets, rules, pending changes
     #[command(subcommand)]
     Policy(policy::PolicyCmd),
@@ -110,7 +110,7 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
         Command::Iplists(c) => objects::ip_lists_cmd(&ctx, &c).await,
         Command::Services(c) => objects::services_cmd(&ctx, &c).await,
         Command::Events(a) => events::run(&ctx, &a).await,
-        Command::Workloads(a) => workloads::run(&ctx, &a).await,
+        Command::Workloads(a) => workloads::workloads_cmd(&ctx, &a).await,
         Command::Policy(p) => policy::run(&ctx, &p).await,
         Command::Traffic(t) => traffic::run(&ctx, &t).await,
         Command::Profile(_) => unreachable!("handled above"),
