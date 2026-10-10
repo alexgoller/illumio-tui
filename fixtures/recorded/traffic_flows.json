@@ -557,7 +557,7 @@
     "seq_id": 5,
     "service": {
       "port": 3389,
-      "process_name": "C:\\Users\\ghernandez\\AppData\\Local\\Programs\\cursor\\Cursor.exe",
+      "process_name": "C:\\Users\\user-14\\AppData\\Local\\Programs\\cursor\\Cursor.exe",
       "proto": 6,
       "user_name": "user-5",
       "windows_service_name": "agentic-ai"
@@ -905,7 +905,7 @@
     "seq_id": 9,
     "service": {
       "port": 3389,
-      "process_name": "C:\\Users\\hlee\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
+      "process_name": "C:\\Users\\user-15\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
       "proto": 6,
       "user_name": "user-8",
       "windows_service_name": "ide"

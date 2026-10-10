@@ -72,6 +72,18 @@ impl Anonymiser {
         format!("{mapped}{suffix}")
     }
 
+    /// Windows process paths embed the account: `C:\Users\<name>\...`.
+    fn process_name(&mut self, raw: &str) -> String {
+        const MARK: &str = "\\Users\\";
+        let Some(i) = raw.find(MARK) else {
+            return raw.to_string();
+        };
+        let start = i + MARK.len();
+        let end = raw[start..].find('\\').map_or(raw.len(), |j| start + j);
+        let user = Self::map(&mut self.users, &raw[start..end], |n| format!("user-{n}"));
+        format!("{}{user}{}", &raw[..start], &raw[end..])
+    }
+
     fn walk(&mut self, v: &mut Value) {
         match v {
             Value::Object(map) => {
@@ -103,6 +115,7 @@ impl Anonymiser {
                         ("user_name", Value::String(s)) if !s.is_empty() => {
                             *s = Self::map(&mut self.users, s, |n| format!("user-{n}"))
                         }
+                        ("process_name", Value::String(s)) => *s = self.process_name(s),
                         ("description", Value::String(s)) => s.clear(),
                         ("public_ip", Value::String(s)) => *s = self.ip(s),
                         _ => self.walk(child),
@@ -244,5 +257,31 @@ async fn main() {
             summary.insert("bytes".into(), Value::from(pce.stats().bytes));
             println!("{}", Value::Object(summary));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn user_names_and_windows_account_paths_share_placeholders() {
+        let mut v = json!([
+            {"service": {"user_name": "alice", "process_name": "C:\\Users\\alice\\a.exe"}},
+            {"service": {"user_name": "NT AUTHORITY\\SYSTEM", "process_name": "svchost.exe"}},
+            {"service": {"user_name": "alice", "process_name": "/usr/bin/sshd"}},
+            {"service": {"user_name": "", "process_name": "C:\\Users\\bob\\b.exe"}}
+        ]);
+        let mut anon = Anonymiser::default();
+        anon.walk(&mut v);
+        assert_eq!(v[0]["service"]["user_name"], "user-1");
+        assert_eq!(v[0]["service"]["process_name"], "C:\\Users\\user-1\\a.exe");
+        assert_eq!(v[1]["service"]["user_name"], "user-2");
+        assert_eq!(v[1]["service"]["process_name"], "svchost.exe");
+        assert_eq!(v[2]["service"]["user_name"], "user-1");
+        assert_eq!(v[2]["service"]["process_name"], "/usr/bin/sshd");
+        assert_eq!(v[3]["service"]["user_name"], "");
+        assert_eq!(v[3]["service"]["process_name"], "C:\\Users\\user-3\\b.exe");
     }
 }
