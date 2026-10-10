@@ -163,3 +163,28 @@ pub fn meta_line(meta: &Meta) -> String {
     }
     s
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn meta_line_shows_the_write() {
+        let meta = Meta {
+            profile: "demo".into(),
+            elapsed_ms: 1,
+            api_calls: 1,
+            bytes: 0,
+            cache: "none",
+            truncated: false,
+            window: None,
+            write: Some(WriteMeta {
+                method: WriteMethod::Post,
+                path: "/orgs/5/labels".into(),
+                status: 201,
+                audit: "x".into(),
+            }),
+        };
+        assert!(meta_line(&meta).contains("POST /orgs/5/labels → 201"));
+    }
+}

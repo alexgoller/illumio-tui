@@ -295,6 +295,25 @@ mod tests {
     }
 
     #[test]
+    fn write_output_renders_written_rows() {
+        let out = WriteOutput::Written(Written {
+            href: "/orgs/5/labels/9".into(),
+            pending: false,
+            status: 201,
+            object: json!({"key": "app"}),
+            dropped_fields: vec![],
+            warnings: vec!["w1".into()],
+        });
+        let rows = out.rows();
+        assert_eq!(rows[0], vec!["href", "/orgs/5/labels/9"]);
+        assert_eq!(rows[1], vec!["pending", "false"]);
+        assert_eq!(rows[2], vec!["status", "201"]);
+        assert_eq!(rows[3], vec!["dropped_fields", ""]);
+        assert_eq!(rows[4], vec!["warnings", "w1"]);
+        assert_eq!(rows[5], vec!["object", r#"{"key":"app"}"#]);
+    }
+
+    #[test]
     fn missing_yes_is_an_args_error_unless_dry_run() {
         assert!(
             check_flags(&WriteFlags {

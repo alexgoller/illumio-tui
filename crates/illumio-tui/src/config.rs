@@ -310,10 +310,12 @@ pub fn resolve(
             .traffic_default_window
             .clone()
             .unwrap_or_else(|| "24h".into()),
-        writes: env_str("ILLUMIO_WRITES")
-            .and_then(|v| parse_bool(&v))
-            .or(profile.writes)
-            .unwrap_or(false),
+        writes: match env_str("ILLUMIO_WRITES") {
+            Some(raw) => parse_bool(&raw).ok_or_else(|| {
+                ConfigError::Message(format!("ILLUMIO_WRITES is not a boolean: {raw:?}"))
+            })?,
+            None => profile.writes.unwrap_or(false),
+        },
     })
 }
 
@@ -528,6 +530,22 @@ api_secret_cmd = "echo   from-command  "
         let shown = format!("{:?}", f2.profiles["demo"]);
         assert!(shown.contains("writes: Some(true)"), "{shown}");
         assert!(!shown.contains("file-secret"));
+    }
+
+    #[test]
+    fn unparsable_illumio_writes_is_a_config_error() {
+        let mut f = file();
+        f.profiles.get_mut("demo").unwrap().writes = Some(true);
+        let err = resolve(
+            &f,
+            &Overrides::default(),
+            &env(&[("ILLUMIO_WRITES", "maybe")]),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("ILLUMIO_WRITES is not a boolean"),
+            "{err}"
+        );
     }
 
     #[test]

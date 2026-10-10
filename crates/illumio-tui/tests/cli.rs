@@ -50,6 +50,9 @@ fn every_flag_has_help_text() {
         vec!["traffic", "query", "--help"],
         vec!["policy", "rulesets", "--help"],
         vec!["policy", "rules", "--help"],
+        vec!["labels", "add", "--help"],
+        vec!["labels", "update", "--help"],
+        vec!["labels", "delete", "--help"],
     ] {
         let out = Command::cargo_bin("illumio-tui")
             .unwrap()

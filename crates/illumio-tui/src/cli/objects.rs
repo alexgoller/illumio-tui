@@ -2,8 +2,10 @@
 use super::context::{Context, cache_label};
 use super::error::CliError;
 use super::output::TableRows;
-use clap::Args;
+use super::write::{self, WriteFlags, parse_kv, resolve_label, run_plan};
+use clap::{Args, Subcommand};
 use pce::models::{IpList, Label, LabelGroup, Service};
+use pce::write::{IfMissing, LabelDraft};
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct LabelsArgs {
@@ -16,6 +18,96 @@ pub struct LabelsArgs {
     /// Include labels the PCE marks deleted
     #[arg(long)]
     pub include_deleted: bool,
+}
+
+/// `labels` lists by default; `add`, `update` and `delete` write.
+#[derive(Args, Debug)]
+#[command(args_conflicts_with_subcommands = true)]
+pub struct LabelsCmd {
+    #[command(subcommand)]
+    pub action: Option<LabelsAction>,
+    #[command(flatten)]
+    pub list: LabelsArgs,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum LabelsAction {
+    /// Create a label (needs writes enabled and --allow-writes)
+    Add(LabelAddArgs),
+    /// Change a label's value
+    Update(LabelUpdateArgs),
+    /// Delete a label
+    Delete(LabelDeleteArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct LabelAddArgs {
+    /// key=value
+    pub label: String,
+    /// Do nothing when a label with exactly this key and value exists
+    #[arg(long)]
+    pub if_missing: bool,
+    #[command(flatten)]
+    pub write: WriteFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct LabelUpdateArgs {
+    /// Label href or key=value
+    pub label: String,
+    /// New value
+    #[arg(long)]
+    pub value: String,
+    #[command(flatten)]
+    pub write: WriteFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct LabelDeleteArgs {
+    /// Label href or key=value
+    pub label: String,
+    #[command(flatten)]
+    pub write: WriteFlags,
+}
+
+pub async fn labels_cmd(ctx: &Context, cmd: &LabelsCmd) -> Result<(), CliError> {
+    match &cmd.action {
+        None => labels(ctx, &cmd.list).await,
+        Some(LabelsAction::Add(a)) => label_add(ctx, a).await,
+        Some(LabelsAction::Update(a)) => label_update(ctx, a).await,
+        Some(LabelsAction::Delete(a)) => label_delete(ctx, a).await,
+    }
+}
+
+async fn label_add(ctx: &Context, a: &LabelAddArgs) -> Result<(), CliError> {
+    let guard = write::prepare(ctx, &a.write)?;
+    let (k, v) = parse_kv(&a.label)?;
+    let draft = LabelDraft::new(k, v);
+    let if_missing = if a.if_missing {
+        IfMissing::SkipExisting
+    } else {
+        IfMissing::Create
+    };
+    let plan = ctx
+        .pce
+        .writer(&guard)
+        .plan_create_label(&draft, if_missing)
+        .await?;
+    run_plan(ctx, &a.write, &guard, plan).await
+}
+
+async fn label_update(ctx: &Context, a: &LabelUpdateArgs) -> Result<(), CliError> {
+    let guard = write::prepare(ctx, &a.write)?;
+    let href = resolve_label(ctx, &a.label).await?;
+    let plan = ctx.pce.writer(&guard).plan_update_label(&href, &a.value)?;
+    run_plan(ctx, &a.write, &guard, plan).await
+}
+
+async fn label_delete(ctx: &Context, a: &LabelDeleteArgs) -> Result<(), CliError> {
+    let guard = write::prepare(ctx, &a.write)?;
+    let href = resolve_label(ctx, &a.label).await?;
+    let plan = ctx.pce.writer(&guard).plan_delete_label(&href)?;
+    run_plan(ctx, &a.write, &guard, plan).await
 }
 
 fn pending(update_type: &Option<String>) -> String {

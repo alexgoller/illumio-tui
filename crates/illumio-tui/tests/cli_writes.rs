@@ -1,5 +1,5 @@
 //! Write commands: guard, --dry-run/--yes, envelope, audit, exit codes.
-#![allow(dead_code, unused_imports)]
+#![allow(dead_code)]
 use assert_cmd::Command;
 use predicates::prelude::*;
 use serde_json::{Value, json};
@@ -117,4 +117,294 @@ fn allow_writes_is_a_global_flag_with_help() {
         .unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("--allow-writes"), "{text}");
+}
+
+mod labels {
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn add_is_refused_without_allow_writes_or_profile_setting() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        // Flag present, profile denies.
+        let a = cmd(&server)
+            .env("XDG_STATE_HOME", state.path())
+            .args([
+                "--allow-writes",
+                "--json",
+                "labels",
+                "add",
+                "app=web",
+                "--yes",
+            ])
+            .assert()
+            .code(6);
+        let err = stderr_json(&a);
+        assert_eq!(err["error"]["kind"], "write_refused");
+        assert_eq!(err["error"]["exit_code"], 6);
+        assert!(
+            err["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("writes = true")
+        );
+        // Profile allows, flag missing.
+        let a = cmd(&server)
+            .env("ILLUMIO_WRITES", "1")
+            .env("XDG_STATE_HOME", state.path())
+            .args(["--json", "labels", "add", "app=web", "--yes"])
+            .assert()
+            .code(6);
+        assert!(
+            stderr_json(&a)["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("--allow-writes")
+        );
+        // Even a dry run needs the guard.
+        cmd(&server)
+            .args(["--json", "labels", "add", "app=web", "--dry-run"])
+            .assert()
+            .code(6);
+        assert!(server.received_requests().await.unwrap().is_empty());
+        assert!(audit_lines(state.path()).is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn add_without_yes_is_exit_2_and_sends_nothing() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        let a = writer(&server, state.path())
+            .args(["labels", "add", "app=web"])
+            .assert()
+            .code(2);
+        let err = stderr_json(&a);
+        assert_eq!(err["error"]["kind"], "args");
+        assert!(err["error"]["message"].as_str().unwrap().contains("--yes"));
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn add_dry_run_prints_the_request_and_sends_nothing() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        let a = writer(&server, state.path())
+            .args(["labels", "add", "app=web", "--dry-run"])
+            .assert()
+            .success();
+        assert_no_secret(&a);
+        let out = stdout_json(a);
+        assert_eq!(out["data"]["method"], "POST");
+        assert_eq!(out["data"]["path"], "/orgs/5/labels");
+        assert_eq!(out["data"]["body"], json!({"key": "app", "value": "web"}));
+        assert_eq!(out["data"]["summary"], "create label app=web");
+        assert_eq!(out["meta"]["cache"], "none");
+        assert_eq!(out["meta"]["api_calls"], 0);
+        assert!(out["meta"].get("write").is_none());
+        assert!(server.received_requests().await.unwrap().is_empty());
+        assert!(
+            audit_lines(state.path()).is_empty(),
+            "dry runs are not audited"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn label_spec_splits_on_the_first_equals() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args(["labels", "add", "app=a=b", "--dry-run"])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["body"], json!({"key": "app", "value": "a=b"}));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn add_sends_once_and_audits() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        Mock::given(method("POST"))
+            .and(path("/api/v2/orgs/5/labels"))
+            .and(body_json(json!({"key": "app", "value": "web"})))
+            .respond_with(
+                ResponseTemplate::new(201).set_body_json(
+                    json!({"href": "/orgs/5/labels/9", "key": "app", "value": "web"}),
+                ),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let a = writer(&server, state.path())
+            .args(["labels", "add", "app=web", "--yes"])
+            .assert()
+            .success();
+        assert_no_secret(&a);
+        let out = stdout_json(a);
+        assert_eq!(out["data"]["href"], "/orgs/5/labels/9");
+        assert_eq!(out["data"]["pending"], false);
+        assert_eq!(out["data"]["status"], 201);
+        assert_eq!(out["data"]["object"]["value"], "web");
+        assert_eq!(out["data"]["dropped_fields"], json!([]));
+        assert_eq!(out["meta"]["write"]["method"], "POST");
+        assert_eq!(out["meta"]["write"]["path"], "/orgs/5/labels");
+        assert_eq!(out["meta"]["write"]["status"], 201);
+        assert!(
+            out["meta"]["write"]["audit"]
+                .as_str()
+                .unwrap()
+                .ends_with("writes.jsonl")
+        );
+        assert_eq!(out["meta"]["api_calls"], 1);
+        let lines = audit_lines(state.path());
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0]["method"], "POST");
+        assert_eq!(lines[0]["status"], 201);
+        assert_eq!(lines[0]["href"], "/orgs/5/labels/9");
+        assert_eq!(lines[0]["source"], "cli");
+        assert_eq!(lines[0]["org_id"], 5);
+        assert!(
+            !serde_json::to_string(&lines[0])
+                .unwrap()
+                .contains(TEST_SECRET)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn add_if_missing_skips_an_exact_match() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/labels"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(
+                    json!([{"href": "/orgs/5/labels/1", "key": "app", "value": "web"}]),
+                ),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args(["labels", "add", "app=web", "--if-missing", "--yes"])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["skipped"], true);
+        assert_eq!(out["data"]["href"], "/orgs/5/labels/1");
+        assert!(out["meta"].get("write").is_none());
+        assert!(audit_lines(state.path()).is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rejected_write_is_exit_4_with_the_pce_message() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        Mock::given(method("POST"))
+            .and(path("/api/v2/orgs/5/labels"))
+            .respond_with(ResponseTemplate::new(406).set_body_json(
+                json!([{"token": "label_key_value_must_be_unique", "message": "exists"}]),
+            ))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let a = writer(&server, state.path())
+            .args(["labels", "add", "app=web", "--yes"])
+            .assert()
+            .code(4);
+        let err = stderr_json(&a);
+        assert_eq!(err["error"]["kind"], "rejected");
+        assert!(
+            err["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("label_key_value_must_be_unique")
+        );
+        assert_eq!(audit_lines(state.path())[0]["status"], 406);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn update_resolves_key_value_and_refetches_after_204() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_index(
+            &server,
+            json!([{"href": "/orgs/5/labels/1", "key": "env", "value": "test"}]),
+            json!([]),
+            json!([]),
+        )
+        .await;
+        Mock::given(method("PUT"))
+            .and(path("/api/v2/orgs/5/labels/1"))
+            .and(body_json(json!({"value": "prod"})))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/labels/1"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(
+                    json!({"href": "/orgs/5/labels/1", "key": "env", "value": "prod"}),
+                ),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args(["labels", "update", "env=test", "--value", "prod", "--yes"])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["href"], "/orgs/5/labels/1");
+        assert_eq!(out["data"]["status"], 204);
+        assert_eq!(out["data"]["object"]["value"], "prod");
+        // Unknown label: exit 2 listing known values, nothing written.
+        let a = writer(&server, state.path())
+            .args(["labels", "update", "env=nope", "--value", "x", "--yes"])
+            .assert()
+            .code(2);
+        assert!(
+            stderr_json(&a)["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("test")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn delete_by_href_and_table_output() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        Mock::given(method("DELETE"))
+            .and(path("/api/v2/orgs/5/labels/9"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let mut c = writer(&server, state.path());
+        c.args(["labels", "delete", "/orgs/5/labels/9", "--yes"]);
+        let out = stdout_json(c.assert().success());
+        assert_eq!(out["data"]["href"], "/orgs/5/labels/9");
+        assert!(out["data"]["object"].is_null());
+        // Table form of a dry run (built from cmd(): writer() already passes --json).
+        let mut t = cmd(&server);
+        t.env("ILLUMIO_WRITES", "1")
+            .env("XDG_STATE_HOME", state.path());
+        t.args([
+            "--allow-writes",
+            "--table",
+            "labels",
+            "delete",
+            "/orgs/5/labels/9",
+            "--dry-run",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("method").and(predicate::str::contains("DELETE")))
+        .stderr(predicate::str::contains("cache none"));
+        assert_eq!(audit_lines(state.path()).len(), 1);
+    }
 }
