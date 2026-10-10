@@ -2,7 +2,20 @@
 //! shared (via `Arc`) by every screen and command. Never makes requests.
 use crate::models::{IpList, Label, LabelGroup, Ref, Service};
 use serde::Serialize;
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+
+/// Active policy references `/sec_policy/active/<type>/<id>`; the index is
+/// built from draft lists and ids are the same in both, so every policy
+/// href is keyed by its draft form.
+fn canon(href: &str) -> Cow<'_, str> {
+    const ACTIVE: &str = "/sec_policy/active/";
+    if href.contains(ACTIVE) {
+        Cow::Owned(href.replacen(ACTIVE, "/sec_policy/draft/", 1))
+    } else {
+        Cow::Borrowed(href)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ResolvedLabel {
@@ -42,15 +55,16 @@ impl NameIndex {
             }
         }
         for g in groups {
-            idx.label_groups.insert(g.href.clone(), g.clone());
+            idx.label_groups
+                .insert(canon(&g.href).into_owned(), g.clone());
         }
         for i in ip_lists {
             idx.ip_list_by_name
                 .insert(i.name.to_ascii_lowercase(), i.href.clone());
-            idx.ip_lists.insert(i.href.clone(), i.clone());
+            idx.ip_lists.insert(canon(&i.href).into_owned(), i.clone());
         }
         for s in services {
-            idx.services.insert(s.href.clone(), s.clone());
+            idx.services.insert(canon(&s.href).into_owned(), s.clone());
         }
         idx
     }
@@ -85,11 +99,15 @@ impl NameIndex {
     }
 
     pub fn label_group_name(&self, href: &str) -> Option<&str> {
-        self.label_groups.get(href).map(|g| g.name.as_str())
+        self.label_groups
+            .get(canon(href).as_ref())
+            .map(|g| g.name.as_str())
     }
 
     pub fn ip_list_name(&self, href: &str) -> Option<&str> {
-        self.ip_lists.get(href).map(|l| l.name.as_str())
+        self.ip_lists
+            .get(canon(href).as_ref())
+            .map(|l| l.name.as_str())
     }
 
     pub fn ip_list_href(&self, name: &str) -> Option<&str> {
@@ -106,11 +124,11 @@ impl NameIndex {
     }
 
     pub fn service(&self, href: &str) -> Option<&Service> {
-        self.services.get(href)
+        self.services.get(canon(href).as_ref())
     }
 
     pub fn service_name(&self, href: &str) -> Option<&str> {
-        self.services.get(href).map(|s| s.name.as_str())
+        self.service(href).map(|s| s.name.as_str())
     }
 
     /// Resolves label refs, sorted by key. Unknown hrefs get key `?` and the
@@ -355,6 +373,28 @@ mod tests {
             Some("PostgreSQL")
         );
         assert_eq!(idx.service_name("/x"), None);
+    }
+
+    #[test]
+    fn active_policy_hrefs_resolve_to_draft_names() {
+        let idx = index();
+        assert_eq!(
+            idx.ip_list_name("/orgs/5/sec_policy/active/ip_lists/21"),
+            Some("Corp")
+        );
+        assert_eq!(
+            idx.service_name("/orgs/5/sec_policy/active/services/31"),
+            Some("PostgreSQL")
+        );
+        assert_eq!(
+            idx.label_group_name("/orgs/5/sec_policy/active/label_groups/10"),
+            Some("All prod envs")
+        );
+        assert_eq!(
+            idx.ip_list_name("/orgs/5/sec_policy/active/ip_lists/99"),
+            None
+        );
+        assert_eq!(canon("/orgs/5/labels/1"), "/orgs/5/labels/1");
     }
 
     #[test]
