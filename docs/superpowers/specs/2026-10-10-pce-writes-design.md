@@ -42,12 +42,13 @@ Success:
 
 ### 3.1 Client
 
-`PceClient` gains one method for mutations:
+`PceClient` gains one crate-private method for mutations (only
+`pce::write::Writer` calls it):
 
 ```rust
 pub enum WriteMethod { Post, Put, Delete }
 
-pub async fn write(
+pub(crate) async fn write(
     &self,
     method: WriteMethod,
     api_path: &str,
@@ -62,6 +63,8 @@ pub async fn write(
   (kind `rejected`, exit code 4). `pce_error_message` formats the body as
   today. GETs keep `InvalidFilter`.
 - `post` (used by the Explorer query) is unchanged.
+- The shared HTTP client follows no redirects: a followed 3xx would turn a
+  POST/PUT/DELETE into a GET. A 3xx maps to `PceError::Server`.
 
 ### 3.2 Guard
 
