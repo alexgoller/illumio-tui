@@ -523,7 +523,7 @@ fn two_profile_config(dir: &std::path::Path, b: &MockServer) -> std::path::PathB
     std::fs::write(
         &cfg,
         format!(
-            "[profiles.a]\nhost = \"a.invalid\"\norg_id = 1\napi_key = \"k\"\napi_secret = \"s\"\n\n[profiles.b]\nscheme = \"http\"\nhost = \"{}\"\nport = {}\norg_id = 5\napi_key = \"k\"\napi_secret = \"s\"\n",
+            "[profiles.a]\nhost = \"a.invalid\"\norg_id = 1\napi_key = \"k\"\napi_secret = \"s\"\n\n[profiles.b]\nscheme = \"http\"\nhost = \"{}\"\nport = {}\norg_id = 5\napi_key = \"k\"\napi_secret = \"s\"\n[profiles.b.limits]\ntraffic_max_results = 500\ntraffic_default_window = \"1h\"\n",
             ub.host_str().unwrap(),
             ub.port().unwrap()
         ),
@@ -564,6 +564,9 @@ async fn switch_profile_rebuilds_the_connection_from_config() {
     let model = run_loop(&mut rt, Box::pin(events), &mut |_| {}).await;
     assert_eq!(model.profile.name, "b");
     assert_eq!(model.profile.org_id, 5);
+    assert_eq!(model.limits.traffic_max_results, 500);
+    assert_eq!(model.traffic.filter.max_results, 500);
+    assert_eq!(model.traffic.filter.window, "1h");
     assert!(
         matches!(
             model.connection,

@@ -4,7 +4,7 @@
 use crate::cli::error::CliError;
 use crate::cli::{Context, GlobalArgs};
 use crate::tui::model::ObjectKind;
-use crate::tui::model::{Model, ProfileInfo};
+use crate::tui::model::{Limits, Model, ProfileInfo};
 use crate::tui::msg::{Cmd, Msg, ObjectsPayload, QueryOutcome};
 use crate::tui::{update, view};
 use crossterm::event::{
@@ -114,9 +114,14 @@ impl Runtime {
                             host: ctx.config.host.clone(),
                             org_id: ctx.config.org_id,
                         };
+                        let limits = Limits {
+                            auto_refresh_min_seconds: ctx.config.auto_refresh_min_seconds,
+                            traffic_max_results: ctx.config.traffic_max_results,
+                            traffic_default_window: ctx.config.traffic_default_window.clone(),
+                        };
                         self.pce = Arc::new(ctx.pce);
                         self.generation.fetch_add(1, Ordering::SeqCst);
-                        Msg::ProfileSwitched(Ok(info))
+                        Msg::ProfileSwitched(Ok((info, limits)))
                     }
                     Err(e) => Msg::ProfileSwitched(Err(e.to_string())),
                 };

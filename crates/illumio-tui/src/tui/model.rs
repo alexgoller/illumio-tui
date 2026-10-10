@@ -1372,7 +1372,7 @@ impl Model {
 
     /// Forgets everything loaded from the previous PCE: a running query is
     /// cancelled, every screen starts empty with auto-refresh off, counters and
-    /// overlay are cleared. Keeps the traffic filter's window and cap.
+    /// overlay are cleared. The traffic filter returns to the defaults in `limits`.
     pub fn reset_data(&mut self) {
         if let QueryState::Running { cancel, .. } = &self.traffic.query {
             cancel.cancel();
@@ -1383,8 +1383,6 @@ impl Model {
             self.limits.traffic_max_results,
             min,
         );
-        traffic.filter.window = self.traffic.filter.window.clone();
-        traffic.filter.max_results = self.traffic.filter.max_results;
         traffic.seq = self.traffic.seq + 1; // a late result of the old query is stale
         self.traffic = traffic;
         self.policy = PolicyState::new(min);

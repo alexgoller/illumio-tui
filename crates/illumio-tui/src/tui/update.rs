@@ -330,8 +330,9 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             Vec::new()
         }
         Msg::ProfileSwitched(result) => match result {
-            Ok(info) => {
+            Ok((info, limits)) => {
                 model.profile = info;
+                model.limits = limits;
                 model.reset_data();
                 model.connection = Connection::Connecting;
                 model.status =
@@ -2755,7 +2756,7 @@ mod tests {
     #[test]
     fn profile_command_resets_state_and_reconnects() {
         use crate::tui::commands::Command;
-        use crate::tui::model::ProfileInfo;
+        use crate::tui::model::{Limits, ProfileInfo};
         use crate::tui::test_support::model_with_flows;
         let mut m = model_with_flows();
         let cmds = update(&mut m, Msg::Command(Command::Profile("prod".into())));
@@ -2766,13 +2767,26 @@ mod tests {
         );
         let cmds = update(
             &mut m,
-            Msg::ProfileSwitched(Ok(ProfileInfo {
-                name: "prod".into(),
-                host: "prod.example".into(),
-                org_id: 9,
-            })),
+            Msg::ProfileSwitched(Ok((
+                ProfileInfo {
+                    name: "prod".into(),
+                    host: "prod.example".into(),
+                    org_id: 9,
+                },
+                Limits {
+                    auto_refresh_min_seconds: 300,
+                    traffic_max_results: 500,
+                    traffic_default_window: "1h".into(),
+                },
+            ))),
         );
         assert_eq!(cmds, vec![Cmd::Connect]);
+        assert_eq!(m.limits.traffic_max_results, 500);
+        assert_eq!(m.limits.auto_refresh_min_seconds, 300);
+        assert_eq!(m.limits.traffic_default_window, "1h");
+        assert_eq!(m.traffic.filter.max_results, 500);
+        assert_eq!(m.traffic.filter.window, "1h");
+        assert_eq!(m.traffic.auto.interval.as_secs(), 300);
         assert!(matches!(m.connection, Connection::Connecting));
         assert!(m.traffic.data.is_none());
         assert_eq!(m.traffic.flows.len(), 0);
