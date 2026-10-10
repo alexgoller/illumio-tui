@@ -343,3 +343,119 @@ async fn workloads_unknown_label_exits_2_without_querying() {
     let err: Value = serde_json::from_slice(&assert.get_output().stderr).unwrap();
     assert!(err["error"]["message"].as_str().unwrap().contains("shop"));
 }
+
+async fn mount_policy(server: &MockServer) {
+    mount_objects(server).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/sec_policy/draft/rule_sets"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/rule_sets.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/sec_policy/active/rule_sets"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/api/v2/orgs/5/sec_policy/draft/rule_sets/100/deny_rules",
+        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/deny_rules.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/api/v2/orgs/5/sec_policy/draft/rule_sets/101/deny_rules",
+        ))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/sec_policy/pending"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/pending_list.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .mount(server)
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn policy_rulesets_resolve_scopes_and_filter_by_name() {
+    let server = MockServer::start().await;
+    mount_policy(&server).await;
+    let out = stdout_json(cmd(&server).args(["policy", "rulesets"]).assert().success());
+    assert_eq!(out["data"].as_array().unwrap().len(), 2);
+    assert_eq!(out["data"][0]["scopes"][0], "app=shop & env=prod");
+    assert_eq!(out["data"][0]["rule_count"], 2);
+    assert_eq!(out["data"][1]["update_type"], "create");
+    let out = stdout_json(
+        cmd(&server)
+            .args(["policy", "rulesets", "--name", "infra"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"].as_array().unwrap().len(), 1);
+    let out = stdout_json(
+        cmd(&server)
+            .args(["policy", "rulesets", "--active"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn policy_rules_include_deny_rules_and_tolerate_missing_endpoint() {
+    let server = MockServer::start().await;
+    mount_policy(&server).await;
+    let out = stdout_json(
+        cmd(&server)
+            .args(["policy", "rules", "shop-prod"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"]["ruleset"]["name"], "Shop-Prod");
+    let rules = out["data"]["rules"].as_array().unwrap();
+    assert_eq!(rules.len(), 4);
+    assert_eq!(rules[1]["consumers"][0], "ipl:Corp");
+    assert_eq!(rules[1]["services"][1], "8000-8099/tcp");
+    assert_eq!(rules[3]["kind"], "override_deny");
+    let out = stdout_json(
+        cmd(&server)
+            .args(["policy", "rules", "/orgs/5/sec_policy/draft/rule_sets/101"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"]["rules"].as_array().unwrap().len(), 1);
+    assert_eq!(out["data"]["rules"][0]["providers"][0], "All workloads");
+    cmd(&server)
+        .args(["policy", "rules", "ghost"])
+        .assert()
+        .code(2);
+    cmd(&server)
+        .args(["policy", "rules", "shop-prod", "--table"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("override_deny").and(predicate::str::contains("role=web")),
+        );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn policy_pending_lists_changes() {
+    let server = MockServer::start().await;
+    mount_policy(&server).await;
+    let out = stdout_json(cmd(&server).args(["policy", "pending"]).assert().success());
+    assert_eq!(out["data"][0]["object_type"], "rule_sets");
+    assert_eq!(out["data"][1]["name"], "Corp");
+}

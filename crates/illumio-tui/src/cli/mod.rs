@@ -5,6 +5,7 @@ pub mod error;
 pub mod health;
 pub mod objects;
 pub mod output;
+pub mod policy;
 pub mod workloads;
 
 use clap::{Args, Parser, Subcommand};
@@ -71,6 +72,9 @@ pub enum Command {
     Services,
     /// List workloads
     Workloads(workloads::WorkloadsArgs),
+    /// Rulesets, rules, pending changes
+    #[command(subcommand)]
+    Policy(policy::PolicyCmd),
 }
 
 pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
@@ -82,5 +86,6 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
         Command::Iplists => objects::ip_lists(&ctx).await,
         Command::Services => objects::services(&ctx).await,
         Command::Workloads(a) => workloads::run(&ctx, &a).await,
+        Command::Policy(p) => policy::run(&ctx, &p).await,
     }
 }
