@@ -96,9 +96,10 @@ impl AuditSink for JsonlAudit {
 
     fn append(&self, entry: &AuditEntry) -> std::io::Result<()> {
         let mut f = self.open()?;
-        let line = serde_json::to_string(entry).map_err(std::io::Error::other)?;
+        // One write call: O_APPEND only makes a single write atomic.
+        let mut line = serde_json::to_string(entry).map_err(std::io::Error::other)?;
+        line.push('\n');
         f.write_all(line.as_bytes())?;
-        f.write_all(b"\n")?;
         f.flush()
     }
 
