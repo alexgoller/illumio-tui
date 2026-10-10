@@ -50,8 +50,8 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 && !o.loading[kind.index()]
                 && o.auto.due(now)
             {
-                // Through the cache: the PCE is only asked once the object TTL has run out.
-                return load_objects(model, kind, CacheMode::Use);
+                // Opted in with `a`: a real refresh of the current kind, like Traffic and Policy.
+                return load_objects(model, kind, CacheMode::Bypass);
             }
             Vec::new()
         }
@@ -2093,9 +2093,9 @@ mod tests {
             update(&mut m, Msg::Tick(now)),
             vec![Cmd::LoadObjects {
                 kind: ObjectKind::LabelGroups,
-                mode: pce::CacheMode::Use
+                mode: pce::CacheMode::Bypass
             }],
-            "current kind only, through the cache"
+            "current kind only, bypassing the cache (opted in)"
         );
         m.screen = Screen::Traffic;
         m.objects.loading[1] = false;
