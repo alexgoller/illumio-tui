@@ -3800,18 +3800,28 @@ use pce::write::{WriteError, WriteRefused};
     Write(#[from] WriteError),
 ```
 
-In `exit_code`, before the `CliError::Io` arm:
+In `exit_code`, before the `CliError::Io` arm, delegate to a helper (the `AuditFailed` variant, added in Task 3's fix round, wraps another `WriteError` and takes its code and kind):
 
 ```rust
-            CliError::Write(WriteError::Refused(_)) => 6,
-            CliError::Write(WriteError::Invalid(_)) => 2,
-            CliError::Write(WriteError::Unanswered(_)) => 4,
-            CliError::Write(WriteError::Pce(e)) => match e {
-                PceError::Auth { .. } => 3,
-                PceError::RateLimited { .. } => 5,
-                PceError::Invalid(_) => 2,
-                _ => 4,
-            },
+            CliError::Write(e) => write_exit_code(e),
+```
+
+```rust
+/// Exit code of a write error; `AuditFailed` reports as the write error it wraps.
+fn write_exit_code(e: &WriteError) -> i32 {
+    match e {
+        WriteError::Refused(_) => 6,
+        WriteError::Invalid(_) => 2,
+        WriteError::Unanswered(_) => 4,
+        WriteError::AuditFailed { write, .. } => write_exit_code(write),
+        WriteError::Pce(e) => match e {
+            PceError::Auth { .. } => 3,
+            PceError::RateLimited { .. } => 5,
+            PceError::Invalid(_) => 2,
+            _ => 4,
+        },
+    }
+}
 ```
 
 In `kind`: `CliError::Write(e) => e.kind().into(),`. Update the module doc comment to list `6 write refused`. Add a unit test in `error.rs`:
@@ -3832,6 +3842,13 @@ mod tests {
             CliError::Write(WriteError::Pce(PceError::Rejected { status: 406, body: "x".into() })).exit_code(),
             4
         );
+        let wrapped = CliError::Write(WriteError::AuditFailed {
+            write: Box::new(WriteError::Refused(WriteRefused::FlagMissing)),
+            error: "disk full".into(),
+        });
+        assert_eq!(wrapped.exit_code(), 6);
+        assert_eq!(wrapped.kind(), "write_refused");
+        assert!(wrapped.to_string().contains("audit"));
     }
 }
 ```
@@ -3993,6 +4010,7 @@ impl TableRows for WriteOutput {
                 row("pending", w.pending.to_string()),
                 row("status", w.status.to_string()),
                 row("dropped_fields", w.dropped_fields.join(", ")),
+                row("warnings", w.warnings.join("; ")),
                 row("object", compact(&w.object)),
             ],
             WriteOutput::Skipped {
