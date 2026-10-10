@@ -3,8 +3,9 @@
 //! `Cmd`s by spawning tasks on a shared `Arc<Pce>`.
 use crate::cli::error::CliError;
 use crate::cli::{Context, GlobalArgs};
+use crate::tui::model::ObjectKind;
 use crate::tui::model::{Model, ProfileInfo};
-use crate::tui::msg::{Cmd, Msg, QueryOutcome};
+use crate::tui::msg::{Cmd, Msg, ObjectsPayload, QueryOutcome};
 use crate::tui::{update, view};
 use crossterm::event::{
     DisableFocusChange, DisableMouseCapture, EnableFocusChange, EnableMouseCapture, Event,
@@ -134,6 +135,33 @@ impl Runtime {
                     let _ = tx.send(Msg::Stats(pce.stats()));
                 });
             }
+            Cmd::LoadObjects { kind, mode } => {
+                self.model.busy += 1;
+                let (pce, tx) = (self.pce.clone(), self.tx.clone());
+                tokio::spawn(async move {
+                    let result = match kind {
+                        ObjectKind::Labels => pce
+                            .labels(mode)
+                            .await
+                            .map(|c| ObjectsPayload::Labels(c.value, c.age.as_secs())),
+                        ObjectKind::LabelGroups => pce
+                            .label_groups(mode)
+                            .await
+                            .map(|c| ObjectsPayload::LabelGroups(c.value, c.age.as_secs())),
+                        ObjectKind::IpLists => pce
+                            .ip_lists(mode)
+                            .await
+                            .map(|c| ObjectsPayload::IpLists(c.value, c.age.as_secs())),
+                        ObjectKind::Services => pce
+                            .services(mode)
+                            .await
+                            .map(|c| ObjectsPayload::Services(c.value, c.age.as_secs())),
+                    }
+                    .map_err(|e| e.to_string());
+                    let _ = tx.send(Msg::ObjectsLoaded { kind, result });
+                    let _ = tx.send(Msg::Stats(pce.stats()));
+                });
+            }
             Cmd::LoadIndex(mode) => {
                 self.model.busy += 1;
                 let (pce, tx) = (self.pce.clone(), self.tx.clone());
@@ -161,6 +189,7 @@ impl Runtime {
                 | Msg::RuleSetsLoaded { .. }
                 | Msg::DenyRulesLoaded { .. }
                 | Msg::PendingLoaded(_)
+                | Msg::ObjectsLoaded { .. }
         );
         let cmds = update(&mut self.model, msg);
         if task_result {

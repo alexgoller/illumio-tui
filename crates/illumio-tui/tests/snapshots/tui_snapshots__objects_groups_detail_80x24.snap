@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Labels & objects  │  4 Workloads
+  Labels  │  Label groups  │  IP lists  │  Services
+╭ Label groups ───────────────────────────────────────── cached 3s ago · 1 row ╮
+│  name                                      key          labels groups pending│
+│▸ All prod envs                             env               1      0        │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭ Detail ───────────────────────────────────────────────────────── Enter hides ╮
+│group  All prod envs  key env                                                 │
+│labels env=prod                                                               │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ready        Tab type  Enter detail  r refresh  a auto  / search  : cmd  ? help

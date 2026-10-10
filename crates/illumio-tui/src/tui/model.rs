@@ -2,7 +2,9 @@
 use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::table::{Column, SortKey, TableView};
 use crate::tui::ui::theme::Theme;
-use pce::models::{DenyRule, PendingChange, PolicyScope, RuleSet};
+use pce::models::{
+    DenyRule, IpList, Label, LabelGroup, PendingChange, PolicyScope, RuleSet, Service,
+};
 use pce::traffic::{BlockedGroup, FlowGroup, ResolvedFlow, blocked_summary, group_by_labels};
 use pce::{NameIndex, RuleKind, RuleSetView, RuleView, StatsSnapshot};
 use std::collections::{HashMap, HashSet};
@@ -751,6 +753,8 @@ pub struct PolicyState {
     pub loaded_at: Option<Instant>,
     pub age_secs: u64,
     pub loading: bool,
+    /// Set by an explicit `r`: the next ruleset reload also bypasses the cache for deny rules.
+    pub bypass_deny: bool,
     pub pending: Option<Vec<PendingChange>>,
     pub auto: AutoRefresh,
 }
@@ -768,6 +772,7 @@ impl PolicyState {
             loaded_at: None,
             age_secs: 0,
             loading: false,
+            bypass_deny: false,
             pending: None,
             auto: AutoRefresh::new(min_refresh),
         }
@@ -800,6 +805,7 @@ impl PolicyState {
         self.deny_requested.clear();
         self.loaded_at = None;
         self.age_secs = 0;
+        self.bypass_deny = false;
     }
 
     /// Rules of the selected ruleset: allow rules, then deny rules (inline or fetched fallback).
@@ -843,6 +849,283 @@ impl PolicyState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObjectKind {
+    Labels,
+    LabelGroups,
+    IpLists,
+    Services,
+}
+
+impl ObjectKind {
+    pub const ALL: [ObjectKind; 4] = [
+        ObjectKind::Labels,
+        ObjectKind::LabelGroups,
+        ObjectKind::IpLists,
+        ObjectKind::Services,
+    ];
+
+    pub fn index(self) -> usize {
+        Self::ALL.iter().position(|k| *k == self).unwrap_or(0)
+    }
+
+    pub fn next(self) -> Self {
+        Self::ALL[(self.index() + 1) % 4]
+    }
+
+    pub fn prev(self) -> Self {
+        Self::ALL[(self.index() + 3) % 4]
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            ObjectKind::Labels => "Labels",
+            ObjectKind::LabelGroups => "Label groups",
+            ObjectKind::IpLists => "IP lists",
+            ObjectKind::Services => "Services",
+        }
+    }
+}
+
+pub fn label_columns() -> Vec<Column<Label>> {
+    vec![
+        Column {
+            title: "key",
+            width: 16,
+            cell: |l| l.key.clone(),
+            key: |l| SortKey::Text(l.key.clone()),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "value",
+            width: 0,
+            cell: |l| l.value.clone(),
+            key: |l| SortKey::Text(l.value.clone()),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "deleted",
+            width: 7,
+            cell: |l| {
+                if l.is_deleted() {
+                    "yes".into()
+                } else {
+                    String::new()
+                }
+            },
+            key: |l| SortKey::Num(u64::from(l.is_deleted())),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "href",
+            width: 24,
+            cell: |l| l.href.clone(),
+            key: |l| SortKey::Text(l.href.clone()),
+            right: false,
+            hide_below: 70,
+            narrow: None,
+            narrow_width: 0,
+        },
+    ]
+}
+
+pub fn group_columns_objects() -> Vec<Column<LabelGroup>> {
+    vec![
+        Column {
+            title: "name",
+            width: 0,
+            cell: |g| g.name.clone(),
+            key: |g| SortKey::Text(g.name.clone()),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "key",
+            width: 12,
+            cell: |g| g.key.clone(),
+            key: |g| SortKey::Text(g.key.clone()),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "labels",
+            width: 6,
+            cell: |g| g.labels.len().to_string(),
+            key: |g| SortKey::Num(g.labels.len() as u64),
+            right: true,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "groups",
+            width: 6,
+            cell: |g| g.sub_groups.len().to_string(),
+            key: |g| SortKey::Num(g.sub_groups.len() as u64),
+            right: true,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "pending",
+            width: 7,
+            cell: |g| g.update_type.clone().unwrap_or_default(),
+            key: |g| SortKey::Text(g.update_type.clone().unwrap_or_default()),
+            right: false,
+            hide_below: 70,
+            narrow: None,
+            narrow_width: 0,
+        },
+    ]
+}
+
+pub fn ip_list_columns() -> Vec<Column<IpList>> {
+    vec![
+        Column {
+            title: "name",
+            width: 28,
+            cell: |l| l.name.clone(),
+            key: |l| SortKey::Text(l.name.clone()),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 24,
+        },
+        Column {
+            title: "ranges",
+            width: 0,
+            cell: |l| l.summary(),
+            key: |l| SortKey::Num(l.ip_ranges.len() as u64),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "pending",
+            width: 7,
+            cell: |l| l.update_type.clone().unwrap_or_default(),
+            key: |l| SortKey::Text(l.update_type.clone().unwrap_or_default()),
+            right: false,
+            hide_below: 70,
+            narrow: None,
+            narrow_width: 0,
+        },
+    ]
+}
+
+pub fn service_columns() -> Vec<Column<Service>> {
+    vec![
+        Column {
+            title: "name",
+            width: 28,
+            cell: |s| s.name.clone(),
+            key: |s| SortKey::Text(s.name.clone()),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 24,
+        },
+        Column {
+            title: "ports",
+            width: 0,
+            cell: |s| s.summary(),
+            key: |s| SortKey::Num(s.service_ports.len() as u64),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "pending",
+            width: 7,
+            cell: |s| s.update_type.clone().unwrap_or_default(),
+            key: |s| SortKey::Text(s.update_type.clone().unwrap_or_default()),
+            right: false,
+            hide_below: 70,
+            narrow: None,
+            narrow_width: 0,
+        },
+    ]
+}
+
+#[derive(Debug)]
+pub struct ObjectsState {
+    pub kind: ObjectKind,
+    pub labels: TableView<Label>,
+    pub groups: TableView<LabelGroup>,
+    pub ip_lists: TableView<IpList>,
+    pub services: TableView<Service>,
+    /// Cache age in seconds when each kind (indexed by `ObjectKind::index`) was loaded.
+    pub ages: [Option<u64>; 4],
+    /// When each kind arrived, so the shown age keeps growing.
+    pub loaded_at: [Option<Instant>; 4],
+    pub loading: [bool; 4],
+    pub show_detail: bool,
+    pub auto: AutoRefresh,
+}
+
+impl ObjectsState {
+    pub fn new(min_refresh: u64) -> Self {
+        Self {
+            kind: ObjectKind::Labels,
+            labels: TableView::new(label_columns()),
+            groups: TableView::new(group_columns_objects()),
+            ip_lists: TableView::new(ip_list_columns()),
+            services: TableView::new(service_columns()),
+            ages: [None; 4],
+            loaded_at: [None; 4],
+            loading: [false; 4],
+            show_detail: false,
+            auto: AutoRefresh::new(min_refresh),
+        }
+    }
+
+    pub fn loaded(&self) -> bool {
+        self.ages.iter().all(Option::is_some)
+    }
+
+    /// Whether the current kind's table is capturing keys for a search.
+    pub fn is_searching(&self) -> bool {
+        match self.kind {
+            ObjectKind::Labels => self.labels.is_searching(),
+            ObjectKind::LabelGroups => self.groups.is_searching(),
+            ObjectKind::IpLists => self.ip_lists.is_searching(),
+            ObjectKind::Services => self.services.is_searching(),
+        }
+    }
+
+    /// Whether the current kind has a selected row.
+    pub fn has_selection(&self) -> bool {
+        match self.kind {
+            ObjectKind::Labels => self.labels.selected_item().is_some(),
+            ObjectKind::LabelGroups => self.groups.selected_item().is_some(),
+            ObjectKind::IpLists => self.ip_lists.selected_item().is_some(),
+            ObjectKind::Services => self.services.selected_item().is_some(),
+        }
+    }
+
+    /// Age of the current kind in seconds, growing since it was loaded.
+    pub fn age_secs(&self, kind: ObjectKind) -> Option<u64> {
+        let i = kind.index();
+        self.ages[i].map(|a| a + self.loaded_at[i].map_or(0, |t| t.elapsed().as_secs()))
+    }
+}
+
 /// Limits copied from the resolved profile so `update` never touches config.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Limits {
@@ -861,6 +1144,7 @@ pub struct Model {
     pub overlay: Overlay,
     pub traffic: TrafficState,
     pub policy: PolicyState,
+    pub objects: ObjectsState,
     pub connection: Connection,
     pub stats: StatsSnapshot,
     pub size: (u16, u16),
@@ -887,6 +1171,7 @@ impl Model {
             auto_refresh_min_seconds,
         );
         let policy = PolicyState::new(auto_refresh_min_seconds);
+        let objects = ObjectsState::new(auto_refresh_min_seconds);
         Self {
             profile,
             theme_name,
@@ -900,6 +1185,7 @@ impl Model {
             overlay: Overlay::None,
             traffic,
             policy,
+            objects,
             connection: Connection::Connecting,
             stats: StatsSnapshot { calls: 0, bytes: 0 },
             size: (80, 24),
@@ -925,7 +1211,7 @@ impl Model {
 
     /// Whether any screen has opted in to auto-refresh (drives the idle tick).
     pub fn any_auto_enabled(&self) -> bool {
-        self.traffic.auto.enabled || self.policy.auto.enabled
+        self.traffic.auto.enabled || self.policy.auto.enabled || self.objects.auto.enabled
     }
 
     pub fn is_connected(&self) -> bool {

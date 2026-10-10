@@ -2,10 +2,10 @@
 use crate::tui::commands::{self, Command};
 use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::model::{
-    Connection, Model, Overlay, PendingAction, PolicyPane, QueryState, Screen, StatusLine,
-    TrafficData, TrafficView,
+    Connection, Model, ObjectKind, Overlay, PendingAction, PolicyPane, QueryState, Screen,
+    StatusLine, TrafficData, TrafficView,
 };
-use crate::tui::msg::{Cmd, Msg, QueryOutcome};
+use crate::tui::msg::{Cmd, Msg, ObjectsPayload, QueryOutcome};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use pce::CacheMode;
 use pce::models::PolicyScope;
@@ -41,6 +41,18 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             {
                 return load_rule_sets(model, CacheMode::Bypass);
             }
+            let o = &model.objects;
+            let kind = o.kind;
+            if model.screen == Screen::Objects
+                && model.focused
+                && model.overlay == Overlay::None
+                && o.ages[kind.index()].is_some()
+                && !o.loading[kind.index()]
+                && o.auto.due(now)
+            {
+                // Through the cache: the PCE is only asked once the object TTL has run out.
+                return load_objects(model, kind, CacheMode::Use);
+            }
             Vec::new()
         }
         Msg::Focus(f) => {
@@ -67,6 +79,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 index_age_secs: age_secs,
             };
             model.status = StatusLine::info("ready");
+            let mut cmds = Vec::new();
             // Rulesets that arrived before the names could be resolved.
             if !model.policy.raw.is_empty()
                 && model.policy.rulesets.is_empty()
@@ -74,9 +87,13 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             {
                 let raw = std::mem::take(&mut model.policy.raw);
                 model.policy.set_rule_sets(raw, &idx);
-                return deny_fallback(model);
+                cmds.extend(deny_fallback(model, CacheMode::Use));
             }
-            Vec::new()
+            // The Objects screen was opened while the startup load was still running.
+            if model.screen == Screen::Objects {
+                cmds.extend(load_missing_objects(model));
+            }
+            cmds
         }
         Msg::IndexFailed(e) => {
             model.status = StatusLine::error(format!("could not load objects: {e}"));
@@ -175,8 +192,12 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 Ok((raw, age)) => {
                     model.policy.loaded_at = Some(Instant::now());
                     model.policy.age_secs = age;
-                    // A reload may change deny rules; they come back through the cache.
-                    model.policy.fallback_deny.clear();
+                    // A reload may change deny rules: ask again, but keep the rows
+                    // already fetched until the new answer replaces them.
+                    model
+                        .policy
+                        .fallback_deny
+                        .retain(|h, _| raw.iter().any(|r| &r.href == h));
                     model.policy.deny_requested.clear();
                     match model.index().cloned() {
                         Some(idx) => model.policy.set_rule_sets(raw, &idx),
@@ -187,8 +208,14 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         model.policy.rulesets.len(),
                         model.policy.scope.segment()
                     ));
-                    // Only the selected ruleset's deny rules are fetched on demand.
-                    deny_fallback(model)
+                    // Only the selected ruleset's deny rules are fetched on demand;
+                    // an explicit `r` bypasses the cache for them as well.
+                    let mode = if std::mem::take(&mut model.policy.bypass_deny) {
+                        CacheMode::Bypass
+                    } else {
+                        CacheMode::Use
+                    };
+                    deny_fallback(model, mode)
                 }
                 Err(e) => {
                     model.status = StatusLine::error(format!("rulesets: {e}"));
@@ -210,6 +237,39 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 Err(e) => {
                     model.policy.deny_requested.remove(&href); // allow a retry on reselect
                     model.status = StatusLine::warn(format!("deny rules: {e}"));
+                }
+            }
+            Vec::new()
+        }
+        Msg::ObjectsLoaded { kind, result } => {
+            let i = kind.index();
+            model.objects.loading[i] = false;
+            match result {
+                Ok(payload) => {
+                    let o = &mut model.objects;
+                    let age = match payload {
+                        ObjectsPayload::Labels(v, a) => {
+                            o.labels.set_rows(v);
+                            a
+                        }
+                        ObjectsPayload::LabelGroups(v, a) => {
+                            o.groups.set_rows(v);
+                            a
+                        }
+                        ObjectsPayload::IpLists(v, a) => {
+                            o.ip_lists.set_rows(v);
+                            a
+                        }
+                        ObjectsPayload::Services(v, a) => {
+                            o.services.set_rows(v);
+                            a
+                        }
+                    };
+                    o.ages[i] = Some(age);
+                    o.loaded_at[i] = Some(Instant::now());
+                }
+                Err(e) => {
+                    model.status = StatusLine::error(format!("{}: {e}", kind.title()));
                 }
             }
             Vec::new()
@@ -398,6 +458,9 @@ fn on_screen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         if model.screen == Screen::Policy && model.policy.is_searching() {
             return policy_key(model, k);
         }
+        if model.screen == Screen::Objects && model.objects.is_searching() {
+            return objects_key(model, k);
+        }
     }
     match (k.code, k.modifiers) {
         (KeyCode::Char('q'), KeyModifiers::NONE) => {
@@ -420,6 +483,7 @@ fn on_screen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         (KeyCode::Char('4'), _) => switch(model, Screen::Workloads),
         _ if model.screen == Screen::Traffic => traffic_key(model, k),
         _ if model.screen == Screen::Policy => policy_key(model, k),
+        _ if model.screen == Screen::Objects => objects_key(model, k),
         _ => Vec::new(),
     }
 }
@@ -558,6 +622,7 @@ fn switch(model: &mut Model, s: Screen) -> Vec<Cmd> {
         {
             load_rule_sets(model, CacheMode::Use)
         }
+        Screen::Objects => load_missing_objects(model),
         _ => Vec::new(),
     }
 }
@@ -572,16 +637,11 @@ fn load_rule_sets(model: &mut Model, mode: CacheMode) -> Vec<Cmd> {
 }
 
 /// Deny-rule endpoint request for the selected ruleset when its inline list is empty.
-fn deny_fallback(model: &mut Model) -> Vec<Cmd> {
+fn deny_fallback(model: &mut Model, mode: CacheMode) -> Vec<Cmd> {
     model
         .policy
         .take_deny_fallback()
-        .map(|href| {
-            vec![Cmd::LoadDenyRules {
-                href,
-                mode: CacheMode::Use,
-            }]
-        })
+        .map(|href| vec![Cmd::LoadDenyRules { href, mode }])
         .unwrap_or_default()
 }
 
@@ -605,7 +665,10 @@ fn policy_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 model.policy.clear();
                 return load_rule_sets(model, CacheMode::Use);
             }
-            KeyCode::Char('r') => return load_rule_sets(model, CacheMode::Bypass),
+            KeyCode::Char('r') => {
+                model.policy.bypass_deny = true;
+                return load_rule_sets(model, CacheMode::Bypass);
+            }
             KeyCode::Char('p') => {
                 model.status = StatusLine::info("loading pending changes");
                 return vec![Cmd::LoadPending(CacheMode::Use)];
@@ -661,7 +724,100 @@ fn policy_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         && let Some(idx) = model.index().cloned()
     {
         model.policy.rebuild_rules(&idx);
-        return deny_fallback(model);
+        return deny_fallback(model, CacheMode::Use);
+    }
+    Vec::new()
+}
+
+/// Loads every kind that has neither arrived nor is in flight. Needs the name
+/// index: it is built from the same four lists, so these are cache hits and
+/// the screen costs no request.
+fn load_missing_objects(model: &mut Model) -> Vec<Cmd> {
+    if model.index().is_none() {
+        return Vec::new();
+    }
+    let missing: Vec<ObjectKind> = ObjectKind::ALL
+        .into_iter()
+        .filter(|k| model.objects.ages[k.index()].is_none() && !model.objects.loading[k.index()])
+        .collect();
+    missing
+        .into_iter()
+        .flat_map(|k| load_objects(model, k, CacheMode::Use))
+        .collect()
+}
+
+fn load_objects(model: &mut Model, kind: ObjectKind, mode: CacheMode) -> Vec<Cmd> {
+    model.objects.loading[kind.index()] = true;
+    model.objects.auto.last_run = Some(Instant::now());
+    vec![Cmd::LoadObjects { kind, mode }]
+}
+
+fn objects_page(model: &Model) -> usize {
+    let area = ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1);
+    crate::tui::ui::layout::chrome(area)
+        .map(|c| crate::tui::ui::screens::objects::table_rows(c.body, model.objects.show_detail))
+        .unwrap_or(10)
+        .max(1)
+}
+
+/// Search editing, navigation and sort on one table, keeping the selection in view.
+fn drive_table<T>(table: &mut crate::tui::table::TableView<T>, k: KeyEvent, page: usize) {
+    if table.is_searching() {
+        search_key(table, k);
+    } else {
+        table_key(table, k, page);
+    }
+    table.ensure_visible(page);
+}
+
+fn objects_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
+    let page = objects_page(model);
+    if !model.objects.is_searching() {
+        let kind = model.objects.kind;
+        match k.code {
+            KeyCode::Tab | KeyCode::BackTab => {
+                model.objects.kind = if k.code == KeyCode::Tab {
+                    kind.next()
+                } else {
+                    kind.prev()
+                };
+                model.objects.show_detail = false;
+                return Vec::new();
+            }
+            KeyCode::Char('r') => {
+                if model.index().is_none() {
+                    model.status = StatusLine::info("objects are still loading");
+                } else if model.objects.loading[kind.index()] {
+                    model.status = StatusLine::info(format!("{} already loading", kind.title()));
+                } else {
+                    return load_objects(model, kind, CacheMode::Bypass);
+                }
+                return Vec::new();
+            }
+            KeyCode::Enter => {
+                let o = &mut model.objects;
+                o.show_detail = !o.show_detail && o.has_selection();
+                return Vec::new();
+            }
+            KeyCode::Char('a') => {
+                let a = &mut model.objects.auto;
+                a.enabled = !a.enabled;
+                model.status = if a.enabled {
+                    StatusLine::info(format!("auto-refresh every {}s", a.interval.as_secs()))
+                } else {
+                    StatusLine::info("auto-refresh off")
+                };
+                return Vec::new();
+            }
+            _ => {}
+        }
+    }
+    let o = &mut model.objects;
+    match o.kind {
+        ObjectKind::Labels => drive_table(&mut o.labels, k, page),
+        ObjectKind::LabelGroups => drive_table(&mut o.groups, k, page),
+        ObjectKind::IpLists => drive_table(&mut o.ip_lists, k, page),
+        ObjectKind::Services => drive_table(&mut o.services, k, page),
     }
     Vec::new()
 }
@@ -1046,13 +1202,14 @@ mod tests {
     }
 
     #[test]
-    fn number_keys_switch_screens_only_policy_loads() {
+    fn number_keys_switch_screens_only_policy_and_objects_load() {
         let mut m = model_fixture();
         assert_eq!(m.screen, Screen::Traffic);
         // entering Policy for the first time loads its rulesets (see the policy tests)
         assert_eq!(update(&mut m, key('2')).len(), 1);
         assert_eq!(m.screen, Screen::Policy);
-        assert!(update(&mut m, key('3')).is_empty());
+        // entering Objects for the first time loads all four kinds (cache hits)
+        assert_eq!(update(&mut m, key('3')).len(), 4);
         assert_eq!(m.screen, Screen::Objects);
         assert!(update(&mut m, key('4')).is_empty());
         assert_eq!(m.screen, Screen::Workloads);
@@ -1700,5 +1857,344 @@ mod tests {
             update(&mut m, Msg::Tick(now)).is_empty(),
             "only on its own screen"
         );
+    }
+
+    fn objects_fixture_msgs() -> Vec<Msg> {
+        use crate::tui::model::ObjectKind;
+        use crate::tui::msg::ObjectsPayload;
+        let labels =
+            serde_json::from_str(include_str!("../../../../fixtures/labels.json")).unwrap();
+        let groups =
+            serde_json::from_str(include_str!("../../../../fixtures/label_groups.json")).unwrap();
+        let lists =
+            serde_json::from_str(include_str!("../../../../fixtures/ip_lists.json")).unwrap();
+        let services =
+            serde_json::from_str(include_str!("../../../../fixtures/services.json")).unwrap();
+        vec![
+            Msg::ObjectsLoaded {
+                kind: ObjectKind::Labels,
+                result: Ok(ObjectsPayload::Labels(labels, 120)),
+            },
+            Msg::ObjectsLoaded {
+                kind: ObjectKind::LabelGroups,
+                result: Ok(ObjectsPayload::LabelGroups(groups, 120)),
+            },
+            Msg::ObjectsLoaded {
+                kind: ObjectKind::IpLists,
+                result: Ok(ObjectsPayload::IpLists(lists, 120)),
+            },
+            Msg::ObjectsLoaded {
+                kind: ObjectKind::Services,
+                result: Ok(ObjectsPayload::Services(services, 120)),
+            },
+        ]
+    }
+
+    #[test]
+    fn opening_objects_loads_all_four_once_and_tab_cycles() {
+        use crate::tui::model::ObjectKind;
+        use crate::tui::msg::ObjectsPayload;
+        let mut m = model_fixture();
+        let cmds = update(&mut m, key('3'));
+        assert_eq!(cmds.len(), 4);
+        assert!(cmds.iter().all(|c| matches!(
+            c,
+            Cmd::LoadObjects {
+                mode: pce::CacheMode::Use,
+                ..
+            }
+        )));
+        let labels: Vec<pce::models::Label> =
+            serde_json::from_str(include_str!("../../../../fixtures/labels.json")).unwrap();
+        update(
+            &mut m,
+            Msg::ObjectsLoaded {
+                kind: ObjectKind::Labels,
+                result: Ok(ObjectsPayload::Labels(labels, 120)),
+            },
+        );
+        assert_eq!(m.objects.labels.len(), 6);
+        assert_eq!(m.objects.ages[0], Some(120));
+        assert!(update(&mut m, key('1')).is_empty());
+        assert!(
+            update(&mut m, key('3')).is_empty(),
+            "no reload while the other kinds are still loading"
+        );
+        update(&mut m, kc(KeyCode::Tab));
+        assert_eq!(m.objects.kind, ObjectKind::LabelGroups);
+        update(&mut m, kc(KeyCode::BackTab));
+        assert_eq!(m.objects.kind, ObjectKind::Labels);
+        let cmds = update(&mut m, key('r'));
+        assert_eq!(
+            cmds,
+            vec![Cmd::LoadObjects {
+                kind: ObjectKind::Labels,
+                mode: pce::CacheMode::Bypass
+            }]
+        );
+        assert!(
+            update(&mut m, key('r')).is_empty(),
+            "a second r while the kind is loading adds no request"
+        );
+    }
+
+    #[test]
+    fn objects_load_only_what_is_missing_and_never_before_the_index() {
+        use crate::tui::model::ObjectKind;
+        let mut m = model_fixture();
+        let Connection::Connected { index, .. } = &mut m.connection else {
+            unreachable!()
+        };
+        let idx = index.take();
+        assert!(
+            update(&mut m, key('3')).is_empty(),
+            "the startup load is still running: no duplicate requests"
+        );
+        assert!(m.objects.loading.iter().all(|l| !l));
+        update(
+            &mut m,
+            Msg::IndexLoaded {
+                index: idx.unwrap(),
+                age_secs: 0,
+            },
+        );
+        assert!(m.objects.loading.iter().all(|l| *l));
+        // a failed kind is retried on re-entry, loaded kinds are not
+        for msg in objects_fixture_msgs().into_iter().take(3) {
+            update(&mut m, msg);
+        }
+        update(
+            &mut m,
+            Msg::ObjectsLoaded {
+                kind: ObjectKind::Services,
+                result: Err("boom".into()),
+            },
+        );
+        assert_eq!(m.status.kind, StatusKind::Error);
+        assert!(m.objects.ages[3].is_none());
+        update(&mut m, key('1'));
+        assert_eq!(
+            update(&mut m, key('3')),
+            vec![Cmd::LoadObjects {
+                kind: ObjectKind::Services,
+                mode: pce::CacheMode::Use
+            }]
+        );
+    }
+
+    #[test]
+    fn a_late_result_for_another_kind_still_fills_its_table() {
+        use crate::tui::model::ObjectKind;
+        let mut m = model_fixture();
+        update(&mut m, key('3'));
+        update(&mut m, kc(KeyCode::Tab)); // LabelGroups is current
+        let msgs = objects_fixture_msgs();
+        update(&mut m, msgs.into_iter().nth(2).unwrap()); // IpLists arrives
+        assert_eq!(m.objects.kind, ObjectKind::LabelGroups);
+        assert_eq!(m.objects.ip_lists.len(), 2);
+        assert_eq!(m.objects.ages[2], Some(120));
+        assert!(!m.objects.loading[2]);
+        assert!(m.objects.loading[1]);
+    }
+
+    #[test]
+    fn objects_search_and_detail_are_local() {
+        use crate::tui::test_support::model_with_objects;
+        let mut m = model_with_objects();
+        update(&mut m, key('3'));
+        update(&mut m, key('/'));
+        for c in "role".chars() {
+            update(&mut m, key(c));
+        }
+        assert_eq!(m.objects.labels.len(), 2);
+        update(&mut m, kc(KeyCode::Enter));
+        update(&mut m, kc(KeyCode::Enter));
+        assert!(m.objects.show_detail);
+        assert_eq!(m.stats.calls, 5);
+    }
+
+    #[test]
+    fn objects_search_captures_keys_including_tab() {
+        use crate::tui::model::ObjectKind;
+        use crate::tui::test_support::model_with_objects;
+        let mut m = model_with_objects();
+        update(&mut m, key('3'));
+        update(&mut m, key('/'));
+        for c in "qr3".chars() {
+            assert!(update(&mut m, key(c)).is_empty());
+        }
+        update(&mut m, kc(KeyCode::Tab));
+        assert!(!m.quit);
+        assert_eq!(m.screen, Screen::Objects);
+        assert_eq!(
+            m.objects.kind,
+            ObjectKind::Labels,
+            "Tab does not switch while searching"
+        );
+        assert!(m.objects.labels.is_empty(), "nothing matches qr3");
+        update(&mut m, kc(KeyCode::Esc));
+        assert_eq!(m.objects.labels.len(), 6);
+    }
+
+    #[test]
+    fn enter_toggles_detail_only_with_a_selection_and_tab_closes_it() {
+        use crate::tui::test_support::model_with_objects;
+        let mut m = model_with_objects();
+        update(&mut m, key('3'));
+        m.objects.labels.set_rows(Vec::new());
+        update(&mut m, kc(KeyCode::Enter));
+        assert!(!m.objects.show_detail, "nothing selected");
+        let mut m = model_with_objects();
+        update(&mut m, key('3'));
+        update(&mut m, kc(KeyCode::Enter));
+        assert!(m.objects.show_detail);
+        update(&mut m, kc(KeyCode::Tab));
+        assert!(!m.objects.show_detail);
+        update(&mut m, kc(KeyCode::Enter));
+        assert!(m.objects.show_detail);
+        update(&mut m, kc(KeyCode::Enter));
+        assert!(!m.objects.show_detail);
+    }
+
+    #[test]
+    fn objects_auto_refresh_obeys_the_guards_and_reloads_only_the_current_kind() {
+        use crate::tui::model::{ObjectKind, Overlay};
+        use crate::tui::test_support::model_with_objects;
+        use std::time::Duration;
+        let mut m = model_with_objects();
+        update(&mut m, key('3'));
+        update(&mut m, kc(KeyCode::Tab)); // LabelGroups
+        let now = Instant::now() + Duration::from_secs(120);
+        m.objects.auto.last_run = Some(Instant::now());
+        assert!(update(&mut m, Msg::Tick(now)).is_empty(), "opt-in only");
+        update(&mut m, key('a'));
+        assert!(m.objects.auto.enabled);
+        let early = Instant::now() + Duration::from_secs(10);
+        assert!(
+            update(&mut m, Msg::Tick(early)).is_empty(),
+            "minimum interval"
+        );
+        m.focused = false;
+        assert!(update(&mut m, Msg::Tick(now)).is_empty(), "not unfocused");
+        m.focused = true;
+        m.overlay = Overlay::Help;
+        assert!(
+            update(&mut m, Msg::Tick(now)).is_empty(),
+            "not under an overlay"
+        );
+        m.overlay = Overlay::None;
+        m.objects.loading[1] = true;
+        assert!(
+            update(&mut m, Msg::Tick(now)).is_empty(),
+            "not while that kind loads"
+        );
+        m.objects.loading[1] = false;
+        assert_eq!(
+            update(&mut m, Msg::Tick(now)),
+            vec![Cmd::LoadObjects {
+                kind: ObjectKind::LabelGroups,
+                mode: pce::CacheMode::Use
+            }],
+            "current kind only, through the cache"
+        );
+        m.screen = Screen::Traffic;
+        m.objects.loading[1] = false;
+        m.objects.auto.last_run = Some(Instant::now());
+        assert!(
+            update(&mut m, Msg::Tick(now)).is_empty(),
+            "only on its own screen"
+        );
+    }
+
+    #[test]
+    fn explicit_r_on_policy_bypasses_the_deny_fallback_but_auto_refresh_does_not() {
+        use crate::tui::test_support::model_with_policy;
+        use pce::models::PolicyScope;
+        use std::time::Duration;
+        let href = "/orgs/5/sec_policy/draft/rule_sets/100";
+        let reload = |m: &mut Model| {
+            let mut rs: Vec<pce::models::RuleSet> =
+                serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
+            rs[0].deny_rules.clear();
+            update(
+                m,
+                Msg::RuleSetsLoaded {
+                    scope: PolicyScope::Draft,
+                    result: Ok((rs, 0)),
+                },
+            )
+        };
+        let mut m = model_with_policy();
+        update(&mut m, key('2'));
+        update(&mut m, key('r'));
+        assert_eq!(
+            reload(&mut m),
+            vec![Cmd::LoadDenyRules {
+                href: href.into(),
+                mode: pce::CacheMode::Bypass
+            }]
+        );
+        // the bypass applies to that one reload only
+        assert_eq!(
+            reload(&mut m),
+            vec![Cmd::LoadDenyRules {
+                href: href.into(),
+                mode: pce::CacheMode::Use
+            }]
+        );
+        update(&mut m, key('a'));
+        let now = Instant::now() + Duration::from_secs(120);
+        m.policy.auto.last_run = Some(Instant::now());
+        assert!(matches!(
+            update(&mut m, Msg::Tick(now)).as_slice(),
+            [Cmd::LoadRuleSets {
+                mode: pce::CacheMode::Bypass,
+                ..
+            }]
+        ));
+        assert_eq!(
+            reload(&mut m),
+            vec![Cmd::LoadDenyRules {
+                href: href.into(),
+                mode: pce::CacheMode::Use
+            }]
+        );
+    }
+
+    #[test]
+    fn policy_reload_keeps_fetched_deny_rows_until_the_new_ones_arrive() {
+        use pce::models::PolicyScope;
+        let href = "/orgs/5/sec_policy/draft/rule_sets/100";
+        let load = |m: &mut Model| {
+            let mut rs: Vec<pce::models::RuleSet> =
+                serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
+            rs[0].deny_rules.clear();
+            update(
+                m,
+                Msg::RuleSetsLoaded {
+                    scope: PolicyScope::Draft,
+                    result: Ok((rs, 0)),
+                },
+            )
+        };
+        let mut m = model_fixture();
+        update(&mut m, key('2'));
+        load(&mut m);
+        let deny: Vec<pce::models::DenyRule> =
+            serde_json::from_str(include_str!("../../../../fixtures/deny_rules.json")).unwrap();
+        update(
+            &mut m,
+            Msg::DenyRulesLoaded {
+                href: href.into(),
+                result: Ok(deny),
+            },
+        );
+        assert_eq!(m.policy.rules.len(), 4);
+        let cmds = load(&mut m);
+        assert_eq!(cmds.len(), 1, "the fallback is asked again after a reload");
+        assert_eq!(m.policy.rules.len(), 4, "no flicker while it is in flight");
+        // a scope switch still forgets everything
+        update(&mut m, key('d'));
+        assert!(m.policy.rules.is_empty());
     }
 }

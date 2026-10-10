@@ -1,8 +1,10 @@
 //! Every event the TUI reacts to, and every side effect it may request.
 use crate::tui::filter::TrafficFilter;
-use crate::tui::model::Screen;
+use crate::tui::model::{ObjectKind, Screen};
 use crossterm::event::{KeyEvent, MouseEvent};
-use pce::models::{DenyRule, PendingChange, PolicyScope, RuleSet};
+use pce::models::{
+    DenyRule, IpList, Label, LabelGroup, PendingChange, PolicyScope, RuleSet, Service,
+};
 use pce::traffic::{QueryProgress, ResolvedFlow};
 use pce::{CacheMode, StatsSnapshot};
 use std::sync::Arc;
@@ -17,6 +19,15 @@ pub struct QueryOutcome {
     pub elapsed: Duration,
     pub hit: bool,
     pub filter: TrafficFilter,
+}
+
+/// One object list with its cache age in seconds.
+#[derive(Debug)]
+pub enum ObjectsPayload {
+    Labels(Vec<Label>, u64),
+    LabelGroups(Vec<LabelGroup>, u64),
+    IpLists(Vec<IpList>, u64),
+    Services(Vec<Service>, u64),
 }
 
 #[derive(Debug)]
@@ -60,6 +71,10 @@ pub enum Msg {
         result: Result<Vec<DenyRule>, String>,
     },
     PendingLoaded(Result<Vec<PendingChange>, String>),
+    ObjectsLoaded {
+        kind: ObjectKind,
+        result: Result<ObjectsPayload, String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -84,6 +99,10 @@ pub enum Cmd {
         mode: CacheMode,
     },
     LoadPending(CacheMode),
+    LoadObjects {
+        kind: ObjectKind,
+        mode: CacheMode,
+    },
     Quit,
 }
 
@@ -121,6 +140,9 @@ impl PartialEq for Cmd {
                 Cmd::LoadDenyRules { href: hb, mode: mb },
             ) => ha == hb && ma == mb,
             (Cmd::LoadPending(a), Cmd::LoadPending(b)) => a == b,
+            (Cmd::LoadObjects { kind: ka, mode: ma }, Cmd::LoadObjects { kind: kb, mode: mb }) => {
+                ka == kb && ma == mb
+            }
             _ => false,
         }
     }

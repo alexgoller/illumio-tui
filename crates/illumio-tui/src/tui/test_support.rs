@@ -84,6 +84,30 @@ pub fn model_with_policy() -> Model {
     m
 }
 
+/// A connected model with the four fixture object lists loaded (ages of 3 s).
+pub fn model_with_objects() -> Model {
+    let mut m = model_fixture();
+    let o = &mut m.objects;
+    o.labels.set_rows(
+        serde_json::from_str(include_str!("../../../../fixtures/labels.json"))
+            .expect("labels fixture"),
+    );
+    o.groups.set_rows(
+        serde_json::from_str(include_str!("../../../../fixtures/label_groups.json"))
+            .expect("groups fixture"),
+    );
+    o.ip_lists.set_rows(
+        serde_json::from_str(include_str!("../../../../fixtures/ip_lists.json"))
+            .expect("ip lists fixture"),
+    );
+    o.services.set_rows(
+        serde_json::from_str(include_str!("../../../../fixtures/services.json"))
+            .expect("services fixture"),
+    );
+    o.ages = [Some(3); 4];
+    m
+}
+
 /// Renders the model into a `w`×`h` test terminal and returns the text.
 pub fn render_to_string(model: &Model, w: u16, h: u16) -> String {
     let mut term = Terminal::new(TestBackend::new(w, h)).expect("test terminal");

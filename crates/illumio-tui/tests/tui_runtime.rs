@@ -351,6 +351,18 @@ async fn load_rule_sets_command_round_trips() {
         .expect(1)
         .mount(&server)
         .await;
+    // Neither the deny-rule fallback nor the pending list is needed here.
+    for p in [
+        "/api/v2/orgs/5/sec_policy/draft/rule_sets/100/deny_rules",
+        "/api/v2/orgs/5/sec_policy/pending",
+    ] {
+        Mock::given(method("GET"))
+            .and(path(p))
+            .respond_with(ResponseTemplate::new(200).set_body_string("[]"))
+            .expect(0)
+            .mount(&server)
+            .await;
+    }
     let pce = pce_for(&server);
     let mut m = model();
     m.connection = Connection::Connected {
@@ -360,13 +372,95 @@ async fn load_rule_sets_command_round_trips() {
     let (mut rt, tx) = Runtime::new(pce, m);
     tx.send(Msg::SwitchScreen(illumio_tui::tui::model::Screen::Policy))
         .unwrap();
-    let events = stream::once(async {
-        tokio::time::sleep(Duration::from_millis(600)).await;
-        Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
+    // Leave the screen and come back: re-entry must not request anything.
+    let events = stream::iter([(600u64, '1'), (150, '2'), (300, 'q')]).then(|(ms, c)| async move {
+        tokio::time::sleep(Duration::from_millis(ms)).await;
+        Event::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))
     });
     let model = run_loop(&mut rt, Box::pin(events), &mut |_| {}).await;
+    assert_eq!(model.screen, illumio_tui::tui::model::Screen::Policy);
     assert_eq!(model.policy.scope, PolicyScope::Draft);
     assert_eq!(model.policy.rulesets.len(), 2);
     assert_eq!(model.policy.rules.len(), 4);
+    assert_eq!(model.busy, 0);
+}
+
+/// Starts a connected runtime, presses `keys` (each after `ms`), and returns the model.
+async fn objects_session(server: &MockServer, keys: &[(u64, char)]) -> Model {
+    Mock::given(method("GET"))
+        .and(path("/api/v2/health"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "normal"})))
+        .expect(1)
+        .mount(server)
+        .await;
+    let (mut rt, _tx) = Runtime::new(pce_for(server), model());
+    rt.execute(Cmd::Connect);
+    let events = stream::iter(keys.to_vec()).then(|(ms, c)| async move {
+        tokio::time::sleep(Duration::from_millis(ms)).await;
+        Event::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))
+    });
+    run_loop(&mut rt, Box::pin(events), &mut |_| {}).await
+}
+
+#[tokio::test]
+async fn opening_objects_after_startup_costs_zero_requests() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await; // each list: expect(1), the startup load only
+    let model = objects_session(&server, &[(500, '3'), (300, 'q')]).await;
+    assert_eq!(
+        model.stats.calls, 5,
+        "health + four lists, nothing for the screen"
+    );
+    assert!(model.objects.loaded(), "{:?}", model.objects.ages);
+    assert_eq!(model.objects.labels.len(), 6);
+    assert_eq!(model.objects.groups.len(), 1);
+    assert_eq!(model.objects.ip_lists.len(), 2);
+    assert_eq!(model.objects.services.len(), 3);
+    assert!(model.objects.loading.iter().all(|l| !l));
+    assert_eq!(model.busy, 0);
+}
+
+#[tokio::test]
+async fn r_on_objects_bypasses_the_cache_for_the_current_kind_only() {
+    let server = MockServer::start().await;
+    for (p, body, n) in [
+        (
+            "/api/v2/orgs/5/labels",
+            include_str!("../../../fixtures/labels.json"),
+            2,
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/label_groups",
+            include_str!("../../../fixtures/label_groups.json"),
+            1,
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/ip_lists",
+            include_str!("../../../fixtures/ip_lists.json"),
+            1,
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/services",
+            include_str!("../../../fixtures/services.json"),
+            1,
+        ),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(p))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(body)
+                    .insert_header("Content-Type", "application/json"),
+            )
+            .expect(n)
+            .mount(&server)
+            .await;
+    }
+    let model = objects_session(&server, &[(500, '3'), (300, 'r'), (400, 'q')]).await;
+    assert_eq!(
+        model.stats.calls, 6,
+        "five at startup plus the labels refresh"
+    );
+    assert_eq!(model.objects.labels.len(), 6);
     assert_eq!(model.busy, 0);
 }

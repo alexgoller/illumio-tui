@@ -126,6 +126,10 @@ fn render_body(model: &Model, f: &mut Frame, area: Rect) {
         screens::policy::render_screen(model, f, area);
         return;
     }
+    if model.screen == Screen::Objects && model.is_connected() {
+        screens::objects::render_screen(model, f, area);
+        return;
+    }
     let block = widgets::panel::panel(model.screen.title(), "", t, true);
     let text = match &model.connection {
         Connection::Connecting => "connecting…",

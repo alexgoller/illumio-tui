@@ -235,3 +235,35 @@ fn policy_rule_detail_overlay_80x24() {
     assert!(out.contains("override_deny"), "{out}");
     insta::assert_snapshot!("policy_rule_detail_80x24", out);
 }
+
+#[test]
+fn objects_screen_tabs_80x24() {
+    use illumio_tui::tui::model::{ObjectKind, Screen};
+    use illumio_tui::tui::test_support::model_with_objects;
+    let mut m = model_with_objects();
+    m.screen = Screen::Objects;
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("role") && out.contains("web"), "{out}");
+    assert!(out.contains("cached 3s ago"), "{out}");
+    insta::assert_snapshot!("objects_labels_80x24", out);
+    m.objects.kind = ObjectKind::IpLists;
+    m.objects.show_detail = true;
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("0.0.0.0/0"), "{out}");
+    insta::assert_snapshot!("objects_iplists_detail_80x24", out);
+    m.objects.kind = ObjectKind::Services;
+    insta::assert_snapshot!("objects_services_160x48", render_to_string(&m, 160, 48));
+}
+
+#[test]
+fn objects_group_detail_resolves_members_80x24() {
+    use illumio_tui::tui::model::{ObjectKind, Screen};
+    use illumio_tui::tui::test_support::model_with_objects;
+    let mut m = model_with_objects();
+    m.screen = Screen::Objects;
+    m.objects.kind = ObjectKind::LabelGroups;
+    m.objects.show_detail = true;
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("env=prod"), "{out}");
+    insta::assert_snapshot!("objects_groups_detail_80x24", out);
+}

@@ -251,7 +251,7 @@ pub fn screen_hint(screen: Screen) -> &'static str {
     match screen {
         Screen::Traffic => "f filter  r run  a auto  v view  s sort  / search",
         Screen::Policy => "d scope  p pending  Enter detail  Tab pane  a auto",
-        Screen::Objects => "Tab type  r refresh  / search",
+        Screen::Objects => "Tab type  Enter detail  r refresh  a auto  / search",
         Screen::Workloads => "t/T to traffic  / search  r refresh",
     }
 }
