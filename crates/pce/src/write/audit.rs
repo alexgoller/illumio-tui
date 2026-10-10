@@ -52,22 +52,24 @@ impl JsonlAudit {
     }
 
     /// `$XDG_STATE_HOME/illumio-tui/writes.jsonl`, else
-    /// `~/.local/state/illumio-tui/writes.jsonl`.
-    pub fn default_path() -> PathBuf {
-        let xdg = std::env::var_os("XDG_STATE_HOME")
-            .filter(|v| !v.is_empty())
-            .map(PathBuf::from);
-        let home = std::env::var_os("HOME").map(PathBuf::from);
-        Self::path_from(xdg.as_deref(), home.as_deref())
+    /// `$HOME/.local/state/illumio-tui/writes.jsonl`; `None` when neither is
+    /// set (never a path relative to the working directory).
+    pub fn default_path() -> Option<PathBuf> {
+        let var = |name| {
+            std::env::var_os(name)
+                .filter(|v| !v.is_empty())
+                .map(PathBuf::from)
+        };
+        Self::path_from(var("XDG_STATE_HOME").as_deref(), var("HOME").as_deref())
     }
 
-    pub fn path_from(xdg_state_home: Option<&Path>, home: Option<&Path>) -> PathBuf {
+    pub fn path_from(xdg_state_home: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> {
         let base = match (xdg_state_home, home) {
             (Some(x), _) => x.to_path_buf(),
             (None, Some(h)) => h.join(".local").join("state"),
-            (None, None) => PathBuf::from(".local").join("state"),
+            (None, None) => return None,
         };
-        base.join("illumio-tui").join("writes.jsonl")
+        Some(base.join("illumio-tui").join("writes.jsonl"))
     }
 
     pub fn path(&self) -> &Path {
@@ -239,13 +241,22 @@ mod tests {
         let p = JsonlAudit::path_from(Some(std::path::Path::new("/tmp/xdg-state")), None);
         assert_eq!(
             p,
-            std::path::PathBuf::from("/tmp/xdg-state/illumio-tui/writes.jsonl")
+            Some(std::path::PathBuf::from(
+                "/tmp/xdg-state/illumio-tui/writes.jsonl"
+            ))
         );
         let p = JsonlAudit::path_from(None, Some(std::path::Path::new("/home/u")));
         assert_eq!(
             p,
-            std::path::PathBuf::from("/home/u/.local/state/illumio-tui/writes.jsonl")
+            Some(std::path::PathBuf::from(
+                "/home/u/.local/state/illumio-tui/writes.jsonl"
+            ))
         );
+    }
+
+    #[test]
+    fn no_state_home_and_no_home_gives_no_path() {
+        assert_eq!(JsonlAudit::path_from(None, None), None);
     }
 
     #[test]

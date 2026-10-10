@@ -8,14 +8,15 @@ use super::output::{TableRows, WriteMeta};
 use clap::Args;
 use pce::models::Label;
 use pce::write::{
-    JsonlAudit, Outcome, Plan, WriteContext, WriteError, WriteGuard, WriteRequest, Written,
+    JsonlAudit, Outcome, Plan, WriteContext, WriteError, WriteGuard, WriteRefused, WriteRequest,
+    Written,
 };
 use serde::Serialize;
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct WriteFlags {
     /// Print the request that would be sent, send nothing
-    #[arg(long)]
+    #[arg(long, conflicts_with = "yes")]
     pub dry_run: bool,
     /// Send the request (required unless --dry-run)
     #[arg(long)]
@@ -33,7 +34,13 @@ pub fn check_flags(flags: &WriteFlags) -> Result<(), CliError> {
 }
 
 fn write_guard(ctx: &Context) -> Result<WriteGuard, CliError> {
-    let audit = JsonlAudit::new(JsonlAudit::default_path());
+    WriteGuard::check(ctx.config.writes, ctx.allow_writes).map_err(WriteError::from)?;
+    let path = JsonlAudit::default_path().ok_or_else(|| {
+        WriteError::from(WriteRefused::AuditUnwritable(
+            "no $XDG_STATE_HOME or $HOME to place the audit log".into(),
+        ))
+    })?;
+    let audit = JsonlAudit::new(path);
     let guard = WriteGuard::new(
         ctx.config.writes,
         ctx.allow_writes,

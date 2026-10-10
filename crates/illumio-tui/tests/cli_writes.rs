@@ -130,6 +130,103 @@ fn allow_writes_is_a_global_flag_with_help() {
     assert!(text.contains("--allow-writes"), "{text}");
 }
 
+/// Every write subcommand, with arguments that would otherwise be valid.
+const ALL_WRITES: [&[&str]; 12] = [
+    &["labels", "add", "a=b"],
+    &["labels", "update", "/orgs/5/labels/1", "--value", "x"],
+    &["labels", "delete", "/orgs/5/labels/1"],
+    &["iplists", "add", "X", "--range", "10.0.0.1"],
+    &[
+        "iplists",
+        "update",
+        "/orgs/5/sec_policy/draft/ip_lists/1",
+        "--add-fqdn",
+        "a",
+    ],
+    &["iplists", "delete", "/orgs/5/sec_policy/draft/ip_lists/1"],
+    &["services", "add", "X", "--port", "1/tcp"],
+    &[
+        "services",
+        "update",
+        "/orgs/5/sec_policy/draft/services/1",
+        "--add-port",
+        "1/tcp",
+    ],
+    &["services", "delete", "/orgs/5/sec_policy/draft/services/1"],
+    &["workloads", "add", "X"],
+    &[
+        "workloads",
+        "update",
+        "/orgs/5/workloads/u1",
+        "--description",
+        "d",
+    ],
+    &["workloads", "delete", "/orgs/5/workloads/u1"],
+];
+
+#[tokio::test(flavor = "multi_thread")]
+async fn every_write_command_is_guarded_and_needs_yes() {
+    let server = MockServer::start().await;
+    let state = tempfile::tempdir().unwrap();
+    for args in ALL_WRITES {
+        // Writes enabled in the profile, but no --allow-writes: exit 6.
+        let a = cmd(&server)
+            .env("ILLUMIO_WRITES", "1")
+            .env("XDG_STATE_HOME", state.path())
+            .arg("--json")
+            .args(args)
+            .arg("--yes")
+            .assert()
+            .code(6);
+        assert_eq!(
+            stderr_json(&a)["error"]["kind"],
+            "write_refused",
+            "{args:?}"
+        );
+        assert_no_secret(&a);
+        // --allow-writes without --yes (or --dry-run): exit 2.
+        let a = writer(&server, state.path()).args(args).assert().code(2);
+        assert_eq!(stderr_json(&a)["error"]["kind"], "args", "{args:?}");
+        assert!(
+            server.received_requests().await.unwrap().is_empty(),
+            "{args:?} sent a request"
+        );
+    }
+    assert!(audit_lines(state.path()).is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dry_run_and_yes_together_are_an_args_error() {
+    let server = MockServer::start().await;
+    let state = tempfile::tempdir().unwrap();
+    writer(&server, state.path())
+        .args(["labels", "add", "a=b", "--dry-run", "--yes"])
+        .assert()
+        .code(2);
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn no_state_home_and_no_home_refuses_writes() {
+    let server = MockServer::start().await;
+    // cmd() clears the environment: neither HOME nor XDG_STATE_HOME is set.
+    let a = cmd(&server)
+        .env("ILLUMIO_WRITES", "1")
+        .args(["--allow-writes", "--json", "labels", "add", "a=b", "--yes"])
+        .assert()
+        .code(6);
+    let err = stderr_json(&a);
+    assert_eq!(err["error"]["kind"], "write_refused");
+    assert!(
+        err["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("no $XDG_STATE_HOME or $HOME to place the audit log"),
+        "{err}"
+    );
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
 mod labels {
     use super::*;
 

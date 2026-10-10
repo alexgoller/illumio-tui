@@ -31,18 +31,25 @@ pub struct WriteGuard {
 }
 
 impl WriteGuard {
-    pub fn new(
-        profile_allows: bool,
-        flag_allows: bool,
-        audit: Box<dyn AuditSink>,
-        ctx: WriteContext,
-    ) -> Result<Self, WriteRefused> {
+    /// The profile and flag refusals, in the order `new` reports them; for
+    /// callers that must refuse before they can build an audit sink.
+    pub fn check(profile_allows: bool, flag_allows: bool) -> Result<(), WriteRefused> {
         if !profile_allows {
             return Err(WriteRefused::ProfileDenies);
         }
         if !flag_allows {
             return Err(WriteRefused::FlagMissing);
         }
+        Ok(())
+    }
+
+    pub fn new(
+        profile_allows: bool,
+        flag_allows: bool,
+        audit: Box<dyn AuditSink>,
+        ctx: WriteContext,
+    ) -> Result<Self, WriteRefused> {
+        Self::check(profile_allows, flag_allows)?;
         audit
             .check_writable()
             .map_err(|e| WriteRefused::AuditUnwritable(format!("{}: {e}", audit.location())))?;
