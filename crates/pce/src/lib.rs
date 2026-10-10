@@ -23,8 +23,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub use resolve::{
-    NameIndex, ResolvedLabel, RuleKind, RuleSetView, RuleView, describe_actor,
-    describe_ingress_service,
+    NameIndex, ResolvedActor, ResolvedLabel, ResolvedService, RuleKind, RuleSetView, RuleView,
+    describe_actor, describe_ingress_service,
 };
 
 pub use auth::Credentials;

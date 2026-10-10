@@ -435,8 +435,20 @@ async fn policy_rules_include_deny_rules_and_tolerate_missing_endpoint() {
     assert_eq!(out["data"]["ruleset"]["name"], "Shop-Prod");
     let rules = out["data"]["rules"].as_array().unwrap();
     assert_eq!(rules.len(), 4);
-    assert_eq!(rules[1]["consumers"][0], "ipl:Corp");
-    assert_eq!(rules[1]["services"][1], "8000-8099/tcp");
+    assert_eq!(rules[1]["consumers"][0]["name"], "ipl:Corp");
+    assert_eq!(
+        rules[1]["consumers"][0]["href"],
+        "/orgs/5/sec_policy/draft/ip_lists/21"
+    );
+    assert_eq!(rules[1]["consumers"][0]["kind"], "ip_list");
+    assert_eq!(rules[1]["consumers"][0]["exclusion"], false);
+    assert_eq!(rules[1]["services"][1]["name"], "8000-8099/tcp");
+    assert!(rules[1]["services"][1]["href"].is_null());
+    assert_eq!(rules[0]["services"][0]["name"], "PostgreSQL");
+    assert_eq!(
+        rules[0]["services"][0]["href"],
+        "/orgs/5/sec_policy/draft/services/31"
+    );
     assert_eq!(rules[3]["kind"], "override_deny");
     assert_eq!(out["meta"]["api_calls"], 5, "four object lists + rulesets");
     let out = stdout_json(
@@ -446,7 +458,11 @@ async fn policy_rules_include_deny_rules_and_tolerate_missing_endpoint() {
             .success(),
     );
     assert_eq!(out["data"]["rules"].as_array().unwrap().len(), 1);
-    assert_eq!(out["data"]["rules"][0]["providers"][0], "All workloads");
+    assert_eq!(
+        out["data"]["rules"][0]["providers"][0]["name"],
+        "All workloads"
+    );
+    assert!(out["data"]["rules"][0]["providers"][0]["href"].is_null());
     assert_eq!(
         out["meta"]["api_calls"], 6,
         "no inline deny rules: the endpoint is tried and its 404 tolerated"

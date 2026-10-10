@@ -70,6 +70,10 @@ impl TableRows for Vec<RuleSetView> {
     }
 }
 
+fn names<'a>(it: impl Iterator<Item = &'a str>) -> String {
+    it.collect::<Vec<_>>().join(", ")
+}
+
 impl TableRows for RulesOutput {
     fn headers(&self) -> Vec<&'static str> {
         vec![
@@ -92,9 +96,9 @@ impl TableRows for RulesOutput {
                         .and_then(|v| v.as_str().map(str::to_string))
                         .unwrap_or_default(),
                     r.enabled.to_string(),
-                    r.consumers.join(", "),
-                    r.providers.join(", "),
-                    r.services.join(", "),
+                    names(r.consumers.iter().map(|a| a.name.as_str())),
+                    names(r.providers.iter().map(|a| a.name.as_str())),
+                    names(r.services.iter().map(|s| s.name.as_str())),
                     r.description.clone().unwrap_or_default(),
                     r.update_type.clone().unwrap_or_default(),
                 ]

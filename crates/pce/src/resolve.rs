@@ -156,49 +156,97 @@ impl NameIndex {
 
 use crate::models::{Actor, DenyRule, IngressService, Rule, RuleSet};
 
-/// `role=web`, `ipl:Corp`, `group:All prod envs`, `wl:<id>`, `All workloads`.
-pub fn describe_actor(a: &Actor, idx: &NameIndex) -> String {
-    let excl = if a.exclusion.unwrap_or(false) {
-        "!"
-    } else {
-        ""
-    };
-    let body = if a.actors.as_deref() == Some("ams") {
-        "All workloads".to_string()
-    } else if let Some(l) = &a.label {
-        idx.label_text(&l.href)
-    } else if let Some(g) = &a.label_group {
-        format!("group:{}", idx.label_group_name(&g.href).unwrap_or(&g.href))
-    } else if let Some(i) = &a.ip_list {
-        format!("ipl:{}", idx.ip_list_name(&i.href).unwrap_or(&i.href))
-    } else if let Some(w) = &a.workload {
-        format!("wl:{}", w.id())
-    } else if let Some(v) = &a.virtual_service {
-        format!("vs:{}", v.id())
-    } else if let Some(v) = &a.virtual_server {
-        format!("vsrv:{}", v.id())
-    } else {
-        "?".to_string()
-    };
-    format!("{excl}{body}")
+/// One side of a rule with its href kept next to the display name, so JSON
+/// consumers can follow the reference and tables can print the name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ResolvedActor {
+    /// `label`, `label_group`, `ip_list`, `workload`, `virtual_service`,
+    /// `virtual_server`, `all_workloads` or `unknown`.
+    pub kind: String,
+    pub href: Option<String>,
+    /// `role=web`, `ipl:Corp`, `group:All prod envs`, `wl:<id>`,
+    /// `All workloads`; prefixed with `!` when `exclusion` is set.
+    pub name: String,
+    pub exclusion: bool,
 }
 
-pub fn describe_ingress_service(s: &IngressService, idx: &NameIndex) -> String {
-    match s {
-        IngressService::Ref(r) => idx.service_name(&r.href).unwrap_or(&r.href).to_string(),
-        IngressService::Port {
-            port,
-            to_port,
-            proto,
-        } => {
-            let proto = crate::models::proto_name(*proto);
-            match (port, to_port) {
-                (Some(p), Some(t)) if t != p => format!("{p}-{t}/{proto}"),
-                (Some(p), _) => format!("{p}/{proto}"),
-                (None, _) => proto,
+impl ResolvedActor {
+    pub fn from_actor(a: &Actor, idx: &NameIndex) -> Self {
+        let exclusion = a.exclusion.unwrap_or(false);
+        let (kind, href, body) = if a.actors.as_deref() == Some("ams") {
+            ("all_workloads", None, "All workloads".to_string())
+        } else if let Some(l) = &a.label {
+            ("label", Some(&l.href), idx.label_text(&l.href))
+        } else if let Some(g) = &a.label_group {
+            (
+                "label_group",
+                Some(&g.href),
+                format!("group:{}", idx.label_group_name(&g.href).unwrap_or(&g.href)),
+            )
+        } else if let Some(i) = &a.ip_list {
+            (
+                "ip_list",
+                Some(&i.href),
+                format!("ipl:{}", idx.ip_list_name(&i.href).unwrap_or(&i.href)),
+            )
+        } else if let Some(w) = &a.workload {
+            ("workload", Some(&w.href), format!("wl:{}", w.id()))
+        } else if let Some(v) = &a.virtual_service {
+            ("virtual_service", Some(&v.href), format!("vs:{}", v.id()))
+        } else if let Some(v) = &a.virtual_server {
+            ("virtual_server", Some(&v.href), format!("vsrv:{}", v.id()))
+        } else {
+            ("unknown", None, "?".to_string())
+        };
+        Self {
+            kind: kind.to_string(),
+            href: href.cloned(),
+            name: if exclusion { format!("!{body}") } else { body },
+            exclusion,
+        }
+    }
+}
+
+/// A rule's service: the service object's href and name, or an inline
+/// port/protocol with no href.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ResolvedService {
+    pub href: Option<String>,
+    /// `PostgreSQL`, `443/tcp`, `8000-8099/tcp`, `icmp`.
+    pub name: String,
+}
+
+impl ResolvedService {
+    pub fn from_ingress_service(s: &IngressService, idx: &NameIndex) -> Self {
+        match s {
+            IngressService::Ref(r) => Self {
+                href: Some(r.href.clone()),
+                name: idx.service_name(&r.href).unwrap_or(&r.href).to_string(),
+            },
+            IngressService::Port {
+                port,
+                to_port,
+                proto,
+            } => {
+                let proto = crate::models::proto_name(*proto);
+                let name = match (port, to_port) {
+                    (Some(p), Some(t)) if t != p => format!("{p}-{t}/{proto}"),
+                    (Some(p), _) => format!("{p}/{proto}"),
+                    (None, _) => proto,
+                };
+                Self { href: None, name }
             }
         }
     }
+}
+
+/// `role=web`, `ipl:Corp`, `group:All prod envs`, `wl:<id>`, `All workloads`.
+pub fn describe_actor(a: &Actor, idx: &NameIndex) -> String {
+    ResolvedActor::from_actor(a, idx).name
+}
+
+pub fn describe_ingress_service(s: &IngressService, idx: &NameIndex) -> String {
+    ResolvedService::from_ingress_service(s, idx).name
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -217,9 +265,9 @@ pub struct RuleView {
     pub kind: RuleKind,
     pub enabled: bool,
     pub description: Option<String>,
-    pub consumers: Vec<String>,
-    pub providers: Vec<String>,
-    pub services: Vec<String>,
+    pub consumers: Vec<ResolvedActor>,
+    pub providers: Vec<ResolvedActor>,
+    pub services: Vec<ResolvedService>,
     pub unscoped_consumers: bool,
     pub update_type: Option<String>,
 }
@@ -231,12 +279,20 @@ impl RuleView {
             kind: RuleKind::Allow,
             enabled: r.enabled,
             description: r.description.clone(),
-            consumers: r.consumers.iter().map(|a| describe_actor(a, idx)).collect(),
-            providers: r.providers.iter().map(|a| describe_actor(a, idx)).collect(),
+            consumers: r
+                .consumers
+                .iter()
+                .map(|a| ResolvedActor::from_actor(a, idx))
+                .collect(),
+            providers: r
+                .providers
+                .iter()
+                .map(|a| ResolvedActor::from_actor(a, idx))
+                .collect(),
             services: r
                 .ingress_services
                 .iter()
-                .map(|s| describe_ingress_service(s, idx))
+                .map(|s| ResolvedService::from_ingress_service(s, idx))
                 .collect(),
             unscoped_consumers: r.unscoped_consumers.unwrap_or(false),
             update_type: r.update_type.clone(),
@@ -253,12 +309,20 @@ impl RuleView {
             },
             enabled: d.enabled,
             description: d.description.clone(),
-            consumers: d.consumers.iter().map(|a| describe_actor(a, idx)).collect(),
-            providers: d.providers.iter().map(|a| describe_actor(a, idx)).collect(),
+            consumers: d
+                .consumers
+                .iter()
+                .map(|a| ResolvedActor::from_actor(a, idx))
+                .collect(),
+            providers: d
+                .providers
+                .iter()
+                .map(|a| ResolvedActor::from_actor(a, idx))
+                .collect(),
             services: d
                 .ingress_services
                 .iter()
-                .map(|s| describe_ingress_service(s, idx))
+                .map(|s| ResolvedService::from_ingress_service(s, idx))
                 .collect(),
             unscoped_consumers: false,
             update_type: d.update_type.clone(),
@@ -434,16 +498,62 @@ mod tests {
         let idx = index();
         let rs: Vec<RuleSet> =
             serde_json::from_str(include_str!("../../../fixtures/rule_sets.json")).unwrap();
+        let names = |actors: &[ResolvedActor]| -> Vec<String> {
+            actors.iter().map(|a| a.name.clone()).collect()
+        };
         let v = RuleView::from_rule(&rs[0].rules[1], &idx);
-        assert_eq!(v.consumers, vec!["ipl:Corp"]);
-        assert_eq!(v.providers, vec!["role=web"]);
-        assert_eq!(v.services, vec!["443/tcp", "8000-8099/tcp"]);
+        assert_eq!(
+            v.consumers,
+            vec![ResolvedActor {
+                kind: "ip_list".into(),
+                href: Some("/orgs/5/sec_policy/draft/ip_lists/21".into()),
+                name: "ipl:Corp".into(),
+                exclusion: false,
+            }]
+        );
+        assert_eq!(names(&v.providers), vec!["role=web"]);
+        assert_eq!(v.providers[0].kind, "label");
+        assert_eq!(v.providers[0].href.as_deref(), Some("/orgs/5/labels/1"));
+        assert_eq!(
+            v.services,
+            vec![
+                ResolvedService {
+                    href: None,
+                    name: "443/tcp".into()
+                },
+                ResolvedService {
+                    href: None,
+                    name: "8000-8099/tcp".into()
+                }
+            ]
+        );
         assert_eq!(v.kind, RuleKind::Allow);
         assert!(v.unscoped_consumers);
+        let v1 = RuleView::from_rule(&rs[0].rules[0], &idx);
+        assert_eq!(
+            v1.services,
+            vec![ResolvedService {
+                href: Some("/orgs/5/sec_policy/draft/services/31".into()),
+                name: "PostgreSQL".into()
+            }]
+        );
         let v3 = RuleView::from_rule(&rs[1].rules[0], &idx);
-        assert_eq!(v3.providers, vec!["All workloads"]);
-        assert_eq!(v3.consumers, vec!["group:All prod envs"]);
-        assert_eq!(v3.services, vec!["All Services"]);
+        assert_eq!(
+            v3.providers,
+            vec![ResolvedActor {
+                kind: "all_workloads".into(),
+                href: None,
+                name: "All workloads".into(),
+                exclusion: false,
+            }]
+        );
+        assert_eq!(names(&v3.consumers), vec!["group:All prod envs"]);
+        assert_eq!(v3.consumers[0].kind, "label_group");
+        assert_eq!(v3.services[0].name, "All Services");
+        assert_eq!(
+            v3.services[0].href.as_deref(),
+            Some("/orgs/5/sec_policy/draft/services/30")
+        );
         let dr: Vec<DenyRule> =
             serde_json::from_str(include_str!("../../../fixtures/deny_rules.json")).unwrap();
         assert_eq!(
@@ -451,9 +561,24 @@ mod tests {
             RuleKind::OverrideDeny
         );
         assert_eq!(
-            RuleView::from_deny(&dr[0], &idx).consumers,
+            names(&RuleView::from_deny(&dr[0], &idx).consumers),
             vec!["ipl:Any (0.0.0.0/0 and ::/0)"]
         );
+        let excluded = Actor {
+            label: Some(Ref::new("/orgs/5/labels/1")),
+            exclusion: Some(true),
+            ..Default::default()
+        };
+        let a = ResolvedActor::from_actor(&excluded, &idx);
+        assert_eq!(a.name, "!role=web");
+        assert!(a.exclusion);
+        assert_eq!(describe_actor(&excluded, &idx), "!role=web");
+        let unknown = ResolvedActor::from_actor(&Actor::default(), &idx);
+        assert_eq!(
+            (unknown.kind.as_str(), unknown.name.as_str()),
+            ("unknown", "?")
+        );
+        assert!(unknown.href.is_none());
         let set = RuleSetView::from_rule_set(&rs[0], &idx);
         assert_eq!(set.scopes, vec!["app=shop & env=prod"]);
         assert_eq!(
