@@ -11,11 +11,11 @@ expression: out
 │4 flows allowed 2 pot.blocked 1 blocked 1  ▄▁▁▁▁▁▁▁▁▁█▄ ██████████████████████│
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭ Flows ───────────────────────────────────────────────────────────────────────╮
-│  last seen        src              src labe dst      service  conns   decisio│
-│▸ 10-10 07:31:02   host-1.example   app=shop host-2.e 5432/tcp     310 allowed│
-│  10-10 07:30:58   10.1.4.9                  host-1.e 8443/tcp      12 potenti│
-│  10-10 06:05:00   unmanaged-nas             host-2.e icmp           3 blocked│
-│  10-10 07:29:00   host-1.example   app=shop fqdn-1.e 443/tcp        5 allowed│
+│  last seen   src              dst              service   conns decision      │
+│▸ 10-10 07:31 host-1.example   host-2.example   5432/tcp    310 allowed       │
+│  10-10 07:30 10.1.4.9         host-1.example   8443/tcp     12 pot.blk       │
+│  10-10 06:05 unmanaged-nas    host-2.example   icmp          3 blocked       │
+│  10-10 07:29 host-1.example   fqdn-1.example   443/tcp       5 allowed       │
 │                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯

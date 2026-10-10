@@ -13,6 +13,12 @@ pub struct Column<T> {
     pub cell: fn(&T) -> String,
     pub key: fn(&T) -> SortKey,
     pub right: bool,
+    /// Hidden when the table area is narrower than this (0 = always shown).
+    pub hide_below: u16,
+    /// Shorter cell text used below 120 columns.
+    pub narrow: Option<fn(&T) -> String>,
+    /// Width used below 120 columns when > 0.
+    pub narrow_width: u16,
 }
 
 impl<T> Clone for Column<T> {
@@ -23,6 +29,9 @@ impl<T> Clone for Column<T> {
             cell: self.cell,
             key: self.key,
             right: self.right,
+            hide_below: self.hide_below,
+            narrow: self.narrow,
+            narrow_width: self.narrow_width,
         }
     }
 }
@@ -257,6 +266,9 @@ mod tests {
                 cell: |r: &R| r.name.to_string(),
                 key: |r: &R| SortKey::Text(r.name.to_string()),
                 right: false,
+                hide_below: 0,
+                narrow: None,
+                narrow_width: 0,
             },
             Column {
                 title: "n",
@@ -264,6 +276,9 @@ mod tests {
                 cell: |r: &R| r.n.to_string(),
                 key: |r: &R| SortKey::Num(r.n),
                 right: true,
+                hide_below: 0,
+                narrow: None,
+                narrow_width: 0,
             },
         ];
         let mut v = TableView::new(cols);

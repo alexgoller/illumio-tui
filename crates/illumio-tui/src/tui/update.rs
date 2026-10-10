@@ -272,6 +272,13 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
 }
 
 fn on_screen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
+    // An active table search captures every key except Ctrl-C.
+    if model.screen == Screen::Traffic
+        && model.traffic.flows.is_searching()
+        && !(k.code == KeyCode::Char('c') && k.modifiers.contains(KeyModifiers::CONTROL))
+    {
+        return traffic_key(model, k);
+    }
     match (k.code, k.modifiers) {
         (KeyCode::Char('q'), KeyModifiers::NONE) => {
             model.quit = true;
@@ -406,6 +413,28 @@ mod tests {
 
     fn key(c: char) -> Msg {
         Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))
+    }
+
+    #[test]
+    fn search_captures_global_keys() {
+        use crate::tui::test_support::model_with_flows;
+        let mut m = model_with_flows();
+        update(&mut m, key('/'));
+        for c in ['1', '0', '.', 'q', ':', '?'] {
+            update(&mut m, key(c));
+        }
+        assert_eq!(m.screen, Screen::Traffic);
+        assert!(!m.quit);
+        assert_eq!(m.overlay, Overlay::None);
+        assert_eq!(m.traffic.flows.search_text(), "10.q:?");
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        );
+        assert!(!m.traffic.flows.is_searching());
+        assert_eq!(m.traffic.flows.search_text(), "");
+        update(&mut m, key('q'));
+        assert!(m.quit);
     }
 
     #[test]

@@ -147,6 +147,14 @@ pub fn flow_columns() -> Vec<Column<ResolvedFlow>> {
             },
             key: |f| SortKey::Text(f.last_detected.clone().unwrap_or_default()),
             right: false,
+            hide_below: 0,
+            narrow: Some(|f| {
+                f.last_detected
+                    .as_deref()
+                    .map(short_time_narrow)
+                    .unwrap_or_default()
+            }),
+            narrow_width: 11,
         },
         Column {
             title: "src",
@@ -154,6 +162,9 @@ pub fn flow_columns() -> Vec<Column<ResolvedFlow>> {
             cell: |f| f.src.display_name(),
             key: |f| SortKey::Text(f.src.display_name()),
             right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 16,
         },
         Column {
             title: "src labels",
@@ -161,6 +172,9 @@ pub fn flow_columns() -> Vec<Column<ResolvedFlow>> {
             cell: |f| f.src.label_text(),
             key: |f| SortKey::Text(f.src.label_text()),
             right: false,
+            hide_below: 120,
+            narrow: None,
+            narrow_width: 0,
         },
         Column {
             title: "dst",
@@ -168,6 +182,9 @@ pub fn flow_columns() -> Vec<Column<ResolvedFlow>> {
             cell: |f| f.dst.display_name(),
             key: |f| SortKey::Text(f.dst.display_name()),
             right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 16,
         },
         Column {
             title: "service",
@@ -175,6 +192,9 @@ pub fn flow_columns() -> Vec<Column<ResolvedFlow>> {
             cell: |f| f.service_text(),
             key: |f| SortKey::Num(u64::from(f.port.unwrap_or(0))),
             right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 9,
         },
         Column {
             title: "conns",
@@ -182,6 +202,9 @@ pub fn flow_columns() -> Vec<Column<ResolvedFlow>> {
             cell: |f| f.num_connections.to_string(),
             key: |f| SortKey::Num(f.num_connections),
             right: true,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 5,
         },
         Column {
             title: "decision",
@@ -189,6 +212,12 @@ pub fn flow_columns() -> Vec<Column<ResolvedFlow>> {
             cell: |f| f.policy_decision.as_str().to_string(),
             key: |f| SortKey::Text(f.policy_decision.as_str().to_string()),
             right: false,
+            hide_below: 0,
+            narrow: Some(|f| match f.policy_decision.as_str() {
+                "potentially_blocked" => "pot.blk".to_string(),
+                other => other.to_string(),
+            }),
+            narrow_width: 8,
         },
     ]
 }
@@ -196,6 +225,13 @@ pub fn flow_columns() -> Vec<Column<ResolvedFlow>> {
 /// `2026-10-10T07:31:02Z` -> `10-10 07:31:02`
 pub fn short_time(s: &str) -> String {
     s.get(5..19)
+        .map(|x| x.replace('T', " "))
+        .unwrap_or_else(|| s.to_string())
+}
+
+/// `2026-10-10T07:31:02Z` -> `10-10 07:31`
+fn short_time_narrow(s: &str) -> String {
+    s.get(5..16)
         .map(|x| x.replace('T', " "))
         .unwrap_or_else(|| s.to_string())
 }

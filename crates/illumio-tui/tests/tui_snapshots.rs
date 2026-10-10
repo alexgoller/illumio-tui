@@ -57,6 +57,9 @@ fn table_widget_renders_header_sort_and_selection() {
             cell: |r: &(String, u64)| r.0.clone(),
             key: |r: &(String, u64)| SortKey::Text(r.0.clone()),
             right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
         },
         Column {
             title: "conns",
@@ -64,6 +67,9 @@ fn table_widget_renders_header_sort_and_selection() {
             cell: |r: &(String, u64)| r.1.to_string(),
             key: |r: &(String, u64)| SortKey::Num(r.1),
             right: true,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
         },
     ]);
     v.set_rows(
@@ -168,5 +174,5 @@ fn traffic_flows_truncated_shows_warning() {
     let mut m = model_with_flows();
     m.traffic.data.as_mut().unwrap().truncated = true;
     let out = render_to_string(&m, 80, 24);
-    assert!(out.contains("truncated"), "{out}");
+    assert!(out.contains("⚠ truncated"), "{out}");
 }
