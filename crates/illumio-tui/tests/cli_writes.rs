@@ -515,7 +515,7 @@ mod iplists {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn update_by_name_puts_the_full_list() {
+    async fn update_by_name_puts_only_the_changed_lists() {
         let server = MockServer::start().await;
         let state = tempfile::tempdir().unwrap();
         mount_index(&server, json!([]), json!([corp()]), json!([])).await;
@@ -527,7 +527,6 @@ mod iplists {
         Mock::given(method("PUT"))
             .and(path("/api/v2/orgs/5/sec_policy/draft/ip_lists/3"))
             .and(body_json(json!({
-                "name": "Corp",
                 "ip_ranges": [{"from_ip": "10.0.0.0/8"}, {"from_ip": "10.2.0.0/16"}],
                 "fqdns": []
             })))
@@ -735,7 +734,7 @@ mod services {
             .await;
         Mock::given(method("PUT"))
             .and(path("/api/v2/orgs/5/sec_policy/draft/services/7"))
-            .and(body_json(json!({"name": "PostgreSQL",
+            .and(body_json(json!({
                  "service_ports": [{"port": 5432, "proto": 6}, {"port": 5433, "proto": 6}]})))
             .respond_with(ResponseTemplate::new(204))
             .expect(1)

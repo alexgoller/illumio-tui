@@ -1,9 +1,11 @@
-//! IP lists under `/sec_policy/draft/ip_lists`. Updates are a full `PUT`
-//! computed locally: the PCE replaces `ip_ranges` and `fqdns` wholesale.
+//! IP lists under `/sec_policy/draft/ip_lists`. An update `PUT`s only the
+//! keys it changes; a changed `ip_ranges` or `fqdns` is sent as the full
+//! list computed locally (the PCE replaces those wholesale), with every
+//! existing entry carried through with its unknown fields.
 use super::specs::IpRangeSpec;
 use super::{IfMissing, ObjectKind, Plan, WriteError, WriteRequest, Writer, checked_href};
 use crate::client::WriteMethod;
-use crate::models::IpList;
+use crate::models::{Fqdn, IpList};
 use serde_json::{Value, json};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11,7 +13,7 @@ pub struct IpListDraft {
     pub name: String,
     pub description: Option<String>,
     pub ranges: Vec<IpRangeSpec>,
-    pub fqdns: Vec<String>,
+    pub fqdns: Vec<Fqdn>,
 }
 
 impl IpListDraft {
@@ -20,7 +22,7 @@ impl IpListDraft {
             name: l.name.clone(),
             description: l.description.clone(),
             ranges: l.ip_ranges.iter().map(IpRangeSpec::from_range).collect(),
-            fqdns: l.fqdns.iter().map(|f| f.fqdn.clone()).collect(),
+            fqdns: l.fqdns.clone(),
         }
     }
 
@@ -29,20 +31,40 @@ impl IpListDraft {
         if self.name.trim().is_empty() {
             errs.push("IP list name must not be empty".into());
         }
-        if self.ranges.is_empty() && self.fqdns.is_empty() {
-            errs.push("an IP list needs at least one range or FQDN".into());
+        if let Err(e) = self.validate_entries() {
+            errs.push(e);
         }
-        if self.fqdns.iter().any(|f| f.trim().is_empty()) {
+        if self.fqdns.iter().any(|f| f.fqdn.trim().is_empty()) {
             errs.push("FQDN must not be empty".into());
         }
         if errs.is_empty() { Ok(()) } else { Err(errs) }
     }
 
+    fn validate_entries(&self) -> Result<(), String> {
+        if self.ranges.is_empty() && self.fqdns.is_empty() {
+            return Err("an IP list needs at least one range or FQDN".into());
+        }
+        Ok(())
+    }
+
+    fn ranges_json(&self) -> Value {
+        Value::Array(self.ranges.iter().map(IpRangeSpec::to_json).collect())
+    }
+
+    fn fqdns_json(&self) -> Value {
+        Value::Array(
+            self.fqdns
+                .iter()
+                .map(|f| serde_json::to_value(f).unwrap_or(Value::Null))
+                .collect(),
+        )
+    }
+
     pub(crate) fn to_body(&self) -> Value {
         let mut v = json!({
             "name": self.name.trim(),
-            "ip_ranges": self.ranges.iter().map(IpRangeSpec::to_json).collect::<Vec<_>>(),
-            "fqdns": self.fqdns.iter().map(|f| json!({"fqdn": f.trim()})).collect::<Vec<_>>(),
+            "ip_ranges": self.ranges_json(),
+            "fqdns": self.fqdns_json(),
         });
         if let Some(d) = &self.description {
             v["description"] = json!(d);
@@ -71,8 +93,17 @@ impl IpListPatch {
             && self.remove_fqdns.is_empty()
     }
 
+    fn touches_ranges(&self) -> bool {
+        !self.add_ranges.is_empty() || !self.remove_ranges.is_empty()
+    }
+
+    fn touches_fqdns(&self) -> bool {
+        !self.add_fqdns.is_empty() || !self.remove_fqdns.is_empty()
+    }
+
     /// The full list after this patch, validated. A remove that matches
     /// nothing is an error so a typo never silently leaves a range behind.
+    /// "At least one range or FQDN" is checked only when a list changes.
     pub fn apply(&self, current: &IpList) -> Result<IpListDraft, Vec<String>> {
         let mut d = IpListDraft::from_ip_list(current);
         let mut errs = Vec::new();
@@ -90,26 +121,53 @@ impl IpListPatch {
         }
         for f in &self.remove_fqdns {
             let before = d.fqdns.len();
-            d.fqdns.retain(|x| x != f);
+            d.fqdns.retain(|x| x.fqdn != *f);
             if d.fqdns.len() == before {
                 errs.push(format!("fqdn {f} is not in {}", current.name));
             }
         }
         for f in &self.add_fqdns {
-            if !d.fqdns.contains(f) {
-                d.fqdns.push(f.clone());
+            let f = Fqdn::new(f);
+            if f.fqdn.is_empty() {
+                errs.push("FQDN must not be empty".into());
+            } else if !d.fqdns.iter().any(|x| x.fqdn == f.fqdn) {
+                d.fqdns.push(f);
             }
         }
         if let Some(n) = &self.name {
+            if n.trim().is_empty() {
+                errs.push("IP list name must not be empty".into());
+            }
             d.name = n.clone();
         }
         if let Some(desc) = &self.description {
             d.description = Some(desc.clone());
         }
-        if let Err(mut e) = d.validate() {
-            errs.append(&mut e);
+        if (self.touches_ranges() || self.touches_fqdns())
+            && let Err(e) = d.validate_entries()
+        {
+            errs.push(e);
         }
         if errs.is_empty() { Ok(d) } else { Err(errs) }
+    }
+
+    /// The `PUT` body: only the keys this patch changes; a changed list is
+    /// sent whole, as computed by [`IpListPatch::apply`].
+    pub(crate) fn body(&self, d: &IpListDraft) -> Value {
+        let mut v = serde_json::Map::new();
+        if self.name.is_some() {
+            v.insert("name".into(), json!(d.name.trim()));
+        }
+        if let Some(desc) = &self.description {
+            v.insert("description".into(), json!(desc));
+        }
+        if self.touches_ranges() {
+            v.insert("ip_ranges".into(), d.ranges_json());
+        }
+        if self.touches_fqdns() {
+            v.insert("fqdns".into(), d.fqdns_json());
+        }
+        Value::Object(v)
     }
 }
 
@@ -122,7 +180,10 @@ impl Writer<'_> {
         draft.validate().map_err(WriteError::Invalid)?;
         if if_missing == IfMissing::SkipExisting {
             let lists = self.pce().ip_lists(self.bypass()).await?.value;
-            if let Some(existing) = lists.iter().find(|l| l.name == draft.name.trim()) {
+            if let Some(existing) = lists
+                .iter()
+                .find(|l| l.update_type.as_deref() != Some("delete") && l.name == draft.name.trim())
+            {
                 return Ok(Plan::Noop {
                     existing_href: existing.href.clone(),
                     reason: format!("ip_list {} exists", draft.name.trim()),
@@ -156,7 +217,7 @@ impl Writer<'_> {
             request: WriteRequest {
                 method: WriteMethod::Put,
                 path: href.clone(),
-                body: Some(draft.to_body()),
+                body: Some(patch.body(&draft)),
                 summary: format!("update ip_list {}", current.name),
             },
             kind: ObjectKind::IpList,

@@ -49,11 +49,29 @@ pub struct IpRange {
     pub exclusion: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Fields this tool does not model, carried through a full update.
+    #[serde(default, flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Fqdn {
     pub fqdn: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Fields this tool does not model, carried through a full update.
+    #[serde(default, flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+impl Fqdn {
+    pub fn new(name: impl AsRef<str>) -> Self {
+        Self {
+            fqdn: name.as_ref().trim().to_string(),
+            description: None,
+            extra: serde_json::Map::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

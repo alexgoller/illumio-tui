@@ -6,7 +6,7 @@ use super::write::{
     self, WriteFlags, parse_kv, resolve_ip_list, resolve_label, resolve_service, run_plan,
 };
 use clap::{Args, Subcommand};
-use pce::models::{IpList, Label, LabelGroup, Service};
+use pce::models::{Fqdn, IpList, Label, LabelGroup, Service};
 use pce::write::{
     IfMissing, IpListDraft, IpListPatch, IpRangeSpec, LabelDraft, PortSpec, ServiceDraft,
     ServicePatch,
@@ -229,7 +229,7 @@ pub struct IplistsCmd {
 pub enum IplistsAction {
     /// Create an IP list in draft (needs writes enabled and --allow-writes)
     Add(IpListAddArgs),
-    /// Add or remove ranges and FQDNs; the full list is re-sent
+    /// Change an IP list's name, description, ranges or FQDNs; a changed list is re-sent whole
     Update(IpListUpdateArgs),
     /// Delete an IP list from draft
     Delete(IpListDeleteArgs),
@@ -322,7 +322,7 @@ async fn ip_list_add(ctx: &Context, a: &IpListAddArgs) -> Result<(), CliError> {
         name: a.name.clone(),
         description: a.description.clone(),
         ranges,
-        fqdns: a.fqdns.clone(),
+        fqdns: a.fqdns.iter().map(Fqdn::new).collect(),
     };
     let if_missing = if a.if_missing {
         IfMissing::SkipExisting
@@ -392,7 +392,7 @@ pub struct ServicesCmd {
 pub enum ServicesAction {
     /// Create a service in draft (needs writes enabled and --allow-writes)
     Add(ServiceAddArgs),
-    /// Add or remove ports; the full port list is re-sent
+    /// Change a service's name, description or ports; a changed port list is re-sent whole
     Update(ServiceUpdateArgs),
     /// Delete a service from draft
     Delete(ServiceDeleteArgs),

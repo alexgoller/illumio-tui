@@ -33,6 +33,8 @@ pub struct IpRangeSpec {
     pub exclusion: bool,
     /// Per-range comment; kept so a full PUT does not erase it.
     pub description: Option<String>,
+    /// PCE-side fields this tool does not model, carried through a full PUT.
+    pub extra: serde_json::Map<String, Value>,
 }
 
 impl IpRangeSpec {
@@ -52,6 +54,7 @@ impl IpRangeSpec {
                 to_ip: None,
                 exclusion,
                 description: None,
+                extra: Default::default(),
             });
         }
         if let Some((a, b)) = s.split_once('-') {
@@ -68,6 +71,7 @@ impl IpRangeSpec {
                 to_ip: Some(to.to_string()),
                 exclusion,
                 description: None,
+                extra: Default::default(),
             });
         }
         let ip = parse_ip(s)?;
@@ -76,6 +80,7 @@ impl IpRangeSpec {
             to_ip: None,
             exclusion,
             description: None,
+            extra: Default::default(),
         })
     }
 
@@ -85,11 +90,14 @@ impl IpRangeSpec {
             to_ip: r.to_ip.clone(),
             exclusion: r.exclusion.unwrap_or(false),
             description: r.description.clone(),
+            extra: r.extra.clone(),
         }
     }
 
+    /// The known fields over the carried-through extras.
     pub fn to_json(&self) -> Value {
-        let mut v = json!({"from_ip": self.from_ip});
+        let mut v = Value::Object(self.extra.clone());
+        v["from_ip"] = json!(self.from_ip);
         if let Some(to) = &self.to_ip {
             v["to_ip"] = json!(to);
         }
@@ -328,6 +336,7 @@ mod tests {
             to_ip: None,
             exclusion: Some(false),
             description: None,
+            extra: Default::default(),
         });
         assert!(a.same_range(&from));
     }

@@ -101,10 +101,13 @@ kind (`objects:` or `workloads`), and re-fetches the object after a 204. A
 timeout, connection loss, gateway status or undecodable 2xx body after the
 request left is reported as `write_unanswered` ("may have applied") and
 audited with `phase: "sent"`; a failed re-fetch, a POST without an href or an
-audit append failure is success with `warnings`. Updates of IP lists, services
-and workload labels compute the full replacement list locally because the PCE
-replaces those arrays wholesale; unknown fields are carried through, or the
-update is refused when they cannot be preserved. Workloads are written only
+audit append failure is success with `warnings`. An update sends only the
+keys that change; a changed list (`ip_ranges`, `fqdns`, `service_ports`,
+workload `labels` or `interfaces`) is computed locally and sent whole because
+the PCE replaces those arrays wholesale, and list entries are carried through
+with their unknown fields. A service update that changes ports is refused when
+the service has fields this tool cannot preserve (`windows_services`, ICMP
+type/code, a port without a protocol). Workloads are written only
 when the PCE reports `managed: false` and no VEN. The CLI layer
 (`cli/write.rs`) owns `--dry-run`/`--yes`, exact name resolution and the
 envelope (`meta.write`).

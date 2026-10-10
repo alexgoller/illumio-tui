@@ -753,6 +753,7 @@ mod labels {
 
 mod ip_lists {
     use super::*;
+    use pce::models::Fqdn;
     use pce::write::{IpListDraft, IpListPatch, IpRangeSpec};
 
     fn corp() -> Value {
@@ -769,7 +770,7 @@ mod ip_lists {
             name: "Corp".into(),
             description: None,
             ranges: vec![IpRangeSpec::parse("10.0.0.0/8", false).unwrap()],
-            fqdns: vec!["*.corp.example".into()],
+            fqdns: vec![Fqdn::new("*.corp.example")],
         };
         assert!(d.validate().is_ok());
         let empty = IpListDraft {
@@ -794,7 +795,7 @@ mod ip_lists {
                 IpRangeSpec::parse("10.0.0.0/8", false).unwrap(),
                 IpRangeSpec::parse("192.168.1.1-192.168.1.9", true).unwrap(),
             ],
-            fqdns: vec!["*.corp.example".into()],
+            fqdns: vec![Fqdn::new("*.corp.example")],
         };
         let plan = pce
             .writer(&guard)
@@ -866,7 +867,10 @@ mod ip_lists {
                 .collect::<Vec<_>>(),
             vec!["10.0.0.0/8", "10.2.0.0/16"]
         );
-        assert_eq!(d.fqdns, vec!["db.corp.example"]);
+        assert_eq!(
+            d.fqdns.iter().map(|f| f.fqdn.as_str()).collect::<Vec<_>>(),
+            vec!["db.corp.example"]
+        );
         // Adding a duplicate is a no-op, not a second entry.
         let dup = IpListPatch {
             add_ranges: vec![IpRangeSpec::parse("10.0.0.0/8", false).unwrap()],
@@ -941,12 +945,10 @@ mod ip_lists {
             req.path, "/orgs/5/sec_policy/draft/ip_lists/3",
             "active is rewritten to draft"
         );
-        let body = req.body.clone().unwrap();
-        assert_eq!(body["name"], "Corp");
-        assert_eq!(body["ip_ranges"].as_array().unwrap().len(), 2);
         assert_eq!(
-            body["fqdns"],
-            json!([{"fqdn": "*.corp.example"}, {"fqdn": "db.corp.example"}])
+            req.body,
+            Some(json!({"fqdns": [{"fqdn": "*.corp.example"}, {"fqdn": "db.corp.example"}]})),
+            "only the changed list, sent whole"
         );
         let err = pce
             .writer(&guard)
@@ -986,6 +988,7 @@ mod ip_lists {
         let server = MockServer::start().await;
         let mut l = corp();
         l["ip_ranges"][0]["description"] = json!("DMZ");
+        l["ip_ranges"][0]["future_field"] = json!({"kept": true});
         Mock::given(method("GET"))
             .and(path("/api/v2/orgs/5/sec_policy/draft/ip_lists/3"))
             .respond_with(ResponseTemplate::new(200).set_body_json(l.clone()))
@@ -994,7 +997,7 @@ mod ip_lists {
         let pce = pce_for(&server);
         let guard = guard_with(MemoryAudit::new());
         let patch = IpListPatch {
-            add_fqdns: vec!["db.corp.example".into()],
+            add_ranges: vec![IpRangeSpec::parse("10.2.0.0/16", false).unwrap()],
             ..IpListPatch::default()
         };
         let plan = pce
@@ -1005,14 +1008,100 @@ mod ip_lists {
         let body = plan.request().unwrap().body.clone().unwrap();
         assert_eq!(
             body["ip_ranges"][0],
-            json!({"from_ip": "10.0.0.0/8", "description": "DMZ"})
+            json!({"from_ip": "10.0.0.0/8", "description": "DMZ", "future_field": {"kept": true}})
         );
+        assert_eq!(body["ip_ranges"].as_array().unwrap().len(), 3);
         let current: pce::models::IpList = serde_json::from_value(l).unwrap();
         let patch = IpListPatch {
             remove_ranges: vec![IpRangeSpec::parse("10.0.0.0/8", false).unwrap()],
             ..IpListPatch::default()
         };
         assert_eq!(patch.apply(&current).unwrap().ranges.len(), 1);
+    }
+
+    async fn plan_update(list: Value, patch: &IpListPatch) -> Value {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/sec_policy/draft/ip_lists/3"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(list))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let plan = pce
+            .writer(&guard)
+            .plan_update_ip_list("/orgs/5/sec_policy/draft/ip_lists/3", patch)
+            .await
+            .unwrap();
+        plan.request().unwrap().body.clone().unwrap()
+    }
+
+    #[tokio::test]
+    async fn rename_only_update_puts_only_the_name() {
+        let patch = IpListPatch {
+            name: Some("X".into()),
+            ..IpListPatch::default()
+        };
+        assert_eq!(plan_update(corp(), &patch).await, json!({"name": "X"}));
+        // An empty list is not this patch's business: no list is sent.
+        let mut empty = corp();
+        empty["ip_ranges"] = json!([]);
+        empty["fqdns"] = json!([]);
+        assert_eq!(plan_update(empty, &patch).await, json!({"name": "X"}));
+    }
+
+    #[tokio::test]
+    async fn fqdn_descriptions_and_unknown_fields_survive_updates() {
+        let mut l = corp();
+        l["fqdns"] =
+            json!([{"fqdn": "*.corp.example", "description": "corp wildcard", "x_future": 1}]);
+        // A range change leaves the FQDNs alone: the key is not sent.
+        let patch = IpListPatch {
+            add_ranges: vec![IpRangeSpec::parse("10.2.0.0/16", false).unwrap()],
+            ..IpListPatch::default()
+        };
+        let body = plan_update(l.clone(), &patch).await;
+        assert!(body.get("fqdns").is_none(), "{body}");
+        assert_eq!(body["ip_ranges"].as_array().unwrap().len(), 3);
+        // An FQDN change sends the list whole, entries carried through.
+        let patch = IpListPatch {
+            add_fqdns: vec![" db.corp.example ".into()],
+            ..IpListPatch::default()
+        };
+        assert_eq!(
+            plan_update(l, &patch).await,
+            json!({"fqdns": [
+                {"fqdn": "*.corp.example", "description": "corp wildcard", "x_future": 1},
+                {"fqdn": "db.corp.example"}
+            ]})
+        );
+    }
+
+    #[tokio::test]
+    async fn if_missing_ignores_a_pending_delete() {
+        let server = MockServer::start().await;
+        let mut gone = corp();
+        gone["update_type"] = json!("delete");
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/sec_policy/draft/ip_lists"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([gone])))
+            .mount(&server)
+            .await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let d = IpListDraft {
+            name: "Corp".into(),
+            description: None,
+            ranges: vec![IpRangeSpec::parse("10.0.0.0/8", false).unwrap()],
+            fqdns: vec![],
+        };
+        let plan = pce
+            .writer(&guard)
+            .plan_create_ip_list(&d, IfMissing::SkipExisting)
+            .await
+            .unwrap();
+        assert!(plan.request().is_some(), "a pending delete does not exist");
     }
 }
 
@@ -1249,7 +1338,7 @@ mod services {
         let pce = pce_for(&server);
         let guard = guard_with(MemoryAudit::new());
         let patch = ServicePatch {
-            description: Some("d".into()),
+            add_ports: vec![PortSpec::parse("5433/tcp").unwrap()],
             ..ServicePatch::default()
         };
         let plan = pce
@@ -1258,9 +1347,64 @@ mod services {
             .await
             .unwrap();
         assert_eq!(
-            plan.request().unwrap().body.clone().unwrap()["service_ports"],
-            json!([{"port": 5432, "proto": 6}])
+            plan.request().unwrap().body.clone().unwrap(),
+            json!({"service_ports": [{"port": 5432, "proto": 6}, {"port": 5433, "proto": 6}]})
         );
+    }
+
+    #[tokio::test]
+    async fn description_only_update_sends_only_the_description_and_keeps_windows_services() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/sec_policy/draft/services/7"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "href": "/orgs/5/sec_policy/draft/services/7", "name": "W",
+                "service_ports": [{"proto": 1, "icmp_type": 8}, {"port": 1}],
+                "windows_services": [{"service_name": "spooler"}]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let patch = ServicePatch {
+            description: Some("print spooler".into()),
+            ..ServicePatch::default()
+        };
+        let plan = pce
+            .writer(&guard)
+            .plan_update_service("/orgs/5/sec_policy/draft/services/7", &patch)
+            .await
+            .unwrap();
+        assert_eq!(
+            plan.request().unwrap().body,
+            Some(json!({"description": "print spooler"}))
+        );
+    }
+
+    #[tokio::test]
+    async fn if_missing_ignores_a_pending_delete() {
+        let server = MockServer::start().await;
+        let mut gone = pg();
+        gone["update_type"] = json!("delete");
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/sec_policy/draft/services"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([gone])))
+            .mount(&server)
+            .await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let d = ServiceDraft {
+            name: "PostgreSQL".into(),
+            description: None,
+            ports: vec![PortSpec::parse("5432/tcp").unwrap()],
+        };
+        let plan = pce
+            .writer(&guard)
+            .plan_create_service(&d, IfMissing::SkipExisting)
+            .await
+            .unwrap();
+        assert!(plan.request().is_some(), "a pending delete does not exist");
     }
 }
 
