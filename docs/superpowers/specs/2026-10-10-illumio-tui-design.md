@@ -290,7 +290,8 @@ Offline suite (runs in CI, no PCE):
 5. `assert_cmd` CLI tests: envelope, exit codes, `--dry-run`.
 
 Live smoke test, opt-in with `PCE_LIVE=1`: health, label load, one 1-hour
-traffic query with `max_results=50`; asserts on shape only. ≤ 6 API calls.
+traffic query with `max_results=50`; asserts on shape only. About 9 API calls
+(health, four object lists, POST, poll, download), capped at 18.
 
 Toolchain: stable Rust, `cargo clippy -D warnings`, `rustfmt`, `cargo deny`,
 GitHub Actions on macOS + Linux.

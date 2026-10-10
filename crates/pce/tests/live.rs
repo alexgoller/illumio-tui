@@ -1,5 +1,7 @@
 //! Opt-in: `PCE_LIVE=1` plus PCE_HOST, PCE_ORG_ID, API_KEY, API_SECRET
-//! (and optionally PCE_PORT, PCE_TLS_VERIFY). At most 8 API calls.
+//! (and optionally PCE_PORT, PCE_TLS_VERIFY). A typical run makes about 9
+//! API calls (health, four object lists, POST, poll, download); the test
+//! fails above 18, since poll count depends on how fast the PCE answers.
 use pce::client::{ClientConfig, PceClient};
 use pce::traffic::TrafficQueryBuilder;
 use pce::{CacheMode, Credentials, Pce};
@@ -56,7 +58,7 @@ async fn live_smoke() {
     let s = pce.stats();
     eprintln!("api calls={} bytes={}", s.calls, s.bytes);
     assert!(
-        s.calls <= 8 + 10,
-        "poll count depends on PCE speed; sanity cap"
+        s.calls <= 18,
+        "about 9 calls expected; poll count depends on PCE speed"
     );
 }
