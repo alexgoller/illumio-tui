@@ -1,6 +1,7 @@
 //! Runs one Explorer query: POST, poll with backoff until completed, GET the
-//! download. Cancellable between polls. Reports progress over a channel so a
-//! UI can show elapsed time without owning the future.
+//! download. Cancellable between polls and during the status and download
+//! requests. Reports progress over a channel so a UI can show elapsed time
+//! without owning the future.
 use crate::client::PceClient;
 use crate::error::{PceError, Result};
 use crate::models::{AsyncQueryStatus, Flow, TrafficQuery};
@@ -85,7 +86,10 @@ pub async fn run_traffic_query(
             () = cancel.cancelled() => return Err(PceError::Cancelled),
             () = tokio::time::sleep(delay) => {}
         }
-        let status: AsyncQueryStatus = client.get(&query_href, &[]).await?.body;
+        let status: AsyncQueryStatus = tokio::select! {
+            () = cancel.cancelled() => return Err(PceError::Cancelled),
+            r = client.get(&query_href, &[]) => r?.body,
+        };
         let state = status.status.clone().unwrap_or_else(|| "unknown".into());
         matches_count = status.matches_count.or(matches_count);
         report(
@@ -122,7 +126,10 @@ pub async fn run_traffic_query(
     };
 
     report(progress, QueryProgress::Downloading);
-    let flows: Vec<Flow> = client.get(&result_href, &[]).await?.body;
+    let flows: Vec<Flow> = tokio::select! {
+        () = cancel.cancelled() => return Err(PceError::Cancelled),
+        r = client.get(&result_href, &[]) => r?.body,
+    };
     let rows = flows.len();
     let truncated = rows as u64 >= u64::from(query.max_results)
         || matches_count.is_some_and(|m| m > rows as u64);

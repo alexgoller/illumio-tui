@@ -230,6 +230,37 @@ async fn cancellation_stops_polling() {
     assert_eq!(c.stats().calls, 1, "only the POST was sent");
 }
 
+#[tokio::test]
+async fn cancellation_interrupts_an_in_flight_request() {
+    let server = MockServer::start().await;
+    mount_submit(&server).await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"status": "working"}))
+                .set_delay(Duration::from_secs(5)),
+        )
+        .mount(&server)
+        .await;
+    let c = client_for(&server);
+    let cancel = CancellationToken::new();
+    let child = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        child.cancel();
+    });
+    let started = std::time::Instant::now();
+    let r = run_traffic_query(&c, &query(1000), &fast(), &cancel, None).await;
+    assert!(matches!(r, Err(PceError::Cancelled)), "{r:?}");
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "cancel must not wait for the 5 s response: {:?}",
+        started.elapsed()
+    );
+    assert_eq!(c.stats().calls, 2, "POST plus the interrupted status GET");
+}
+
 #[test]
 fn fixture_rows_keep_unknown_fields() {
     let flows: Vec<Flow> =
