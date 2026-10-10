@@ -1,0 +1,14 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: text
+---
+╭ Hosts ────────────────────── 30 rows ╮
+│  name         conns                  │
+│  host-0           210                │
+│  host-1           203                │
+│▸ host-2           196                │
+│  host-3           189                │
+│  host-4           182                │
+│  host-5           175                │
+│  host-6           168                │
+╰──────────────────────────────────────╯

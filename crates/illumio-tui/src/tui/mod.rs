@@ -4,6 +4,7 @@
 pub mod app;
 pub mod model;
 pub mod msg;
+pub mod table;
 pub mod test_support;
 pub mod ui;
 pub mod update;

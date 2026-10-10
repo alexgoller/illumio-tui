@@ -40,3 +40,61 @@ fn disconnected_state_shows_error_in_body() {
     assert!(out.contains("HTTP 401"), "{out}");
     assert!(out.contains(":profile"), "hint to switch profile: {out}");
 }
+
+#[test]
+fn table_widget_renders_header_sort_and_selection() {
+    use illumio_tui::tui::table::{Column, SortKey, TableView};
+    use illumio_tui::tui::ui::widgets::panel::panel;
+    use illumio_tui::tui::ui::widgets::table::render;
+    use ratatui::{Terminal, backend::TestBackend, style::Style};
+    let m = model_fixture();
+    let mut v: TableView<(String, u64)> = TableView::new(vec![
+        Column {
+            title: "name",
+            width: 12,
+            cell: |r: &(String, u64)| r.0.clone(),
+            key: |r: &(String, u64)| SortKey::Text(r.0.clone()),
+            right: false,
+        },
+        Column {
+            title: "conns",
+            width: 7,
+            cell: |r: &(String, u64)| r.1.to_string(),
+            key: |r: &(String, u64)| SortKey::Num(r.1),
+            right: true,
+        },
+    ]);
+    v.set_rows(
+        (0..30)
+            .map(|i| (format!("host-{i}"), (30 - i) as u64 * 7))
+            .collect(),
+    );
+    v.sort_by(1, true);
+    v.select_next();
+    v.select_next();
+    v.ensure_visible(6);
+    let mut term = Terminal::new(TestBackend::new(40, 10)).unwrap();
+    term.draw(|f| {
+        render(
+            f,
+            f.area(),
+            &v,
+            &m.theme,
+            panel("Hosts", "30 rows", &m.theme, true),
+            &|_| Style::default(),
+        )
+    })
+    .unwrap();
+    let buf = term.backend().buffer();
+    let text: String = (0..10)
+        .map(|y| {
+            (0..40)
+                .map(|x| buf[(x, y)].symbol().to_string())
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+                + "\n"
+        })
+        .collect();
+    insta::assert_snapshot!("table_widget_40x10", text);
+}
