@@ -98,3 +98,23 @@ fn table_widget_renders_header_sort_and_selection() {
         .collect();
     insta::assert_snapshot!("table_widget_40x10", text);
 }
+
+#[test]
+fn help_overlay_80x24() {
+    use illumio_tui::tui::model::Overlay;
+    let mut m = model_fixture();
+    m.overlay = Overlay::Help;
+    insta::assert_snapshot!("help_overlay_80x24", render_to_string(&m, 80, 24));
+}
+
+#[test]
+fn prompt_overlay_80x24() {
+    use illumio_tui::tui::model::Overlay;
+    let mut m = model_fixture();
+    m.overlay = Overlay::Prompt {
+        input: "filter app=web".into(),
+    };
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains(":filter app=web"), "{out}");
+    insta::assert_snapshot!("prompt_overlay_80x24", out);
+}

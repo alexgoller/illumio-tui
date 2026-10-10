@@ -1,5 +1,6 @@
 //! Pure state transitions. Never performs I/O; returns `Cmd`s instead.
-use crate::tui::model::{Connection, Model, Screen, StatusLine};
+use crate::tui::commands::{self, Command};
+use crate::tui::model::{Connection, Model, Overlay, Screen, StatusLine};
 use crate::tui::msg::{Cmd, Msg};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use pce::CacheMode;
@@ -51,6 +52,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             model.screen = s;
             Vec::new()
         }
+        Msg::Command(c) => on_command(model, c),
     }
 }
 
@@ -58,10 +60,66 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     if k.kind == KeyEventKind::Release {
         return Vec::new();
     }
+    if k.code == KeyCode::Char('c') && k.modifiers == KeyModifiers::CONTROL {
+        model.quit = true;
+        return vec![Cmd::Quit];
+    }
+    match model.overlay.clone() {
+        Overlay::Help => {
+            if matches!(
+                k.code,
+                KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q')
+            ) {
+                model.overlay = Overlay::None;
+            }
+            Vec::new()
+        }
+        Overlay::Prompt { mut input } => match k.code {
+            KeyCode::Esc => {
+                model.overlay = Overlay::None;
+                Vec::new()
+            }
+            KeyCode::Enter => {
+                model.overlay = Overlay::None;
+                match commands::parse(&input) {
+                    Ok(cmd) => update(model, Msg::Command(cmd)),
+                    Err(e) => {
+                        model.status = StatusLine::error(e);
+                        Vec::new()
+                    }
+                }
+            }
+            KeyCode::Backspace => {
+                input.pop();
+                model.overlay = Overlay::Prompt { input };
+                Vec::new()
+            }
+            KeyCode::Char(c) => {
+                input.push(c);
+                model.overlay = Overlay::Prompt { input };
+                Vec::new()
+            }
+            _ => Vec::new(),
+        },
+        Overlay::None => on_screen_key(model, k),
+    }
+}
+
+fn on_screen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     match (k.code, k.modifiers) {
-        (KeyCode::Char('c'), KeyModifiers::CONTROL) | (KeyCode::Char('q'), KeyModifiers::NONE) => {
+        (KeyCode::Char('q'), KeyModifiers::NONE) => {
             model.quit = true;
             vec![Cmd::Quit]
+        }
+        (KeyCode::Char(':'), _) => {
+            model.overlay = Overlay::Prompt {
+                input: String::new(),
+            };
+            Vec::new()
+        }
+        (KeyCode::Char('?'), _) => {
+            model.overlay = Overlay::Help;
+            Vec::new()
         }
         (KeyCode::Char('1'), _) => switch(model, Screen::Traffic),
         (KeyCode::Char('2'), _) => switch(model, Screen::Policy),
@@ -74,6 +132,28 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
 fn switch(model: &mut Model, s: Screen) -> Vec<Cmd> {
     model.screen = s;
     Vec::new()
+}
+
+pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
+    match cmd {
+        Command::Screen(s) => switch(model, s),
+        Command::Quit => {
+            model.quit = true;
+            vec![Cmd::Quit]
+        }
+        Command::Help => {
+            model.overlay = Overlay::Help;
+            Vec::new()
+        }
+        Command::Filter(_)
+        | Command::Window(_)
+        | Command::Profile(_)
+        | Command::Draft
+        | Command::Active => {
+            model.status = StatusLine::warn("not available yet");
+            Vec::new()
+        }
+    }
 }
 
 #[cfg(test)]
@@ -150,5 +230,75 @@ mod tests {
         assert_eq!(m.size, (120, 40));
         update(&mut m, Msg::Focus(false));
         assert!(!m.focused);
+    }
+
+    #[test]
+    fn colon_opens_prompt_enter_runs_command_and_errors_show_in_status() {
+        use crate::tui::model::Overlay;
+        let mut m = model_fixture();
+        update(&mut m, key(':'));
+        assert!(matches!(m.overlay, Overlay::Prompt { .. }));
+        for c in "policy".chars() {
+            update(&mut m, key(c));
+        }
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        assert!(matches!(m.overlay, Overlay::None));
+        assert_eq!(m.screen, Screen::Policy);
+
+        update(&mut m, key(':'));
+        for c in "bogus".chars() {
+            update(&mut m, key(c));
+        }
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        assert_eq!(m.status.kind, StatusKind::Error);
+        assert!(
+            m.status.text.contains("unknown command"),
+            "{}",
+            m.status.text
+        );
+        assert_eq!(m.screen, Screen::Policy, "a bad command changes nothing");
+
+        update(&mut m, key(':'));
+        update(&mut m, key('x'));
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
+        );
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        );
+        assert!(matches!(m.overlay, Overlay::None));
+    }
+
+    #[test]
+    fn help_overlay_toggles_and_swallows_keys() {
+        use crate::tui::model::Overlay;
+        let mut m = model_fixture();
+        update(&mut m, key('?'));
+        assert!(matches!(m.overlay, Overlay::Help));
+        update(&mut m, key('2'));
+        assert_eq!(
+            m.screen,
+            Screen::Traffic,
+            "keys go to the overlay, not the screen"
+        );
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        );
+        assert!(matches!(m.overlay, Overlay::None));
+        update(&mut m, key('?'));
+        update(&mut m, key('?'));
+        assert!(matches!(m.overlay, Overlay::None), "? toggles");
+        assert!(
+            update(&mut m, Msg::Command(crate::tui::commands::Command::Quit)).contains(&Cmd::Quit)
+        );
     }
 }

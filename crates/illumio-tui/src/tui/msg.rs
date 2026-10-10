@@ -23,6 +23,7 @@ pub enum Msg {
     /// Fresh request counters from the client (sent after every task).
     Stats(StatsSnapshot),
     SwitchScreen(Screen),
+    Command(crate::tui::commands::Command),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

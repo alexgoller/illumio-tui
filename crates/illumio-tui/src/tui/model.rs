@@ -87,6 +87,15 @@ impl StatusLine {
     }
 }
 
+/// A modal drawn on top of the current screen. Later tasks add `FilterEditor`,
+/// `Confirm`, `Error`, `Detail`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Overlay {
+    None,
+    Help,
+    Prompt { input: String },
+}
+
 /// Limits copied from the resolved profile so `update` never touches config.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Limits {
@@ -102,6 +111,7 @@ pub struct Model {
     pub theme: Theme,
     pub limits: Limits,
     pub screen: Screen,
+    pub overlay: Overlay,
     pub connection: Connection,
     pub stats: StatsSnapshot,
     pub size: (u16, u16),
@@ -132,6 +142,7 @@ impl Model {
                 traffic_default_window,
             },
             screen: Screen::Traffic,
+            overlay: Overlay::None,
             connection: Connection::Connecting,
             stats: StatsSnapshot { calls: 0, bytes: 0 },
             size: (80, 24),

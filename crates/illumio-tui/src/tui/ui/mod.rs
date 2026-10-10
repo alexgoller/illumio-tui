@@ -4,7 +4,7 @@ pub mod layout;
 pub mod theme;
 pub mod widgets;
 
-use crate::tui::model::{Connection, Model, Screen};
+use crate::tui::model::{Connection, Model, Overlay, Screen};
 use layout::chrome;
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -36,6 +36,11 @@ pub fn view(model: &Model, f: &mut Frame) {
     render_tabs(model, f, c.tabs);
     render_body(model, f, c.body);
     widgets::status::render(model, f, c.status);
+    match &model.overlay {
+        Overlay::None => {}
+        Overlay::Help => widgets::overlay::render_help(model, f, area),
+        Overlay::Prompt { input } => widgets::overlay::render_prompt(model, input, f, area),
+    }
 }
 
 fn render_header(model: &Model, f: &mut Frame, area: Rect) {

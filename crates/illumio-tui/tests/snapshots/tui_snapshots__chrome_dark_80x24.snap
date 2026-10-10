@@ -25,4 +25,4 @@ expression: "render_to_string(&m, 80, 24)"
 │                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-ready                                                     : cmd  ? help  q quit
+ready          f filter  r run  a auto  v view  s sort  / search  : cmd  ? help
