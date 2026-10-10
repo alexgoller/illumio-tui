@@ -63,3 +63,7 @@ body without sending it.
     PCE_LIVE=1 cargo test -p pce --test live                    # needs PCE_* env
 
 Design: `docs/superpowers/specs/2026-10-10-illumio-tui-design.md`.
+
+## License
+
+GPL-3.0-only. See `LICENSE`.
