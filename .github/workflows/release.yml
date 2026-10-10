@@ -1,0 +1,152 @@
+name: Release
+
+# Tag push (v*) builds every target and publishes a GitHub Release.
+# workflow_dispatch is a dry run: same builds, archives and SHA256SUMS are
+# uploaded as workflow artifacts, but no release is created.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  BIN: illumio-tui
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-latest, cross: false }
+          # Fully static binary for old distros; cross ships a musl C toolchain for aws-lc-sys.
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest, cross: true }
+          # Cross image provides the aarch64 gcc toolchain and an older glibc baseline.
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-latest, cross: true }
+          - { target: aarch64-apple-darwin, os: macos-latest, cross: false }
+          - { target: x86_64-apple-darwin, os: macos-latest, cross: false }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest, cross: false }
+    env:
+      TARGET: ${{ matrix.target }}
+      USE_CROSS: ${{ matrix.cross }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Determine version
+        id: version
+        run: |
+          cargo_version=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "illumio-tui") | .version')
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            tag_version="${GITHUB_REF_NAME#v}"
+            if [[ "$tag_version" != "$cargo_version" ]]; then
+              echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $cargo_version"
+              exit 1
+            fi
+          fi
+          echo "version=$cargo_version" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: |
+          if [[ "$USE_CROSS" == "true" ]]; then
+            cross build --release --locked -p illumio-tui --target "$TARGET"
+          else
+            cargo build --release --locked -p illumio-tui --target "$TARGET"
+          fi
+
+      - name: Package
+        id: package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          name="$BIN-$VERSION-$TARGET"
+          exe="$BIN"
+          [[ "$TARGET" == *windows* ]] && exe="$BIN.exe"
+          bin_path="target/$TARGET/release/$exe"
+          if [[ "$RUNNER_OS" != "Windows" ]]; then file "$bin_path"; fi
+          mkdir -p "dist/$name"
+          cp "$bin_path" README.md LICENSE "dist/$name/"
+          cd dist
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            7z a "$name.zip" "$name" > /dev/null
+            echo "archive=$name.zip" >> "$GITHUB_OUTPUT"
+          else
+            tar -czf "$name.tar.gz" "$name"
+            echo "archive=$name.tar.gz" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Smoke test
+        # Only where the host can execute the binary natively.
+        if: matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'x86_64-unknown-linux-musl' || matrix.target == 'aarch64-apple-darwin' || matrix.target == 'x86_64-pc-windows-msvc'
+        run: |
+          exe="$BIN"
+          [[ "$TARGET" == *windows* ]] && exe="$BIN.exe"
+          "target/$TARGET/release/$exe" --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/${{ steps.package.outputs.archive }}
+          if-no-files-found: error
+
+  checksums:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Generate SHA256SUMS
+        working-directory: dist
+        run: |
+          sha256sum -- *.tar.gz *.zip > SHA256SUMS
+          cat SHA256SUMS
+          sha256sum --check SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SHA256SUMS
+          path: dist/SHA256SUMS
+          if-no-files-found: error
+
+  release:
+    needs: checksums
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/SHA256SUMS
