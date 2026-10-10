@@ -53,8 +53,10 @@ pub struct Actor {
 #[serde(untagged)]
 pub enum IngressService {
     Ref(Ref),
+    /// An inline service. `port` is absent for port-less protocols (ICMP).
     Port {
-        port: u16,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        port: Option<u16>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         to_port: Option<u16>,
         proto: i64,
@@ -197,9 +199,18 @@ mod tests {
         assert_eq!(
             rs[0].rules[1].ingress_services[1],
             IngressService::Port {
-                port: 8000,
+                port: Some(8000),
                 to_port: Some(8099),
                 proto: 6
+            }
+        );
+        let portless: Vec<IngressService> = serde_json::from_str(r#"[{"proto": 1}]"#).unwrap();
+        assert_eq!(
+            portless[0],
+            IngressService::Port {
+                port: None,
+                to_port: None,
+                proto: 1
             }
         );
         assert_eq!(rs[0].rules[1].unscoped_consumers, Some(true));

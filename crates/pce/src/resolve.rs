@@ -172,10 +172,14 @@ pub fn describe_ingress_service(s: &IngressService, idx: &NameIndex) -> String {
             port,
             to_port,
             proto,
-        } => match to_port {
-            Some(t) if t != port => format!("{port}-{t}/{}", crate::models::proto_name(*proto)),
-            _ => format!("{port}/{}", crate::models::proto_name(*proto)),
-        },
+        } => {
+            let proto = crate::models::proto_name(*proto);
+            match (port, to_port) {
+                (Some(p), Some(t)) if t != p => format!("{p}-{t}/{proto}"),
+                (Some(p), _) => format!("{p}/{proto}"),
+                (None, _) => proto,
+            }
+        }
     }
 }
 
@@ -366,6 +370,19 @@ mod tests {
             .map(|l| format!("{}={}", l.key, l.value))
             .collect();
         assert_eq!(text, vec!["?=/orgs/5/labels/77", "env=prod", "role=web"]);
+    }
+
+    #[test]
+    fn portless_ingress_service_renders_protocol_only() {
+        let idx = index();
+        let s: Vec<IngressService> = serde_json::from_str(r#"[{"proto": 1}]"#).unwrap();
+        assert_eq!(describe_ingress_service(&s[0], &idx), "icmp");
+        let s = IngressService::Port {
+            port: Some(53),
+            to_port: Some(53),
+            proto: 17,
+        };
+        assert_eq!(describe_ingress_service(&s, &idx), "53/udp");
     }
 
     #[test]
