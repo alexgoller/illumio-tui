@@ -1,0 +1,102 @@
+//! Everything a command needs: the resolved config, the Pce facade, the
+//! output format, and the cache mode.
+use super::GlobalArgs;
+use super::error::CliError;
+use super::output::{Meta, OutputFormat, TableRows, Window, meta_line, write_json, write_table};
+use crate::config::{self, Overrides};
+use pce::{CacheMode, Pce, PceClient};
+use serde::Serialize;
+use std::collections::HashMap;
+use std::io::IsTerminal;
+use std::time::Instant;
+
+pub struct Context {
+    pub config: config::ResolvedConfig,
+    pub pce: Pce,
+    pub format: OutputFormat,
+    pub cache_mode: CacheMode,
+    started: Instant,
+}
+
+impl Context {
+    pub fn new(global: &GlobalArgs) -> Result<Self, CliError> {
+        let path = global
+            .config
+            .clone()
+            .unwrap_or_else(config::default_config_path);
+        let file = config::load_config_file(&path)?;
+        let real: HashMap<String, String> = std::env::vars().collect();
+        let env = match &global.env_file {
+            Some(p) => config::merge_env(config::load_env_file(p)?, real),
+            None => real,
+        };
+        let overrides = Overrides {
+            profile: global.profile.clone(),
+            host: global.host.clone(),
+            port: global.port,
+            org_id: global.org_id,
+            tls_verify: if global.insecure { Some(false) } else { None },
+        };
+        let resolved = config::resolve(&file, &overrides, &env)?;
+        let pce = Pce::new(PceClient::new(resolved.client_config())?);
+        let format = if global.table {
+            OutputFormat::Table
+        } else if global.json || !std::io::stdout().is_terminal() {
+            OutputFormat::Json
+        } else {
+            OutputFormat::Table
+        };
+        let cache_mode = if global.no_cache {
+            CacheMode::Bypass
+        } else {
+            CacheMode::Use
+        };
+        Ok(Self {
+            config: resolved,
+            pce,
+            format,
+            cache_mode,
+            started: Instant::now(),
+        })
+    }
+
+    pub fn meta(&self, cache: &'static str, truncated: bool, window: Option<Window>) -> Meta {
+        let s = self.pce.stats();
+        Meta {
+            profile: self.config.profile_name.clone(),
+            elapsed_ms: self.started.elapsed().as_millis(),
+            api_calls: s.calls,
+            bytes: s.bytes,
+            cache,
+            truncated,
+            window,
+        }
+    }
+
+    pub fn emit<T: Serialize + TableRows>(
+        &self,
+        data: &T,
+        cache: &'static str,
+        truncated: bool,
+        window: Option<Window>,
+    ) -> Result<(), CliError> {
+        let meta = self.meta(cache, truncated, window);
+        let mut out = std::io::stdout().lock();
+        match self.format {
+            OutputFormat::Json => write_json(&mut out, data, &meta)?,
+            OutputFormat::Table => {
+                write_table(&mut out, data)?;
+                eprintln!("{}", meta_line(&meta));
+            }
+        }
+        Ok(())
+    }
+}
+
+pub fn cache_label(hit: bool, mode: CacheMode) -> &'static str {
+    match (mode, hit) {
+        (CacheMode::Bypass, _) => "bypass",
+        (CacheMode::Use, true) => "hit",
+        (CacheMode::Use, false) => "miss",
+    }
+}

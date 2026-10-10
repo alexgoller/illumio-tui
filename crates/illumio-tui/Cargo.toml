@@ -6,6 +6,10 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[lib]
+name = "illumio_tui"
+path = "src/lib.rs"
+
 [[bin]]
 name = "illumio-tui"
 path = "src/main.rs"
@@ -30,3 +34,4 @@ assert_cmd.workspace = true
 predicates.workspace = true
 tempfile.workspace = true
 wiremock.workspace = true
+url.workspace = true

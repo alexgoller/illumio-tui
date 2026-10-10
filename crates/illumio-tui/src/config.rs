@@ -2,11 +2,6 @@
 //! environment variable (same names as illumio-mcp-server), then the
 //! selected profile in `~/.config/illumio-tui/config.toml`, then defaults.
 //! The tool never writes secrets anywhere.
-//!
-//! `main.rs` does not wire this module in until Task 14, so its public API
-//! is only consumed by its own tests for now; allow dead_code here rather
-//! than on every item so clippy's `-D warnings` build still passes.
-#![allow(dead_code)]
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};

@@ -1221,6 +1221,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "toml",
+ "url",
  "wiremock",
 ]
 
