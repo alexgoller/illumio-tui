@@ -464,3 +464,55 @@ async fn r_on_objects_bypasses_the_cache_for_the_current_kind_only() {
     assert_eq!(model.objects.labels.len(), 6);
     assert_eq!(model.busy, 0);
 }
+
+async fn mount_workloads(server: &MockServer, times: u64) {
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/workloads.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(times)
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn opening_workloads_loads_the_list_once_and_reopening_costs_nothing() {
+    // The name index does not include workloads, so the first visit is the one
+    // request for them; leaving and coming back must not repeat it.
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    mount_workloads(&server, 1).await;
+    let model = objects_session(
+        &server,
+        &[
+            (500, '4'),
+            (300, '1'),
+            (100, '4'),
+            (100, '3'),
+            (100, '4'),
+            (300, 'q'),
+        ],
+    )
+    .await;
+    assert_eq!(
+        model.stats.calls, 6,
+        "health + four lists + one workloads list"
+    );
+    assert_eq!(model.workloads.table.len(), 3);
+    assert!(!model.workloads.loading);
+    assert_eq!(model.busy, 0);
+}
+
+#[tokio::test]
+async fn r_on_workloads_bypasses_the_cache_exactly_once() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    mount_workloads(&server, 2).await; // open (Use) + r (Bypass)
+    let model = objects_session(&server, &[(500, '4'), (400, 'r'), (400, 'q')]).await;
+    assert_eq!(model.stats.calls, 7);
+    assert_eq!(model.workloads.table.len(), 3);
+    assert_eq!(model.busy, 0);
+}

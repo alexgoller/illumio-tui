@@ -12,6 +12,7 @@ use crossterm::event::{
     EventStream,
 };
 use futures::{Stream, StreamExt};
+use pce::models::WorkloadFilter;
 use pce::{CacheMode, Pce};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -162,6 +163,19 @@ impl Runtime {
                     let _ = tx.send(Msg::Stats(pce.stats()));
                 });
             }
+            Cmd::LoadWorkloads(mode) => {
+                self.model.busy += 1;
+                let (pce, tx) = (self.pce.clone(), self.tx.clone());
+                tokio::spawn(async move {
+                    let result = pce
+                        .workloads(&WorkloadFilter::default(), mode)
+                        .await
+                        .map(|c| (c.value, c.age.as_secs()))
+                        .map_err(|e| e.to_string());
+                    let _ = tx.send(Msg::WorkloadsLoaded(result));
+                    let _ = tx.send(Msg::Stats(pce.stats()));
+                });
+            }
             Cmd::LoadIndex(mode) => {
                 self.model.busy += 1;
                 let (pce, tx) = (self.pce.clone(), self.tx.clone());
@@ -190,6 +204,7 @@ impl Runtime {
                 | Msg::DenyRulesLoaded { .. }
                 | Msg::PendingLoaded(_)
                 | Msg::ObjectsLoaded { .. }
+                | Msg::WorkloadsLoaded(_)
         );
         let cmds = update(&mut self.model, msg);
         if task_result {

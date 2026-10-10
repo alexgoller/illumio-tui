@@ -3,7 +3,7 @@ use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::table::{Column, SortKey, TableView};
 use crate::tui::ui::theme::Theme;
 use pce::models::{
-    DenyRule, IpList, Label, LabelGroup, PendingChange, PolicyScope, RuleSet, Service,
+    DenyRule, IpList, Label, LabelGroup, PendingChange, PolicyScope, RuleSet, Service, Workload,
 };
 use pce::traffic::{BlockedGroup, FlowGroup, ResolvedFlow, blocked_summary, group_by_labels};
 use pce::{NameIndex, RuleKind, RuleSetView, RuleView, StatsSnapshot};
@@ -1129,6 +1129,121 @@ impl ObjectsState {
     }
 }
 
+fn text_col(
+    title: &'static str,
+    width: u16,
+    cell: fn(&Workload) -> String,
+    key: fn(&Workload) -> SortKey,
+) -> Column<Workload> {
+    Column {
+        title,
+        width,
+        cell,
+        key,
+        right: false,
+        hide_below: 0,
+        narrow: None,
+        narrow_width: 0,
+    }
+}
+
+fn hostname_of(w: &Workload) -> String {
+    w.hostname.clone().unwrap_or_default()
+}
+
+fn name_of(w: &Workload) -> String {
+    w.name.clone().unwrap_or_default()
+}
+
+fn ip_of(w: &Workload) -> String {
+    w.primary_ip().unwrap_or("").to_string()
+}
+
+fn enforcement_of(w: &Workload) -> String {
+    w.enforcement_mode.clone().unwrap_or_default()
+}
+
+fn visibility_of(w: &Workload) -> String {
+    w.visibility_level.clone().unwrap_or_default()
+}
+
+fn online_of(w: &Workload) -> String {
+    match w.online {
+        Some(true) => "yes",
+        Some(false) => "no",
+        None => "",
+    }
+    .to_string()
+}
+
+fn agent_of(w: &Workload) -> String {
+    w.agent_status().unwrap_or_default()
+}
+
+pub fn workload_columns() -> Vec<Column<Workload>> {
+    // Below 120 columns only hostname, ip, enforcement, online and agent stay,
+    // so the table is readable at 80.
+    let wide = |c: Column<Workload>| Column {
+        hide_below: 120,
+        ..c
+    };
+    vec![
+        Column {
+            // A workload without a hostname is still identifiable when the name column is hidden.
+            narrow: Some(Workload::display_name),
+            narrow_width: 20,
+            ..text_col("hostname", 22, hostname_of, |w| {
+                SortKey::Text(hostname_of(w))
+            })
+        },
+        wide(text_col("name", 14, name_of, |w| SortKey::Text(name_of(w)))),
+        text_col("ip", 15, ip_of, |w| SortKey::Text(ip_of(w))),
+        wide(text_col("labels", 0, Workload::label_text, |w| {
+            SortKey::Text(w.label_text())
+        })),
+        Column {
+            narrow: Some(|w| enforcement_of(w).replace("visibility_only", "visibility")),
+            narrow_width: 11,
+            ..text_col("enforcement", 15, enforcement_of, |w| {
+                SortKey::Text(enforcement_of(w))
+            })
+        },
+        wide(text_col("visibility", 13, visibility_of, |w| {
+            SortKey::Text(visibility_of(w))
+        })),
+        text_col("online", 6, online_of, |w| {
+            SortKey::Num(u64::from(w.online.unwrap_or(false)))
+        }),
+        text_col("agent", 8, agent_of, |w| SortKey::Text(agent_of(w))),
+    ]
+}
+
+#[derive(Debug)]
+pub struct WorkloadsState {
+    pub table: TableView<Workload>,
+    pub age_secs: u64,
+    pub loaded_at: Option<Instant>,
+    pub loading: bool,
+    pub show_detail: bool,
+    /// The name index failed, so the screen could not load; `r` retries the index.
+    pub index_failed: bool,
+    pub auto: AutoRefresh,
+}
+
+impl WorkloadsState {
+    pub fn new(min_refresh: u64) -> Self {
+        Self {
+            table: TableView::new(workload_columns()),
+            age_secs: 0,
+            loaded_at: None,
+            loading: false,
+            show_detail: false,
+            index_failed: false,
+            auto: AutoRefresh::new(min_refresh),
+        }
+    }
+}
+
 /// Limits copied from the resolved profile so `update` never touches config.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Limits {
@@ -1148,6 +1263,7 @@ pub struct Model {
     pub traffic: TrafficState,
     pub policy: PolicyState,
     pub objects: ObjectsState,
+    pub workloads: WorkloadsState,
     pub connection: Connection,
     pub stats: StatsSnapshot,
     pub size: (u16, u16),
@@ -1175,6 +1291,7 @@ impl Model {
         );
         let policy = PolicyState::new(auto_refresh_min_seconds);
         let objects = ObjectsState::new(auto_refresh_min_seconds);
+        let workloads = WorkloadsState::new(auto_refresh_min_seconds);
         Self {
             profile,
             theme_name,
@@ -1189,6 +1306,7 @@ impl Model {
             traffic,
             policy,
             objects,
+            workloads,
             connection: Connection::Connecting,
             stats: StatsSnapshot { calls: 0, bytes: 0 },
             size: (80, 24),
@@ -1214,7 +1332,10 @@ impl Model {
 
     /// Whether any screen has opted in to auto-refresh (drives the idle tick).
     pub fn any_auto_enabled(&self) -> bool {
-        self.traffic.auto.enabled || self.policy.auto.enabled || self.objects.auto.enabled
+        self.traffic.auto.enabled
+            || self.policy.auto.enabled
+            || self.objects.auto.enabled
+            || self.workloads.auto.enabled
     }
 
     pub fn is_connected(&self) -> bool {

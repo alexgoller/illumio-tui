@@ -267,3 +267,19 @@ fn objects_group_detail_resolves_members_80x24() {
     assert!(out.contains("env=prod"), "{out}");
     insta::assert_snapshot!("objects_groups_detail_80x24", out);
 }
+
+#[test]
+fn workloads_screen_80x24_and_detail_160x48() {
+    use illumio_tui::tui::model::Screen;
+    use illumio_tui::tui::test_support::model_with_workloads;
+    let mut m = model_with_workloads();
+    m.screen = Screen::Workloads;
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("host-1.example"), "{out}");
+    assert!(out.contains("active"), "{out}");
+    insta::assert_snapshot!("workloads_80x24", out);
+    m.workloads.show_detail = true;
+    let out = render_to_string(&m, 160, 48);
+    assert!(out.contains("eth0"), "{out}");
+    insta::assert_snapshot!("workloads_160x48_detail", out);
+}

@@ -3,7 +3,7 @@ use crate::tui::filter::TrafficFilter;
 use crate::tui::model::{ObjectKind, Screen};
 use crossterm::event::{KeyEvent, MouseEvent};
 use pce::models::{
-    DenyRule, IpList, Label, LabelGroup, PendingChange, PolicyScope, RuleSet, Service,
+    DenyRule, IpList, Label, LabelGroup, PendingChange, PolicyScope, RuleSet, Service, Workload,
 };
 use pce::traffic::{QueryProgress, ResolvedFlow};
 use pce::{CacheMode, StatsSnapshot};
@@ -75,6 +75,8 @@ pub enum Msg {
         kind: ObjectKind,
         result: Result<ObjectsPayload, String>,
     },
+    /// Workloads with the cache age in seconds.
+    WorkloadsLoaded(Result<(Vec<Workload>, u64), String>),
 }
 
 #[derive(Debug, Clone)]
@@ -103,6 +105,7 @@ pub enum Cmd {
         kind: ObjectKind,
         mode: CacheMode,
     },
+    LoadWorkloads(CacheMode),
     Quit,
 }
 
@@ -143,6 +146,7 @@ impl PartialEq for Cmd {
             (Cmd::LoadObjects { kind: ka, mode: ma }, Cmd::LoadObjects { kind: kb, mode: mb }) => {
                 ka == kb && ma == mb
             }
+            (Cmd::LoadWorkloads(a), Cmd::LoadWorkloads(b)) => a == b,
             _ => false,
         }
     }

@@ -187,10 +187,10 @@ fn render_detail(model: &Model, f: &mut Frame, area: Rect) {
 }
 
 /// `(heading, text)`; a missing heading continues the previous one.
-type DetailLine = (Option<&'static str>, String);
+pub(super) type DetailLine = (Option<&'static str>, String);
 
 /// Fits `lines` into `capacity` rows; the last row says how many were cut.
-fn clip(mut lines: Vec<DetailLine>, capacity: usize) -> Vec<DetailLine> {
+pub(super) fn clip(mut lines: Vec<DetailLine>, capacity: usize) -> Vec<DetailLine> {
     if capacity > 0 && lines.len() > capacity {
         let hidden = lines.len() - (capacity - 1);
         lines.truncate(capacity - 1);
@@ -200,7 +200,7 @@ fn clip(mut lines: Vec<DetailLine>, capacity: usize) -> Vec<DetailLine> {
 }
 
 /// First item carries the heading, the rest continue it. Nothing: a dash.
-fn items(head: &'static str, values: Vec<String>) -> Vec<DetailLine> {
+pub(super) fn items(head: &'static str, values: Vec<String>) -> Vec<DetailLine> {
     if values.is_empty() {
         return vec![(Some(head), "-".into())];
     }

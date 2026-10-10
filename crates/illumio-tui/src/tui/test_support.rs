@@ -108,6 +108,17 @@ pub fn model_with_objects() -> Model {
     m
 }
 
+/// A connected model with the three fixture workloads loaded (age 5 s).
+pub fn model_with_workloads() -> Model {
+    let mut m = model_fixture();
+    m.workloads.table.set_rows(
+        serde_json::from_str(include_str!("../../../../fixtures/workloads.json"))
+            .expect("workloads fixture"),
+    );
+    m.workloads.loaded_at = Some(Instant::now() - Duration::from_secs(5));
+    m
+}
+
 /// Renders the model into a `w`×`h` test terminal and returns the text.
 pub fn render_to_string(model: &Model, w: u16, h: u16) -> String {
     let mut term = Terminal::new(TestBackend::new(w, h)).expect("test terminal");

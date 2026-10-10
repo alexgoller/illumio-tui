@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Labels & objects  │  4 Workloads
+╭ Workloads ──────────────────────────────────────────────── 3 · cached 5s ago ╮
+│  hostname             ip              enforcement online agent               │
+│▸ host-1.example       10.0.1.10       full        yes    active              │
+│  host-2.example       10.0.2.20       visibility  no     stopped             │
+│  unmanaged-nas        10.0.3.30       idle                                   │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ready                        t/T to traffic  / search  r refresh  : cmd  ? help

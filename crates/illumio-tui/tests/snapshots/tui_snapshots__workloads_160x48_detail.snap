@@ -1,0 +1,52 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                                                                                                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Labels & objects  │  4 Workloads
+╭ Workloads ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 3 · cached 5s ago ╮
+│  hostname               name           ip              labels                                                   enforcement     visibility    online agent   │
+│▸ host-1.example         web01          10.0.1.10       app=shop env=prod role=web                               full            flow_summary  yes    active  │
+│  host-2.example                        10.0.2.20       app=shop env=prod role=db                                visibility_only flow_summary  no     stopped │
+│                         unmanaged-nas  10.0.3.30                                                                idle                                         │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭ Detail ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── Enter hides ╮
+│href    /orgs/5/workloads/aaaa-1                                                                                                                              │
+│os      ubuntu-x86_64-22.04                                                                                                                                   │
+│ven     active                                                                                                                                                │
+│labels  app=shop env=prod role=web                                                                                                                            │
+│iface   eth0 10.0.1.10/24 up                                                                                                                                  │
+│                                                                                                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ready                                                                                                        t/T to traffic  / search  r refresh  : cmd  ? help

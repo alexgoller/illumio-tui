@@ -53,6 +53,15 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 // Opted in with `a`: a real refresh of the current kind, like Traffic and Policy.
                 return load_objects(model, kind, CacheMode::Bypass);
             }
+            if model.screen == Screen::Workloads
+                && model.focused
+                && model.overlay == Overlay::None
+                && model.workloads.loaded_at.is_some()
+                && !model.workloads.loading
+                && model.workloads.auto.due(now)
+            {
+                return load_workloads(model, CacheMode::Bypass);
+            }
             Vec::new()
         }
         Msg::Focus(f) => {
@@ -80,6 +89,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             };
             model.status = StatusLine::info("ready");
             model.objects.index_failed = false;
+            model.workloads.index_failed = false;
             let mut cmds = Vec::new();
             // Rulesets that arrived before the names could be resolved.
             if !model.policy.raw.is_empty()
@@ -94,11 +104,15 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             if model.screen == Screen::Objects {
                 cmds.extend(load_missing_objects(model));
             }
+            if model.screen == Screen::Workloads {
+                cmds.extend(load_missing_workloads(model));
+            }
             cmds
         }
         Msg::IndexFailed(e) => {
             model.status = StatusLine::error(format!("could not load objects: {e}"));
             model.objects.index_failed = true;
+            model.workloads.index_failed = true;
             Vec::new()
         }
         Msg::Stats(s) => {
@@ -241,6 +255,24 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 Err(e) => {
                     model.policy.deny_requested.remove(&href); // allow a retry on reselect
                     model.status = StatusLine::warn(format!("deny rules: {e}"));
+                }
+            }
+            Vec::new()
+        }
+        Msg::WorkloadsLoaded(result) => {
+            model.workloads.loading = false;
+            match result {
+                Ok((rows, age)) => {
+                    let w = &mut model.workloads;
+                    w.table.set_rows(rows);
+                    w.loaded_at = Some(Instant::now());
+                    w.age_secs = age;
+                    w.show_detail &= w.table.selected_item().is_some();
+                    model.status =
+                        StatusLine::info(format!("{} workloads", model.workloads.table.len()));
+                }
+                Err(e) => {
+                    model.status = StatusLine::error(format!("could not load workloads: {e}"));
                 }
             }
             Vec::new()
@@ -465,6 +497,9 @@ fn on_screen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         if model.screen == Screen::Objects && model.objects.is_searching() {
             return objects_key(model, k);
         }
+        if model.screen == Screen::Workloads && model.workloads.table.is_searching() {
+            return workloads_key(model, k);
+        }
     }
     match (k.code, k.modifiers) {
         (KeyCode::Char('q'), KeyModifiers::NONE) => {
@@ -488,6 +523,7 @@ fn on_screen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         _ if model.screen == Screen::Traffic => traffic_key(model, k),
         _ if model.screen == Screen::Policy => policy_key(model, k),
         _ if model.screen == Screen::Objects => objects_key(model, k),
+        _ if model.screen == Screen::Workloads => workloads_key(model, k),
         _ => Vec::new(),
     }
 }
@@ -627,6 +663,7 @@ fn switch(model: &mut Model, s: Screen) -> Vec<Cmd> {
             load_rule_sets(model, CacheMode::Use)
         }
         Screen::Objects => load_missing_objects(model),
+        Screen::Workloads => load_missing_workloads(model),
         _ => Vec::new(),
     }
 }
@@ -754,6 +791,99 @@ fn load_objects(model: &mut Model, kind: ObjectKind, mode: CacheMode) -> Vec<Cmd
     model.objects.loading[kind.index()] = true;
     model.objects.auto.last_run = Some(Instant::now());
     vec![Cmd::LoadObjects { kind, mode }]
+}
+
+/// Loads the workloads once. Waits for the name index like Objects does, so the
+/// startup load never races a second request for the same data.
+fn load_missing_workloads(model: &mut Model) -> Vec<Cmd> {
+    if model.index().is_none() || model.workloads.loaded_at.is_some() || model.workloads.loading {
+        return Vec::new();
+    }
+    load_workloads(model, CacheMode::Use)
+}
+
+fn load_workloads(model: &mut Model, mode: CacheMode) -> Vec<Cmd> {
+    model.workloads.loading = true;
+    model.workloads.auto.last_run = Some(Instant::now());
+    vec![Cmd::LoadWorkloads(mode)]
+}
+
+fn workloads_page(model: &Model) -> usize {
+    let area = ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1);
+    crate::tui::ui::layout::chrome(area)
+        .map(|c| {
+            crate::tui::ui::screens::workloads::table_rows(c.body, model.workloads.show_detail)
+        })
+        .unwrap_or(10)
+        .max(1)
+}
+
+/// What the traffic filter calls this workload. `,` and `|` separate filter
+/// terms, so a name containing them is addressed by its href id instead.
+fn workload_filter_ref(w: &pce::models::Workload) -> String {
+    let name = w.display_name();
+    let name = if name.contains([',', '|']) {
+        pce::models::Ref::new(&w.href).id().to_string()
+    } else {
+        name
+    };
+    format!("wl:{name}")
+}
+
+fn workloads_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
+    let page = workloads_page(model);
+    if !model.workloads.table.is_searching() {
+        match k.code {
+            KeyCode::Char('r') => {
+                if model.index().is_none() {
+                    if model.workloads.index_failed {
+                        model.workloads.index_failed = false;
+                        model.status = StatusLine::info("loading name index…");
+                        return vec![Cmd::LoadIndex(CacheMode::Use)];
+                    }
+                    model.status = StatusLine::info("workloads are still loading");
+                } else if model.workloads.loading {
+                    model.status = StatusLine::info("workloads already loading");
+                } else {
+                    return load_workloads(model, CacheMode::Bypass);
+                }
+                return Vec::new();
+            }
+            KeyCode::Enter => {
+                let w = &mut model.workloads;
+                w.show_detail = !w.show_detail && w.table.selected_item().is_some();
+                return Vec::new();
+            }
+            KeyCode::Char('a') => {
+                let a = &mut model.workloads.auto;
+                a.enabled = !a.enabled;
+                model.status = if a.enabled {
+                    StatusLine::info(format!("auto-refresh every {}s", a.interval.as_secs()))
+                } else {
+                    StatusLine::info("auto-refresh off")
+                };
+                return Vec::new();
+            }
+            KeyCode::Char(c @ ('t' | 'T')) => {
+                let Some(w) = model.workloads.table.selected_item() else {
+                    return Vec::new();
+                };
+                let expr = workload_filter_ref(w);
+                model.status = StatusLine::info(format!("traffic for {}", w.display_name()));
+                let mut f = model.traffic.filter.clone();
+                if c == 't' {
+                    f.src = expr;
+                } else {
+                    f.dst = expr;
+                }
+                model.screen = Screen::Traffic;
+                return request_query(model, f);
+            }
+            _ => {}
+        }
+    }
+    drive_table(&mut model.workloads.table, k, page);
+    Vec::new()
 }
 
 fn objects_page(model: &Model) -> usize {
@@ -1211,7 +1341,7 @@ mod tests {
     }
 
     #[test]
-    fn number_keys_switch_screens_only_policy_and_objects_load() {
+    fn number_keys_switch_screens_policy_objects_and_workloads_load() {
         let mut m = model_fixture();
         assert_eq!(m.screen, Screen::Traffic);
         // entering Policy for the first time loads its rulesets (see the policy tests)
@@ -1220,7 +1350,11 @@ mod tests {
         // entering Objects for the first time loads all four kinds (cache hits)
         assert_eq!(update(&mut m, key('3')).len(), 4);
         assert_eq!(m.screen, Screen::Objects);
-        assert!(update(&mut m, key('4')).is_empty());
+        // entering Workloads for the first time loads the list once (a cache hit)
+        assert_eq!(
+            update(&mut m, key('4')),
+            vec![Cmd::LoadWorkloads(pce::CacheMode::Use)]
+        );
         assert_eq!(m.screen, Screen::Workloads);
         assert!(update(&mut m, key('1')).is_empty());
         assert_eq!(m.screen, Screen::Traffic);
@@ -2279,6 +2413,240 @@ mod tests {
                 href: "/orgs/5/sec_policy/draft/rule_sets/100".into(),
                 mode: pce::CacheMode::Use
             }]
+        );
+    }
+
+    #[test]
+    fn opening_workloads_loads_once_and_t_jumps_to_traffic() {
+        use crate::tui::test_support::model_with_workloads;
+        let mut m = model_fixture();
+        let cmds = update(&mut m, key('4'));
+        assert_eq!(cmds, vec![Cmd::LoadWorkloads(pce::CacheMode::Use)]);
+        let wl: Vec<pce::models::Workload> =
+            serde_json::from_str(include_str!("../../../../fixtures/workloads.json")).unwrap();
+        update(&mut m, Msg::WorkloadsLoaded(Ok((wl, 0))));
+        assert_eq!(m.workloads.table.len(), 3);
+        assert!(update(&mut m, key('4')).is_empty());
+
+        let mut m = model_with_workloads();
+        update(&mut m, key('4'));
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+        );
+        let cmds = update(&mut m, key('t'));
+        assert_eq!(m.screen, Screen::Traffic);
+        assert_eq!(m.traffic.filter.src, "wl:host-2.example");
+        assert!(
+            matches!(
+                cmds.as_slice(),
+                [Cmd::RunQuery {
+                    mode: pce::CacheMode::Use,
+                    ..
+                }]
+            ),
+            "{cmds:?}"
+        );
+        let seq = m.traffic.seq;
+        update(
+            &mut m,
+            Msg::QueryDone {
+                seq,
+                result: Err("x".into()),
+            },
+        );
+        update(&mut m, key('4'));
+        let cmds = update(&mut m, key('T'));
+        assert_eq!(m.traffic.filter.dst, "wl:host-2.example");
+        assert_eq!(
+            m.traffic.filter.src, "wl:host-2.example",
+            "src kept from before"
+        );
+        assert!(matches!(cmds.as_slice(), [Cmd::RunQuery { .. }]));
+    }
+
+    #[test]
+    fn workloads_wait_for_the_index_and_recover_from_a_failed_one() {
+        let mut m = model_fixture();
+        let Connection::Connected { index, .. } = &mut m.connection else {
+            unreachable!()
+        };
+        let idx = index.take().unwrap();
+        assert!(
+            update(&mut m, key('4')).is_empty(),
+            "the startup load is still running: no duplicate requests"
+        );
+        assert!(!m.workloads.loading);
+        assert_eq!(
+            update(
+                &mut m,
+                Msg::IndexLoaded {
+                    index: idx,
+                    age_secs: 0
+                }
+            ),
+            vec![Cmd::LoadWorkloads(pce::CacheMode::Use)]
+        );
+        assert!(m.workloads.loading);
+
+        let mut m = model_fixture();
+        let Connection::Connected { index, .. } = &mut m.connection else {
+            unreachable!()
+        };
+        index.take();
+        update(&mut m, key('4'));
+        update(&mut m, Msg::IndexFailed("boom".into()));
+        assert!(m.workloads.index_failed);
+        assert_eq!(
+            update(&mut m, key('r')),
+            vec![Cmd::LoadIndex(pce::CacheMode::Use)]
+        );
+        assert!(update(&mut m, key('r')).is_empty(), "retry is issued once");
+    }
+
+    #[test]
+    fn workloads_error_keeps_rows_and_r_bypasses_unless_loading() {
+        use crate::tui::test_support::model_with_workloads;
+        let mut m = model_with_workloads();
+        update(&mut m, key('4'));
+        assert_eq!(
+            update(&mut m, key('r')),
+            vec![Cmd::LoadWorkloads(pce::CacheMode::Bypass)]
+        );
+        assert!(m.workloads.loading);
+        assert!(update(&mut m, key('r')).is_empty(), "already loading");
+        update(&mut m, Msg::WorkloadsLoaded(Err("boom".into())));
+        assert!(!m.workloads.loading);
+        assert_eq!(m.status.kind, StatusKind::Error);
+        assert_eq!(m.workloads.table.len(), 3, "rows kept on error");
+    }
+
+    #[test]
+    fn workloads_enter_toggles_detail_only_with_a_selection() {
+        use crate::tui::test_support::model_with_workloads;
+        let mut m = model_fixture();
+        m.screen = Screen::Workloads;
+        update(&mut m, kc(KeyCode::Enter));
+        assert!(!m.workloads.show_detail, "nothing selected");
+        let mut m = model_with_workloads();
+        update(&mut m, key('4'));
+        update(&mut m, kc(KeyCode::Enter));
+        assert!(m.workloads.show_detail);
+        update(&mut m, kc(KeyCode::Enter));
+        assert!(!m.workloads.show_detail);
+    }
+
+    #[test]
+    fn t_needs_a_selection_and_does_not_fire_while_searching() {
+        use crate::tui::test_support::model_with_workloads;
+        let mut m = model_fixture();
+        m.screen = Screen::Workloads;
+        assert!(update(&mut m, key('t')).is_empty());
+        assert_eq!(m.screen, Screen::Workloads, "nothing selected: stay");
+
+        let mut m = model_with_workloads();
+        update(&mut m, key('4'));
+        update(&mut m, key('/'));
+        assert!(update(&mut m, key('t')).is_empty());
+        assert_eq!(m.screen, Screen::Workloads);
+        assert_eq!(
+            m.workloads.table.search_text(),
+            "t",
+            "typed into the search"
+        );
+        assert!(m.traffic.filter.src.is_empty());
+    }
+
+    #[test]
+    fn t_goes_through_the_cost_guard() {
+        use crate::tui::test_support::model_with_workloads;
+        let mut m = model_with_workloads();
+        update(&mut m, key('4'));
+        m.traffic.filter.window = "30d".into();
+        let cmds = update(&mut m, key('t'));
+        assert!(cmds.is_empty(), "{cmds:?}");
+        assert_eq!(m.screen, Screen::Traffic);
+        assert!(matches!(m.overlay, Overlay::Confirm { .. }));
+        assert!(m.traffic.filter.src.is_empty(), "not applied before y");
+        let cmds = update(&mut m, key('y'));
+        assert!(matches!(cmds.as_slice(), [Cmd::RunQuery { .. }]));
+        assert_eq!(m.traffic.filter.src, "wl:host-1.example");
+    }
+
+    #[test]
+    fn t_while_a_query_runs_replaces_it_with_one_new_query() {
+        use crate::tui::test_support::model_with_workloads;
+        let mut m = model_with_workloads();
+        update(&mut m, key('4'));
+        let first = update(&mut m, key('t'));
+        assert!(matches!(first.as_slice(), [Cmd::RunQuery { .. }]));
+        let seq = m.traffic.seq;
+        update(&mut m, key('4'));
+        let second = update(&mut m, key('T'));
+        assert!(matches!(second.as_slice(), [Cmd::RunQuery { .. }]));
+        assert_eq!(m.traffic.seq, seq + 1, "the older query is superseded");
+    }
+
+    #[test]
+    fn jump_uses_the_href_id_when_the_name_would_break_the_filter_syntax() {
+        use crate::tui::test_support::model_with_workloads;
+        let mut m = model_with_workloads();
+        let mut wl = m.workloads.table.rows().to_vec();
+        wl[0].hostname = Some("db, primary|1".into());
+        wl[1].hostname = Some("my host".into());
+        m.workloads.table.set_rows(wl);
+        update(&mut m, key('4'));
+        update(&mut m, key('t'));
+        assert_eq!(m.traffic.filter.src, "wl:aaaa-1");
+        assert!(m.traffic.filter.validate().is_ok());
+        update(&mut m, key('4'));
+        update(&mut m, key('j'));
+        update(&mut m, key('T'));
+        assert_eq!(m.traffic.filter.dst, "wl:my host", "spaces are fine");
+        assert!(m.traffic.filter.validate().is_ok());
+    }
+
+    #[test]
+    fn workloads_auto_refresh_obeys_the_guards_and_bypasses() {
+        use crate::tui::test_support::model_with_workloads;
+        use std::time::Duration;
+        let mut m = model_with_workloads();
+        update(&mut m, key('4'));
+        let now = Instant::now() + Duration::from_secs(120);
+        m.workloads.auto.last_run = Some(Instant::now());
+        assert!(update(&mut m, Msg::Tick(now)).is_empty(), "opt-in only");
+        update(&mut m, key('a'));
+        assert!(m.workloads.auto.enabled);
+        let early = Instant::now() + Duration::from_secs(10);
+        assert!(
+            update(&mut m, Msg::Tick(early)).is_empty(),
+            "minimum interval"
+        );
+        m.focused = false;
+        assert!(update(&mut m, Msg::Tick(now)).is_empty(), "not unfocused");
+        m.focused = true;
+        m.overlay = Overlay::Help;
+        assert!(
+            update(&mut m, Msg::Tick(now)).is_empty(),
+            "not under an overlay"
+        );
+        m.overlay = Overlay::None;
+        m.workloads.loading = true;
+        assert!(
+            update(&mut m, Msg::Tick(now)).is_empty(),
+            "not while loading"
+        );
+        m.workloads.loading = false;
+        assert_eq!(
+            update(&mut m, Msg::Tick(now)),
+            vec![Cmd::LoadWorkloads(pce::CacheMode::Bypass)]
+        );
+        m.screen = Screen::Traffic;
+        m.workloads.loading = false;
+        m.workloads.auto.last_run = Some(Instant::now());
+        assert!(
+            update(&mut m, Msg::Tick(now)).is_empty(),
+            "only on its own screen"
         );
     }
 }
