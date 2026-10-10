@@ -376,3 +376,182 @@ fn draft_href_rewrites_active_and_refuses_other_scopes() {
         WriteError::Invalid(_)
     ));
 }
+
+#[tokio::test]
+async fn failed_refetch_after_204_is_a_warning_not_an_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v2/orgs/5/sec_policy/draft/ip_lists/3"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/sec_policy/draft/ip_lists/3"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    let pce = pce_for(&server);
+    let audit = MemoryAudit::new();
+    let guard = guard_with(audit.clone());
+    let out = pce
+        .writer(&guard)
+        .execute(send_plan(
+            WriteMethod::Put,
+            "/orgs/5/sec_policy/draft/ip_lists/3",
+            Some(json!({"name": "Corp"})),
+            ObjectKind::IpList,
+        ))
+        .await
+        .unwrap();
+    let Outcome::Written(w) = out else {
+        panic!("expected Written")
+    };
+    assert!(w.object.is_null());
+    assert!(
+        w.warnings[0].contains("write applied; re-fetch of"),
+        "{:?}",
+        w.warnings
+    );
+    assert_eq!(audit.entries()[0].status, Some(204));
+}
+
+#[tokio::test]
+async fn non_json_2xx_body_is_unanswered() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/labels"))
+        .respond_with(ResponseTemplate::new(201).set_body_string("not json"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let pce = pce_for(&server);
+    let audit = MemoryAudit::new();
+    let guard = guard_with(audit.clone());
+    let err = pce
+        .writer(&guard)
+        .execute(send_plan(
+            WriteMethod::Post,
+            "/orgs/5/labels",
+            Some(json!({})),
+            ObjectKind::Label,
+        ))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, WriteError::Unanswered(_)), "{err:?}");
+    assert_eq!(audit.entries()[0].phase.as_deref(), Some("sent"));
+}
+
+struct FailingAppend;
+impl pce::write::AuditSink for FailingAppend {
+    fn check_writable(&self) -> std::io::Result<()> {
+        Ok(())
+    }
+    fn append(&self, _: &pce::write::AuditEntry) -> std::io::Result<()> {
+        Err(std::io::Error::other("disk full"))
+    }
+    fn location(&self) -> String {
+        "failing".into()
+    }
+}
+
+#[tokio::test]
+async fn audit_append_failure_is_a_warning_on_success_and_audit_failed_on_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/labels"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({"href": "/orgs/5/labels/9"})))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/sec_policy/draft/services"))
+        .respond_with(ResponseTemplate::new(406).set_body_json(json!([{"token": "x"}])))
+        .mount(&server)
+        .await;
+    let pce = pce_for(&server);
+    let guard = WriteGuard::new(true, true, Box::new(FailingAppend), ctx()).unwrap();
+    let out = pce
+        .writer(&guard)
+        .execute(send_plan(
+            WriteMethod::Post,
+            "/orgs/5/labels",
+            Some(json!({})),
+            ObjectKind::Label,
+        ))
+        .await
+        .unwrap();
+    let Outcome::Written(w) = out else {
+        panic!("expected Written")
+    };
+    assert!(
+        w.warnings[0].contains("audit entry could not be written to failing"),
+        "{:?}",
+        w.warnings
+    );
+    let err = pce
+        .writer(&guard)
+        .execute(send_plan(
+            WriteMethod::Post,
+            "/orgs/5/sec_policy/draft/services",
+            Some(json!({})),
+            ObjectKind::Service,
+        ))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, WriteError::AuditFailed { .. }), "{err:?}");
+    assert_eq!(err.kind(), "rejected");
+}
+
+#[tokio::test]
+async fn auth_failure_is_audited_with_its_status() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/labels"))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&server)
+        .await;
+    let pce = pce_for(&server);
+    let audit = MemoryAudit::new();
+    let guard = guard_with(audit.clone());
+    let _ = pce
+        .writer(&guard)
+        .execute(send_plan(
+            WriteMethod::Post,
+            "/orgs/5/labels",
+            Some(json!({})),
+            ObjectKind::Label,
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(audit.entries()[0].status, Some(401));
+}
+
+#[tokio::test]
+async fn post_without_href_does_not_refetch_the_collection() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/labels"))
+        .respond_with(ResponseTemplate::new(201))
+        .mount(&server)
+        .await;
+    let pce = pce_for(&server);
+    let guard = guard_with(MemoryAudit::new());
+    let out = pce
+        .writer(&guard)
+        .execute(send_plan(
+            WriteMethod::Post,
+            "/orgs/5/labels",
+            Some(json!({})),
+            ObjectKind::Label,
+        ))
+        .await
+        .unwrap();
+    let Outcome::Written(w) = out else {
+        panic!("expected Written")
+    };
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    assert!(
+        w.warnings.iter().any(|m| m.contains("no href")),
+        "{:?}",
+        w.warnings
+    );
+}

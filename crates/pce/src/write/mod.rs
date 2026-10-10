@@ -94,6 +94,8 @@ pub struct Written {
     pub object: Value,
     /// Keys sent with a value that came back empty or missing.
     pub dropped_fields: Vec<String>,
+    /// Things the caller should know although the write succeeded.
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -117,6 +119,12 @@ pub enum WriteError {
     Unanswered(PceError),
     #[error(transparent)]
     Pce(PceError),
+    /// The write failed and its audit entry could not be written either.
+    #[error("{write}; and the audit entry could not be written: {error}")]
+    AuditFailed {
+        write: Box<WriteError>,
+        error: String,
+    },
 }
 
 impl WriteError {
@@ -127,6 +135,7 @@ impl WriteError {
             WriteError::Invalid(_) => "invalid",
             WriteError::Unanswered(_) => "write_unanswered",
             WriteError::Pce(e) => e.kind(),
+            WriteError::AuditFailed { write, .. } => write.kind(),
         }
     }
 
@@ -255,42 +264,72 @@ impl<'a> Writer<'a> {
                     e,
                     PceError::Timeout(_)
                         | PceError::Network(_)
+                        | PceError::Decode(_)
                         | PceError::Server {
                             status: 502..=504,
                             ..
                         }
                 );
-                if let PceError::Server { status, .. } | PceError::Rejected { status, .. } = &e {
-                    entry.status = Some(*status);
+                match &e {
+                    PceError::Server { status, .. }
+                    | PceError::Rejected { status, .. }
+                    | PceError::Auth { status } => entry.status = Some(*status),
+                    PceError::NotFound { .. } => entry.status = Some(404),
+                    PceError::RateLimited { .. } => entry.status = Some(429),
+                    _ => {}
                 }
                 entry.error = Some(e.to_string());
                 if unanswered {
                     entry.phase = Some("sent".into());
                 }
-                let _ = audit.append(&entry);
-                return Err(if unanswered {
+                let appended = audit.append(&entry);
+                let err = if unanswered {
                     WriteError::Unanswered(e)
                 } else {
                     WriteError::Pce(e)
+                };
+                return Err(match appended {
+                    Ok(()) => err,
+                    Err(a) => WriteError::AuditFailed {
+                        write: Box::new(err),
+                        error: format!("{}: {a}", audit.location()),
+                    },
                 });
             }
         };
 
-        let href = resp
+        let body_href = resp
             .body
             .get("href")
             .and_then(Value::as_str)
-            .map(str::to_string)
-            .unwrap_or_else(|| request.path.clone());
+            .map(str::to_string);
+        let post_without_href = request.method == WriteMethod::Post && body_href.is_none();
+        let href = body_href.unwrap_or_else(|| request.path.clone());
         entry.status = Some(resp.status);
         entry.href = Some(href.clone());
-        let _ = audit.append(&entry);
+        let mut warnings = Vec::new();
+        if let Err(e) = audit.append(&entry) {
+            warnings.push(format!(
+                "audit entry could not be written to {}: {e}",
+                audit.location()
+            ));
+        }
         self.pce.invalidate(kind.cache_prefix());
 
         let object = if request.method == WriteMethod::Delete {
             Value::Null
+        } else if post_without_href {
+            // Re-fetching the collection path would load the whole list.
+            warnings.push("response carried no href; object not re-fetched".into());
+            resp.body
         } else if resp.body.is_null() {
-            self.fetch(&href).await?
+            match self.fetch(&href).await {
+                Ok(v) => v,
+                Err(e) => {
+                    warnings.push(format!("write applied; re-fetch of {href} failed: {e}"));
+                    Value::Null
+                }
+            }
         } else {
             resp.body
         };
@@ -305,6 +344,7 @@ impl<'a> Writer<'a> {
             status: resp.status,
             object,
             dropped_fields: dropped,
+            warnings,
         }))
     }
 
