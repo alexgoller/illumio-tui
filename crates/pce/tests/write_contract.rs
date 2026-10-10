@@ -1183,3 +1183,315 @@ mod services {
         );
     }
 }
+
+mod workloads {
+    use super::*;
+    use pce::NameIndex;
+    use pce::models::Label;
+    use pce::write::{InterfaceSpec, LabelRemoval, WorkloadDraft, WorkloadPatch};
+
+    fn printer() -> Value {
+        json!({
+            "href": "/orgs/5/workloads/u1", "name": "printer-1", "hostname": "printer-1.lab",
+            "managed": false, "interfaces": [{"name": "eth0", "address": "10.0.0.50", "cidr_block": 24}],
+            "labels": [{"href": "/orgs/5/labels/1", "key": "app", "value": "print"}]
+        })
+    }
+
+    fn managed() -> Value {
+        json!({"href": "/orgs/5/workloads/m1", "hostname": "web-1", "managed": true, "interfaces": [], "labels": []})
+    }
+
+    fn idx() -> NameIndex {
+        let labels: Vec<Label> = serde_json::from_value(json!([
+            {"href": "/orgs/5/labels/1", "key": "app", "value": "print"},
+            {"href": "/orgs/5/labels/2", "key": "env", "value": "lab"},
+            {"href": "/orgs/5/labels/3", "key": "app", "value": "scan"}
+        ]))
+        .unwrap();
+        NameIndex::new(&labels, &[], &[], &[])
+    }
+
+    #[test]
+    fn draft_validates_and_defaults_hostname_to_name() {
+        let d = WorkloadDraft {
+            name: "printer-1".into(),
+            hostname: None,
+            description: None,
+            interfaces: vec![],
+            labels: vec![],
+        };
+        assert!(
+            d.validate().is_ok(),
+            "hostname defaults to the name, which satisfies the rule"
+        );
+        let d = WorkloadDraft {
+            name: " ".into(),
+            ..d
+        };
+        assert!(d.validate().is_err());
+    }
+
+    #[tokio::test]
+    async fn create_plan_body() {
+        let server = MockServer::start().await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let d = WorkloadDraft {
+            name: "printer-1".into(),
+            hostname: None,
+            description: Some("lobby printer".into()),
+            interfaces: vec![InterfaceSpec::parse("10.0.0.50/24", "eth0".into()).unwrap()],
+            labels: vec!["/orgs/5/labels/1".into()],
+        };
+        let plan = pce
+            .writer(&guard)
+            .plan_create_workload(&d, IfMissing::Create)
+            .await
+            .unwrap();
+        let req = plan.request().unwrap();
+        assert_eq!(req.method, WriteMethod::Post);
+        assert_eq!(req.path, "/orgs/5/workloads");
+        assert_eq!(
+            req.body,
+            Some(json!({
+                "name": "printer-1", "hostname": "printer-1", "description": "lobby printer",
+                "interfaces": [{"name": "eth0", "address": "10.0.0.50", "cidr_block": 24}],
+                "labels": [{"href": "/orgs/5/labels/1"}]
+            }))
+        );
+        assert_eq!(req.summary, "create workload printer-1");
+    }
+
+    #[tokio::test]
+    async fn find_workload_matches_hostname_then_name_exactly() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/workloads"))
+            .and(wiremock::matchers::query_param("hostname", "printer-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([printer(), {
+                "href": "/orgs/5/workloads/u2", "hostname": "printer-10.lab", "managed": false
+            }])))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/workloads"))
+            .and(wiremock::matchers::query_param("name", "printer-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([printer()])))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/workloads"))
+            .and(wiremock::matchers::query_param("hostname", "PRINTER-1.LAB"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([printer()])))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/workloads"))
+            .and(wiremock::matchers::query_param("hostname", "nope"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/workloads"))
+            .and(wiremock::matchers::query_param("name", "nope"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+            .mount(&server)
+            .await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let w = pce.writer(&guard);
+        // No hostname equals "printer-1" exactly, so the name lookup finds it.
+        assert_eq!(
+            w.find_workload("printer-1").await.unwrap().href,
+            "/orgs/5/workloads/u1"
+        );
+        assert_eq!(
+            w.find_workload("PRINTER-1.LAB").await.unwrap().href,
+            "/orgs/5/workloads/u1"
+        );
+        let err = w.find_workload("nope").await.unwrap_err();
+        assert!(matches!(err, WriteError::Invalid(_)), "{err:?}");
+        assert!(err.to_string().contains("nope"));
+    }
+
+    #[tokio::test]
+    async fn find_workload_refuses_ambiguity_and_lists_candidates() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/workloads"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                {"href": "/orgs/5/workloads/a", "hostname": "dup", "managed": false},
+                {"href": "/orgs/5/workloads/b", "hostname": "dup", "managed": false}
+            ])))
+            .mount(&server)
+            .await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let err = pce.writer(&guard).find_workload("dup").await.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("/orgs/5/workloads/a") && msg.contains("/orgs/5/workloads/b"),
+            "{msg}"
+        );
+    }
+
+    #[test]
+    fn patch_sends_only_changed_keys() {
+        let current: pce::models::Workload = serde_json::from_value(printer()).unwrap();
+        let patch = WorkloadPatch {
+            description: Some("moved".into()),
+            ..WorkloadPatch::default()
+        };
+        assert_eq!(
+            patch.apply(&current, &idx()).unwrap(),
+            json!({"description": "moved"})
+        );
+        let patch = WorkloadPatch {
+            add_addresses: vec!["10.0.1.5".into()],
+            remove_addresses: vec!["10.0.0.50".into()],
+            add_labels: vec!["/orgs/5/labels/2".into()],
+            ..WorkloadPatch::default()
+        };
+        let body = patch.apply(&current, &idx()).unwrap();
+        // Removes run before adds, so the freed name is reused.
+        assert_eq!(
+            body["interfaces"],
+            json!([{"name": "eth0", "address": "10.0.1.5"}])
+        );
+        assert_eq!(
+            body["labels"],
+            json!([{"href": "/orgs/5/labels/1"}, {"href": "/orgs/5/labels/2"}])
+        );
+        assert!(body.get("name").is_none() && body.get("hostname").is_none());
+    }
+
+    #[test]
+    fn label_removal_by_key_or_pair_and_set_labels() {
+        let current: pce::models::Workload = serde_json::from_value(printer()).unwrap();
+        let patch = WorkloadPatch {
+            remove_labels: vec![LabelRemoval {
+                key: "app".into(),
+                value: None,
+            }],
+            add_labels: vec!["/orgs/5/labels/3".into()],
+            ..WorkloadPatch::default()
+        };
+        let body = patch.apply(&current, &idx()).unwrap();
+        assert_eq!(body["labels"], json!([{"href": "/orgs/5/labels/3"}]));
+        let patch = WorkloadPatch {
+            remove_labels: vec![LabelRemoval {
+                key: "app".into(),
+                value: Some("scan".into()),
+            }],
+            ..WorkloadPatch::default()
+        };
+        let errs = patch.apply(&current, &idx()).unwrap_err();
+        assert!(errs[0].contains("app=scan"), "{errs:?}");
+        let patch = WorkloadPatch {
+            set_labels: Some(vec![]),
+            ..WorkloadPatch::default()
+        };
+        assert_eq!(
+            patch.apply(&current, &idx()).unwrap(),
+            json!({"labels": []})
+        );
+        assert!(WorkloadPatch::default().is_empty());
+    }
+
+    #[test]
+    fn removing_the_last_interface_without_a_hostname_is_refused() {
+        let mut v = printer();
+        v["hostname"] = Value::Null;
+        let current: pce::models::Workload = serde_json::from_value(v).unwrap();
+        let patch = WorkloadPatch {
+            remove_addresses: vec!["10.0.0.50".into()],
+            ..WorkloadPatch::default()
+        };
+        let errs = patch.apply(&current, &idx()).unwrap_err();
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("hostname") || e.contains("interface")),
+            "{errs:?}"
+        );
+        let patch = WorkloadPatch {
+            remove_addresses: vec!["1.2.3.4".into()],
+            ..WorkloadPatch::default()
+        };
+        assert!(patch.apply(&current, &idx()).unwrap_err()[0].contains("1.2.3.4"));
+    }
+
+    #[tokio::test]
+    async fn update_and_delete_refuse_managed_workloads() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/workloads/m1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(managed()))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/workloads/u1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(printer()))
+            .mount(&server)
+            .await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let w = pce.writer(&guard);
+        let patch = WorkloadPatch {
+            description: Some("x".into()),
+            ..WorkloadPatch::default()
+        };
+        let err = w
+            .plan_update_workload("/orgs/5/workloads/m1", &patch, &idx())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("VEN-managed"), "{err}");
+        let err = w
+            .plan_delete_workload("/orgs/5/workloads/m1")
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("VEN-managed"), "{err}");
+        let plan = w
+            .plan_update_workload("/orgs/5/workloads/u1", &patch, &idx())
+            .await
+            .unwrap();
+        let req = plan.request().unwrap();
+        assert_eq!(req.method, WriteMethod::Put);
+        assert_eq!(req.path, "/orgs/5/workloads/u1");
+        assert_eq!(req.body, Some(json!({"description": "x"})));
+        let plan = w
+            .plan_delete_workload("/orgs/5/workloads/u1")
+            .await
+            .unwrap();
+        assert_eq!(plan.request().unwrap().method, WriteMethod::Delete);
+        assert_eq!(
+            plan.request().unwrap().summary,
+            "delete workload printer-1.lab"
+        );
+    }
+
+    #[tokio::test]
+    async fn if_missing_skips_an_existing_hostname() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/workloads"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([printer()])))
+            .mount(&server)
+            .await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let d = WorkloadDraft {
+            name: "printer-1".into(),
+            hostname: Some("printer-1.lab".into()),
+            description: None,
+            interfaces: vec![],
+            labels: vec![],
+        };
+        let plan = pce
+            .writer(&guard)
+            .plan_create_workload(&d, IfMissing::SkipExisting)
+            .await
+            .unwrap();
+        assert!(matches!(plan, Plan::Noop { .. }));
+    }
+}

@@ -9,6 +9,7 @@ pub mod ip_lists;
 pub mod labels;
 pub mod services;
 pub mod specs;
+pub mod workloads;
 
 use crate::client::WriteMethod;
 use crate::error::PceError;
@@ -22,6 +23,7 @@ pub use ip_lists::{IpListDraft, IpListPatch};
 pub use labels::LabelDraft;
 pub use services::{ServiceDraft, ServicePatch};
 pub use specs::{InterfaceSpec, IpRangeSpec, PortSpec};
+pub use workloads::{LabelRemoval, WorkloadDraft, WorkloadPatch};
 
 /// What kind of object a plan touches; decides the cache prefix and whether
 /// the result waits for provisioning.
