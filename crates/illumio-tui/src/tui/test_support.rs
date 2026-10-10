@@ -111,10 +111,10 @@ pub fn model_with_objects() -> Model {
 /// A connected model with the three fixture workloads loaded (age 5 s).
 pub fn model_with_workloads() -> Model {
     let mut m = model_fixture();
-    m.workloads.table.set_rows(
-        serde_json::from_str(include_str!("../../../../fixtures/workloads.json"))
-            .expect("workloads fixture"),
-    );
+    m.workloads.raw = serde_json::from_str(include_str!("../../../../fixtures/workloads.json"))
+        .expect("workloads fixture");
+    m.workloads.now = Some("2026-10-10T08:00:00Z".parse().expect("fixed test clock"));
+    m.workloads.rebuild();
     m.workloads.loaded_at = Some(Instant::now() - Duration::from_secs(5));
     m
 }

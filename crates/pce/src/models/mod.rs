@@ -17,4 +17,7 @@ pub use traffic::{
     ActorFilter, ActorMatch, AsyncQueryStatus, Endpoint, Flow, FlowService, FlowWorkload, NamedRef,
     QueryResultRef, ServiceFilter, ServiceMatch, TimestampRange, TrafficQuery,
 };
-pub use workloads::{Interface, Workload, WorkloadFilter, WorkloadLabel};
+pub use workloads::{
+    AgentStatus, HEARTBEAT_OFFLINE, Interface, SYNC_STALE, VenHealth, Workload, WorkloadFilter,
+    WorkloadLabel,
+};

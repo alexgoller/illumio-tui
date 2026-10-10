@@ -283,7 +283,7 @@ fn workloads_screen_80x24_and_detail_160x48() {
     m.screen = Screen::Workloads;
     let out = render_to_string(&m, 80, 24);
     assert!(out.contains("host-1.example"), "{out}");
-    assert!(out.contains("active"), "{out}");
+    assert!(out.contains("healthy"), "{out}");
     insta::assert_snapshot!("workloads_80x24", out);
     m.workloads.show_detail = true;
     let out = render_to_string(&m, 160, 48);
@@ -347,4 +347,24 @@ fn tripped_auto_refresh_keeps_its_reason_in_the_panel_meta() {
     m.workloads.auto.enabled = true;
     let on = render_to_string(&m, 160, 48);
     assert!(on.contains("auto in") && !on.contains("auto off"), "{on}");
+}
+
+#[test]
+fn workloads_health_summary_and_columns_160x48() {
+    use illumio_tui::tui::model::Screen;
+    use illumio_tui::tui::test_support::model_with_workloads;
+    let mut m = model_with_workloads();
+    m.screen = Screen::Workloads;
+    m.workloads.show_detail = true;
+    m.workloads.table.select_next();
+    let out = render_to_string(&m, 160, 48);
+    assert!(out.contains("healthy 1"), "{out}");
+    assert!(out.contains("offline 1"), "{out}");
+    assert!(out.contains("unmanaged 1"), "{out}");
+    assert!(
+        out.contains("policy out of date"),
+        "warning text in detail: {out}"
+    );
+    assert!(out.contains("syncing"), "{out}");
+    insta::assert_snapshot!("workloads_health_160x48", out);
 }

@@ -286,7 +286,8 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             match result {
                 Ok((rows, age)) => {
                     let w = &mut model.workloads;
-                    w.table.set_rows(rows);
+                    w.raw = rows;
+                    w.rebuild();
                     w.loaded_at = Some(Instant::now());
                     w.auto.from_tick = false;
                     w.age_secs = age;
@@ -1016,6 +1017,17 @@ fn workloads_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 w.show_detail = !w.show_detail && w.table.selected_item().is_some();
                 return Vec::new();
             }
+            KeyCode::Char('h') => {
+                let w = &mut model.workloads;
+                w.unhealthy_only = !w.unhealthy_only;
+                w.rebuild();
+                w.show_detail &= w.table.selected_item().is_some();
+                return Vec::new();
+            }
+            KeyCode::Char('H') => {
+                model.workloads.sort_by_health();
+                return Vec::new();
+            }
             KeyCode::Char('a') => {
                 let a = &mut model.workloads.auto;
                 a.enabled = !a.enabled;
@@ -1031,7 +1043,7 @@ fn workloads_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 let Some(w) = model.workloads.table.selected_item() else {
                     return Vec::new();
                 };
-                let expr = workload_filter_ref(w);
+                let expr = workload_filter_ref(&w.workload);
                 let mut f = model.traffic.filter.clone();
                 if c == 't' {
                     f.src = expr;
@@ -2780,10 +2792,9 @@ mod tests {
     fn jump_uses_the_href_id_when_the_name_would_break_the_filter_syntax() {
         use crate::tui::test_support::model_with_workloads;
         let mut m = model_with_workloads();
-        let mut wl = m.workloads.table.rows().to_vec();
-        wl[0].hostname = Some("db, primary|1".into());
-        wl[1].hostname = Some("my host".into());
-        m.workloads.table.set_rows(wl);
+        m.workloads.raw[0].hostname = Some("db, primary|1".into());
+        m.workloads.raw[1].hostname = Some("my host".into());
+        m.workloads.rebuild();
         update(&mut m, key('4'));
         update(&mut m, key('t'));
         assert_eq!(m.traffic.filter.src, "wl:aaaa-1");
@@ -2793,6 +2804,69 @@ mod tests {
         update(&mut m, key('T'));
         assert_eq!(m.traffic.filter.dst, "wl:my host", "spaces are fine");
         assert!(m.traffic.filter.validate().is_ok());
+    }
+
+    #[test]
+    fn h_toggles_unhealthy_only_and_capital_h_sorts_by_health() {
+        use crate::tui::test_support::model_with_workloads;
+        let mut m = model_with_workloads();
+        update(&mut m, key('4'));
+        assert_eq!(m.workloads.table.len(), 3);
+        update(&mut m, key('h'));
+        assert!(m.workloads.unhealthy_only);
+        assert_eq!(
+            m.workloads.table.len(),
+            1,
+            "only host-2 (offline) is unhealthy at the fixed test clock"
+        );
+        update(&mut m, key('h'));
+        assert_eq!(m.workloads.table.len(), 3);
+        update(&mut m, key('H'));
+        assert_eq!(
+            m.workloads
+                .table
+                .selected_item()
+                .unwrap()
+                .workload
+                .hostname
+                .as_deref(),
+            Some("host-2.example"),
+            "worst health first"
+        );
+        assert_eq!(m.stats.calls, 5, "pure projections: no request");
+    }
+
+    #[test]
+    fn h_with_no_unhealthy_rows_is_empty_not_a_panic_and_capital_h_flips() {
+        use crate::tui::test_support::model_with_workloads;
+        let mut m = model_with_workloads();
+        update(&mut m, key('4'));
+        m.workloads.raw.remove(1);
+        m.workloads.rebuild();
+        update(&mut m, key('h'));
+        assert_eq!(m.workloads.table.len(), 0);
+        assert!(m.workloads.table.selected_item().is_none());
+        assert_eq!(
+            m.workloads.summary(),
+            [1, 1, 0, 0, 0],
+            "summary ignores the filter"
+        );
+        update(&mut m, key('h'));
+        update(&mut m, key('H'));
+        assert_eq!(m.workloads.table.sort(), Some((8, true)));
+        update(&mut m, key('H'));
+        assert_eq!(m.workloads.table.sort(), Some((8, false)), "second H flips");
+        assert_eq!(
+            m.workloads
+                .table
+                .selected_item()
+                .unwrap()
+                .workload
+                .hostname
+                .as_deref(),
+            Some("host-1.example"),
+            "ascending: healthy before unmanaged"
+        );
     }
 
     #[test]

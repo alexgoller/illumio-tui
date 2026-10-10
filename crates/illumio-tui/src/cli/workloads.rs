@@ -5,7 +5,8 @@ use super::error::CliError;
 use super::output::TableRows;
 use clap::Args;
 use pce::PceError;
-use pce::models::{Workload, WorkloadFilter};
+use pce::models::{VenHealth, Workload, WorkloadFilter};
+use serde::Serialize;
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct WorkloadsArgs {
@@ -33,9 +34,46 @@ pub struct WorkloadsArgs {
     /// Row cap sent to the PCE (default 10000)
     #[arg(long)]
     pub max_results: Option<u32>,
+    /// Only workloads whose VEN is in warning, error or offline state (local filter)
+    #[arg(long)]
+    pub unhealthy: bool,
 }
 
-impl TableRows for Vec<Workload> {
+/// A workload plus its derived VEN health, as printed by the CLI.
+#[derive(Debug, Serialize)]
+pub struct WorkloadRow {
+    #[serde(flatten)]
+    pub workload: Workload,
+    pub health: VenHealth,
+    pub sync_state: Option<String>,
+    pub heartbeat_age_secs: Option<u64>,
+}
+
+impl WorkloadRow {
+    pub fn new(workload: Workload, now: jiff::Timestamp) -> Self {
+        let health = workload.ven_health(now);
+        let a = workload.agent_status_view();
+        Self {
+            heartbeat_age_secs: workload.heartbeat_age(now).map(|d| d.as_secs()),
+            sync_state: a.and_then(|a| a.sync_state),
+            health,
+            workload,
+        }
+    }
+}
+
+/// `45s`, `2m`, `3h`, `2d`; blank when the age is unknown.
+fn compact_age(secs: Option<u64>) -> String {
+    match secs {
+        None => String::new(),
+        Some(s) if s < 60 => format!("{s}s"),
+        Some(s) if s < 3600 => format!("{}m", s / 60),
+        Some(s) if s < 86_400 => format!("{}h", s / 3600),
+        Some(s) => format!("{}d", s / 86_400),
+    }
+}
+
+impl TableRows for Vec<WorkloadRow> {
     fn headers(&self) -> Vec<&'static str> {
         vec![
             "hostname",
@@ -45,12 +83,16 @@ impl TableRows for Vec<Workload> {
             "enforcement",
             "online",
             "agent",
+            "sync",
+            "heartbeat",
+            "health",
             "href",
         ]
     }
     fn rows(&self) -> Vec<Vec<String>> {
         self.iter()
-            .map(|w| {
+            .map(|r| {
+                let w = &r.workload;
                 vec![
                     w.hostname.clone().unwrap_or_default(),
                     w.name.clone().unwrap_or_default(),
@@ -59,6 +101,9 @@ impl TableRows for Vec<Workload> {
                     w.enforcement_mode.clone().unwrap_or_default(),
                     w.online.map(|b| b.to_string()).unwrap_or_default(),
                     w.agent_status().unwrap_or_default(),
+                    r.sync_state.clone().unwrap_or_default(),
+                    compact_age(r.heartbeat_age_secs),
+                    r.health.as_str().to_string(),
                     w.href.clone(),
                 ]
             })
@@ -97,10 +142,18 @@ pub async fn run(ctx: &Context, args: &WorkloadsArgs) -> Result<(), CliError> {
         filter.labels = vec![hrefs];
     }
     let c = ctx.pce.workloads(&filter, ctx.cache_mode).await?;
-    ctx.emit(
-        &c.value,
-        cache_label(c.hit, ctx.cache_mode),
-        c.truncated,
-        None,
-    )
+    let now = jiff::Timestamp::now();
+    let rows: Vec<WorkloadRow> = c
+        .value
+        .into_iter()
+        .map(|w| WorkloadRow::new(w, now))
+        .filter(|r| {
+            !args.unhealthy
+                || matches!(
+                    r.health,
+                    VenHealth::Warning | VenHealth::Error | VenHealth::Offline
+                )
+        })
+        .collect();
+    ctx.emit(&rows, cache_label(c.hit, ctx.cache_mode), c.truncated, None)
 }

@@ -3,7 +3,8 @@ use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::table::{Column, SortKey, TableView};
 use crate::tui::ui::theme::Theme;
 use pce::models::{
-    DenyRule, IpList, Label, LabelGroup, PendingChange, PolicyScope, RuleSet, Service, Workload,
+    DenyRule, IpList, Label, LabelGroup, PendingChange, PolicyScope, RuleSet, Service, VenHealth,
+    Workload,
 };
 use pce::traffic::{BlockedGroup, FlowGroup, ResolvedFlow, blocked_summary, group_by_labels};
 use pce::{NameIndex, RuleKind, RuleSetView, RuleView, StatsSnapshot};
@@ -1182,12 +1183,50 @@ impl ObjectsState {
     }
 }
 
+/// A workload with its derived health and display strings, computed once per
+/// rebuild so the column `fn` pointers stay pure.
+#[derive(Debug, Clone)]
+pub struct WorkloadRowView {
+    pub workload: Workload,
+    pub health: VenHealth,
+    pub heartbeat: String,
+    /// Heartbeat age in seconds, for sorting (`None` sorts last when ascending).
+    pub heartbeat_secs: Option<u64>,
+    pub sync: String,
+    pub ven: String,
+}
+
+impl WorkloadRowView {
+    pub fn new(workload: Workload, now: jiff::Timestamp) -> Self {
+        let health = workload.ven_health(now);
+        let a = workload.agent_status_view();
+        let age = workload.heartbeat_age(now);
+        let heartbeat = age
+            .map(crate::tui::ui::widgets::bars::age_text)
+            .unwrap_or_default();
+        Self {
+            heartbeat,
+            heartbeat_secs: age.map(|d| d.as_secs()),
+            sync: a
+                .as_ref()
+                .and_then(|a| a.sync_state.clone())
+                .unwrap_or_default(),
+            ven: a.and_then(|a| a.version).unwrap_or_default(),
+            health,
+            workload,
+        }
+    }
+}
+
+type RowCell = fn(&WorkloadRowView) -> String;
+type RowKey = fn(&WorkloadRowView) -> SortKey;
+
 fn text_col(
     title: &'static str,
     width: u16,
-    cell: fn(&Workload) -> String,
-    key: fn(&Workload) -> SortKey,
-) -> Column<Workload> {
+    cell: RowCell,
+    key: RowKey,
+) -> Column<WorkloadRowView> {
     Column {
         title,
         width,
@@ -1200,80 +1239,126 @@ fn text_col(
     }
 }
 
-fn hostname_of(w: &Workload) -> String {
-    w.hostname.clone().unwrap_or_default()
+fn hostname_of(r: &WorkloadRowView) -> String {
+    r.workload.hostname.clone().unwrap_or_default()
 }
 
-fn name_of(w: &Workload) -> String {
-    w.name.clone().unwrap_or_default()
+fn name_of(r: &WorkloadRowView) -> String {
+    r.workload.name.clone().unwrap_or_default()
 }
 
-fn ip_of(w: &Workload) -> String {
-    w.primary_ip().unwrap_or("").to_string()
+fn ip_of(r: &WorkloadRowView) -> String {
+    r.workload.primary_ip().unwrap_or("").to_string()
 }
 
-fn enforcement_of(w: &Workload) -> String {
-    w.enforcement_mode.clone().unwrap_or_default()
+fn enforcement_of(r: &WorkloadRowView) -> String {
+    r.workload.enforcement_mode.clone().unwrap_or_default()
 }
 
-fn visibility_of(w: &Workload) -> String {
-    w.visibility_level.clone().unwrap_or_default()
+fn visibility_of(r: &WorkloadRowView) -> String {
+    r.workload.visibility_level.clone().unwrap_or_default()
 }
 
-fn online_of(w: &Workload) -> String {
-    match w.online {
+fn online_of(r: &WorkloadRowView) -> String {
+    match r.workload.online {
         Some(true) => "yes",
         Some(false) => "no",
-        None => "",
+        None => "-",
     }
     .to_string()
 }
 
-fn agent_of(w: &Workload) -> String {
-    w.agent_status().unwrap_or_default()
+fn agent_of(r: &WorkloadRowView) -> String {
+    r.workload.agent_status().unwrap_or_else(|| "-".into())
 }
 
-pub fn workload_columns() -> Vec<Column<Workload>> {
-    // Below 120 columns only hostname, ip, enforcement, online and agent stay,
-    // so the table is readable at 80.
-    let wide = |c: Column<Workload>| Column {
+/// Index of the `health` column in `workload_columns()`.
+const HEALTH_COL: usize = 8;
+
+pub fn workload_columns() -> Vec<Column<WorkloadRowView>> {
+    // Below 120 columns only hostname, ip, enforcement, heartbeat and health
+    // stay, so the table is readable at 80.
+    let wide = |c: Column<WorkloadRowView>| Column {
         hide_below: 120,
         ..c
     };
     vec![
         Column {
             // A workload without a hostname is still identifiable when the name column is hidden.
-            narrow: Some(Workload::display_name),
+            narrow: Some(|r| r.workload.display_name()),
             narrow_width: 20,
-            ..text_col("hostname", 22, hostname_of, |w| {
-                SortKey::Text(hostname_of(w))
+            ..text_col("hostname", 22, hostname_of, |r| {
+                SortKey::Text(hostname_of(r))
             })
         },
-        wide(text_col("name", 14, name_of, |w| SortKey::Text(name_of(w)))),
-        text_col("ip", 15, ip_of, |w| SortKey::Text(ip_of(w))),
-        wide(text_col("labels", 0, Workload::label_text, |w| {
-            SortKey::Text(w.label_text())
-        })),
+        wide(text_col("name", 14, name_of, |r| SortKey::Text(name_of(r)))),
+        text_col("ip", 15, ip_of, |r| SortKey::Text(ip_of(r))),
+        wide(text_col(
+            "labels",
+            0,
+            |r| r.workload.label_text(),
+            |r| SortKey::Text(r.workload.label_text()),
+        )),
         Column {
-            narrow: Some(|w| enforcement_of(w).replace("visibility_only", "visibility")),
+            narrow: Some(|r| enforcement_of(r).replace("visibility_only", "visibility")),
             narrow_width: 11,
-            ..text_col("enforcement", 15, enforcement_of, |w| {
-                SortKey::Text(enforcement_of(w))
+            ..text_col("enforcement", 15, enforcement_of, |r| {
+                SortKey::Text(enforcement_of(r))
             })
         },
-        wide(text_col("visibility", 13, visibility_of, |w| {
-            SortKey::Text(visibility_of(w))
+        Column {
+            // Secondary: gives way to the health columns until the terminal is very wide.
+            hide_below: 180,
+            ..text_col("visibility", 13, visibility_of, |r| {
+                SortKey::Text(visibility_of(r))
+            })
+        },
+        wide(text_col("online", 6, online_of, |r| {
+            SortKey::Num(u64::from(r.workload.online.unwrap_or(false)))
         })),
-        text_col("online", 6, online_of, |w| {
-            SortKey::Num(u64::from(w.online.unwrap_or(false)))
-        }),
-        text_col("agent", 8, agent_of, |w| SortKey::Text(agent_of(w))),
+        wide(text_col("agent", 8, agent_of, |r| {
+            SortKey::Text(agent_of(r))
+        })),
+        text_col(
+            "health",
+            9,
+            |r| r.health.as_str().to_string(),
+            |r| SortKey::Num(u64::from(r.health.rank())),
+        ),
+        text_col(
+            "heartbeat",
+            9,
+            |r| r.heartbeat.clone(),
+            |r| SortKey::Num(r.heartbeat_secs.unwrap_or(u64::MAX)),
+        ),
+        wide(text_col(
+            "sync",
+            8,
+            |r| r.sync.clone(),
+            |r| SortKey::Text(r.sync.clone()),
+        )),
+        Column {
+            hide_below: 140,
+            ..text_col(
+                "ven",
+                12,
+                |r| r.ven.clone(),
+                |r| SortKey::Text(r.ven.clone()),
+            )
+        },
     ]
 }
 
 #[derive(Debug)]
 pub struct WorkloadsState {
-    pub table: TableView<Workload>,
+    pub table: TableView<WorkloadRowView>,
+    /// The workloads as fetched; `table` is a projection of these.
+    pub raw: Vec<Workload>,
+    pub unhealthy_only: bool,
+    /// Test-only fixed clock so ages in snapshots are deterministic.
+    pub now: Option<jiff::Timestamp>,
+    /// Workloads per health state in rank order (healthy, unmanaged, warning, offline, error).
+    counts: [usize; 5],
     pub age_secs: u64,
     pub loaded_at: Option<Instant>,
     pub loading: bool,
@@ -1287,6 +1372,10 @@ impl WorkloadsState {
     pub fn new(min_refresh: u64) -> Self {
         Self {
             table: TableView::new(workload_columns()),
+            raw: Vec::new(),
+            unhealthy_only: false,
+            now: None,
+            counts: [0; 5],
             age_secs: 0,
             loaded_at: None,
             loading: false,
@@ -1294,6 +1383,45 @@ impl WorkloadsState {
             index_failed: false,
             auto: AutoRefresh::new(min_refresh),
         }
+    }
+
+    /// Recomputes the table rows (and health counts) from `raw`.
+    pub fn rebuild(&mut self) {
+        let now = self.now.unwrap_or_else(jiff::Timestamp::now);
+        let views: Vec<WorkloadRowView> = self
+            .raw
+            .iter()
+            .cloned()
+            .map(|w| WorkloadRowView::new(w, now))
+            .collect();
+        self.counts = [0; 5];
+        for v in &views {
+            self.counts[usize::from(v.health.rank())] += 1;
+        }
+        let unhealthy = |h: VenHealth| {
+            matches!(
+                h,
+                VenHealth::Warning | VenHealth::Error | VenHealth::Offline
+            )
+        };
+        let rows = if self.unhealthy_only {
+            views.into_iter().filter(|v| unhealthy(v.health)).collect()
+        } else {
+            views
+        };
+        self.table.set_rows(rows);
+    }
+
+    /// Counts per state in rank order (healthy, unmanaged, warning, offline, error)
+    /// over all loaded workloads, ignoring the unhealthy-only filter.
+    pub fn summary(&self) -> [usize; 5] {
+        self.counts
+    }
+
+    /// `H`: worst health first; pressing it again flips the direction.
+    pub fn sort_by_health(&mut self) {
+        let desc = self.table.sort() != Some((HEALTH_COL, true));
+        self.table.sort_by(HEALTH_COL, desc);
     }
 }
 

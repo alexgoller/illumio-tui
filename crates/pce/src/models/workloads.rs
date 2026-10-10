@@ -2,6 +2,7 @@
 use super::common::Ref;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::time::Duration;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Interface {
@@ -52,6 +53,77 @@ pub struct Workload {
     pub ven: Option<Ref>,
 }
 
+/// A heartbeat older than this means the VEN is offline, whatever its status says.
+pub const HEARTBEAT_OFFLINE: Duration = Duration::from_secs(15 * 60);
+/// A policy sync still not applied after this long is an error.
+pub const SYNC_STALE: Duration = Duration::from_secs(10 * 60);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VenHealth {
+    Healthy,
+    Warning,
+    Error,
+    Offline,
+    Unmanaged,
+}
+
+impl VenHealth {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            VenHealth::Healthy => "healthy",
+            VenHealth::Warning => "warning",
+            VenHealth::Error => "error",
+            VenHealth::Offline => "offline",
+            VenHealth::Unmanaged => "unmanaged",
+        }
+    }
+
+    /// Higher is worse; used for sorting.
+    pub fn rank(self) -> u8 {
+        match self {
+            VenHealth::Healthy => 0,
+            VenHealth::Unmanaged => 1,
+            VenHealth::Warning => 2,
+            VenHealth::Offline => 3,
+            VenHealth::Error => 4,
+        }
+    }
+}
+
+/// The parts of `agent.status` the UI cares about, with messages flattened.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct AgentStatus {
+    pub status: Option<String>,
+    pub sync_state: Option<String>,
+    pub last_heartbeat: Option<String>,
+    pub applied_at: Option<String>,
+    pub version: Option<String>,
+    pub uptime_seconds: Option<u64>,
+    pub fw_config_current: Option<bool>,
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+/// `{"type": "x", "message": "y"}` becomes `x: y`; strings pass through; anything else is compact JSON.
+fn health_item(v: &Value) -> String {
+    if let Some(s) = v.as_str() {
+        return s.to_string();
+    }
+    let t = v.get("type").and_then(Value::as_str);
+    let m = v.get("message").and_then(Value::as_str);
+    match (t, m) {
+        (Some(t), Some(m)) => format!("{t}: {m}"),
+        (Some(t), None) => t.to_string(),
+        (None, Some(m)) => m.to_string(),
+        (None, None) => v.to_string(),
+    }
+}
+
+fn parse_ts(s: &str) -> Option<jiff::Timestamp> {
+    s.parse().ok()
+}
+
 impl Workload {
     /// hostname, else name, else the href id.
     pub fn display_name(&self) -> String {
@@ -95,6 +167,69 @@ impl Workload {
 
     pub fn label_hrefs(&self) -> Vec<&str> {
         self.labels.iter().map(|l| l.href.as_str()).collect()
+    }
+
+    pub fn agent_status_view(&self) -> Option<AgentStatus> {
+        let st = self.agent.as_ref()?.get("status")?;
+        let list = |k: &str| {
+            st.get("agent_health_errors")
+                .and_then(|e| e.get(k))
+                .and_then(Value::as_array)
+                .map(|a| a.iter().map(health_item).collect::<Vec<_>>())
+                .unwrap_or_default()
+        };
+        let s = |k: &str| st.get(k).and_then(Value::as_str).map(str::to_string);
+        Some(AgentStatus {
+            status: s("status"),
+            sync_state: s("security_policy_sync_state"),
+            last_heartbeat: s("last_heartbeat_on"),
+            applied_at: s("security_policy_applied_at"),
+            version: s("agent_version"),
+            uptime_seconds: st.get("uptime_seconds").and_then(Value::as_u64),
+            fw_config_current: st.get("fw_config_current").and_then(Value::as_bool),
+            errors: list("errors"),
+            warnings: list("warnings"),
+        })
+    }
+
+    pub fn ven_version(&self) -> Option<String> {
+        self.agent_status_view().and_then(|a| a.version)
+    }
+
+    /// Time since the last heartbeat; `None` when unmanaged or the timestamp is missing or unparseable.
+    pub fn heartbeat_age(&self, now: jiff::Timestamp) -> Option<Duration> {
+        let hb = parse_ts(self.agent_status_view()?.last_heartbeat.as_deref()?)?;
+        Some(now.duration_since(hb).unsigned_abs())
+    }
+
+    pub fn ven_health(&self, now: jiff::Timestamp) -> VenHealth {
+        let Some(a) = self.agent_status_view() else {
+            return VenHealth::Unmanaged;
+        };
+        if self.online == Some(false) {
+            return VenHealth::Offline;
+        }
+        if self
+            .heartbeat_age(now)
+            .is_some_and(|age| age > HEARTBEAT_OFFLINE)
+        {
+            return VenHealth::Offline;
+        }
+        if !a.errors.is_empty() {
+            return VenHealth::Error;
+        }
+        let sync_stale = a.sync_state.as_deref().is_some_and(|s| s != "applied")
+            && a.applied_at
+                .as_deref()
+                .and_then(parse_ts)
+                .is_some_and(|t| now.duration_since(t).unsigned_abs() > SYNC_STALE);
+        if sync_stale {
+            return VenHealth::Error;
+        }
+        if !a.warnings.is_empty() {
+            return VenHealth::Warning;
+        }
+        VenHealth::Healthy
     }
 }
 
@@ -192,5 +327,77 @@ mod tests {
             r#"[["/orgs/5/labels/1","/orgs/5/labels/3"],["/orgs/5/labels/2"]]"#.to_string()
         )));
         assert_eq!(WorkloadFilter::default().to_query(), vec![]);
+    }
+
+    #[test]
+    fn ven_health_rules() {
+        let w = fixture();
+        let now: jiff::Timestamp = "2026-10-10T08:00:00Z".parse().unwrap();
+        assert_eq!(w[0].ven_health(now), VenHealth::Healthy);
+        assert_eq!(
+            w[0].heartbeat_age(now),
+            Some(std::time::Duration::from_secs(120))
+        );
+        assert_eq!(w[0].ven_version().as_deref(), Some("23.2.31-3113"));
+        let a = w[0].agent_status_view().unwrap();
+        assert_eq!(a.sync_state.as_deref(), Some("applied"));
+        assert!(a.errors.is_empty() && a.warnings.is_empty());
+        // workload 2: online=false -> Offline regardless of warnings
+        assert_eq!(w[1].ven_health(now), VenHealth::Offline);
+        let a2 = w[1].agent_status_view().unwrap();
+        assert_eq!(a2.warnings, vec!["policy_sync: policy out of date"]);
+        assert_eq!(w[2].ven_health(now), VenHealth::Unmanaged);
+        assert_eq!(w[2].heartbeat_age(now), None);
+        // stale heartbeat on an online workload -> Offline
+        let mut stale = w[0].clone();
+        stale.agent.as_mut().unwrap()["status"]["last_heartbeat_on"] =
+            serde_json::Value::String("2026-10-10T07:00:00Z".into());
+        assert_eq!(stale.ven_health(now), VenHealth::Offline);
+        // syncing for longer than SYNC_STALE -> Error; a recent sync -> Warning only if warnings exist, else Healthy
+        let mut syncing = w[0].clone();
+        syncing.agent.as_mut().unwrap()["status"]["security_policy_sync_state"] =
+            serde_json::Value::String("syncing".into());
+        syncing.agent.as_mut().unwrap()["status"]["security_policy_applied_at"] =
+            serde_json::Value::String("2026-10-10T07:40:00Z".into());
+        assert_eq!(syncing.ven_health(now), VenHealth::Error);
+        syncing.agent.as_mut().unwrap()["status"]["security_policy_applied_at"] =
+            serde_json::Value::String("2026-10-10T07:55:00Z".into());
+        assert_eq!(syncing.ven_health(now), VenHealth::Healthy);
+        let mut errs = w[0].clone();
+        errs.agent.as_mut().unwrap()["status"]["agent_health_errors"]["errors"] =
+            serde_json::json!([{"type": "firewall", "message": "iptables failed"}]);
+        assert_eq!(errs.ven_health(now), VenHealth::Error);
+        assert_eq!(
+            errs.agent_status_view().unwrap().errors,
+            vec!["firewall: iptables failed"]
+        );
+        assert!(
+            VenHealth::Error.rank() > VenHealth::Offline.rank()
+                && VenHealth::Offline.rank() > VenHealth::Warning.rank()
+        );
+        assert_eq!(
+            serde_json::to_string(&VenHealth::Offline).unwrap(),
+            "\"offline\""
+        );
+    }
+
+    #[test]
+    fn unparseable_or_missing_timestamps_are_unknown_never_a_panic() {
+        let w = fixture();
+        let now: jiff::Timestamp = "2026-10-10T08:00:00Z".parse().unwrap();
+        let mut bad = w[0].clone();
+        bad.agent.as_mut().unwrap()["status"]["last_heartbeat_on"] =
+            serde_json::Value::String("not a time".into());
+        assert_eq!(bad.heartbeat_age(now), None);
+        assert_eq!(bad.ven_health(now), VenHealth::Healthy);
+        bad.agent.as_mut().unwrap()["status"]
+            .as_object_mut()
+            .unwrap()
+            .remove("last_heartbeat_on");
+        assert_eq!(bad.heartbeat_age(now), None);
+        // An agent object without a status has nothing to derive from.
+        let mut bare = w[0].clone();
+        bare.agent = Some(serde_json::json!({"href": "/orgs/5/agents/9"}));
+        assert_eq!(bare.agent_status_view(), None);
     }
 }

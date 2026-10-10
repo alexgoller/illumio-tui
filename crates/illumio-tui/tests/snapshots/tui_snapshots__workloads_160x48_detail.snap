@@ -4,16 +4,12 @@ expression: out
 ---
  illumio-tui pce.example · org 5 ●                                                                                                        api 5 calls · 20.8 KB
   1 Traffic  │  2 Policy  │  3 Labels & objects  │  4 Workloads
+healthy 1 · warning 0 · error 0 · offline 1 · unmanaged 1  ████████████████████████
 ╭ Workloads ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 3 · cached 5s ago ╮
-│  hostname               name           ip              labels                                                   enforcement     visibility    online agent   │
-│▸ host-1.example         web01          10.0.1.10       app=shop env=prod role=web                               full            flow_summary  yes    active  │
-│  host-2.example                        10.0.2.20       app=shop env=prod role=db                                visibility_only flow_summary  no     stopped │
-│                         unmanaged-nas  10.0.3.30                                                                idle                                         │
-│                                                                                                                                                              │
-│                                                                                                                                                              │
-│                                                                                                                                                              │
-│                                                                                                                                                              │
-│                                                                                                                                                              │
+│  hostname               name           ip              labels                       enforcement     online agent    health    heartbeat sync     ven         │
+│▸ host-1.example         web01          10.0.1.10       app=shop env=prod role=web   full            yes    active   healthy   2m ago    applied  23.2.31-3113│
+│  host-2.example                        10.0.2.20       app=shop env=prod role=db    visibility_only no     stopped  offline   2h ago    syncing  22.5.10-1   │
+│                         unmanaged-nas  10.0.3.30                                    idle            -      -        unmanaged                                │
 │                                                                                                                                                              │
 │                                                                                                                                                              │
 │                                                                                                                                                              │
@@ -44,9 +40,13 @@ expression: out
 ╭ Detail ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── Enter hides ╮
 │href    /orgs/5/workloads/aaaa-1                                                                                                                              │
 │os      ubuntu-x86_64-22.04                                                                                                                                   │
-│ven     active                                                                                                                                                │
+│ven     active · 23.2.31-3113 · up 16m                                                                                                                        │
+│health  healthy                                                                                                                                               │
+│sync    applied · applied 2026-10-10T07:50:00Z                                                                                                                │
+│beat    2026-10-10T07:58:00Z (2m ago)                                                                                                                         │
 │labels  app=shop env=prod role=web                                                                                                                            │
 │iface   eth0 10.0.1.10/24 up                                                                                                                                  │
+│                                                                                                                                                              │
 │                                                                                                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ready                                                                                                        t/T to traffic  / search  r refresh  : cmd  ? help

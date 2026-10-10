@@ -389,6 +389,60 @@ async fn workloads_with_label_filter_resolve_hrefs() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn workloads_report_ven_health_and_unhealthy_filter() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/workloads.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .mount(&server)
+        .await;
+    let out = stdout_json(cmd(&server).arg("workloads").assert().success());
+    let rows = out["data"].as_array().unwrap();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0]["sync_state"], "applied");
+    assert!(
+        matches!(
+            rows[0]["health"].as_str(),
+            Some("healthy") | Some("offline")
+        ),
+        "fixture heartbeat ages with real time: {}",
+        rows[0]["health"]
+    );
+    assert_eq!(rows[1]["health"], "offline");
+    assert_eq!(rows[2]["health"], "unmanaged");
+    assert!(
+        rows[2]["heartbeat_age_secs"].is_null(),
+        "unknown age is null, not 0"
+    );
+    assert!(
+        rows[0]["hostname"].is_string(),
+        "workload fields are flattened"
+    );
+    let out = stdout_json(
+        cmd(&server)
+            .args(["workloads", "--unhealthy"])
+            .assert()
+            .success(),
+    );
+    let rows = out["data"].as_array().unwrap();
+    assert!(
+        rows.iter()
+            .all(|r| r["health"] != "unmanaged" && r["health"] != "healthy")
+    );
+    assert!(rows.iter().any(|r| r["hostname"] == "host-2.example"));
+    cmd(&server)
+        .args(["workloads", "--table"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("health").and(predicate::str::contains("offline")));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn workloads_unknown_label_exits_2_without_querying() {
     let server = MockServer::start().await;
     mount_objects(&server).await;
