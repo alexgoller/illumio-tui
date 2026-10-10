@@ -121,12 +121,7 @@ fn render_table(model: &Model, f: &mut Frame, area: Rect) {
     } else {
         format!("{freshness} · {rows}")
     };
-    if o.auto.enabled {
-        meta.push_str(&format!(
-            " · auto in {}s",
-            o.auto.remaining(Instant::now()).as_secs()
-        ));
-    }
+    meta.push_str(&o.auto.meta(Instant::now()));
     if !sort_meta.is_empty() {
         meta = format!("{sort_meta} · {meta}");
     }

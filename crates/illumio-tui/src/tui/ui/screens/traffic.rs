@@ -74,11 +74,7 @@ fn query_meta(model: &Model) -> String {
                     d.flows.len(),
                     bars::age_text(d.fetched_at.elapsed()),
                     if d.cache_hit { " · cached" } else { "" },
-                    if auto.enabled {
-                        format!(" · auto in {}s", auto.remaining(Instant::now()).as_secs())
-                    } else {
-                        String::new()
-                    }
+                    auto.meta(Instant::now())
                 )
             }
             None => "no query yet · press r".into(),

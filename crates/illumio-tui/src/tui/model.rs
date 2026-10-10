@@ -508,6 +508,17 @@ impl AutoRefresh {
         }
     }
 
+    /// Panel meta suffix: the countdown while on, the reason after a failed tick.
+    pub fn meta(&self, now: Instant) -> String {
+        if self.enabled {
+            format!(" · auto in {}s", self.remaining(now).as_secs())
+        } else if self.tripped {
+            " · auto off · failed".into()
+        } else {
+            String::new()
+        }
+    }
+
     pub fn due(&self, now: Instant) -> bool {
         self.enabled
             && self

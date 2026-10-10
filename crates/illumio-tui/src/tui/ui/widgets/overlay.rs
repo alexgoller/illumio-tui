@@ -34,8 +34,8 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ),
     ("Policy   d", "toggle draft / active"),
     ("Policy   p", "pending changes"),
-    ("Policy   Enter", "rule detail"),
-    ("Objects  Tab", "next object type"),
+    ("Policy   Tab / Enter", "switch pane · rule detail"),
+    ("Objects  Tab / Enter", "next object type · detail"),
     (
         "Workloads t / T",
         "jump to Traffic with workload as src / dst",

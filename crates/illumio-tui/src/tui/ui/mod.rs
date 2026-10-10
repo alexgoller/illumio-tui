@@ -82,13 +82,59 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect) {
     }
 }
 
-fn render_tabs(model: &Model, f: &mut Frame, area: Rect) {
-    let t = &model.theme;
-    let titles: Vec<Line> = Screen::ALL
+/// Tab labels; `Tabs` draws each one between `TAB_PAD` padding cells.
+fn tab_labels() -> Vec<String> {
+    Screen::ALL
         .iter()
         .enumerate()
-        .map(|(i, s)| Line::from(format!(" {} {} ", i + 1, s.title())))
-        .collect();
+        .map(|(i, s)| format!(" {} {} ", i + 1, s.title()))
+        .collect()
+}
+
+/// Padding cells either side of a label, and the divider between tabs; shared
+/// by `render_tabs` and `tab_at` so hit-testing cannot drift from the drawing.
+const TAB_PAD: &str = " ";
+const TAB_DIVIDER: &str = "│";
+
+/// Cells one tab occupies, padding included.
+fn tab_width(label: &str) -> u16 {
+    (label.chars().count() + 2 * TAB_PAD.chars().count()) as u16
+}
+
+/// Which tab a click at column `x` on the tabs row hits, for a row `width` cells wide.
+/// Dividers, the space past the last tab and clipped cells hit nothing.
+pub fn tab_at(x: u16, width: u16) -> Option<Screen> {
+    if x >= width {
+        return None;
+    }
+    let divider = TAB_DIVIDER.chars().count() as u16;
+    let mut start = 0u16;
+    for (label, screen) in tab_labels().iter().zip(Screen::ALL) {
+        let w = tab_width(label);
+        if x >= start && x < start + w {
+            return Some(screen);
+        }
+        start += w + divider;
+    }
+    None
+}
+
+/// A column inside the given tab's label (test helper for `tab_at`).
+pub fn tab_x(screen: Screen) -> u16 {
+    let divider = TAB_DIVIDER.chars().count() as u16;
+    let mut start = 0u16;
+    for (label, s) in tab_labels().iter().zip(Screen::ALL) {
+        if s == screen {
+            return start + TAB_PAD.chars().count() as u16;
+        }
+        start += tab_width(label) + divider;
+    }
+    0
+}
+
+fn render_tabs(model: &Model, f: &mut Frame, area: Rect) {
+    let t = &model.theme;
+    let titles: Vec<Line> = tab_labels().into_iter().map(Line::from).collect();
     let tabs = Tabs::new(titles)
         .select(model.screen.index())
         .style(Style::new().fg(t.dim).bg(t.bg))
@@ -97,7 +143,8 @@ fn render_tabs(model: &Model, f: &mut Frame, area: Rect) {
                 .fg(t.accent)
                 .add_modifier(ratatui::style::Modifier::BOLD),
         )
-        .divider(Span::raw("│"));
+        .padding(TAB_PAD, TAB_PAD)
+        .divider(Span::raw(TAB_DIVIDER));
     f.render_widget(tabs, area);
 }
 
@@ -142,4 +189,31 @@ fn render_body(model: &Model, f: &mut Frame, area: Rect) {
         _ => "",
     };
     f.render_widget(Paragraph::new(text).block(block).style(t.base()), area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tab_at_matches_the_rendered_row() {
+        for s in Screen::ALL {
+            assert_eq!(tab_at(tab_x(s), 80), Some(s));
+        }
+        let first_len = tab_width(&tab_labels()[0]);
+        assert_eq!(tab_at(first_len, 80), None, "divider");
+        assert_eq!(tab_at(79, 80), None, "past the last tab");
+        let x = tab_x(Screen::Workloads);
+        assert_eq!(tab_at(x, x), None, "clipped by a narrow terminal");
+        // The rendered row puts each label exactly where tab_at expects it.
+        let m = crate::tui::test_support::model_fixture();
+        let out = crate::tui::test_support::render_to_string(&m, 80, 24);
+        let row: Vec<char> = out.lines().nth(1).unwrap().chars().collect();
+        for s in Screen::ALL {
+            let x = tab_x(s) as usize;
+            assert!(row[x + 1].is_ascii_digit(), "the label's number follows x");
+            assert_eq!(row[x - 1], ' ', "padding cell before the label");
+            assert_eq!(tab_at(x as u16 + 1, 80), Some(s));
+        }
+    }
 }

@@ -15,7 +15,7 @@ use std::time::Instant;
 pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
     match msg {
         Msg::Key(k) => on_key(model, k),
-        Msg::Mouse(_) => Vec::new(),
+        Msg::Mouse(me) => on_mouse(model, me),
         Msg::Resize(w, h) => {
             model.size = (w, h);
             Vec::new()
@@ -721,6 +721,82 @@ fn request_query(model: &mut Model, f: TrafficFilter) -> Vec<Cmd> {
         return Vec::new();
     }
     update(model, Msg::ApplyFilter(f))
+}
+
+/// Mouse: the wheel moves the focused table one row (also while a search is
+/// active), a left click on the tabs row switches screen through the same path
+/// as the number keys. Everything else is ignored; the wheel never requests anything.
+fn on_mouse(model: &mut Model, me: crossterm::event::MouseEvent) -> Vec<Cmd> {
+    use crossterm::event::{MouseButton, MouseEventKind};
+    if model.overlay != Overlay::None {
+        return Vec::new();
+    }
+    match me.kind {
+        MouseEventKind::ScrollDown => scroll_focused(model, true),
+        MouseEventKind::ScrollUp => scroll_focused(model, false),
+        MouseEventKind::Down(MouseButton::Left) if me.row == 1 => {
+            return match crate::tui::ui::tab_at(me.column, model.size.0) {
+                Some(s) => switch(model, s),
+                None => Vec::new(),
+            };
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+/// One row up or down in the current screen's focused table.
+fn scroll_focused(model: &mut Model, down: bool) {
+    fn step<T>(table: &mut crate::tui::table::TableView<T>, down: bool, page: usize) {
+        if down {
+            table.select_next();
+        } else {
+            table.select_prev();
+        }
+        table.ensure_visible(page);
+    }
+    match model.screen {
+        Screen::Traffic => {
+            let page = traffic_page(model);
+            let t = &mut model.traffic;
+            match t.view {
+                TrafficView::Flows => step(&mut t.flows, down, page),
+                TrafficView::Aggregate => step(&mut t.groups, down, page),
+                TrafficView::Blocked => step(&mut t.blocked, down, page),
+            }
+        }
+        Screen::Policy => {
+            let page = policy_page(model);
+            match model.policy.pane {
+                PolicyPane::RuleSets => {
+                    let before = model.policy.selected_href();
+                    step(&mut model.policy.rulesets, down, page);
+                    // The rules follow the ruleset; a missing deny list is not
+                    // fetched from here (the wheel never requests).
+                    if model.policy.selected_href() != before
+                        && let Some(idx) = model.index().cloned()
+                    {
+                        model.policy.rebuild_rules(&idx);
+                    }
+                }
+                PolicyPane::Rules => step(&mut model.policy.rules, down, page),
+            }
+        }
+        Screen::Objects => {
+            let page = objects_page(model);
+            let o = &mut model.objects;
+            match o.kind {
+                ObjectKind::Labels => step(&mut o.labels, down, page),
+                ObjectKind::LabelGroups => step(&mut o.groups, down, page),
+                ObjectKind::IpLists => step(&mut o.ip_lists, down, page),
+                ObjectKind::Services => step(&mut o.services, down, page),
+            }
+        }
+        Screen::Workloads => {
+            let page = workloads_page(model);
+            step(&mut model.workloads.table, down, page);
+        }
+    }
 }
 
 fn switch(model: &mut Model, s: Screen) -> Vec<Cmd> {
@@ -3206,5 +3282,112 @@ mod tests {
             },
         );
         assert!(again.is_empty(), "{again:?}");
+    }
+
+    fn mouse(kind: crossterm::event::MouseEventKind, column: u16, row: u16) -> Msg {
+        Msg::Mouse(crossterm::event::MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        })
+    }
+
+    #[test]
+    fn mouse_wheel_scrolls_and_tab_click_switches() {
+        use crate::tui::test_support::model_with_flows;
+        use crossterm::event::{MouseButton, MouseEventKind};
+        let mut m = model_with_flows();
+        update(&mut m, Msg::Resize(80, 24));
+        update(&mut m, mouse(MouseEventKind::ScrollDown, 10, 10));
+        update(&mut m, mouse(MouseEventKind::ScrollDown, 10, 10));
+        assert_eq!(m.traffic.flows.selected_pos(), 2);
+        update(&mut m, mouse(MouseEventKind::ScrollUp, 10, 10));
+        assert_eq!(m.traffic.flows.selected_pos(), 1);
+        let x = crate::tui::ui::tab_x(Screen::Policy);
+        update(&mut m, mouse(MouseEventKind::Down(MouseButton::Left), x, 1));
+        assert_eq!(m.screen, Screen::Policy);
+        assert_eq!(m.stats.calls, 5);
+    }
+
+    #[test]
+    fn mouse_ignores_everything_else_and_overlays() {
+        use crate::tui::test_support::model_with_flows;
+        use crossterm::event::{MouseButton, MouseEventKind};
+        let mut m = model_with_flows();
+        update(&mut m, Msg::Resize(80, 24));
+        let x = crate::tui::ui::tab_x(Screen::Policy);
+        for kind in [
+            MouseEventKind::Down(MouseButton::Right),
+            MouseEventKind::Up(MouseButton::Left),
+            MouseEventKind::Moved,
+            MouseEventKind::Drag(MouseButton::Left),
+        ] {
+            assert!(update(&mut m, mouse(kind, x, 1)).is_empty());
+        }
+        // Clicks off the tabs row, past the last tab, and on a divider do nothing.
+        let left = MouseEventKind::Down(MouseButton::Left);
+        assert!(update(&mut m, mouse(left, x, 5)).is_empty());
+        assert!(update(&mut m, mouse(left, 79, 1)).is_empty());
+        let divider = crate::tui::ui::tab_x(Screen::Policy) - 2;
+        assert!(update(&mut m, mouse(left, divider, 1)).is_empty());
+        assert_eq!(m.screen, Screen::Traffic);
+        assert_eq!(m.traffic.flows.selected_pos(), 0);
+        // Overlays swallow wheel and clicks.
+        m.overlay = Overlay::Help;
+        update(&mut m, mouse(MouseEventKind::ScrollDown, 10, 10));
+        update(&mut m, mouse(left, x, 1));
+        assert_eq!(m.traffic.flows.selected_pos(), 0);
+        assert_eq!(m.screen, Screen::Traffic);
+    }
+
+    #[test]
+    fn mouse_wheel_follows_policy_pane_aggregate_view_and_search() {
+        use crate::tui::test_support::{model_with_flows, model_with_policy, model_with_workloads};
+        use crossterm::event::MouseEventKind;
+        let down = || mouse(MouseEventKind::ScrollDown, 10, 10);
+        let mut m = model_with_policy();
+        m.screen = Screen::Policy;
+        update(&mut m, Msg::Resize(160, 48));
+        assert!(
+            update(&mut m, down()).is_empty(),
+            "the wheel never requests"
+        );
+        assert_eq!(m.policy.rulesets.selected_pos(), 1);
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)),
+        );
+        assert_eq!(m.policy.pane, PolicyPane::Rules);
+        let before = m.policy.rulesets.selected_pos();
+        update(&mut m, down());
+        assert_eq!(m.policy.rulesets.selected_pos(), before);
+
+        let mut m = model_with_flows();
+        update(&mut m, Msg::Resize(80, 24));
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE)),
+        );
+        assert_eq!(m.traffic.view, TrafficView::Aggregate);
+        update(&mut m, down());
+        assert_eq!(m.traffic.groups.selected_pos(), 1);
+        assert_eq!(m.traffic.flows.selected_pos(), 0);
+        // An active search keeps routing the wheel to the table.
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE)),
+        );
+        update(&mut m, down());
+        assert_eq!(
+            m.traffic.groups.selected_pos(),
+            2.min(m.traffic.groups.len() - 1)
+        );
+
+        // Empty table: no panic, no request.
+        let mut m = model_with_workloads();
+        m.screen = Screen::Workloads;
+        m.workloads.table.set_rows(Vec::new());
+        assert!(update(&mut m, down()).is_empty());
     }
 }

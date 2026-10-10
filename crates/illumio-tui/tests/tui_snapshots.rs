@@ -1,6 +1,7 @@
 use illumio_tui::tui::model::{Connection, Screen};
 use illumio_tui::tui::test_support::{
-    model_fixture, model_with_flows, render_styled, render_to_string,
+    model_fixture, model_with_flows, model_with_objects, model_with_policy, model_with_workloads,
+    render_styled, render_to_string,
 };
 
 #[test]
@@ -13,6 +14,12 @@ fn chrome_dark_80x24() {
 fn chrome_dark_160x48() {
     let m = model_fixture();
     insta::assert_snapshot!("chrome_dark_160x48", render_to_string(&m, 160, 48));
+}
+
+#[test]
+fn chrome_dark_styled_80x24() {
+    let m = model_fixture();
+    insta::assert_snapshot!("chrome_dark_styled_80x24", render_styled(&m, 80, 24));
 }
 
 #[test]
@@ -297,4 +304,47 @@ fn error_overlay_80x24() {
     assert!(out.contains("Error"), "{out}");
     assert!(out.contains("Esc"), "{out}");
     insta::assert_snapshot!("error_overlay_80x24", out);
+}
+
+#[test]
+fn light_theme_styled_screens_160x48() {
+    let mut m = model_with_flows();
+    m.set_theme("light");
+    insta::assert_snapshot!("light_traffic_160x48", render_styled(&m, 160, 48));
+    let mut m = model_with_policy();
+    m.set_theme("light");
+    m.screen = Screen::Policy;
+    insta::assert_snapshot!("light_policy_160x48", render_styled(&m, 160, 48));
+    let mut m = model_with_objects();
+    m.set_theme("light");
+    m.screen = Screen::Objects;
+    insta::assert_snapshot!("light_objects_160x48", render_styled(&m, 160, 48));
+    let mut m = model_with_workloads();
+    m.set_theme("light");
+    m.screen = Screen::Workloads;
+    insta::assert_snapshot!("light_workloads_160x48", render_styled(&m, 160, 48));
+}
+
+#[test]
+fn dark_and_light_differ_in_style_not_text() {
+    let dark = model_with_flows();
+    let mut light = model_with_flows();
+    light.set_theme("light");
+    assert_eq!(
+        render_to_string(&dark, 80, 24),
+        render_to_string(&light, 80, 24)
+    );
+    assert_ne!(render_styled(&dark, 80, 24), render_styled(&light, 80, 24));
+}
+
+#[test]
+fn tripped_auto_refresh_keeps_its_reason_in_the_panel_meta() {
+    let mut m = model_with_workloads();
+    m.screen = Screen::Workloads;
+    assert!(!render_to_string(&m, 160, 48).contains("auto off"));
+    m.workloads.auto.tripped = true;
+    assert!(render_to_string(&m, 160, 48).contains("auto off · failed"));
+    m.workloads.auto.enabled = true;
+    let on = render_to_string(&m, 160, 48);
+    assert!(on.contains("auto in") && !on.contains("auto off"), "{on}");
 }

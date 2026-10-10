@@ -48,12 +48,7 @@ pub fn render_screen(model: &Model, f: &mut Frame, body: Rect) {
             .unwrap_or_default()
     };
     let mut meta = format!("{} · {freshness}", p.scope.segment());
-    if p.auto.enabled {
-        meta.push_str(&format!(
-            " · auto in {}s",
-            p.auto.remaining(Instant::now()).as_secs()
-        ));
-    }
+    meta.push_str(&p.auto.meta(Instant::now()));
     let sort_meta = header_meta(&p.rulesets);
     if !sort_meta.is_empty() {
         meta = format!("{sort_meta} · {meta}");
