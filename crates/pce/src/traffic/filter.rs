@@ -56,6 +56,16 @@ impl FilterExpr {
     }
 }
 
+/// Joins up to 20 names with `", "`, appending `", …"` when more exist.
+fn preview(names: &[String]) -> String {
+    let shown: Vec<&str> = names.iter().take(20).map(String::as_str).collect();
+    if names.len() > 20 {
+        format!("{}, …", shown.join(", "))
+    } else {
+        shown.join(", ")
+    }
+}
+
 pub fn resolve_actor(
     expr: &FilterExpr,
     idx: &NameIndex,
@@ -83,7 +93,12 @@ pub fn resolve_actor(
             .map(|h| ActorMatch::IpList {
                 ip_list: Ref::new(h),
             })
-            .ok_or_else(|| PceError::Invalid(format!("unknown IP list {name:?}"))),
+            .ok_or_else(|| {
+                PceError::Invalid(format!(
+                    "unknown IP list {name:?}; known: {}",
+                    preview(&idx.ip_list_names())
+                ))
+            }),
         FilterExpr::Workload(name) => {
             let lower = name.to_ascii_lowercase();
             workloads
@@ -101,8 +116,13 @@ pub fn resolve_actor(
                     workload: Ref::new(&w.href),
                 })
                 .ok_or_else(|| {
+                    let mut known: Vec<String> =
+                        workloads.iter().map(|w| w.display_name()).collect();
+                    known.sort_by_key(|n| n.to_ascii_lowercase());
+                    known.dedup();
                     PceError::Invalid(format!(
-                        "unknown workload {name:?} (hostname, name or href id)"
+                        "unknown workload {name:?} (hostname, name or href id); known: {}",
+                        preview(&known)
                     ))
                 })
         }
@@ -217,9 +237,14 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("unknown IP list"));
+        assert!(err.contains("Corp"), "lists known IP lists: {err}");
         let err = resolve_actor(&FilterExpr::parse("wl:ghost").unwrap(), &idx, &wls)
             .unwrap_err()
             .to_string();
         assert!(err.contains("unknown workload"));
+        assert!(
+            err.contains("host-2.example"),
+            "lists known workloads: {err}"
+        );
     }
 }

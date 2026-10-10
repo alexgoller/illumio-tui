@@ -98,6 +98,13 @@ impl NameIndex {
             .map(String::as_str)
     }
 
+    /// IP list names, sorted case-insensitively.
+    pub fn ip_list_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.ip_lists.values().map(|l| l.name.clone()).collect();
+        names.sort_by_key(|n| n.to_ascii_lowercase());
+        names
+    }
+
     pub fn service(&self, href: &str) -> Option<&Service> {
         self.services.get(href)
     }
@@ -334,6 +341,10 @@ mod tests {
         assert_eq!(
             idx.ip_list_href("corp"),
             Some("/orgs/5/sec_policy/draft/ip_lists/21")
+        );
+        assert_eq!(
+            idx.ip_list_names(),
+            vec!["Any (0.0.0.0/0 and ::/0)", "Corp"]
         );
         assert_eq!(
             idx.service_name("/orgs/5/sec_policy/draft/services/31"),
