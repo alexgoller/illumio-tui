@@ -140,6 +140,22 @@ impl Pce {
             .await
     }
 
+    pub async fn workloads(
+        &self,
+        filter: &models::WorkloadFilter,
+        mode: CacheMode,
+    ) -> Result<Cached<Vec<models::Workload>>> {
+        let path = self.client.org_path("workloads");
+        self.cached_list(
+            "workloads",
+            &path,
+            filter.to_query(),
+            self.ttls.workloads,
+            mode,
+        )
+        .await
+    }
+
     /// Fetches a JSON array with an explicit `max_results`, caching under
     /// `key` (plus the query string). `truncated` is set when the PCE reports
     /// more rows than it returned.

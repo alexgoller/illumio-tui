@@ -105,3 +105,45 @@ async fn object_lists_are_cached_separately() {
     assert!(p.services(CacheMode::Use).await.unwrap().hit);
     assert_eq!(p.stats().calls, 4);
 }
+
+#[tokio::test]
+async fn workloads_pass_filters_and_cache_per_filter() {
+    use pce::models::WorkloadFilter;
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .and(query_param("hostname", "host-1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/workloads.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let p = pce_for(&server);
+    let f = WorkloadFilter {
+        hostname: Some("host-1".into()),
+        ..Default::default()
+    };
+    assert_eq!(
+        p.workloads(&f, CacheMode::Use).await.unwrap().value.len(),
+        3
+    );
+    assert!(p.workloads(&f, CacheMode::Use).await.unwrap().hit);
+    assert_eq!(
+        p.workloads(&WorkloadFilter::default(), CacheMode::Use)
+            .await
+            .unwrap()
+            .value
+            .len(),
+        0
+    );
+    assert_eq!(p.stats().calls, 2);
+}
