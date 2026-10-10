@@ -1088,4 +1088,40 @@ mod workloads {
         );
         assert!(server.received_requests().await.unwrap().is_empty());
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn description_only_update_does_not_load_the_index() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/workloads/u1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(printer()))
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/api/v2/orgs/5/workloads/u1"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        writer(&server, state.path())
+            .args([
+                "workloads",
+                "update",
+                "/orgs/5/workloads/u1",
+                "--description",
+                "x",
+                "--yes",
+            ])
+            .assert()
+            .success();
+        assert!(
+            server
+                .received_requests()
+                .await
+                .unwrap()
+                .iter()
+                .all(|r| r.url.path() == "/api/v2/orgs/5/workloads/u1")
+        );
+    }
 }

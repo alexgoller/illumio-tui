@@ -233,7 +233,14 @@ async fn workload_update(ctx: &Context, a: &WorkloadUpdateArgs) -> Result<(), Cl
         remove_labels,
     };
     let href = workload_href(ctx, &guard, &a.target).await?;
-    let idx = ctx.pce.name_index(ctx.cache_mode).await?;
+    // The index (four reads) is only needed when labels change.
+    let touches_labels =
+        a.set_labels.is_some() || !a.add_labels.is_empty() || !a.remove_labels.is_empty();
+    let idx = if touches_labels {
+        ctx.pce.name_index(ctx.cache_mode).await?
+    } else {
+        std::sync::Arc::new(pce::NameIndex::default())
+    };
     let plan = ctx
         .pce
         .writer(&guard)
