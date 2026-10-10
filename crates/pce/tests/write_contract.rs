@@ -555,3 +555,118 @@ async fn post_without_href_does_not_refetch_the_collection() {
         w.warnings
     );
 }
+
+mod labels {
+    use super::*;
+    use pce::write::LabelDraft;
+
+    #[test]
+    fn label_draft_validates_and_trims() {
+        let d = LabelDraft::new(" app ", " web ");
+        assert_eq!(d.display(), "app=web");
+        assert!(d.validate().is_ok());
+        let errs = LabelDraft::new("", " ").validate().unwrap_err();
+        assert_eq!(errs.len(), 2, "{errs:?}");
+    }
+
+    #[tokio::test]
+    async fn create_plan_without_if_missing_makes_no_request() {
+        let server = MockServer::start().await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let plan = pce
+            .writer(&guard)
+            .plan_create_label(&LabelDraft::new("app", "web"), IfMissing::Create)
+            .await
+            .unwrap();
+        let req = plan.request().expect("send plan").clone();
+        assert_eq!(req.method, WriteMethod::Post);
+        assert_eq!(req.path, "/orgs/5/labels");
+        assert_eq!(req.body, Some(json!({"key": "app", "value": "web"})));
+        assert_eq!(req.summary, "create label app=web");
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn if_missing_bypasses_the_cache_and_skips_an_exact_match() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/labels"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                {"href": "/orgs/5/labels/1", "key": "app", "value": "web"},
+                {"href": "/orgs/5/labels/2", "key": "app", "value": "webshop"}
+            ])))
+            .expect(3)
+            .mount(&server)
+            .await;
+        let pce = pce_for(&server);
+        pce.labels(CacheMode::Use).await.unwrap(); // warm: the writer must not use this
+        let guard = guard_with(MemoryAudit::new());
+        let plan = pce
+            .writer(&guard)
+            .plan_create_label(&LabelDraft::new("app", "web"), IfMissing::SkipExisting)
+            .await
+            .unwrap();
+        match plan {
+            Plan::Noop { existing_href, .. } => assert_eq!(existing_href, "/orgs/5/labels/1"),
+            other => panic!("expected Noop, got {other:?}"),
+        }
+        // "web" is a substring of "webshop": only the exact match counts.
+        let plan = pce
+            .writer(&guard)
+            .plan_create_label(&LabelDraft::new("app", "we"), IfMissing::SkipExisting)
+            .await
+            .unwrap();
+        assert!(plan.request().is_some());
+    }
+
+    #[tokio::test]
+    async fn if_missing_ignores_deleted_labels() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/labels"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                {"href": "/orgs/5/labels/1", "key": "app", "value": "web", "deleted": true}
+            ])))
+            .mount(&server)
+            .await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let plan = pce
+            .writer(&guard)
+            .plan_create_label(&LabelDraft::new("app", "web"), IfMissing::SkipExisting)
+            .await
+            .unwrap();
+        assert!(
+            plan.request().is_some(),
+            "a deleted label does not count as existing"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_and_delete_plans() {
+        let server = MockServer::start().await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let w = pce.writer(&guard);
+        let up = w.plan_update_label("/orgs/5/labels/9", "prod").unwrap();
+        let req = up.request().unwrap();
+        assert_eq!(req.method, WriteMethod::Put);
+        assert_eq!(req.path, "/orgs/5/labels/9");
+        assert_eq!(req.body, Some(json!({"value": "prod"})));
+        let del = w.plan_delete_label("/orgs/5/labels/9").unwrap();
+        let req = del.request().unwrap();
+        assert_eq!(req.method, WriteMethod::Delete);
+        assert_eq!(req.body, None);
+        assert_eq!(req.summary, "delete label /orgs/5/labels/9");
+        assert!(matches!(
+            w.plan_delete_label("/orgs/5/sec_policy/draft/ip_lists/1")
+                .unwrap_err(),
+            WriteError::Invalid(_)
+        ));
+        assert!(matches!(
+            w.plan_update_label("/orgs/5/labels/9", " ").unwrap_err(),
+            WriteError::Invalid(_)
+        ));
+    }
+}

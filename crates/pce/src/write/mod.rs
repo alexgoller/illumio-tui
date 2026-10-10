@@ -5,6 +5,7 @@
 //! through [`crate::Pce::writer`] with a [`WriteGuard`].
 pub mod audit;
 pub mod guard;
+pub mod labels;
 pub mod specs;
 
 use crate::client::WriteMethod;
@@ -15,6 +16,7 @@ use serde_json::Value;
 
 pub use audit::{AuditEntry, AuditSink, JsonlAudit, MemoryAudit, NullAudit};
 pub use guard::{WriteContext, WriteGuard, WriteRefused};
+pub use labels::LabelDraft;
 pub use specs::{InterfaceSpec, IpRangeSpec, PortSpec};
 
 /// What kind of object a plan touches; decides the cache prefix and whether
@@ -175,6 +177,18 @@ pub fn draft_href(href: &str) -> Result<String, WriteError> {
         )));
     }
     Ok(href.to_string())
+}
+
+/// An href of the expected kind (`labels`, `ip_lists`, `services`,
+/// `workloads`), rewritten to draft where that applies.
+pub fn checked_href(href: &str, segment: &str) -> Result<String, WriteError> {
+    let href = href.trim().trim_end_matches('/');
+    if !href.starts_with("/orgs/") || !href.contains(&format!("/{segment}/")) {
+        return Err(WriteError::invalid(format!(
+            "{href:?} is not a {segment} href (expected /orgs/<org>/.../{segment}/<id>)"
+        )));
+    }
+    draft_href(href)
 }
 
 /// A value counts as "present" for `dropped_fields` when it is not null,
