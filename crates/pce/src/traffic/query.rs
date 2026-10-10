@@ -171,6 +171,12 @@ impl TrafficQueryBuilder {
                 format_timestamp(self.end)
             )));
         }
+        if self.start > Timestamp::now() {
+            return Err(PceError::Invalid(format!(
+                "start ({}) is in the future",
+                format_timestamp(self.start)
+            )));
+        }
         if self.max_results == 0 {
             return Err(PceError::Invalid("max_results must be at least 1".into()));
         }
@@ -283,6 +289,17 @@ mod tests {
                 .max_results(0)
                 .build();
         assert!(matches!(r, Err(crate::PceError::Invalid(_))));
+    }
+
+    #[test]
+    fn future_start_is_rejected() {
+        let start = Timestamp::now().checked_add(Span::new().hours(24)).unwrap();
+        let end = start.checked_add(Span::new().hours(1)).unwrap();
+        let r = TrafficQueryBuilder::between(start, end).build();
+        assert!(
+            matches!(r, Err(crate::PceError::Invalid(ref m)) if m.contains("in the future")),
+            "{r:?}"
+        );
     }
 
     #[test]
