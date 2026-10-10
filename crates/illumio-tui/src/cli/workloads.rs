@@ -3,7 +3,7 @@
 use super::context::{Context, cache_label};
 use super::error::CliError;
 use super::output::TableRows;
-use super::write::{self, WriteFlags, is_href, parse_kv, resolve_labels, run_plan};
+use super::write::{self, WriteFlags, is_href, label_in, parse_kv, resolve_labels, run_plan};
 use clap::{Args, Subcommand};
 use pce::PceError;
 use pce::models::{VenHealth, Workload, WorkloadFilter};
@@ -193,18 +193,6 @@ async fn workload_update(ctx: &Context, a: &WorkloadUpdateArgs) -> Result<(), Cl
             }),
         })
         .collect::<Result<Vec<_>, _>>()?;
-    // `--set-labels ""` clears every label: clap yields `Some(vec![""])`.
-    let set_labels = match &a.set_labels {
-        Some(specs) => {
-            let specs: Vec<String> = specs
-                .iter()
-                .filter(|s| !s.trim().is_empty())
-                .cloned()
-                .collect();
-            Some(resolve_labels(ctx, &specs).await?)
-        }
-        None => None,
-    };
     // Nothing to change: refuse before any lookup or label resolution.
     let nothing = WorkloadPatch {
         name: a.name.clone(),
@@ -222,6 +210,30 @@ async fn workload_update(ctx: &Context, a: &WorkloadUpdateArgs) -> Result<(), Cl
             "nothing to change; pass --name, --hostname, --description, --add-ip, --remove-ip, --set-labels, --add-label or --remove-label".into(),
         ));
     }
+    // One labels list (one GET), only when labels change: it resolves the
+    // specs and supplies keys for the workload's current labels.
+    let touches_labels =
+        a.set_labels.is_some() || !a.add_labels.is_empty() || !a.remove_labels.is_empty();
+    let labels = if touches_labels {
+        ctx.pce.labels(ctx.cache_mode).await?.value
+    } else {
+        Vec::new()
+    };
+    let resolve = |specs: &[String]| -> Result<Vec<String>, CliError> {
+        specs.iter().map(|s| label_in(&labels, s)).collect()
+    };
+    // `--set-labels ""` clears every label: clap yields `Some(vec![""])`.
+    let set_labels = match &a.set_labels {
+        Some(specs) => {
+            let specs: Vec<String> = specs
+                .iter()
+                .filter(|s| !s.trim().is_empty())
+                .cloned()
+                .collect();
+            Some(resolve(&specs)?)
+        }
+        None => None,
+    };
     let patch = WorkloadPatch {
         name: a.name.clone(),
         hostname: a.hostname.clone(),
@@ -229,18 +241,11 @@ async fn workload_update(ctx: &Context, a: &WorkloadUpdateArgs) -> Result<(), Cl
         add_addresses: a.add_ips.clone(),
         remove_addresses: a.remove_ips.clone(),
         set_labels,
-        add_labels: resolve_labels(ctx, &a.add_labels).await?,
+        add_labels: resolve(&a.add_labels)?,
         remove_labels,
     };
     let href = workload_href(ctx, &guard, &a.target).await?;
-    // The index (four reads) is only needed when labels change.
-    let touches_labels =
-        a.set_labels.is_some() || !a.add_labels.is_empty() || !a.remove_labels.is_empty();
-    let idx = if touches_labels {
-        ctx.pce.name_index(ctx.cache_mode).await?
-    } else {
-        std::sync::Arc::new(pce::NameIndex::default())
-    };
+    let idx = pce::NameIndex::new(&labels, &[], &[], &[]);
     let plan = ctx
         .pce
         .writer(&guard)

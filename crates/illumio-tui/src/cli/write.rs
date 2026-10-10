@@ -6,6 +6,7 @@ use super::context::Context;
 use super::error::CliError;
 use super::output::{TableRows, WriteMeta};
 use clap::Args;
+use pce::models::Label;
 use pce::write::{
     JsonlAudit, Outcome, Plan, WriteContext, WriteError, WriteGuard, WriteRequest, Written,
 };
@@ -183,37 +184,91 @@ pub fn is_href(s: &str) -> bool {
     s.trim_start().starts_with("/orgs/")
 }
 
-/// An href as given, or `key=value` resolved exactly through the name index.
-pub async fn resolve_label(ctx: &Context, spec: &str) -> Result<String, CliError> {
+/// Up to five names that contain `needle` case-insensitively, for an
+/// error that found no exact match.
+fn similar<'a>(needle: &str, names: impl Iterator<Item = &'a str>) -> Vec<String> {
+    let needle = needle.to_lowercase();
+    let mut out: Vec<String> = names
+        .filter(|n| n.to_lowercase().contains(&needle))
+        .map(str::to_string)
+        .collect();
+    out.sort();
+    out.dedup();
+    out.truncate(5);
+    out
+}
+
+fn with_similar(msg: String, similar: &[String]) -> String {
+    if similar.is_empty() {
+        msg
+    } else {
+        format!("{msg}; similar: {}", similar.join(", "))
+    }
+}
+
+/// An href as given, or `key=value` matched exactly against `labels`
+/// (deleted labels excluded).
+pub fn label_in(labels: &[Label], spec: &str) -> Result<String, CliError> {
     if is_href(spec) {
         return Ok(spec.trim().to_string());
     }
     let (k, v) = parse_kv(spec)?;
-    let idx = ctx.pce.name_index(ctx.cache_mode).await?;
-    idx.label_href(&k, &v).map(str::to_string).ok_or_else(|| {
-        let known = idx.values_for_key(&k);
-        CliError::Args(if known.is_empty() {
-            format!("unknown label {k}={v}; no labels have key {k}")
-        } else {
-            format!(
-                "unknown label {k}={v}; known values for {k}: {}",
-                known.join(", ")
-            )
-        })
-    })
-}
-
-pub async fn resolve_labels(ctx: &Context, specs: &[String]) -> Result<Vec<String>, CliError> {
-    let mut out = Vec::with_capacity(specs.len());
-    for s in specs {
-        out.push(resolve_label(ctx, s).await?);
+    let live = || labels.iter().filter(|l| !l.is_deleted() && l.key == k);
+    if let Some(l) = live().find(|l| l.value == v) {
+        return Ok(l.href.clone());
     }
-    Ok(out)
+    let mut known: Vec<&str> = live().map(|l| l.value.as_str()).collect();
+    known.sort_unstable();
+    known.dedup();
+    let msg = if known.is_empty() {
+        format!("unknown label {k}={v}; no labels have key {k}")
+    } else {
+        format!(
+            "unknown label {k}={v}; known values for {k}: {}",
+            known.join(", ")
+        )
+    };
+    Err(CliError::Args(with_similar(
+        msg,
+        &similar(&v, known.into_iter()),
+    )))
 }
 
-fn pick_one(kind: &str, name: &str, hrefs: Vec<&str>) -> Result<String, CliError> {
+/// Resolves every spec against one labels list, loaded (one GET) only when
+/// a spec is not an href.
+pub async fn resolve_labels(ctx: &Context, specs: &[String]) -> Result<Vec<String>, CliError> {
+    let labels = if specs.iter().all(|s| is_href(s)) {
+        Vec::new()
+    } else {
+        ctx.pce.labels(ctx.cache_mode).await?.value
+    };
+    specs.iter().map(|s| label_in(&labels, s)).collect()
+}
+
+pub async fn resolve_label(ctx: &Context, spec: &str) -> Result<String, CliError> {
+    let mut hrefs = resolve_labels(ctx, &[spec.to_string()]).await?;
+    Ok(hrefs.remove(0))
+}
+
+/// Exactly one live object named `name` (case-sensitive); draft objects
+/// pending deletion do not count. None or several is an args error listing
+/// candidates.
+fn pick_one<'a>(
+    kind: &str,
+    name: &str,
+    live: impl Iterator<Item = (&'a str, &'a str)> + Clone,
+) -> Result<String, CliError> {
+    let mut hrefs: Vec<&str> = live
+        .clone()
+        .filter(|(n, _)| *n == name)
+        .map(|(_, h)| h)
+        .collect();
+    hrefs.sort_unstable();
     match hrefs.len() {
-        0 => Err(CliError::Args(format!("no {kind} named {name:?}"))),
+        0 => Err(CliError::Args(with_similar(
+            format!("no {kind} named {name:?}"),
+            &similar(name, live.map(|(n, _)| n)),
+        ))),
         1 => Ok(hrefs[0].to_string()),
         _ => Err(CliError::Args(format!(
             "{name:?} names several {kind}s: {}; use the href",
@@ -222,30 +277,38 @@ fn pick_one(kind: &str, name: &str, hrefs: Vec<&str>) -> Result<String, CliError
     }
 }
 
+fn not_pending_delete(update_type: Option<&str>) -> bool {
+    update_type != Some("delete")
+}
+
 pub async fn resolve_ip_list(ctx: &Context, name: &str) -> Result<String, CliError> {
     if is_href(name) {
         return Ok(name.trim().to_string());
     }
-    let idx = ctx.pce.name_index(ctx.cache_mode).await?;
-    let hrefs: Vec<&str> = idx
-        .ip_lists_named(name.trim())
-        .iter()
-        .map(|l| l.href.as_str())
-        .collect();
-    pick_one("IP list", name.trim(), hrefs)
+    let lists = ctx.pce.ip_lists(ctx.cache_mode).await?.value;
+    pick_one(
+        "IP list",
+        name.trim(),
+        lists
+            .iter()
+            .filter(|l| not_pending_delete(l.update_type.as_deref()))
+            .map(|l| (l.name.as_str(), l.href.as_str())),
+    )
 }
 
 pub async fn resolve_service(ctx: &Context, name: &str) -> Result<String, CliError> {
     if is_href(name) {
         return Ok(name.trim().to_string());
     }
-    let idx = ctx.pce.name_index(ctx.cache_mode).await?;
-    let hrefs: Vec<&str> = idx
-        .services_named(name.trim())
-        .iter()
-        .map(|s| s.href.as_str())
-        .collect();
-    pick_one("service", name.trim(), hrefs)
+    let services = ctx.pce.services(ctx.cache_mode).await?.value;
+    pick_one(
+        "service",
+        name.trim(),
+        services
+            .iter()
+            .filter(|s| not_pending_delete(s.update_type.as_deref()))
+            .map(|s| (s.name.as_str(), s.href.as_str())),
+    )
 }
 
 #[cfg(test)]
@@ -265,6 +328,46 @@ mod tests {
         assert!(parse_kv("app=").is_err());
         assert!(is_href("/orgs/5/labels/1"));
         assert!(!is_href("app=web"));
+    }
+
+    #[test]
+    fn zero_matches_list_similar_names() {
+        let live = [
+            ("Corp-DMZ", "/a"),
+            ("corp", "/b"),
+            ("Other", "/c"),
+            ("Corp", "/d"),
+        ];
+        let err = pick_one("IP list", "Corporate", live.iter().copied()).unwrap_err();
+        assert_eq!(err.to_string(), r#"no IP list named "Corporate""#);
+        let err = pick_one("IP list", "CORP-", live.iter().copied()).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            r#"no IP list named "CORP-"; similar: Corp-DMZ"#
+        );
+        let err = pick_one("IP list", "Cor", live.iter().copied()).unwrap_err();
+        assert!(
+            err.to_string().ends_with("similar: Corp, Corp-DMZ, corp"),
+            "{err}"
+        );
+        assert_eq!(
+            pick_one("IP list", "Corp", live.iter().copied()).unwrap(),
+            "/d"
+        );
+        let many: Vec<(String, String)> = (0..8)
+            .map(|i| (format!("web{i}"), format!("/{i}")))
+            .collect();
+        let err = pick_one(
+            "service",
+            "we",
+            many.iter().map(|(n, h)| (n.as_str(), h.as_str())),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .ends_with("similar: web0, web1, web2, web3, web4"),
+            "at most five: {err}"
+        );
     }
 
     #[test]

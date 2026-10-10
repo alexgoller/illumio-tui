@@ -83,6 +83,17 @@ pub async fn mount_index(server: &MockServer, labels: Value, ip_lists: Value, se
     }
 }
 
+/// How many requests went to `method path`.
+pub async fn count(server: &MockServer, m: &str, p: &str) -> usize {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.method.as_str() == m && r.url.path() == p)
+        .count()
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn health_reports_the_writes_setting() {
     let server = MockServer::start().await;
@@ -637,6 +648,108 @@ mod iplists {
         );
         assert!(server.received_requests().await.unwrap().is_empty());
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn update_by_name_loads_only_the_ip_list_collection_once() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_index(&server, json!([]), json!([corp()]), json!([])).await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/sec_policy/draft/ip_lists/3"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(corp()))
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/api/v2/orgs/5/sec_policy/draft/ip_lists/3"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        writer(&server, state.path())
+            .args([
+                "--no-cache",
+                "iplists",
+                "update",
+                "Corp",
+                "--add-fqdn",
+                "db.corp.example",
+                "--yes",
+            ])
+            .assert()
+            .success();
+        let reqs = server.received_requests().await.unwrap();
+        let seen: Vec<String> = reqs
+            .iter()
+            .map(|r| format!("{} {}", r.method, r.url.path()))
+            .collect();
+        assert_eq!(
+            seen,
+            vec![
+                "GET /api/v2/orgs/5/sec_policy/draft/ip_lists",
+                "GET /api/v2/orgs/5/sec_policy/draft/ip_lists/3",
+                "PUT /api/v2/orgs/5/sec_policy/draft/ip_lists/3",
+                "GET /api/v2/orgs/5/sec_policy/draft/ip_lists/3",
+            ],
+            "one collection GET, the href fetch, the PUT and the re-fetch"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_pending_delete_does_not_count_as_existing() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        let mut gone = corp();
+        gone["update_type"] = json!("delete");
+        mount_index(&server, json!([]), json!([gone]), json!([])).await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "iplists",
+                    "add",
+                    "Corp",
+                    "--range",
+                    "10.0.0.0/8",
+                    "--if-missing",
+                    "--dry-run",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["method"], "POST", "{out}");
+        let a = writer(&server, state.path())
+            .args(["iplists", "delete", "Corp", "--yes"])
+            .assert()
+            .code(2);
+        let msg = stderr_json(&a)["error"]["message"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(msg.contains("no IP list named \"Corp\""), "{msg}");
+        assert!(
+            server
+                .received_requests()
+                .await
+                .unwrap()
+                .iter()
+                .all(|r| r.method.as_str() == "GET"),
+            "nothing written"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_unknown_name_lists_similar_names() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_index(&server, json!([]), json!([corp()]), json!([])).await;
+        let a = writer(&server, state.path())
+            .args(["iplists", "delete", "corp", "--yes"])
+            .assert()
+            .code(2);
+        assert_eq!(
+            stderr_json(&a)["error"]["message"],
+            "no IP list named \"corp\"; similar: Corp"
+        );
+    }
 }
 
 mod services {
@@ -1086,6 +1199,49 @@ mod workloads {
                 .contains("nothing to change")
         );
         assert!(server.received_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn set_labels_loads_the_labels_list_once_and_nothing_else() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_index(&server, labels(), json!([]), json!([])).await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/workloads/u1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(printer()))
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/api/v2/orgs/5/workloads/u1"))
+            .and(body_json(json!({
+                "labels": [{"href": "/orgs/5/labels/1"}, {"href": "/orgs/5/labels/2"}]
+            })))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        writer(&server, state.path())
+            .args([
+                "--no-cache",
+                "workloads",
+                "update",
+                "/orgs/5/workloads/u1",
+                "--set-labels",
+                "app=print,env=lab",
+                "--yes",
+            ])
+            .assert()
+            .success();
+        assert_eq!(count(&server, "GET", "/api/v2/orgs/5/labels").await, 1);
+        assert_eq!(
+            count(&server, "GET", "/api/v2/orgs/5/workloads/u1").await,
+            2
+        );
+        assert_eq!(
+            server.received_requests().await.unwrap().len(),
+            4,
+            "labels GET, workload GET, PUT, re-fetch"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
