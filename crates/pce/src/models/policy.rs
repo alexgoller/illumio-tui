@@ -1,0 +1,248 @@
+//! Rulesets, allow rules, deny rules, and pending provisioning changes.
+use super::common::Ref;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PolicyScope {
+    Draft,
+    Active,
+}
+
+impl PolicyScope {
+    pub fn segment(self) -> &'static str {
+        match self {
+            PolicyScope::Draft => "draft",
+            PolicyScope::Active => "active",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "draft" => Some(PolicyScope::Draft),
+            "active" => Some(PolicyScope::Active),
+            _ => None,
+        }
+    }
+}
+
+/// One side of a rule or one element of a scope. Exactly one of the
+/// optional fields is set, or `actors == "ams"` for all workloads.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Actor {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actors: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<Ref>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label_group: Option<Ref>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workload: Option<Ref>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub virtual_service: Option<Ref>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub virtual_server: Option<Ref>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ip_list: Option<Ref>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exclusion: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum IngressService {
+    Ref(Ref),
+    Port {
+        port: u16,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to_port: Option<u16>,
+        proto: i64,
+    },
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ResolveLabelsAs {
+    #[serde(default)]
+    pub providers: Vec<String>,
+    #[serde(default)]
+    pub consumers: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Rule {
+    pub href: String,
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub providers: Vec<Actor>,
+    #[serde(default)]
+    pub consumers: Vec<Actor>,
+    #[serde(default)]
+    pub ingress_services: Vec<IngressService>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolve_labels_as: Option<ResolveLabelsAs>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unscoped_consumers: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sec_connect: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stateless: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine_auth: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_type: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DenyRule {
+    pub href: String,
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub providers: Vec<Actor>,
+    #[serde(default)]
+    pub consumers: Vec<Actor>,
+    #[serde(default)]
+    pub ingress_services: Vec<IngressService>,
+    #[serde(rename = "override", default)]
+    pub override_: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_type: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RuleSet {
+    pub href: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub scopes: Vec<Vec<Actor>>,
+    #[serde(default)]
+    pub rules: Vec<Rule>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PendingChange {
+    pub href: String,
+    pub change_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub object_type: String,
+}
+
+/// `GET /sec_policy/pending` is either a list of `{href, change_type, name}`
+/// or a map of object type to such lists (with `update_type`). Both become
+/// one flat list.
+pub fn parse_pending(v: Value) -> Vec<PendingChange> {
+    fn item(v: &Value) -> Option<PendingChange> {
+        let href = v.get("href")?.as_str()?.to_string();
+        let change_type = v
+            .get("change_type")
+            .or_else(|| v.get("update_type"))
+            .and_then(Value::as_str)
+            .unwrap_or("update")
+            .to_string();
+        let name = v.get("name").and_then(Value::as_str).map(str::to_string);
+        let object_type = Ref::new(&href).object_type().to_string();
+        Some(PendingChange {
+            href,
+            change_type,
+            name,
+            object_type,
+        })
+    }
+    match v {
+        Value::Array(items) => items.iter().filter_map(item).collect(),
+        Value::Object(map) => map
+            .values()
+            .filter_map(Value::as_array)
+            .flatten()
+            .filter_map(item)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rule_sets_fixture_parses() {
+        let rs: Vec<RuleSet> =
+            serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
+        assert_eq!(rs.len(), 2);
+        assert_eq!(rs[0].rules.len(), 2);
+        assert_eq!(rs[0].scopes[0].len(), 2);
+        assert_eq!(
+            rs[0].rules[0].ingress_services[0],
+            IngressService::Ref(Ref::new("/orgs/5/sec_policy/draft/services/31"))
+        );
+        assert_eq!(
+            rs[0].rules[1].ingress_services[1],
+            IngressService::Port {
+                port: 8000,
+                to_port: Some(8099),
+                proto: 6
+            }
+        );
+        assert_eq!(rs[0].rules[1].unscoped_consumers, Some(true));
+        assert_eq!(rs[1].rules[0].providers[0].actors.as_deref(), Some("ams"));
+        assert_eq!(rs[1].update_type.as_deref(), Some("create"));
+    }
+
+    #[test]
+    fn deny_rules_parse_override_flag() {
+        let dr: Vec<DenyRule> =
+            serde_json::from_str(include_str!("../../../../fixtures/deny_rules.json")).unwrap();
+        assert!(!dr[0].override_);
+        assert!(dr[1].override_);
+        let back = serde_json::to_value(&dr[1]).unwrap();
+        assert_eq!(back["override"], true);
+    }
+
+    #[test]
+    fn pending_parses_both_shapes() {
+        let list: serde_json::Value =
+            serde_json::from_str(include_str!("../../../../fixtures/pending_list.json")).unwrap();
+        let dict: serde_json::Value =
+            serde_json::from_str(include_str!("../../../../fixtures/pending_dict.json")).unwrap();
+        let a = parse_pending(list);
+        let b = parse_pending(dict);
+        assert_eq!(a.len(), 2);
+        assert_eq!(a[0].object_type, "rule_sets");
+        assert_eq!(a[0].change_type, "create");
+        assert_eq!(a[1].name.as_deref(), Some("Corp"));
+        assert_eq!(
+            b.len(),
+            a.len(),
+            "dict shape yields the same changes (order may differ)"
+        );
+        for change in &a {
+            assert!(b.contains(change), "{change:?} missing from dict parse");
+        }
+    }
+
+    #[test]
+    fn scope_segments() {
+        assert_eq!(PolicyScope::Draft.segment(), "draft");
+        assert_eq!(PolicyScope::parse("ACTIVE"), Some(PolicyScope::Active));
+        assert_eq!(PolicyScope::parse("x"), None);
+    }
+}

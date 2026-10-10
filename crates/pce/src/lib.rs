@@ -21,7 +21,10 @@ pub mod resolve;
 use std::sync::Arc;
 use std::time::Duration;
 
-pub use resolve::{NameIndex, ResolvedLabel};
+pub use resolve::{
+    NameIndex, ResolvedLabel, RuleKind, RuleSetView, RuleView, describe_actor,
+    describe_ingress_service,
+};
 
 pub use auth::Credentials;
 pub use cache::TtlCache;
@@ -175,6 +178,58 @@ impl Pce {
             mode,
         )
         .await
+    }
+
+    pub async fn rule_sets(
+        &self,
+        scope: models::PolicyScope,
+        mode: CacheMode,
+    ) -> Result<Cached<Vec<models::RuleSet>>> {
+        let path = self
+            .client
+            .org_path(&format!("sec_policy/{}/rule_sets", scope.segment()));
+        let key = format!("policy:{}:rule_sets", scope.segment());
+        self.cached_list(&key, &path, vec![], self.ttls.policy, mode)
+            .await
+    }
+
+    /// Deny rules live on a per-ruleset endpoint that the OpenAPI spec omits.
+    pub async fn deny_rules(
+        &self,
+        ruleset_href: &str,
+        mode: CacheMode,
+    ) -> Result<Cached<Vec<models::DenyRule>>> {
+        let path = format!("{}/deny_rules", ruleset_href.trim_end_matches('/'));
+        let key = format!("policy:deny:{ruleset_href}");
+        self.cached_list(&key, &path, vec![], self.ttls.policy, mode)
+            .await
+    }
+
+    pub async fn pending_changes(
+        &self,
+        mode: CacheMode,
+    ) -> Result<Cached<Vec<models::PendingChange>>> {
+        let key = "policy:pending";
+        if mode == CacheMode::Use
+            && let Some((value, age)) = self.cache.get::<Vec<models::PendingChange>>(key)
+        {
+            return Ok(Cached {
+                value,
+                age,
+                hit: true,
+                truncated: false,
+            });
+        }
+        let path = self.client.org_path("sec_policy/pending");
+        let raw = self.client.get::<serde_json::Value>(&path, &[]).await?.body;
+        let value = models::parse_pending(raw);
+        self.cache.insert(key, value.clone(), self.ttls.policy);
+        Ok(Cached {
+            value,
+            age: Duration::ZERO,
+            hit: false,
+            truncated: false,
+        })
     }
 
     /// Fetches a JSON array with an explicit `max_results`, caching under

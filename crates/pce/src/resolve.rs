@@ -129,6 +129,158 @@ impl NameIndex {
     }
 }
 
+use crate::models::{Actor, DenyRule, IngressService, Rule, RuleSet};
+
+/// `role=web`, `ipl:Corp`, `group:All prod envs`, `wl:<id>`, `All workloads`.
+pub fn describe_actor(a: &Actor, idx: &NameIndex) -> String {
+    let excl = if a.exclusion.unwrap_or(false) {
+        "!"
+    } else {
+        ""
+    };
+    let body = if a.actors.as_deref() == Some("ams") {
+        "All workloads".to_string()
+    } else if let Some(l) = &a.label {
+        idx.label_text(&l.href)
+    } else if let Some(g) = &a.label_group {
+        format!("group:{}", idx.label_group_name(&g.href).unwrap_or(&g.href))
+    } else if let Some(i) = &a.ip_list {
+        format!("ipl:{}", idx.ip_list_name(&i.href).unwrap_or(&i.href))
+    } else if let Some(w) = &a.workload {
+        format!("wl:{}", w.id())
+    } else if let Some(v) = &a.virtual_service {
+        format!("vs:{}", v.id())
+    } else if let Some(v) = &a.virtual_server {
+        format!("vsrv:{}", v.id())
+    } else {
+        "?".to_string()
+    };
+    format!("{excl}{body}")
+}
+
+pub fn describe_ingress_service(s: &IngressService, idx: &NameIndex) -> String {
+    match s {
+        IngressService::Ref(r) => idx.service_name(&r.href).unwrap_or(&r.href).to_string(),
+        IngressService::Port {
+            port,
+            to_port,
+            proto,
+        } => match to_port {
+            Some(t) if t != port => format!("{port}-{t}/{}", crate::models::proto_name(*proto)),
+            _ => format!("{port}/{}", crate::models::proto_name(*proto)),
+        },
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleKind {
+    Allow,
+    Deny,
+    OverrideDeny,
+}
+
+/// A rule with every href turned into a name. What the CLI prints and the
+/// TUI lists.
+#[derive(Debug, Clone, Serialize)]
+pub struct RuleView {
+    pub href: String,
+    pub kind: RuleKind,
+    pub enabled: bool,
+    pub description: Option<String>,
+    pub consumers: Vec<String>,
+    pub providers: Vec<String>,
+    pub services: Vec<String>,
+    pub unscoped_consumers: bool,
+    pub update_type: Option<String>,
+}
+
+impl RuleView {
+    pub fn from_rule(r: &Rule, idx: &NameIndex) -> Self {
+        Self {
+            href: r.href.clone(),
+            kind: RuleKind::Allow,
+            enabled: r.enabled,
+            description: r.description.clone(),
+            consumers: r.consumers.iter().map(|a| describe_actor(a, idx)).collect(),
+            providers: r.providers.iter().map(|a| describe_actor(a, idx)).collect(),
+            services: r
+                .ingress_services
+                .iter()
+                .map(|s| describe_ingress_service(s, idx))
+                .collect(),
+            unscoped_consumers: r.unscoped_consumers.unwrap_or(false),
+            update_type: r.update_type.clone(),
+        }
+    }
+
+    pub fn from_deny(d: &DenyRule, idx: &NameIndex) -> Self {
+        Self {
+            href: d.href.clone(),
+            kind: if d.override_ {
+                RuleKind::OverrideDeny
+            } else {
+                RuleKind::Deny
+            },
+            enabled: d.enabled,
+            description: d.description.clone(),
+            consumers: d.consumers.iter().map(|a| describe_actor(a, idx)).collect(),
+            providers: d.providers.iter().map(|a| describe_actor(a, idx)).collect(),
+            services: d
+                .ingress_services
+                .iter()
+                .map(|s| describe_ingress_service(s, idx))
+                .collect(),
+            unscoped_consumers: false,
+            update_type: d.update_type.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RuleSetView {
+    pub href: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub enabled: bool,
+    /// One string per scope, `app=shop & env=prod`; `All` for an empty scope.
+    pub scopes: Vec<String>,
+    pub rule_count: usize,
+    pub update_type: Option<String>,
+}
+
+impl RuleSetView {
+    pub fn from_rule_set(rs: &RuleSet, idx: &NameIndex) -> Self {
+        let scopes = if rs.scopes.is_empty() {
+            vec!["All".to_string()]
+        } else {
+            rs.scopes
+                .iter()
+                .map(|scope| {
+                    if scope.is_empty() {
+                        "All".to_string()
+                    } else {
+                        scope
+                            .iter()
+                            .map(|a| describe_actor(a, idx))
+                            .collect::<Vec<_>>()
+                            .join(" & ")
+                    }
+                })
+                .collect()
+        };
+        Self {
+            href: rs.href.clone(),
+            name: rs.name.clone(),
+            description: rs.description.clone(),
+            enabled: rs.enabled,
+            scopes,
+            rule_count: rs.rules.len(),
+            update_type: rs.update_type.clone(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,5 +355,37 @@ mod tests {
             .map(|l| format!("{}={}", l.key, l.value))
             .collect();
         assert_eq!(text, vec!["?=/orgs/5/labels/77", "env=prod", "role=web"]);
+    }
+
+    #[test]
+    fn rule_views_render_names() {
+        use crate::models::{DenyRule, RuleSet};
+        let idx = index();
+        let rs: Vec<RuleSet> =
+            serde_json::from_str(include_str!("../../../fixtures/rule_sets.json")).unwrap();
+        let v = RuleView::from_rule(&rs[0].rules[1], &idx);
+        assert_eq!(v.consumers, vec!["ipl:Corp"]);
+        assert_eq!(v.providers, vec!["role=web"]);
+        assert_eq!(v.services, vec!["443/tcp", "8000-8099/tcp"]);
+        assert_eq!(v.kind, RuleKind::Allow);
+        assert!(v.unscoped_consumers);
+        let v3 = RuleView::from_rule(&rs[1].rules[0], &idx);
+        assert_eq!(v3.providers, vec!["All workloads"]);
+        assert_eq!(v3.consumers, vec!["group:All prod envs"]);
+        assert_eq!(v3.services, vec!["All Services"]);
+        let dr: Vec<DenyRule> =
+            serde_json::from_str(include_str!("../../../fixtures/deny_rules.json")).unwrap();
+        assert_eq!(
+            RuleView::from_deny(&dr[1], &idx).kind,
+            RuleKind::OverrideDeny
+        );
+        assert_eq!(
+            RuleView::from_deny(&dr[0], &idx).consumers,
+            vec!["ipl:Any (0.0.0.0/0 and ::/0)"]
+        );
+        let set = RuleSetView::from_rule_set(&rs[0], &idx);
+        assert_eq!(set.scopes, vec!["app=shop & env=prod"]);
+        assert_eq!(set.rule_count, 2);
+        assert_eq!(RuleSetView::from_rule_set(&rs[1], &idx).scopes, vec!["All"]);
     }
 }

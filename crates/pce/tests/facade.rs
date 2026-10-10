@@ -187,3 +187,83 @@ async fn workloads_pass_filters_and_cache_per_filter() {
     );
     assert_eq!(p.stats().calls, 2);
 }
+
+#[tokio::test]
+async fn policy_reads_use_scope_and_cache() {
+    use pce::models::PolicyScope;
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/sec_policy/draft/rule_sets"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/rule_sets.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/sec_policy/active/rule_sets"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/api/v2/orgs/5/sec_policy/draft/rule_sets/100/deny_rules",
+        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/deny_rules.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/sec_policy/pending"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/pending_dict.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let p = pce_for(&server);
+    assert_eq!(
+        p.rule_sets(PolicyScope::Draft, CacheMode::Use)
+            .await
+            .unwrap()
+            .value
+            .len(),
+        2
+    );
+    assert_eq!(
+        p.rule_sets(PolicyScope::Active, CacheMode::Use)
+            .await
+            .unwrap()
+            .value
+            .len(),
+        0
+    );
+    assert!(
+        p.rule_sets(PolicyScope::Draft, CacheMode::Use)
+            .await
+            .unwrap()
+            .hit
+    );
+    assert_eq!(
+        p.deny_rules("/orgs/5/sec_policy/draft/rule_sets/100", CacheMode::Use)
+            .await
+            .unwrap()
+            .value
+            .len(),
+        2
+    );
+    assert_eq!(
+        p.pending_changes(CacheMode::Use).await.unwrap().value.len(),
+        2
+    );
+    assert_eq!(p.stats().calls, 4);
+}

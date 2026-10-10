@@ -1,0 +1,4 @@
+[
+  {"href":"/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/7","enabled":true,"description":"block telnet","providers":[{"actors":"ams"}],"consumers":[{"ip_list":{"href":"/orgs/5/sec_policy/draft/ip_lists/20"}}],"ingress_services":[{"port":23,"proto":6}],"override":false,"update_type":null},
+  {"href":"/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8","enabled":true,"providers":[{"label":{"href":"/orgs/5/labels/2"}}],"consumers":[{"actors":"ams"}],"ingress_services":[{"port":22,"proto":6}],"override":true}
+]

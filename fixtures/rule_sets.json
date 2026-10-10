@@ -1,0 +1,21 @@
+[
+  {"href":"/orgs/5/sec_policy/draft/rule_sets/100","name":"Shop-Prod","description":"Ringfence","enabled":true,
+   "scopes":[[{"label":{"href":"/orgs/5/labels/3"}},{"label":{"href":"/orgs/5/labels/4"}}]],
+   "update_type":null,"created_at":"2025-01-01T00:00:00Z","updated_at":"2025-06-01T00:00:00Z",
+   "rules":[
+     {"href":"/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1","enabled":true,"description":"web to db",
+      "providers":[{"label":{"href":"/orgs/5/labels/2"}}],"consumers":[{"label":{"href":"/orgs/5/labels/1"}}],
+      "ingress_services":[{"href":"/orgs/5/sec_policy/draft/services/31"}],
+      "resolve_labels_as":{"providers":["workloads"],"consumers":["workloads"]},
+      "unscoped_consumers":false,"sec_connect":false,"stateless":false,"machine_auth":false,"network_type":"brn","update_type":null},
+     {"href":"/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/2","enabled":true,"description":"corp to web",
+      "providers":[{"label":{"href":"/orgs/5/labels/1"}}],"consumers":[{"ip_list":{"href":"/orgs/5/sec_policy/draft/ip_lists/21"}}],
+      "ingress_services":[{"port":443,"proto":6},{"port":8000,"to_port":8099,"proto":6}],
+      "resolve_labels_as":{"providers":["workloads"],"consumers":["workloads"]},"unscoped_consumers":true,"update_type":"update"}
+   ]},
+  {"href":"/orgs/5/sec_policy/draft/rule_sets/101","name":"Global-Infra","enabled":false,"scopes":[[]],
+   "rules":[{"href":"/orgs/5/sec_policy/draft/rule_sets/101/sec_rules/3","enabled":true,
+             "providers":[{"actors":"ams"}],"consumers":[{"label_group":{"href":"/orgs/5/sec_policy/draft/label_groups/10"}}],
+             "ingress_services":[{"href":"/orgs/5/sec_policy/draft/services/30"}],"update_type":"create"}],
+   "update_type":"create"}
+]
