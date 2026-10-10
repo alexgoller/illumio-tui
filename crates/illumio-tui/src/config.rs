@@ -18,7 +18,7 @@ pub struct ConfigFile {
     pub profiles: BTreeMap<String, Profile>,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Default, Clone, Serialize, Deserialize)]
 pub struct Profile {
     pub host: Option<String>,
     pub port: Option<u16>,
@@ -31,6 +31,27 @@ pub struct Profile {
     pub api_secret_cmd: Option<String>,
     #[serde(default)]
     pub limits: Limits,
+}
+
+/// Manual `Debug` so a profile never prints its plaintext secret, even
+/// through `{:?}` in a log line or an error message.
+impl std::fmt::Debug for Profile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Profile")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("org_id", &self.org_id)
+            .field("scheme", &self.scheme)
+            .field("tls_verify", &self.tls_verify)
+            .field("api_key", &self.api_key)
+            .field(
+                "api_secret",
+                &self.api_secret.as_ref().map(|_| "<redacted>"),
+            )
+            .field("api_secret_cmd", &self.api_secret_cmd)
+            .field("limits", &self.limits)
+            .finish()
+    }
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -149,26 +170,35 @@ pub fn resolve(
     overrides: &Overrides,
     env: &HashMap<String, String>,
 ) -> Result<ResolvedConfig, ConfigError> {
-    let profile_name = overrides
+    let env_str = |k: &str| {
+        env.get(k)
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    };
+
+    // `default_profile` in the file is as much an explicit request as
+    // `--profile` or `ILLUMIO_PROFILE`: naming an unknown profile through any
+    // of the three is always an error. Only the implicit fallback name
+    // "default" (nothing named a profile at all) may resolve to
+    // `Profile::default()` when no such profile is configured.
+    let explicit_profile_name = overrides
         .profile
         .clone()
-        .or_else(|| env.get("ILLUMIO_PROFILE").cloned())
-        .or_else(|| file.default_profile.clone())
-        .unwrap_or_else(|| "default".to_string());
+        .or_else(|| env_str("ILLUMIO_PROFILE"))
+        .or_else(|| file.default_profile.clone());
+    let (profile_name, is_explicit) = match explicit_profile_name {
+        Some(name) => (name, true),
+        None => ("default".to_string(), false),
+    };
     let profile = match file.profiles.get(&profile_name) {
         Some(p) => p.clone(),
-        None if overrides.profile.is_some() || env.contains_key("ILLUMIO_PROFILE") => {
+        None if is_explicit => {
             return Err(ConfigError::Message(format!(
                 "profile {profile_name:?} not found in config; known: {}",
                 file.profiles.keys().cloned().collect::<Vec<_>>().join(", ")
             )));
         }
         None => Profile::default(),
-    };
-    let env_str = |k: &str| {
-        env.get(k)
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
     };
 
     let host = overrides
@@ -181,22 +211,26 @@ pub fn resolve(
                 "no PCE host: pass --host, set PCE_HOST, or add host to the profile".into(),
             )
         })?;
-    let port = match overrides
-        .port
-        .or_else(|| env_str("PCE_PORT").and_then(|v| v.parse().ok()))
-    {
-        Some(p) => p,
-        None => profile.port.unwrap_or(443),
+    let port = if let Some(p) = overrides.port {
+        p
+    } else if let Some(raw) = env_str("PCE_PORT") {
+        raw.parse::<u16>()
+            .map_err(|_| ConfigError::Message(format!("PCE_PORT is not a number: {raw:?}")))?
+    } else {
+        profile.port.unwrap_or(443)
     };
-    let org_id = overrides
-        .org_id
-        .or_else(|| env_str("PCE_ORG_ID").and_then(|v| v.parse().ok()))
-        .or(profile.org_id)
-        .ok_or_else(|| {
+    let org_id = if let Some(o) = overrides.org_id {
+        o
+    } else if let Some(raw) = env_str("PCE_ORG_ID") {
+        raw.parse::<u64>()
+            .map_err(|_| ConfigError::Message(format!("PCE_ORG_ID is not a number: {raw:?}")))?
+    } else {
+        profile.org_id.ok_or_else(|| {
             ConfigError::Message(
                 "no org id: pass --org-id, set PCE_ORG_ID, or add org_id to the profile".into(),
             )
-        })?;
+        })?
+    };
     let scheme = env_str("PCE_SCHEME")
         .or_else(|| profile.scheme.clone())
         .unwrap_or_else(|| "https".into());
@@ -418,6 +452,70 @@ api_secret_cmd = "echo   from-command  "
         f.profiles.get_mut("cmd").unwrap().api_secret_cmd = Some("true".into());
         let err = resolve(&f, &o, &env(&[])).unwrap_err().to_string();
         assert!(err.contains("empty"), "{err}");
+    }
+
+    #[test]
+    fn default_profile_pointing_at_missing_profile_is_an_error() {
+        let f = ConfigFile {
+            default_profile: Some("ghost".into()),
+            profiles: BTreeMap::new(),
+        };
+        let err = resolve(&f, &Overrides::default(), &env(&[]))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("profile \"ghost\""), "{err}");
+    }
+
+    #[test]
+    fn profile_debug_redacts_secret() {
+        let p = Profile {
+            api_key: Some("k".into()),
+            api_secret: Some("very-secret".into()),
+            ..Default::default()
+        };
+        let out = format!("{p:?}");
+        assert!(out.contains('k'), "{out}");
+        assert!(out.contains("<redacted>"), "{out}");
+        assert!(!out.contains("very-secret"), "{out}");
+    }
+
+    #[test]
+    fn empty_illumio_profile_env_falls_through_to_default() {
+        let e = env(&[
+            ("ILLUMIO_PROFILE", ""),
+            ("PCE_HOST", "h"),
+            ("PCE_ORG_ID", "3"),
+            ("API_KEY", "k"),
+            ("API_SECRET", "s"),
+        ]);
+        let c = resolve(&ConfigFile::default(), &Overrides::default(), &e).unwrap();
+        assert_eq!(c.profile_name, "default");
+    }
+
+    #[test]
+    fn non_numeric_port_and_org_id_name_the_env_var() {
+        let e = env(&[
+            ("PCE_HOST", "h"),
+            ("PCE_ORG_ID", "abc"),
+            ("API_KEY", "k"),
+            ("API_SECRET", "s"),
+        ]);
+        let err = resolve(&ConfigFile::default(), &Overrides::default(), &e)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("PCE_ORG_ID"), "{err}");
+
+        let e = env(&[
+            ("PCE_HOST", "h"),
+            ("PCE_ORG_ID", "3"),
+            ("PCE_PORT", "nope"),
+            ("API_KEY", "k"),
+            ("API_SECRET", "s"),
+        ]);
+        let err = resolve(&ConfigFile::default(), &Overrides::default(), &e)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("PCE_PORT"), "{err}");
     }
 
     #[test]
