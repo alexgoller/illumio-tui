@@ -2,7 +2,9 @@
 use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::ui::theme::Theme;
 use pce::StatsSnapshot;
-use std::time::Instant;
+use pce::traffic::ResolvedFlow;
+use std::time::{Duration, Instant};
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Screen {
@@ -109,15 +111,64 @@ pub enum PendingAction {
 }
 
 #[derive(Debug)]
+pub enum QueryState {
+    Idle,
+    Running {
+        seq: u64,
+        started: Instant,
+        status: String,
+        cancel: CancellationToken,
+    },
+    Failed(String),
+}
+
+#[derive(Debug)]
+pub struct TrafficData {
+    pub flows: Vec<ResolvedFlow>,
+    pub truncated: bool,
+    pub matches_count: Option<u64>,
+    pub elapsed: Duration,
+    pub cache_hit: bool,
+    pub fetched_at: Instant,
+    pub filter: TrafficFilter,
+}
+
+#[derive(Debug)]
 pub struct TrafficState {
     pub filter: TrafficFilter,
+    pub query: QueryState,
+    pub data: Option<TrafficData>,
+    pub seq: u64,
 }
 
 impl TrafficState {
     pub fn new(window: &str, max_results: u32) -> Self {
         Self {
             filter: TrafficFilter::defaults(window, max_results),
+            query: QueryState::Idle,
+            data: None,
+            seq: 0,
         }
+    }
+
+    pub fn is_running(&self) -> bool {
+        matches!(self.query, QueryState::Running { .. })
+    }
+
+    /// Cancels a running query (if any) and returns the next sequence number.
+    pub fn start_query(&mut self, now: Instant) -> (u64, CancellationToken) {
+        if let QueryState::Running { cancel, .. } = &self.query {
+            cancel.cancel();
+        }
+        self.seq += 1;
+        let cancel = CancellationToken::new();
+        self.query = QueryState::Running {
+            seq: self.seq,
+            started: now,
+            status: "submitting".into(),
+            cancel: cancel.clone(),
+        };
+        (self.seq, cancel)
     }
 }
 

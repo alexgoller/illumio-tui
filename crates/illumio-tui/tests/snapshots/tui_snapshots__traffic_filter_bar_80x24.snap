@@ -5,12 +5,12 @@ expression: out
  illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
   1 Traffic  │  2 Policy  │  3 Labels & objects  │  4 Workloads
 ╭ Filters ────────────────────────────────────────────── window 24h · cap 1000 ╮
-│window 24h  src app=shop,env=prod  dst *  svc 5432/tcp  decision all   [f] edi│
+│window 24h  src app=shop,env=prod  dst *  svc 5432/tcp  decision all          │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 
 
 
-╭ Flows ───────────────────────────────────────────────────────────────────────╮
+╭ Flows ─────────────────────────────────────────────── no query yet · press r ╮
 │                                                                              │
 │                                                                              │
 │                                                                              │

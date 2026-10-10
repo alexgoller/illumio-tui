@@ -132,3 +132,59 @@ async fn end_of_event_stream_ends_the_loop() {
     let model = run_loop(&mut rt, Box::pin(stream::empty()), &mut |_| {}).await;
     assert!(!model.quit);
 }
+
+#[tokio::test]
+async fn run_query_command_executes_against_the_pce_and_reports_flows() {
+    use illumio_tui::tui::filter::TrafficFilter;
+    use illumio_tui::tui::msg::Msg;
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    const QHREF: &str = "/orgs/5/traffic_flows/async_queries/q-1";
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/traffic_flows/async_queries"))
+        .respond_with(
+            ResponseTemplate::new(202).set_body_json(json!({"href": QHREF, "status": "queued"})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "completed", "result": {"href": format!("{QHREF}/download")}, "matches_count": 4})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}/download")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/traffic_flows.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .mount(&server)
+        .await;
+    let pce = pce_for(&server);
+    let mut m = model();
+    m.connection = Connection::Connected {
+        index: Some(pce.name_index(pce::CacheMode::Use).await.unwrap()),
+        index_age_secs: 0,
+    };
+    let (mut rt, tx) = Runtime::new(pce, m);
+    let mut f = TrafficFilter::defaults("1h", 50);
+    f.src = "app=shop".into();
+    tx.send(Msg::ApplyFilter(f)).unwrap();
+    let events = stream::once(async {
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
+    });
+    let model = run_loop(&mut rt, Box::pin(events), &mut |_| {}).await;
+    let data = model.traffic.data.as_ref().expect("query result");
+    assert_eq!(data.flows.len(), 4);
+    assert_eq!(data.flows[0].src.display_name(), "host-1.example");
+    assert!(!model.traffic.is_running());
+    assert_eq!(model.busy, 0);
+    assert!(
+        model.stats.calls >= 7,
+        "4 lists + POST + poll + download, got {}",
+        model.stats.calls
+    );
+}

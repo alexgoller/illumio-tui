@@ -1,7 +1,8 @@
 //! The Traffic screen. This task: layout and the filter bar. Tasks 7–9
 //! add the stats header, the three result views and the detail pane.
-use crate::tui::model::Model;
+use crate::tui::model::{Model, QueryState};
 use crate::tui::ui::widgets::panel::panel;
+use pce::models::PolicyDecision;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Style;
@@ -45,9 +46,27 @@ pub fn render(model: &Model, f: &mut Frame, body: Rect) {
     render_filter_bar(model, f, l.filter);
     let t = &model.theme;
     f.render_widget(
-        Paragraph::new("").block(panel("Flows", "", t, false)),
+        Paragraph::new("").block(panel("Flows", &flows_meta(model), t, false)),
         l.table,
     );
+}
+
+/// Query state for the Flows panel title: running, result count and age, or failure.
+fn flows_meta(model: &Model) -> String {
+    match &model.traffic.query {
+        QueryState::Running {
+            started, status, ..
+        } => format!("running {:.1}s · {status}", started.elapsed().as_secs_f64()),
+        QueryState::Failed(_) => "failed".into(),
+        QueryState::Idle => match &model.traffic.data {
+            Some(d) => format!(
+                "{} flows · {}s ago",
+                d.flows.len(),
+                d.fetched_at.elapsed().as_secs()
+            ),
+            None => "no query yet · press r".into(),
+        },
+    }
 }
 
 pub fn render_filter_bar(model: &Model, f: &mut Frame, area: Rect) {
@@ -62,7 +81,7 @@ pub fn render_filter_bar(model: &Model, f: &mut Frame, area: Rect) {
             s.trim().to_string()
         }
     };
-    let decision = if fl.decisions.len() == 3 {
+    let decision = if fl.decisions.len() == PolicyDecision::ALL.len() {
         "all".to_string()
     } else {
         fl.decisions
@@ -82,7 +101,6 @@ pub fn render_filter_bar(model: &Model, f: &mut Frame, area: Rect) {
         Span::styled(or(&fl.service), t.base()),
         Span::styled("  decision ", t.dim_style()),
         Span::styled(decision, t.base()),
-        Span::styled("   [f] edit  [r] run  [a] auto", t.dim_style()),
     ]);
     f.render_widget(Paragraph::new(line).block(block).style(t.base()), area);
 }

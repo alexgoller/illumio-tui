@@ -1,10 +1,14 @@
 //! Pure state transitions. Never performs I/O; returns `Cmd`s instead.
 use crate::tui::commands::{self, Command};
 use crate::tui::filter::{FilterEditor, TrafficFilter};
-use crate::tui::model::{Connection, Model, Overlay, PendingAction, Screen, StatusLine};
-use crate::tui::msg::{Cmd, Msg};
+use crate::tui::model::{
+    Connection, Model, Overlay, PendingAction, QueryState, Screen, StatusLine, TrafficData,
+};
+use crate::tui::msg::{Cmd, Msg, QueryOutcome};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use pce::CacheMode;
+use pce::traffic::QueryProgress;
+use std::time::Instant;
 
 pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
     match msg {
@@ -14,7 +18,12 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             model.size = (w, h);
             Vec::new()
         }
-        Msg::Tick(_) => Vec::new(),
+        Msg::Tick(now) => {
+            if model.traffic.is_running() {
+                refresh_running_status_at(model, now);
+            }
+            Vec::new()
+        }
         Msg::Focus(f) => {
             model.focused = f;
             Vec::new()
@@ -55,11 +64,105 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         }
         Msg::Command(c) => on_command(model, c),
         Msg::ApplyFilter(f) => {
-            model.traffic.filter = f;
-            model.status =
-                StatusLine::info(format!("filter set: {}", model.traffic.filter.summary()));
+            model.traffic.filter = f.clone();
+            start_query(model, f, CacheMode::Use)
+        }
+        Msg::RunNow => {
+            if model.traffic.is_running() {
+                model.status = StatusLine::info("query already running");
+                return Vec::new();
+            }
+            let f = model.traffic.filter.clone();
+            start_query(model, f, CacheMode::Bypass)
+        }
+        Msg::QueryProgress { seq, progress } => {
+            if let QueryState::Running {
+                seq: cur, status, ..
+            } = &mut model.traffic.query
+                && *cur == seq
+            {
+                *status = match progress {
+                    QueryProgress::Submitted { .. } => "submitted".into(),
+                    QueryProgress::Polling { status, .. } => format!("polling ({status})"),
+                    QueryProgress::Downloading => "downloading".into(),
+                    QueryProgress::Done { rows } => format!("done, {rows} rows"),
+                };
+                refresh_running_status(model);
+            }
             Vec::new()
         }
+        Msg::QueryDone { seq, result } => {
+            if model.traffic.seq != seq {
+                return Vec::new(); // a cancelled or superseded query
+            }
+            match result {
+                Ok(o) => {
+                    let QueryOutcome {
+                        flows,
+                        truncated,
+                        matches_count,
+                        elapsed,
+                        hit,
+                        filter,
+                    } = o;
+                    let n = flows.len();
+                    model.traffic.data = Some(TrafficData {
+                        flows,
+                        truncated,
+                        matches_count,
+                        elapsed,
+                        cache_hit: hit,
+                        fetched_at: Instant::now(),
+                        filter,
+                    });
+                    model.traffic.query = QueryState::Idle;
+                    model.status = if truncated {
+                        StatusLine::warn(format!(
+                            "{n} flows (truncated: the PCE matched {}; raise the cap or narrow the filter)",
+                            matches_count
+                                .map(|m| m.to_string())
+                                .unwrap_or_else(|| "more".into())
+                        ))
+                    } else {
+                        StatusLine::info(format!(
+                            "{n} flows in {:.1}s{}",
+                            elapsed.as_secs_f64(),
+                            if hit { " (cached)" } else { "" }
+                        ))
+                    };
+                }
+                Err(e) => {
+                    model.traffic.query = QueryState::Failed(e.clone());
+                    model.status = StatusLine::error(e);
+                }
+            }
+            Vec::new()
+        }
+    }
+}
+
+fn start_query(model: &mut Model, filter: TrafficFilter, mode: CacheMode) -> Vec<Cmd> {
+    let (seq, cancel) = model.traffic.start_query(Instant::now());
+    model.status = StatusLine::info("query running");
+    vec![Cmd::RunQuery {
+        seq,
+        filter,
+        mode,
+        cancel,
+    }]
+}
+
+fn refresh_running_status(model: &mut Model) {
+    refresh_running_status_at(model, Instant::now());
+}
+
+fn refresh_running_status_at(model: &mut Model, now: Instant) {
+    if let QueryState::Running {
+        started, status, ..
+    } = &model.traffic.query
+    {
+        let secs = now.saturating_duration_since(*started).as_secs_f64();
+        model.status = StatusLine::info(format!("query running {secs:.1}s · {status}"));
     }
 }
 
@@ -142,7 +245,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             Vec::new()
         }
         Overlay::Confirm { action, .. } => match k.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
                 model.overlay = Overlay::None;
                 match action {
                     PendingAction::RunQuery(f) => update(model, Msg::ApplyFilter(f)),
@@ -190,6 +293,7 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             model.overlay = Overlay::FilterEditor(FilterEditor::from_filter(&model.traffic.filter));
             Vec::new()
         }
+        KeyCode::Char('r') => update(model, Msg::RunNow),
         _ => Vec::new(),
     }
 }
@@ -418,8 +522,8 @@ mod tests {
         assert!(matches!(m.overlay, Overlay::None));
         assert_eq!(m.traffic.filter.src, "app=shop");
         assert!(
-            msgs.is_empty(),
-            "Task 6 turns the applied filter into Cmd::RunQuery; for now nothing is emitted"
+            matches!(msgs.as_slice(), [Cmd::RunQuery { .. }]),
+            "an applied filter runs the query"
         );
 
         // A big window asks for confirmation before anything happens.
@@ -496,5 +600,185 @@ mod tests {
         update(&mut m, Msg::Command(Command::Window("never".into())));
         assert_eq!(m.status.kind, StatusKind::Error);
         assert_eq!(m.traffic.filter.window, "2h");
+    }
+
+    fn running(m: &Model) -> bool {
+        m.traffic.is_running()
+    }
+
+    #[test]
+    fn apply_filter_runs_query_and_r_reruns_with_bypass() {
+        use crate::tui::filter::TrafficFilter;
+        let mut m = model_fixture();
+        let f = TrafficFilter::defaults("1h", 50);
+        let cmds = update(&mut m, Msg::ApplyFilter(f.clone()));
+        assert_eq!(cmds.len(), 1);
+        match &cmds[0] {
+            Cmd::RunQuery {
+                seq, filter, mode, ..
+            } => {
+                assert_eq!(*seq, 1);
+                assert_eq!(filter, &f);
+                assert_eq!(*mode, pce::CacheMode::Use);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(running(&m));
+        // r while running: no-op
+        let cmds = update(&mut m, key('r'));
+        assert!(cmds.is_empty());
+        assert!(
+            m.status.text.contains("already running"),
+            "{}",
+            m.status.text
+        );
+        // finish it
+        let outcome = crate::tui::msg::QueryOutcome {
+            flows: vec![],
+            truncated: false,
+            matches_count: Some(0),
+            elapsed: std::time::Duration::from_millis(5),
+            hit: false,
+            filter: f.clone(),
+        };
+        update(
+            &mut m,
+            Msg::QueryDone {
+                seq: 1,
+                result: Ok(outcome),
+            },
+        );
+        assert!(!running(&m));
+        assert!(m.traffic.data.is_some());
+        // r now reruns with Bypass and a new seq
+        let cmds = update(&mut m, key('r'));
+        match &cmds[0] {
+            Cmd::RunQuery { seq, mode, .. } => {
+                assert_eq!(*seq, 2);
+                assert_eq!(*mode, pce::CacheMode::Bypass);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_filter_cancels_running_query_and_ignores_its_late_result() {
+        use crate::tui::filter::TrafficFilter;
+        use crate::tui::model::QueryState;
+        let mut m = model_fixture();
+        update(&mut m, Msg::ApplyFilter(TrafficFilter::defaults("1h", 50)));
+        let first_token = match &m.traffic.query {
+            QueryState::Running { cancel, .. } => cancel.clone(),
+            other => panic!("{other:?}"),
+        };
+        let mut f2 = TrafficFilter::defaults("1h", 50);
+        f2.src = "app=shop".into();
+        let cmds = update(&mut m, Msg::ApplyFilter(f2));
+        assert!(first_token.is_cancelled(), "old query cancelled");
+        assert!(matches!(cmds[0], Cmd::RunQuery { seq: 2, .. }));
+        // The old query's late error must not disturb the new one.
+        update(
+            &mut m,
+            Msg::QueryDone {
+                seq: 1,
+                result: Err("cancelled".into()),
+            },
+        );
+        assert!(running(&m));
+        assert!(!matches!(m.traffic.query, QueryState::Failed(_)));
+        update(
+            &mut m,
+            Msg::QueryDone {
+                seq: 2,
+                result: Err("traffic query failed: boom".into()),
+            },
+        );
+        assert!(matches!(&m.traffic.query, QueryState::Failed(e) if e.contains("boom")));
+        assert_eq!(m.status.kind, StatusKind::Error);
+    }
+
+    #[test]
+    fn progress_updates_status_while_running() {
+        use crate::tui::filter::TrafficFilter;
+        use pce::traffic::QueryProgress;
+        let mut m = model_fixture();
+        update(&mut m, Msg::ApplyFilter(TrafficFilter::defaults("1h", 50)));
+        update(
+            &mut m,
+            Msg::QueryProgress {
+                seq: 1,
+                progress: QueryProgress::Polling {
+                    status: "working".into(),
+                    elapsed: std::time::Duration::from_secs(2),
+                },
+            },
+        );
+        assert!(m.status.text.contains("working"), "{}", m.status.text);
+        update(
+            &mut m,
+            Msg::QueryProgress {
+                seq: 7,
+                progress: QueryProgress::Downloading,
+            },
+        );
+        assert!(m.status.text.contains("working"), "stale seq ignored");
+    }
+
+    #[test]
+    fn truncated_result_warns() {
+        use crate::tui::filter::TrafficFilter;
+        let mut m = model_fixture();
+        let f = TrafficFilter::defaults("1h", 50);
+        update(&mut m, Msg::ApplyFilter(f.clone()));
+        let outcome = crate::tui::msg::QueryOutcome {
+            flows: vec![],
+            truncated: true,
+            matches_count: Some(900),
+            elapsed: std::time::Duration::from_secs(1),
+            hit: false,
+            filter: f,
+        };
+        update(
+            &mut m,
+            Msg::QueryDone {
+                seq: 1,
+                result: Ok(outcome),
+            },
+        );
+        assert_eq!(m.status.kind, StatusKind::Warn);
+        assert!(m.status.text.contains("truncated"), "{}", m.status.text);
+    }
+
+    #[test]
+    fn confirm_requires_y_and_enter_is_ignored() {
+        use crate::tui::model::Overlay;
+        let enter = || Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let mut m = model_fixture();
+        update(&mut m, key('f'));
+        for _ in 0..3 {
+            update(
+                &mut m,
+                Msg::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
+            );
+        }
+        for c in "30d".chars() {
+            update(&mut m, key(c));
+        }
+        assert!(update(&mut m, enter()).is_empty());
+        assert!(matches!(m.overlay, Overlay::Confirm { .. }));
+        let cmds = update(&mut m, enter());
+        assert!(cmds.is_empty(), "Enter must not confirm");
+        assert!(matches!(m.overlay, Overlay::Confirm { .. }));
+        let cmds = update(&mut m, key('y'));
+        assert!(matches!(m.overlay, Overlay::None));
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(
+            &cmds[0],
+            Cmd::RunQuery {
+                mode: pce::CacheMode::Use,
+                ..
+            }
+        ));
+        assert_eq!(m.traffic.filter.window, "30d");
     }
 }

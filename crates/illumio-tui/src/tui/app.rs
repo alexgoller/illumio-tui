@@ -4,14 +4,14 @@
 use crate::cli::error::CliError;
 use crate::cli::{Context, GlobalArgs};
 use crate::tui::model::{Model, ProfileInfo};
-use crate::tui::msg::{Cmd, Msg};
+use crate::tui::msg::{Cmd, Msg, QueryOutcome};
 use crate::tui::{update, view};
 use crossterm::event::{
     DisableFocusChange, DisableMouseCapture, EnableFocusChange, EnableMouseCapture, Event,
     EventStream,
 };
 use futures::{Stream, StreamExt};
-use pce::Pce;
+use pce::{CacheMode, Pce};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -57,6 +57,44 @@ impl Runtime {
                     let _ = tx.send(Msg::Stats(pce.stats()));
                 });
             }
+            Cmd::RunQuery {
+                seq,
+                filter,
+                mode,
+                cancel,
+            } => {
+                self.model.busy += 1;
+                let (pce, tx) = (self.pce.clone(), self.tx.clone());
+                tokio::spawn(async move {
+                    let (ptx, mut prx) = tokio::sync::mpsc::unbounded_channel();
+                    let forward_tx = tx.clone();
+                    let forward = tokio::spawn(async move {
+                        while let Some(p) = prx.recv().await {
+                            let _ = forward_tx.send(Msg::QueryProgress { seq, progress: p });
+                        }
+                    });
+                    let result = async {
+                        let query = filter.to_query(&pce, mode).await?;
+                        let cached = pce.traffic(&query, mode, &cancel, Some(&ptx)).await?;
+                        let idx = pce.name_index(CacheMode::Use).await?;
+                        let flows = pce::traffic::resolve_flows(&cached.value.flows, &idx);
+                        Ok::<_, pce::PceError>(QueryOutcome {
+                            flows,
+                            truncated: cached.value.truncated,
+                            matches_count: cached.value.matches_count,
+                            elapsed: cached.value.elapsed,
+                            hit: cached.hit,
+                            filter,
+                        })
+                    }
+                    .await
+                    .map_err(|e| e.to_string());
+                    drop(ptx);
+                    let _ = forward.await;
+                    let _ = tx.send(Msg::QueryDone { seq, result });
+                    let _ = tx.send(Msg::Stats(pce.stats()));
+                });
+            }
             Cmd::LoadIndex(mode) => {
                 self.model.busy += 1;
                 let (pce, tx) = (self.pce.clone(), self.tx.clone());
@@ -76,7 +114,11 @@ impl Runtime {
         // A task result always lowers `busy`; terminal events do not.
         let task_result = matches!(
             msg,
-            Msg::Connected | Msg::ConnectFailed(_) | Msg::IndexLoaded { .. } | Msg::IndexFailed(_)
+            Msg::Connected
+                | Msg::ConnectFailed(_)
+                | Msg::IndexLoaded { .. }
+                | Msg::IndexFailed(_)
+                | Msg::QueryDone { .. }
         );
         let cmds = update(&mut self.model, msg);
         if task_result {
