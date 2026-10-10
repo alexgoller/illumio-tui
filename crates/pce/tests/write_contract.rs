@@ -1736,6 +1736,34 @@ mod workloads {
         assert_eq!(first["friendly_name"], "lan");
     }
 
+    #[test]
+    fn adding_an_existing_address_with_another_prefix_replaces_the_prefix() {
+        let mut v = printer();
+        v["interfaces"] = json!([{"name": "lan0", "address": "10.0.0.50", "cidr_block": 24,
+            "default_gateway_address": "10.0.0.1"}]);
+        let current: pce::models::Workload = serde_json::from_value(v).unwrap();
+        let patch = WorkloadPatch {
+            add_addresses: vec!["10.0.0.50/16".into()],
+            ..WorkloadPatch::default()
+        };
+        let body = patch.apply(&current, &idx()).unwrap();
+        assert_eq!(
+            body["interfaces"],
+            json!([{"name": "lan0", "address": "10.0.0.50", "cidr_block": 16,
+                    "default_gateway_address": "10.0.0.1"}]),
+            "same interface, new prefix, name and extras kept"
+        );
+        for same in ["10.0.0.50/24", "10.0.0.50"] {
+            let patch = WorkloadPatch {
+                add_addresses: vec![same.into()],
+                ..WorkloadPatch::default()
+            };
+            let body = patch.apply(&current, &idx()).unwrap();
+            assert_eq!(body["interfaces"][0]["cidr_block"], 24, "{same}: no-op");
+            assert_eq!(body["interfaces"].as_array().unwrap().len(), 1, "{same}");
+        }
+    }
+
     #[tokio::test]
     async fn unknown_or_ven_backed_management_is_refused() {
         let server = MockServer::start().await;

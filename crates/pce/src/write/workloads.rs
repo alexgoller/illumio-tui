@@ -147,11 +147,16 @@ impl WorkloadPatch {
             }
             for a in &self.add_addresses {
                 match InterfaceSpec::parse(a, next_interface_name(&ifaces)) {
-                    Ok(spec) => {
-                        if !ifaces.iter().any(|i| i.address == spec.address) {
-                            ifaces.push(spec);
+                    // An existing address with another prefix keeps its
+                    // interface (name, extras) and takes the new prefix.
+                    Ok(spec) => match ifaces.iter_mut().find(|i| i.address == spec.address) {
+                        Some(existing) => {
+                            if spec.cidr_block.is_some() {
+                                existing.cidr_block = spec.cidr_block;
+                            }
                         }
-                    }
+                        None => ifaces.push(spec),
+                    },
                     Err(e) => errs.push(e),
                 }
             }

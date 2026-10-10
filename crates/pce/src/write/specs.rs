@@ -266,8 +266,18 @@ impl InterfaceSpec {
         }
     }
 
+    /// Extras the PCE reports but does not accept back (`network`,
+    /// `loopback`, `href`) and null extras are not sent.
     pub fn to_json(&self) -> Value {
-        let mut v = Value::Object(self.extra.clone());
+        let mut v = Value::Object(
+            self.extra
+                .iter()
+                .filter(|(k, v)| {
+                    !v.is_null() && !matches!(k.as_str(), "network" | "loopback" | "href")
+                })
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+        );
         v["address"] = json!(self.address);
         if let Some(c) = self.cidr_block {
             v["cidr_block"] = json!(c);
@@ -430,5 +440,29 @@ mod tests {
         });
         assert_eq!(from.to_json()["cidr_block"], 24);
         assert_eq!(from.to_json()["link_state"], "up");
+    }
+
+    #[test]
+    fn interface_extras_drop_read_only_and_null_fields() {
+        let mut extra = serde_json::Map::new();
+        for (k, v) in [
+            ("network", json!({"href": "/orgs/5/networks/1"})),
+            ("loopback", json!(false)),
+            ("href", json!("/orgs/5/workloads/u1/interfaces/eth0")),
+            ("default_gateway_address", json!(null)),
+            ("friendly_name", json!("lan")),
+        ] {
+            extra.insert(k.into(), v);
+        }
+        let i = InterfaceSpec {
+            name: "eth0".into(),
+            address: "10.0.0.5".into(),
+            cidr_block: Some(24),
+            extra,
+        };
+        assert_eq!(
+            i.to_json(),
+            json!({"name": "eth0", "address": "10.0.0.5", "cidr_block": 24, "friendly_name": "lan"})
+        );
     }
 }
