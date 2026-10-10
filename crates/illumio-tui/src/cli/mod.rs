@@ -61,6 +61,9 @@ pub struct GlobalArgs {
     /// Ignore cached responses
     #[arg(long, global = true)]
     pub no_cache: bool,
+    /// TUI colour theme: dark (default) or light (env: ILLUMIO_TUI_THEME)
+    #[arg(long, global = true, env = "ILLUMIO_TUI_THEME")]
+    pub theme: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]

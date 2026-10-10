@@ -28,6 +28,8 @@ dotenvy.workspace = true
 jiff.workspace = true
 humantime.workspace = true
 ratatui.workspace = true
+crossterm.workspace = true
+futures.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true
@@ -35,3 +37,4 @@ predicates.workspace = true
 tempfile.workspace = true
 wiremock.workspace = true
 url.workspace = true
+insta.workspace = true

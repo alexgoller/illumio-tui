@@ -30,6 +30,9 @@ wiremock = "0.6"
 assert_cmd = "2"
 predicates = "3"
 tempfile = "3"
+crossterm = { version = "0.29", features = ["event-stream"] }
+futures = "0.3"
+insta = "1"
 
 [profile.release]
 lto = "thin"
