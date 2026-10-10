@@ -6,6 +6,7 @@ pub mod health;
 pub mod objects;
 pub mod output;
 pub mod policy;
+pub mod profile;
 pub mod traffic;
 pub mod workloads;
 
@@ -80,9 +81,15 @@ pub enum Command {
     /// Explorer traffic queries
     #[command(subcommand)]
     Traffic(traffic::TrafficCmd),
+    /// Manage connection profiles
+    #[command(subcommand)]
+    Profile(profile::ProfileCmd),
 }
 
 pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
+    if let Command::Profile(p) = &command {
+        return profile::run(&global, p);
+    }
     let ctx = Context::new(&global)?;
     match command {
         Command::Health => health::run(&ctx).await,
@@ -93,5 +100,6 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
         Command::Workloads(a) => workloads::run(&ctx, &a).await,
         Command::Policy(p) => policy::run(&ctx, &p).await,
         Command::Traffic(t) => traffic::run(&ctx, &t).await,
+        Command::Profile(_) => unreachable!("handled above"),
     }
 }

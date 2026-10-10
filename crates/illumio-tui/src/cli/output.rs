@@ -12,6 +12,16 @@ pub enum OutputFormat {
     Table,
 }
 
+pub fn choose_format(json: bool, table: bool) -> OutputFormat {
+    if table {
+        OutputFormat::Table
+    } else if json || !std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+        OutputFormat::Json
+    } else {
+        OutputFormat::Table
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Window {
     pub start: String,

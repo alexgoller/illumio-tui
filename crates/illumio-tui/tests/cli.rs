@@ -637,3 +637,59 @@ async fn traffic_guards_exit_2() {
         .assert()
         .code(2);
 }
+
+#[test]
+fn profile_list_and_use_without_credentials() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = dir.path().join("config.toml");
+    std::fs::write(&cfg, "default_profile = \"a\"\n\n[profiles.a]\nhost = \"a.example\"\norg_id = 1\n\n[profiles.b]\nhost = \"b.example\"\norg_id = 2\n").unwrap();
+    let out = stdout_json(
+        Command::cargo_bin("illumio-tui")
+            .unwrap()
+            .env_clear()
+            .args(["--config", cfg.to_str().unwrap(), "profile", "list"])
+            .assert()
+            .success(),
+    );
+    let rows = out["data"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["name"], "a");
+    assert_eq!(rows[0]["is_default"], true);
+    assert_eq!(rows[1]["host"], "b.example");
+
+    let out = stdout_json(
+        Command::cargo_bin("illumio-tui")
+            .unwrap()
+            .env_clear()
+            .args(["--config", cfg.to_str().unwrap(), "profile", "use", "b"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"]["default_profile"], "b");
+    let text = std::fs::read_to_string(&cfg).unwrap();
+    assert!(text.contains("default_profile = \"b\""));
+    assert!(
+        text.contains("host = \"a.example\""),
+        "other profiles survive: {text}"
+    );
+
+    Command::cargo_bin("illumio-tui")
+        .unwrap()
+        .env_clear()
+        .args(["--config", cfg.to_str().unwrap(), "profile", "use", "zzz"])
+        .assert()
+        .code(2);
+    Command::cargo_bin("illumio-tui")
+        .unwrap()
+        .env_clear()
+        .args([
+            "--config",
+            cfg.to_str().unwrap(),
+            "profile",
+            "list",
+            "--table",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("b.example"));
+}

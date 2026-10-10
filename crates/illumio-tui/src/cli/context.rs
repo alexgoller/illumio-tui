@@ -7,7 +7,6 @@ use crate::config::{self, Overrides};
 use pce::{CacheMode, Pce, PceClient};
 use serde::Serialize;
 use std::collections::HashMap;
-use std::io::IsTerminal;
 use std::time::Instant;
 
 pub struct Context {
@@ -39,13 +38,7 @@ impl Context {
         };
         let resolved = config::resolve(&file, &overrides, &env)?;
         let pce = Pce::new(PceClient::new(resolved.client_config())?);
-        let format = if global.table {
-            OutputFormat::Table
-        } else if global.json || !std::io::stdout().is_terminal() {
-            OutputFormat::Json
-        } else {
-            OutputFormat::Table
-        };
+        let format = super::output::choose_format(global.json, global.table);
         let cache_mode = if global.no_cache {
             CacheMode::Bypass
         } else {
