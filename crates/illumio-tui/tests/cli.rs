@@ -165,6 +165,11 @@ async fn env_file_flag_supplies_credentials() {
 }
 
 async fn mount_objects(server: &MockServer) {
+    mount_objects_expecting(server, None).await;
+}
+
+/// The four object lists, each with an optional exact call count.
+async fn mount_objects_expecting(server: &MockServer, expect: Option<u64>) {
     for (p, body) in [
         (
             "/api/v2/orgs/5/labels",
@@ -183,15 +188,15 @@ async fn mount_objects(server: &MockServer) {
             include_str!("../../../fixtures/services.json"),
         ),
     ] {
-        Mock::given(method("GET"))
-            .and(path(p))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_string(body)
-                    .insert_header("Content-Type", "application/json"),
-            )
-            .mount(server)
-            .await;
+        let mock = Mock::given(method("GET")).and(path(p)).respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(body)
+                .insert_header("Content-Type", "application/json"),
+        );
+        match expect {
+            Some(n) => mock.expect(n).mount(server).await,
+            None => mock.mount(server).await,
+        }
     }
 }
 
@@ -599,17 +604,35 @@ async fn traffic_dry_run_prints_body_without_submitting() {
     assert_eq!(out["meta"]["cache"], "none");
 }
 
+/// Every mock answers but none may be called: the guards run offline.
+async fn mount_traffic_quiet(server: &MockServer) {
+    mount_objects_expecting(server, Some(0)).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .expect(0)
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/traffic_flows/async_queries"))
+        .respond_with(ResponseTemplate::new(202).set_body_json(json!({"href": QHREF})))
+        .expect(0)
+        .mount(server)
+        .await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn traffic_guards_exit_2() {
-    let server = MockServer::start().await;
-    mount_traffic(&server, 0).await;
-    let assert = cmd(&server)
+    // Window, order, decision and cap guards run before any request.
+    let quiet = MockServer::start().await;
+    mount_traffic_quiet(&quiet).await;
+    let assert = cmd(&quiet)
         .args(["traffic", "query", "--window", "30d"])
         .assert()
         .code(2);
     let err: Value = serde_json::from_slice(&assert.get_output().stderr).unwrap();
     assert!(err["error"]["message"].as_str().unwrap().contains("--yes"));
-    let assert = cmd(&server)
+    let assert = cmd(&quiet)
         .args([
             "traffic",
             "query",
@@ -622,20 +645,77 @@ async fn traffic_guards_exit_2() {
         .code(2);
     let err: Value = serde_json::from_slice(&assert.get_output().stderr).unwrap();
     assert!(err["error"]["message"].as_str().unwrap().contains("before"));
+    cmd(&quiet)
+        .args(["traffic", "query", "--decision", "maybe"])
+        .assert()
+        .code(2);
+    cmd(&quiet)
+        .args(["traffic", "query", "--max-results", "20000"])
+        .assert()
+        .code(2);
+    cmd(&quiet)
+        .args(["traffic", "query", "--window", "30d", "--src", "app=shop"])
+        .assert()
+        .code(2);
+    // A filter-less dry run needs nothing from the PCE either.
+    let out = stdout_json(
+        cmd(&quiet)
+            .args(["traffic", "query", "--dry-run"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"]["sources"]["include"], json!([[]]));
+    assert_eq!(out["meta"]["api_calls"], 0);
+
+    // An unknown label still needs the object lists to say what is known.
+    let server = MockServer::start().await;
+    mount_traffic(&server, 0).await;
     let assert = cmd(&server)
         .args(["traffic", "query", "--src", "app=nope"])
         .assert()
         .code(2);
     let err: Value = serde_json::from_slice(&assert.get_output().stderr).unwrap();
     assert!(err["error"]["message"].as_str().unwrap().contains("shop"));
-    cmd(&server)
-        .args(["traffic", "query", "--decision", "maybe"])
-        .assert()
-        .code(2);
-    cmd(&server)
-        .args(["traffic", "query", "--max-results", "20000"])
-        .assert()
-        .code(2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn no_cache_fetches_each_object_list_once() {
+    let server = MockServer::start().await;
+    mount_objects_expecting(&server, Some(1)).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .expect(0)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/traffic_flows/async_queries"))
+        .respond_with(ResponseTemplate::new(202).set_body_json(json!({"href": QHREF})))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "traffic",
+                "query",
+                "--no-cache",
+                "--dry-run",
+                "--src",
+                "app=shop",
+                "--dst",
+                "ip:10.0.0.5",
+                "--exclude-dst",
+                "ipl:corp",
+            ])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["meta"]["api_calls"], 4);
+    assert_eq!(
+        out["data"]["destinations"]["exclude"],
+        json!([{"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/21"}}])
+    );
 }
 
 #[test]

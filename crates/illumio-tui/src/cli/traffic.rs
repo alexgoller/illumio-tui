@@ -7,12 +7,16 @@ use super::output::{TableRows, Window};
 use clap::{Args, Subcommand};
 use jiff::Timestamp;
 use jiff::civil::Date;
-use pce::models::{PolicyDecision, ServiceMatch, TrafficQuery, proto_number};
+use pce::NameIndex;
+use pce::models::{
+    ActorMatch, PolicyDecision, ServiceMatch, TrafficQuery, WorkloadFilter, proto_number,
+};
 use pce::traffic::{
     BlockedGroup, FilterExpr, FlowGroup, ResolvedFlow, TrafficQueryBuilder, blocked_summary,
-    group_by_labels, parse_window, resolve_flows,
+    group_by_labels, parse_window, resolve_actor, resolve_flows,
 };
 use serde::Serialize;
+use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Subcommand, Debug)]
@@ -104,7 +108,18 @@ fn parse_groups(values: &[String]) -> Result<Vec<Vec<FilterExpr>>, CliError> {
         .collect()
 }
 
-pub async fn build_query(ctx: &Context, args: &QueryArgs) -> Result<TrafficQuery, CliError> {
+/// The query plus the name index when filter resolution already loaded it,
+/// so `query()` never fetches the object lists twice in one command.
+pub struct BuiltQuery {
+    pub query: TrafficQuery,
+    pub index: Option<Arc<NameIndex>>,
+}
+
+/// Builds the request body. Everything that can be checked offline (window,
+/// caps, the `--yes` guard, filter syntax) is checked before the first PCE
+/// request; the object lists are fetched once, and only when a filter names
+/// something that needs resolving.
+pub async fn build_query(ctx: &Context, args: &QueryArgs) -> Result<BuiltQuery, CliError> {
     let mut b = match (&args.from, &args.to) {
         (Some(f), Some(t)) => {
             TrafficQueryBuilder::between(parse_time(f, false)?, parse_time(t, true)?)
@@ -117,34 +132,6 @@ pub async fn build_query(ctx: &Context, args: &QueryArgs) -> Result<TrafficQuery
             TrafficQueryBuilder::last(parse_window(&w)?)?
         }
     };
-    let src = ctx
-        .pce
-        .resolve_filter_groups(&parse_groups(&args.src)?, ctx.cache_mode)
-        .await?;
-    let dst = ctx
-        .pce
-        .resolve_filter_groups(&parse_groups(&args.dst)?, ctx.cache_mode)
-        .await?;
-    let ex_src = ctx
-        .pce
-        .resolve_filter_groups(&parse_groups(&args.exclude_src)?, ctx.cache_mode)
-        .await?;
-    let ex_dst = ctx
-        .pce
-        .resolve_filter_groups(&parse_groups(&args.exclude_dst)?, ctx.cache_mode)
-        .await?;
-    for g in src {
-        b = b.source(g);
-    }
-    for g in dst {
-        b = b.destination(g);
-    }
-    for m in ex_src.into_iter().flatten() {
-        b = b.exclude_source(m);
-    }
-    for m in ex_dst.into_iter().flatten() {
-        b = b.exclude_destination(m);
-    }
     if args.port.is_some() || args.proto.is_some() || args.process.is_some() {
         let proto = match &args.proto {
             Some(p) => Some(
@@ -172,7 +159,70 @@ pub async fn build_query(ctx: &Context, args: &QueryArgs) -> Result<TrafficQuery
     b = b
         .decisions(decisions)
         .max_results(args.max_results.unwrap_or(ctx.config.traffic_max_results));
-    Ok(b.build()?)
+
+    // Cost guard on the bounds alone, before any request. A dry run only
+    // prints the body, so it never needs confirming.
+    let bounds = b.clone().build()?;
+    if !args.dry_run
+        && !args.yes
+        && let Some(reason) = bounds.needs_confirmation()
+    {
+        return Err(CliError::Args(format!(
+            "expensive query: {reason}; re-run with --yes to confirm"
+        )));
+    }
+
+    let src = parse_groups(&args.src)?;
+    let dst = parse_groups(&args.dst)?;
+    let ex_src = parse_groups(&args.exclude_src)?;
+    let ex_dst = parse_groups(&args.exclude_dst)?;
+    let all = || {
+        [&src, &dst, &ex_src, &ex_dst]
+            .into_iter()
+            .flatten()
+            .flatten()
+    };
+    if all().next().is_none() {
+        return Ok(BuiltQuery {
+            query: bounds,
+            index: None,
+        });
+    }
+    let idx = ctx.pce.name_index(ctx.cache_mode).await?;
+    let workloads = if all().any(FilterExpr::needs_workloads) {
+        ctx.pce
+            .workloads(&WorkloadFilter::default(), ctx.cache_mode)
+            .await?
+            .value
+    } else {
+        Vec::new()
+    };
+    let resolve = |groups: &[Vec<FilterExpr>]| -> Result<Vec<Vec<ActorMatch>>, CliError> {
+        groups
+            .iter()
+            .map(|g| {
+                g.iter()
+                    .map(|e| resolve_actor(e, &idx, &workloads).map_err(CliError::from))
+                    .collect()
+            })
+            .collect()
+    };
+    for g in resolve(&src)? {
+        b = b.source(g);
+    }
+    for g in resolve(&dst)? {
+        b = b.destination(g);
+    }
+    for m in resolve(&ex_src)?.into_iter().flatten() {
+        b = b.exclude_source(m);
+    }
+    for m in resolve(&ex_dst)?.into_iter().flatten() {
+        b = b.exclude_destination(m);
+    }
+    Ok(BuiltQuery {
+        query: b.build()?,
+        index: Some(idx),
+    })
 }
 
 #[derive(Debug, Serialize)]
@@ -294,7 +344,7 @@ pub async fn run(ctx: &Context, cmd: &TrafficCmd) -> Result<(), CliError> {
 }
 
 async fn query(ctx: &Context, args: &QueryArgs) -> Result<(), CliError> {
-    let q = build_query(ctx, args).await?;
+    let BuiltQuery { query: q, index } = build_query(ctx, args).await?;
     let window = Some(Window {
         start: q.start_date.clone(),
         end: q.end_date.clone(),
@@ -302,14 +352,10 @@ async fn query(ctx: &Context, args: &QueryArgs) -> Result<(), CliError> {
     if args.dry_run {
         return ctx.emit(&DryRun(q), "none", false, window);
     }
-    if let Some(reason) = q.needs_confirmation()
-        && !args.yes
-    {
-        return Err(CliError::Args(format!(
-            "expensive query: {reason}; re-run with --yes to confirm"
-        )));
-    }
-    let idx = ctx.pce.name_index(ctx.cache_mode).await?;
+    let idx = match index {
+        Some(idx) => idx,
+        None => ctx.pce.name_index(ctx.cache_mode).await?,
+    };
     let result = ctx
         .pce
         .traffic(&q, ctx.cache_mode, &CancellationToken::new(), None)
