@@ -4,3 +4,9 @@
 //! Everything that talks to a PCE goes through [`client::PceClient`], which
 //! throttles, counts and retries requests. Higher-level typed reads with
 //! caching live on the [`Pce`] facade (added in Task 5).
+
+pub mod auth;
+pub mod error;
+
+pub use auth::Credentials;
+pub use error::{PceError, Result};
