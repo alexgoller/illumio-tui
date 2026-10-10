@@ -7,6 +7,8 @@
 
 pub mod auth;
 pub mod error;
+pub mod limiter;
 
 pub use auth::Credentials;
 pub use error::{PceError, Result};
+pub use limiter::RateLimiter;
