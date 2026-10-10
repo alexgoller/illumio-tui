@@ -366,7 +366,7 @@ async fn workloads_with_label_filter_resolve_hrefs() {
             .assert()
             .success(),
     );
-    assert_eq!(out["data"].as_array().unwrap().len(), 3);
+    assert_eq!(out["data"].as_array().unwrap().len(), 4);
     assert_eq!(out["data"][0]["hostname"], "host-1.example");
     cmd(&server)
         .args([
@@ -399,11 +399,12 @@ async fn workloads_report_ven_health_and_unhealthy_filter() {
                 .set_body_string(include_str!("../../../fixtures/workloads.json"))
                 .insert_header("Content-Type", "application/json"),
         )
+        .expect(3)
         .mount(&server)
         .await;
     let out = stdout_json(cmd(&server).arg("workloads").assert().success());
     let rows = out["data"].as_array().unwrap();
-    assert_eq!(rows.len(), 3);
+    assert_eq!(rows.len(), 4);
     assert_eq!(rows[0]["sync_state"], "applied");
     assert!(
         matches!(
@@ -415,6 +416,13 @@ async fn workloads_report_ven_health_and_unhealthy_filter() {
     );
     assert_eq!(rows[1]["health"], "offline");
     assert_eq!(rows[2]["health"], "unmanaged");
+    assert!(
+        matches!(
+            rows[3]["health"].as_str(),
+            Some("warning") | Some("offline")
+        ),
+        "suspended VEN is never healthy; the fixture heartbeat ages with real time"
+    );
     assert!(
         rows[2]["heartbeat_age_secs"].is_null(),
         "unknown age is null, not 0"
@@ -435,6 +443,7 @@ async fn workloads_report_ven_health_and_unhealthy_filter() {
             .all(|r| r["health"] != "unmanaged" && r["health"] != "healthy")
     );
     assert!(rows.iter().any(|r| r["hostname"] == "host-2.example"));
+    assert!(rows.iter().any(|r| r["hostname"] == "host-4.example"));
     cmd(&server)
         .args(["workloads", "--table"])
         .assert()

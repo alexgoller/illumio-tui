@@ -226,6 +226,12 @@ impl Workload {
         if sync_stale {
             return VenHealth::Error;
         }
+        if a.status
+            .as_deref()
+            .is_some_and(|s| !s.eq_ignore_ascii_case("active"))
+        {
+            return VenHealth::Warning;
+        }
         if !a.warnings.is_empty() {
             return VenHealth::Warning;
         }
@@ -293,7 +299,7 @@ mod tests {
     #[test]
     fn parses_and_derives_display_fields() {
         let w = fixture();
-        assert_eq!(w.len(), 3);
+        assert_eq!(w.len(), 4);
         assert_eq!(w[0].display_name(), "host-1.example");
         assert_eq!(w[0].primary_ip(), Some("10.0.1.10"));
         assert_eq!(w[0].agent_status(), Some("active".into()));
@@ -379,6 +385,29 @@ mod tests {
             serde_json::to_string(&VenHealth::Offline).unwrap(),
             "\"offline\""
         );
+    }
+
+    #[test]
+    fn a_non_active_status_is_at_least_a_warning() {
+        let w = fixture();
+        let now: jiff::Timestamp = "2026-10-10T08:00:00Z".parse().unwrap();
+        // suspended, online, fresh heartbeat
+        assert_eq!(w[3].ven_health(now), VenHealth::Warning);
+        let mut upper = w[0].clone();
+        upper.agent.as_mut().unwrap()["status"]["status"] = "ACTIVE".into();
+        assert_eq!(
+            upper.ven_health(now),
+            VenHealth::Healthy,
+            "case-insensitive"
+        );
+        // Offline and Error still win over the status warning.
+        let mut off = w[3].clone();
+        off.online = Some(false);
+        assert_eq!(off.ven_health(now), VenHealth::Offline);
+        let mut err = w[3].clone();
+        err.agent.as_mut().unwrap()["status"]["agent_health_errors"]["errors"] =
+            serde_json::json!(["boom"]);
+        assert_eq!(err.ven_health(now), VenHealth::Error);
     }
 
     #[test]

@@ -2625,7 +2625,7 @@ mod tests {
         let wl: Vec<pce::models::Workload> =
             serde_json::from_str(include_str!("../../../../fixtures/workloads.json")).unwrap();
         update(&mut m, Msg::WorkloadsLoaded(Ok((wl, 0))));
-        assert_eq!(m.workloads.table.len(), 3);
+        assert_eq!(m.workloads.table.len(), 4);
         assert!(update(&mut m, key('4')).is_empty());
 
         let mut m = model_with_workloads();
@@ -2718,7 +2718,7 @@ mod tests {
         update(&mut m, Msg::WorkloadsLoaded(Err("boom".into())));
         assert!(!m.workloads.loading);
         assert_eq!(m.status.kind, StatusKind::Error);
-        assert_eq!(m.workloads.table.len(), 3, "rows kept on error");
+        assert_eq!(m.workloads.table.len(), 4, "rows kept on error");
     }
 
     #[test]
@@ -2811,16 +2811,16 @@ mod tests {
         use crate::tui::test_support::model_with_workloads;
         let mut m = model_with_workloads();
         update(&mut m, key('4'));
-        assert_eq!(m.workloads.table.len(), 3);
+        assert_eq!(m.workloads.table.len(), 4);
         update(&mut m, key('h'));
         assert!(m.workloads.unhealthy_only);
         assert_eq!(
             m.workloads.table.len(),
-            1,
-            "only host-2 (offline) is unhealthy at the fixed test clock"
+            2,
+            "host-2 (offline) and host-4 (suspended) are unhealthy at the fixed test clock"
         );
         update(&mut m, key('h'));
-        assert_eq!(m.workloads.table.len(), 3);
+        assert_eq!(m.workloads.table.len(), 4);
         update(&mut m, key('H'));
         assert_eq!(
             m.workloads
@@ -2841,6 +2841,7 @@ mod tests {
         use crate::tui::test_support::model_with_workloads;
         let mut m = model_with_workloads();
         update(&mut m, key('4'));
+        m.workloads.raw.remove(3);
         m.workloads.raw.remove(1);
         m.workloads.rebuild();
         update(&mut m, key('h'));

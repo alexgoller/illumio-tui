@@ -1316,7 +1316,7 @@ pub fn workload_columns() -> Vec<Column<WorkloadRowView>> {
         wide(text_col("online", 6, online_of, |r| {
             SortKey::Num(u64::from(r.workload.online.unwrap_or(false)))
         })),
-        wide(text_col("agent", 8, agent_of, |r| {
+        wide(text_col("agent", 9, agent_of, |r| {
             SortKey::Text(agent_of(r))
         })),
         text_col(

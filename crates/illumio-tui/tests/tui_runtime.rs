@@ -501,7 +501,7 @@ async fn opening_workloads_loads_the_list_once_and_reopening_costs_nothing() {
         model.stats.calls, 6,
         "health + four lists + one workloads list"
     );
-    assert_eq!(model.workloads.table.len(), 3);
+    assert_eq!(model.workloads.table.len(), 4);
     assert!(!model.workloads.loading);
     assert_eq!(model.busy, 0);
 }
@@ -513,7 +513,7 @@ async fn r_on_workloads_bypasses_the_cache_exactly_once() {
     mount_workloads(&server, 2).await; // open (Use) + r (Bypass)
     let model = objects_session(&server, &[(500, '4'), (400, 'r'), (400, 'q')]).await;
     assert_eq!(model.stats.calls, 7);
-    assert_eq!(model.workloads.table.len(), 3);
+    assert_eq!(model.workloads.table.len(), 4);
     assert_eq!(model.busy, 0);
 }
 

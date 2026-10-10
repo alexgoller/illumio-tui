@@ -174,7 +174,7 @@ async fn workloads_pass_filters_and_cache_per_filter() {
     };
     assert_eq!(
         p.workloads(&f, CacheMode::Use).await.unwrap().value.len(),
-        3
+        4
     );
     assert!(p.workloads(&f, CacheMode::Use).await.unwrap().hit);
     assert_eq!(
