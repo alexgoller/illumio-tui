@@ -7,6 +7,7 @@ pub mod audit;
 pub mod guard;
 pub mod ip_lists;
 pub mod labels;
+pub mod services;
 pub mod specs;
 
 use crate::client::WriteMethod;
@@ -19,6 +20,7 @@ pub use audit::{AuditEntry, AuditSink, JsonlAudit, MemoryAudit, NullAudit};
 pub use guard::{WriteContext, WriteGuard, WriteRefused};
 pub use ip_lists::{IpListDraft, IpListPatch};
 pub use labels::LabelDraft;
+pub use services::{ServiceDraft, ServicePatch};
 pub use specs::{InterfaceSpec, IpRangeSpec, PortSpec};
 
 /// What kind of object a plan touches; decides the cache prefix and whether

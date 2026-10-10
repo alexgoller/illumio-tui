@@ -935,3 +935,213 @@ mod ip_lists {
         assert_eq!(patch.apply(&current).unwrap().ranges.len(), 1);
     }
 }
+
+mod services {
+    use super::*;
+    use pce::write::{PortSpec, ServiceDraft, ServicePatch};
+
+    fn pg() -> Value {
+        json!({
+            "href": "/orgs/5/sec_policy/draft/services/7", "name": "PostgreSQL",
+            "service_ports": [{"port": 5432, "proto": 6}]
+        })
+    }
+
+    #[test]
+    fn draft_validates_and_sends_only_service_ports() {
+        let d = ServiceDraft {
+            name: "PG".into(),
+            description: None,
+            ports: vec![],
+        };
+        assert!(d.validate().is_err(), "a service needs a port");
+        let d = ServiceDraft {
+            name: "PG".into(),
+            description: Some("db".into()),
+            ports: vec![
+                PortSpec::parse("5432/tcp").unwrap(),
+                PortSpec::parse("icmp").unwrap(),
+            ],
+        };
+        assert!(d.validate().is_ok());
+    }
+
+    #[tokio::test]
+    async fn create_plan_body() {
+        let server = MockServer::start().await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let d = ServiceDraft {
+            name: "PostgreSQL".into(),
+            description: Some("db".into()),
+            ports: vec![
+                PortSpec::parse("5432/tcp").unwrap(),
+                PortSpec::parse("8000-8100/udp").unwrap(),
+            ],
+        };
+        let plan = pce
+            .writer(&guard)
+            .plan_create_service(&d, IfMissing::Create)
+            .await
+            .unwrap();
+        let req = plan.request().unwrap();
+        assert_eq!(req.method, WriteMethod::Post);
+        assert_eq!(req.path, "/orgs/5/sec_policy/draft/services");
+        let body = req.body.clone().unwrap();
+        assert_eq!(
+            body,
+            json!({"name": "PostgreSQL", "description": "db",
+                   "service_ports": [{"port": 5432, "proto": 6}, {"port": 8000, "to_port": 8100, "proto": 17}]})
+        );
+        assert!(
+            body.get("windows_services").is_none(),
+            "exactly one port list key"
+        );
+        assert_eq!(req.summary, "create service PostgreSQL");
+    }
+
+    #[tokio::test]
+    async fn if_missing_skips_exact_name() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/sec_policy/draft/services"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([pg()])))
+            .mount(&server)
+            .await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let d = |n: &str| ServiceDraft {
+            name: n.into(),
+            description: None,
+            ports: vec![PortSpec::parse("1/tcp").unwrap()],
+        };
+        assert!(matches!(
+            pce.writer(&guard)
+                .plan_create_service(&d("PostgreSQL"), IfMissing::SkipExisting)
+                .await
+                .unwrap(),
+            Plan::Noop { .. }
+        ));
+        assert!(
+            pce.writer(&guard)
+                .plan_create_service(&d("Postgres"), IfMissing::SkipExisting)
+                .await
+                .unwrap()
+                .request()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn patch_adds_and_removes_ports() {
+        let current: pce::models::Service = serde_json::from_value(pg()).unwrap();
+        let patch = ServicePatch {
+            name: Some("PG".into()),
+            description: None,
+            add_ports: vec![
+                PortSpec::parse("5433/tcp").unwrap(),
+                PortSpec::parse("5432/tcp").unwrap(),
+            ],
+            remove_ports: vec![],
+        };
+        let d = patch.apply(&current).unwrap();
+        assert_eq!(d.name, "PG");
+        assert_eq!(
+            d.ports.iter().map(PortSpec::display).collect::<Vec<_>>(),
+            vec!["5432/tcp", "5433/tcp"]
+        );
+        let patch = ServicePatch {
+            remove_ports: vec![PortSpec::parse("5432/tcp").unwrap()],
+            ..ServicePatch::default()
+        };
+        let errs = patch.apply(&current).unwrap_err();
+        assert!(
+            errs.iter().any(|e| e.contains("at least one")),
+            "removing the last port: {errs:?}"
+        );
+        let patch = ServicePatch {
+            remove_ports: vec![PortSpec::parse("99/tcp").unwrap()],
+            ..ServicePatch::default()
+        };
+        assert!(patch.apply(&current).unwrap_err()[0].contains("99/tcp"));
+    }
+
+    #[tokio::test]
+    async fn update_and_delete_plans() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/sec_policy/draft/services/7"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(pg()))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let patch = ServicePatch {
+            add_ports: vec![PortSpec::parse("5433/tcp").unwrap()],
+            ..ServicePatch::default()
+        };
+        let plan = pce
+            .writer(&guard)
+            .plan_update_service("/orgs/5/sec_policy/draft/services/7", &patch)
+            .await
+            .unwrap();
+        let req = plan.request().unwrap();
+        assert_eq!(req.method, WriteMethod::Put);
+        assert_eq!(
+            req.body.clone().unwrap()["service_ports"],
+            json!([{"port": 5432, "proto": 6}, {"port": 5433, "proto": 6}])
+        );
+        let del = pce
+            .writer(&guard)
+            .plan_delete_service("/orgs/5/sec_policy/active/services/7")
+            .unwrap();
+        assert_eq!(
+            del.request().unwrap().path,
+            "/orgs/5/sec_policy/draft/services/7"
+        );
+    }
+
+    async fn refuses_unpreservable(body: Value) {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/sec_policy/draft/services/7"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(&server)
+            .await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let patch = ServicePatch {
+            add_ports: vec![PortSpec::parse("5433/tcp").unwrap()],
+            ..ServicePatch::default()
+        };
+        let err = pce
+            .writer(&guard)
+            .plan_update_service("/orgs/5/sec_policy/draft/services/7", &patch)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, WriteError::Invalid(_)), "{err:?}");
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(reqs.len(), 1, "only the GET");
+        assert_eq!(reqs[0].method.as_str(), "GET");
+    }
+
+    #[tokio::test]
+    async fn update_refuses_windows_services() {
+        refuses_unpreservable(json!({
+            "href": "/orgs/5/sec_policy/draft/services/7", "name": "W",
+            "service_ports": [{"port": 5432, "proto": 6}],
+            "windows_services": [{"service_name": "spooler"}]
+        }))
+        .await;
+    }
+
+    #[tokio::test]
+    async fn update_refuses_icmp_type_or_code() {
+        refuses_unpreservable(json!({
+            "href": "/orgs/5/sec_policy/draft/services/7", "name": "I",
+            "service_ports": [{"proto": 1, "icmp_type": 8, "icmp_code": 0}]
+        }))
+        .await;
+    }
+}
