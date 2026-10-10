@@ -53,6 +53,9 @@ fn every_flag_has_help_text() {
         vec!["labels", "add", "--help"],
         vec!["labels", "update", "--help"],
         vec!["labels", "delete", "--help"],
+        vec!["iplists", "add", "--help"],
+        vec!["iplists", "update", "--help"],
+        vec!["iplists", "delete", "--help"],
     ] {
         let out = Command::cargo_bin("illumio-tui")
             .unwrap()
@@ -61,13 +64,17 @@ fn every_flag_has_help_text() {
             .output()
             .unwrap();
         let text = String::from_utf8_lossy(&out.stdout);
-        for line in text.lines() {
+        let lines: Vec<&str> = text.lines().collect();
+        for (i, line) in lines.iter().enumerate() {
             let t = line.trim_start();
-            // clap prints an option line as `--flag <VALUE>  description`; a
-            // bare flag with nothing after it has no doc comment.
+            // clap prints an option line as `--flag <VALUE>  description`, or
+            // with the description on the next line when flags are long; a
+            // bare flag with neither has no doc comment.
             if t.starts_with("--") {
-                let after = t.split_once("  ").map(|(_, d)| d.trim()).unwrap_or("");
-                assert!(!after.is_empty(), "{args:?}: no help for {t:?}");
+                let inline = t.split_once("  ").map(|(_, d)| d.trim()).unwrap_or("");
+                let next = lines.get(i + 1).map(|l| l.trim()).unwrap_or("");
+                let wrapped = !next.is_empty() && !next.starts_with('-');
+                assert!(!inline.is_empty() || wrapped, "{args:?}: no help for {t:?}");
             }
         }
     }

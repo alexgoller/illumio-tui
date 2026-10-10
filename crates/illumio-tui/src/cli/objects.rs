@@ -2,10 +2,10 @@
 use super::context::{Context, cache_label};
 use super::error::CliError;
 use super::output::TableRows;
-use super::write::{self, WriteFlags, parse_kv, resolve_label, run_plan};
+use super::write::{self, WriteFlags, parse_kv, resolve_ip_list, resolve_label, run_plan};
 use clap::{Args, Subcommand};
 use pce::models::{IpList, Label, LabelGroup, Service};
-use pce::write::{IfMissing, LabelDraft};
+use pce::write::{IfMissing, IpListDraft, IpListPatch, IpRangeSpec, LabelDraft};
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct LabelsArgs {
@@ -212,6 +212,154 @@ pub async fn label_groups(ctx: &Context) -> Result<(), CliError> {
         c.truncated,
         None,
     )
+}
+
+#[derive(Args, Debug)]
+pub struct IplistsCmd {
+    #[command(subcommand)]
+    pub action: Option<IplistsAction>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum IplistsAction {
+    /// Create an IP list in draft (needs writes enabled and --allow-writes)
+    Add(IpListAddArgs),
+    /// Add or remove ranges and FQDNs; the full list is re-sent
+    Update(IpListUpdateArgs),
+    /// Delete an IP list from draft
+    Delete(IpListDeleteArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct IpListAddArgs {
+    /// IP list name
+    pub name: String,
+    /// Range: A, A-B or A/N (repeatable)
+    #[arg(long = "range")]
+    pub ranges: Vec<String>,
+    /// Excluded range, same forms (repeatable)
+    #[arg(long = "exclude")]
+    pub excludes: Vec<String>,
+    /// FQDN, wildcards allowed (repeatable)
+    #[arg(long = "fqdn")]
+    pub fqdns: Vec<String>,
+    /// Description
+    #[arg(long)]
+    pub description: Option<String>,
+    /// Do nothing when an IP list with exactly this name exists
+    #[arg(long)]
+    pub if_missing: bool,
+    #[command(flatten)]
+    pub write: WriteFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct IpListUpdateArgs {
+    /// IP list name or href
+    pub target: String,
+    /// New name
+    #[arg(long)]
+    pub name: Option<String>,
+    /// New description
+    #[arg(long)]
+    pub description: Option<String>,
+    /// Range to add (repeatable)
+    #[arg(long = "add-range")]
+    pub add_ranges: Vec<String>,
+    /// Range to remove; must match an existing range exactly (repeatable)
+    #[arg(long = "remove-range")]
+    pub remove_ranges: Vec<String>,
+    /// Excluded range to add (repeatable)
+    #[arg(long = "add-exclude")]
+    pub add_excludes: Vec<String>,
+    /// Excluded range to remove (repeatable)
+    #[arg(long = "remove-exclude")]
+    pub remove_excludes: Vec<String>,
+    /// FQDN to add (repeatable)
+    #[arg(long = "add-fqdn")]
+    pub add_fqdns: Vec<String>,
+    /// FQDN to remove (repeatable)
+    #[arg(long = "remove-fqdn")]
+    pub remove_fqdns: Vec<String>,
+    #[command(flatten)]
+    pub write: WriteFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct IpListDeleteArgs {
+    /// IP list name or href
+    pub target: String,
+    #[command(flatten)]
+    pub write: WriteFlags,
+}
+
+fn parse_ranges(specs: &[String], exclusion: bool) -> Result<Vec<IpRangeSpec>, CliError> {
+    specs
+        .iter()
+        .map(|s| IpRangeSpec::parse(s, exclusion).map_err(CliError::Args))
+        .collect()
+}
+
+pub async fn ip_lists_cmd(ctx: &Context, cmd: &IplistsCmd) -> Result<(), CliError> {
+    match &cmd.action {
+        None => ip_lists(ctx).await,
+        Some(IplistsAction::Add(a)) => ip_list_add(ctx, a).await,
+        Some(IplistsAction::Update(a)) => ip_list_update(ctx, a).await,
+        Some(IplistsAction::Delete(a)) => ip_list_delete(ctx, a).await,
+    }
+}
+
+async fn ip_list_add(ctx: &Context, a: &IpListAddArgs) -> Result<(), CliError> {
+    let guard = write::prepare(ctx, &a.write)?;
+    let mut ranges = parse_ranges(&a.ranges, false)?;
+    ranges.extend(parse_ranges(&a.excludes, true)?);
+    let draft = IpListDraft {
+        name: a.name.clone(),
+        description: a.description.clone(),
+        ranges,
+        fqdns: a.fqdns.clone(),
+    };
+    let if_missing = if a.if_missing {
+        IfMissing::SkipExisting
+    } else {
+        IfMissing::Create
+    };
+    let plan = ctx
+        .pce
+        .writer(&guard)
+        .plan_create_ip_list(&draft, if_missing)
+        .await?;
+    run_plan(ctx, &a.write, &guard, plan).await
+}
+
+async fn ip_list_update(ctx: &Context, a: &IpListUpdateArgs) -> Result<(), CliError> {
+    let guard = write::prepare(ctx, &a.write)?;
+    let mut add_ranges = parse_ranges(&a.add_ranges, false)?;
+    add_ranges.extend(parse_ranges(&a.add_excludes, true)?);
+    let mut remove_ranges = parse_ranges(&a.remove_ranges, false)?;
+    remove_ranges.extend(parse_ranges(&a.remove_excludes, true)?);
+    let patch = IpListPatch {
+        name: a.name.clone(),
+        description: a.description.clone(),
+        add_ranges,
+        remove_ranges,
+        add_fqdns: a.add_fqdns.clone(),
+        remove_fqdns: a.remove_fqdns.clone(),
+    };
+    let href = resolve_ip_list(ctx, &a.target).await?;
+    let plan = ctx
+        .pce
+        .writer(&guard)
+        .plan_update_ip_list(&href, &patch)
+        .await?;
+    run_plan(ctx, &a.write, &guard, plan).await
+}
+
+async fn ip_list_delete(ctx: &Context, a: &IpListDeleteArgs) -> Result<(), CliError> {
+    let guard = write::prepare(ctx, &a.write)?;
+    let href = resolve_ip_list(ctx, &a.target).await?;
+    let plan = ctx.pce.writer(&guard).plan_delete_ip_list(&href)?;
+    run_plan(ctx, &a.write, &guard, plan).await
 }
 
 pub async fn ip_lists(ctx: &Context) -> Result<(), CliError> {

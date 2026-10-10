@@ -408,3 +408,217 @@ mod labels {
         assert_eq!(audit_lines(state.path()).len(), 1);
     }
 }
+
+mod iplists {
+    use super::*;
+
+    fn corp() -> Value {
+        json!({
+            "href": "/orgs/5/sec_policy/draft/ip_lists/3", "name": "Corp",
+            "ip_ranges": [{"from_ip": "10.0.0.0/8"}], "fqdns": [{"fqdn": "*.corp.example"}]
+        })
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn add_dry_run_body() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "iplists",
+                    "add",
+                    "Corp",
+                    "--range",
+                    "10.0.0.0/8",
+                    "--range",
+                    "192.168.1.1-192.168.1.9",
+                    "--exclude",
+                    "10.0.5.0/24",
+                    "--fqdn",
+                    "*.corp.example",
+                    "--description",
+                    "corp nets",
+                    "--dry-run",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["method"], "POST");
+        assert_eq!(out["data"]["path"], "/orgs/5/sec_policy/draft/ip_lists");
+        assert_eq!(
+            out["data"]["body"],
+            json!({
+                "name": "Corp", "description": "corp nets",
+                "ip_ranges": [
+                    {"from_ip": "10.0.0.0/8"},
+                    {"from_ip": "192.168.1.1", "to_ip": "192.168.1.9"},
+                    {"from_ip": "10.0.5.0/24", "exclusion": true}
+                ],
+                "fqdns": [{"fqdn": "*.corp.example"}]
+            })
+        );
+        // A bad range is exit 2 before anything else.
+        let a = writer(&server, state.path())
+            .args([
+                "iplists",
+                "add",
+                "Corp",
+                "--range",
+                "10.0.0.0/99",
+                "--dry-run",
+            ])
+            .assert()
+            .code(2);
+        assert!(
+            stderr_json(&a)["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("10.0.0.0/99")
+        );
+        // Neither a range nor an FQDN is exit 2.
+        writer(&server, state.path())
+            .args(["iplists", "add", "Empty", "--dry-run"])
+            .assert()
+            .code(2);
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn add_sends_and_marks_pending() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        Mock::given(method("POST"))
+            .and(path("/api/v2/orgs/5/sec_policy/draft/ip_lists"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(corp()))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "iplists",
+                    "add",
+                    "Corp",
+                    "--range",
+                    "10.0.0.0/8",
+                    "--fqdn",
+                    "*.corp.example",
+                    "--yes",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["pending"], true);
+        assert_eq!(out["data"]["href"], "/orgs/5/sec_policy/draft/ip_lists/3");
+        assert_eq!(audit_lines(state.path()).len(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn update_by_name_puts_the_full_list() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_index(&server, json!([]), json!([corp()]), json!([])).await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/sec_policy/draft/ip_lists/3"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(corp()))
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/api/v2/orgs/5/sec_policy/draft/ip_lists/3"))
+            .and(body_json(json!({
+                "name": "Corp",
+                "ip_ranges": [{"from_ip": "10.0.0.0/8"}, {"from_ip": "10.2.0.0/16"}],
+                "fqdns": []
+            })))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "iplists",
+                    "update",
+                    "Corp",
+                    "--add-range",
+                    "10.2.0.0/16",
+                    "--remove-fqdn",
+                    "*.corp.example",
+                    "--yes",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["status"], 204);
+        assert_eq!(out["data"]["pending"], true);
+        assert_eq!(out["meta"]["write"]["method"], "PUT");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn removing_the_last_range_is_refused() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        let mut only_range = corp();
+        only_range["fqdns"] = json!([]);
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/sec_policy/draft/ip_lists/3"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(only_range))
+            .mount(&server)
+            .await;
+        let a = writer(&server, state.path())
+            .args([
+                "iplists",
+                "update",
+                "/orgs/5/sec_policy/draft/ip_lists/3",
+                "--remove-range",
+                "10.0.0.0/8",
+                "--yes",
+            ])
+            .assert()
+            .code(2);
+        assert_eq!(stderr_json(&a)["error"]["kind"], "invalid");
+        let sent = server.received_requests().await.unwrap();
+        assert!(
+            sent.iter().all(|r| r.method.as_str() == "GET"),
+            "nothing was written"
+        );
+        assert!(audit_lines(state.path()).is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn ambiguous_name_lists_candidates_and_delete_by_href_works() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        let mut dup = corp();
+        dup["href"] = json!("/orgs/5/sec_policy/draft/ip_lists/4");
+        mount_index(&server, json!([]), json!([corp(), dup]), json!([])).await;
+        let a = writer(&server, state.path())
+            .args(["iplists", "delete", "Corp", "--yes"])
+            .assert()
+            .code(2);
+        let msg = stderr_json(&a)["error"]["message"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(
+            msg.contains("ip_lists/3") && msg.contains("ip_lists/4"),
+            "{msg}"
+        );
+        Mock::given(method("DELETE"))
+            .and(path("/api/v2/orgs/5/sec_policy/draft/ip_lists/4"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        writer(&server, state.path())
+            .args([
+                "iplists",
+                "delete",
+                "/orgs/5/sec_policy/active/ip_lists/4",
+                "--yes",
+            ])
+            .assert()
+            .success();
+    }
+}

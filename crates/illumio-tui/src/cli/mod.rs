@@ -79,8 +79,8 @@ pub enum Command {
     Labels(objects::LabelsCmd),
     /// List label groups
     LabelGroups,
-    /// List IP lists
-    Iplists,
+    /// List IP lists; add, update or delete one
+    Iplists(objects::IplistsCmd),
     /// List services
     Services,
     /// List audit events
@@ -107,7 +107,7 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
         Command::Health => health::run(&ctx).await,
         Command::Labels(a) => objects::labels_cmd(&ctx, &a).await,
         Command::LabelGroups => objects::label_groups(&ctx).await,
-        Command::Iplists => objects::ip_lists(&ctx).await,
+        Command::Iplists(c) => objects::ip_lists_cmd(&ctx, &c).await,
         Command::Services => objects::services(&ctx).await,
         Command::Events(a) => events::run(&ctx, &a).await,
         Command::Workloads(a) => workloads::run(&ctx, &a).await,
