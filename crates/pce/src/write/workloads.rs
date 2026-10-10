@@ -110,6 +110,17 @@ impl WorkloadPatch {
             .or_else(|| current.name.clone())
             .unwrap_or_else(|| current.href.clone());
 
+        if self.name.as_deref().is_some_and(|n| n.trim().is_empty()) {
+            errs.push("workload name must not be empty".into());
+        }
+        if self
+            .hostname
+            .as_deref()
+            .is_some_and(|h| h.trim().is_empty())
+        {
+            errs.push("hostname must not be empty".into());
+        }
+        let mut new_ifaces: Option<Vec<InterfaceSpec>> = None;
         if let Some(n) = &self.name {
             body.insert("name".into(), json!(n));
         }
@@ -144,20 +155,27 @@ impl WorkloadPatch {
                     Err(e) => errs.push(e),
                 }
             }
-            let hostname = self
-                .hostname
-                .clone()
-                .or_else(|| current.hostname.clone())
-                .unwrap_or_default();
-            if ifaces.is_empty() && hostname.trim().is_empty() {
-                errs.push(format!(
-                    "{who} would have no interface and no hostname; keep one interface or set --hostname"
-                ));
-            }
             body.insert(
                 "interfaces".into(),
                 Value::Array(ifaces.iter().map(InterfaceSpec::to_json).collect()),
             );
+            new_ifaces = Some(ifaces);
+        }
+
+        // A workload needs a hostname or an interface, whatever changed.
+        let hostname = self
+            .hostname
+            .as_deref()
+            .or(current.hostname.as_deref())
+            .unwrap_or_default();
+        let has_interfaces = match &new_ifaces {
+            Some(i) => !i.is_empty(),
+            None => !current.interfaces.is_empty(),
+        };
+        if hostname.trim().is_empty() && !has_interfaces {
+            errs.push(format!(
+                "{who} would have no interface and no hostname; keep one interface or set --hostname"
+            ));
         }
 
         if let Some(set) = &self.set_labels {
@@ -221,74 +239,87 @@ impl WorkloadPatch {
     }
 }
 
+fn ambiguous(needle: &str, hits: &[Workload]) -> WriteError {
+    WriteError::invalid(format!(
+        "{needle:?} matches several workloads: {}; use the href",
+        hits.iter()
+            .map(|w| w.href.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    ))
+}
+
 fn require_unmanaged(w: &Workload) -> Result<(), WriteError> {
+    let who = w
+        .hostname
+        .clone()
+        .or_else(|| w.name.clone())
+        .unwrap_or_else(|| w.href.clone());
     if w.managed == Some(true) {
-        let who = w
-            .hostname
-            .clone()
-            .or_else(|| w.name.clone())
-            .unwrap_or_else(|| w.href.clone());
         return Err(WriteError::invalid(format!(
             "{who} is VEN-managed; this version writes unmanaged workloads only"
+        )));
+    }
+    if w.managed != Some(false) || w.ven.is_some() {
+        return Err(WriteError::invalid(format!(
+            "{who}: cannot confirm it is unmanaged (no managed flag or a VEN is attached); refusing"
         )));
     }
     Ok(())
 }
 
 impl Writer<'_> {
-    /// Exact match on hostname (case-insensitive), then on name. The PCE's
-    /// `?hostname=` and `?name=` are substring filters, so the result is
-    /// narrowed here; none or several matches is an error listing them.
-    pub async fn find_workload(&self, name_or_hostname: &str) -> Result<Workload, WriteError> {
-        let needle = name_or_hostname.trim();
-        let by_host = self
-            .pce()
-            .workloads(
-                &WorkloadFilter {
-                    hostname: Some(needle.to_string()),
-                    ..WorkloadFilter::default()
-                },
-                self.bypass(),
-            )
-            .await?
-            .value;
-        let mut hits: Vec<Workload> = by_host
+    /// Exact matches for `needle`. The PCE's `?hostname=` / `?name=` are
+    /// substring filters, so the rows are narrowed here.
+    async fn lookup(&self, by_hostname: bool, needle: &str) -> Result<Vec<Workload>, WriteError> {
+        let mut filter = WorkloadFilter {
+            max_results: Some(500),
+            ..WorkloadFilter::default()
+        };
+        if by_hostname {
+            filter.hostname = Some(needle.to_string());
+        } else {
+            filter.name = Some(needle.to_string());
+        }
+        let found = self.pce().workloads(&filter, self.bypass()).await?;
+        if found.truncated {
+            return Err(WriteError::invalid(format!(
+                "too many workloads match {needle:?}; use the href"
+            )));
+        }
+        Ok(found
+            .value
             .into_iter()
             .filter(|w| {
-                w.hostname
-                    .as_deref()
-                    .is_some_and(|h| h.eq_ignore_ascii_case(needle))
+                if by_hostname {
+                    w.hostname
+                        .as_deref()
+                        .is_some_and(|h| h.eq_ignore_ascii_case(needle))
+                } else {
+                    w.name.as_deref() == Some(needle)
+                }
             })
-            .collect();
+            .collect())
+    }
+
+    async fn lookup_by_hostname(&self, hostname: &str) -> Result<Vec<Workload>, WriteError> {
+        self.lookup(true, hostname).await
+    }
+
+    /// Exact match on hostname (case-insensitive), then on name; none or
+    /// several matches is an error listing them.
+    pub async fn find_workload(&self, name_or_hostname: &str) -> Result<Workload, WriteError> {
+        let needle = name_or_hostname.trim();
+        let mut hits = self.lookup_by_hostname(needle).await?;
         if hits.is_empty() {
-            let by_name = self
-                .pce()
-                .workloads(
-                    &WorkloadFilter {
-                        name: Some(needle.to_string()),
-                        ..WorkloadFilter::default()
-                    },
-                    self.bypass(),
-                )
-                .await?
-                .value;
-            hits = by_name
-                .into_iter()
-                .filter(|w| w.name.as_deref() == Some(needle))
-                .collect();
+            hits = self.lookup(false, needle).await?;
         }
         match hits.len() {
             0 => Err(WriteError::invalid(format!(
                 "no workload with hostname or name {needle:?}"
             ))),
             1 => Ok(hits.remove(0)),
-            _ => Err(WriteError::invalid(format!(
-                "{needle:?} matches several workloads: {}; use the href",
-                hits.iter()
-                    .map(|w| w.href.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ))),
+            _ => Err(ambiguous(needle, &hits)),
         }
     }
 
@@ -298,13 +329,19 @@ impl Writer<'_> {
         if_missing: IfMissing,
     ) -> Result<Plan, WriteError> {
         draft.validate().map_err(WriteError::Invalid)?;
-        if if_missing == IfMissing::SkipExisting
-            && let Ok(existing) = self.find_workload(&draft.hostname()).await
-        {
-            return Ok(Plan::Noop {
-                existing_href: existing.href.clone(),
-                reason: format!("workload {} exists", draft.hostname()),
-            });
+        if if_missing == IfMissing::SkipExisting {
+            let hostname = draft.hostname();
+            let hits = self.lookup_by_hostname(&hostname).await?;
+            match hits.len() {
+                0 => {}
+                1 => {
+                    return Ok(Plan::Noop {
+                        existing_href: hits[0].href.clone(),
+                        reason: format!("workload {hostname} exists"),
+                    });
+                }
+                _ => return Err(ambiguous(&hostname, &hits)),
+            }
         }
         Ok(Plan::Send {
             request: WriteRequest {

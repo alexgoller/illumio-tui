@@ -1494,4 +1494,117 @@ mod workloads {
             .unwrap();
         assert!(matches!(plan, Plan::Noop { .. }));
     }
+
+    #[test]
+    fn interface_extras_survive_an_address_patch() {
+        let mut v = printer();
+        v["interfaces"] = json!([{"name": "eth0", "address": "10.0.0.50", "cidr_block": 24,
+            "link_state": "up", "default_gateway_address": "10.0.0.1", "friendly_name": "lan"}]);
+        let current: pce::models::Workload = serde_json::from_value(v).unwrap();
+        let patch = WorkloadPatch {
+            add_addresses: vec!["10.0.1.5".into()],
+            ..WorkloadPatch::default()
+        };
+        let body = patch.apply(&current, &idx()).unwrap();
+        let first = &body["interfaces"][0];
+        assert_eq!(first["link_state"], "up");
+        assert_eq!(first["default_gateway_address"], "10.0.0.1");
+        assert_eq!(first["friendly_name"], "lan");
+    }
+
+    #[tokio::test]
+    async fn unknown_or_ven_backed_management_is_refused() {
+        let server = MockServer::start().await;
+        let mut no_flag = printer();
+        no_flag.as_object_mut().unwrap().remove("managed");
+        let mut with_ven = printer();
+        with_ven["href"] = json!("/orgs/5/workloads/u2");
+        with_ven["ven"] = json!({"href": "/orgs/5/vens/1"});
+        for (p, body) in [("u1", no_flag), ("u2", with_ven)] {
+            Mock::given(method("GET"))
+                .and(path(format!("/api/v2/orgs/5/workloads/{p}")))
+                .respond_with(ResponseTemplate::new(200).set_body_json(body))
+                .mount(&server)
+                .await;
+        }
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let w = pce.writer(&guard);
+        let patch = WorkloadPatch {
+            description: Some("x".into()),
+            ..WorkloadPatch::default()
+        };
+        for h in ["/orgs/5/workloads/u1", "/orgs/5/workloads/u2"] {
+            let err = w.plan_update_workload(h, &patch, &idx()).await.unwrap_err();
+            assert!(
+                matches!(err, WriteError::Invalid(_)) && err.to_string().contains("cannot confirm"),
+                "{err}"
+            );
+            assert!(matches!(
+                w.plan_delete_workload(h).await.unwrap_err(),
+                WriteError::Invalid(_)
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn if_missing_propagates_lookup_errors_and_refuses_ambiguity() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/workloads"))
+            .and(wiremock::matchers::query_param("hostname", "boom"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/workloads"))
+            .and(wiremock::matchers::query_param("hostname", "dup"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                {"href": "/orgs/5/workloads/a", "hostname": "dup", "managed": false},
+                {"href": "/orgs/5/workloads/b", "hostname": "DUP", "managed": false}
+            ])))
+            .mount(&server)
+            .await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let w = pce.writer(&guard);
+        let d = |h: &str| WorkloadDraft {
+            name: h.into(),
+            hostname: None,
+            description: None,
+            interfaces: vec![],
+            labels: vec![],
+        };
+        let err = w
+            .plan_create_workload(&d("boom"), IfMissing::SkipExisting)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, WriteError::Pce(_)), "{err:?}");
+        let err = w
+            .plan_create_workload(&d("dup"), IfMissing::SkipExisting)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, WriteError::Invalid(_))
+                && err.to_string().contains("/orgs/5/workloads/b"),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn hostname_or_interface_rule_runs_on_every_patch() {
+        let mut v = printer();
+        v["interfaces"] = json!([]);
+        let current: pce::models::Workload = serde_json::from_value(v).unwrap();
+        let patch = WorkloadPatch {
+            hostname: Some("".into()),
+            ..WorkloadPatch::default()
+        };
+        assert!(patch.apply(&current, &idx()).is_err());
+        let patch = WorkloadPatch {
+            name: Some(" ".into()),
+            ..WorkloadPatch::default()
+        };
+        assert!(patch.apply(&current, &idx()).is_err());
+    }
 }

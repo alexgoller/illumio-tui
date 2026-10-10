@@ -13,6 +13,10 @@ pub struct Interface {
     pub cidr_block: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link_state: Option<String>,
+    /// Everything else the PCE reports (gateway, friendly name, ...); kept
+    /// so a full interfaces PUT does not clear it.
+    #[serde(default, flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

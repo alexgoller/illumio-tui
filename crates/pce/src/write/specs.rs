@@ -212,6 +212,8 @@ pub struct InterfaceSpec {
     pub name: String,
     pub address: String,
     pub cidr_block: Option<u8>,
+    /// PCE-side fields carried through a full interfaces PUT.
+    pub extra: serde_json::Map<String, Value>,
 }
 
 impl InterfaceSpec {
@@ -224,6 +226,7 @@ impl InterfaceSpec {
                 name,
                 address: ip.to_string(),
                 cidr_block: Some(bits),
+                extra: Default::default(),
             });
         }
         let ip = parse_ip(s)?;
@@ -231,21 +234,31 @@ impl InterfaceSpec {
             name,
             address: ip.to_string(),
             cidr_block: None,
+            extra: Default::default(),
         })
     }
 
     pub fn from_interface(i: &Interface) -> Self {
+        let mut extra = i.extra.clone();
+        if let Some(l) = &i.link_state {
+            extra.insert("link_state".into(), json!(l));
+        }
         Self {
             name: i.name.clone(),
             address: i.address.clone(),
             cidr_block: i.cidr_block,
+            extra,
         }
     }
 
     pub fn to_json(&self) -> Value {
-        let mut v = json!({"name": self.name, "address": self.address});
+        let mut v = Value::Object(self.extra.clone());
+        v["address"] = json!(self.address);
         if let Some(c) = self.cidr_block {
             v["cidr_block"] = json!(c);
+        }
+        if !self.name.is_empty() {
+            v["name"] = json!(self.name);
         }
         v
     }
@@ -393,7 +406,9 @@ mod tests {
             address: "10.0.0.5".into(),
             cidr_block: Some(24),
             link_state: Some("up".into()),
+            extra: Default::default(),
         });
         assert_eq!(from.to_json()["cidr_block"], 24);
+        assert_eq!(from.to_json()["link_state"], "up");
     }
 }
