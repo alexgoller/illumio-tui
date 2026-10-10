@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Labels & objects  │  4 Workloads
+╭ Filters ────────────────────────────────── window 24h · cap 1000 · unbounded ╮
+│window 24h  src *  dst *  svc *  decision all                                 │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭ Result ──────────────────────────────────────────────────── 4 flows · 3s ago ╮
+│4 flows allowed 2 pot.blocked 1 blocked 1  ▄▁▁▁▁▁▁▁▁▁█▄ ██████████████████████│
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭ Flows ───────────────────────────────────────────────────────────────────────╮
+│  last seen        src              src labe dst      service  conns   decisio│
+│▸ 10-10 07:31:02   host-1.example   app=shop host-2.e 5432/tcp     310 allowed│
+│  10-10 07:30:58   10.1.4.9                  host-1.e 8443/tcp      12 potenti│
+│  10-10 06:05:00   unmanaged-nas             host-2.e icmp           3 blocked│
+│  10-10 07:29:00   host-1.example   app=shop fqdn-1.e 443/tcp        5 allowed│
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭ Detail ───────────────────────────────────────────────────────── Enter shows ╮
+│select a flow and press Enter                                                 │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ready          f filter  r run  a auto  v view  s sort  / search  : cmd  ? help

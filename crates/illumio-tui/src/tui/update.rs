@@ -115,6 +115,15 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         fetched_at: Instant::now(),
                         filter,
                     });
+                    model.traffic.flows.set_rows(
+                        model
+                            .traffic
+                            .data
+                            .as_ref()
+                            .map(|d| d.flows.clone())
+                            .unwrap_or_default(),
+                    );
+                    model.traffic.show_detail = false;
                     model.traffic.query = QueryState::Idle;
                     model.status = if truncated {
                         StatusLine::warn(format!(
@@ -287,15 +296,47 @@ fn on_screen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     }
 }
 
+fn traffic_page(model: &Model) -> usize {
+    let area = ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1);
+    crate::tui::ui::layout::chrome(area)
+        .map(|c| crate::tui::ui::screens::traffic::table_rows(c.body))
+        .unwrap_or(10)
+        .max(1)
+}
+
 fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
+    let page = traffic_page(model);
+    let table = &mut model.traffic.flows;
+    if table.is_searching() {
+        match k.code {
+            KeyCode::Esc => table.search_clear(),
+            KeyCode::Enter => table.search_commit(),
+            KeyCode::Backspace => table.search_pop(),
+            KeyCode::Char(c) => table.search_push(c),
+            _ => {}
+        }
+        table.ensure_visible(page);
+        return Vec::new();
+    }
     match k.code {
         KeyCode::Char('f') => {
             model.overlay = Overlay::FilterEditor(FilterEditor::from_filter(&model.traffic.filter));
-            Vec::new()
+            return Vec::new();
         }
-        KeyCode::Char('r') => update(model, Msg::RunNow),
-        _ => Vec::new(),
+        KeyCode::Char('r') => return update(model, Msg::RunNow),
+        KeyCode::Down | KeyCode::Char('j') => table.select_next(),
+        KeyCode::Up | KeyCode::Char('k') => table.select_prev(),
+        KeyCode::PageDown => table.page_down(page),
+        KeyCode::PageUp => table.page_up(page),
+        KeyCode::Home => table.home(),
+        KeyCode::End => table.end(),
+        KeyCode::Char('s') => table.sort_next(),
+        KeyCode::Char('/') => table.start_search(),
+        KeyCode::Enter => model.traffic.show_detail = !model.traffic.show_detail,
+        _ => {}
     }
+    model.traffic.flows.ensure_visible(page);
+    Vec::new()
 }
 
 /// Validated filter from the editor or a command: confirm if expensive, else apply.
@@ -365,6 +406,81 @@ mod tests {
 
     fn key(c: char) -> Msg {
         Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))
+    }
+
+    #[test]
+    fn flow_table_navigation_sort_search_and_detail_never_emit_commands() {
+        use crate::tui::test_support::model_with_flows;
+        let mut m = model_with_flows();
+        assert_eq!(m.traffic.flows.len(), 4);
+        assert!(
+            update(
+                &mut m,
+                Msg::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+            )
+            .is_empty()
+        );
+        assert_eq!(m.traffic.flows.selected_pos(), 1);
+        update(&mut m, key('j'));
+        assert_eq!(m.traffic.flows.selected_pos(), 2);
+        update(&mut m, key('k'));
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)),
+        );
+        assert_eq!(m.traffic.flows.selected_pos(), 3);
+        assert!(update(&mut m, key('s')).is_empty());
+        assert_eq!(m.traffic.flows.sort(), Some((0, false)));
+        update(&mut m, key('/'));
+        assert!(m.traffic.flows.is_searching());
+        for c in "nas".chars() {
+            update(&mut m, key(c));
+        }
+        assert_eq!(m.traffic.flows.len(), 1);
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        assert!(!m.traffic.flows.is_searching());
+        update(&mut m, key('/'));
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        );
+        assert_eq!(m.traffic.flows.len(), 4, "Esc clears the search");
+        assert!(!m.traffic.show_detail);
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        assert!(m.traffic.show_detail);
+        assert_eq!(m.stats.calls, 5, "no request was made by any of this");
+    }
+
+    #[test]
+    fn query_done_fills_the_flow_table() {
+        use crate::tui::filter::TrafficFilter;
+        use crate::tui::test_support::fixture_flows;
+        let mut m = model_fixture();
+        let f = TrafficFilter::defaults("1h", 50);
+        update(&mut m, Msg::ApplyFilter(f.clone()));
+        let outcome = crate::tui::msg::QueryOutcome {
+            flows: fixture_flows(),
+            truncated: false,
+            matches_count: Some(4),
+            elapsed: std::time::Duration::from_secs(1),
+            hit: false,
+            filter: f,
+        };
+        update(
+            &mut m,
+            Msg::QueryDone {
+                seq: 1,
+                result: Ok(outcome),
+            },
+        );
+        assert_eq!(m.traffic.flows.len(), 4);
+        assert_eq!(m.traffic.flows.selected_pos(), 0);
     }
 
     #[test]

@@ -1,12 +1,14 @@
 //! Fixture-backed models and off-screen rendering for tests and snapshots.
 //! Compiled always (it is tiny) so integration tests can use it.
-use crate::tui::model::{Connection, Model, ProfileInfo};
+use crate::tui::model::{Connection, Model, ProfileInfo, QueryState, TrafficData};
 use crate::tui::ui::view;
 use pce::NameIndex;
-use pce::models::{IpList, Label, LabelGroup, Service};
+use pce::models::{Flow, IpList, Label, LabelGroup, Service};
+use pce::traffic::{ResolvedFlow, resolve_flows};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 pub fn fixture_index() -> Arc<NameIndex> {
     let labels: Vec<Label> = serde_json::from_str(include_str!("../../../../fixtures/labels.json"))
@@ -40,6 +42,31 @@ pub fn model_fixture() -> Model {
         bytes: 21_344,
     };
     m.status = crate::tui::model::StatusLine::info("ready");
+    m
+}
+
+pub fn fixture_flows() -> Vec<ResolvedFlow> {
+    let raw: Vec<Flow> =
+        serde_json::from_str(include_str!("../../../../fixtures/traffic_flows.json"))
+            .expect("flows fixture");
+    resolve_flows(&raw, &fixture_index())
+}
+
+/// A connected model with the fixture flows loaded as a finished query.
+pub fn model_with_flows() -> Model {
+    let mut m = model_fixture();
+    let flows = fixture_flows();
+    m.traffic.flows.set_rows(flows.clone());
+    m.traffic.data = Some(TrafficData {
+        flows,
+        truncated: false,
+        matches_count: Some(4),
+        elapsed: Duration::from_millis(1840),
+        cache_hit: false,
+        fetched_at: Instant::now() - Duration::from_secs(3),
+        filter: m.traffic.filter.clone(),
+    });
+    m.traffic.query = QueryState::Idle;
     m
 }
 

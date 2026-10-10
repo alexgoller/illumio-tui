@@ -1,5 +1,7 @@
 use illumio_tui::tui::model::{Connection, Screen};
-use illumio_tui::tui::test_support::{model_fixture, render_styled, render_to_string};
+use illumio_tui::tui::test_support::{
+    model_fixture, model_with_flows, render_styled, render_to_string,
+};
 
 #[test]
 fn chrome_dark_80x24() {
@@ -135,4 +137,36 @@ fn traffic_filter_bar_and_editor_80x24() {
     insta::assert_snapshot!("traffic_filter_bar_80x24", out);
     m.overlay = Overlay::FilterEditor(FilterEditor::from_filter(&m.traffic.filter));
     insta::assert_snapshot!("traffic_filter_editor_80x24", render_to_string(&m, 80, 24));
+}
+
+#[test]
+fn traffic_flows_80x24() {
+    let m = model_with_flows();
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("host-1.example"), "{out}");
+    assert!(
+        out.contains("icmp"),
+        "ICMP flow renders without a port: {out}"
+    );
+    assert!(out.contains("4 flows"), "{out}");
+    insta::assert_snapshot!("traffic_flows_80x24", out);
+}
+
+#[test]
+fn traffic_flows_160x48_with_detail() {
+    let mut m = model_with_flows();
+    m.traffic.show_detail = true;
+    m.traffic.flows.select_next(); // the Corp -> host-1 potentially blocked flow
+    let out = render_to_string(&m, 160, 48);
+    assert!(out.contains("Corp"), "{out}");
+    assert!(out.contains("potentially_blocked"), "{out}");
+    insta::assert_snapshot!("traffic_flows_160x48_detail", out);
+}
+
+#[test]
+fn traffic_flows_truncated_shows_warning() {
+    let mut m = model_with_flows();
+    m.traffic.data.as_mut().unwrap().truncated = true;
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("truncated"), "{out}");
 }

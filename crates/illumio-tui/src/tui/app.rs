@@ -74,7 +74,7 @@ impl Runtime {
                         }
                     });
                     let result = async {
-                        let query = filter.to_query(&pce, mode).await?;
+                        let query = filter.to_query(&pce, CacheMode::Use).await?;
                         let cached = pce.traffic(&query, mode, &cancel, Some(&ptx)).await?;
                         let idx = pce.name_index(CacheMode::Use).await?;
                         let flows = pce::traffic::resolve_flows(&cached.value.flows, &idx);

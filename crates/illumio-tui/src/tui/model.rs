@@ -1,5 +1,6 @@
 //! All TUI state. No I/O, no terminal types beyond sizes.
 use crate::tui::filter::{FilterEditor, TrafficFilter};
+use crate::tui::table::{Column, SortKey, TableView};
 use crate::tui::ui::theme::Theme;
 use pce::StatsSnapshot;
 use pce::traffic::ResolvedFlow;
@@ -133,12 +134,80 @@ pub struct TrafficData {
     pub filter: TrafficFilter,
 }
 
+pub fn flow_columns() -> Vec<Column<ResolvedFlow>> {
+    vec![
+        Column {
+            title: "last seen",
+            width: 16,
+            cell: |f| {
+                f.last_detected
+                    .as_deref()
+                    .map(short_time)
+                    .unwrap_or_default()
+            },
+            key: |f| SortKey::Text(f.last_detected.clone().unwrap_or_default()),
+            right: false,
+        },
+        Column {
+            title: "src",
+            width: 22,
+            cell: |f| f.src.display_name(),
+            key: |f| SortKey::Text(f.src.display_name()),
+            right: false,
+        },
+        Column {
+            title: "src labels",
+            width: 0,
+            cell: |f| f.src.label_text(),
+            key: |f| SortKey::Text(f.src.label_text()),
+            right: false,
+        },
+        Column {
+            title: "dst",
+            width: 22,
+            cell: |f| f.dst.display_name(),
+            key: |f| SortKey::Text(f.dst.display_name()),
+            right: false,
+        },
+        Column {
+            title: "service",
+            width: 10,
+            cell: |f| f.service_text(),
+            key: |f| SortKey::Num(u64::from(f.port.unwrap_or(0))),
+            right: false,
+        },
+        Column {
+            title: "conns",
+            width: 7,
+            cell: |f| f.num_connections.to_string(),
+            key: |f| SortKey::Num(f.num_connections),
+            right: true,
+        },
+        Column {
+            title: "decision",
+            width: 19,
+            cell: |f| f.policy_decision.as_str().to_string(),
+            key: |f| SortKey::Text(f.policy_decision.as_str().to_string()),
+            right: false,
+        },
+    ]
+}
+
+/// `2026-10-10T07:31:02Z` -> `10-10 07:31:02`
+pub fn short_time(s: &str) -> String {
+    s.get(5..19)
+        .map(|x| x.replace('T', " "))
+        .unwrap_or_else(|| s.to_string())
+}
+
 #[derive(Debug)]
 pub struct TrafficState {
     pub filter: TrafficFilter,
     pub query: QueryState,
     pub data: Option<TrafficData>,
     pub seq: u64,
+    pub flows: TableView<ResolvedFlow>,
+    pub show_detail: bool,
 }
 
 impl TrafficState {
@@ -148,6 +217,8 @@ impl TrafficState {
             query: QueryState::Idle,
             data: None,
             seq: 0,
+            flows: TableView::new(flow_columns()),
+            show_detail: false,
         }
     }
 

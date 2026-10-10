@@ -1,13 +1,14 @@
-//! The Traffic screen. This task: layout and the filter bar. Tasks 7–9
-//! add the stats header, the three result views and the detail pane.
+//! The Traffic screen: filter bar, result stats, flow table and detail pane.
 use crate::tui::model::{Model, QueryState};
+use crate::tui::ui::widgets::bars;
 use crate::tui::ui::widgets::panel::panel;
 use pce::models::PolicyDecision;
+use pce::traffic::ResolvedEndpoint;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Paragraph, Wrap};
 
 #[derive(Debug, Clone, Copy)]
 pub struct TrafficLayout {
@@ -44,15 +45,14 @@ pub fn table_rows(body: Rect) -> usize {
 pub fn render(model: &Model, f: &mut Frame, body: Rect) {
     let l = layout(body);
     render_filter_bar(model, f, l.filter);
-    let t = &model.theme;
-    f.render_widget(
-        Paragraph::new("").block(panel("Flows", &flows_meta(model), t, false)),
-        l.table,
-    );
+    render_stats(model, f, l.stats);
+    render_flows(model, f, l.table);
+    if l.detail.height > 0 {
+        render_detail(model, f, l.detail);
+    }
 }
 
-/// Query state for the Flows panel title: running, result count and age, or failure.
-fn flows_meta(model: &Model) -> String {
+fn query_meta(model: &Model) -> String {
     match &model.traffic.query {
         QueryState::Running {
             started, status, ..
@@ -60,13 +60,172 @@ fn flows_meta(model: &Model) -> String {
         QueryState::Failed(_) => "failed".into(),
         QueryState::Idle => match &model.traffic.data {
             Some(d) => format!(
-                "{} flows · {}s ago",
+                "{} flows · {}{}",
                 d.flows.len(),
-                d.fetched_at.elapsed().as_secs()
+                bars::age_text(d.fetched_at.elapsed()),
+                if d.cache_hit { " · cached" } else { "" }
             ),
             None => "no query yet · press r".into(),
         },
     }
+}
+
+fn render_stats(model: &Model, f: &mut Frame, area: Rect) {
+    let t = &model.theme;
+    let meta = query_meta(model);
+    let block = panel("Result", &meta, t, false);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let Some(d) = &model.traffic.data else {
+        f.render_widget(
+            Paragraph::new(Span::styled(
+                "run a query with r, edit the filter with f",
+                t.dim_style(),
+            )),
+            inner,
+        );
+        return;
+    };
+    let (mut a, mut p, mut b) = (0u64, 0u64, 0u64);
+    for fl in &d.flows {
+        match fl.policy_decision {
+            PolicyDecision::Allowed => a += 1,
+            PolicyDecision::PotentiallyBlocked => p += 1,
+            PolicyDecision::Blocked => b += 1,
+            PolicyDecision::Unknown => {}
+        }
+    }
+    let mut left = vec![
+        Span::styled(format!("{} flows ", d.flows.len()), t.header_style()),
+        Span::styled(format!("allowed {a} "), Style::new().fg(t.ok)),
+        Span::styled(format!("pot.blocked {p} "), Style::new().fg(t.warn)),
+        Span::styled(format!("blocked {b}"), Style::new().fg(t.bad)),
+    ];
+    if d.truncated {
+        left.push(Span::styled("  ⚠ truncated", Style::new().fg(t.warn)));
+    }
+    let left_w = left
+        .iter()
+        .map(|s| s.content.chars().count())
+        .sum::<usize>()
+        .saturating_add(2)
+        .min(inner.width.saturating_sub(24) as usize) as u16;
+    let cols = Layout::horizontal([Constraint::Length(left_w), Constraint::Min(10)]).split(inner);
+    f.render_widget(Paragraph::new(Line::from(left)), cols[0]);
+    let bar = bars::decision_bar(a, p, b, cols[1].width.saturating_sub(12) as usize, t);
+    let data = bars::sparkline_buckets(&d.flows, 12);
+    let max = *data.iter().max().unwrap_or(&1).max(&1);
+    let spark: String = data
+        .iter()
+        .map(|&v| {
+            let idx = ((v * 7) / max) as usize;
+            ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'][idx.min(7)]
+        })
+        .collect();
+    let mut right = bar.spans;
+    right.insert(
+        0,
+        Span::styled(format!("{spark} "), Style::new().fg(t.accent)),
+    );
+    f.render_widget(Paragraph::new(Line::from(right)), cols[1]);
+}
+
+fn render_flows(model: &Model, f: &mut Frame, area: Rect) {
+    let t = &model.theme;
+    let meta = crate::tui::ui::widgets::table::header_meta(&model.traffic.flows);
+    let block = panel("Flows", &meta, t, true);
+    let theme = t.clone();
+    crate::tui::ui::widgets::table::render(f, area, &model.traffic.flows, t, block, &move |fl| {
+        theme.decision_style(fl.policy_decision)
+    });
+}
+
+/// Labels, then any IP lists the endpoint belongs to (an IP-list-only endpoint has no labels).
+fn endpoint_tags(e: &ResolvedEndpoint) -> String {
+    let mut s = e.label_text();
+    if !e.ip_lists.is_empty() {
+        if !s.is_empty() {
+            s.push_str("  ");
+        }
+        s.push_str(&format!("ip lists: {}", e.ip_lists.join(", ")));
+    }
+    s
+}
+
+fn render_detail(model: &Model, f: &mut Frame, area: Rect) {
+    let t = &model.theme;
+    let block = panel(
+        "Detail",
+        if model.traffic.show_detail {
+            "Enter hides"
+        } else {
+            "Enter shows"
+        },
+        t,
+        false,
+    );
+    let Some(fl) = model
+        .traffic
+        .flows
+        .selected_item()
+        .filter(|_| model.traffic.show_detail)
+    else {
+        f.render_widget(
+            Paragraph::new(Span::styled("select a flow and press Enter", t.dim_style()))
+                .block(block),
+            area,
+        );
+        return;
+    };
+    let rules = if fl.rules.is_empty() {
+        "n/a".to_string()
+    } else {
+        fl.rules.join(", ")
+    };
+    let dash = || "-".to_string();
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("src  ", t.header_style()),
+            Span::raw(format!(
+                "{}  {}  {}",
+                fl.src.display_name(),
+                fl.src.ip.clone().unwrap_or_default(),
+                endpoint_tags(&fl.src)
+            )),
+        ]),
+        Line::from(vec![
+            Span::styled("dst  ", t.header_style()),
+            Span::raw(format!(
+                "{}  {}  {}",
+                fl.dst.display_name(),
+                fl.dst.ip.clone().unwrap_or_default(),
+                endpoint_tags(&fl.dst)
+            )),
+        ]),
+        Line::from(vec![
+            Span::styled("svc  ", t.header_style()),
+            Span::raw(format!(
+                "{}  process {}  user {}  {}",
+                fl.service_text(),
+                fl.process_name.clone().unwrap_or_else(dash),
+                fl.user_name.clone().unwrap_or_else(dash),
+                fl.policy_decision.as_str()
+            )),
+        ]),
+        Line::from(vec![
+            Span::styled("seen ", t.header_style()),
+            Span::raw(format!(
+                "first {}  last {}  rules {}",
+                fl.first_detected.clone().unwrap_or_default(),
+                fl.last_detected.clone().unwrap_or_default(),
+                rules
+            )),
+        ]),
+    ];
+    f.render_widget(
+        Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
+        area,
+    );
 }
 
 pub fn render_filter_bar(model: &Model, f: &mut Frame, area: Rect) {
