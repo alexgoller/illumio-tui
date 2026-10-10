@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Labels & objects  │  4 Workloads
+╭ Rulesets ──────────────────────────────────────────────────── draft · 5s ago ╮
+│  ruleset                on  scopes                              rules pending│
+│▸ Shop-Prod              ✓   app=shop & env=prod                     4        │
+│  Global-Infra           ✗   All                                     1 create │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭ Rules · Shop-Prod ───────────────────────────────────────────────────────────╮
+│  kind          on  consumers           providers          services           │
+│▸ allow         ✓   role=web            role=db            PostgreSQL         │
+│  allow         ✓   ipl:Corp            role=web           443/tcp, 8000-8099/│
+│  deny          ✓   ipl:Any (0.0.0.0/0  All workloads      23/tcp             │
+│  override_deny ✓   All workloads       role=db            22/tcp             │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ready         d scope  p pending  Enter detail  Tab pane  a auto  : cmd  ? help

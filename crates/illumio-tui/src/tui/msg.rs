@@ -2,6 +2,7 @@
 use crate::tui::filter::TrafficFilter;
 use crate::tui::model::Screen;
 use crossterm::event::{KeyEvent, MouseEvent};
+use pce::models::{DenyRule, PendingChange, PolicyScope, RuleSet};
 use pce::traffic::{QueryProgress, ResolvedFlow};
 use pce::{CacheMode, StatsSnapshot};
 use std::sync::Arc;
@@ -49,6 +50,16 @@ pub enum Msg {
         seq: u64,
         result: Result<QueryOutcome, String>,
     },
+    /// Rulesets for `scope` with the cache age in seconds.
+    RuleSetsLoaded {
+        scope: PolicyScope,
+        result: Result<(Vec<RuleSet>, u64), String>,
+    },
+    DenyRulesLoaded {
+        href: String,
+        result: Result<Vec<DenyRule>, String>,
+    },
+    PendingLoaded(Result<Vec<PendingChange>, String>),
 }
 
 #[derive(Debug, Clone)]
@@ -63,6 +74,16 @@ pub enum Cmd {
         mode: CacheMode,
         cancel: CancellationToken,
     },
+    LoadRuleSets {
+        scope: PolicyScope,
+        mode: CacheMode,
+    },
+    /// Fallback for a ruleset whose inline `deny_rules` is empty.
+    LoadDenyRules {
+        href: String,
+        mode: CacheMode,
+    },
+    LoadPending(CacheMode),
     Quit,
 }
 
@@ -85,6 +106,21 @@ impl PartialEq for Cmd {
                     ..
                 },
             ) => a == b && fa == fb && ma == mb,
+            (
+                Cmd::LoadRuleSets {
+                    scope: sa,
+                    mode: ma,
+                },
+                Cmd::LoadRuleSets {
+                    scope: sb,
+                    mode: mb,
+                },
+            ) => sa == sb && ma == mb,
+            (
+                Cmd::LoadDenyRules { href: ha, mode: ma },
+                Cmd::LoadDenyRules { href: hb, mode: mb },
+            ) => ha == hb && ma == mb,
+            (Cmd::LoadPending(a), Cmd::LoadPending(b)) => a == b,
             _ => false,
         }
     }

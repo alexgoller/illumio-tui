@@ -71,6 +71,19 @@ pub fn model_with_flows() -> Model {
     m
 }
 
+/// A connected model with the fixture rulesets loaded (draft scope, loaded 5 s ago).
+pub fn model_with_policy() -> Model {
+    let mut m = model_fixture();
+    let raw: Vec<pce::models::RuleSet> =
+        serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json"))
+            .expect("rule sets fixture");
+    let idx = fixture_index();
+    m.policy.set_rule_sets(raw, &idx);
+    // The first ruleset has inline deny rules; the second is left to the fallback.
+    m.policy.loaded_at = Some(Instant::now() - Duration::from_secs(5));
+    m
+}
+
 /// Renders the model into a `w`×`h` test terminal and returns the text.
 pub fn render_to_string(model: &Model, w: u16, h: u16) -> String {
     let mut term = Terminal::new(TestBackend::new(w, h)).expect("test terminal");

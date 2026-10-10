@@ -2,8 +2,10 @@
 use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::table::{Column, SortKey, TableView};
 use crate::tui::ui::theme::Theme;
-use pce::StatsSnapshot;
+use pce::models::{DenyRule, PendingChange, PolicyScope, RuleSet};
 use pce::traffic::{BlockedGroup, FlowGroup, ResolvedFlow, blocked_summary, group_by_labels};
+use pce::{NameIndex, RuleKind, RuleSetView, RuleView, StatsSnapshot};
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
@@ -92,7 +94,7 @@ impl StatusLine {
 }
 
 /// A modal drawn on top of the current screen. Later tasks add `Error`, `Detail`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum Overlay {
     None,
     Help,
@@ -108,7 +110,39 @@ pub enum Overlay {
     GroupKeys {
         input: String,
     },
+    /// The selected policy rule in full.
+    RuleDetail(RuleView),
+    /// Pending (unprovisioned) changes; the list lives in `PolicyState::pending`.
+    Pending,
 }
+
+impl PartialEq for Overlay {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Overlay::None, Overlay::None)
+            | (Overlay::Help, Overlay::Help)
+            | (Overlay::Pending, Overlay::Pending) => true,
+            (Overlay::Prompt { input: a }, Overlay::Prompt { input: b })
+            | (Overlay::GroupKeys { input: a }, Overlay::GroupKeys { input: b }) => a == b,
+            (Overlay::FilterEditor(a), Overlay::FilterEditor(b)) => a == b,
+            (
+                Overlay::Confirm {
+                    reason: ra,
+                    action: aa,
+                },
+                Overlay::Confirm {
+                    reason: rb,
+                    action: ab,
+                },
+            ) => ra == rb && aa == ab,
+            // `RuleView` is not `PartialEq`; a rule is identified by its href.
+            (Overlay::RuleDetail(a), Overlay::RuleDetail(b)) => a.href == b.href,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Overlay {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PendingAction {
@@ -553,6 +587,262 @@ impl TrafficState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolicyPane {
+    RuleSets,
+    Rules,
+}
+
+fn plain_names<'a>(v: impl Iterator<Item = &'a str>) -> String {
+    v.collect::<Vec<_>>().join(", ")
+}
+
+fn actor_names(v: &[pce::ResolvedActor]) -> String {
+    plain_names(v.iter().map(|a| a.name.as_str()))
+}
+
+fn service_names(v: &[pce::ResolvedService]) -> String {
+    plain_names(v.iter().map(|s| s.name.as_str()))
+}
+
+pub fn rule_kind_name(kind: RuleKind) -> &'static str {
+    match kind {
+        RuleKind::Allow => "allow",
+        RuleKind::Deny => "deny",
+        RuleKind::OverrideDeny => "override_deny",
+    }
+}
+
+fn on_off(enabled: bool) -> String {
+    if enabled { "✓".into() } else { "✗".into() }
+}
+
+pub fn ruleset_columns() -> Vec<Column<RuleSetView>> {
+    vec![
+        Column {
+            title: "ruleset",
+            width: 22,
+            cell: |r| r.name.clone(),
+            key: |r| SortKey::Text(r.name.clone()),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "on",
+            width: 3,
+            cell: |r| on_off(r.enabled),
+            key: |r| SortKey::Num(u64::from(r.enabled)),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "scopes",
+            width: 0,
+            cell: |r| r.scopes.join(" | "),
+            key: |r| SortKey::Text(r.scopes.join(" | ")),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "rules",
+            width: 5,
+            cell: |r| r.rule_count.to_string(),
+            key: |r| SortKey::Num(r.rule_count as u64),
+            right: true,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "pending",
+            width: 7,
+            cell: |r| r.update_type.clone().unwrap_or_default(),
+            key: |r| SortKey::Text(r.update_type.clone().unwrap_or_default()),
+            right: false,
+            hide_below: 70,
+            narrow: None,
+            narrow_width: 0,
+        },
+    ]
+}
+
+pub fn rule_columns() -> Vec<Column<RuleView>> {
+    vec![
+        Column {
+            title: "kind",
+            width: 13,
+            cell: |r| rule_kind_name(r.kind).to_string(),
+            key: |r| SortKey::Text(rule_kind_name(r.kind).to_string()),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "on",
+            width: 3,
+            cell: |r| on_off(r.enabled),
+            key: |r| SortKey::Num(u64::from(r.enabled)),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "consumers",
+            width: 0,
+            cell: |r| actor_names(&r.consumers),
+            key: |r| SortKey::Text(actor_names(&r.consumers)),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "providers",
+            width: 0,
+            cell: |r| actor_names(&r.providers),
+            key: |r| SortKey::Text(actor_names(&r.providers)),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "services",
+            width: 0,
+            cell: |r| service_names(&r.services),
+            key: |r| SortKey::Text(service_names(&r.services)),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "pending",
+            width: 7,
+            cell: |r| r.update_type.clone().unwrap_or_default(),
+            key: |r| SortKey::Text(r.update_type.clone().unwrap_or_default()),
+            right: false,
+            hide_below: 90,
+            narrow: None,
+            narrow_width: 0,
+        },
+    ]
+}
+
+#[derive(Debug)]
+pub struct PolicyState {
+    pub scope: PolicyScope,
+    pub pane: PolicyPane,
+    pub rulesets: TableView<RuleSetView>,
+    pub rules: TableView<RuleView>,
+    pub raw: Vec<RuleSet>,
+    /// Deny rules fetched from the endpoint for rulesets whose inline list is empty.
+    pub fallback_deny: HashMap<String, Vec<DenyRule>>,
+    /// Rulesets whose deny-rule fallback was already requested (once per load).
+    pub deny_requested: HashSet<String>,
+    pub loaded_at: Option<Instant>,
+    pub age_secs: u64,
+    pub loading: bool,
+    pub pending: Option<Vec<PendingChange>>,
+    pub auto: AutoRefresh,
+}
+
+impl PolicyState {
+    pub fn new(min_refresh: u64) -> Self {
+        Self {
+            scope: PolicyScope::Draft,
+            pane: PolicyPane::RuleSets,
+            rulesets: TableView::new(ruleset_columns()),
+            rules: TableView::new(rule_columns()),
+            raw: Vec::new(),
+            fallback_deny: HashMap::new(),
+            deny_requested: HashSet::new(),
+            loaded_at: None,
+            age_secs: 0,
+            loading: false,
+            pending: None,
+            auto: AutoRefresh::new(min_refresh),
+        }
+    }
+
+    /// Whether the focused pane's table is capturing keys for a search.
+    pub fn is_searching(&self) -> bool {
+        match self.pane {
+            PolicyPane::RuleSets => self.rulesets.is_searching(),
+            PolicyPane::Rules => self.rules.is_searching(),
+        }
+    }
+
+    pub fn set_rule_sets(&mut self, raw: Vec<RuleSet>, idx: &NameIndex) {
+        self.rulesets.set_rows(
+            raw.iter()
+                .map(|rs| RuleSetView::from_rule_set(rs, idx))
+                .collect(),
+        );
+        self.raw = raw;
+        self.rebuild_rules(idx);
+    }
+
+    /// Forgets everything loaded (a scope switch shows nothing of the old scope).
+    pub fn clear(&mut self) {
+        self.rulesets.set_rows(Vec::new());
+        self.rules.set_rows(Vec::new());
+        self.raw.clear();
+        self.fallback_deny.clear();
+        self.deny_requested.clear();
+        self.loaded_at = None;
+        self.age_secs = 0;
+    }
+
+    /// Rules of the selected ruleset: allow rules, then deny rules (inline or fetched fallback).
+    pub fn rebuild_rules(&mut self, idx: &NameIndex) {
+        let Some(href) = self.selected_href() else {
+            self.rules.set_rows(Vec::new());
+            return;
+        };
+        let Some(rs) = self.raw.iter().find(|r| r.href == href) else {
+            self.rules.set_rows(Vec::new());
+            return;
+        };
+        let mut rows: Vec<RuleView> = rs
+            .rules
+            .iter()
+            .map(|r| RuleView::from_rule(r, idx))
+            .collect();
+        let deny: &[DenyRule] = if rs.deny_rules.is_empty() {
+            self.fallback_deny.get(&href).map_or(&[], Vec::as_slice)
+        } else {
+            &rs.deny_rules
+        };
+        rows.extend(deny.iter().map(|d| RuleView::from_deny(d, idx)));
+        self.rules.set_rows(rows);
+    }
+
+    pub fn selected_href(&self) -> Option<String> {
+        self.rulesets.selected_item().map(|r| r.href.clone())
+    }
+
+    /// The selected ruleset's href when its inline deny list is empty and the
+    /// endpoint has not been asked yet. Marks it as requested.
+    pub fn take_deny_fallback(&mut self) -> Option<String> {
+        let href = self.selected_href()?;
+        let inline_empty = self
+            .raw
+            .iter()
+            .find(|r| r.href == href)
+            .is_some_and(|r| r.deny_rules.is_empty());
+        (inline_empty && self.deny_requested.insert(href.clone())).then_some(href)
+    }
+}
+
 /// Limits copied from the resolved profile so `update` never touches config.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Limits {
@@ -570,6 +860,7 @@ pub struct Model {
     pub screen: Screen,
     pub overlay: Overlay,
     pub traffic: TrafficState,
+    pub policy: PolicyState,
     pub connection: Connection,
     pub stats: StatsSnapshot,
     pub size: (u16, u16),
@@ -595,6 +886,7 @@ impl Model {
             traffic_max_results,
             auto_refresh_min_seconds,
         );
+        let policy = PolicyState::new(auto_refresh_min_seconds);
         Self {
             profile,
             theme_name,
@@ -607,6 +899,7 @@ impl Model {
             screen: Screen::Traffic,
             overlay: Overlay::None,
             traffic,
+            policy,
             connection: Connection::Connecting,
             stats: StatsSnapshot { calls: 0, bytes: 0 },
             size: (80, 24),
@@ -632,7 +925,7 @@ impl Model {
 
     /// Whether any screen has opted in to auto-refresh (drives the idle tick).
     pub fn any_auto_enabled(&self) -> bool {
-        self.traffic.auto.enabled
+        self.traffic.auto.enabled || self.policy.auto.enabled
     }
 
     pub fn is_connected(&self) -> bool {

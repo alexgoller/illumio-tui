@@ -334,3 +334,39 @@ async fn auto_refresh_off_never_requeries_on_tick() {
 async fn auto_refresh_on_requeries_exactly_once_when_due() {
     assert_eq!(posts_after_far_future_tick(true).await, 2);
 }
+
+#[tokio::test]
+async fn load_rule_sets_command_round_trips() {
+    use illumio_tui::tui::msg::Msg;
+    use pce::models::PolicyScope;
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/sec_policy/draft/rule_sets"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/rule_sets.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let pce = pce_for(&server);
+    let mut m = model();
+    m.connection = Connection::Connected {
+        index: Some(pce.name_index(pce::CacheMode::Use).await.unwrap()),
+        index_age_secs: 0,
+    };
+    let (mut rt, tx) = Runtime::new(pce, m);
+    tx.send(Msg::SwitchScreen(illumio_tui::tui::model::Screen::Policy))
+        .unwrap();
+    let events = stream::once(async {
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
+    });
+    let model = run_loop(&mut rt, Box::pin(events), &mut |_| {}).await;
+    assert_eq!(model.policy.scope, PolicyScope::Draft);
+    assert_eq!(model.policy.rulesets.len(), 2);
+    assert_eq!(model.policy.rules.len(), 4);
+    assert_eq!(model.busy, 0);
+}

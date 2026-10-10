@@ -95,6 +95,45 @@ impl Runtime {
                     let _ = tx.send(Msg::Stats(pce.stats()));
                 });
             }
+            Cmd::LoadRuleSets { scope, mode } => {
+                self.model.busy += 1;
+                let (pce, tx) = (self.pce.clone(), self.tx.clone());
+                tokio::spawn(async move {
+                    let result = pce
+                        .rule_sets(scope, mode)
+                        .await
+                        .map(|c| (c.value, c.age.as_secs()))
+                        .map_err(|e| e.to_string());
+                    let _ = tx.send(Msg::RuleSetsLoaded { scope, result });
+                    let _ = tx.send(Msg::Stats(pce.stats()));
+                });
+            }
+            Cmd::LoadDenyRules { href, mode } => {
+                self.model.busy += 1;
+                let (pce, tx) = (self.pce.clone(), self.tx.clone());
+                tokio::spawn(async move {
+                    let result = pce
+                        .deny_rules(&href, mode)
+                        .await
+                        .map(|c| c.value)
+                        .map_err(|e| e.to_string());
+                    let _ = tx.send(Msg::DenyRulesLoaded { href, result });
+                    let _ = tx.send(Msg::Stats(pce.stats()));
+                });
+            }
+            Cmd::LoadPending(mode) => {
+                self.model.busy += 1;
+                let (pce, tx) = (self.pce.clone(), self.tx.clone());
+                tokio::spawn(async move {
+                    let result = pce
+                        .pending_changes(mode)
+                        .await
+                        .map(|c| c.value)
+                        .map_err(|e| e.to_string());
+                    let _ = tx.send(Msg::PendingLoaded(result));
+                    let _ = tx.send(Msg::Stats(pce.stats()));
+                });
+            }
             Cmd::LoadIndex(mode) => {
                 self.model.busy += 1;
                 let (pce, tx) = (self.pce.clone(), self.tx.clone());
@@ -119,6 +158,9 @@ impl Runtime {
                 | Msg::IndexLoaded { .. }
                 | Msg::IndexFailed(_)
                 | Msg::QueryDone { .. }
+                | Msg::RuleSetsLoaded { .. }
+                | Msg::DenyRulesLoaded { .. }
+                | Msg::PendingLoaded(_)
         );
         let cmds = update(&mut self.model, msg);
         if task_result {

@@ -1,8 +1,9 @@
 //! Modal overlays drawn on top of the current screen: help and the `:` prompt.
 use crate::tui::filter::{FIELD_NAMES, FilterEditor};
-use crate::tui::model::{Model, Screen};
+use crate::tui::model::{Model, Screen, rule_kind_name};
 use crate::tui::ui::layout::centered;
 use crate::tui::ui::widgets::panel::panel;
+use pce::RuleView;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
@@ -149,10 +150,107 @@ pub fn render_confirm(model: &Model, reason: &str, f: &mut Frame, area: Rect) {
     );
 }
 
+fn labelled<'a>(model: &Model, label: &str, value: String) -> Line<'a> {
+    let t = &model.theme;
+    Line::from(vec![
+        Span::styled(format!("{label:<12}"), t.header_style()),
+        Span::styled(value, t.base()),
+    ])
+}
+
+pub fn render_rule_detail(model: &Model, rule: &RuleView, f: &mut Frame, area: Rect) {
+    let t = &model.theme;
+    let r = centered(area, 76, 14);
+    f.render_widget(Clear, r);
+    let names = |v: &[pce::ResolvedActor]| {
+        v.iter()
+            .map(|a| a.name.clone())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let services = rule
+        .services
+        .iter()
+        .map(|s| s.name.clone())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let flags = format!(
+        "{} · {}",
+        if rule.enabled { "enabled" } else { "disabled" },
+        if rule.unscoped_consumers {
+            "unscoped consumers"
+        } else {
+            "scoped consumers"
+        }
+    );
+    let lines = vec![
+        labelled(
+            model,
+            "description",
+            rule.description.clone().unwrap_or_else(|| "(none)".into()),
+        ),
+        labelled(model, "consumers", names(&rule.consumers)),
+        labelled(model, "providers", names(&rule.providers)),
+        labelled(model, "services", services),
+        labelled(model, "flags", flags),
+        labelled(
+            model,
+            "pending",
+            rule.update_type.clone().unwrap_or_else(|| "none".into()),
+        ),
+        labelled(model, "href", rule.href.clone()),
+    ];
+    let block = panel(rule_kind_name(rule.kind), "Esc closes", t, true);
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(block)
+            .style(t.base())
+            .wrap(Wrap { trim: true }),
+        r,
+    );
+}
+
+pub fn render_pending(model: &Model, f: &mut Frame, area: Rect) {
+    let t = &model.theme;
+    let r = centered(area, 70, 16);
+    f.render_widget(Clear, r);
+    let pending = model.policy.pending.as_deref().unwrap_or(&[]);
+    let mut lines: Vec<Line> = if pending.is_empty() {
+        vec![Line::from(Span::styled("none", t.dim_style()))]
+    } else {
+        pending
+            .iter()
+            .map(|c| {
+                Line::from(vec![
+                    Span::styled(format!("{:<16}", c.object_type), t.header_style()),
+                    Span::styled(format!("{:<8}", c.change_type), Style::new().fg(t.warn)),
+                    Span::styled(c.name.clone().unwrap_or_else(|| c.href.clone()), t.base()),
+                ])
+            })
+            .collect()
+    };
+    let rows = r.height.saturating_sub(2) as usize;
+    if lines.len() > rows {
+        let hidden = lines.len() - (rows - 1);
+        lines.truncate(rows - 1);
+        lines.push(Line::from(Span::styled(
+            format!("… {hidden} more"),
+            t.dim_style(),
+        )));
+    }
+    let meta = format!("{} · Esc closes", pending.len());
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(panel("Pending changes", &meta, t, true))
+            .style(t.base()),
+        r,
+    );
+}
+
 pub fn screen_hint(screen: Screen) -> &'static str {
     match screen {
         Screen::Traffic => "f filter  r run  a auto  v view  s sort  / search",
-        Screen::Policy => "d draft/active  p pending  Enter detail  r refresh",
+        Screen::Policy => "d scope  p pending  Enter detail  Tab pane  a auto",
         Screen::Objects => "Tab type  r refresh  / search",
         Screen::Workloads => "t/T to traffic  / search  r refresh",
     }

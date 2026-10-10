@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Labels & objects  │  4 Workloads
+╭ Rulesets ──────────────────────────────────────────────────── draft · 5s ago ╮
+│  ruleset                on  scopes                              rules pending│
+│▸ Shop-Prod              ✓   app=shop & env=prod                     4        │
+│ ╭ override_deny ─────────────────────────────────────────────── Esc closes ╮ │
+│ │description (none)                                                        │ │
+│ │consumers   All workloads                                                 │ │
+╰─│providers   role=db                                                       │─╯
+╭ │services    22/tcp                                                        │─╮
+│ │flags       enabled · scoped consumers                                    │ │
+│▸│pending     none                                                          │ │
+│ │href        /orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8           │/│
+│ │                                                                          │ │
+│ │                                                                          │ │
+│ │                                                                          │ │
+│ │                                                                          │ │
+│ │                                                                          │ │
+│ ╰──────────────────────────────────────────────────────────────────────────╯ │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ready         d scope  p pending  Enter detail  Tab pane  a auto  : cmd  ? help

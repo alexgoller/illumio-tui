@@ -191,3 +191,47 @@ fn traffic_aggregate_and_blocked_80x24() {
     assert!(out.contains("8443/tcp"), "{out}");
     insta::assert_snapshot!("traffic_blocked_80x24", out);
 }
+
+#[test]
+fn policy_screen_80x24_and_160x48() {
+    use illumio_tui::tui::model::Screen;
+    use illumio_tui::tui::test_support::model_with_policy;
+    let mut m = model_with_policy();
+    m.screen = Screen::Policy;
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("Shop-Prod"), "{out}");
+    assert!(
+        out.contains("override_deny") || out.contains("override"),
+        "{out}"
+    );
+    insta::assert_snapshot!("policy_80x24", out);
+    insta::assert_snapshot!("policy_160x48", render_to_string(&m, 160, 48));
+}
+
+#[test]
+fn policy_pending_overlay_80x24() {
+    use illumio_tui::tui::model::{Overlay, Screen};
+    use illumio_tui::tui::test_support::model_with_policy;
+    let mut m = model_with_policy();
+    m.screen = Screen::Policy;
+    m.policy.pending = Some(pce::models::parse_pending(
+        serde_json::from_str(include_str!("../../../fixtures/pending_list.json")).unwrap(),
+    ));
+    m.overlay = Overlay::Pending;
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("Global-Infra"), "{out}");
+    insta::assert_snapshot!("policy_pending_80x24", out);
+}
+
+#[test]
+fn policy_rule_detail_overlay_80x24() {
+    use illumio_tui::tui::model::{Overlay, Screen};
+    use illumio_tui::tui::test_support::model_with_policy;
+    let mut m = model_with_policy();
+    m.screen = Screen::Policy;
+    let rule = m.policy.rules.rows()[3].clone(); // the override_deny rule
+    m.overlay = Overlay::RuleDetail(rule);
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("override_deny"), "{out}");
+    insta::assert_snapshot!("policy_rule_detail_80x24", out);
+}

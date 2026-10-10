@@ -2,12 +2,13 @@
 use crate::tui::commands::{self, Command};
 use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::model::{
-    Connection, Model, Overlay, PendingAction, QueryState, Screen, StatusLine, TrafficData,
-    TrafficView,
+    Connection, Model, Overlay, PendingAction, PolicyPane, QueryState, Screen, StatusLine,
+    TrafficData, TrafficView,
 };
 use crate::tui::msg::{Cmd, Msg, QueryOutcome};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use pce::CacheMode;
+use pce::models::PolicyScope;
 use pce::traffic::QueryProgress;
 use std::time::Instant;
 
@@ -22,9 +23,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::Tick(now) => {
             if model.traffic.is_running() {
                 refresh_running_status_at(model, now);
-                return Vec::new();
-            }
-            if model.screen == Screen::Traffic
+            } else if model.screen == Screen::Traffic
                 && model.focused
                 && model.overlay == Overlay::None
                 && model.traffic.data.is_some()
@@ -32,6 +31,15 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             {
                 let f = model.traffic.filter.clone();
                 return start_query(model, f, CacheMode::Bypass);
+            }
+            if model.screen == Screen::Policy
+                && model.focused
+                && model.overlay == Overlay::None
+                && model.policy.loaded_at.is_some()
+                && !model.policy.loading
+                && model.policy.auto.due(now)
+            {
+                return load_rule_sets(model, CacheMode::Bypass);
             }
             Vec::new()
         }
@@ -59,6 +67,15 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 index_age_secs: age_secs,
             };
             model.status = StatusLine::info("ready");
+            // Rulesets that arrived before the names could be resolved.
+            if !model.policy.raw.is_empty()
+                && model.policy.rulesets.is_empty()
+                && let Some(idx) = model.index().cloned()
+            {
+                let raw = std::mem::take(&mut model.policy.raw);
+                model.policy.set_rule_sets(raw, &idx);
+                return deny_fallback(model);
+            }
             Vec::new()
         }
         Msg::IndexFailed(e) => {
@@ -69,10 +86,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             model.stats = s;
             Vec::new()
         }
-        Msg::SwitchScreen(s) => {
-            model.screen = s;
-            Vec::new()
-        }
+        Msg::SwitchScreen(s) => switch(model, s),
         Msg::Command(c) => on_command(model, c),
         Msg::ApplyFilter(f) => {
             model.traffic.filter = f.clone();
@@ -149,6 +163,65 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     model.traffic.query = QueryState::Failed(e.clone());
                     model.status = StatusLine::error(e);
                 }
+            }
+            Vec::new()
+        }
+        Msg::RuleSetsLoaded { scope, result } => {
+            if scope != model.policy.scope {
+                return Vec::new(); // the user toggled draft/active meanwhile
+            }
+            model.policy.loading = false;
+            match result {
+                Ok((raw, age)) => {
+                    model.policy.loaded_at = Some(Instant::now());
+                    model.policy.age_secs = age;
+                    // A reload may change deny rules; they come back through the cache.
+                    model.policy.fallback_deny.clear();
+                    model.policy.deny_requested.clear();
+                    match model.index().cloned() {
+                        Some(idx) => model.policy.set_rule_sets(raw, &idx),
+                        None => model.policy.raw = raw, // built when the index arrives
+                    }
+                    model.status = StatusLine::info(format!(
+                        "{} rulesets ({})",
+                        model.policy.rulesets.len(),
+                        model.policy.scope.segment()
+                    ));
+                    // Only the selected ruleset's deny rules are fetched on demand.
+                    deny_fallback(model)
+                }
+                Err(e) => {
+                    model.status = StatusLine::error(format!("rulesets: {e}"));
+                    Vec::new()
+                }
+            }
+        }
+        Msg::DenyRulesLoaded { href, result } => {
+            match result {
+                Ok(d) => {
+                    model.policy.fallback_deny.insert(href, d);
+                    if let Some(idx) = model.index().cloned() {
+                        model.policy.rebuild_rules(&idx);
+                    }
+                }
+                Err(e) if e.contains("not found") => {
+                    model.policy.fallback_deny.insert(href, Vec::new());
+                }
+                Err(e) => {
+                    model.policy.deny_requested.remove(&href); // allow a retry on reselect
+                    model.status = StatusLine::warn(format!("deny rules: {e}"));
+                }
+            }
+            Vec::new()
+        }
+        Msg::PendingLoaded(result) => {
+            match result {
+                Ok(p) => {
+                    model.status = StatusLine::info(format!("{} pending changes", p.len()));
+                    model.policy.pending = Some(p);
+                    model.overlay = Overlay::Pending;
+                }
+                Err(e) => model.status = StatusLine::error(format!("pending: {e}")),
             }
             Vec::new()
         }
@@ -305,17 +378,26 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             }
             _ => Vec::new(),
         },
+        Overlay::RuleDetail(_) | Overlay::Pending => {
+            if matches!(k.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) {
+                model.overlay = Overlay::None;
+            }
+            Vec::new()
+        }
         Overlay::None => on_screen_key(model, k),
     }
 }
 
 fn on_screen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     // An active table search captures every key except Ctrl-C.
-    if model.screen == Screen::Traffic
-        && model.traffic.is_searching()
-        && !(k.code == KeyCode::Char('c') && k.modifiers.contains(KeyModifiers::CONTROL))
-    {
-        return traffic_key(model, k);
+    let ctrl_c = k.code == KeyCode::Char('c') && k.modifiers.contains(KeyModifiers::CONTROL);
+    if !ctrl_c {
+        if model.screen == Screen::Traffic && model.traffic.is_searching() {
+            return traffic_key(model, k);
+        }
+        if model.screen == Screen::Policy && model.policy.is_searching() {
+            return policy_key(model, k);
+        }
     }
     match (k.code, k.modifiers) {
         (KeyCode::Char('q'), KeyModifiers::NONE) => {
@@ -337,6 +419,7 @@ fn on_screen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         (KeyCode::Char('3'), _) => switch(model, Screen::Objects),
         (KeyCode::Char('4'), _) => switch(model, Screen::Workloads),
         _ if model.screen == Screen::Traffic => traffic_key(model, k),
+        _ if model.screen == Screen::Policy => policy_key(model, k),
         _ => Vec::new(),
     }
 }
@@ -466,6 +549,120 @@ fn request_query(model: &mut Model, f: TrafficFilter) -> Vec<Cmd> {
 
 fn switch(model: &mut Model, s: Screen) -> Vec<Cmd> {
     model.screen = s;
+    match s {
+        // Loaded data is kept: returning to the screen never requests again.
+        Screen::Policy
+            if model.policy.loaded_at.is_none()
+                && !model.policy.loading
+                && model.is_connected() =>
+        {
+            load_rule_sets(model, CacheMode::Use)
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn load_rule_sets(model: &mut Model, mode: CacheMode) -> Vec<Cmd> {
+    model.policy.loading = true;
+    model.policy.auto.last_run = Some(Instant::now());
+    vec![Cmd::LoadRuleSets {
+        scope: model.policy.scope,
+        mode,
+    }]
+}
+
+/// Deny-rule endpoint request for the selected ruleset when its inline list is empty.
+fn deny_fallback(model: &mut Model) -> Vec<Cmd> {
+    model
+        .policy
+        .take_deny_fallback()
+        .map(|href| {
+            vec![Cmd::LoadDenyRules {
+                href,
+                mode: CacheMode::Use,
+            }]
+        })
+        .unwrap_or_default()
+}
+
+fn policy_page(model: &Model) -> usize {
+    let area = ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1);
+    crate::tui::ui::layout::chrome(area)
+        .map(|c| crate::tui::ui::screens::policy::table_rows(c.body, model.policy.pane))
+        .unwrap_or(10)
+        .max(1)
+}
+
+fn policy_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
+    let page = policy_page(model);
+    if !model.policy.is_searching() {
+        match k.code {
+            KeyCode::Char('d') => {
+                model.policy.scope = match model.policy.scope {
+                    PolicyScope::Draft => PolicyScope::Active,
+                    PolicyScope::Active => PolicyScope::Draft,
+                };
+                model.policy.clear();
+                return load_rule_sets(model, CacheMode::Use);
+            }
+            KeyCode::Char('r') => return load_rule_sets(model, CacheMode::Bypass),
+            KeyCode::Char('p') => {
+                model.status = StatusLine::info("loading pending changes");
+                return vec![Cmd::LoadPending(CacheMode::Use)];
+            }
+            KeyCode::Char('a') => {
+                let a = &mut model.policy.auto;
+                a.enabled = !a.enabled;
+                model.status = if a.enabled {
+                    StatusLine::info(format!("auto-refresh every {}s", a.interval.as_secs()))
+                } else {
+                    StatusLine::info("auto-refresh off")
+                };
+                return Vec::new();
+            }
+            KeyCode::Tab | KeyCode::BackTab => {
+                model.policy.pane = match model.policy.pane {
+                    PolicyPane::RuleSets => PolicyPane::Rules,
+                    PolicyPane::Rules => PolicyPane::RuleSets,
+                };
+                return Vec::new();
+            }
+            KeyCode::Enter if model.policy.pane == PolicyPane::Rules => {
+                if let Some(r) = model.policy.rules.selected_item() {
+                    model.overlay = Overlay::RuleDetail(r.clone());
+                }
+                return Vec::new();
+            }
+            _ => {}
+        }
+    }
+    let before = model.policy.selected_href();
+    match model.policy.pane {
+        PolicyPane::RuleSets => {
+            let t = &mut model.policy.rulesets;
+            if t.is_searching() {
+                search_key(t, k);
+            } else {
+                table_key(t, k, page);
+            }
+            t.ensure_visible(page);
+        }
+        PolicyPane::Rules => {
+            let t = &mut model.policy.rules;
+            if t.is_searching() {
+                search_key(t, k);
+            } else {
+                table_key(t, k, page);
+            }
+            t.ensure_visible(page);
+        }
+    }
+    if model.policy.selected_href() != before
+        && let Some(idx) = model.index().cloned()
+    {
+        model.policy.rebuild_rules(&idx);
+        return deny_fallback(model);
+    }
     Vec::new()
 }
 
@@ -849,16 +1046,17 @@ mod tests {
     }
 
     #[test]
-    fn number_keys_switch_screens_without_commands() {
+    fn number_keys_switch_screens_only_policy_loads() {
         let mut m = model_fixture();
         assert_eq!(m.screen, Screen::Traffic);
-        assert!(update(&mut m, key('2')).is_empty());
+        // entering Policy for the first time loads its rulesets (see the policy tests)
+        assert_eq!(update(&mut m, key('2')).len(), 1);
         assert_eq!(m.screen, Screen::Policy);
-        update(&mut m, key('3'));
+        assert!(update(&mut m, key('3')).is_empty());
         assert_eq!(m.screen, Screen::Objects);
-        update(&mut m, key('4'));
+        assert!(update(&mut m, key('4')).is_empty());
         assert_eq!(m.screen, Screen::Workloads);
-        update(&mut m, key('1'));
+        assert!(update(&mut m, key('1')).is_empty());
         assert_eq!(m.screen, Screen::Traffic);
     }
 
@@ -1248,5 +1446,259 @@ mod tests {
             }
         ));
         assert_eq!(m.traffic.filter.window, "30d");
+    }
+
+    // ---- Policy screen (Task 10) ----
+
+    fn kc(code: KeyCode) -> Msg {
+        Msg::Key(KeyEvent::new(code, KeyModifiers::NONE))
+    }
+
+    #[test]
+    fn opening_policy_loads_rulesets_once_and_d_toggles_scope() {
+        use pce::models::PolicyScope;
+        let mut m = model_fixture();
+        let cmds = update(&mut m, key('2'));
+        assert_eq!(
+            cmds,
+            vec![Cmd::LoadRuleSets {
+                scope: PolicyScope::Draft,
+                mode: pce::CacheMode::Use
+            }]
+        );
+        assert!(m.policy.loading);
+        let rs: Vec<pce::models::RuleSet> =
+            serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
+        update(
+            &mut m,
+            Msg::RuleSetsLoaded {
+                scope: PolicyScope::Draft,
+                result: Ok((rs, 0)),
+            },
+        );
+        assert!(!m.policy.loading);
+        assert_eq!(m.policy.rulesets.len(), 2);
+        assert_eq!(
+            m.policy.rules.len(),
+            4,
+            "allow + inline deny rules of the first ruleset"
+        );
+        assert!(update(&mut m, key('1')).is_empty());
+        assert!(
+            update(&mut m, key('2')).is_empty(),
+            "already loaded: no request"
+        );
+        let cmds = update(&mut m, key('d'));
+        assert_eq!(
+            cmds,
+            vec![Cmd::LoadRuleSets {
+                scope: PolicyScope::Active,
+                mode: pce::CacheMode::Use
+            }]
+        );
+        assert_eq!(m.policy.scope, PolicyScope::Active);
+        let cmds = update(&mut m, key('r'));
+        assert_eq!(
+            cmds,
+            vec![Cmd::LoadRuleSets {
+                scope: PolicyScope::Active,
+                mode: pce::CacheMode::Bypass
+            }]
+        );
+    }
+
+    #[test]
+    fn selecting_a_ruleset_rebuilds_rules_and_enter_opens_detail() {
+        use crate::tui::model::Overlay;
+        use crate::tui::test_support::model_with_policy;
+        let mut m = model_with_policy();
+        update(&mut m, key('2'));
+        assert_eq!(m.policy.rules.len(), 4);
+        update(&mut m, kc(KeyCode::Down));
+        assert_eq!(m.policy.rules.len(), 1, "second ruleset has one rule");
+        update(&mut m, kc(KeyCode::Tab));
+        update(&mut m, kc(KeyCode::Enter));
+        match &m.overlay {
+            Overlay::RuleDetail(r) => assert_eq!(r.providers[0].name, "All workloads"),
+            other => panic!("{other:?}"),
+        }
+        update(&mut m, kc(KeyCode::Esc));
+        assert!(matches!(m.overlay, Overlay::None));
+    }
+
+    #[test]
+    fn p_loads_pending_and_shows_the_panel() {
+        use crate::tui::model::Overlay;
+        use crate::tui::test_support::model_with_policy;
+        let mut m = model_with_policy();
+        update(&mut m, key('2'));
+        let cmds = update(&mut m, key('p'));
+        assert_eq!(cmds, vec![Cmd::LoadPending(pce::CacheMode::Use)]);
+        let pending = pce::models::parse_pending(
+            serde_json::from_str(include_str!("../../../../fixtures/pending_list.json")).unwrap(),
+        );
+        update(&mut m, Msg::PendingLoaded(Ok(pending)));
+        assert!(matches!(m.overlay, Overlay::Pending));
+        assert_eq!(m.policy.pending.as_ref().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn empty_inline_deny_rules_fall_back_to_the_endpoint() {
+        use pce::models::PolicyScope;
+        let mut m = model_fixture();
+        update(&mut m, key('2'));
+        let mut rs: Vec<pce::models::RuleSet> =
+            serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
+        rs[0].deny_rules.clear();
+        let cmds = update(
+            &mut m,
+            Msg::RuleSetsLoaded {
+                scope: PolicyScope::Draft,
+                result: Ok((rs, 0)),
+            },
+        );
+        assert_eq!(
+            cmds,
+            vec![Cmd::LoadDenyRules {
+                href: "/orgs/5/sec_policy/draft/rule_sets/100".into(),
+                mode: pce::CacheMode::Use
+            }]
+        );
+        let deny: Vec<pce::models::DenyRule> =
+            serde_json::from_str(include_str!("../../../../fixtures/deny_rules.json")).unwrap();
+        update(
+            &mut m,
+            Msg::DenyRulesLoaded {
+                href: "/orgs/5/sec_policy/draft/rule_sets/100".into(),
+                result: Ok(deny),
+            },
+        );
+        assert_eq!(m.policy.rules.len(), 4);
+    }
+
+    #[test]
+    fn fallback_is_requested_once_per_ruleset_even_when_revisited() {
+        use crate::tui::test_support::model_with_policy;
+        let mut m = model_with_policy();
+        update(&mut m, key('2'));
+        // the second ruleset has no inline deny rules: first visit requests, revisit does not
+        let first = update(&mut m, kc(KeyCode::Down));
+        assert_eq!(
+            first,
+            vec![Cmd::LoadDenyRules {
+                href: "/orgs/5/sec_policy/draft/rule_sets/101".into(),
+                mode: pce::CacheMode::Use
+            }]
+        );
+        update(&mut m, kc(KeyCode::Up));
+        assert!(update(&mut m, kc(KeyCode::Down)).is_empty());
+        // a "not found" answer is remembered as empty
+        update(
+            &mut m,
+            Msg::DenyRulesLoaded {
+                href: "/orgs/5/sec_policy/draft/rule_sets/101".into(),
+                result: Err("not found".into()),
+            },
+        );
+        update(&mut m, kc(KeyCode::Up));
+        assert!(update(&mut m, kc(KeyCode::Down)).is_empty());
+    }
+
+    #[test]
+    fn result_for_the_other_scope_is_ignored_and_keeps_loading() {
+        use pce::models::PolicyScope;
+        let mut m = model_fixture();
+        update(&mut m, key('2'));
+        update(&mut m, key('d')); // Active now loading
+        let rs: Vec<pce::models::RuleSet> =
+            serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
+        update(
+            &mut m,
+            Msg::RuleSetsLoaded {
+                scope: PolicyScope::Draft,
+                result: Ok((rs, 0)),
+            },
+        );
+        assert!(m.policy.loading, "the active-scope load is still in flight");
+        assert!(m.policy.rulesets.is_empty());
+    }
+
+    #[test]
+    fn enter_without_a_rule_does_nothing_and_search_captures_keys() {
+        use crate::tui::model::Overlay;
+        use crate::tui::test_support::model_with_policy;
+        let mut m = model_with_policy();
+        update(&mut m, key('2'));
+        update(&mut m, key('/'));
+        for c in "qd2".chars() {
+            assert!(update(&mut m, key(c)).is_empty());
+        }
+        assert!(!m.quit, "q is typed into the search");
+        assert_eq!(m.screen, Screen::Policy);
+        assert_eq!(m.policy.scope, pce::models::PolicyScope::Draft);
+        assert!(m.policy.rulesets.is_empty(), "nothing matches qd2");
+        assert!(m.policy.rules.is_empty());
+        update(&mut m, kc(KeyCode::Esc));
+        assert_eq!(m.policy.rulesets.len(), 2);
+        update(&mut m, kc(KeyCode::Tab));
+        m.policy.rules.set_rows(Vec::new());
+        update(&mut m, kc(KeyCode::Enter));
+        assert!(matches!(m.overlay, Overlay::None));
+    }
+
+    #[test]
+    fn policy_without_an_index_requests_nothing_until_connected() {
+        let mut m = model_fixture();
+        m.connection = Connection::Connecting;
+        assert!(update(&mut m, key('2')).is_empty());
+        assert!(!m.policy.loading);
+    }
+
+    #[test]
+    fn policy_auto_refresh_obeys_the_guards() {
+        use crate::tui::model::Overlay;
+        use crate::tui::test_support::model_with_policy;
+        use std::time::Duration;
+        let mut m = model_with_policy();
+        update(&mut m, key('2'));
+        let now = Instant::now() + Duration::from_secs(120);
+        m.policy.auto.last_run = Some(Instant::now());
+        assert!(update(&mut m, Msg::Tick(now)).is_empty(), "opt-in only");
+        update(&mut m, key('a'));
+        assert!(m.policy.auto.enabled);
+        let early = Instant::now() + Duration::from_secs(10);
+        assert!(
+            update(&mut m, Msg::Tick(early)).is_empty(),
+            "minimum interval"
+        );
+        m.focused = false;
+        assert!(update(&mut m, Msg::Tick(now)).is_empty(), "not unfocused");
+        m.focused = true;
+        m.overlay = Overlay::Help;
+        assert!(
+            update(&mut m, Msg::Tick(now)).is_empty(),
+            "not under an overlay"
+        );
+        m.overlay = Overlay::None;
+        m.policy.loading = true;
+        assert!(
+            update(&mut m, Msg::Tick(now)).is_empty(),
+            "not while loading"
+        );
+        m.policy.loading = false;
+        assert_eq!(
+            update(&mut m, Msg::Tick(now)),
+            vec![Cmd::LoadRuleSets {
+                scope: pce::models::PolicyScope::Draft,
+                mode: pce::CacheMode::Bypass
+            }]
+        );
+        m.screen = Screen::Traffic;
+        m.policy.loading = false;
+        m.policy.auto.last_run = Some(Instant::now());
+        assert!(
+            update(&mut m, Msg::Tick(now)).is_empty(),
+            "only on its own screen"
+        );
     }
 }

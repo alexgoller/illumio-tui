@@ -46,6 +46,8 @@ pub fn view(model: &Model, f: &mut Frame) {
         }
         Overlay::FilterEditor(e) => widgets::overlay::render_filter_editor(model, e, f, area),
         Overlay::Confirm { reason, .. } => widgets::overlay::render_confirm(model, reason, f, area),
+        Overlay::RuleDetail(rule) => widgets::overlay::render_rule_detail(model, rule, f, area),
+        Overlay::Pending => widgets::overlay::render_pending(model, f, area),
     }
 }
 
@@ -118,6 +120,10 @@ fn render_body(model: &Model, f: &mut Frame, area: Rect) {
     }
     if model.screen == Screen::Traffic && model.is_connected() {
         screens::traffic::render(model, f, area);
+        return;
+    }
+    if model.screen == Screen::Policy && model.is_connected() {
+        screens::policy::render_screen(model, f, area);
         return;
     }
     let block = widgets::panel::panel(model.screen.title(), "", t, true);

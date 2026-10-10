@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Labels & objects  │  4 Workloads
+╭ Rulesets ──────────────────────────────────────────────────── draft · 5s ago ╮
+│  ruleset                on  scopes                              rules pending│
+│▸ Sh╭ Pending changes ─────────────────────────────────── 2 · Esc closes ╮    │
+│  Gl│rule_sets       create  Global-Infra                                │ate │
+│    │ip_lists        create  Corp                                        │    │
+│    │                                                                    │    │
+╰────│                                                                    │────╯
+╭ Rul│                                                                    │────╮
+│  ki│                                                                    │    │
+│▸ al│                                                                    │    │
+│  al│                                                                    │099/│
+│  de│                                                                    │    │
+│  ov│                                                                    │    │
+│    │                                                                    │    │
+│    │                                                                    │    │
+│    │                                                                    │    │
+│    │                                                                    │    │
+│    ╰────────────────────────────────────────────────────────────────────╯    │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ready         d scope  p pending  Enter detail  Tab pane  a auto  : cmd  ? help
