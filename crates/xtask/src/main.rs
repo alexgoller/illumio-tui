@@ -88,6 +88,10 @@ impl Anonymiser {
         match v {
             Value::Object(map) => {
                 let has_hostname = map.contains_key("hostname");
+                // Event payloads carry arbitrary hostnames, IPs and users under
+                // free-form keys; blank them rather than map field by field.
+                let is_resource_change = map.contains_key("resource");
+                let is_notification = map.contains_key("notification_type");
                 let has_user = map.contains_key("username") || map.contains_key("email");
                 let keys: Vec<String> = map.keys().cloned().collect();
                 for k in keys {
@@ -123,6 +127,8 @@ impl Anonymiser {
                             *s = Self::map(&mut self.users, s, |n| format!("user-{n}"))
                         }
                         ("process_name", Value::String(s)) => *s = self.process_name(s),
+                        ("changes", Value::Object(m)) if is_resource_change => m.clear(),
+                        ("info", Value::Object(m)) if is_notification => m.clear(),
                         ("description", Value::String(s)) => s.clear(),
                         ("public_ip", Value::String(s)) => *s = self.ip(s),
                         _ => self.walk(child),
@@ -302,7 +308,10 @@ mod tests {
             {"created_by": {"user": {"href": "/users/1", "username": "alice@corp.com", "name": "Alice A"}}},
             {"created_by": {"user": {"username": "alice@corp.com"}}},
             {"created_by": {"agent": {"hostname": "web01"}}},
-            {"resource_changes": [{"resource": {"label": {"href": "/orgs/5/labels/1", "name": "Web"}}}]}
+            {"resource_changes": [{"resource": {"label": {"href": "/orgs/5/labels/1", "name": "Web"}}}]},
+            {"resource_changes": [{"resource": {"workload": {"hostname": "web01"}},
+                "changes": {"hostname": {"before": "web01", "after": "web02"}, "ip_address": {"after": "192.0.2.77"}}}],
+             "notifications": [{"notification_type": "user.login", "info": {"ip": "192.0.2.78", "user": "bob@corp.com"}}]}
         ]);
         let mut anon = Anonymiser::default();
         anon.walk(&mut v);
@@ -315,5 +324,12 @@ mod tests {
         assert_eq!(v[2]["created_by"]["agent"]["hostname"], "host-1.example");
         let label = &v[3]["resource_changes"][0]["resource"]["label"]["name"];
         assert_eq!(label, "Web", "plain names are left alone");
+        assert_eq!(v[4]["resource_changes"][0]["changes"], json!({}));
+        assert_eq!(v[4]["notifications"][0]["info"], json!({}));
+        assert_eq!(v[4]["notifications"][0]["notification_type"], "user.login");
+        let all = v.to_string();
+        for leak in ["web02", "192.0.2.77", "192.0.2.78", "bob@corp.com", "web01"] {
+            assert!(!all.contains(leak), "{leak} leaked: {all}");
+        }
     }
 }
