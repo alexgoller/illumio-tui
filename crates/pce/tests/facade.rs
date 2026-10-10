@@ -107,6 +107,46 @@ async fn object_lists_are_cached_separately() {
 }
 
 #[tokio::test]
+async fn name_index_loads_four_lists_once() {
+    let server = MockServer::start().await;
+    for (p, body) in [
+        (
+            "/api/v2/orgs/5/labels",
+            include_str!("../../../fixtures/labels.json"),
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/label_groups",
+            include_str!("../../../fixtures/label_groups.json"),
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/ip_lists",
+            include_str!("../../../fixtures/ip_lists.json"),
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/services",
+            include_str!("../../../fixtures/services.json"),
+        ),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(p))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(body)
+                    .insert_header("Content-Type", "application/json"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+    let p = pce_for(&server);
+    let idx = p.name_index(CacheMode::Use).await.unwrap();
+    assert_eq!(idx.label_text("/orgs/5/labels/3"), "app=shop");
+    let again = p.name_index(CacheMode::Use).await.unwrap();
+    assert_eq!(again.label_keys().len(), 4);
+    assert_eq!(p.stats().calls, 4);
+}
+
+#[tokio::test]
 async fn workloads_pass_filters_and_cache_per_filter() {
     use pce::models::WorkloadFilter;
     let server = MockServer::start().await;

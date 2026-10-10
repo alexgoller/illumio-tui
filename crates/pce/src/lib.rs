@@ -16,8 +16,12 @@ pub mod client;
 pub mod error;
 pub mod limiter;
 pub mod models;
+pub mod resolve;
 
+use std::sync::Arc;
 use std::time::Duration;
+
+pub use resolve::{NameIndex, ResolvedLabel};
 
 pub use auth::Credentials;
 pub use cache::TtlCache;
@@ -138,6 +142,23 @@ impl Pce {
         let path = self.client.org_path("sec_policy/draft/services");
         self.cached_list("objects:services", &path, vec![], self.ttls.objects, mode)
             .await
+    }
+
+    /// Loads (or reuses) the four object lists and builds the name index.
+    pub async fn name_index(&self, mode: CacheMode) -> Result<Arc<NameIndex>> {
+        if mode == CacheMode::Use
+            && let Some((idx, _)) = self.cache.get::<Arc<NameIndex>>("objects:index")
+        {
+            return Ok(idx);
+        }
+        let labels = self.labels(mode).await?.value;
+        let groups = self.label_groups(mode).await?.value;
+        let lists = self.ip_lists(mode).await?.value;
+        let services = self.services(mode).await?.value;
+        let idx = Arc::new(NameIndex::new(&labels, &groups, &lists, &services));
+        self.cache
+            .insert("objects:index", idx.clone(), self.ttls.objects);
+        Ok(idx)
     }
 
     pub async fn workloads(
