@@ -887,6 +887,9 @@ fn policy_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 };
                 return Vec::new();
             }
+            KeyCode::Enter if model.policy.pane == PolicyPane::RuleSets => {
+                return deny_fallback(model, CacheMode::Use);
+            }
             KeyCode::Enter if model.policy.pane == PolicyPane::Rules => {
                 if let Some(r) = model.policy.rules.selected_item() {
                     model.overlay = Overlay::RuleDetail(r.clone());
@@ -3308,6 +3311,46 @@ mod tests {
         update(&mut m, mouse(MouseEventKind::Down(MouseButton::Left), x, 1));
         assert_eq!(m.screen, Screen::Policy);
         assert_eq!(m.stats.calls, 5);
+    }
+
+    #[test]
+    fn wheel_selected_ruleset_notes_missing_deny_rules_until_a_key_loads_them() {
+        use crate::tui::test_support::{model_with_policy, render_to_string};
+        use crossterm::event::MouseEventKind;
+        let href = "/orgs/5/sec_policy/draft/rule_sets/101".to_string();
+        let mut m = model_with_policy();
+        m.screen = Screen::Policy;
+        update(&mut m, Msg::Resize(80, 24));
+        assert!(!render_to_string(&m, 80, 24).contains("deny rules not loaded"));
+        assert!(update(&mut m, mouse(MouseEventKind::ScrollDown, 10, 10)).is_empty());
+        assert_eq!(m.policy.selected_href().as_deref(), Some(href.as_str()));
+        assert!(render_to_string(&m, 80, 24).contains("deny rules not loaded"));
+        // A key move away (Up) and back (Down) loads them through the existing path, once.
+        let up = update(&mut m, kc(KeyCode::Up));
+        let down = update(&mut m, kc(KeyCode::Down));
+        let loads: Vec<_> = up.iter().chain(down.iter()).collect();
+        assert!(
+            loads.contains(&&Cmd::LoadDenyRules {
+                href: href.clone(),
+                mode: pce::CacheMode::Use
+            }),
+            "{loads:?}"
+        );
+        assert!(!render_to_string(&m, 80, 24).contains("deny rules not loaded"));
+        update(
+            &mut m,
+            Msg::DenyRulesLoaded {
+                href,
+                result: Ok(Vec::new()),
+            },
+        );
+        assert!(!render_to_string(&m, 80, 24).contains("deny rules not loaded"));
+        // Enter on the ruleset row is the other way in.
+        let mut m = model_with_policy();
+        m.screen = Screen::Policy;
+        update(&mut m, mouse(MouseEventKind::ScrollDown, 10, 10));
+        assert_eq!(update(&mut m, kc(KeyCode::Enter)).len(), 1);
+        assert!(update(&mut m, kc(KeyCode::Enter)).is_empty());
     }
 
     #[test]

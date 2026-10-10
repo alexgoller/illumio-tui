@@ -74,17 +74,21 @@ pub fn render_screen(model: &Model, f: &mut Frame, body: Rect) {
         .map(|r| format!("Rules · {}", r.name))
         .unwrap_or_else(|| "Rules".into());
     let theme = t.clone();
+    let mut rules_meta = header_meta(&p.rules);
+    if p.deny_not_loaded() {
+        let note = "deny rules not loaded · ↑/↓ loads";
+        rules_meta = if rules_meta.is_empty() {
+            note.into()
+        } else {
+            format!("{note} · {rules_meta}")
+        };
+    }
     render(
         f,
         right,
         &p.rules,
         t,
-        panel(
-            &title,
-            &header_meta(&p.rules),
-            t,
-            p.pane == PolicyPane::Rules,
-        ),
+        panel(&title, &rules_meta, t, p.pane == PolicyPane::Rules),
         &move |r| match r.kind {
             RuleKind::Allow => Style::default(),
             RuleKind::Deny => Style::new().fg(theme.warn),

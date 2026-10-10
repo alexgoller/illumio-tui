@@ -875,6 +875,20 @@ impl PolicyState {
         self.rulesets.selected_item().map(|r| r.href.clone())
     }
 
+    /// The selected ruleset has no inline deny rules and its endpoint list was
+    /// neither fetched nor requested: the rules pane may be missing deny rules.
+    pub fn deny_not_loaded(&self) -> bool {
+        let Some(href) = self.selected_href() else {
+            return false;
+        };
+        self.raw
+            .iter()
+            .find(|r| r.href == href)
+            .is_some_and(|r| r.deny_rules.is_empty())
+            && !self.fallback_deny.contains_key(&href)
+            && !self.deny_requested.contains(&href)
+    }
+
     /// The selected ruleset's href when its inline deny list is empty and the
     /// endpoint has not been asked yet. Marks it as requested.
     pub fn take_deny_fallback(&mut self) -> Option<String> {
