@@ -123,6 +123,20 @@ impl NameIndex {
         names
     }
 
+    /// IP lists whose name equals `name` exactly (case-sensitive), by href.
+    pub fn ip_lists_named(&self, name: &str) -> Vec<&IpList> {
+        let mut v: Vec<&IpList> = self.ip_lists.values().filter(|l| l.name == name).collect();
+        v.sort_by(|a, b| a.href.cmp(&b.href));
+        v
+    }
+
+    /// Services whose name equals `name` exactly (case-sensitive), by href.
+    pub fn services_named(&self, name: &str) -> Vec<&Service> {
+        let mut v: Vec<&Service> = self.services.values().filter(|s| s.name == name).collect();
+        v.sort_by(|a, b| a.href.cmp(&b.href));
+        v
+    }
+
     pub fn service(&self, href: &str) -> Option<&Service> {
         self.services.get(canon(href).as_ref())
     }
@@ -589,5 +603,33 @@ mod tests {
         let infra = RuleSetView::from_rule_set(&rs[1], &idx);
         assert_eq!(infra.scopes, vec!["All"]);
         assert_eq!((infra.rule_count, infra.deny_count), (1, 0));
+    }
+
+    #[test]
+    fn exact_name_lookups_are_case_sensitive_and_list_duplicates() {
+        let lists: Vec<IpList> = serde_json::from_str(
+            r#"[
+            {"href": "/orgs/5/sec_policy/draft/ip_lists/1", "name": "Corp"},
+            {"href": "/orgs/5/sec_policy/draft/ip_lists/2", "name": "Corp"},
+            {"href": "/orgs/5/sec_policy/draft/ip_lists/3", "name": "corp"}
+        ]"#,
+        )
+        .unwrap();
+        let services: Vec<Service> = serde_json::from_str(
+            r#"[
+            {"href": "/orgs/5/sec_policy/draft/services/1", "name": "PG"}
+        ]"#,
+        )
+        .unwrap();
+        let idx = NameIndex::new(&[], &[], &lists, &services);
+        let hits = idx.ip_lists_named("Corp");
+        assert_eq!(hits.len(), 2);
+        assert_eq!(
+            hits[0].href, "/orgs/5/sec_policy/draft/ip_lists/1",
+            "sorted by href"
+        );
+        assert_eq!(idx.ip_lists_named("corp").len(), 1);
+        assert_eq!(idx.services_named("PG").len(), 1);
+        assert!(idx.services_named("pg").is_empty());
     }
 }

@@ -1,6 +1,8 @@
 //! Where connection settings come from, in order: command-line flag, then
 //! environment variable (same names as illumio-mcp-server), then the
 //! selected profile in `~/.config/illumio-tui/config.toml`, then defaults.
+//! `writes` (profile) or `ILLUMIO_WRITES` (env) enables write commands;
+//! nothing is written unless `--allow-writes` is also given.
 //! The tool never writes secrets anywhere.
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -28,6 +30,8 @@ pub struct Profile {
     pub api_secret: Option<String>,
     /// Shell command whose stdout is the API secret (e.g. `op read ...`).
     pub api_secret_cmd: Option<String>,
+    /// Allow write commands against this PCE (the CLI also needs --allow-writes).
+    pub writes: Option<bool>,
     #[serde(default, skip_serializing_if = "Limits::is_empty")]
     pub limits: Limits,
     /// Unknown keys, round-tripped verbatim.
@@ -51,6 +55,7 @@ impl std::fmt::Debug for Profile {
                 &self.api_secret.as_ref().map(|_| "<redacted>"),
             )
             .field("api_secret_cmd", &self.api_secret_cmd)
+            .field("writes", &self.writes)
             .field("limits", &self.limits)
             // Unknown keys could be anything; print their names only.
             .field("extra", &self.extra.keys().collect::<Vec<_>>())
@@ -98,6 +103,7 @@ pub struct ResolvedConfig {
     pub auto_refresh_min_seconds: u64,
     pub traffic_max_results: u32,
     pub traffic_default_window: String,
+    pub writes: bool,
 }
 
 impl ResolvedConfig {
@@ -304,6 +310,10 @@ pub fn resolve(
             .traffic_default_window
             .clone()
             .unwrap_or_else(|| "24h".into()),
+        writes: env_str("ILLUMIO_WRITES")
+            .and_then(|v| parse_bool(&v))
+            .or(profile.writes)
+            .unwrap_or(false),
     })
 }
 
@@ -492,6 +502,32 @@ api_secret_cmd = "echo   from-command  "
             .unwrap_err()
             .to_string();
         assert!(err.contains("profile \"ghost\""), "{err}");
+    }
+
+    #[test]
+    fn writes_default_off_profile_enables_env_outranks() {
+        let f = file();
+        let r = resolve(&f, &Overrides::default(), &env(&[])).unwrap();
+        assert!(!r.writes);
+        let mut f2 = f.clone();
+        f2.profiles.get_mut("demo").unwrap().writes = Some(true);
+        assert!(
+            resolve(&f2, &Overrides::default(), &env(&[]))
+                .unwrap()
+                .writes
+        );
+        let r = resolve(
+            &f2,
+            &Overrides::default(),
+            &env(&[("ILLUMIO_WRITES", "false")]),
+        )
+        .unwrap();
+        assert!(!r.writes, "env outranks the profile");
+        let r = resolve(&f, &Overrides::default(), &env(&[("ILLUMIO_WRITES", "1")])).unwrap();
+        assert!(r.writes);
+        let shown = format!("{:?}", f2.profiles["demo"]);
+        assert!(shown.contains("writes: Some(true)"), "{shown}");
+        assert!(!shown.contains("file-secret"));
     }
 
     #[test]

@@ -1,5 +1,6 @@
 //! The JSON envelope every command prints, and the table renderer shared
 //! with the TUI (same ratatui Table widget, drawn into an off-screen buffer).
+use pce::WriteMethod;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Rect};
 use ratatui::widgets::{Row, Table, Widget};
@@ -28,6 +29,16 @@ pub struct Window {
     pub end: String,
 }
 
+/// What a write command did, for `meta.write`.
+#[derive(Debug, Clone, Serialize)]
+pub struct WriteMeta {
+    pub method: WriteMethod,
+    pub path: String,
+    pub status: u16,
+    /// Audit log location.
+    pub audit: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Meta {
     pub profile: String,
@@ -39,6 +50,8 @@ pub struct Meta {
     pub truncated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window: Option<Window>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub write: Option<WriteMeta>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -139,6 +152,14 @@ pub fn meta_line(meta: &Meta) -> String {
     );
     if meta.truncated {
         s.push_str(" · WARNING: result truncated");
+    }
+    if let Some(w) = &meta.write {
+        s.push_str(&format!(
+            " · {} {} → {}",
+            w.method.as_str(),
+            w.path,
+            w.status
+        ));
     }
     s
 }

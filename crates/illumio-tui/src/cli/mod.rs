@@ -10,6 +10,7 @@ pub mod policy;
 pub mod profile;
 pub mod traffic;
 pub mod workloads;
+pub mod write;
 
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
@@ -62,6 +63,9 @@ pub struct GlobalArgs {
     /// Ignore cached responses
     #[arg(long, global = true)]
     pub no_cache: bool,
+    /// Allow write commands; the profile must also set writes = true (or ILLUMIO_WRITES=1)
+    #[arg(long, global = true)]
+    pub allow_writes: bool,
     /// TUI colour theme: dark (default) or light (env: ILLUMIO_TUI_THEME)
     #[arg(long, global = true, env = "ILLUMIO_TUI_THEME")]
     pub theme: Option<String>,

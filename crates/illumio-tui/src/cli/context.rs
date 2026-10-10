@@ -2,7 +2,9 @@
 //! output format, and the cache mode.
 use super::GlobalArgs;
 use super::error::CliError;
-use super::output::{Meta, OutputFormat, TableRows, Window, meta_line, write_json, write_table};
+use super::output::{
+    Meta, OutputFormat, TableRows, Window, WriteMeta, meta_line, write_json, write_table,
+};
 use crate::config::{self, Overrides};
 use pce::{CacheMode, Pce, PceClient};
 use serde::Serialize;
@@ -14,6 +16,7 @@ pub struct Context {
     pub pce: Pce,
     pub format: OutputFormat,
     pub cache_mode: CacheMode,
+    pub allow_writes: bool,
     started: Instant,
 }
 
@@ -49,6 +52,7 @@ impl Context {
             pce,
             format,
             cache_mode,
+            allow_writes: global.allow_writes,
             started: Instant::now(),
         })
     }
@@ -63,6 +67,7 @@ impl Context {
             cache,
             truncated,
             window,
+            write: None,
         }
     }
 
@@ -74,6 +79,25 @@ impl Context {
         window: Option<Window>,
     ) -> Result<(), CliError> {
         let meta = self.meta(cache, truncated, window);
+        let mut out = std::io::stdout().lock();
+        match self.format {
+            OutputFormat::Json => write_json(&mut out, data, &meta)?,
+            OutputFormat::Table => {
+                write_table(&mut out, data)?;
+                eprintln!("{}", meta_line(&meta));
+            }
+        }
+        Ok(())
+    }
+
+    /// Envelope for a write command: `cache` is always `none`.
+    pub fn emit_write(
+        &self,
+        data: &super::write::WriteOutput,
+        write: Option<WriteMeta>,
+    ) -> Result<(), CliError> {
+        let mut meta = self.meta("none", false, None);
+        meta.write = write;
         let mut out = std::io::stdout().lock();
         match self.format {
             OutputFormat::Json => write_json(&mut out, data, &meta)?,

@@ -9,6 +9,7 @@ pub struct HealthReport {
     pub host: String,
     pub org_id: u64,
     pub status: serde_json::Value,
+    pub writes: bool,
 }
 
 impl TableRows for HealthReport {
@@ -22,6 +23,7 @@ impl TableRows for HealthReport {
             vec!["host".into(), self.host.clone()],
             vec!["org_id".into(), self.org_id.to_string()],
             vec!["status".into(), self.status.to_string()],
+            vec!["writes".into(), self.writes.to_string()],
         ]
     }
 }
@@ -33,6 +35,7 @@ pub async fn run(ctx: &Context) -> Result<(), CliError> {
         host: ctx.config.host.clone(),
         org_id: ctx.config.org_id,
         status,
+        writes: ctx.config.writes,
     };
     ctx.emit(&report, "none", false, None)
 }
