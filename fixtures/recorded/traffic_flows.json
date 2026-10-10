@@ -1,0 +1,4779 @@
+[
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "fqdn": "",
+      "ip": "10.0.1.52",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-26.example",
+        "href": "/orgs/5636114/workloads/18eaf9d7-89a2-49b1-b24f-050dc14bbe1b",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120549"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120551"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120542"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120550"
+          }
+        ]
+      }
+    },
+    "dst_bi": 1348183,
+    "dst_bo": 8822896,
+    "flow_direction": "outbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 5172,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 0,
+    "service": {
+      "port": 3306,
+      "process_name": "/usr/bin/mysql",
+      "proto": 6,
+      "user_name": "root",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.53",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-27.example",
+        "href": "/orgs/5636114/workloads/5b36966c-a7f8-4020-9c0f-8b0f489cfa67",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120549"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120540"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116746"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120542"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120550"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:07:48Z",
+      "last_detected": "2026-10-10T23:59:59Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "ip": "10.0.1.54",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-28.example",
+        "href": "/orgs/5636114/workloads/63d6808f-2968-493c-8813-95429e2d5bc7",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120534"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120533"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120512"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "dst_bi": 1818230,
+    "dst_bo": 293407,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 1222,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 1,
+    "service": {
+      "port": 514,
+      "process_name": "/usr/sbin/rsyslogd",
+      "proto": 6,
+      "user_name": "syslog",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.34",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-12.example",
+        "href": "/orgs/5636114/workloads/0fdb1468-649f-4c62-b1ef-4c4b15fdcaaf",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120544"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120545"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120542"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120546"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:11:01Z",
+      "last_detected": "2026-10-10T23:59:59Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "ip": "10.0.1.34",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-12.example",
+        "href": "/orgs/5636114/workloads/0fdb1468-649f-4c62-b1ef-4c4b15fdcaaf",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120544"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120545"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120542"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120546"
+          }
+        ]
+      }
+    },
+    "dst_bi": 8354728,
+    "dst_bo": 1244121,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 5354,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 2,
+    "service": {
+      "port": 8070,
+      "process_name": "/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.322.b06-1.el7_9.x86_64/jre/bin/java",
+      "proto": 6,
+      "user_name": "tomcat",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.45",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-21.example",
+        "href": "/orgs/5636114/workloads/0e4bdc44-74c3-4b42-bdf5-930cad4dd141",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120544"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120545"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116746"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120542"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120546"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:02:34Z",
+      "last_detected": "2026-10-10T23:59:59Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "ip": "10.0.1.55",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-29.example",
+        "href": "/orgs/5636114/workloads/27f9c24e-ba0c-4c40-b5bc-7ba45fb9d4d6",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120538"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          }
+        ]
+      }
+    },
+    "dst_bi": 8805085,
+    "dst_bo": 1355579,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 4937,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 3,
+    "service": {
+      "port": 22,
+      "process_name": "/usr/sbin/sshd",
+      "proto": 6,
+      "user_name": "root",
+      "windows_service_name": "ssh"
+    },
+    "src": {
+      "ip": "10.0.1.56",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-30.example",
+        "href": "/orgs/5636114/workloads/d07924b8-85f6-4fb2-a15c-da52903ed6c8",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120552"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120509"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120512"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:07:11Z",
+      "last_detected": "2026-10-10T23:59:58Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "endpoint",
+    "dst": {
+      "fqdn": "",
+      "ip": "10.0.1.57",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-31.example",
+        "href": "/orgs/5636114/workloads/ff93f48f-0aa9-4a2a-8b2f-d3e125e3e4fe",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120524"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116746"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "dst_bi": 1237869,
+    "dst_bo": 8100126,
+    "flow_direction": "outbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 4887,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 4,
+    "service": {
+      "port": 443,
+      "process_name": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "proto": 6,
+      "user_name": "csmith",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.58",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-32.example",
+        "href": "/orgs/5636114/workloads/0f22162c-6e8b-4b4a-acc4-ca22bd995d0b",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120564"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120559"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120560"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120566"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120561"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120562"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120565"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:08:18Z",
+      "last_detected": "2026-10-10T23:59:58Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "endpoint",
+    "dst": {
+      "fqdn": "",
+      "ip": "10.0.1.59",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-33.example",
+        "href": "/orgs/5636114/workloads/556f77be-444b-4bac-8ea0-49d1511df15b",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120538"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116746"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          }
+        ]
+      }
+    },
+    "dst_bi": 1187120,
+    "dst_bo": 8201552,
+    "flow_direction": "outbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 4292,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 5,
+    "service": {
+      "port": 3389,
+      "process_name": "C:\\Users\\ghernandez\\AppData\\Local\\Programs\\cursor\\Cursor.exe",
+      "proto": 6,
+      "user_name": "CRYSTAL\\ghernandez",
+      "windows_service_name": "agentic-ai"
+    },
+    "src": {
+      "ip": "10.0.1.60",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-34.example",
+        "href": "/orgs/5636114/workloads/d0fea814-fa23-4220-a938-7497fd38c269",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120568"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120559"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120567"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120561"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120569"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120570"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:05:26Z",
+      "last_detected": "2026-10-10T23:59:58Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "endpoint",
+    "dst": {
+      "ip": "10.0.1.61",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-35.example",
+        "href": "/orgs/5636114/workloads/334c9e9b-4e3b-4224-bb57-022bdb489a89",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120564"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120559"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120560"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120566"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120561"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120562"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120572"
+          }
+        ]
+      }
+    },
+    "dst_bi": 3342994,
+    "dst_bo": 458147,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/77d63570-7475-4eb2-889b-5e7be60a7ab7",
+      "name": "External"
+    },
+    "num_connections": 447,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 6,
+    "service": {
+      "port": 445,
+      "process_name": "System",
+      "proto": 6,
+      "user_name": "NT AUTHORITY\\SYSTEM",
+      "windows_service_name": "smb"
+    },
+    "src": {
+      "ip": "10.0.1.62",
+      "ip_lists": [
+        {
+          "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997117027",
+          "name": "rfc1918"
+        }
+      ]
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T01:01:41Z",
+      "last_detected": "2026-10-10T23:59:58Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "ip": "10.0.1.54",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-28.example",
+        "href": "/orgs/5636114/workloads/63d6808f-2968-493c-8813-95429e2d5bc7",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120534"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120533"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120512"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "dst_bi": 3420473,
+    "dst_bo": 514572,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 1586,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 7,
+    "service": {
+      "port": 514,
+      "process_name": "/usr/sbin/rsyslogd",
+      "proto": 17,
+      "user_name": "syslog",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.63",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-36.example",
+        "href": "/orgs/5636114/workloads/8f49c9eb-f235-4a50-a2a6-b75a435dec48",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120549"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120551"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120542"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120550"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:06:11Z",
+      "last_detected": "2026-10-10T23:59:58Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "ip": "10.0.1.64",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-37.example",
+        "href": "/orgs/5636114/workloads/c347e039-2f35-40cb-8831-db178fb38540",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120530"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116746"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120529"
+          }
+        ]
+      }
+    },
+    "dst_bi": 8418654,
+    "dst_bo": 1287226,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 5296,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 8,
+    "service": {
+      "port": 443,
+      "process_name": "/usr/sbin/httpd",
+      "proto": 6,
+      "user_name": "apache",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.65",
+      "ip_lists": [
+        {
+          "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997117027",
+          "name": "rfc1918"
+        }
+      ]
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:01:58Z",
+      "last_detected": "2026-10-10T23:59:57Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "endpoint",
+    "dst": {
+      "fqdn": "",
+      "ip": "10.0.1.66",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-38.example",
+        "href": "/orgs/5636114/workloads/63a91f77-7df9-469f-8087-b5fe7cd30da6",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120543"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120541"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116746"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120542"
+          }
+        ]
+      }
+    },
+    "dst_bi": 1195064,
+    "dst_bo": 7836274,
+    "flow_direction": "outbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 4680,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 9,
+    "service": {
+      "port": 3389,
+      "process_name": "C:\\Users\\hlee\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
+      "proto": 6,
+      "user_name": "CRYSTAL\\hlee",
+      "windows_service_name": "ide"
+    },
+    "src": {
+      "ip": "10.0.1.38",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-16.example",
+        "href": "/orgs/5636114/workloads/03eec080-97f5-49ad-b345-943742a6420a",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120568"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120559"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120567"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120561"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120569"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120570"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:06:08Z",
+      "last_detected": "2026-10-10T23:59:56Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "ip": "10.0.1.67",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-39.example",
+        "href": "/orgs/5636114/workloads/c6744a8e-5edd-4ef5-bb9a-db3de0b7e117",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120552"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120509"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120512"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "dst_bi": 9798192,
+    "dst_bo": 1444241,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 5152,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 10,
+    "service": {
+      "port": 22,
+      "process_name": "C:\\Windows\\System32\\svchost.exe",
+      "proto": 6,
+      "user_name": "NT AUTHORITY\\NETWORK SERVICE",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.68",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-40.example",
+        "href": "/orgs/5636114/workloads/86856746-6712-4d4f-a10a-3b379bc58920",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120564"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120559"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120560"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120566"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120561"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120562"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120565"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:04:00Z",
+      "last_detected": "2026-10-10T23:59:55Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "fqdn": "",
+      "ip": "10.0.1.69",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-41.example",
+        "href": "/orgs/5636114/workloads/b4231614-59ef-46f1-b6d3-e4ee3ff4549e",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120534"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120533"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120512"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "dst_bi": 558235,
+    "dst_bo": 3737716,
+    "flow_direction": "outbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 2286,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 11,
+    "service": {
+      "port": 514,
+      "process_name": "",
+      "proto": 17,
+      "user_name": "root",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.70",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-42.example",
+        "href": "/orgs/5636114/workloads/08f5a813-f021-4a0c-9654-cb5805695591",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120519"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:11:57Z",
+      "last_detected": "2026-10-10T23:59:55Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "fqdn": "",
+      "ip": "10.0.1.71",
+      "ip_lists": [
+        {
+          "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997117019",
+          "name": "internet"
+        }
+      ]
+    },
+    "dst_bi": 1309222,
+    "dst_bo": 8588421,
+    "flow_direction": "outbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 5057,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 12,
+    "service": {
+      "port": 22,
+      "process_name": "/usr/bin/ssh",
+      "proto": 6,
+      "user_name": "root",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.72",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-43.example",
+        "href": "/orgs/5636114/workloads/7d6bf195-0d76-4fa5-b88b-ea1a07aa757a",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120538"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116754"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:04:08Z",
+      "last_detected": "2026-10-10T23:59:55Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "fqdn": "",
+      "ip": "10.0.1.46",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-22.example",
+        "href": "/orgs/5636114/workloads/cb49190a-55bb-49f2-aa7c-dc40f44ac767",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120544"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116753"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120540"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120517"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120542"
+          }
+        ]
+      }
+    },
+    "dst_bi": 1408783,
+    "dst_bo": 9329338,
+    "flow_direction": "outbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 5029,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 13,
+    "service": {
+      "port": 5432,
+      "process_name": "/usr/bin/psql",
+      "proto": 6,
+      "user_name": "root",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.73",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-44.example",
+        "href": "/orgs/5636114/workloads/e514e14d-3ed1-4621-8aae-56622e105718",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120544"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116753"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120541"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120542"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:19:07Z",
+      "last_detected": "2026-10-10T23:59:55Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "ip": "10.0.1.74",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-45.example",
+        "href": "/orgs/5636114/workloads/c6ee0df0-cbbd-4ba5-a8f5-f6e3ec984629",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120544"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116753"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120541"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116746"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120542"
+          }
+        ]
+      }
+    },
+    "dst_bi": 8021383,
+    "dst_bo": 1246363,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 5252,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 14,
+    "service": {
+      "port": 443,
+      "process_name": "/usr/sbin/httpd",
+      "proto": 6,
+      "user_name": "apache",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.75",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-46.example",
+        "href": "/orgs/5636114/workloads/9ad16309-f8e6-4d48-8f3b-957df8e4d45b",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120538"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116754"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116746"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:01:29Z",
+      "last_detected": "2026-10-10T23:59:55Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "ip": "10.0.1.76",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-47.example",
+        "href": "/orgs/5636114/workloads/4f1b894b-510a-4deb-8570-23b2d1b8cf5c",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120538"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120540"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          }
+        ]
+      }
+    },
+    "dst_bi": 9590310,
+    "dst_bo": 1442678,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 5502,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 15,
+    "service": {
+      "port": 8070,
+      "process_name": "/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.322.b06-1.el7_9.x86_64/jre/bin/java",
+      "proto": 6,
+      "user_name": "tomcat",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.77",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-48.example",
+        "href": "/orgs/5636114/workloads/77bfee3f-3c0f-444a-8406-bfebcb22f8e8",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120538"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120540"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116746"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:10:47Z",
+      "last_detected": "2026-10-10T23:59:54Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "ip": "10.0.1.78",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-49.example",
+        "href": "/orgs/5636114/workloads/420ac98c-6930-4e2e-8aaf-926c465633d8",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120519"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "dst_bi": 9802273,
+    "dst_bo": 1495087,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 5840,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 16,
+    "service": {
+      "port": 8070,
+      "process_name": "/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.322.b06-1.el7_9.x86_64/jre/bin/java",
+      "proto": 6,
+      "user_name": "tomcat",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.79",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-50.example",
+        "href": "/orgs/5636114/workloads/513e7899-04eb-419e-8fa2-f24b1b3ce822",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120519"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116746"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:07:21Z",
+      "last_detected": "2026-10-10T23:59:54Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "ip": "10.0.1.80",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-51.example",
+        "href": "/orgs/5636114/workloads/c27eb0d2-4fc4-4cc5-975c-f683b9c58e4a",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120530"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120517"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120529"
+          }
+        ]
+      }
+    },
+    "dst_bi": 8695480,
+    "dst_bo": 1345975,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 4836,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 17,
+    "service": {
+      "port": 3306,
+      "process_name": "/usr/sbin/mysqld",
+      "proto": 6,
+      "user_name": "mysql",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.81",
+      "ip_lists": [
+        {
+          "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997117027",
+          "name": "rfc1918"
+        }
+      ]
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:06:05Z",
+      "last_detected": "2026-10-10T23:59:53Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "ip": "10.0.1.82",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-52.example",
+        "href": "/orgs/5636114/workloads/24d0f23c-930a-4349-b383-e99dcd226fa3",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120523"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120517"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "dst_bi": 8221380,
+    "dst_bo": 1201041,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 5189,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 18,
+    "service": {
+      "port": 3306,
+      "process_name": "/usr/sbin/mysqld",
+      "proto": 6,
+      "user_name": "mysql",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.83",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-53.example",
+        "href": "/orgs/5636114/workloads/befd370a-08cd-41e6-8b1e-e1ed1f4bd87b",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120548"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:01:50Z",
+      "last_detected": "2026-10-10T23:59:53Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "ip": "10.0.1.84",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-54.example",
+        "href": "/orgs/5636114/workloads/711b90af-ffa0-4dbd-af13-3d10a9ae009c",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120547"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120517"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120512"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "dst_bi": 8859591,
+    "dst_bo": 1339751,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 4649,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 19,
+    "service": {
+      "port": 5432,
+      "process_name": "/usr/lib/postgresql/14/bin/postgres",
+      "proto": 6,
+      "user_name": "postgres",
+      "windows_service_name": "postgres"
+    },
+    "src": {
+      "ip": "10.0.1.85",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-55.example",
+        "href": "/orgs/5636114/workloads/43581e36-c713-4e1b-b493-2f4a32598628",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120547"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120512"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:04:05Z",
+      "last_detected": "2026-10-10T23:59:53Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "fqdn": "",
+      "ip": "10.0.1.86",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-56.example",
+        "href": "/orgs/5636114/workloads/1f9868ca-3afd-4930-9366-6ffd917b88a6",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120524"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "dst_bi": 1313841,
+    "dst_bo": 8965818,
+    "flow_direction": "outbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 4474,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 20,
+    "service": {
+      "port": 8070,
+      "process_name": "",
+      "proto": 6,
+      "user_name": "root",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.57",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-31.example",
+        "href": "/orgs/5636114/workloads/ff93f48f-0aa9-4a2a-8b2f-d3e125e3e4fe",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120524"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116746"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:05:16Z",
+      "last_detected": "2026-10-10T23:59:52Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "ip": "10.0.1.87",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-57.example",
+        "href": "/orgs/5636114/workloads/4bd54f0a-2665-40d8-9020-ee0ea9681d97",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120538"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120540"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120517"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          }
+        ]
+      }
+    },
+    "dst_bi": 9583431,
+    "dst_bo": 1478318,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 5527,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 21,
+    "service": {
+      "port": 3306,
+      "process_name": "/usr/sbin/mysqld",
+      "proto": 6,
+      "user_name": "mysql",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.76",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-47.example",
+        "href": "/orgs/5636114/workloads/4f1b894b-510a-4deb-8570-23b2d1b8cf5c",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120538"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120540"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:04:16Z",
+      "last_detected": "2026-10-10T23:59:52Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "ip": "10.0.1.88",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-58.example",
+        "href": "/orgs/5636114/workloads/b7b29d40-6e7d-4d85-84c9-6aa55dd14221",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120543"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120541"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120542"
+          }
+        ]
+      }
+    },
+    "dst_bi": 4780857,
+    "dst_bo": 741298,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 2956,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 22,
+    "service": {
+      "port": 21,
+      "process_name": "",
+      "proto": 6,
+      "user_name": "root",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.89",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-59.example",
+        "href": "/orgs/5636114/workloads/9c0b8d08-c994-4b1a-acb3-013d1b1f38f0",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120526"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120528"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120512"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120527"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:01:20Z",
+      "last_detected": "2026-10-10T23:59:50Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "fqdn": "",
+      "ip": "10.0.1.90",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-60.example",
+        "href": "/orgs/5636114/workloads/80c47d88-10b7-499e-bb59-76df55470ea3",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120538"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120517"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          }
+        ]
+      }
+    },
+    "dst_bi": 1368471,
+    "dst_bo": 9310141,
+    "flow_direction": "outbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 4912,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 23,
+    "service": {
+      "port": 22,
+      "process_name": "C:\\Windows\\System32\\OpenSSH\\ssh.exe",
+      "proto": 6,
+      "user_name": "NT AUTHORITY\\SYSTEM",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.56",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-30.example",
+        "href": "/orgs/5636114/workloads/d07924b8-85f6-4fb2-a15c-da52903ed6c8",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120552"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120509"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120512"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:02:28Z",
+      "last_detected": "2026-10-10T23:59:50Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "ip": "10.0.1.91",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-61.example",
+        "href": "/orgs/5636114/workloads/62857912-cc94-46c9-8886-1487e9c531cf",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120513"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120511"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120512"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120514"
+          }
+        ]
+      }
+    },
+    "dst_bi": 7530217,
+    "dst_bo": 1151361,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 4389,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 24,
+    "service": {
+      "port": 389,
+      "process_name": "C:\\Windows\\System32\\lsass.exe",
+      "proto": 6,
+      "user_name": "NT AUTHORITY\\SYSTEM",
+      "windows_service_name": "LDAPServer"
+    },
+    "src": {
+      "ip": "10.0.1.92",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-62.example",
+        "href": "/orgs/5636114/workloads/92d127f4-46fa-4bfa-9a2c-2e768d514abc",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120519"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116746"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:09:00Z",
+      "last_detected": "2026-10-10T23:59:50Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "fqdn": "",
+      "ip": "10.0.1.93",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-63.example",
+        "href": "/orgs/5636114/workloads/91bc4d71-63e8-441a-9dc6-64e590d50bd8",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120513"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120511"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120512"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120514"
+          }
+        ]
+      }
+    },
+    "dst_bi": 357031,
+    "dst_bo": 2490393,
+    "flow_direction": "outbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 893,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 25,
+    "service": {
+      "port": 88,
+      "process_name": "",
+      "proto": 17,
+      "user_name": "root",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.94",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-64.example",
+        "href": "/orgs/5636114/workloads/3e955714-b14d-4223-9bc1-3ad618a3144f",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120544"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116753"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120540"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116746"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120542"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:52:22Z",
+      "last_detected": "2026-10-10T23:59:49Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "fqdn": "",
+      "ip": "10.0.1.95",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-65.example",
+        "href": "/orgs/5636114/workloads/e2eeaeda-2a23-4a32-ae3f-70b2173e47db",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120522"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120517"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "dst_bi": 1279720,
+    "dst_bo": 8421753,
+    "flow_direction": "outbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 4860,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 26,
+    "service": {
+      "port": 3306,
+      "process_name": "/usr/bin/mysql",
+      "proto": 6,
+      "user_name": "root",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.96",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-66.example",
+        "href": "/orgs/5636114/workloads/95f04982-cb50-4324-990e-fccff77802e8",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120522"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:04:31Z",
+      "last_detected": "2026-10-10T23:59:49Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "fqdn": "",
+      "ip": "10.0.1.97",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-67.example",
+        "href": "/orgs/5636114/workloads/361b7a8d-019a-4387-888e-845719fc2ec0",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120544"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116753"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120517"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120542"
+          }
+        ]
+      }
+    },
+    "dst_bi": 1363413,
+    "dst_bo": 8813409,
+    "flow_direction": "outbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 5151,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 27,
+    "service": {
+      "port": 3306,
+      "process_name": "/usr/bin/mysql",
+      "proto": 6,
+      "user_name": "root",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.98",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-68.example",
+        "href": "/orgs/5636114/workloads/e8599475-4989-4125-a054-58f5dc40f835",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120544"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116753"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120540"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120542"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:04:44Z",
+      "last_detected": "2026-10-10T23:59:49Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "endpoint",
+    "dst": {
+      "fqdn": "",
+      "ip": "10.0.1.67",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-39.example",
+        "href": "/orgs/5636114/workloads/c6744a8e-5edd-4ef5-bb9a-db3de0b7e117",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120552"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120509"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120512"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "dst_bi": 1084469,
+    "dst_bo": 7657362,
+    "flow_direction": "outbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 4484,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 28,
+    "service": {
+      "port": 3389,
+      "process_name": "/Applications/Microsoft Remote Desktop.app/Contents/MacOS/Microsoft Remote Desktop",
+      "proto": 6,
+      "user_name": "csmith",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.58",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-32.example",
+        "href": "/orgs/5636114/workloads/0f22162c-6e8b-4b4a-acc4-ca22bd995d0b",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120564"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120559"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120560"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120566"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120561"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120562"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120565"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:03:15Z",
+      "last_detected": "2026-10-10T23:59:49Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "fqdn": "",
+      "ip": "10.0.1.54",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-28.example",
+        "href": "/orgs/5636114/workloads/63d6808f-2968-493c-8813-95429e2d5bc7",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120534"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120533"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120512"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "dst_bi": 428791,
+    "dst_bo": 2744923,
+    "flow_direction": "outbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 1489,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 29,
+    "service": {
+      "port": 514,
+      "process_name": "",
+      "proto": 6,
+      "user_name": "root",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.86",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-56.example",
+        "href": "/orgs/5636114/workloads/1f9868ca-3afd-4930-9366-6ffd917b88a6",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120524"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:02:29Z",
+      "last_detected": "2026-10-10T23:59:49Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "ip": "10.0.1.99",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-69.example",
+        "href": "/orgs/5636114/workloads/ff59c027-b515-4e1a-bc9a-2a0bbdcb70cf",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120548"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "dst_bi": 8333332,
+    "dst_bo": 1242683,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 4811,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 30,
+    "service": {
+      "port": 443,
+      "process_name": "/usr/sbin/nginx",
+      "proto": 6,
+      "user_name": "www-data",
+      "windows_service_name": "https"
+    },
+    "src": {
+      "ip": "10.0.1.100",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-70.example",
+        "href": "/orgs/5636114/workloads/47ee9512-3e7f-41fa-947a-f2104af51e7e",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120558"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120554"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120577"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120555"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120557"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:01:20Z",
+      "last_detected": "2026-10-10T23:59:49Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "ip": "10.0.1.82",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-52.example",
+        "href": "/orgs/5636114/workloads/24d0f23c-930a-4349-b383-e99dcd226fa3",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120523"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120517"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "dst_bi": 9091505,
+    "dst_bo": 1356449,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 5238,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 31,
+    "service": {
+      "port": 3306,
+      "process_name": "/usr/sbin/mysqld",
+      "proto": 6,
+      "user_name": "mysql",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.101",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-71.example",
+        "href": "/orgs/5636114/workloads/2b6c04c7-3e7f-49a3-ac3e-40cf5eb7ac74",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120548"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:04:46Z",
+      "last_detected": "2026-10-10T23:59:49Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "fqdn": "",
+      "ip": "10.0.1.63",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-36.example",
+        "href": "/orgs/5636114/workloads/8f49c9eb-f235-4a50-a2a6-b75a435dec48",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120549"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120551"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120542"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120550"
+          }
+        ]
+      }
+    },
+    "dst_bi": 1251514,
+    "dst_bo": 8282907,
+    "flow_direction": "outbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 5379,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 32,
+    "service": {
+      "port": 8443,
+      "process_name": "",
+      "proto": 6,
+      "user_name": "root",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.102",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-72.example",
+        "href": "/orgs/5636114/workloads/4cf9501f-6c68-4d94-a869-25efeba7bc2e",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120549"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116746"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120542"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120550"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:02:34Z",
+      "last_detected": "2026-10-10T23:59:49Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "ip": "10.0.1.91",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-61.example",
+        "href": "/orgs/5636114/workloads/62857912-cc94-46c9-8886-1487e9c531cf",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120513"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120511"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120512"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120514"
+          }
+        ]
+      }
+    },
+    "dst_bi": 7746238,
+    "dst_bo": 1139363,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 4477,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 33,
+    "service": {
+      "port": 53,
+      "process_name": "C:\\Windows\\System32\\dns.exe",
+      "proto": 17,
+      "user_name": "NT AUTHORITY\\SYSTEM",
+      "windows_service_name": "DNS"
+    },
+    "src": {
+      "ip": "10.0.1.102",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-72.example",
+        "href": "/orgs/5636114/workloads/4cf9501f-6c68-4d94-a869-25efeba7bc2e",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120549"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116746"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120542"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120550"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:03:39Z",
+      "last_detected": "2026-10-10T23:59:48Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "ip": "10.0.1.74",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-45.example",
+        "href": "/orgs/5636114/workloads/c6ee0df0-cbbd-4ba5-a8f5-f6e3ec984629",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120544"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116753"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120541"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116746"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120542"
+          }
+        ]
+      }
+    },
+    "dst_bi": 9403392,
+    "dst_bo": 1391430,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 5162,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 34,
+    "service": {
+      "port": 5666,
+      "process_name": "/usr/sbin/nrpe",
+      "proto": 6,
+      "user_name": "nagios",
+      "windows_service_name": "nrpe"
+    },
+    "src": {
+      "ip": "10.0.1.103",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-73.example",
+        "href": "/orgs/5636114/workloads/5487496b-3f33-4e79-beb6-3ce3f398488d",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120532"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120531"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120512"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:09:20Z",
+      "last_detected": "2026-10-10T23:59:48Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "fqdn": "",
+      "ip": "10.0.1.104",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-74.example",
+        "href": "/orgs/5636114/workloads/9068785d-47f9-48d1-a415-5489b25fbbc3",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120524"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "dst_bi": 1536278,
+    "dst_bo": 9847025,
+    "flow_direction": "outbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 5900,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 35,
+    "service": {
+      "port": 8070,
+      "process_name": "",
+      "proto": 6,
+      "user_name": "root",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.105",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-75.example",
+        "href": "/orgs/5636114/workloads/4634dfee-b15a-4100-8c42-4630f90ec83c",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120524"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116746"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:07:49Z",
+      "last_detected": "2026-10-10T23:59:47Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "ip": "10.0.1.106",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-76.example",
+        "href": "/orgs/5636114/workloads/fcc37ff5-f10e-4ed0-8616-bcca4fdcd6d5",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120544"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116753"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120541"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120542"
+          }
+        ]
+      }
+    },
+    "dst_bi": 9133551,
+    "dst_bo": 1382875,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 5198,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 36,
+    "service": {
+      "port": 443,
+      "process_name": "/usr/sbin/nginx",
+      "proto": 6,
+      "user_name": "www-data",
+      "windows_service_name": "https"
+    },
+    "src": {
+      "ip": "10.0.1.107",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-77.example",
+        "href": "/orgs/5636114/workloads/f6d5e203-621e-4284-b9de-61a059b7a8b6",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120538"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116754"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:04:38Z",
+      "last_detected": "2026-10-10T23:59:47Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "ip": "10.0.1.108",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-78.example",
+        "href": "/orgs/5636114/workloads/df083e01-5ca6-4116-a8b3-ea05bba10166",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120513"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120511"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120512"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120514"
+          }
+        ]
+      }
+    },
+    "dst_bi": 9352357,
+    "dst_bo": 1386837,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 4717,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 37,
+    "service": {
+      "port": 53,
+      "process_name": "C:\\Windows\\System32\\dns.exe",
+      "proto": 17,
+      "user_name": "NT AUTHORITY\\SYSTEM",
+      "windows_service_name": "DNS"
+    },
+    "src": {
+      "ip": "10.0.1.104",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-74.example",
+        "href": "/orgs/5636114/workloads/9068785d-47f9-48d1-a415-5489b25fbbc3",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120524"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:08:44Z",
+      "last_detected": "2026-10-10T23:59:47Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "ip": "10.0.1.109",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-79.example",
+        "href": "/orgs/5636114/workloads/cbe8911c-ffd3-4e5a-a4fb-9f649d65763d",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120522"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116746"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "dst_bi": 8900305,
+    "dst_bo": 1378535,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 5283,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 38,
+    "service": {
+      "port": 5666,
+      "process_name": "/usr/sbin/nrpe",
+      "proto": 6,
+      "user_name": "nagios",
+      "windows_service_name": "nrpe"
+    },
+    "src": {
+      "ip": "10.0.1.103",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-73.example",
+        "href": "/orgs/5636114/workloads/5487496b-3f33-4e79-beb6-3ce3f398488d",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120532"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120531"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120512"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:07:58Z",
+      "last_detected": "2026-10-10T23:59:46Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "ip": "10.0.1.91",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-61.example",
+        "href": "/orgs/5636114/workloads/62857912-cc94-46c9-8886-1487e9c531cf",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120513"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120511"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120512"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120514"
+          }
+        ]
+      }
+    },
+    "dst_bi": 8015595,
+    "dst_bo": 1158527,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 5409,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 39,
+    "service": {
+      "port": 53,
+      "process_name": "C:\\Windows\\System32\\dns.exe",
+      "proto": 17,
+      "user_name": "NT AUTHORITY\\SYSTEM",
+      "windows_service_name": "DNS"
+    },
+    "src": {
+      "ip": "10.0.1.110",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-80.example",
+        "href": "/orgs/5636114/workloads/d0d3f516-f7df-48f4-ae16-883b8390648d",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120568"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120559"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120567"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120561"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120569"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120570"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:06:23Z",
+      "last_detected": "2026-10-10T23:59:46Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "fqdn": "",
+      "ip": "10.0.1.111",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-81.example",
+        "href": "/orgs/5636114/workloads/e2d2f82d-cedf-42b9-9d5b-a5cae06c0335",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120544"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116753"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120541"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120542"
+          }
+        ]
+      }
+    },
+    "dst_bi": 697578,
+    "dst_bo": 4551316,
+    "flow_direction": "outbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 2728,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 40,
+    "service": {
+      "port": 3702,
+      "process_name": "",
+      "proto": 17,
+      "user_name": "root",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.112",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-82.example",
+        "href": "/orgs/5636114/workloads/fdd8abcf-7259-4c65-b937-96856bb3f68d",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120538"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120541"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:17:31Z",
+      "last_detected": "2026-10-10T23:59:46Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "ip": "10.0.1.108",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-78.example",
+        "href": "/orgs/5636114/workloads/df083e01-5ca6-4116-a8b3-ea05bba10166",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120513"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120511"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120512"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120514"
+          }
+        ]
+      }
+    },
+    "dst_bi": 8775313,
+    "dst_bo": 1317775,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 4905,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 41,
+    "service": {
+      "port": 53,
+      "process_name": "C:\\Windows\\System32\\dns.exe",
+      "proto": 17,
+      "user_name": "NT AUTHORITY\\SYSTEM",
+      "windows_service_name": "DNS"
+    },
+    "src": {
+      "ip": "10.0.1.113",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-83.example",
+        "href": "/orgs/5636114/workloads/3aba59e7-2965-4dad-a35d-8bcfefc90989",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120538"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:02:07Z",
+      "last_detected": "2026-10-10T23:59:45Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "endpoint",
+    "dst": {
+      "fqdn": "",
+      "ip": "10.0.1.114",
+      "ip_lists": [
+        {
+          "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997117019",
+          "name": "internet"
+        }
+      ]
+    },
+    "dst_bi": 8820,
+    "dst_bo": 67648,
+    "flow_direction": "outbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 49,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 42,
+    "service": {
+      "port": 443,
+      "process_name": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "proto": 6,
+      "user_name": "csmith",
+      "windows_service_name": "deepseek"
+    },
+    "src": {
+      "ip": "10.0.1.58",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-32.example",
+        "href": "/orgs/5636114/workloads/0f22162c-6e8b-4b4a-acc4-ca22bd995d0b",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120564"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120559"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120560"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120566"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120561"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120562"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120565"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T06:35:57Z",
+      "last_detected": "2026-10-10T23:59:45Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "fqdn": "",
+      "ip": "10.0.1.115",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-84.example",
+        "href": "/orgs/5636114/workloads/da8a1ac7-9290-4e71-b222-c4ea1813054a",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120544"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116753"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120540"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116746"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120542"
+          }
+        ]
+      }
+    },
+    "dst_bi": 1407691,
+    "dst_bo": 9394756,
+    "flow_direction": "outbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 4860,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 43,
+    "service": {
+      "port": 5666,
+      "process_name": "",
+      "proto": 6,
+      "user_name": "root",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.116",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-85.example",
+        "href": "/orgs/5636114/workloads/d71ecd05-4b75-498e-bc16-6c0d337d04fa",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120532"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120531"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120512"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:08:00Z",
+      "last_detected": "2026-10-10T23:59:45Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "fqdn": "",
+      "ip": "10.0.1.46",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-22.example",
+        "href": "/orgs/5636114/workloads/cb49190a-55bb-49f2-aa7c-dc40f44ac767",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120544"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116753"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120540"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120517"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120542"
+          }
+        ]
+      }
+    },
+    "dst_bi": 1403372,
+    "dst_bo": 9327156,
+    "flow_direction": "outbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 5431,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 44,
+    "service": {
+      "port": 3306,
+      "process_name": "/usr/bin/mysql",
+      "proto": 6,
+      "user_name": "root",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.55",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-29.example",
+        "href": "/orgs/5636114/workloads/27f9c24e-ba0c-4c40-b5bc-7ba45fb9d4d6",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120538"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:05:46Z",
+      "last_detected": "2026-10-10T23:59:45Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "fqdn": "",
+      "ip": "10.0.1.54",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-28.example",
+        "href": "/orgs/5636114/workloads/63d6808f-2968-493c-8813-95429e2d5bc7",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120534"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120533"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120512"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "dst_bi": 383153,
+    "dst_bo": 2568555,
+    "flow_direction": "outbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 1620,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 45,
+    "service": {
+      "port": 514,
+      "process_name": "",
+      "proto": 17,
+      "user_name": "root",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.117",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-86.example",
+        "href": "/orgs/5636114/workloads/54d4dfa9-c39f-4a1d-9d38-4632f6085bd1",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120538"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120540"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:12:17Z",
+      "last_detected": "2026-10-10T23:59:44Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "fqdn": "",
+      "ip": "10.0.1.118",
+      "ip_lists": [
+        {
+          "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997117019",
+          "name": "internet"
+        }
+      ]
+    },
+    "dst_bi": 1417877,
+    "dst_bo": 9538906,
+    "flow_direction": "outbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 5050,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 46,
+    "service": {
+      "port": 53,
+      "process_name": "/usr/bin/dig",
+      "proto": 17,
+      "user_name": "root",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.119",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-87.example",
+        "href": "/orgs/5636114/workloads/87dffe78-4107-4604-8a33-1c55cce00735",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120538"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116754"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116746"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:06:01Z",
+      "last_detected": "2026-10-10T23:59:44Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "ip": "10.0.1.120",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-88.example",
+        "href": "/orgs/5636114/workloads/6b08c875-bc81-4e0c-ad4e-d1b47765b957",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120538"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120540"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120517"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          }
+        ]
+      }
+    },
+    "dst_bi": 8855391,
+    "dst_bo": 1339323,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 5297,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 47,
+    "service": {
+      "port": 3306,
+      "process_name": "/usr/sbin/mysqld",
+      "proto": 6,
+      "user_name": "mysql",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.121",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-89.example",
+        "href": "/orgs/5636114/workloads/869539e3-a41b-4dd2-a2a6-9847fe9edbea",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120538"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120541"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120537"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:06:32Z",
+      "last_detected": "2026-10-10T23:59:43Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "fqdn": "",
+      "ip": "10.0.1.104",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-74.example",
+        "href": "/orgs/5636114/workloads/9068785d-47f9-48d1-a415-5489b25fbbc3",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120524"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120521"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "dst_bi": 1379485,
+    "dst_bo": 9081644,
+    "flow_direction": "outbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 4599,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 48,
+    "service": {
+      "port": 5666,
+      "process_name": "",
+      "proto": 6,
+      "user_name": "root",
+      "windows_service_name": ""
+    },
+    "src": {
+      "ip": "10.0.1.103",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-73.example",
+        "href": "/orgs/5636114/workloads/5487496b-3f33-4e79-beb6-3ce3f398488d",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120532"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120516"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120531"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120512"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:04:49Z",
+      "last_detected": "2026-10-10T23:59:43Z"
+    }
+  },
+  {
+    "caps": [
+      "write"
+    ],
+    "client_type": "server",
+    "dst": {
+      "ip": "10.0.1.109",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-79.example",
+        "href": "/orgs/5636114/workloads/cbe8911c-ffd3-4e5a-a4fb-9f649d65763d",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120522"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120515"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997116746"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120508"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120520"
+          }
+        ]
+      }
+    },
+    "dst_bi": 8950066,
+    "dst_bo": 1360681,
+    "flow_direction": "inbound",
+    "network": {
+      "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+      "name": "Corporate"
+    },
+    "num_connections": 5273,
+    "policy_decision": "allowed",
+    "rules": [],
+    "seq_id": 49,
+    "service": {
+      "port": 22,
+      "process_name": "/usr/sbin/sshd",
+      "proto": 6,
+      "user_name": "root",
+      "windows_service_name": "ssh"
+    },
+    "src": {
+      "ip": "10.0.1.68",
+      "ip_lists": [],
+      "workload": {
+        "hostname": "host-40.example",
+        "href": "/orgs/5636114/workloads/86856746-6712-4d4f-a10a-3b379bc58920",
+        "labels": [
+          {
+            "href": "/orgs/5636114/labels/24206847997120564"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120559"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120560"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120566"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120502"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120518"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120561"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120562"
+          },
+          {
+            "href": "/orgs/5636114/labels/24206847997120565"
+          }
+        ]
+      }
+    },
+    "state": "closed",
+    "timestamp_range": {
+      "first_detected": "2026-10-10T00:13:48Z",
+      "last_detected": "2026-10-10T23:59:43Z"
+    }
+  }
+]

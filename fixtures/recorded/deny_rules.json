@@ -1,0 +1,79 @@
+[
+  {
+    "consumers": [
+      {
+        "exclusion": false,
+        "label": {
+          "href": "/orgs/5636114/labels/24206847997118117"
+        }
+      }
+    ],
+    "enabled": true,
+    "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997116627/deny_rules/24206847997116491",
+    "ingress_services": [
+      {
+        "href": "/orgs/5636114/sec_policy/draft/services/24206847997119298"
+      }
+    ],
+    "override": true,
+    "providers": [
+      {
+        "exclusion": false,
+        "label": {
+          "href": "/orgs/5636114/labels/24206847997118116"
+        }
+      }
+    ]
+  },
+  {
+    "consumers": [
+      {
+        "exclusion": false,
+        "label": {
+          "href": "/orgs/5636114/labels/24206847997118116"
+        }
+      }
+    ],
+    "enabled": true,
+    "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997116627/deny_rules/24206847997116489",
+    "ingress_services": [
+      {
+        "href": "/orgs/5636114/sec_policy/draft/services/24206847997119298"
+      }
+    ],
+    "override": true,
+    "providers": [
+      {
+        "ip_list": {
+          "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997116452"
+        }
+      }
+    ]
+  },
+  {
+    "consumers": [
+      {
+        "exclusion": false,
+        "label": {
+          "href": "/orgs/5636114/labels/24206847997120564"
+        }
+      }
+    ],
+    "description": "",
+    "enabled": true,
+    "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117395/deny_rules/24206847997117397",
+    "ingress_services": [
+      {
+        "href": "/orgs/5636114/sec_policy/draft/services/24206847997138432"
+      }
+    ],
+    "override": false,
+    "providers": [
+      {
+        "ip_list": {
+          "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997117019"
+        }
+      }
+    ]
+  }
+]

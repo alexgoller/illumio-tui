@@ -1,0 +1,1540 @@
+[
+  {
+    "caps": [
+      "write",
+      "provision"
+    ],
+    "created_at": "2026-08-31T13:58:21.525Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "deny_rules": [
+      {
+        "all_ips_except_for_in_consumers": true,
+        "all_ips_except_for_in_providers": false,
+        "caps": [
+          "write",
+          "provision"
+        ],
+        "consumers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997118117"
+            }
+          }
+        ],
+        "created_at": "2026-08-31T13:58:21.556Z",
+        "created_by": {
+          "href": "/users/0"
+        },
+        "deleted_at": null,
+        "deleted_by": null,
+        "description": null,
+        "egress_services": [],
+        "enabled": true,
+        "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997116627/deny_rules/24206847997116491",
+        "ingress_services": [
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997119298"
+          }
+        ],
+        "network_type": "brn",
+        "override": true,
+        "providers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997118116"
+            }
+          }
+        ],
+        "unscoped_consumers": true,
+        "update_type": null,
+        "updated_at": "2026-08-31T13:58:21.561Z",
+        "updated_by": {
+          "href": "/service_accounts/24206847997116420"
+        }
+      },
+      {
+        "all_ips_except_for_in_consumers": false,
+        "all_ips_except_for_in_providers": false,
+        "caps": [
+          "write",
+          "provision"
+        ],
+        "consumers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997118116"
+            }
+          }
+        ],
+        "created_at": "2026-08-31T13:58:21.535Z",
+        "created_by": {
+          "href": "/users/0"
+        },
+        "deleted_at": null,
+        "deleted_by": null,
+        "description": null,
+        "egress_services": [],
+        "enabled": true,
+        "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997116627/deny_rules/24206847997116489",
+        "ingress_services": [
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997119298"
+          }
+        ],
+        "network_type": "brn",
+        "override": true,
+        "providers": [
+          {
+            "ip_list": {
+              "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997116452"
+            }
+          }
+        ],
+        "unscoped_consumers": true,
+        "update_type": null,
+        "updated_at": "2026-08-31T13:58:21.544Z",
+        "updated_by": {
+          "href": "/service_accounts/24206847997116420"
+        }
+      }
+    ],
+    "description": "",
+    "enabled": true,
+    "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997116627",
+    "ip_tables_rules": [],
+    "name": "Quarantine Policy: Strict",
+    "rules": [
+      {
+        "all_ips_except_for_in_consumers": false,
+        "all_ips_except_for_in_providers": false,
+        "consumers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997118117"
+            }
+          }
+        ],
+        "consuming_security_principals": [],
+        "created_at": "2026-08-31T13:58:21.579Z",
+        "created_by": {
+          "href": "/users/0"
+        },
+        "deleted_at": null,
+        "deleted_by": null,
+        "description": null,
+        "egress_services": [],
+        "enabled": true,
+        "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997116627/sec_rules/24206847997116644",
+        "ingress_services": [
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997119424"
+          },
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997119376"
+          }
+        ],
+        "machine_auth": false,
+        "network_type": "brn",
+        "providers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997118116"
+            }
+          }
+        ],
+        "resolve_labels_as": {
+          "consumers": [
+            "workloads"
+          ],
+          "providers": [
+            "workloads"
+          ]
+        },
+        "sec_connect": false,
+        "stateless": false,
+        "unscoped_consumers": false,
+        "update_type": null,
+        "updated_at": "2026-08-31T13:58:21.584Z",
+        "updated_by": {
+          "href": "/service_accounts/24206847997116420"
+        },
+        "use_workload_subnets": []
+      }
+    ],
+    "scopes": [
+      []
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-31T13:58:21.713Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "caps": [
+      "write",
+      "provision"
+    ],
+    "created_at": "2026-09-14T08:37:46.959Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "deny_rules": [
+      {
+        "all_ips_except_for_in_consumers": false,
+        "all_ips_except_for_in_providers": false,
+        "caps": [
+          "write",
+          "provision"
+        ],
+        "consumers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997120564"
+            }
+          }
+        ],
+        "created_at": "2026-09-14T08:37:51.077Z",
+        "created_by": {
+          "href": "/users/56294995342162285"
+        },
+        "deleted_at": null,
+        "deleted_by": null,
+        "description": "",
+        "egress_services": [],
+        "enabled": true,
+        "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117395/deny_rules/24206847997117397",
+        "ingress_services": [
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997138432"
+          }
+        ],
+        "network_type": "non_brn",
+        "override": false,
+        "providers": [
+          {
+            "ip_list": {
+              "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997117019"
+            }
+          }
+        ],
+        "unscoped_consumers": false,
+        "update_type": null,
+        "updated_at": "2026-09-14T08:37:51.086Z",
+        "updated_by": {
+          "href": "/users/56294995342162285"
+        }
+      }
+    ],
+    "description": "",
+    "enabled": true,
+    "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117395",
+    "ip_tables_rules": [],
+    "name": "6. Off Domain laptop Policy",
+    "rules": [],
+    "scopes": [
+      []
+    ],
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:51.093Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "caps": [
+      "write",
+      "provision"
+    ],
+    "created_at": "2026-09-14T08:37:47.556Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "deny_rules": [],
+    "description": "",
+    "enabled": true,
+    "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117405",
+    "ip_tables_rules": [],
+    "name": "11. Core Services",
+    "rules": [
+      {
+        "all_ips_except_for_in_consumers": false,
+        "all_ips_except_for_in_providers": false,
+        "consumers": [
+          {
+            "actors": "ams"
+          }
+        ],
+        "consuming_security_principals": [],
+        "created_at": "2026-09-14T08:37:52.706Z",
+        "created_by": {
+          "href": "/users/56294995342162285"
+        },
+        "deleted_at": null,
+        "deleted_by": null,
+        "description": "",
+        "egress_services": [],
+        "enabled": true,
+        "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117405/sec_rules/24206847997118020",
+        "ingress_services": [
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997138428"
+          }
+        ],
+        "machine_auth": false,
+        "network_type": "brn",
+        "providers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997120536"
+            }
+          }
+        ],
+        "resolve_labels_as": {
+          "consumers": [
+            "workloads"
+          ],
+          "providers": [
+            "workloads"
+          ]
+        },
+        "sec_connect": false,
+        "stateless": false,
+        "unscoped_consumers": false,
+        "update_type": null,
+        "updated_at": "2026-09-14T08:37:52.716Z",
+        "updated_by": {
+          "href": "/users/56294995342162285"
+        },
+        "use_workload_subnets": []
+      },
+      {
+        "all_ips_except_for_in_consumers": false,
+        "all_ips_except_for_in_providers": false,
+        "consumers": [
+          {
+            "actors": "ams"
+          }
+        ],
+        "consuming_security_principals": [],
+        "created_at": "2026-09-14T08:37:52.534Z",
+        "created_by": {
+          "href": "/users/56294995342162285"
+        },
+        "deleted_at": null,
+        "deleted_by": null,
+        "description": "",
+        "egress_services": [],
+        "enabled": true,
+        "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117405/sec_rules/24206847997118018",
+        "ingress_services": [
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997138576"
+          }
+        ],
+        "machine_auth": false,
+        "network_type": "brn",
+        "providers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997120533"
+            }
+          },
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997120534"
+            }
+          }
+        ],
+        "resolve_labels_as": {
+          "consumers": [
+            "workloads"
+          ],
+          "providers": [
+            "workloads"
+          ]
+        },
+        "sec_connect": false,
+        "stateless": false,
+        "unscoped_consumers": false,
+        "update_type": null,
+        "updated_at": "2026-09-14T08:37:52.545Z",
+        "updated_by": {
+          "href": "/users/56294995342162285"
+        },
+        "use_workload_subnets": []
+      },
+      {
+        "all_ips_except_for_in_consumers": false,
+        "all_ips_except_for_in_providers": false,
+        "consumers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997120532"
+            }
+          },
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997120531"
+            }
+          }
+        ],
+        "consuming_security_principals": [],
+        "created_at": "2026-09-14T08:37:52.356Z",
+        "created_by": {
+          "href": "/users/56294995342162285"
+        },
+        "deleted_at": null,
+        "deleted_by": null,
+        "description": "",
+        "egress_services": [],
+        "enabled": true,
+        "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117405/sec_rules/24206847997118016",
+        "ingress_services": [
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997138498"
+          }
+        ],
+        "machine_auth": false,
+        "network_type": "brn",
+        "providers": [
+          {
+            "actors": "ams"
+          }
+        ],
+        "resolve_labels_as": {
+          "consumers": [
+            "workloads"
+          ],
+          "providers": [
+            "workloads"
+          ]
+        },
+        "sec_connect": false,
+        "stateless": false,
+        "unscoped_consumers": false,
+        "update_type": null,
+        "updated_at": "2026-09-14T08:37:52.366Z",
+        "updated_by": {
+          "href": "/users/56294995342162285"
+        },
+        "use_workload_subnets": []
+      }
+    ],
+    "scopes": [
+      []
+    ],
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:52.716Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "caps": [
+      "write",
+      "provision"
+    ],
+    "created_at": "2026-09-14T08:37:46.185Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "deny_rules": [
+      {
+        "all_ips_except_for_in_consumers": false,
+        "all_ips_except_for_in_providers": false,
+        "caps": [
+          "write",
+          "provision"
+        ],
+        "consumers": [
+          {
+            "ip_list": {
+              "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997116452"
+            }
+          }
+        ],
+        "created_at": "2026-09-14T08:37:49.860Z",
+        "created_by": {
+          "href": "/users/56294995342162285"
+        },
+        "deleted_at": null,
+        "deleted_by": null,
+        "description": "",
+        "egress_services": [],
+        "enabled": true,
+        "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117385/deny_rules/24206847997117385",
+        "ingress_services": [
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997138452"
+          }
+        ],
+        "network_type": "brn",
+        "override": false,
+        "providers": [
+          {
+            "actors": "ams"
+          }
+        ],
+        "unscoped_consumers": false,
+        "update_type": null,
+        "updated_at": "2026-09-14T08:37:49.870Z",
+        "updated_by": {
+          "href": "/users/56294995342162285"
+        }
+      },
+      {
+        "all_ips_except_for_in_consumers": false,
+        "all_ips_except_for_in_providers": false,
+        "caps": [
+          "write",
+          "provision"
+        ],
+        "consumers": [
+          {
+            "ip_list": {
+              "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997117019"
+            }
+          }
+        ],
+        "created_at": "2026-09-14T08:37:49.708Z",
+        "created_by": {
+          "href": "/users/56294995342162285"
+        },
+        "deleted_at": null,
+        "deleted_by": null,
+        "description": "",
+        "egress_services": [],
+        "enabled": true,
+        "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117385/deny_rules/24206847997117383",
+        "ingress_services": [
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997119298"
+          }
+        ],
+        "network_type": "brn",
+        "override": true,
+        "providers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997120517"
+            }
+          }
+        ],
+        "unscoped_consumers": false,
+        "update_type": null,
+        "updated_at": "2026-09-14T08:37:49.718Z",
+        "updated_by": {
+          "href": "/users/56294995342162285"
+        }
+      },
+      {
+        "all_ips_except_for_in_consumers": false,
+        "all_ips_except_for_in_providers": false,
+        "caps": [
+          "write",
+          "provision"
+        ],
+        "consumers": [
+          {
+            "ip_list": {
+              "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997116452"
+            }
+          }
+        ],
+        "created_at": "2026-09-14T08:37:49.527Z",
+        "created_by": {
+          "href": "/users/56294995342162285"
+        },
+        "deleted_at": null,
+        "deleted_by": null,
+        "description": "",
+        "egress_services": [],
+        "enabled": true,
+        "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117385/deny_rules/24206847997117381",
+        "ingress_services": [
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997138408"
+          },
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997138508"
+          },
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997138570"
+          },
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997138416"
+          },
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997138422"
+          }
+        ],
+        "network_type": "brn",
+        "override": true,
+        "providers": [
+          {
+            "actors": "ams"
+          }
+        ],
+        "unscoped_consumers": false,
+        "update_type": null,
+        "updated_at": "2026-09-14T08:37:49.539Z",
+        "updated_by": {
+          "href": "/users/56294995342162285"
+        }
+      }
+    ],
+    "description": "",
+    "enabled": true,
+    "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117385",
+    "ip_tables_rules": [],
+    "name": "1. Ransomware Propogation Deny",
+    "rules": [
+      {
+        "all_ips_except_for_in_consumers": false,
+        "all_ips_except_for_in_providers": false,
+        "consumers": [
+          {
+            "ip_list": {
+              "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997117027"
+            }
+          }
+        ],
+        "consuming_security_principals": [],
+        "created_at": "2026-09-14T08:37:49.376Z",
+        "created_by": {
+          "href": "/users/56294995342162285"
+        },
+        "deleted_at": null,
+        "deleted_by": null,
+        "description": "",
+        "egress_services": [],
+        "enabled": true,
+        "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117385/sec_rules/24206847997118004",
+        "ingress_services": [
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997138452"
+          }
+        ],
+        "machine_auth": false,
+        "network_type": "brn",
+        "providers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997120497"
+            }
+          }
+        ],
+        "resolve_labels_as": {
+          "consumers": [
+            "workloads"
+          ],
+          "providers": [
+            "workloads"
+          ]
+        },
+        "sec_connect": false,
+        "stateless": false,
+        "unscoped_consumers": false,
+        "update_type": null,
+        "updated_at": "2026-09-14T08:37:49.387Z",
+        "updated_by": {
+          "href": "/users/56294995342162285"
+        },
+        "use_workload_subnets": []
+      }
+    ],
+    "scopes": [
+      []
+    ],
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:49.881Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "caps": [
+      "write",
+      "provision"
+    ],
+    "created_at": "2026-09-14T08:37:47.195Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "deny_rules": [],
+    "description": "",
+    "enabled": true,
+    "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117399",
+    "ip_tables_rules": [],
+    "name": "8. Adaptive User Segmentation ",
+    "rules": [
+      {
+        "all_ips_except_for_in_consumers": false,
+        "all_ips_except_for_in_providers": false,
+        "consumers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997120564"
+            }
+          },
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997120568"
+            }
+          }
+        ],
+        "consuming_security_principals": [
+          {
+            "deleted": false,
+            "href": "/orgs/5636114/security_principals/S-1-5-21-3967917948-4012392808-1110388204-1109",
+            "name": "IT",
+            "sid": "S-1-5-21-3967917948-4012392808-1110388204-1109",
+            "used_by_ruleset": true
+          }
+        ],
+        "created_at": "2026-09-14T08:37:51.591Z",
+        "created_by": {
+          "href": "/users/56294995342162285"
+        },
+        "deleted_at": null,
+        "deleted_by": null,
+        "description": "",
+        "egress_services": [],
+        "enabled": true,
+        "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117399/sec_rules/24206847997118014",
+        "ingress_services": [
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997138432"
+          }
+        ],
+        "machine_auth": false,
+        "network_type": "brn",
+        "providers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997120544"
+            }
+          }
+        ],
+        "resolve_labels_as": {
+          "consumers": [
+            "workloads"
+          ],
+          "providers": [
+            "workloads"
+          ]
+        },
+        "sec_connect": false,
+        "stateless": false,
+        "unscoped_consumers": false,
+        "update_type": null,
+        "updated_at": "2026-09-14T08:37:51.600Z",
+        "updated_by": {
+          "href": "/users/56294995342162285"
+        },
+        "use_workload_subnets": []
+      }
+    ],
+    "scopes": [
+      []
+    ],
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:51.601Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "caps": [
+      "write",
+      "provision"
+    ],
+    "created_at": "2026-09-14T08:37:47.428Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "deny_rules": [
+      {
+        "all_ips_except_for_in_consumers": false,
+        "all_ips_except_for_in_providers": false,
+        "caps": [
+          "write",
+          "provision"
+        ],
+        "consumers": [
+          {
+            "ip_list": {
+              "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997116452"
+            }
+          }
+        ],
+        "created_at": "2026-09-14T08:37:52.184Z",
+        "created_by": {
+          "href": "/users/56294995342162285"
+        },
+        "deleted_at": null,
+        "deleted_by": null,
+        "description": "",
+        "egress_services": [],
+        "enabled": true,
+        "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117403/deny_rules/24206847997117405",
+        "ingress_services": [
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997119298"
+          }
+        ],
+        "network_type": "brn",
+        "override": true,
+        "providers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997120490"
+            }
+          }
+        ],
+        "unscoped_consumers": false,
+        "update_type": null,
+        "updated_at": "2026-09-14T08:37:52.193Z",
+        "updated_by": {
+          "href": "/users/56294995342162285"
+        }
+      },
+      {
+        "all_ips_except_for_in_consumers": false,
+        "all_ips_except_for_in_providers": false,
+        "caps": [
+          "write",
+          "provision"
+        ],
+        "consumers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997120490"
+            }
+          }
+        ],
+        "created_at": "2026-09-14T08:37:52.025Z",
+        "created_by": {
+          "href": "/users/56294995342162285"
+        },
+        "deleted_at": null,
+        "deleted_by": null,
+        "description": "",
+        "egress_services": [],
+        "enabled": true,
+        "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117403/deny_rules/24206847997117403",
+        "ingress_services": [
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997119298"
+          }
+        ],
+        "network_type": "brn",
+        "override": true,
+        "providers": [
+          {
+            "ip_list": {
+              "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997116452"
+            }
+          }
+        ],
+        "unscoped_consumers": false,
+        "update_type": null,
+        "updated_at": "2026-09-14T08:37:52.035Z",
+        "updated_by": {
+          "href": "/users/56294995342162285"
+        }
+      }
+    ],
+    "description": "",
+    "enabled": true,
+    "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117403",
+    "ip_tables_rules": [],
+    "name": "10. Quarantine",
+    "rules": [],
+    "scopes": [
+      []
+    ],
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:52.203Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "caps": [
+      "write",
+      "provision"
+    ],
+    "created_at": "2026-09-14T08:37:47.992Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "deny_rules": [],
+    "description": "",
+    "enabled": true,
+    "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117411",
+    "ip_tables_rules": [],
+    "name": "14. pos | pci",
+    "rules": [
+      {
+        "all_ips_except_for_in_consumers": false,
+        "all_ips_except_for_in_providers": false,
+        "consumers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997120517"
+            }
+          }
+        ],
+        "consuming_security_principals": [],
+        "created_at": "2026-09-14T08:37:53.961Z",
+        "created_by": {
+          "href": "/users/56294995342162285"
+        },
+        "deleted_at": null,
+        "deleted_by": null,
+        "description": "",
+        "egress_services": [],
+        "enabled": true,
+        "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117411/sec_rules/24206847997118034",
+        "ingress_services": [
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997138450"
+          },
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997138476"
+          }
+        ],
+        "machine_auth": false,
+        "network_type": "brn",
+        "providers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997120517"
+            }
+          }
+        ],
+        "resolve_labels_as": {
+          "consumers": [
+            "workloads"
+          ],
+          "providers": [
+            "workloads"
+          ]
+        },
+        "sec_connect": false,
+        "stateless": false,
+        "unscoped_consumers": false,
+        "update_type": null,
+        "updated_at": "2026-09-14T08:37:53.969Z",
+        "updated_by": {
+          "href": "/users/56294995342162285"
+        },
+        "use_workload_subnets": []
+      },
+      {
+        "all_ips_except_for_in_consumers": false,
+        "all_ips_except_for_in_providers": false,
+        "consumers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997120521"
+            }
+          },
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997116746"
+            }
+          }
+        ],
+        "consuming_security_principals": [],
+        "created_at": "2026-09-14T08:37:53.767Z",
+        "created_by": {
+          "href": "/users/56294995342162285"
+        },
+        "deleted_at": null,
+        "deleted_by": null,
+        "description": "",
+        "egress_services": [],
+        "enabled": true,
+        "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117411/sec_rules/24206847997118032",
+        "ingress_services": [
+          {
+            "port": 8070,
+            "proto": 6
+          }
+        ],
+        "machine_auth": false,
+        "network_type": "brn",
+        "providers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997120521"
+            }
+          }
+        ],
+        "resolve_labels_as": {
+          "consumers": [
+            "workloads"
+          ],
+          "providers": [
+            "workloads"
+          ]
+        },
+        "sec_connect": false,
+        "stateless": false,
+        "unscoped_consumers": false,
+        "update_type": null,
+        "updated_at": "2026-09-14T08:37:53.780Z",
+        "updated_by": {
+          "href": "/users/56294995342162285"
+        },
+        "use_workload_subnets": []
+      },
+      {
+        "all_ips_except_for_in_consumers": false,
+        "all_ips_except_for_in_providers": false,
+        "consumers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997120521"
+            }
+          }
+        ],
+        "consuming_security_principals": [],
+        "created_at": "2026-09-14T08:37:53.573Z",
+        "created_by": {
+          "href": "/users/56294995342162285"
+        },
+        "deleted_at": null,
+        "deleted_by": null,
+        "description": "",
+        "egress_services": [],
+        "enabled": true,
+        "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117411/sec_rules/24206847997118030",
+        "ingress_services": [
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997138476"
+          }
+        ],
+        "machine_auth": false,
+        "network_type": "brn",
+        "providers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997120517"
+            }
+          }
+        ],
+        "resolve_labels_as": {
+          "consumers": [
+            "workloads"
+          ],
+          "providers": [
+            "workloads"
+          ]
+        },
+        "sec_connect": false,
+        "stateless": false,
+        "unscoped_consumers": false,
+        "update_type": null,
+        "updated_at": "2026-09-14T08:37:53.582Z",
+        "updated_by": {
+          "href": "/users/56294995342162285"
+        },
+        "use_workload_subnets": []
+      },
+      {
+        "all_ips_except_for_in_consumers": false,
+        "all_ips_except_for_in_providers": false,
+        "consumers": [
+          {
+            "ip_list": {
+              "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997117017"
+            }
+          }
+        ],
+        "consuming_security_principals": [],
+        "created_at": "2026-09-14T08:37:53.392Z",
+        "created_by": {
+          "href": "/users/56294995342162285"
+        },
+        "deleted_at": null,
+        "deleted_by": null,
+        "description": "",
+        "egress_services": [],
+        "enabled": true,
+        "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117411/sec_rules/24206847997118028",
+        "ingress_services": [
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997138432"
+          }
+        ],
+        "machine_auth": false,
+        "network_type": "brn",
+        "providers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997116746"
+            }
+          }
+        ],
+        "resolve_labels_as": {
+          "consumers": [
+            "workloads"
+          ],
+          "providers": [
+            "workloads"
+          ]
+        },
+        "sec_connect": false,
+        "stateless": false,
+        "unscoped_consumers": false,
+        "update_type": null,
+        "updated_at": "2026-09-14T08:37:53.400Z",
+        "updated_by": {
+          "href": "/users/56294995342162285"
+        },
+        "use_workload_subnets": []
+      },
+      {
+        "all_ips_except_for_in_consumers": false,
+        "all_ips_except_for_in_providers": false,
+        "consumers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997116746"
+            }
+          }
+        ],
+        "consuming_security_principals": [],
+        "created_at": "2026-09-14T08:37:53.228Z",
+        "created_by": {
+          "href": "/users/56294995342162285"
+        },
+        "deleted_at": null,
+        "deleted_by": null,
+        "description": "",
+        "egress_services": [],
+        "enabled": true,
+        "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117411/sec_rules/24206847997118026",
+        "ingress_services": [
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997138418"
+          }
+        ],
+        "machine_auth": false,
+        "network_type": "brn",
+        "providers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997116746"
+            }
+          }
+        ],
+        "resolve_labels_as": {
+          "consumers": [
+            "workloads"
+          ],
+          "providers": [
+            "workloads"
+          ]
+        },
+        "sec_connect": false,
+        "stateless": false,
+        "unscoped_consumers": false,
+        "update_type": null,
+        "updated_at": "2026-09-14T08:37:53.236Z",
+        "updated_by": {
+          "href": "/users/56294995342162285"
+        },
+        "use_workload_subnets": []
+      }
+    ],
+    "scopes": [
+      [
+        {
+          "exclusion": false,
+          "label": {
+            "href": "/orgs/5636114/labels/24206847997120544"
+          }
+        },
+        {
+          "exclusion": false,
+          "label": {
+            "href": "/orgs/5636114/labels/24206847997120545"
+          }
+        }
+      ]
+    ],
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:53.969Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "caps": [
+      "write",
+      "provision"
+    ],
+    "created_at": "2026-09-14T08:37:46.347Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "deny_rules": [
+      {
+        "all_ips_except_for_in_consumers": false,
+        "all_ips_except_for_in_providers": false,
+        "caps": [
+          "write",
+          "provision"
+        ],
+        "consumers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997120555"
+            }
+          }
+        ],
+        "created_at": "2026-09-14T08:37:50.006Z",
+        "created_by": {
+          "href": "/users/56294995342162285"
+        },
+        "deleted_at": null,
+        "deleted_by": null,
+        "description": "",
+        "egress_services": [],
+        "enabled": true,
+        "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117387/deny_rules/24206847997117387",
+        "ingress_services": [
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997119298"
+          }
+        ],
+        "network_type": "brn",
+        "override": false,
+        "providers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997116752"
+            }
+          }
+        ],
+        "unscoped_consumers": false,
+        "update_type": null,
+        "updated_at": "2026-09-14T08:37:50.014Z",
+        "updated_by": {
+          "href": "/users/56294995342162285"
+        }
+      }
+    ],
+    "description": "",
+    "enabled": true,
+    "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117387",
+    "ip_tables_rules": [],
+    "name": "2. OT-IT separation",
+    "rules": [],
+    "scopes": [
+      []
+    ],
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:50.021Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "caps": [
+      "write",
+      "provision"
+    ],
+    "created_at": "2026-09-14T08:37:47.064Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "deny_rules": [],
+    "description": "",
+    "enabled": true,
+    "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117397",
+    "ip_tables_rules": [],
+    "name": "7. Cloud Workload Migration",
+    "rules": [
+      {
+        "all_ips_except_for_in_consumers": false,
+        "all_ips_except_for_in_providers": false,
+        "consumers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997116746"
+            }
+          }
+        ],
+        "consuming_security_principals": [],
+        "created_at": "2026-09-14T08:37:51.415Z",
+        "created_by": {
+          "href": "/users/56294995342162285"
+        },
+        "deleted_at": null,
+        "deleted_by": null,
+        "description": "",
+        "egress_services": [],
+        "enabled": true,
+        "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117397/sec_rules/24206847997118012",
+        "ingress_services": [
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997119298"
+          }
+        ],
+        "machine_auth": false,
+        "network_type": "brn",
+        "providers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997120521"
+            }
+          }
+        ],
+        "resolve_labels_as": {
+          "consumers": [
+            "workloads"
+          ],
+          "providers": [
+            "workloads"
+          ]
+        },
+        "sec_connect": false,
+        "stateless": false,
+        "unscoped_consumers": false,
+        "update_type": null,
+        "updated_at": "2026-09-14T08:37:51.424Z",
+        "updated_by": {
+          "href": "/users/56294995342162285"
+        },
+        "use_workload_subnets": []
+      },
+      {
+        "all_ips_except_for_in_consumers": false,
+        "all_ips_except_for_in_providers": false,
+        "consumers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997120521"
+            }
+          }
+        ],
+        "consuming_security_principals": [],
+        "created_at": "2026-09-14T08:37:51.243Z",
+        "created_by": {
+          "href": "/users/56294995342162285"
+        },
+        "deleted_at": null,
+        "deleted_by": null,
+        "description": "",
+        "egress_services": [],
+        "enabled": true,
+        "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117397/sec_rules/24206847997118010",
+        "ingress_services": [
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997119298"
+          }
+        ],
+        "machine_auth": false,
+        "network_type": "brn",
+        "providers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997120517"
+            }
+          }
+        ],
+        "resolve_labels_as": {
+          "consumers": [
+            "workloads"
+          ],
+          "providers": [
+            "workloads"
+          ]
+        },
+        "sec_connect": false,
+        "stateless": false,
+        "unscoped_consumers": false,
+        "update_type": null,
+        "updated_at": "2026-09-14T08:37:51.253Z",
+        "updated_by": {
+          "href": "/users/56294995342162285"
+        },
+        "use_workload_subnets": []
+      }
+    ],
+    "scopes": [
+      [
+        {
+          "exclusion": false,
+          "label": {
+            "href": "/orgs/5636114/labels/24206847997120544"
+          }
+        }
+      ]
+    ],
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:51.424Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "caps": [
+      "write",
+      "provision"
+    ],
+    "created_at": "2026-09-14T08:37:47.682Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "deny_rules": [],
+    "description": "",
+    "enabled": true,
+    "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117407",
+    "ip_tables_rules": [],
+    "name": "12. activedirectory | prod",
+    "rules": [
+      {
+        "all_ips_except_for_in_consumers": false,
+        "all_ips_except_for_in_providers": false,
+        "consumers": [
+          {
+            "actors": "ams"
+          }
+        ],
+        "consuming_security_principals": [],
+        "created_at": "2026-09-14T08:37:52.885Z",
+        "created_by": {
+          "href": "/users/56294995342162285"
+        },
+        "deleted_at": null,
+        "deleted_by": null,
+        "description": "",
+        "egress_services": [],
+        "enabled": true,
+        "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117407/sec_rules/24206847997118022",
+        "ingress_services": [
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997138428"
+          },
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997138454"
+          },
+          {
+            "href": "/orgs/5636114/sec_policy/draft/services/24206847997138510"
+          }
+        ],
+        "machine_auth": false,
+        "network_type": "brn",
+        "providers": [
+          {
+            "exclusion": false,
+            "label": {
+              "href": "/orgs/5636114/labels/24206847997120511"
+            }
+          }
+        ],
+        "resolve_labels_as": {
+          "consumers": [
+            "workloads"
+          ],
+          "providers": [
+            "workloads"
+          ]
+        },
+        "sec_connect": false,
+        "stateless": false,
+        "unscoped_consumers": true,
+        "update_type": null,
+        "updated_at": "2026-09-14T08:37:52.894Z",
+        "updated_by": {
+          "href": "/users/56294995342162285"
+        },
+        "use_workload_subnets": []
+      }
+    ],
+    "scopes": [
+      [
+        {
+          "exclusion": false,
+          "label": {
+            "href": "/orgs/5636114/labels/24206847997120513"
+          }
+        },
+        {
+          "exclusion": false,
+          "label": {
+            "href": "/orgs/5636114/labels/24206847997116752"
+          }
+        }
+      ]
+    ],
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:52.894Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  }
+]

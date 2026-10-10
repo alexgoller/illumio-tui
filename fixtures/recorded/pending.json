@@ -1,0 +1,63 @@
+{
+  "rule_sets": [
+    {
+      "caps": [
+        "write",
+        "provision"
+      ],
+      "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997117727",
+      "name": "16. payment | prod - vdi browser only",
+      "related_services": [
+        {
+          "href": "/orgs/5636114/sec_policy/draft/services/24206847997139093"
+        }
+      ],
+      "update_type": "create",
+      "updated_at": "2026-09-17T05:01:29.092Z",
+      "updated_by": {
+        "href": "/users/56294995342162285"
+      }
+    },
+    {
+      "caps": [
+        "write",
+        "provision"
+      ],
+      "href": "/orgs/5636114/sec_policy/draft/rule_sets/24206847997118431",
+      "name": "RF-pos-Staging",
+      "update_type": "create",
+      "updated_at": "2026-10-01T15:54:16.118Z",
+      "updated_by": {
+        "href": "/users/56294995342162285"
+      }
+    }
+  ],
+  "services": [
+    {
+      "caps": [
+        "write",
+        "provision"
+      ],
+      "href": "/orgs/5636114/sec_policy/draft/services/24206847997139091",
+      "name": "S-VDI-chrome-egress",
+      "update_type": "create",
+      "updated_at": "2026-09-17T04:38:40.504Z",
+      "updated_by": {
+        "href": "/users/56294995342162285"
+      }
+    },
+    {
+      "caps": [
+        "write",
+        "provision"
+      ],
+      "href": "/orgs/5636114/sec_policy/draft/services/24206847997139093",
+      "name": "chrome.exe (egress)",
+      "update_type": "create",
+      "updated_at": "2026-09-17T05:00:50.012Z",
+      "updated_by": {
+        "href": "/users/56294995342162285"
+      }
+    }
+  ]
+}

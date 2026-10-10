@@ -1,0 +1,3244 @@
+[
+  {
+    "created_at": "2026-08-29T01:40:21.733Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": null,
+    "description_url": null,
+    "external_data_reference": "All Services",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119298",
+    "name": "All Services",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "proto": -1
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.736Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.742Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "NFS",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119300",
+    "name": "S-NFS",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": {
+        "category": "admin",
+        "os_platforms": [
+          "linux"
+        ],
+        "severity": "medium"
+      }
+    },
+    "service_ports": [
+      {
+        "port": 2049,
+        "proto": 17
+      },
+      {
+        "port": 2049,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.746Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.747Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "Telnet",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119302",
+    "name": "S-TELNET",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": {
+        "category": "admin",
+        "os_platforms": [
+          "linux",
+          "windows"
+        ],
+        "severity": "medium"
+      }
+    },
+    "service_ports": [
+      {
+        "port": 23,
+        "proto": 17
+      },
+      {
+        "port": 23,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.749Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.750Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "POPv3",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119304",
+    "name": "S-POPV3",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": {
+        "category": "legacy",
+        "os_platforms": [
+          "linux",
+          "windows"
+        ],
+        "severity": "low"
+      }
+    },
+    "service_ports": [
+      {
+        "port": 110,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.753Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.754Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "HTTPS",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119306",
+    "name": "S-HTTPS",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 443,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.755Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.756Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "HTTPS-UDP",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119308",
+    "name": "S-HTTPS-UDP",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 443,
+        "proto": 17
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.758Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.760Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "Kerberos-v4",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119310",
+    "name": "S-KERBEROS-V4",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 750,
+        "proto": 17
+      },
+      {
+        "port": 750,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.762Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.764Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "DNS",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119312",
+    "name": "S-DNS",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 53,
+        "proto": 6
+      },
+      {
+        "port": 53,
+        "proto": 17
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.766Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.768Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "IRC",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119314",
+    "name": "S-IRC",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 6667,
+        "proto": 17
+      },
+      {
+        "port": 6667,
+        "proto": 6
+      },
+      {
+        "port": 194,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.771Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.772Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "DHCP Client",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119316",
+    "name": "S-DHCP-CLIENT",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 68,
+        "proto": 17
+      },
+      {
+        "port": 68,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.775Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.776Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "SNMP",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119318",
+    "name": "S-SNMP-POLL",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 161,
+        "proto": 17
+      },
+      {
+        "port": 161,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.779Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.780Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "PXE",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119320",
+    "name": "S-PXE",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 4011,
+        "proto": 6
+      },
+      {
+        "port": 4011,
+        "proto": 17
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.783Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.784Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "Kerberos-Auth",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119322",
+    "name": "S-KERBEROS-AUTH",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 88,
+        "proto": 17
+      },
+      {
+        "port": 88,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.787Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.788Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "Kerberos-v5",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119324",
+    "name": "S-KERBEROS-V5",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 464,
+        "proto": 17
+      },
+      {
+        "port": 464,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.790Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.792Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "LPD-LPR",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119326",
+    "name": "S-LPD-LPR",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 515,
+        "proto": 17
+      },
+      {
+        "port": 515,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.794Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.795Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "MySQL",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119328",
+    "name": "S-MYSQL",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 3306,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.797Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.798Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "MySQL-Cluster",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119330",
+    "name": "S-MYSQL-CLUSTER",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 1186,
+        "proto": 17
+      },
+      {
+        "port": 1186,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.801Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.802Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "ISAKMP",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119332",
+    "name": "S-ISAKMP-IKE",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 500,
+        "proto": 17
+      },
+      {
+        "port": 500,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.805Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.806Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "WINRM",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119334",
+    "name": "S-WINRM",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": {
+        "category": "admin",
+        "os_platforms": [
+          "windows"
+        ],
+        "severity": "critical"
+      }
+    },
+    "service_ports": [
+      {
+        "port": 5985,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.807Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.808Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "WINRMS",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119336",
+    "name": "S-WINRM-SECURE",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": {
+        "category": "admin",
+        "os_platforms": [
+          "windows"
+        ],
+        "severity": "critical"
+      }
+    },
+    "service_ports": [
+      {
+        "port": 5986,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.811Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.823Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "HIGH-TCP-PORTS",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119338",
+    "name": "S-HIGH-TCP-PORTS",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 49152,
+        "proto": 6,
+        "to_port": 65535
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.825Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.837Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "HIGH-UDP-PORTS",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119340",
+    "name": "S-HIGH-UDP-PORTS",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 49152,
+        "proto": 17,
+        "to_port": 65535
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.840Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.841Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "DHCP Server",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119342",
+    "name": "S-DHCP-SERVER",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 67,
+        "proto": 17
+      },
+      {
+        "port": 67,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.843Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.844Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "SNMP-Trap",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119344",
+    "name": "S-SNMP-TRAP",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 162,
+        "proto": 17
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.846Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.847Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "Rlogin",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119346",
+    "name": "S-RLOGIN",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 513,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.849Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.850Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "IRCS",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119348",
+    "name": "S-IRCS",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 994,
+        "proto": 17
+      },
+      {
+        "port": 994,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.853Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.854Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "RTSP",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119350",
+    "name": "S-RTSP",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 554,
+        "proto": 17
+      },
+      {
+        "port": 554,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.857Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.858Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "Klogin",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119352",
+    "name": "S-KLOGIN",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 543,
+        "proto": 6
+      },
+      {
+        "port": 543,
+        "proto": 17
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.861Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.862Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "NTP",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119354",
+    "name": "S-NTP",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 123,
+        "proto": 6
+      },
+      {
+        "port": 123,
+        "proto": 17
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.865Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.866Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "PTP-Events",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119356",
+    "name": "S-PTP-EVENTS",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 319,
+        "proto": 17
+      },
+      {
+        "port": 319,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.869Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.870Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "SMTP",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119358",
+    "name": "S-SMTP",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 25,
+        "proto": 6
+      },
+      {
+        "port": 25,
+        "proto": 17
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.874Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.875Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "SMTPS",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119360",
+    "name": "S-SMTPS",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 465,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.877Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.878Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "SMTP-TLS",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119362",
+    "name": "S-SMTP-TLS",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 587,
+        "proto": 6
+      },
+      {
+        "port": 587,
+        "proto": 17
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.881Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.882Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "MSFT SQL Service Broker",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119364",
+    "name": "S-MS-SQL-BROKER",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 4022,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.884Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.885Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "MSFT RPC",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119366",
+    "name": "S-RPC",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": {
+        "category": "admin",
+        "os_platforms": [
+          "windows",
+          "linux"
+        ],
+        "severity": "critical"
+      }
+    },
+    "service_ports": [
+      {
+        "port": 135,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.887Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.888Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "HTTP",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119368",
+    "name": "S-HTTP",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": {
+        "category": "legacy",
+        "os_platforms": [
+          "windows",
+          "linux"
+        ],
+        "severity": "medium"
+      }
+    },
+    "service_ports": [
+      {
+        "port": 80,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.890Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.891Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "POPv3S",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119370",
+    "name": "S-POPV3S",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 995,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.893Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.894Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "IMAPS",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119372",
+    "name": "S-IMAPS",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 993,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.896Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.897Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "NAT-T",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119374",
+    "name": "S-NAT-T",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 4500,
+        "proto": 17
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.899Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.900Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "RDP",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119376",
+    "name": "S-RDP",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": {
+        "category": "admin",
+        "os_platforms": [
+          "windows"
+        ],
+        "severity": "critical"
+      }
+    },
+    "service_ports": [
+      {
+        "port": 3389,
+        "proto": 17
+      },
+      {
+        "port": 3389,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.903Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.904Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "SMB",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119378",
+    "name": "S-SMB",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": {
+        "category": "admin",
+        "os_platforms": [
+          "windows",
+          "linux"
+        ],
+        "severity": "critical"
+      }
+    },
+    "service_ports": [
+      {
+        "port": 445,
+        "proto": 6
+      },
+      {
+        "port": 445,
+        "proto": 17
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.906Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.908Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "Kerberos-CDC",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119380",
+    "name": "S-KERBEROS-CDC",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 223,
+        "proto": 17
+      },
+      {
+        "port": 223,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.910Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.912Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "LDAPS",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119382",
+    "name": "S-LDAPS",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 636,
+        "proto": 17
+      },
+      {
+        "port": 636,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.914Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.915Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "LDAP",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119384",
+    "name": "S-LDAP",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 389,
+        "proto": 6
+      },
+      {
+        "port": 389,
+        "proto": 17
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.918Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.919Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "FTPS",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119386",
+    "name": "S-FTPS",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 989,
+        "proto": 17,
+        "to_port": 990
+      },
+      {
+        "port": 989,
+        "proto": 6,
+        "to_port": 990
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.922Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.923Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "IMAP",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119388",
+    "name": "S-IMAP",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 143,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.925Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.926Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "SFTP",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119390",
+    "name": "S-SFTP",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 115,
+        "proto": 6
+      },
+      {
+        "port": 115,
+        "proto": 17
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.929Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.930Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "iSCSI",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119392",
+    "name": "S-ISCSI",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 3260,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.932Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.933Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "iSCSI-ALT",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119394",
+    "name": "S-ISCSI-ALT",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 860,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.935Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.936Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "Alt HTTP",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119396",
+    "name": "S-ALT-HTTP",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 8080,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.938Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.938Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "Alt HTTPS",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119398",
+    "name": "S-ALT-HTTPS",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 8443,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.940Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.941Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "MSFT Global Catalog",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119400",
+    "name": "S-MS-GLOBAL-CATALOG",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 3268,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.943Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.944Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "MSFT Global Catalog Secure",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119402",
+    "name": "S-MS-GLOBAL-CATALOG-SECURE",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 3269,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.946Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.947Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "WSUS",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119404",
+    "name": "S-MS-WSUS",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 8530,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.949Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.950Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "WSUS SECURE",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119406",
+    "name": "S-MS-WSUS-SECURE",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 8531,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.952Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.953Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "NetBIOS",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119408",
+    "name": "S-NETBIOS",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": {
+        "category": "legacy",
+        "os_platforms": [
+          "windows"
+        ],
+        "severity": "high"
+      }
+    },
+    "service_ports": [
+      {
+        "port": 137,
+        "proto": 17,
+        "to_port": 138
+      },
+      {
+        "port": 137,
+        "proto": 6
+      },
+      {
+        "port": 139,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.956Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.957Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "Link Local Multicast Name Resolution",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119410",
+    "name": "S-LLMNR",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": {
+        "category": "legacy",
+        "os_platforms": [
+          "windows"
+        ],
+        "severity": "medium"
+      }
+    },
+    "service_ports": [
+      {
+        "port": 5355,
+        "proto": 17
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.959Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.960Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "Multicast DNS",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119412",
+    "name": "S-MDNS",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": {
+        "category": "legacy",
+        "os_platforms": [
+          "windows",
+          "linux"
+        ],
+        "severity": "medium"
+      }
+    },
+    "service_ports": [
+      {
+        "port": 5353,
+        "proto": 17
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.979Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.980Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "RIP",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119414",
+    "name": "S-RIP",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 520,
+        "proto": 17
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.983Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.984Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "MS SQL Server/Client Communication",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119416",
+    "name": "S-MS-SQL",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 1433,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.987Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.988Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "MS SQL Browser",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119418",
+    "name": "S-MS-SQL-BROWSER",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 1434,
+        "proto": 17
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.990Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.991Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "TFTP",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119420",
+    "name": "S-TFTP",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 69,
+        "proto": 17
+      },
+      {
+        "port": 69,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.994Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.996Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "BIND RNDC",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119422",
+    "name": "S-BIND-RNDC",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 953,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.998Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:21.999Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "SSH",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119424",
+    "name": "S-SSH",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": {
+        "category": "admin",
+        "os_platforms": [
+          "linux"
+        ],
+        "severity": "medium"
+      }
+    },
+    "service_ports": [
+      {
+        "port": 22,
+        "proto": 17
+      },
+      {
+        "port": 22,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.002Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:22.003Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "BGP",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119426",
+    "name": "S-BGP",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 179,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.005Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:22.006Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "PostgreSQL",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119428",
+    "name": "S-POSTGRESQL",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 5432,
+        "proto": 17
+      },
+      {
+        "port": 5432,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.009Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:22.010Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "FTP-DATA",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119430",
+    "name": "S-FTP-DATA",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": {
+        "category": "legacy",
+        "os_platforms": [
+          "windows",
+          "linux"
+        ],
+        "severity": "medium"
+      }
+    },
+    "service_ports": [
+      {
+        "port": 20,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.012Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:22.013Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "FTP-CONTROL",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119432",
+    "name": "S-FTP-CONTROL",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": {
+        "category": "legacy",
+        "os_platforms": [
+          "windows",
+          "linux"
+        ],
+        "severity": "medium"
+      }
+    },
+    "service_ports": [
+      {
+        "port": 21,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.015Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:22.016Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "MongoDB",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119434",
+    "name": "S-MONGODB",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 27017,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.018Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:22.019Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "MongoDB-Cluster",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119436",
+    "name": "S-MONGODB-CLUSTER",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 27018,
+        "proto": 6,
+        "to_port": 27019
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.021Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:22.022Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "Syslog",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119438",
+    "name": "S-SYSLOG",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 514,
+        "proto": 17
+      },
+      {
+        "port": 514,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.025Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:22.026Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "MSFT Cluster Communication",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119440",
+    "name": "S-MS-CLUSTER",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 3343,
+        "proto": 17
+      },
+      {
+        "port": 3343,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.029Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:22.030Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "PTP-General",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119442",
+    "name": "S-PTP-GENERAL",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 320,
+        "proto": 17
+      },
+      {
+        "port": 320,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.033Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:22.034Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "Splunk-Web",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119444",
+    "name": "S-SPLUNK-WEB",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 8000,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.036Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:22.037Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "Splunk-Mgmt",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119446",
+    "name": "S-SPLUNK-MGMT",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 8089,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.039Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:22.040Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "Splunk-Data",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119448",
+    "name": "S-SPLUNK-DATA",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 9997,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.042Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:22.043Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "Splunk-Data-Secure",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119450",
+    "name": "S-SPLUNK-DATA-SECURE",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 9998,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.045Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:22.046Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "MSFT Net.TCP Port Sharing",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119452",
+    "name": "S-MS-.NET-TCP-PORT-SHARING",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 808,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.048Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:22.049Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "PPTP",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119454",
+    "name": "S-PPTP",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": {
+        "category": "legacy",
+        "os_platforms": [
+          "linux",
+          "windows"
+        ],
+        "severity": "low"
+      }
+    },
+    "service_ports": [
+      {
+        "port": 1723,
+        "proto": 17
+      },
+      {
+        "port": 1723,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.052Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:22.053Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "SSDP",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119456",
+    "name": "S-SSDP",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": {
+        "category": "legacy",
+        "os_platforms": [
+          "windows"
+        ],
+        "severity": "medium"
+      }
+    },
+    "service_ports": [
+      {
+        "port": 1900,
+        "proto": 17
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.055Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:22.056Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "SunRPC",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119458",
+    "name": "S-SUNRPC",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": {
+        "category": "legacy",
+        "os_platforms": [
+          "linux"
+        ],
+        "severity": "low"
+      }
+    },
+    "service_ports": [
+      {
+        "port": 111,
+        "proto": 17
+      },
+      {
+        "port": 111,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.059Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:22.060Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "TeamViewer",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119460",
+    "name": "S-TEAMVIEWER",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": {
+        "category": "admin",
+        "os_platforms": [
+          "linux",
+          "windows"
+        ],
+        "severity": "high"
+      }
+    },
+    "service_ports": [
+      {
+        "port": 5938,
+        "proto": 17
+      },
+      {
+        "port": 5938,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.063Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:22.064Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "VNC",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119462",
+    "name": "S-VNC",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": {
+        "category": "admin",
+        "os_platforms": [
+          "linux",
+          "windows"
+        ],
+        "severity": "high"
+      }
+    },
+    "service_ports": [
+      {
+        "port": 5900,
+        "proto": 17
+      },
+      {
+        "port": 5900,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.067Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:22.068Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "WSD",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119464",
+    "name": "S-WSD",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": {
+        "category": "legacy",
+        "os_platforms": [
+          "windows"
+        ],
+        "severity": "medium"
+      }
+    },
+    "service_ports": [
+      {
+        "port": 3702,
+        "proto": 17
+      },
+      {
+        "port": 3702,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.071Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:22.072Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "DNS-TLS",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119466",
+    "name": "S-DNS-TLS",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 853,
+        "proto": 6
+      },
+      {
+        "port": 853,
+        "proto": 17
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.075Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:22.076Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "MS-AD-WEB",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119468",
+    "name": "S-MS-AD-WEB-SERVICES",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 9389,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.078Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:22.079Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "METASPLOIT",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119470",
+    "name": "S-METASPLOIT",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": {
+        "category": "legacy",
+        "os_platforms": [
+          "windows",
+          "linux"
+        ],
+        "severity": "low"
+      }
+    },
+    "service_ports": [
+      {
+        "port": 4444,
+        "proto": 17
+      },
+      {
+        "port": 4444,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.082Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:22.083Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "ORACLE-SQL",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119472",
+    "name": "S-ORACLE-SQL",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 1521,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.085Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:22.086Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "MS-KMS",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119474",
+    "name": "S-KMS",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 1688,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.088Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-08-29T01:40:22.089Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "external_data_reference": "ICMP",
+    "external_data_set": "com.illumio.ilo_defaults",
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997119476",
+    "name": "S-ICMP",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "icmp_code": null,
+        "icmp_type": null,
+        "proto": 1
+      },
+      {
+        "icmp_code": null,
+        "icmp_type": null,
+        "proto": 58
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:22.092Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-09-14T08:37:27.918Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997138400",
+    "name": "pxe",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 4011,
+        "proto": 6
+      },
+      {
+        "port": 4011,
+        "proto": 17
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:27.931Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "created_at": "2026-09-14T08:37:28.035Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997138402",
+    "name": "rip",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 520,
+        "proto": 17
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:28.044Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "created_at": "2026-09-14T08:37:33.903Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997138500",
+    "name": "kerberov5",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 464,
+        "proto": 17
+      },
+      {
+        "port": 464,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:33.910Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "created_at": "2026-09-14T08:37:28.393Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997138406",
+    "name": "splunk-data-secure",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 9998,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:28.402Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "created_at": "2026-09-14T08:37:34.227Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997138506",
+    "name": "splunk-data",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 9997,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:34.234Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "created_at": "2026-09-14T08:37:38.266Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997138572",
+    "name": "sftp",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 115,
+        "proto": 6
+      },
+      {
+        "port": 115,
+        "proto": 17
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:38.275Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "created_at": "2026-09-14T08:37:38.386Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997138574",
+    "name": "splunk-web",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 8000,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:38.395Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "created_at": "2026-09-14T08:37:33.680Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997138496",
+    "name": "vnc",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": {
+        "category": "admin",
+        "os_platforms": [
+          "linux",
+          "windows"
+        ],
+        "severity": "high"
+      }
+    },
+    "service_ports": [
+      {
+        "port": 5900,
+        "proto": 17
+      },
+      {
+        "port": 5900,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:39.580Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "created_at": "2026-09-14T08:37:34.440Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997138510",
+    "name": "dns",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 53,
+        "proto": 6
+      },
+      {
+        "port": 53,
+        "proto": 17
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:34.448Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "created_at": "2026-09-14T08:37:28.737Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "description_url": null,
+    "href": "/orgs/5636114/sec_policy/draft/services/24206847997138412",
+    "name": "kerberocdc",
+    "process_name": null,
+    "risk_details": {
+      "ransomware": null
+    },
+    "service_ports": [
+      {
+        "port": 223,
+        "proto": 17
+      },
+      {
+        "port": 223,
+        "proto": 6
+      }
+    ],
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:28.771Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  }
+]

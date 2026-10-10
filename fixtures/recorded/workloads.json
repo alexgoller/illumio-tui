@@ -1,0 +1,3627 @@
+[
+  {
+    "agent": {
+      "active_pce_fqdn": null,
+      "config": {
+        "log_traffic": false,
+        "mode": "selective",
+        "visibility_level": "enhanced_data_collection"
+      },
+      "href": "/orgs/5636114/agents/24206847997120498",
+      "status": {
+        "agent_health": [],
+        "agent_health_errors": {
+          "errors": [],
+          "warnings": []
+        },
+        "agent_version": "23.2.31-3113",
+        "firewall_rule_count": 0,
+        "fw_config_current": true,
+        "instance_id": null,
+        "last_heartbeat_on": "2026-10-10T11:18:26.002688Z",
+        "managed_since": "2026-09-14T08:36:12.621977Z",
+        "security_policy_applied_at": "2026-10-10T11:18:26.144994Z",
+        "security_policy_received_at": "2026-10-10T11:18:26.144994Z",
+        "security_policy_refresh_at": "2026-10-10T11:18:26.144994Z",
+        "security_policy_sync_state": "applied",
+        "status": "active",
+        "uid": "",
+        "uptime_seconds": 25673911
+      },
+      "target_pce_fqdn": null,
+      "type": "Host"
+    },
+    "agent_to_pce_certificate_authentication_id": null,
+    "blocked_connection_action": "drop",
+    "caps": [
+      "write"
+    ],
+    "containers_inherit_host_policy": false,
+    "created_at": "2026-09-14T08:36:12.610150Z",
+    "created_by": {
+      "href": "/orgs/5636114/agents/24206847997120498"
+    },
+    "data_center": null,
+    "data_center_zone": null,
+    "datacenter_nat_1to1": false,
+    "deleted": false,
+    "description": null,
+    "distinguished_name": null,
+    "enforcement_mode": "selective",
+    "external_data_reference": null,
+    "external_data_set": null,
+    "hostname": "host-1.example",
+    "href": "/orgs/5636114/workloads/3826420e-9cc2-417b-92b8-5f65eca033d0",
+    "ignored_interface_names": [],
+    "interfaces": [
+      {
+        "address": "10.0.1.19",
+        "cidr_block": 26,
+        "default_gateway_address": "10.0.1.20",
+        "friendly_name": null,
+        "link_state": null,
+        "loopback": false,
+        "name": "eth0",
+        "network": {
+          "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+          "name": "Corporate"
+        },
+        "network_detection_mode": "single_private_brn",
+        "public_ip": null
+      }
+    ],
+    "labels": [
+      {
+        "href": "/orgs/5636114/labels/24206847997116746",
+        "key": "role",
+        "value": "Web"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120542",
+        "key": "bu",
+        "value": "banking"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120543",
+        "key": "app",
+        "value": "payment"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120520",
+        "key": "os",
+        "value": "linux"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997116752",
+        "key": "env",
+        "value": "Production"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120541",
+        "key": "loc",
+        "value": "syd"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120508",
+        "key": "type",
+        "value": "server"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120537",
+        "key": "DFIRBubble",
+        "value": "IR-DIRTYBUBBLE"
+      }
+    ],
+    "managed": true,
+    "name": null,
+    "online": true,
+    "os_detail": "5.4.0-1045-aws #47-Ubuntu SMP Tue Apr 13 07:02:25 UTC 2021 (Ubuntu 20.04.2 LTS)",
+    "os_id": "ubuntu-x86_64-xenial",
+    "public_ip": "10.0.1.21",
+    "risk_summary": {
+      "ransomware": {
+        "last_updated_at": "2026-10-10T04:38:11Z",
+        "ransomware_protection_percent": 41.08,
+        "workload_exposure_severity": "fully_protected"
+      }
+    },
+    "service_principal_name": null,
+    "service_provider": null,
+    "services": {},
+    "updated_at": "2026-09-14T08:37:02.185414Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "ven": {
+      "hostname": "host-1.example",
+      "href": "/orgs/5636114/vens/3826420e-9cc2-417b-92b8-5f65eca033d0",
+      "name": null,
+      "status": "active",
+      "ven_type": "server",
+      "version": "23.2.31-3113"
+    },
+    "visibility_level": "enhanced_data_collection"
+  },
+  {
+    "agent": {
+      "active_pce_fqdn": null,
+      "config": {
+        "log_traffic": false,
+        "mode": "selective",
+        "visibility_level": "enhanced_data_collection"
+      },
+      "href": "/orgs/5636114/agents/24206847997120561",
+      "status": {
+        "agent_health": [],
+        "agent_health_errors": {
+          "errors": [],
+          "warnings": []
+        },
+        "agent_version": "23.2.31-3113",
+        "firewall_rule_count": 0,
+        "fw_config_current": true,
+        "instance_id": null,
+        "last_heartbeat_on": "2026-10-10T11:18:27.407764Z",
+        "managed_since": "2026-09-14T08:36:19.091431Z",
+        "security_policy_applied_at": "2026-10-10T11:18:27.570950Z",
+        "security_policy_received_at": "2026-10-10T11:18:27.570950Z",
+        "security_policy_refresh_at": "2026-10-10T11:18:27.570950Z",
+        "security_policy_sync_state": "applied",
+        "status": "active",
+        "uid": "",
+        "uptime_seconds": 25673911
+      },
+      "target_pce_fqdn": null,
+      "type": "Host"
+    },
+    "agent_to_pce_certificate_authentication_id": null,
+    "blocked_connection_action": "drop",
+    "caps": [
+      "write"
+    ],
+    "containers_inherit_host_policy": false,
+    "created_at": "2026-09-14T08:36:19.077702Z",
+    "created_by": {
+      "href": "/orgs/5636114/agents/24206847997120561"
+    },
+    "data_center": null,
+    "data_center_zone": null,
+    "datacenter_nat_1to1": false,
+    "deleted": false,
+    "description": null,
+    "distinguished_name": null,
+    "enforcement_mode": "selective",
+    "external_data_reference": null,
+    "external_data_set": null,
+    "hostname": "host-2.example",
+    "href": "/orgs/5636114/workloads/f922fa7d-8f18-4a29-81e0-57a1aa369ab0",
+    "ignored_interface_names": [],
+    "interfaces": [
+      {
+        "address": "10.0.1.22",
+        "cidr_block": 26,
+        "default_gateway_address": "10.0.1.23",
+        "friendly_name": null,
+        "link_state": null,
+        "loopback": false,
+        "name": "eth0",
+        "network": {
+          "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+          "name": "Corporate"
+        },
+        "network_detection_mode": "single_private_brn",
+        "public_ip": null
+      }
+    ],
+    "labels": [
+      {
+        "href": "/orgs/5636114/labels/24206847997116752",
+        "key": "env",
+        "value": "Production"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120540",
+        "key": "loc",
+        "value": "ldn"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120508",
+        "key": "type",
+        "value": "server"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120537",
+        "key": "DFIRBubble",
+        "value": "IR-DIRTYBUBBLE"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997116746",
+        "key": "role",
+        "value": "Web"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120542",
+        "key": "bu",
+        "value": "banking"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120543",
+        "key": "app",
+        "value": "payment"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120520",
+        "key": "os",
+        "value": "linux"
+      }
+    ],
+    "managed": true,
+    "name": null,
+    "online": true,
+    "os_detail": "3.10.0-1160.62.1.el7.x86_64 #1 SMP Wed Mar 23 09:04:02 UTC 2022 (Red Hat Enterprise Linux Server release 7.9 (Maipo))",
+    "os_id": "centos-x86_64-7.0",
+    "public_ip": "10.0.1.21",
+    "risk_summary": {
+      "ransomware": {
+        "last_updated_at": "2026-10-10T04:38:11Z",
+        "ransomware_protection_percent": 41.08,
+        "workload_exposure_severity": "fully_protected"
+      }
+    },
+    "service_principal_name": null,
+    "service_provider": null,
+    "services": {},
+    "updated_at": "2026-09-14T08:37:02.398371Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "ven": {
+      "hostname": "host-2.example",
+      "href": "/orgs/5636114/vens/f922fa7d-8f18-4a29-81e0-57a1aa369ab0",
+      "name": null,
+      "status": "active",
+      "ven_type": "server",
+      "version": "23.2.31-3113"
+    },
+    "visibility_level": "enhanced_data_collection"
+  },
+  {
+    "agent": {
+      "active_pce_fqdn": null,
+      "config": {
+        "log_traffic": false,
+        "mode": "selective",
+        "visibility_level": "enhanced_data_collection"
+      },
+      "href": "/orgs/5636114/agents/24206847997120615",
+      "status": {
+        "agent_health": [],
+        "agent_health_errors": {
+          "errors": [],
+          "warnings": []
+        },
+        "agent_version": "23.2.31-3113",
+        "firewall_rule_count": 0,
+        "fw_config_current": true,
+        "instance_id": null,
+        "last_heartbeat_on": "2026-10-10T11:18:28.587675Z",
+        "managed_since": "2026-09-14T08:36:24.483996Z",
+        "security_policy_applied_at": "2026-10-10T11:18:28.714427Z",
+        "security_policy_received_at": "2026-10-10T11:18:28.714427Z",
+        "security_policy_refresh_at": "2026-10-10T11:18:28.714427Z",
+        "security_policy_sync_state": "applied",
+        "status": "active",
+        "uid": "",
+        "uptime_seconds": 25673911
+      },
+      "target_pce_fqdn": null,
+      "type": "Host"
+    },
+    "agent_to_pce_certificate_authentication_id": null,
+    "blocked_connection_action": "drop",
+    "caps": [
+      "write"
+    ],
+    "containers_inherit_host_policy": false,
+    "created_at": "2026-09-14T08:36:24.467965Z",
+    "created_by": {
+      "href": "/orgs/5636114/agents/24206847997120615"
+    },
+    "data_center": null,
+    "data_center_zone": null,
+    "datacenter_nat_1to1": false,
+    "deleted": false,
+    "description": null,
+    "distinguished_name": null,
+    "enforcement_mode": "selective",
+    "external_data_reference": null,
+    "external_data_set": null,
+    "hostname": "host-3.example",
+    "href": "/orgs/5636114/workloads/26e2d5e2-c4ac-42fa-aafb-b4f6f8b6b2ec",
+    "ignored_interface_names": [],
+    "interfaces": [
+      {
+        "address": "10.0.1.24",
+        "cidr_block": 26,
+        "default_gateway_address": "10.0.1.23",
+        "friendly_name": null,
+        "link_state": null,
+        "loopback": false,
+        "name": "eth0",
+        "network": {
+          "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+          "name": "Corporate"
+        },
+        "network_detection_mode": "single_private_brn",
+        "public_ip": null
+      }
+    ],
+    "labels": [
+      {
+        "href": "/orgs/5636114/labels/24206847997120508",
+        "key": "type",
+        "value": "server"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120537",
+        "key": "DFIRBubble",
+        "value": "IR-DIRTYBUBBLE"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997116746",
+        "key": "role",
+        "value": "Web"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120542",
+        "key": "bu",
+        "value": "banking"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120543",
+        "key": "app",
+        "value": "payment"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120520",
+        "key": "os",
+        "value": "linux"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997116752",
+        "key": "env",
+        "value": "Production"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120540",
+        "key": "loc",
+        "value": "ldn"
+      }
+    ],
+    "managed": true,
+    "name": null,
+    "online": true,
+    "os_detail": "3.10.0-1160.62.1.el7.x86_64 #1 SMP Wed Mar 23 09:04:02 UTC 2022 (Red Hat Enterprise Linux Server release 7.9 (Maipo))",
+    "os_id": "centos-x86_64-7.0",
+    "public_ip": "10.0.1.21",
+    "risk_summary": {
+      "ransomware": {
+        "last_updated_at": "2026-10-10T08:42:01Z",
+        "ransomware_protection_percent": 41.08,
+        "workload_exposure_severity": "fully_protected"
+      }
+    },
+    "service_principal_name": null,
+    "service_provider": null,
+    "services": {},
+    "updated_at": "2026-09-14T08:37:02.611850Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "ven": {
+      "hostname": "host-3.example",
+      "href": "/orgs/5636114/vens/26e2d5e2-c4ac-42fa-aafb-b4f6f8b6b2ec",
+      "name": null,
+      "status": "active",
+      "ven_type": "server",
+      "version": "23.2.31-3113"
+    },
+    "visibility_level": "enhanced_data_collection"
+  },
+  {
+    "agent": {
+      "active_pce_fqdn": null,
+      "config": {
+        "log_traffic": false,
+        "mode": "selective",
+        "visibility_level": "enhanced_data_collection"
+      },
+      "href": "/orgs/5636114/agents/24206847997120587",
+      "status": {
+        "agent_health": [],
+        "agent_health_errors": {
+          "errors": [],
+          "warnings": []
+        },
+        "agent_version": "24.2.20-2091",
+        "firewall_rule_count": 0,
+        "fw_config_current": true,
+        "instance_id": null,
+        "last_heartbeat_on": "2026-10-10T11:18:27.805454Z",
+        "managed_since": "2026-09-14T08:36:21.714725Z",
+        "security_policy_applied_at": "2026-10-10T11:18:27.931509Z",
+        "security_policy_received_at": "2026-10-10T11:18:27.931509Z",
+        "security_policy_refresh_at": "2026-10-10T11:18:27.931509Z",
+        "security_policy_sync_state": "applied",
+        "status": "active",
+        "uid": "",
+        "uptime_seconds": 25673911
+      },
+      "target_pce_fqdn": null,
+      "type": "Host"
+    },
+    "agent_to_pce_certificate_authentication_id": null,
+    "blocked_connection_action": "drop",
+    "caps": [
+      "write"
+    ],
+    "containers_inherit_host_policy": false,
+    "created_at": "2026-09-14T08:36:21.700097Z",
+    "created_by": {
+      "href": "/orgs/5636114/agents/24206847997120587"
+    },
+    "data_center": null,
+    "data_center_zone": null,
+    "datacenter_nat_1to1": false,
+    "deleted": false,
+    "description": null,
+    "distinguished_name": null,
+    "enforcement_mode": "selective",
+    "external_data_reference": null,
+    "external_data_set": null,
+    "hostname": "host-4.example",
+    "href": "/orgs/5636114/workloads/52874ecc-758d-4f4c-9cd0-566536890c42",
+    "ignored_interface_names": [],
+    "interfaces": [
+      {
+        "address": "10.0.1.25",
+        "cidr_block": 26,
+        "default_gateway_address": "10.0.1.23",
+        "friendly_name": null,
+        "link_state": null,
+        "loopback": false,
+        "name": "eth0",
+        "network": {
+          "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+          "name": "Corporate"
+        },
+        "network_detection_mode": "single_private_brn",
+        "public_ip": null
+      }
+    ],
+    "labels": [
+      {
+        "href": "/orgs/5636114/labels/24206847997120543",
+        "key": "app",
+        "value": "payment"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120520",
+        "key": "os",
+        "value": "linux"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997116752",
+        "key": "env",
+        "value": "Production"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120540",
+        "key": "loc",
+        "value": "ldn"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120508",
+        "key": "type",
+        "value": "server"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120537",
+        "key": "DFIRBubble",
+        "value": "IR-DIRTYBUBBLE"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997116746",
+        "key": "role",
+        "value": "Web"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120542",
+        "key": "bu",
+        "value": "banking"
+      }
+    ],
+    "managed": true,
+    "name": null,
+    "online": true,
+    "os_detail": "3.10.0-1160.62.1.el7.x86_64 #1 SMP Wed Mar 23 09:04:02 UTC 2022 (Red Hat Enterprise Linux Server release 7.9 (Maipo))",
+    "os_id": "centos-x86_64-7.0",
+    "public_ip": "10.0.1.21",
+    "risk_summary": {
+      "ransomware": {
+        "last_updated_at": "2026-10-10T08:42:01Z",
+        "ransomware_protection_percent": 41.08,
+        "workload_exposure_severity": "fully_protected"
+      }
+    },
+    "service_principal_name": null,
+    "service_provider": null,
+    "services": {},
+    "updated_at": "2026-09-14T08:37:02.835182Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "ven": {
+      "hostname": "host-4.example",
+      "href": "/orgs/5636114/vens/52874ecc-758d-4f4c-9cd0-566536890c42",
+      "name": null,
+      "status": "active",
+      "ven_type": "server",
+      "version": "24.2.20-2091"
+    },
+    "visibility_level": "enhanced_data_collection"
+  },
+  {
+    "agent": {
+      "active_pce_fqdn": null,
+      "config": {
+        "log_traffic": false,
+        "mode": "selective",
+        "visibility_level": "enhanced_data_collection"
+      },
+      "href": "/orgs/5636114/agents/24206847997120603",
+      "status": {
+        "agent_health": [],
+        "agent_health_errors": {
+          "errors": [],
+          "warnings": []
+        },
+        "agent_version": "23.2.31-3113",
+        "firewall_rule_count": 0,
+        "fw_config_current": true,
+        "instance_id": null,
+        "last_heartbeat_on": "2026-10-10T11:18:28.381755Z",
+        "managed_since": "2026-09-14T08:36:23.226241Z",
+        "security_policy_applied_at": "2026-10-10T11:18:28.504574Z",
+        "security_policy_received_at": "2026-10-10T11:18:28.504574Z",
+        "security_policy_refresh_at": "2026-10-10T11:18:28.504574Z",
+        "security_policy_sync_state": "applied",
+        "status": "active",
+        "uid": "",
+        "uptime_seconds": 25673911
+      },
+      "target_pce_fqdn": null,
+      "type": "Host"
+    },
+    "agent_to_pce_certificate_authentication_id": null,
+    "blocked_connection_action": "drop",
+    "caps": [
+      "write"
+    ],
+    "containers_inherit_host_policy": false,
+    "created_at": "2026-09-14T08:36:23.209962Z",
+    "created_by": {
+      "href": "/orgs/5636114/agents/24206847997120603"
+    },
+    "data_center": null,
+    "data_center_zone": null,
+    "datacenter_nat_1to1": false,
+    "deleted": false,
+    "description": null,
+    "distinguished_name": null,
+    "enforcement_mode": "selective",
+    "external_data_reference": null,
+    "external_data_set": null,
+    "hostname": "host-5.example",
+    "href": "/orgs/5636114/workloads/a46efd82-40a1-4889-998c-2940491ec4c9",
+    "ignored_interface_names": [],
+    "interfaces": [
+      {
+        "address": "10.0.1.26",
+        "cidr_block": 26,
+        "default_gateway_address": "10.0.1.27",
+        "friendly_name": null,
+        "link_state": null,
+        "loopback": false,
+        "name": "eth0",
+        "network": {
+          "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+          "name": "Corporate"
+        },
+        "network_detection_mode": "single_private_brn",
+        "public_ip": null
+      }
+    ],
+    "labels": [
+      {
+        "href": "/orgs/5636114/labels/24206847997120517",
+        "key": "role",
+        "value": "db"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120542",
+        "key": "bu",
+        "value": "banking"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120544",
+        "key": "app",
+        "value": "pos"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120520",
+        "key": "os",
+        "value": "linux"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120545",
+        "key": "env",
+        "value": "PCI"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120516",
+        "key": "loc",
+        "value": "ny"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120508",
+        "key": "type",
+        "value": "server"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120546",
+        "key": "compliance",
+        "value": "PCI-DSS"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120537",
+        "key": "DFIRBubble",
+        "value": "IR-DIRTYBUBBLE"
+      }
+    ],
+    "managed": true,
+    "name": null,
+    "online": true,
+    "os_detail": "3.10.0-1160.62.1.el7.x86_64 #1 SMP Wed Mar 23 09:04:02 UTC 2022 (Red Hat Enterprise Linux Server release 7.9 (Maipo))",
+    "os_id": "centos-x86_64-7.0",
+    "public_ip": "10.0.1.21",
+    "risk_summary": {
+      "ransomware": {
+        "last_updated_at": "2026-10-10T08:42:01Z",
+        "ransomware_protection_percent": 100.0,
+        "workload_exposure_severity": "fully_protected"
+      }
+    },
+    "service_principal_name": null,
+    "service_provider": null,
+    "services": {},
+    "updated_at": "2026-09-14T08:37:03.061091Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "ven": {
+      "hostname": "host-5.example",
+      "href": "/orgs/5636114/vens/a46efd82-40a1-4889-998c-2940491ec4c9",
+      "name": null,
+      "status": "active",
+      "ven_type": "server",
+      "version": "23.2.31-3113"
+    },
+    "visibility_level": "enhanced_data_collection"
+  },
+  {
+    "agent": {
+      "active_pce_fqdn": null,
+      "config": {
+        "log_traffic": false,
+        "mode": "selective",
+        "visibility_level": "enhanced_data_collection"
+      },
+      "href": "/orgs/5636114/agents/24206847997120441",
+      "status": {
+        "agent_health": [],
+        "agent_health_errors": {
+          "errors": [],
+          "warnings": []
+        },
+        "agent_version": "24.2.20-2091",
+        "firewall_rule_count": 0,
+        "fw_config_current": true,
+        "instance_id": null,
+        "last_heartbeat_on": "2026-10-10T11:18:25.060800Z",
+        "managed_since": "2026-09-14T08:36:06.811041Z",
+        "security_policy_applied_at": "2026-10-10T11:18:25.185886Z",
+        "security_policy_received_at": "2026-10-10T11:18:25.185886Z",
+        "security_policy_refresh_at": "2026-10-10T11:18:25.185886Z",
+        "security_policy_sync_state": "applied",
+        "status": "active",
+        "uid": "",
+        "uptime_seconds": 25673911
+      },
+      "target_pce_fqdn": null,
+      "type": "Host"
+    },
+    "agent_to_pce_certificate_authentication_id": null,
+    "blocked_connection_action": "drop",
+    "caps": [
+      "write"
+    ],
+    "containers_inherit_host_policy": false,
+    "created_at": "2026-09-14T08:36:06.777421Z",
+    "created_by": {
+      "href": "/orgs/5636114/agents/24206847997120441"
+    },
+    "data_center": null,
+    "data_center_zone": null,
+    "datacenter_nat_1to1": false,
+    "deleted": false,
+    "description": null,
+    "distinguished_name": null,
+    "enforcement_mode": "selective",
+    "external_data_reference": null,
+    "external_data_set": null,
+    "hostname": "host-6.example",
+    "href": "/orgs/5636114/workloads/49a891e5-81a3-4306-86d2-e28d8b5148ac",
+    "ignored_interface_names": [],
+    "interfaces": [
+      {
+        "address": "10.0.1.28",
+        "cidr_block": 26,
+        "default_gateway_address": "10.0.1.27",
+        "friendly_name": null,
+        "link_state": null,
+        "loopback": false,
+        "name": "eth0",
+        "network": {
+          "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+          "name": "Corporate"
+        },
+        "network_detection_mode": "single_private_brn",
+        "public_ip": null
+      }
+    ],
+    "labels": [
+      {
+        "href": "/orgs/5636114/labels/24206847997120545",
+        "key": "env",
+        "value": "PCI"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120515",
+        "key": "loc",
+        "value": "ca"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120508",
+        "key": "type",
+        "value": "server"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120546",
+        "key": "compliance",
+        "value": "PCI-DSS"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120537",
+        "key": "DFIRBubble",
+        "value": "IR-DIRTYBUBBLE"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120517",
+        "key": "role",
+        "value": "db"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120542",
+        "key": "bu",
+        "value": "banking"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120544",
+        "key": "app",
+        "value": "pos"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120520",
+        "key": "os",
+        "value": "linux"
+      }
+    ],
+    "managed": true,
+    "name": null,
+    "online": true,
+    "os_detail": "3.10.0-1160.62.1.el7.x86_64 #1 SMP Wed Mar 23 09:04:02 UTC 2022 (Red Hat Enterprise Linux Server release 7.9 (Maipo))",
+    "os_id": "centos-x86_64-7.0",
+    "public_ip": "10.0.1.21",
+    "risk_summary": {
+      "ransomware": {
+        "last_updated_at": "2026-10-10T04:38:11Z",
+        "ransomware_protection_percent": 100.0,
+        "workload_exposure_severity": "fully_protected"
+      }
+    },
+    "service_principal_name": null,
+    "service_provider": null,
+    "services": {},
+    "updated_at": "2026-09-14T08:37:03.313347Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "ven": {
+      "hostname": "host-6.example",
+      "href": "/orgs/5636114/vens/49a891e5-81a3-4306-86d2-e28d8b5148ac",
+      "name": null,
+      "status": "active",
+      "ven_type": "server",
+      "version": "24.2.20-2091"
+    },
+    "visibility_level": "enhanced_data_collection"
+  },
+  {
+    "agent": {
+      "active_pce_fqdn": null,
+      "config": {
+        "log_traffic": false,
+        "mode": "selective",
+        "visibility_level": "enhanced_data_collection"
+      },
+      "href": "/orgs/5636114/agents/24206847997120582",
+      "status": {
+        "agent_health": [],
+        "agent_health_errors": {
+          "errors": [],
+          "warnings": []
+        },
+        "agent_version": "22.5.34-9890",
+        "firewall_rule_count": 0,
+        "fw_config_current": true,
+        "instance_id": null,
+        "last_heartbeat_on": "2026-10-10T11:18:27.997074Z",
+        "managed_since": "2026-09-14T08:36:21.094157Z",
+        "security_policy_applied_at": "2026-10-10T11:18:28.112876Z",
+        "security_policy_received_at": "2026-10-10T11:18:28.112876Z",
+        "security_policy_refresh_at": "2026-10-10T11:18:28.112876Z",
+        "security_policy_sync_state": "applied",
+        "status": "active",
+        "uid": "",
+        "uptime_seconds": 25673911
+      },
+      "target_pce_fqdn": null,
+      "type": "Host"
+    },
+    "agent_to_pce_certificate_authentication_id": null,
+    "blocked_connection_action": "drop",
+    "caps": [
+      "write"
+    ],
+    "containers_inherit_host_policy": false,
+    "created_at": "2026-09-14T08:36:21.079855Z",
+    "created_by": {
+      "href": "/orgs/5636114/agents/24206847997120582"
+    },
+    "data_center": null,
+    "data_center_zone": null,
+    "datacenter_nat_1to1": false,
+    "deleted": false,
+    "description": null,
+    "distinguished_name": null,
+    "enforcement_mode": "selective",
+    "external_data_reference": null,
+    "external_data_set": null,
+    "hostname": "host-7.example",
+    "href": "/orgs/5636114/workloads/90844628-7e94-4dda-a145-ee932e480d41",
+    "ignored_interface_names": [],
+    "interfaces": [
+      {
+        "address": "10.0.1.29",
+        "cidr_block": 26,
+        "default_gateway_address": "10.0.1.27",
+        "friendly_name": null,
+        "link_state": null,
+        "loopback": false,
+        "name": "eth0",
+        "network": {
+          "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+          "name": "Corporate"
+        },
+        "network_detection_mode": "single_private_brn",
+        "public_ip": null
+      }
+    ],
+    "labels": [
+      {
+        "href": "/orgs/5636114/labels/24206847997120544",
+        "key": "app",
+        "value": "pos"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120520",
+        "key": "os",
+        "value": "linux"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120545",
+        "key": "env",
+        "value": "PCI"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120516",
+        "key": "loc",
+        "value": "ny"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120508",
+        "key": "type",
+        "value": "server"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120546",
+        "key": "compliance",
+        "value": "PCI-DSS"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120537",
+        "key": "DFIRBubble",
+        "value": "IR-DIRTYBUBBLE"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120517",
+        "key": "role",
+        "value": "db"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120542",
+        "key": "bu",
+        "value": "banking"
+      }
+    ],
+    "managed": true,
+    "name": null,
+    "online": true,
+    "os_detail": "3.10.0-1160.62.1.el7.x86_64 #1 SMP Wed Mar 23 09:04:02 UTC 2022 (Red Hat Enterprise Linux Server release 7.9 (Maipo))",
+    "os_id": "centos-x86_64-7.0",
+    "public_ip": "10.0.1.21",
+    "risk_summary": {
+      "ransomware": {
+        "last_updated_at": "2026-10-10T08:42:01Z",
+        "ransomware_protection_percent": 100.0,
+        "workload_exposure_severity": "fully_protected"
+      }
+    },
+    "service_principal_name": null,
+    "service_provider": null,
+    "services": {},
+    "updated_at": "2026-09-14T08:37:03.545358Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "ven": {
+      "hostname": "host-7.example",
+      "href": "/orgs/5636114/vens/90844628-7e94-4dda-a145-ee932e480d41",
+      "name": null,
+      "status": "active",
+      "ven_type": "server",
+      "version": "22.5.34-9890"
+    },
+    "visibility_level": "enhanced_data_collection"
+  },
+  {
+    "agent": {
+      "active_pce_fqdn": null,
+      "config": {
+        "log_traffic": false,
+        "mode": "selective",
+        "visibility_level": "enhanced_data_collection"
+      },
+      "href": "/orgs/5636114/agents/24206847997120471",
+      "status": {
+        "agent_health": [],
+        "agent_health_errors": {
+          "errors": [],
+          "warnings": []
+        },
+        "agent_version": "24.2.20-2091",
+        "firewall_rule_count": 0,
+        "fw_config_current": true,
+        "instance_id": null,
+        "last_heartbeat_on": "2026-10-10T11:18:25.716701Z",
+        "managed_since": "2026-09-14T08:36:10.242990Z",
+        "security_policy_applied_at": "2026-10-10T11:18:25.841337Z",
+        "security_policy_received_at": "2026-10-10T11:18:25.841337Z",
+        "security_policy_refresh_at": "2026-10-10T11:18:25.841337Z",
+        "security_policy_sync_state": "applied",
+        "status": "active",
+        "uid": "",
+        "uptime_seconds": 25673911
+      },
+      "target_pce_fqdn": null,
+      "type": "Host"
+    },
+    "agent_to_pce_certificate_authentication_id": null,
+    "blocked_connection_action": "drop",
+    "caps": [
+      "write"
+    ],
+    "containers_inherit_host_policy": false,
+    "created_at": "2026-09-14T08:36:10.229208Z",
+    "created_by": {
+      "href": "/orgs/5636114/agents/24206847997120471"
+    },
+    "data_center": null,
+    "data_center_zone": null,
+    "datacenter_nat_1to1": false,
+    "deleted": false,
+    "description": null,
+    "distinguished_name": null,
+    "enforcement_mode": "selective",
+    "external_data_reference": null,
+    "external_data_set": null,
+    "hostname": "host-8.example",
+    "href": "/orgs/5636114/workloads/870b0dd5-ca4d-4799-ba35-550e3a94f5de",
+    "ignored_interface_names": [],
+    "interfaces": [
+      {
+        "address": "10.0.1.30",
+        "cidr_block": 26,
+        "default_gateway_address": "10.0.1.27",
+        "friendly_name": null,
+        "link_state": null,
+        "loopback": false,
+        "name": "eth0",
+        "network": {
+          "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+          "name": "Corporate"
+        },
+        "network_detection_mode": "single_private_brn",
+        "public_ip": null
+      }
+    ],
+    "labels": [
+      {
+        "href": "/orgs/5636114/labels/24206847997120520",
+        "key": "os",
+        "value": "linux"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120545",
+        "key": "env",
+        "value": "PCI"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120515",
+        "key": "loc",
+        "value": "ca"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120508",
+        "key": "type",
+        "value": "server"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120546",
+        "key": "compliance",
+        "value": "PCI-DSS"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120537",
+        "key": "DFIRBubble",
+        "value": "IR-DIRTYBUBBLE"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120517",
+        "key": "role",
+        "value": "db"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120542",
+        "key": "bu",
+        "value": "banking"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120544",
+        "key": "app",
+        "value": "pos"
+      }
+    ],
+    "managed": true,
+    "name": null,
+    "online": true,
+    "os_detail": "3.10.0-1160.62.1.el7.x86_64 #1 SMP Wed Mar 23 09:04:02 UTC 2022 (Red Hat Enterprise Linux Server release 7.9 (Maipo))",
+    "os_id": "centos-x86_64-7.0",
+    "public_ip": "10.0.1.21",
+    "risk_summary": {
+      "ransomware": {
+        "last_updated_at": "2026-10-10T00:35:18Z",
+        "ransomware_protection_percent": 100.0,
+        "workload_exposure_severity": "fully_protected"
+      }
+    },
+    "service_principal_name": null,
+    "service_provider": null,
+    "services": {},
+    "updated_at": "2026-09-14T08:37:03.757881Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "ven": {
+      "hostname": "host-8.example",
+      "href": "/orgs/5636114/vens/870b0dd5-ca4d-4799-ba35-550e3a94f5de",
+      "name": null,
+      "status": "active",
+      "ven_type": "server",
+      "version": "24.2.20-2091"
+    },
+    "visibility_level": "enhanced_data_collection"
+  },
+  {
+    "agent": {
+      "active_pce_fqdn": null,
+      "config": {
+        "log_traffic": false,
+        "mode": "selective",
+        "visibility_level": "enhanced_data_collection"
+      },
+      "href": "/orgs/5636114/agents/24206847997120504",
+      "status": {
+        "agent_health": [],
+        "agent_health_errors": {
+          "errors": [],
+          "warnings": []
+        },
+        "agent_version": "23.2.31-3113",
+        "firewall_rule_count": 0,
+        "fw_config_current": true,
+        "instance_id": null,
+        "last_heartbeat_on": "2026-10-10T11:18:26.232090Z",
+        "managed_since": "2026-09-14T08:36:13.367839Z",
+        "security_policy_applied_at": "2026-10-10T11:18:26.342960Z",
+        "security_policy_received_at": "2026-10-10T11:18:26.342960Z",
+        "security_policy_refresh_at": "2026-10-10T11:18:26.342960Z",
+        "security_policy_sync_state": "applied",
+        "status": "active",
+        "uid": "",
+        "uptime_seconds": 25673911
+      },
+      "target_pce_fqdn": null,
+      "type": "Host"
+    },
+    "agent_to_pce_certificate_authentication_id": null,
+    "blocked_connection_action": "drop",
+    "caps": [
+      "write"
+    ],
+    "containers_inherit_host_policy": false,
+    "created_at": "2026-09-14T08:36:13.352744Z",
+    "created_by": {
+      "href": "/orgs/5636114/agents/24206847997120504"
+    },
+    "data_center": null,
+    "data_center_zone": null,
+    "datacenter_nat_1to1": false,
+    "deleted": false,
+    "description": null,
+    "distinguished_name": null,
+    "enforcement_mode": "selective",
+    "external_data_reference": null,
+    "external_data_set": null,
+    "hostname": "host-9.example",
+    "href": "/orgs/5636114/workloads/6192d36c-3aa8-40c7-a8f0-f22894a657ce",
+    "ignored_interface_names": [],
+    "interfaces": [
+      {
+        "address": "10.0.1.31",
+        "cidr_block": 26,
+        "default_gateway_address": "10.0.1.27",
+        "friendly_name": null,
+        "link_state": null,
+        "loopback": false,
+        "name": "eth0",
+        "network": {
+          "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+          "name": "Corporate"
+        },
+        "network_detection_mode": "single_private_brn",
+        "public_ip": null
+      }
+    ],
+    "labels": [
+      {
+        "href": "/orgs/5636114/labels/24206847997120542",
+        "key": "bu",
+        "value": "banking"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120544",
+        "key": "app",
+        "value": "pos"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120520",
+        "key": "os",
+        "value": "linux"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120545",
+        "key": "env",
+        "value": "PCI"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120516",
+        "key": "loc",
+        "value": "ny"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120508",
+        "key": "type",
+        "value": "server"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120546",
+        "key": "compliance",
+        "value": "PCI-DSS"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120537",
+        "key": "DFIRBubble",
+        "value": "IR-DIRTYBUBBLE"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120521",
+        "key": "role",
+        "value": "processing"
+      }
+    ],
+    "managed": true,
+    "name": null,
+    "online": true,
+    "os_detail": "3.10.0-1160.62.1.el7.x86_64 #1 SMP Wed Mar 23 09:04:02 UTC 2022 (Red Hat Enterprise Linux Server release 7.9 (Maipo))",
+    "os_id": "centos-x86_64-7.0",
+    "public_ip": "10.0.1.21",
+    "risk_summary": {
+      "ransomware": {
+        "last_updated_at": "2026-10-10T04:38:11Z",
+        "ransomware_protection_percent": 27.32,
+        "workload_exposure_severity": "fully_protected"
+      }
+    },
+    "service_principal_name": null,
+    "service_provider": null,
+    "services": {},
+    "updated_at": "2026-09-14T08:37:03.979374Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "ven": {
+      "hostname": "host-9.example",
+      "href": "/orgs/5636114/vens/6192d36c-3aa8-40c7-a8f0-f22894a657ce",
+      "name": null,
+      "status": "active",
+      "ven_type": "server",
+      "version": "23.2.31-3113"
+    },
+    "visibility_level": "enhanced_data_collection"
+  },
+  {
+    "agent": {
+      "active_pce_fqdn": null,
+      "config": {
+        "log_traffic": false,
+        "mode": "selective",
+        "visibility_level": "enhanced_data_collection"
+      },
+      "href": "/orgs/5636114/agents/24206847997120491",
+      "status": {
+        "agent_health": [],
+        "agent_health_errors": {
+          "errors": [],
+          "warnings": []
+        },
+        "agent_version": "24.2.20-2091",
+        "firewall_rule_count": 0,
+        "fw_config_current": true,
+        "instance_id": null,
+        "last_heartbeat_on": "2026-10-10T11:18:26.083715Z",
+        "managed_since": "2026-09-14T08:36:12.384581Z",
+        "security_policy_applied_at": "2026-10-10T11:18:26.209392Z",
+        "security_policy_received_at": "2026-10-10T11:18:26.209392Z",
+        "security_policy_refresh_at": "2026-10-10T11:18:26.209392Z",
+        "security_policy_sync_state": "applied",
+        "status": "active",
+        "uid": "",
+        "uptime_seconds": 25673911
+      },
+      "target_pce_fqdn": null,
+      "type": "Host"
+    },
+    "agent_to_pce_certificate_authentication_id": null,
+    "blocked_connection_action": "drop",
+    "caps": [
+      "write"
+    ],
+    "containers_inherit_host_policy": false,
+    "created_at": "2026-09-14T08:36:12.369449Z",
+    "created_by": {
+      "href": "/orgs/5636114/agents/24206847997120491"
+    },
+    "data_center": null,
+    "data_center_zone": null,
+    "datacenter_nat_1to1": false,
+    "deleted": false,
+    "description": null,
+    "distinguished_name": null,
+    "enforcement_mode": "selective",
+    "external_data_reference": null,
+    "external_data_set": null,
+    "hostname": "host-10.example",
+    "href": "/orgs/5636114/workloads/55daf3bc-22b5-46fc-8fd6-61a6f8b4e9f3",
+    "ignored_interface_names": [],
+    "interfaces": [
+      {
+        "address": "10.0.1.32",
+        "cidr_block": 26,
+        "default_gateway_address": "10.0.1.27",
+        "friendly_name": null,
+        "link_state": null,
+        "loopback": false,
+        "name": "eth0",
+        "network": {
+          "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+          "name": "Corporate"
+        },
+        "network_detection_mode": "single_private_brn",
+        "public_ip": null
+      }
+    ],
+    "labels": [
+      {
+        "href": "/orgs/5636114/labels/24206847997120544",
+        "key": "app",
+        "value": "pos"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120520",
+        "key": "os",
+        "value": "linux"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120545",
+        "key": "env",
+        "value": "PCI"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120515",
+        "key": "loc",
+        "value": "ca"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120508",
+        "key": "type",
+        "value": "server"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120546",
+        "key": "compliance",
+        "value": "PCI-DSS"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120537",
+        "key": "DFIRBubble",
+        "value": "IR-DIRTYBUBBLE"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120521",
+        "key": "role",
+        "value": "processing"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120542",
+        "key": "bu",
+        "value": "banking"
+      }
+    ],
+    "managed": true,
+    "name": null,
+    "online": true,
+    "os_detail": "3.10.0-1160.62.1.el7.x86_64 #1 SMP Wed Mar 23 09:04:02 UTC 2022 (Red Hat Enterprise Linux Server release 7.9 (Maipo))",
+    "os_id": "centos-x86_64-7.0",
+    "public_ip": "10.0.1.21",
+    "risk_summary": {
+      "ransomware": {
+        "last_updated_at": "2026-10-10T08:42:01Z",
+        "ransomware_protection_percent": 27.32,
+        "workload_exposure_severity": "fully_protected"
+      }
+    },
+    "service_principal_name": null,
+    "service_provider": null,
+    "services": {},
+    "updated_at": "2026-09-14T08:37:04.207692Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "ven": {
+      "hostname": "host-10.example",
+      "href": "/orgs/5636114/vens/55daf3bc-22b5-46fc-8fd6-61a6f8b4e9f3",
+      "name": null,
+      "status": "active",
+      "ven_type": "server",
+      "version": "24.2.20-2091"
+    },
+    "visibility_level": "enhanced_data_collection"
+  },
+  {
+    "agent": {
+      "active_pce_fqdn": null,
+      "config": {
+        "log_traffic": false,
+        "mode": "selective",
+        "visibility_level": "enhanced_data_collection"
+      },
+      "href": "/orgs/5636114/agents/24206847997120512",
+      "status": {
+        "agent_health": [],
+        "agent_health_errors": {
+          "errors": [],
+          "warnings": []
+        },
+        "agent_version": "24.2.20-2091",
+        "firewall_rule_count": 0,
+        "fw_config_current": true,
+        "instance_id": null,
+        "last_heartbeat_on": "2026-10-10T11:18:26.458512Z",
+        "managed_since": "2026-09-14T08:36:14.283587Z",
+        "security_policy_applied_at": "2026-10-10T11:18:26.594521Z",
+        "security_policy_received_at": "2026-10-10T11:18:26.594521Z",
+        "security_policy_refresh_at": "2026-10-10T11:18:26.594521Z",
+        "security_policy_sync_state": "applied",
+        "status": "active",
+        "uid": "",
+        "uptime_seconds": 25673911
+      },
+      "target_pce_fqdn": null,
+      "type": "Host"
+    },
+    "agent_to_pce_certificate_authentication_id": null,
+    "blocked_connection_action": "drop",
+    "caps": [
+      "write"
+    ],
+    "containers_inherit_host_policy": false,
+    "created_at": "2026-09-14T08:36:14.267625Z",
+    "created_by": {
+      "href": "/orgs/5636114/agents/24206847997120512"
+    },
+    "data_center": null,
+    "data_center_zone": null,
+    "datacenter_nat_1to1": false,
+    "deleted": false,
+    "description": null,
+    "distinguished_name": null,
+    "enforcement_mode": "selective",
+    "external_data_reference": null,
+    "external_data_set": null,
+    "hostname": "host-11.example",
+    "href": "/orgs/5636114/workloads/766d09a6-763e-4ff7-9d74-9857f76c9cc0",
+    "ignored_interface_names": [],
+    "interfaces": [
+      {
+        "address": "10.0.1.33",
+        "cidr_block": 26,
+        "default_gateway_address": "10.0.1.27",
+        "friendly_name": null,
+        "link_state": null,
+        "loopback": false,
+        "name": "eth0",
+        "network": {
+          "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+          "name": "Corporate"
+        },
+        "network_detection_mode": "single_private_brn",
+        "public_ip": null
+      }
+    ],
+    "labels": [
+      {
+        "href": "/orgs/5636114/labels/24206847997120537",
+        "key": "DFIRBubble",
+        "value": "IR-DIRTYBUBBLE"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120521",
+        "key": "role",
+        "value": "processing"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120542",
+        "key": "bu",
+        "value": "banking"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120544",
+        "key": "app",
+        "value": "pos"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120520",
+        "key": "os",
+        "value": "linux"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120545",
+        "key": "env",
+        "value": "PCI"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120515",
+        "key": "loc",
+        "value": "ca"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120508",
+        "key": "type",
+        "value": "server"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120546",
+        "key": "compliance",
+        "value": "PCI-DSS"
+      }
+    ],
+    "managed": true,
+    "name": null,
+    "online": true,
+    "os_detail": "3.10.0-1160.62.1.el7.x86_64 #1 SMP Wed Mar 23 09:04:02 UTC 2022 (Red Hat Enterprise Linux Server release 7.9 (Maipo))",
+    "os_id": "centos-x86_64-7.0",
+    "public_ip": "10.0.1.21",
+    "risk_summary": {
+      "ransomware": {
+        "last_updated_at": "2026-10-10T08:42:01Z",
+        "ransomware_protection_percent": 27.32,
+        "workload_exposure_severity": "fully_protected"
+      }
+    },
+    "service_principal_name": null,
+    "service_provider": null,
+    "services": {},
+    "updated_at": "2026-09-14T08:37:04.432236Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "ven": {
+      "hostname": "host-11.example",
+      "href": "/orgs/5636114/vens/766d09a6-763e-4ff7-9d74-9857f76c9cc0",
+      "name": null,
+      "status": "active",
+      "ven_type": "server",
+      "version": "24.2.20-2091"
+    },
+    "visibility_level": "enhanced_data_collection"
+  },
+  {
+    "agent": {
+      "active_pce_fqdn": null,
+      "config": {
+        "log_traffic": false,
+        "mode": "selective",
+        "visibility_level": "enhanced_data_collection"
+      },
+      "href": "/orgs/5636114/agents/24206847997120445",
+      "status": {
+        "agent_health": [],
+        "agent_health_errors": {
+          "errors": [],
+          "warnings": []
+        },
+        "agent_version": "23.2.31-3113",
+        "firewall_rule_count": 0,
+        "fw_config_current": true,
+        "instance_id": null,
+        "last_heartbeat_on": "2026-10-10T11:18:25.055511Z",
+        "managed_since": "2026-09-14T08:36:06.826898Z",
+        "security_policy_applied_at": "2026-10-10T11:18:25.244581Z",
+        "security_policy_received_at": "2026-10-10T11:18:25.244581Z",
+        "security_policy_refresh_at": "2026-10-10T11:18:25.244581Z",
+        "security_policy_sync_state": "applied",
+        "status": "active",
+        "uid": "",
+        "uptime_seconds": 25673911
+      },
+      "target_pce_fqdn": null,
+      "type": "Host"
+    },
+    "agent_to_pce_certificate_authentication_id": null,
+    "blocked_connection_action": "drop",
+    "caps": [
+      "write"
+    ],
+    "containers_inherit_host_policy": false,
+    "created_at": "2026-09-14T08:36:06.799421Z",
+    "created_by": {
+      "href": "/orgs/5636114/agents/24206847997120445"
+    },
+    "data_center": null,
+    "data_center_zone": null,
+    "datacenter_nat_1to1": false,
+    "deleted": false,
+    "description": null,
+    "distinguished_name": null,
+    "enforcement_mode": "selective",
+    "external_data_reference": null,
+    "external_data_set": null,
+    "hostname": "host-12.example",
+    "href": "/orgs/5636114/workloads/0fdb1468-649f-4c62-b1ef-4c4b15fdcaaf",
+    "ignored_interface_names": [],
+    "interfaces": [
+      {
+        "address": "10.0.1.34",
+        "cidr_block": 26,
+        "default_gateway_address": "10.0.1.27",
+        "friendly_name": null,
+        "link_state": null,
+        "loopback": false,
+        "name": "eth0",
+        "network": {
+          "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+          "name": "Corporate"
+        },
+        "network_detection_mode": "single_private_brn",
+        "public_ip": null
+      }
+    ],
+    "labels": [
+      {
+        "href": "/orgs/5636114/labels/24206847997120545",
+        "key": "env",
+        "value": "PCI"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120516",
+        "key": "loc",
+        "value": "ny"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120508",
+        "key": "type",
+        "value": "server"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120546",
+        "key": "compliance",
+        "value": "PCI-DSS"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120537",
+        "key": "DFIRBubble",
+        "value": "IR-DIRTYBUBBLE"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120521",
+        "key": "role",
+        "value": "processing"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120542",
+        "key": "bu",
+        "value": "banking"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120544",
+        "key": "app",
+        "value": "pos"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120520",
+        "key": "os",
+        "value": "linux"
+      }
+    ],
+    "managed": true,
+    "name": null,
+    "online": true,
+    "os_detail": "3.10.0-1160.62.1.el7.x86_64 #1 SMP Wed Mar 23 09:04:02 UTC 2022 (Red Hat Enterprise Linux Server release 7.9 (Maipo))",
+    "os_id": "centos-x86_64-7.0",
+    "public_ip": "10.0.1.21",
+    "risk_summary": {
+      "ransomware": {
+        "last_updated_at": "2026-10-09T20:31:38Z",
+        "ransomware_protection_percent": 27.08,
+        "workload_exposure_severity": "fully_protected"
+      }
+    },
+    "service_principal_name": null,
+    "service_provider": null,
+    "services": {},
+    "updated_at": "2026-09-14T08:37:04.677028Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "ven": {
+      "hostname": "host-12.example",
+      "href": "/orgs/5636114/vens/0fdb1468-649f-4c62-b1ef-4c4b15fdcaaf",
+      "name": null,
+      "status": "active",
+      "ven_type": "server",
+      "version": "23.2.31-3113"
+    },
+    "visibility_level": "enhanced_data_collection"
+  },
+  {
+    "agent": {
+      "active_pce_fqdn": null,
+      "config": {
+        "log_traffic": false,
+        "mode": "selective",
+        "visibility_level": "enhanced_data_collection"
+      },
+      "href": "/orgs/5636114/agents/24206847997120484",
+      "status": {
+        "agent_health": [],
+        "agent_health_errors": {
+          "errors": [],
+          "warnings": []
+        },
+        "agent_version": "22.5.34-9890",
+        "firewall_rule_count": 0,
+        "fw_config_current": true,
+        "instance_id": null,
+        "last_heartbeat_on": "2026-10-10T11:18:25.847775Z",
+        "managed_since": "2026-09-14T08:36:11.467170Z",
+        "security_policy_applied_at": "2026-10-10T11:18:25.971561Z",
+        "security_policy_received_at": "2026-10-10T11:18:25.971561Z",
+        "security_policy_refresh_at": "2026-10-10T11:18:25.971561Z",
+        "security_policy_sync_state": "applied",
+        "status": "active",
+        "uid": "",
+        "uptime_seconds": 25673911
+      },
+      "target_pce_fqdn": null,
+      "type": "Host"
+    },
+    "agent_to_pce_certificate_authentication_id": null,
+    "blocked_connection_action": "drop",
+    "caps": [
+      "write"
+    ],
+    "containers_inherit_host_policy": false,
+    "created_at": "2026-09-14T08:36:11.454078Z",
+    "created_by": {
+      "href": "/orgs/5636114/agents/24206847997120484"
+    },
+    "data_center": null,
+    "data_center_zone": null,
+    "datacenter_nat_1to1": false,
+    "deleted": false,
+    "description": null,
+    "distinguished_name": null,
+    "enforcement_mode": "selective",
+    "external_data_reference": null,
+    "external_data_set": null,
+    "hostname": "host-13.example",
+    "href": "/orgs/5636114/workloads/f32a0002-29fd-4d52-81a0-1d7e8c40d219",
+    "ignored_interface_names": [],
+    "interfaces": [
+      {
+        "address": "10.0.1.35",
+        "cidr_block": 26,
+        "default_gateway_address": "10.0.1.27",
+        "friendly_name": null,
+        "link_state": null,
+        "loopback": false,
+        "name": "eth0",
+        "network": {
+          "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+          "name": "Corporate"
+        },
+        "network_detection_mode": "single_private_brn",
+        "public_ip": null
+      }
+    ],
+    "labels": [
+      {
+        "href": "/orgs/5636114/labels/24206847997120545",
+        "key": "env",
+        "value": "PCI"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120516",
+        "key": "loc",
+        "value": "ny"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120508",
+        "key": "type",
+        "value": "server"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120546",
+        "key": "compliance",
+        "value": "PCI-DSS"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120537",
+        "key": "DFIRBubble",
+        "value": "IR-DIRTYBUBBLE"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120521",
+        "key": "role",
+        "value": "processing"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120542",
+        "key": "bu",
+        "value": "banking"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120544",
+        "key": "app",
+        "value": "pos"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120520",
+        "key": "os",
+        "value": "linux"
+      }
+    ],
+    "managed": true,
+    "name": null,
+    "online": true,
+    "os_detail": "3.10.0-1160.62.1.el7.x86_64 #1 SMP Wed Mar 23 09:04:02 UTC 2022 (Red Hat Enterprise Linux Server release 7.9 (Maipo))",
+    "os_id": "centos-x86_64-7.0",
+    "public_ip": "10.0.1.21",
+    "risk_summary": {
+      "ransomware": {
+        "last_updated_at": "2026-10-10T08:42:01Z",
+        "ransomware_protection_percent": 27.32,
+        "workload_exposure_severity": "fully_protected"
+      }
+    },
+    "service_principal_name": null,
+    "service_provider": null,
+    "services": {},
+    "updated_at": "2026-09-14T08:37:04.898943Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "ven": {
+      "hostname": "host-13.example",
+      "href": "/orgs/5636114/vens/f32a0002-29fd-4d52-81a0-1d7e8c40d219",
+      "name": null,
+      "status": "active",
+      "ven_type": "server",
+      "version": "22.5.34-9890"
+    },
+    "visibility_level": "enhanced_data_collection"
+  },
+  {
+    "agent": {
+      "active_pce_fqdn": null,
+      "config": {
+        "log_traffic": false,
+        "mode": "selective",
+        "visibility_level": "enhanced_data_collection"
+      },
+      "href": "/orgs/5636114/agents/24206847997120522",
+      "status": {
+        "agent_health": [],
+        "agent_health_errors": {
+          "errors": [],
+          "warnings": []
+        },
+        "agent_version": "24.2.20-2091",
+        "firewall_rule_count": 0,
+        "fw_config_current": true,
+        "instance_id": null,
+        "last_heartbeat_on": "2026-10-10T11:18:26.667386Z",
+        "managed_since": "2026-09-14T08:36:15.234811Z",
+        "security_policy_applied_at": "2026-10-10T11:18:26.799164Z",
+        "security_policy_received_at": "2026-10-10T11:18:26.799164Z",
+        "security_policy_refresh_at": "2026-10-10T11:18:26.799164Z",
+        "security_policy_sync_state": "applied",
+        "status": "active",
+        "uid": "",
+        "uptime_seconds": 25673911
+      },
+      "target_pce_fqdn": null,
+      "type": "Host"
+    },
+    "agent_to_pce_certificate_authentication_id": null,
+    "blocked_connection_action": "drop",
+    "caps": [
+      "write"
+    ],
+    "containers_inherit_host_policy": false,
+    "created_at": "2026-09-14T08:36:15.219040Z",
+    "created_by": {
+      "href": "/orgs/5636114/agents/24206847997120522"
+    },
+    "data_center": null,
+    "data_center_zone": null,
+    "datacenter_nat_1to1": false,
+    "deleted": false,
+    "description": null,
+    "distinguished_name": null,
+    "enforcement_mode": "selective",
+    "external_data_reference": null,
+    "external_data_set": null,
+    "hostname": "host-14.example",
+    "href": "/orgs/5636114/workloads/e8baa247-0f3d-4762-a9de-0358b10927bc",
+    "ignored_interface_names": [],
+    "interfaces": [
+      {
+        "address": "10.0.1.36",
+        "cidr_block": 26,
+        "default_gateway_address": "10.0.1.27",
+        "friendly_name": null,
+        "link_state": null,
+        "loopback": false,
+        "name": "eth0",
+        "network": {
+          "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+          "name": "Corporate"
+        },
+        "network_detection_mode": "single_private_brn",
+        "public_ip": null
+      }
+    ],
+    "labels": [
+      {
+        "href": "/orgs/5636114/labels/24206847997120545",
+        "key": "env",
+        "value": "PCI"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120515",
+        "key": "loc",
+        "value": "ca"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120508",
+        "key": "type",
+        "value": "server"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120546",
+        "key": "compliance",
+        "value": "PCI-DSS"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120537",
+        "key": "DFIRBubble",
+        "value": "IR-DIRTYBUBBLE"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120521",
+        "key": "role",
+        "value": "processing"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120542",
+        "key": "bu",
+        "value": "banking"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120544",
+        "key": "app",
+        "value": "pos"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120520",
+        "key": "os",
+        "value": "linux"
+      }
+    ],
+    "managed": true,
+    "name": null,
+    "online": true,
+    "os_detail": "3.10.0-1160.62.1.el7.x86_64 #1 SMP Wed Mar 23 09:04:02 UTC 2022 (Red Hat Enterprise Linux Server release 7.9 (Maipo))",
+    "os_id": "centos-x86_64-7.0",
+    "public_ip": "10.0.1.21",
+    "risk_summary": {
+      "ransomware": {
+        "last_updated_at": "2026-10-10T08:42:01Z",
+        "ransomware_protection_percent": 27.32,
+        "workload_exposure_severity": "fully_protected"
+      }
+    },
+    "service_principal_name": null,
+    "service_provider": null,
+    "services": {},
+    "updated_at": "2026-09-14T08:37:05.122960Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "ven": {
+      "hostname": "host-14.example",
+      "href": "/orgs/5636114/vens/e8baa247-0f3d-4762-a9de-0358b10927bc",
+      "name": null,
+      "status": "active",
+      "ven_type": "server",
+      "version": "24.2.20-2091"
+    },
+    "visibility_level": "enhanced_data_collection"
+  },
+  {
+    "agent": {
+      "active_pce_fqdn": null,
+      "config": {
+        "log_traffic": false,
+        "mode": "selective",
+        "visibility_level": "enhanced_data_collection"
+      },
+      "href": "/orgs/5636114/agents/24206847997120479",
+      "status": {
+        "agent_health": [],
+        "agent_health_errors": {
+          "errors": [],
+          "warnings": []
+        },
+        "agent_version": "24.2.20-2091",
+        "firewall_rule_count": 0,
+        "fw_config_current": true,
+        "instance_id": null,
+        "last_heartbeat_on": "2026-10-10T11:18:25.642950Z",
+        "managed_since": "2026-09-14T08:36:10.697498Z",
+        "security_policy_applied_at": "2026-10-10T11:18:25.767881Z",
+        "security_policy_received_at": "2026-10-10T11:18:25.767881Z",
+        "security_policy_refresh_at": "2026-10-10T11:18:25.767881Z",
+        "security_policy_sync_state": "applied",
+        "status": "active",
+        "uid": "",
+        "uptime_seconds": 25673911
+      },
+      "target_pce_fqdn": null,
+      "type": "Host"
+    },
+    "agent_to_pce_certificate_authentication_id": null,
+    "blocked_connection_action": "drop",
+    "caps": [
+      "write"
+    ],
+    "containers_inherit_host_policy": false,
+    "created_at": "2026-09-14T08:36:10.682662Z",
+    "created_by": {
+      "href": "/orgs/5636114/agents/24206847997120479"
+    },
+    "data_center": null,
+    "data_center_zone": null,
+    "datacenter_nat_1to1": false,
+    "deleted": false,
+    "description": null,
+    "distinguished_name": null,
+    "enforcement_mode": "selective",
+    "external_data_reference": null,
+    "external_data_set": null,
+    "hostname": "host-15.example",
+    "href": "/orgs/5636114/workloads/c20b58a5-82e0-4728-bdea-950fded43742",
+    "ignored_interface_names": [],
+    "interfaces": [
+      {
+        "address": "10.0.1.37",
+        "cidr_block": 26,
+        "default_gateway_address": "10.0.1.27",
+        "friendly_name": null,
+        "link_state": null,
+        "loopback": false,
+        "name": "eth0",
+        "network": {
+          "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+          "name": "Corporate"
+        },
+        "network_detection_mode": "single_private_brn",
+        "public_ip": null
+      }
+    ],
+    "labels": [
+      {
+        "href": "/orgs/5636114/labels/24206847997120546",
+        "key": "compliance",
+        "value": "PCI-DSS"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120537",
+        "key": "DFIRBubble",
+        "value": "IR-DIRTYBUBBLE"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997116746",
+        "key": "role",
+        "value": "Web"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120542",
+        "key": "bu",
+        "value": "banking"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120544",
+        "key": "app",
+        "value": "pos"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120520",
+        "key": "os",
+        "value": "linux"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120545",
+        "key": "env",
+        "value": "PCI"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120516",
+        "key": "loc",
+        "value": "ny"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120508",
+        "key": "type",
+        "value": "server"
+      }
+    ],
+    "managed": true,
+    "name": null,
+    "online": true,
+    "os_detail": "3.10.0-1160.62.1.el7.x86_64 #1 SMP Wed Mar 23 09:04:02 UTC 2022 (Red Hat Enterprise Linux Server release 7.9 (Maipo))",
+    "os_id": "centos-x86_64-7.0",
+    "public_ip": "10.0.1.21",
+    "risk_summary": {
+      "ransomware": {
+        "last_updated_at": "2026-10-10T08:42:01Z",
+        "ransomware_protection_percent": 27.32,
+        "workload_exposure_severity": "fully_protected"
+      }
+    },
+    "service_principal_name": null,
+    "service_provider": null,
+    "services": {},
+    "updated_at": "2026-09-14T08:37:05.347291Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "ven": {
+      "hostname": "host-15.example",
+      "href": "/orgs/5636114/vens/c20b58a5-82e0-4728-bdea-950fded43742",
+      "name": null,
+      "status": "active",
+      "ven_type": "server",
+      "version": "24.2.20-2091"
+    },
+    "visibility_level": "enhanced_data_collection"
+  },
+  {
+    "agent": {
+      "active_pce_fqdn": null,
+      "config": {
+        "log_traffic": false,
+        "mode": "selective",
+        "visibility_level": "enhanced_data_collection"
+      },
+      "href": "/orgs/5636114/agents/24206847997120590",
+      "status": {
+        "agent_health": [],
+        "agent_health_errors": {
+          "errors": [],
+          "warnings": []
+        },
+        "agent_version": "24.2.20-2091",
+        "firewall_rule_count": 0,
+        "fw_config_current": true,
+        "instance_id": null,
+        "last_heartbeat_on": "2026-10-10T11:18:27.958786Z",
+        "managed_since": "2026-09-14T08:36:21.948946Z",
+        "security_policy_applied_at": "2026-10-10T11:18:28.120393Z",
+        "security_policy_received_at": "2026-10-10T11:18:28.120393Z",
+        "security_policy_refresh_at": "2026-10-10T11:18:28.120393Z",
+        "security_policy_sync_state": "applied",
+        "status": "active",
+        "uid": "",
+        "uptime_seconds": 25673911
+      },
+      "target_pce_fqdn": null,
+      "type": "Host"
+    },
+    "agent_to_pce_certificate_authentication_id": null,
+    "blocked_connection_action": "drop",
+    "caps": [
+      "write"
+    ],
+    "containers_inherit_host_policy": false,
+    "created_at": "2026-09-14T08:36:21.933894Z",
+    "created_by": {
+      "href": "/orgs/5636114/agents/24206847997120590"
+    },
+    "data_center": null,
+    "data_center_zone": null,
+    "datacenter_nat_1to1": false,
+    "deleted": false,
+    "description": null,
+    "distinguished_name": null,
+    "enforcement_mode": "selective",
+    "external_data_reference": null,
+    "external_data_set": null,
+    "firewall_coexistence": {
+      "illumio_primary": true
+    },
+    "hostname": "host-16.example",
+    "href": "/orgs/5636114/workloads/03eec080-97f5-49ad-b345-943742a6420a",
+    "ignored_interface_names": [],
+    "interfaces": [
+      {
+        "address": "10.0.1.38",
+        "cidr_block": 24,
+        "default_gateway_address": "10.0.1.39",
+        "friendly_name": null,
+        "link_state": null,
+        "loopback": false,
+        "name": "eth32769",
+        "network": {
+          "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+          "name": "Corporate"
+        },
+        "network_detection_mode": "single_private_brn",
+        "public_ip": null
+      }
+    ],
+    "labels": [
+      {
+        "href": "/orgs/5636114/labels/24206847997120567",
+        "key": "role",
+        "value": "contractor"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120518",
+        "key": "bu",
+        "value": "commerce"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120568",
+        "key": "app",
+        "value": "vdi"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120569",
+        "key": "os",
+        "value": "Windows 10"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120559",
+        "key": "env",
+        "value": "Users"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120516",
+        "key": "loc",
+        "value": "ny"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120561",
+        "key": "type",
+        "value": "endpoint"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120570",
+        "key": "risk",
+        "value": "Low Risk"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120502",
+        "key": "DFIRBubble",
+        "value": "IR-CLEANBUBBLE"
+      }
+    ],
+    "managed": true,
+    "name": null,
+    "online": true,
+    "os_detail": "19041.1.amd64fre.vb_release.191206-1406 (Windows 10 Pro)",
+    "os_id": "win-x86_64-client",
+    "public_ip": "10.0.1.21",
+    "risk_summary": null,
+    "service_principal_name": null,
+    "service_provider": null,
+    "services": {},
+    "updated_at": "2026-09-14T08:37:20.010052Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "ven": {
+      "hostname": "host-16.example",
+      "href": "/orgs/5636114/vens/03eec080-97f5-49ad-b345-943742a6420a",
+      "name": null,
+      "status": "active",
+      "ven_type": "endpoint",
+      "version": "24.2.20-2091"
+    },
+    "visibility_level": "enhanced_data_collection"
+  },
+  {
+    "agent": {
+      "config": {
+        "log_traffic": false,
+        "mode": "selective",
+        "visibility_level": "enhanced_data_collection"
+      }
+    },
+    "agent_to_pce_certificate_authentication_id": null,
+    "blocked_connection_action": null,
+    "caps": [
+      "write"
+    ],
+    "containers_inherit_host_policy": null,
+    "created_at": "2026-09-14T08:37:23.866695Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "data_center": null,
+    "data_center_zone": null,
+    "datacenter_nat_1to1": false,
+    "deleted": false,
+    "description": null,
+    "distinguished_name": null,
+    "enforcement_mode": "selective",
+    "external_data_reference": null,
+    "external_data_set": null,
+    "hostname": "host-17.example",
+    "href": "/orgs/5636114/workloads/a27bcd0b-91d3-4e0c-97c3-635092aba2a0",
+    "ignored_interface_names": [],
+    "interfaces": [
+      {
+        "address": "10.0.1.40",
+        "cidr_block": null,
+        "default_gateway_address": null,
+        "friendly_name": null,
+        "link_state": null,
+        "loopback": false,
+        "name": "umwl",
+        "network": {
+          "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+          "name": "Corporate"
+        },
+        "network_detection_mode": "single_private_brn",
+        "public_ip": null
+      }
+    ],
+    "labels": [
+      {
+        "href": "/orgs/5636114/labels/24206847997116752",
+        "key": "env",
+        "value": "Production"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120554",
+        "key": "loc",
+        "value": "bos"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120555",
+        "key": "type",
+        "value": "OT"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120502",
+        "key": "DFIRBubble",
+        "value": "IR-CLEANBUBBLE"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120556",
+        "key": "role",
+        "value": "counter"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120557",
+        "key": "bu",
+        "value": "manufacturing"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120558",
+        "key": "app",
+        "value": "packaging"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120520",
+        "key": "os",
+        "value": "linux"
+      }
+    ],
+    "managed": false,
+    "name": null,
+    "online": true,
+    "os_detail": null,
+    "os_id": null,
+    "public_ip": null,
+    "risk_summary": null,
+    "service_principal_name": null,
+    "service_provider": null,
+    "services": {},
+    "updated_at": "2026-09-14T08:37:23.945312Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "ven": null,
+    "visibility_level": "enhanced_data_collection"
+  },
+  {
+    "agent": {
+      "active_pce_fqdn": null,
+      "config": {
+        "log_traffic": false,
+        "mode": "selective",
+        "visibility_level": "enhanced_data_collection"
+      },
+      "href": "/orgs/5636114/agents/24206847997120566",
+      "status": {
+        "agent_health": [],
+        "agent_health_errors": {
+          "errors": [],
+          "warnings": []
+        },
+        "agent_version": "24.2.20-2091",
+        "firewall_rule_count": 0,
+        "fw_config_current": true,
+        "instance_id": null,
+        "last_heartbeat_on": "2026-10-10T11:18:27.644224Z",
+        "managed_since": "2026-09-14T08:36:19.705041Z",
+        "security_policy_applied_at": "2026-10-10T11:18:27.767557Z",
+        "security_policy_received_at": "2026-10-10T11:18:27.767557Z",
+        "security_policy_refresh_at": "2026-10-10T11:18:27.767557Z",
+        "security_policy_sync_state": "applied",
+        "status": "active",
+        "uid": "",
+        "uptime_seconds": 25673911
+      },
+      "target_pce_fqdn": null,
+      "type": "Host"
+    },
+    "agent_to_pce_certificate_authentication_id": null,
+    "blocked_connection_action": "drop",
+    "caps": [
+      "write"
+    ],
+    "containers_inherit_host_policy": false,
+    "created_at": "2026-09-14T08:36:19.691737Z",
+    "created_by": {
+      "href": "/orgs/5636114/agents/24206847997120566"
+    },
+    "data_center": null,
+    "data_center_zone": null,
+    "datacenter_nat_1to1": false,
+    "deleted": false,
+    "description": null,
+    "distinguished_name": null,
+    "enforcement_mode": "selective",
+    "external_data_reference": null,
+    "external_data_set": null,
+    "hostname": "host-18.example",
+    "href": "/orgs/5636114/workloads/f553c381-ba6c-48ec-b124-1eb6b8fad22b",
+    "ignored_interface_names": [],
+    "interfaces": [
+      {
+        "address": "10.0.1.41",
+        "cidr_block": 26,
+        "default_gateway_address": "10.0.1.27",
+        "friendly_name": null,
+        "link_state": null,
+        "loopback": false,
+        "name": "eth0",
+        "network": {
+          "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+          "name": "Corporate"
+        },
+        "network_detection_mode": "single_private_brn",
+        "public_ip": null
+      }
+    ],
+    "labels": [
+      {
+        "href": "/orgs/5636114/labels/24206847997120544",
+        "key": "app",
+        "value": "pos"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120520",
+        "key": "os",
+        "value": "linux"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120545",
+        "key": "env",
+        "value": "PCI"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120515",
+        "key": "loc",
+        "value": "ca"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120508",
+        "key": "type",
+        "value": "server"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120546",
+        "key": "compliance",
+        "value": "PCI-DSS"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120537",
+        "key": "DFIRBubble",
+        "value": "IR-DIRTYBUBBLE"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997116746",
+        "key": "role",
+        "value": "Web"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120542",
+        "key": "bu",
+        "value": "banking"
+      }
+    ],
+    "managed": true,
+    "name": null,
+    "online": true,
+    "os_detail": "3.10.0-1160.62.1.el7.x86_64 #1 SMP Wed Mar 23 09:04:02 UTC 2022 (Red Hat Enterprise Linux Server release 7.9 (Maipo))",
+    "os_id": "centos-x86_64-7.0",
+    "public_ip": "10.0.1.21",
+    "risk_summary": {
+      "ransomware": {
+        "last_updated_at": "2026-10-10T08:42:01Z",
+        "ransomware_protection_percent": 27.32,
+        "workload_exposure_severity": "fully_protected"
+      }
+    },
+    "service_principal_name": null,
+    "service_provider": null,
+    "services": {},
+    "updated_at": "2026-09-14T08:37:05.579615Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "ven": {
+      "hostname": "host-18.example",
+      "href": "/orgs/5636114/vens/f553c381-ba6c-48ec-b124-1eb6b8fad22b",
+      "name": null,
+      "status": "active",
+      "ven_type": "server",
+      "version": "24.2.20-2091"
+    },
+    "visibility_level": "enhanced_data_collection"
+  },
+  {
+    "agent": {
+      "active_pce_fqdn": null,
+      "config": {
+        "log_traffic": false,
+        "mode": "selective",
+        "visibility_level": "enhanced_data_collection"
+      },
+      "href": "/orgs/5636114/agents/24206847997120593",
+      "status": {
+        "agent_health": [],
+        "agent_health_errors": {
+          "errors": [],
+          "warnings": []
+        },
+        "agent_version": "24.2.20-2091",
+        "firewall_rule_count": 0,
+        "fw_config_current": true,
+        "instance_id": null,
+        "last_heartbeat_on": "2026-10-10T11:18:28.266892Z",
+        "managed_since": "2026-09-14T08:36:22.238119Z",
+        "security_policy_applied_at": "2026-10-10T11:18:28.384239Z",
+        "security_policy_received_at": "2026-10-10T11:18:28.384239Z",
+        "security_policy_refresh_at": "2026-10-10T11:18:28.384239Z",
+        "security_policy_sync_state": "applied",
+        "status": "active",
+        "uid": "",
+        "uptime_seconds": 25673911
+      },
+      "target_pce_fqdn": null,
+      "type": "Host"
+    },
+    "agent_to_pce_certificate_authentication_id": null,
+    "blocked_connection_action": "drop",
+    "caps": [
+      "write"
+    ],
+    "containers_inherit_host_policy": false,
+    "created_at": "2026-09-14T08:36:22.221939Z",
+    "created_by": {
+      "href": "/orgs/5636114/agents/24206847997120593"
+    },
+    "data_center": null,
+    "data_center_zone": null,
+    "datacenter_nat_1to1": false,
+    "deleted": false,
+    "description": null,
+    "distinguished_name": null,
+    "enforcement_mode": "selective",
+    "external_data_reference": null,
+    "external_data_set": null,
+    "hostname": "host-19.example",
+    "href": "/orgs/5636114/workloads/fb2af782-4689-4098-ba13-2726ff69581d",
+    "ignored_interface_names": [],
+    "interfaces": [
+      {
+        "address": "10.0.1.42",
+        "cidr_block": 26,
+        "default_gateway_address": "10.0.1.27",
+        "friendly_name": null,
+        "link_state": null,
+        "loopback": false,
+        "name": "eth0",
+        "network": {
+          "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+          "name": "Corporate"
+        },
+        "network_detection_mode": "single_private_brn",
+        "public_ip": null
+      }
+    ],
+    "labels": [
+      {
+        "href": "/orgs/5636114/labels/24206847997120542",
+        "key": "bu",
+        "value": "banking"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120544",
+        "key": "app",
+        "value": "pos"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120520",
+        "key": "os",
+        "value": "linux"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120545",
+        "key": "env",
+        "value": "PCI"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120515",
+        "key": "loc",
+        "value": "ca"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120508",
+        "key": "type",
+        "value": "server"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120546",
+        "key": "compliance",
+        "value": "PCI-DSS"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120537",
+        "key": "DFIRBubble",
+        "value": "IR-DIRTYBUBBLE"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997116746",
+        "key": "role",
+        "value": "Web"
+      }
+    ],
+    "managed": true,
+    "name": null,
+    "online": true,
+    "os_detail": "3.10.0-1160.62.1.el7.x86_64 #1 SMP Wed Mar 23 09:04:02 UTC 2022 (Red Hat Enterprise Linux Server release 7.9 (Maipo))",
+    "os_id": "centos-x86_64-7.0",
+    "public_ip": "10.0.1.21",
+    "risk_summary": {
+      "ransomware": {
+        "last_updated_at": "2026-10-10T04:38:11Z",
+        "ransomware_protection_percent": 27.32,
+        "workload_exposure_severity": "fully_protected"
+      }
+    },
+    "service_principal_name": null,
+    "service_provider": null,
+    "services": {},
+    "updated_at": "2026-09-14T08:37:05.814709Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "ven": {
+      "hostname": "host-19.example",
+      "href": "/orgs/5636114/vens/fb2af782-4689-4098-ba13-2726ff69581d",
+      "name": null,
+      "status": "active",
+      "ven_type": "server",
+      "version": "24.2.20-2091"
+    },
+    "visibility_level": "enhanced_data_collection"
+  },
+  {
+    "agent": {
+      "active_pce_fqdn": null,
+      "config": {
+        "log_traffic": false,
+        "mode": "selective",
+        "visibility_level": "enhanced_data_collection"
+      },
+      "href": "/orgs/5636114/agents/24206847997120480",
+      "status": {
+        "agent_health": [],
+        "agent_health_errors": {
+          "errors": [],
+          "warnings": []
+        },
+        "agent_version": "23.2.31-3113",
+        "firewall_rule_count": 0,
+        "fw_config_current": true,
+        "instance_id": null,
+        "last_heartbeat_on": "2026-10-10T11:18:25.674231Z",
+        "managed_since": "2026-09-14T08:36:10.722926Z",
+        "security_policy_applied_at": "2026-10-10T11:18:25.797309Z",
+        "security_policy_received_at": "2026-10-10T11:18:25.797309Z",
+        "security_policy_refresh_at": "2026-10-10T11:18:25.797309Z",
+        "security_policy_sync_state": "applied",
+        "status": "active",
+        "uid": "",
+        "uptime_seconds": 25673911
+      },
+      "target_pce_fqdn": null,
+      "type": "Host"
+    },
+    "agent_to_pce_certificate_authentication_id": null,
+    "blocked_connection_action": "drop",
+    "caps": [
+      "write"
+    ],
+    "containers_inherit_host_policy": false,
+    "created_at": "2026-09-14T08:36:10.708110Z",
+    "created_by": {
+      "href": "/orgs/5636114/agents/24206847997120480"
+    },
+    "data_center": null,
+    "data_center_zone": null,
+    "datacenter_nat_1to1": false,
+    "deleted": false,
+    "description": null,
+    "distinguished_name": null,
+    "enforcement_mode": "selective",
+    "external_data_reference": null,
+    "external_data_set": null,
+    "hostname": "host-20.example",
+    "href": "/orgs/5636114/workloads/91e5cce6-2c02-4c7e-a95e-b356fcc18b69",
+    "ignored_interface_names": [],
+    "interfaces": [
+      {
+        "address": "10.0.1.43",
+        "cidr_block": 26,
+        "default_gateway_address": "10.0.1.44",
+        "friendly_name": null,
+        "link_state": null,
+        "loopback": false,
+        "name": "eth0",
+        "network": {
+          "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+          "name": "Corporate"
+        },
+        "network_detection_mode": "single_private_brn",
+        "public_ip": null
+      }
+    ],
+    "labels": [
+      {
+        "href": "/orgs/5636114/labels/24206847997120501",
+        "key": "compliance",
+        "value": "HIPAA"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120502",
+        "key": "DFIRBubble",
+        "value": "IR-CLEANBUBBLE"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120503",
+        "key": "role",
+        "value": "vna"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120504",
+        "key": "bu",
+        "value": "health"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120505",
+        "key": "app",
+        "value": "imaging"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120506",
+        "key": "os",
+        "value": "windows 2022"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997116752",
+        "key": "env",
+        "value": "Production"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120507",
+        "key": "loc",
+        "value": "acme hospital"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120508",
+        "key": "type",
+        "value": "server"
+      }
+    ],
+    "managed": true,
+    "name": null,
+    "online": true,
+    "os_detail": "17763.1.amd64fre.rs5_release.180914-1434 (Windows Server 2019 Standard)",
+    "os_id": "win-x86_64-server",
+    "public_ip": "10.0.1.21",
+    "risk_summary": {
+      "ransomware": {
+        "last_updated_at": "2026-10-10T08:42:01Z",
+        "ransomware_protection_percent": 51.9,
+        "workload_exposure_severity": "fully_protected"
+      }
+    },
+    "service_principal_name": null,
+    "service_provider": null,
+    "services": {},
+    "updated_at": "2026-09-14T08:36:42.506860Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "ven": {
+      "hostname": "host-20.example",
+      "href": "/orgs/5636114/vens/91e5cce6-2c02-4c7e-a95e-b356fcc18b69",
+      "name": null,
+      "status": "active",
+      "ven_type": "server",
+      "version": "23.2.31-3113"
+    },
+    "visibility_level": "enhanced_data_collection"
+  },
+  {
+    "agent": {
+      "active_pce_fqdn": null,
+      "config": {
+        "log_traffic": false,
+        "mode": "selective",
+        "visibility_level": "enhanced_data_collection"
+      },
+      "href": "/orgs/5636114/agents/24206847997120450",
+      "status": {
+        "agent_health": [],
+        "agent_health_errors": {
+          "errors": [],
+          "warnings": []
+        },
+        "agent_version": "24.2.20-2091",
+        "firewall_rule_count": 0,
+        "fw_config_current": true,
+        "instance_id": null,
+        "last_heartbeat_on": "2026-10-10T11:18:25.060581Z",
+        "managed_since": "2026-09-14T08:36:06.854555Z",
+        "security_policy_applied_at": "2026-10-10T11:18:25.188824Z",
+        "security_policy_received_at": "2026-10-10T11:18:25.188824Z",
+        "security_policy_refresh_at": "2026-10-10T11:18:25.188824Z",
+        "security_policy_sync_state": "applied",
+        "status": "active",
+        "uid": "",
+        "uptime_seconds": 25673911
+      },
+      "target_pce_fqdn": null,
+      "type": "Host"
+    },
+    "agent_to_pce_certificate_authentication_id": null,
+    "blocked_connection_action": "drop",
+    "caps": [
+      "write"
+    ],
+    "containers_inherit_host_policy": false,
+    "created_at": "2026-09-14T08:36:06.817148Z",
+    "created_by": {
+      "href": "/orgs/5636114/agents/24206847997120450"
+    },
+    "data_center": null,
+    "data_center_zone": null,
+    "datacenter_nat_1to1": false,
+    "deleted": false,
+    "description": null,
+    "distinguished_name": null,
+    "enforcement_mode": "selective",
+    "external_data_reference": null,
+    "external_data_set": null,
+    "hostname": "host-21.example",
+    "href": "/orgs/5636114/workloads/0e4bdc44-74c3-4b42-bdf5-930cad4dd141",
+    "ignored_interface_names": [],
+    "interfaces": [
+      {
+        "address": "10.0.1.45",
+        "cidr_block": 26,
+        "default_gateway_address": "10.0.1.27",
+        "friendly_name": null,
+        "link_state": null,
+        "loopback": false,
+        "name": "eth0",
+        "network": {
+          "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+          "name": "Corporate"
+        },
+        "network_detection_mode": "single_private_brn",
+        "public_ip": null
+      }
+    ],
+    "labels": [
+      {
+        "href": "/orgs/5636114/labels/24206847997120545",
+        "key": "env",
+        "value": "PCI"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120516",
+        "key": "loc",
+        "value": "ny"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120508",
+        "key": "type",
+        "value": "server"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120546",
+        "key": "compliance",
+        "value": "PCI-DSS"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120537",
+        "key": "DFIRBubble",
+        "value": "IR-DIRTYBUBBLE"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997116746",
+        "key": "role",
+        "value": "Web"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120542",
+        "key": "bu",
+        "value": "banking"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120544",
+        "key": "app",
+        "value": "pos"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120520",
+        "key": "os",
+        "value": "linux"
+      }
+    ],
+    "managed": true,
+    "name": null,
+    "online": true,
+    "os_detail": "3.10.0-1160.62.1.el7.x86_64 #1 SMP Wed Mar 23 09:04:02 UTC 2022 (Red Hat Enterprise Linux Server release 7.9 (Maipo))",
+    "os_id": "centos-x86_64-7.0",
+    "public_ip": "10.0.1.21",
+    "risk_summary": {
+      "ransomware": {
+        "last_updated_at": "2026-10-10T04:38:11Z",
+        "ransomware_protection_percent": 27.32,
+        "workload_exposure_severity": "fully_protected"
+      }
+    },
+    "service_principal_name": null,
+    "service_provider": null,
+    "services": {},
+    "updated_at": "2026-09-14T08:37:06.055088Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "ven": {
+      "hostname": "host-21.example",
+      "href": "/orgs/5636114/vens/0e4bdc44-74c3-4b42-bdf5-930cad4dd141",
+      "name": null,
+      "status": "active",
+      "ven_type": "server",
+      "version": "24.2.20-2091"
+    },
+    "visibility_level": "enhanced_data_collection"
+  },
+  {
+    "agent": {
+      "active_pce_fqdn": null,
+      "config": {
+        "log_traffic": false,
+        "mode": "selective",
+        "visibility_level": "enhanced_data_collection"
+      },
+      "href": "/orgs/5636114/agents/24206847997120596",
+      "status": {
+        "agent_health": [],
+        "agent_health_errors": {
+          "errors": [],
+          "warnings": []
+        },
+        "agent_version": "24.2.20-2091",
+        "firewall_rule_count": 0,
+        "fw_config_current": true,
+        "instance_id": null,
+        "last_heartbeat_on": "2026-10-10T11:18:27.997969Z",
+        "managed_since": "2026-09-14T08:36:22.591480Z",
+        "security_policy_applied_at": "2026-10-10T11:18:28.106779Z",
+        "security_policy_received_at": "2026-10-10T11:18:28.106779Z",
+        "security_policy_refresh_at": "2026-10-10T11:18:28.106779Z",
+        "security_policy_sync_state": "applied",
+        "status": "active",
+        "uid": "",
+        "uptime_seconds": 25673911
+      },
+      "target_pce_fqdn": null,
+      "type": "Host"
+    },
+    "agent_to_pce_certificate_authentication_id": null,
+    "blocked_connection_action": "drop",
+    "caps": [
+      "write"
+    ],
+    "containers_inherit_host_policy": false,
+    "created_at": "2026-09-14T08:36:22.576517Z",
+    "created_by": {
+      "href": "/orgs/5636114/agents/24206847997120596"
+    },
+    "data_center": null,
+    "data_center_zone": null,
+    "datacenter_nat_1to1": false,
+    "deleted": false,
+    "description": null,
+    "distinguished_name": null,
+    "enforcement_mode": "selective",
+    "external_data_reference": null,
+    "external_data_set": null,
+    "hostname": "host-22.example",
+    "href": "/orgs/5636114/workloads/cb49190a-55bb-49f2-aa7c-dc40f44ac767",
+    "ignored_interface_names": [],
+    "interfaces": [
+      {
+        "address": "10.0.1.46",
+        "cidr_block": 26,
+        "default_gateway_address": "10.0.1.47",
+        "friendly_name": null,
+        "link_state": null,
+        "loopback": false,
+        "name": "eth0",
+        "network": {
+          "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+          "name": "Corporate"
+        },
+        "network_detection_mode": "single_private_brn",
+        "public_ip": null
+      }
+    ],
+    "labels": [
+      {
+        "href": "/orgs/5636114/labels/24206847997120537",
+        "key": "DFIRBubble",
+        "value": "IR-DIRTYBUBBLE"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120517",
+        "key": "role",
+        "value": "db"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120542",
+        "key": "bu",
+        "value": "banking"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120544",
+        "key": "app",
+        "value": "pos"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120520",
+        "key": "os",
+        "value": "linux"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997116753",
+        "key": "env",
+        "value": "Staging"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120540",
+        "key": "loc",
+        "value": "ldn"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120508",
+        "key": "type",
+        "value": "server"
+      }
+    ],
+    "managed": true,
+    "name": null,
+    "online": true,
+    "os_detail": "3.10.0-1160.62.1.el7.x86_64 #1 SMP Wed Mar 23 09:04:02 UTC 2022 (Red Hat Enterprise Linux Server release 7.9 (Maipo))",
+    "os_id": "centos-x86_64-7.0",
+    "public_ip": "10.0.1.21",
+    "risk_summary": {
+      "ransomware": {
+        "last_updated_at": "2026-10-10T04:38:11Z",
+        "ransomware_protection_percent": 100.0,
+        "workload_exposure_severity": "fully_protected"
+      }
+    },
+    "service_principal_name": null,
+    "service_provider": null,
+    "services": {},
+    "updated_at": "2026-09-14T08:37:06.287799Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "ven": {
+      "hostname": "host-22.example",
+      "href": "/orgs/5636114/vens/cb49190a-55bb-49f2-aa7c-dc40f44ac767",
+      "name": null,
+      "status": "active",
+      "ven_type": "server",
+      "version": "24.2.20-2091"
+    },
+    "visibility_level": "enhanced_data_collection"
+  },
+  {
+    "agent": {
+      "active_pce_fqdn": null,
+      "config": {
+        "log_traffic": false,
+        "mode": "selective",
+        "visibility_level": "enhanced_data_collection"
+      },
+      "href": "/orgs/5636114/agents/24206847997120490",
+      "status": {
+        "agent_health": [],
+        "agent_health_errors": {
+          "errors": [],
+          "warnings": []
+        },
+        "agent_version": "23.2.31-3113",
+        "firewall_rule_count": 0,
+        "fw_config_current": true,
+        "instance_id": null,
+        "last_heartbeat_on": "2026-10-10T11:18:25.867632Z",
+        "managed_since": "2026-09-14T08:36:11.843384Z",
+        "security_policy_applied_at": "2026-10-10T11:18:25.990675Z",
+        "security_policy_received_at": "2026-10-10T11:18:25.990675Z",
+        "security_policy_refresh_at": "2026-10-10T11:18:25.990675Z",
+        "security_policy_sync_state": "applied",
+        "status": "active",
+        "uid": "",
+        "uptime_seconds": 25673911
+      },
+      "target_pce_fqdn": null,
+      "type": "Host"
+    },
+    "agent_to_pce_certificate_authentication_id": null,
+    "blocked_connection_action": "drop",
+    "caps": [
+      "write"
+    ],
+    "containers_inherit_host_policy": false,
+    "created_at": "2026-09-14T08:36:11.828517Z",
+    "created_by": {
+      "href": "/orgs/5636114/agents/24206847997120490"
+    },
+    "data_center": null,
+    "data_center_zone": null,
+    "datacenter_nat_1to1": false,
+    "deleted": false,
+    "description": null,
+    "distinguished_name": null,
+    "enforcement_mode": "selective",
+    "external_data_reference": null,
+    "external_data_set": null,
+    "hostname": "host-23.example",
+    "href": "/orgs/5636114/workloads/a8e29ffe-a882-4fa6-8809-85c9f619c4a8",
+    "ignored_interface_names": [],
+    "interfaces": [
+      {
+        "address": "10.0.1.48",
+        "cidr_block": 26,
+        "default_gateway_address": "10.0.1.44",
+        "friendly_name": null,
+        "link_state": null,
+        "loopback": false,
+        "name": "eth0",
+        "network": {
+          "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+          "name": "Corporate"
+        },
+        "network_detection_mode": "single_private_brn",
+        "public_ip": null
+      }
+    ],
+    "labels": [
+      {
+        "href": "/orgs/5636114/labels/24206847997116752",
+        "key": "env",
+        "value": "Production"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120507",
+        "key": "loc",
+        "value": "acme hospital"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120508",
+        "key": "type",
+        "value": "server"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120501",
+        "key": "compliance",
+        "value": "HIPAA"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120502",
+        "key": "DFIRBubble",
+        "value": "IR-CLEANBUBBLE"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120503",
+        "key": "role",
+        "value": "vna"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120504",
+        "key": "bu",
+        "value": "health"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120505",
+        "key": "app",
+        "value": "imaging"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120506",
+        "key": "os",
+        "value": "windows 2022"
+      }
+    ],
+    "managed": true,
+    "name": null,
+    "online": true,
+    "os_detail": "17763.1.amd64fre.rs5_release.180914-1434 (Windows Server 2019 Standard)",
+    "os_id": "win-x86_64-server",
+    "public_ip": "10.0.1.21",
+    "risk_summary": {
+      "ransomware": {
+        "last_updated_at": "2026-10-10T08:42:01Z",
+        "ransomware_protection_percent": 51.9,
+        "workload_exposure_severity": "fully_protected"
+      }
+    },
+    "service_principal_name": null,
+    "service_provider": null,
+    "services": {},
+    "updated_at": "2026-09-14T08:36:42.731156Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "ven": {
+      "hostname": "host-23.example",
+      "href": "/orgs/5636114/vens/a8e29ffe-a882-4fa6-8809-85c9f619c4a8",
+      "name": null,
+      "status": "active",
+      "ven_type": "server",
+      "version": "23.2.31-3113"
+    },
+    "visibility_level": "enhanced_data_collection"
+  },
+  {
+    "agent": {
+      "active_pce_fqdn": null,
+      "config": {
+        "log_traffic": false,
+        "mode": "selective",
+        "visibility_level": "enhanced_data_collection"
+      },
+      "href": "/orgs/5636114/agents/24206847997120468",
+      "status": {
+        "agent_health": [],
+        "agent_health_errors": {
+          "errors": [],
+          "warnings": []
+        },
+        "agent_version": "23.2.31-3113",
+        "firewall_rule_count": 0,
+        "fw_config_current": true,
+        "instance_id": null,
+        "last_heartbeat_on": "2026-10-10T11:18:25.480234Z",
+        "managed_since": "2026-09-14T08:36:09.409497Z",
+        "security_policy_applied_at": "2026-10-10T11:18:25.606730Z",
+        "security_policy_received_at": "2026-10-10T11:18:25.606730Z",
+        "security_policy_refresh_at": "2026-10-10T11:18:25.606730Z",
+        "security_policy_sync_state": "applied",
+        "status": "active",
+        "uid": "",
+        "uptime_seconds": 25673911
+      },
+      "target_pce_fqdn": null,
+      "type": "Host"
+    },
+    "agent_to_pce_certificate_authentication_id": null,
+    "blocked_connection_action": "drop",
+    "caps": [
+      "write"
+    ],
+    "containers_inherit_host_policy": false,
+    "created_at": "2026-09-14T08:36:09.377733Z",
+    "created_by": {
+      "href": "/orgs/5636114/agents/24206847997120468"
+    },
+    "data_center": null,
+    "data_center_zone": null,
+    "datacenter_nat_1to1": false,
+    "deleted": false,
+    "description": null,
+    "distinguished_name": null,
+    "enforcement_mode": "selective",
+    "external_data_reference": null,
+    "external_data_set": null,
+    "hostname": "host-24.example",
+    "href": "/orgs/5636114/workloads/cb14317e-dfbd-4eda-8c9c-ada62db51c8f",
+    "ignored_interface_names": [],
+    "interfaces": [
+      {
+        "address": "10.0.1.49",
+        "cidr_block": 26,
+        "default_gateway_address": "10.0.1.44",
+        "friendly_name": null,
+        "link_state": null,
+        "loopback": false,
+        "name": "eth0",
+        "network": {
+          "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+          "name": "Corporate"
+        },
+        "network_detection_mode": "single_private_brn",
+        "public_ip": null
+      }
+    ],
+    "labels": [
+      {
+        "href": "/orgs/5636114/labels/24206847997120505",
+        "key": "app",
+        "value": "imaging"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120506",
+        "key": "os",
+        "value": "windows 2022"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997116752",
+        "key": "env",
+        "value": "Production"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120507",
+        "key": "loc",
+        "value": "acme hospital"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120508",
+        "key": "type",
+        "value": "server"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120501",
+        "key": "compliance",
+        "value": "HIPAA"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120502",
+        "key": "DFIRBubble",
+        "value": "IR-CLEANBUBBLE"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120509",
+        "key": "role",
+        "value": "jumpbox"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120504",
+        "key": "bu",
+        "value": "health"
+      }
+    ],
+    "managed": true,
+    "name": null,
+    "online": true,
+    "os_detail": "17763.1.amd64fre.rs5_release.180914-1434 (Windows Server 2019 Standard)",
+    "os_id": "win-x86_64-server",
+    "public_ip": "10.0.1.21",
+    "risk_summary": {
+      "ransomware": {
+        "last_updated_at": "2026-10-10T08:42:01Z",
+        "ransomware_protection_percent": 51.9,
+        "workload_exposure_severity": "fully_protected"
+      }
+    },
+    "service_principal_name": null,
+    "service_provider": null,
+    "services": {},
+    "updated_at": "2026-09-14T08:36:42.979923Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "ven": {
+      "hostname": "host-24.example",
+      "href": "/orgs/5636114/vens/cb14317e-dfbd-4eda-8c9c-ada62db51c8f",
+      "name": null,
+      "status": "active",
+      "ven_type": "server",
+      "version": "23.2.31-3113"
+    },
+    "visibility_level": "enhanced_data_collection"
+  },
+  {
+    "agent": {
+      "active_pce_fqdn": null,
+      "config": {
+        "log_traffic": false,
+        "mode": "selective",
+        "visibility_level": "enhanced_data_collection"
+      },
+      "href": "/orgs/5636114/agents/24206847997120606",
+      "status": {
+        "agent_health": [],
+        "agent_health_errors": {
+          "errors": [],
+          "warnings": []
+        },
+        "agent_version": "24.2.20-2091",
+        "firewall_rule_count": 0,
+        "fw_config_current": true,
+        "instance_id": null,
+        "last_heartbeat_on": "2026-10-10T11:18:28.377157Z",
+        "managed_since": "2026-09-14T08:36:23.495666Z",
+        "security_policy_applied_at": "2026-10-10T11:18:28.497641Z",
+        "security_policy_received_at": "2026-10-10T11:18:28.497641Z",
+        "security_policy_refresh_at": "2026-10-10T11:18:28.497641Z",
+        "security_policy_sync_state": "applied",
+        "status": "active",
+        "uid": "",
+        "uptime_seconds": 25673911
+      },
+      "target_pce_fqdn": null,
+      "type": "Host"
+    },
+    "agent_to_pce_certificate_authentication_id": null,
+    "blocked_connection_action": "drop",
+    "caps": [
+      "write"
+    ],
+    "containers_inherit_host_policy": false,
+    "created_at": "2026-09-14T08:36:23.481332Z",
+    "created_by": {
+      "href": "/orgs/5636114/agents/24206847997120606"
+    },
+    "data_center": null,
+    "data_center_zone": null,
+    "datacenter_nat_1to1": false,
+    "deleted": false,
+    "description": null,
+    "distinguished_name": null,
+    "enforcement_mode": "selective",
+    "external_data_reference": null,
+    "external_data_set": null,
+    "hostname": "host-25.example",
+    "href": "/orgs/5636114/workloads/a09013dc-01b1-404a-a657-efbac5cfb2e9",
+    "ignored_interface_names": [],
+    "interfaces": [
+      {
+        "address": "10.0.1.50",
+        "cidr_block": 26,
+        "default_gateway_address": "10.0.1.51",
+        "friendly_name": null,
+        "link_state": null,
+        "loopback": false,
+        "name": "eth0",
+        "network": {
+          "href": "/orgs/5636114/networks/6722a389-7cbd-4d38-98c1-44bc0c431e75",
+          "name": "Corporate"
+        },
+        "network_detection_mode": "single_private_brn",
+        "public_ip": null
+      }
+    ],
+    "labels": [
+      {
+        "href": "/orgs/5636114/labels/24206847997120520",
+        "key": "os",
+        "value": "linux"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997116753",
+        "key": "env",
+        "value": "Staging"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120515",
+        "key": "loc",
+        "value": "ca"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120508",
+        "key": "type",
+        "value": "server"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120537",
+        "key": "DFIRBubble",
+        "value": "IR-DIRTYBUBBLE"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120517",
+        "key": "role",
+        "value": "db"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120542",
+        "key": "bu",
+        "value": "banking"
+      },
+      {
+        "href": "/orgs/5636114/labels/24206847997120544",
+        "key": "app",
+        "value": "pos"
+      }
+    ],
+    "managed": true,
+    "name": null,
+    "online": true,
+    "os_detail": "3.10.0-1160.62.1.el7.x86_64 #1 SMP Wed Mar 23 09:04:02 UTC 2022 (Red Hat Enterprise Linux Server release 7.9 (Maipo))",
+    "os_id": "centos-x86_64-7.0",
+    "public_ip": "10.0.1.21",
+    "risk_summary": {
+      "ransomware": {
+        "last_updated_at": "2026-10-10T08:42:01Z",
+        "ransomware_protection_percent": 100.0,
+        "workload_exposure_severity": "fully_protected"
+      }
+    },
+    "service_principal_name": null,
+    "service_provider": null,
+    "services": {},
+    "updated_at": "2026-09-14T08:37:06.495208Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "ven": {
+      "hostname": "host-25.example",
+      "href": "/orgs/5636114/vens/a09013dc-01b1-404a-a657-efbac5cfb2e9",
+      "name": null,
+      "status": "active",
+      "ven_type": "server",
+      "version": "24.2.20-2091"
+    },
+    "visibility_level": "enhanced_data_collection"
+  }
+]

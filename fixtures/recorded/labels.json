@@ -1,0 +1,2225 @@
+[
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-08-29T01:40:22.305Z",
+    "created_by": {
+      "href": "/service_accounts/24206847997116420"
+    },
+    "href": "/orgs/5636114/labels/24206847997116746",
+    "key": "role",
+    "updated_at": "2026-08-29T01:40:22.305Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    },
+    "value": "Web"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-08-29T01:40:22.311Z",
+    "created_by": {
+      "href": "/service_accounts/24206847997116420"
+    },
+    "href": "/orgs/5636114/labels/24206847997116747",
+    "key": "role",
+    "updated_at": "2026-08-29T01:40:22.311Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    },
+    "value": "Database"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-08-29T01:40:22.316Z",
+    "created_by": {
+      "href": "/service_accounts/24206847997116420"
+    },
+    "href": "/orgs/5636114/labels/24206847997116748",
+    "key": "role",
+    "updated_at": "2026-08-29T01:40:22.316Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    },
+    "value": "API"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-08-29T01:40:22.321Z",
+    "created_by": {
+      "href": "/service_accounts/24206847997116420"
+    },
+    "href": "/orgs/5636114/labels/24206847997116749",
+    "key": "role",
+    "updated_at": "2026-08-29T01:40:22.321Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    },
+    "value": "Mail"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-08-29T01:40:22.327Z",
+    "created_by": {
+      "href": "/service_accounts/24206847997116420"
+    },
+    "href": "/orgs/5636114/labels/24206847997116750",
+    "key": "role",
+    "updated_at": "2026-08-29T01:40:22.327Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    },
+    "value": "Single Node App"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-08-29T01:40:22.332Z",
+    "created_by": {
+      "href": "/service_accounts/24206847997116420"
+    },
+    "href": "/orgs/5636114/labels/24206847997116751",
+    "key": "role",
+    "updated_at": "2026-08-29T01:40:22.332Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    },
+    "value": "Load Balancer"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-08-29T01:40:22.337Z",
+    "created_by": {
+      "href": "/service_accounts/24206847997116420"
+    },
+    "href": "/orgs/5636114/labels/24206847997116752",
+    "key": "env",
+    "updated_at": "2026-08-29T01:40:22.337Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    },
+    "value": "Production"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-08-29T01:40:22.343Z",
+    "created_by": {
+      "href": "/service_accounts/24206847997116420"
+    },
+    "href": "/orgs/5636114/labels/24206847997116753",
+    "key": "env",
+    "updated_at": "2026-08-29T01:40:22.343Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    },
+    "value": "Staging"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-08-29T01:40:22.348Z",
+    "created_by": {
+      "href": "/service_accounts/24206847997116420"
+    },
+    "href": "/orgs/5636114/labels/24206847997116754",
+    "key": "env",
+    "updated_at": "2026-08-29T01:40:22.348Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    },
+    "value": "Development"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-08-29T01:40:22.354Z",
+    "created_by": {
+      "href": "/service_accounts/24206847997116420"
+    },
+    "href": "/orgs/5636114/labels/24206847997116755",
+    "key": "env",
+    "updated_at": "2026-08-29T01:40:22.354Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    },
+    "value": "Test"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-08-29T01:40:22.359Z",
+    "created_by": {
+      "href": "/service_accounts/24206847997116420"
+    },
+    "href": "/orgs/5636114/labels/24206847997116756",
+    "key": "loc",
+    "updated_at": "2026-08-29T01:40:22.359Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    },
+    "value": "Amazon"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-08-29T01:40:22.366Z",
+    "created_by": {
+      "href": "/service_accounts/24206847997116420"
+    },
+    "href": "/orgs/5636114/labels/24206847997116757",
+    "key": "loc",
+    "updated_at": "2026-08-29T01:40:22.366Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    },
+    "value": "Azure"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-08-29T01:40:22.371Z",
+    "created_by": {
+      "href": "/service_accounts/24206847997116420"
+    },
+    "href": "/orgs/5636114/labels/24206847997116758",
+    "key": "loc",
+    "updated_at": "2026-08-29T01:40:22.371Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    },
+    "value": "Rackspace"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:29.934Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120485",
+    "key": "app",
+    "updated_at": "2026-09-14T08:36:29.934Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "kubernetes"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:30.048Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120486",
+    "key": "app",
+    "updated_at": "2026-09-14T08:36:30.048Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "guestbook"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:30.152Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120487",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:30.152Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "redis-master"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-08-31T13:58:21.508Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "href": "/orgs/5636114/labels/24206847997118116",
+    "key": "quarantine.illumio.com",
+    "updated_at": "2026-08-31T13:58:21.508Z",
+    "updated_by": {
+      "href": "/users/0"
+    },
+    "value": "strict-quarantine"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-08-31T13:58:21.516Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "href": "/orgs/5636114/labels/24206847997118117",
+    "key": "quarantine.illumio.com",
+    "updated_at": "2026-08-31T13:58:21.516Z",
+    "updated_by": {
+      "href": "/users/0"
+    },
+    "value": "controlled-access"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:30.277Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120488",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:30.277Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "redis-slave"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:30.836Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120492",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:30.836Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "node"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:36.052Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120532",
+    "key": "app",
+    "updated_at": "2026-09-14T08:36:36.052Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "monitoring"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:39.781Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120560",
+    "key": "loc",
+    "updated_at": "2026-09-14T08:36:39.781Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "remote"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:30.428Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120489",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:30.428Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "frontend"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:30.546Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120490",
+    "key": "env",
+    "updated_at": "2026-09-14T08:36:30.546Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "quarantine"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:31.248Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120495",
+    "key": "app",
+    "updated_at": "2026-09-14T08:36:31.248Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "kube-system"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:37.452Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120543",
+    "key": "app",
+    "updated_at": "2026-09-14T08:36:37.452Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "payment"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:37.881Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120547",
+    "key": "app",
+    "updated_at": "2026-09-14T08:36:37.881Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "procurement"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:37.971Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120548",
+    "key": "app",
+    "updated_at": "2026-09-14T08:36:37.971Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "cart"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:39.638Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120559",
+    "key": "env",
+    "updated_at": "2026-09-14T08:36:39.638Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "Users"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:40.892Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120568",
+    "key": "app",
+    "updated_at": "2026-09-14T08:36:40.892Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "vdi"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:41.153Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120570",
+    "key": "risk",
+    "updated_at": "2026-09-14T08:36:41.153Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "Low Risk"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:41.662Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120575",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:41.662Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "mri"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:41.758Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120576",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:41.758Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "xray"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:42.169Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120580",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:42.169Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "sensor"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:30.701Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120491",
+    "key": "app",
+    "updated_at": "2026-09-14T08:36:30.701Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "yelb"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:31.085Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120494",
+    "key": "type",
+    "updated_at": "2026-09-14T08:36:31.085Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "k8s-node"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:31.353Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120496",
+    "key": "app",
+    "updated_at": "2026-09-14T08:36:31.353Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "illumio-system"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:31.472Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120497",
+    "key": "risk",
+    "updated_at": "2026-09-14T08:36:31.472Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "telnet-allow"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:31.601Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120498",
+    "key": "kc",
+    "updated_at": "2026-09-14T08:36:31.601Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "cluster01"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:31.779Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120499",
+    "key": "kc",
+    "updated_at": "2026-09-14T08:36:31.779Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "cluster02"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:31.898Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120500",
+    "key": "kc",
+    "updated_at": "2026-09-14T08:36:31.898Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "cluster03"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:32.682Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120501",
+    "key": "compliance",
+    "updated_at": "2026-09-14T08:36:32.682Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "HIPAA"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:32.788Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120502",
+    "key": "DFIRBubble",
+    "updated_at": "2026-09-14T08:36:32.788Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "IR-CLEANBUBBLE"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:32.885Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120503",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:32.885Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "vna"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:32.986Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120504",
+    "key": "bu",
+    "updated_at": "2026-09-14T08:36:32.986Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "health"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:33.098Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120505",
+    "key": "app",
+    "updated_at": "2026-09-14T08:36:33.098Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "imaging"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:33.200Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120506",
+    "key": "os",
+    "updated_at": "2026-09-14T08:36:33.200Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "windows 2022"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:33.327Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120507",
+    "key": "loc",
+    "updated_at": "2026-09-14T08:36:33.327Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "acme hospital"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:33.431Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120508",
+    "key": "type",
+    "updated_at": "2026-09-14T08:36:33.431Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "server"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:33.534Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120509",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:33.534Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "jumpbox"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:33.626Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120510",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:33.626Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "pacs"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:33.745Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120511",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:33.745Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "dc"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:33.845Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120512",
+    "key": "bu",
+    "updated_at": "2026-09-14T08:36:33.845Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "it"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:33.937Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120513",
+    "key": "app",
+    "updated_at": "2026-09-14T08:36:33.937Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "ad"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:34.049Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120514",
+    "key": "os",
+    "updated_at": "2026-09-14T08:36:34.049Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "windows 2008"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:34.139Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120515",
+    "key": "loc",
+    "updated_at": "2026-09-14T08:36:34.139Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "ca"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:34.249Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120516",
+    "key": "loc",
+    "updated_at": "2026-09-14T08:36:34.249Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "ny"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:34.361Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120517",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:34.361Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "db"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:34.463Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120518",
+    "key": "bu",
+    "updated_at": "2026-09-14T08:36:34.463Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "commerce"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:34.558Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120519",
+    "key": "app",
+    "updated_at": "2026-09-14T08:36:34.558Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "assetmgmt"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:34.659Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120520",
+    "key": "os",
+    "updated_at": "2026-09-14T08:36:34.659Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "linux"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:34.750Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120521",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:34.750Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "processing"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:34.854Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120522",
+    "key": "app",
+    "updated_at": "2026-09-14T08:36:34.854Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "catalog"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:34.954Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120523",
+    "key": "app",
+    "updated_at": "2026-09-14T08:36:34.954Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "shareddb"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:35.067Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120524",
+    "key": "app",
+    "updated_at": "2026-09-14T08:36:35.067Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "ecomm"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:35.196Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120525",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:35.196Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "edgetransport"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:35.304Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120526",
+    "key": "app",
+    "updated_at": "2026-09-14T08:36:35.304Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "exchange"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:41.974Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120578",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:41.974Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "scada"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:30.956Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120493",
+    "key": "type",
+    "updated_at": "2026-09-14T08:36:30.956Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "k8s-wkld"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:35.406Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120527",
+    "key": "os",
+    "updated_at": "2026-09-14T08:36:35.406Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "windows 2019"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:35.518Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120528",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:35.518Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "mailserver"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:35.646Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120529",
+    "key": "bu",
+    "updated_at": "2026-09-14T08:36:35.646Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "hr"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:35.783Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120530",
+    "key": "app",
+    "updated_at": "2026-09-14T08:36:35.783Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "hrm"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:36.179Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120533",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:36.179Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "syslog"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:36.363Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120534",
+    "key": "app",
+    "updated_at": "2026-09-14T08:36:36.363Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "soc"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:36.647Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120536",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:36.647Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "time"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:36.777Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120537",
+    "key": "DFIRBubble",
+    "updated_at": "2026-09-14T08:36:36.777Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "IR-DIRTYBUBBLE"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:36.903Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120538",
+    "key": "app",
+    "updated_at": "2026-09-14T08:36:36.903Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "ordering"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:37.016Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120539",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:37.016Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "loadbalancer"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:37.157Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120540",
+    "key": "loc",
+    "updated_at": "2026-09-14T08:36:37.157Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "ldn"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:37.265Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120541",
+    "key": "loc",
+    "updated_at": "2026-09-14T08:36:37.265Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "syd"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:37.358Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120542",
+    "key": "bu",
+    "updated_at": "2026-09-14T08:36:37.358Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "banking"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:37.572Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120544",
+    "key": "app",
+    "updated_at": "2026-09-14T08:36:37.572Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "pos"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:37.672Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120545",
+    "key": "env",
+    "updated_at": "2026-09-14T08:36:37.672Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "PCI"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:38.080Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120549",
+    "key": "app",
+    "updated_at": "2026-09-14T08:36:38.080Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "swift"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:38.204Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120550",
+    "key": "compliance",
+    "updated_at": "2026-09-14T08:36:38.204Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "SWIFT"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:38.328Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120551",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:38.328Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "gateway"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:38.521Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120552",
+    "key": "app",
+    "updated_at": "2026-09-14T08:36:38.521Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "jump-infra"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:38.981Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120555",
+    "key": "type",
+    "updated_at": "2026-09-14T08:36:38.981Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "OT"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:39.174Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120556",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:39.174Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "counter"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:39.336Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120557",
+    "key": "bu",
+    "updated_at": "2026-09-14T08:36:39.336Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "manufacturing"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:40.013Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120562",
+    "key": "risk",
+    "updated_at": "2026-09-14T08:36:40.013Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "High Risk"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:40.479Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120565",
+    "key": "os",
+    "updated_at": "2026-09-14T08:36:40.479Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "Mac"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:41.464Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120573",
+    "key": "env",
+    "updated_at": "2026-09-14T08:36:41.464Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "medical"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:35.915Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120531",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:35.915Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "nagios"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:36.501Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120535",
+    "key": "app",
+    "updated_at": "2026-09-14T08:36:36.501Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "infra-mgmt"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:37.776Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120546",
+    "key": "compliance",
+    "updated_at": "2026-09-14T08:36:37.776Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "PCI-DSS"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:38.672Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120553",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:38.672Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "filer"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:38.834Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120554",
+    "key": "loc",
+    "updated_at": "2026-09-14T08:36:38.834Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "bos"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:39.498Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120558",
+    "key": "app",
+    "updated_at": "2026-09-14T08:36:39.498Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "packaging"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:40.112Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120563",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:40.112Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "admin"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:40.284Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120564",
+    "key": "app",
+    "updated_at": "2026-09-14T08:36:40.284Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "laptop"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:41.276Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120571",
+    "key": "DFIRBubble",
+    "updated_at": "2026-09-14T08:36:41.276Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "IR-RECOVERY-TEAM"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:41.372Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120572",
+    "key": "os",
+    "updated_at": "2026-09-14T08:36:41.372Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "Windows 11"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:39.909Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120561",
+    "key": "type",
+    "updated_at": "2026-09-14T08:36:39.909Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "endpoint"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:40.634Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120566",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:40.634Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "employee"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:40.759Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120567",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:40.759Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "contractor"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:41.016Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120569",
+    "key": "os",
+    "updated_at": "2026-09-14T08:36:41.016Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "Windows 10"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:41.564Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120574",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:41.564Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "ct"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:41.868Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120577",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:41.868Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "control"
+  },
+  {
+    "caps": [
+      "read",
+      "write"
+    ],
+    "created_at": "2026-09-14T08:36:42.076Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "href": "/orgs/5636114/labels/24206847997120579",
+    "key": "role",
+    "updated_at": "2026-09-14T08:36:42.076Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    },
+    "value": "plc"
+  },
+  {
+    "caps": [
+      "read"
+    ],
+    "created_at": "2026-09-28T14:19:03.039Z",
+    "created_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "href": "/orgs/5636114/labels/24206847997122290",
+    "key": "servicecategory",
+    "updated_at": "2026-09-28T14:19:03.039Z",
+    "updated_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "value": "Network Management"
+  },
+  {
+    "caps": [
+      "read"
+    ],
+    "created_at": "2026-09-28T14:19:03.202Z",
+    "created_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "href": "/orgs/5636114/labels/24206847997122291",
+    "key": "servicerole",
+    "updated_at": "2026-09-28T14:19:03.202Z",
+    "updated_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "value": "SQLServers"
+  },
+  {
+    "caps": [
+      "read"
+    ],
+    "created_at": "2026-09-28T14:19:03.332Z",
+    "created_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "href": "/orgs/5636114/labels/24206847997122292",
+    "key": "servicerole",
+    "updated_at": "2026-09-28T14:19:03.332Z",
+    "updated_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "value": "VirtualNetworks"
+  },
+  {
+    "caps": [
+      "read"
+    ],
+    "created_at": "2026-09-28T14:19:05.733Z",
+    "created_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "href": "/orgs/5636114/labels/24206847997122308",
+    "key": "servicerole",
+    "updated_at": "2026-09-28T14:19:05.733Z",
+    "updated_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "value": "PrivateEndpoints"
+  },
+  {
+    "caps": [
+      "read"
+    ],
+    "created_at": "2026-09-28T14:19:03.500Z",
+    "created_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "href": "/orgs/5636114/labels/24206847997122293",
+    "key": "servicecategory",
+    "updated_at": "2026-09-28T14:19:03.500Z",
+    "updated_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "value": "Databases"
+  },
+  {
+    "caps": [
+      "read"
+    ],
+    "created_at": "2026-09-28T14:19:03.671Z",
+    "created_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "href": "/orgs/5636114/labels/24206847997122294",
+    "key": "servicerole",
+    "updated_at": "2026-09-28T14:19:03.671Z",
+    "updated_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "value": "NetworkInterfaces"
+  },
+  {
+    "caps": [
+      "read"
+    ],
+    "created_at": "2026-09-28T14:19:04.909Z",
+    "created_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "href": "/orgs/5636114/labels/24206847997122302",
+    "key": "servicerole",
+    "updated_at": "2026-09-28T14:19:04.909Z",
+    "updated_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "value": "Vaults"
+  },
+  {
+    "caps": [
+      "read"
+    ],
+    "created_at": "2026-09-28T14:19:03.874Z",
+    "created_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "href": "/orgs/5636114/labels/24206847997122295",
+    "key": "servicecategory",
+    "updated_at": "2026-09-28T14:19:03.874Z",
+    "updated_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "value": "Compute"
+  },
+  {
+    "caps": [
+      "read"
+    ],
+    "created_at": "2026-09-28T14:19:04.035Z",
+    "created_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "href": "/orgs/5636114/labels/24206847997122296",
+    "key": "servicerole",
+    "updated_at": "2026-09-28T14:19:04.035Z",
+    "updated_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "value": "NetworkSubnets"
+  },
+  {
+    "caps": [
+      "read"
+    ],
+    "created_at": "2026-09-28T14:19:04.191Z",
+    "created_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "href": "/orgs/5636114/labels/24206847997122297",
+    "key": "servicerole",
+    "updated_at": "2026-09-28T14:19:04.191Z",
+    "updated_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "value": "ComputeVirtualMachines"
+  },
+  {
+    "caps": [
+      "read"
+    ],
+    "created_at": "2026-09-28T14:19:04.455Z",
+    "created_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "href": "/orgs/5636114/labels/24206847997122299",
+    "key": "servicerole",
+    "updated_at": "2026-09-28T14:19:04.455Z",
+    "updated_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "value": "NetworkSecurityGroups"
+  },
+  {
+    "caps": [
+      "read"
+    ],
+    "created_at": "2026-09-28T14:19:05.056Z",
+    "created_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "href": "/orgs/5636114/labels/24206847997122303",
+    "key": "servicecategory",
+    "updated_at": "2026-09-28T14:19:05.056Z",
+    "updated_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "value": "Storage"
+  },
+  {
+    "caps": [
+      "read"
+    ],
+    "created_at": "2026-09-28T14:19:04.324Z",
+    "created_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "href": "/orgs/5636114/labels/24206847997122298",
+    "key": "servicecategory",
+    "updated_at": "2026-09-28T14:19:04.324Z",
+    "updated_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "value": "Network Security"
+  },
+  {
+    "caps": [
+      "read"
+    ],
+    "created_at": "2026-09-28T14:19:04.598Z",
+    "created_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "href": "/orgs/5636114/labels/24206847997122300",
+    "key": "servicerole",
+    "updated_at": "2026-09-28T14:19:04.598Z",
+    "updated_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "value": "DocDBAccounts"
+  },
+  {
+    "caps": [
+      "read"
+    ],
+    "created_at": "2026-09-28T14:19:04.764Z",
+    "created_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "href": "/orgs/5636114/labels/24206847997122301",
+    "key": "servicecategory",
+    "updated_at": "2026-09-28T14:19:04.764Z",
+    "updated_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "value": "Security Infrastructure"
+  },
+  {
+    "caps": [
+      "read"
+    ],
+    "created_at": "2026-09-28T14:19:05.189Z",
+    "created_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "href": "/orgs/5636114/labels/24206847997122304",
+    "key": "servicerole",
+    "updated_at": "2026-09-28T14:19:05.189Z",
+    "updated_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "value": "StorageAccounts"
+  },
+  {
+    "caps": [
+      "read"
+    ],
+    "created_at": "2026-09-28T14:19:06.030Z",
+    "created_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "href": "/orgs/5636114/labels/24206847997122310",
+    "key": "servicerole",
+    "updated_at": "2026-09-28T14:19:06.030Z",
+    "updated_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "value": "ManagedSQLInstances"
+  },
+  {
+    "caps": [
+      "read"
+    ],
+    "created_at": "2026-09-28T14:19:05.318Z",
+    "created_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "href": "/orgs/5636114/labels/24206847997122305",
+    "key": "servicecategory",
+    "updated_at": "2026-09-28T14:19:05.318Z",
+    "updated_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "value": "Serverless"
+  },
+  {
+    "caps": [
+      "read"
+    ],
+    "created_at": "2026-09-28T14:19:05.472Z",
+    "created_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "href": "/orgs/5636114/labels/24206847997122306",
+    "key": "servicerole",
+    "updated_at": "2026-09-28T14:19:05.472Z",
+    "updated_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "value": "Sites"
+  },
+  {
+    "caps": [
+      "read"
+    ],
+    "created_at": "2026-09-28T14:19:05.593Z",
+    "created_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "href": "/orgs/5636114/labels/24206847997122307",
+    "key": "servicerole",
+    "updated_at": "2026-09-28T14:19:05.593Z",
+    "updated_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "value": "VirtualNetworksPeering"
+  },
+  {
+    "caps": [
+      "read"
+    ],
+    "created_at": "2026-09-28T14:19:05.885Z",
+    "created_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "href": "/orgs/5636114/labels/24206847997122309",
+    "key": "servicerole",
+    "updated_at": "2026-09-28T14:19:05.885Z",
+    "updated_by": {
+      "href": "/service_accounts/56294995342132804"
+    },
+    "value": "NetworkPublicIPs"
+  }
+]

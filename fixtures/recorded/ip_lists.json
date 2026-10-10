@@ -1,0 +1,1630 @@
+[
+  {
+    "created_at": "2026-08-29T01:40:21.727Z",
+    "created_by": {
+      "href": "/users/0"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "fqdns": [],
+    "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997116452",
+    "ip_ranges": [
+      {
+        "exclusion": false,
+        "from_ip": "0.0.0.0/0"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "::/0"
+      }
+    ],
+    "name": "Any (0.0.0.0/0 and ::/0)",
+    "update_type": null,
+    "updated_at": "2026-08-29T01:40:21.730Z",
+    "updated_by": {
+      "href": "/service_accounts/24206847997116420"
+    }
+  },
+  {
+    "created_at": "2026-09-14T08:37:43.274Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "fqdns": [],
+    "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997117019",
+    "ip_ranges": [
+      {
+        "exclusion": false,
+        "from_ip": "0.0.0.0/0"
+      },
+      {
+        "exclusion": true,
+        "from_ip": "10.0.0.1/8"
+      },
+      {
+        "exclusion": true,
+        "from_ip": "10.0.0.2/12"
+      },
+      {
+        "exclusion": true,
+        "from_ip": "10.0.0.3/16"
+      },
+      {
+        "exclusion": true,
+        "from_ip": "10.0.0.4/16"
+      },
+      {
+        "exclusion": true,
+        "from_ip": "10.0.0.5",
+        "to_ip": "10.0.0.6"
+      },
+      {
+        "exclusion": true,
+        "from_ip": "10.0.0.7/24"
+      }
+    ],
+    "name": "internet",
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:43.286Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "created_at": "2026-09-14T08:37:44.108Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "fqdns": [
+      {
+        "fqdn": "fqdn-1.example"
+      },
+      {
+        "fqdn": "fqdn-2.example"
+      },
+      {
+        "fqdn": "fqdn-3.example"
+      },
+      {
+        "fqdn": "fqdn-4.example"
+      },
+      {
+        "fqdn": "fqdn-5.example"
+      },
+      {
+        "fqdn": "fqdn-6.example"
+      },
+      {
+        "fqdn": "fqdn-7.example"
+      },
+      {
+        "fqdn": "fqdn-8.example"
+      },
+      {
+        "fqdn": "fqdn-9.example"
+      },
+      {
+        "fqdn": "fqdn-10.example"
+      },
+      {
+        "fqdn": "fqdn-11.example"
+      },
+      {
+        "fqdn": "fqdn-12.example"
+      },
+      {
+        "fqdn": "fqdn-13.example"
+      },
+      {
+        "fqdn": "fqdn-14.example"
+      },
+      {
+        "fqdn": "fqdn-15.example"
+      },
+      {
+        "fqdn": "fqdn-16.example"
+      },
+      {
+        "fqdn": "fqdn-17.example"
+      },
+      {
+        "fqdn": "fqdn-18.example"
+      },
+      {
+        "fqdn": "fqdn-19.example"
+      },
+      {
+        "fqdn": "fqdn-20.example"
+      },
+      {
+        "fqdn": "fqdn-21.example"
+      },
+      {
+        "fqdn": "fqdn-22.example"
+      },
+      {
+        "fqdn": "fqdn-23.example"
+      },
+      {
+        "fqdn": "fqdn-24.example"
+      },
+      {
+        "fqdn": "fqdn-25.example"
+      },
+      {
+        "fqdn": "fqdn-26.example"
+      },
+      {
+        "fqdn": "fqdn-27.example"
+      },
+      {
+        "fqdn": "fqdn-28.example"
+      }
+    ],
+    "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997117031",
+    "ip_ranges": [
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.8"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.9"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.10"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.11"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.12"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.13"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.14"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.15"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.16"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.17"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.18"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.19"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.20"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.21"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.22"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.23"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.24"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.25"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.26"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.27"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.28"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.29"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.30"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.31"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.32"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.33"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.34"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.35"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.36"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.37"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.38"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.39"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.40"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.41"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.42"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.43"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.44"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.45"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.46"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.47"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.48"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.49"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.50"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.51"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.52"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.53"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.54"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.55"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.56"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.57"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.58"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.59"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.60"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.61"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.62"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.63"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.64"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.65"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.66"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.67"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.68"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.69"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.70"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.71"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.72"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.73"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.74"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.75"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.76"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.77"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.78"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.79"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.80"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.81"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.82"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.83"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.84"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.85"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.86"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.87"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.88"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.89"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.90"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.91"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.92"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.93"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.94"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.95"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.96"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.97"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.98"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.99"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.100"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.101"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.102"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.103"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.104"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.105"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.106"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.107"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.108"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.109"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.110"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.111"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.112"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.113"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.114"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.115"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.116"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.117"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.118"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.119"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.120"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.121"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.122"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.123"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.124"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.125"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.126"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.127"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.128"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.129"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.130"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.131"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.132"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.133"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.134"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.135"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.136"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.137"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.138"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.139"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.140"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.141"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.142"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.143"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.144"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.145"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.146"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.147"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.148"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.149"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.150"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.151"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.152"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.153"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.154"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.155"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.156"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.157"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.158"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.159"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.160"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.161"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.162"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.163"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.164"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.165"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.166"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.167"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.168"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.169"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.170"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.171"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.172"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.173"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.174"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.175"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.176"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.177"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.178"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.179"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.180"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.181"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.182"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.183"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.184"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.185"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.186"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.187"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.188"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.189"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.190"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.191"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.192"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.193"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.194"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.195"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.196"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.197"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.198"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.199"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.200"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.201"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.202"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.203"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.204"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.205"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.206"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.207"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.208"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.209"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.210"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.211"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.212"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.213"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.214"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.215"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.216"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.217"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.218"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.219"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.220"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.221"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.222"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.223"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.224"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.225"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.226"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.227"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.228"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.229"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.230"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.231"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.232"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.233"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.234"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.235"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.236"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.237"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.238"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.239"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.240"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.241"
+      }
+    ],
+    "name": "IPL-EDR-CROWDSTRIKE-FALCON",
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:44.350Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "created_at": "2026-09-14T08:37:43.391Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "fqdns": [],
+    "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997117021",
+    "ip_ranges": [
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.4/16"
+      }
+    ],
+    "name": "link local",
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:43.395Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "created_at": "2026-09-14T08:37:45.128Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "fqdns": [
+      {
+        "fqdn": "fqdn-29.example"
+      },
+      {
+        "fqdn": "fqdn-30.example"
+      },
+      {
+        "fqdn": "fqdn-31.example"
+      },
+      {
+        "fqdn": "fqdn-32.example"
+      },
+      {
+        "fqdn": "fqdn-33.example"
+      }
+    ],
+    "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997117035",
+    "ip_ranges": [],
+    "name": "IPL-GOOGLE-NTP",
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:45.134Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "created_at": "2026-09-14T08:37:43.508Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "fqdns": [],
+    "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997117023",
+    "ip_ranges": [
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.242"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.243"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.244"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.245"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.246"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.247"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.248"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.249"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.250"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.251"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.252"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.253"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.254"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.255"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.1.0"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.1.1"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.1.2"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.1.3"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.1.4"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.1.5"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.1.6"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.1.7"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.1.8"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.1.9"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.1.10"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.1.11"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.1.12"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.1.13"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.1.14"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.1.15"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.1.16"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.1.17"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.1.18"
+      }
+    ],
+    "name": "Malicious IPs from Threat Feed",
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:43.544Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "created_at": "2026-09-14T08:37:43.700Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "fqdns": [],
+    "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997117025",
+    "ip_ranges": [
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.5",
+        "to_ip": "10.0.0.6"
+      }
+    ],
+    "name": "multicast",
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:43.705Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "created_at": "2026-09-14T08:37:43.806Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "fqdns": [],
+    "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997117027",
+    "ip_ranges": [
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.1/8"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.2/12"
+      },
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.3/16"
+      }
+    ],
+    "name": "rfc1918",
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:43.811Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "created_at": "2026-09-14T08:37:43.921Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "fqdns": [
+      {
+        "fqdn": "fqdn-34.example"
+      }
+    ],
+    "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997117029",
+    "ip_ranges": [],
+    "name": "IPL-DFIR-ARTIFACT-STORAGE",
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:43.928Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "created_at": "2026-09-14T08:37:43.171Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "fqdns": [],
+    "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997117017",
+    "ip_ranges": [
+      {
+        "exclusion": false,
+        "from_ip": "10.0.0.7/24"
+      }
+    ],
+    "name": "hq",
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:43.177Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "created_at": "2026-09-14T08:37:44.871Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "fqdns": [
+      {
+        "fqdn": "fqdn-35.example"
+      },
+      {
+        "fqdn": "fqdn-36.example"
+      },
+      {
+        "fqdn": "fqdn-37.example"
+      },
+      {
+        "fqdn": "fqdn-38.example"
+      },
+      {
+        "fqdn": "fqdn-39.example"
+      },
+      {
+        "fqdn": "fqdn-40.example"
+      },
+      {
+        "fqdn": "fqdn-41.example"
+      },
+      {
+        "fqdn": "fqdn-42.example"
+      },
+      {
+        "fqdn": "fqdn-43.example"
+      },
+      {
+        "fqdn": "fqdn-44.example"
+      },
+      {
+        "fqdn": "fqdn-45.example"
+      },
+      {
+        "fqdn": "fqdn-46.example"
+      },
+      {
+        "fqdn": "fqdn-47.example"
+      },
+      {
+        "fqdn": "fqdn-48.example"
+      },
+      {
+        "fqdn": "fqdn-49.example"
+      },
+      {
+        "fqdn": "fqdn-50.example"
+      },
+      {
+        "fqdn": "fqdn-51.example"
+      },
+      {
+        "fqdn": "fqdn-52.example"
+      },
+      {
+        "fqdn": "fqdn-53.example"
+      },
+      {
+        "fqdn": "fqdn-54.example"
+      },
+      {
+        "fqdn": "fqdn-55.example"
+      },
+      {
+        "fqdn": "fqdn-56.example"
+      },
+      {
+        "fqdn": "fqdn-57.example"
+      },
+      {
+        "fqdn": "fqdn-58.example"
+      },
+      {
+        "fqdn": "fqdn-59.example"
+      },
+      {
+        "fqdn": "fqdn-60.example"
+      },
+      {
+        "fqdn": "fqdn-61.example"
+      },
+      {
+        "fqdn": "fqdn-62.example"
+      },
+      {
+        "fqdn": "fqdn-63.example"
+      },
+      {
+        "fqdn": "fqdn-64.example"
+      },
+      {
+        "fqdn": "fqdn-65.example"
+      }
+    ],
+    "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997117033",
+    "ip_ranges": [],
+    "name": "IPL-EDR-MICROSOFT-DEFENDER-ENDPOINT",
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:44.879Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  },
+  {
+    "created_at": "2026-09-14T08:37:45.280Z",
+    "created_by": {
+      "href": "/users/56294995342162285"
+    },
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "fqdns": [
+      {
+        "fqdn": "fqdn-66.example"
+      },
+      {
+        "fqdn": "fqdn-67.example"
+      },
+      {
+        "fqdn": "fqdn-58.example"
+      },
+      {
+        "fqdn": "fqdn-60.example"
+      },
+      {
+        "fqdn": "fqdn-68.example"
+      },
+      {
+        "fqdn": "fqdn-69.example"
+      },
+      {
+        "fqdn": "fqdn-62.example"
+      },
+      {
+        "fqdn": "fqdn-70.example"
+      },
+      {
+        "fqdn": "fqdn-71.example"
+      },
+      {
+        "fqdn": "fqdn-63.example"
+      },
+      {
+        "fqdn": "fqdn-72.example"
+      },
+      {
+        "fqdn": "fqdn-73.example"
+      },
+      {
+        "fqdn": "fqdn-74.example"
+      },
+      {
+        "fqdn": "fqdn-75.example"
+      },
+      {
+        "fqdn": "fqdn-65.example"
+      },
+      {
+        "fqdn": "fqdn-76.example"
+      },
+      {
+        "fqdn": "fqdn-77.example"
+      },
+      {
+        "fqdn": "fqdn-78.example"
+      },
+      {
+        "fqdn": "fqdn-79.example"
+      },
+      {
+        "fqdn": "fqdn-80.example"
+      },
+      {
+        "fqdn": "fqdn-81.example"
+      },
+      {
+        "fqdn": "fqdn-82.example"
+      },
+      {
+        "fqdn": "fqdn-83.example"
+      },
+      {
+        "fqdn": "fqdn-84.example"
+      },
+      {
+        "fqdn": "fqdn-85.example"
+      }
+    ],
+    "href": "/orgs/5636114/sec_policy/draft/ip_lists/24206847997117037",
+    "ip_ranges": [],
+    "name": "IPL-MICROSOFT-WINDOWS-UPDATE",
+    "update_type": null,
+    "updated_at": "2026-09-14T08:37:45.288Z",
+    "updated_by": {
+      "href": "/users/56294995342162285"
+    }
+  }
+]
