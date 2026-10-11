@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ Keys ────────────────────────────────── 1-22 of 32 · j/k scroll · Esc closes ╮
+╭ Keys ────────────────────────────────── 1-22 of 33 · j/k scroll · Esc closes ╮
 │1 2 3 4 5                Traffic · Policy · Objects · Workloads · Events      │
 │:                        command prompt: :traffic :policy :objects :workloads │
 │                         :events  :iplists  :filter <expr>  :window <dur>     │
@@ -15,14 +15,14 @@ expression: out
 │/                        search in the current table (Enter keep, Esc clear)  │
 │r                        refresh the current screen (bypasses the cache)      │
 │a                        toggle auto-refresh for the current screen           │
-│Traffic  v               cycle Flows · App-to-app · Blocked                   │
+│Traffic  v               cycle Flows · App-to-app · Mesh · Blocked            │
 │Traffic  f               edit filter: window src dst service decisions        │
 │Traffic  g               pick the label keys every view groups by             │
-│Traffic  Enter           detail (flows) · drill into a pair (aggregate)       │
-│Traffic  w               draft allow rule from a blocked flow (writes)        │
+│Traffic  Enter           detail (flows) · drill into a row (app-to-app, mesh) │
+│Mesh     u / p           show or hide the user · process columns              │
+│Traffic  w               draft allow rule from a blocked flow or row (writes) │
 │w form   Ctrl-A Ctrl-N   all labels · new ruleset                             │
 │Policy   d               toggle draft / active                                │
 │Policy   p               pending changes                                      │
 │Policy   Tab / Enter     pane · rule detail · on a ruleset: load deny rules   │
-│Policy   N               new deny rule in the selected ruleset (rules pane)   │
 ╰──────────────────────────────────────────────────────────────────────────────╯

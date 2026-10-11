@@ -56,6 +56,7 @@ pub fn render(model: &Model, f: &mut Frame, body: Rect) {
         }
         // The detail pane belongs to the Flows view; the others use its space.
         TrafficView::Aggregate => render_groups(model, f, l.table.union(l.detail)),
+        TrafficView::Mesh => render_mesh(model, f, l.table.union(l.detail)),
         TrafficView::Blocked => render_blocked(model, f, l.table.union(l.detail)),
     }
 }
@@ -178,6 +179,23 @@ fn render_groups(model: &Model, f: &mut Frame, area: Rect) {
     let theme = t.clone();
     crate::tui::ui::widgets::table::render(f, area, &model.traffic.groups, t, block, &move |g| {
         theme.decision_style(g.dominant())
+    });
+}
+
+/// Rows are styled by their dominant decision, like App-to-app.
+fn render_mesh(model: &Model, f: &mut Frame, area: Rect) {
+    let t = &model.theme;
+    let meta = crate::tui::ui::widgets::table::header_meta(&model.traffic.mesh);
+    let meta = format!(
+        "keys {} · u user · p process · Enter drills{}{}",
+        model.traffic.effective_keys().join(","),
+        if meta.is_empty() { "" } else { " · " },
+        meta
+    );
+    let block = panel(TrafficView::Mesh.title(), &meta, t, true);
+    let theme = t.clone();
+    crate::tui::ui::widgets::table::render(f, area, &model.traffic.mesh, t, block, &move |r| {
+        theme.decision_style(r.dominant())
     });
 }
 

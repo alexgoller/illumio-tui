@@ -1215,6 +1215,10 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 search_key(&mut t.groups, k);
                 t.groups.ensure_visible(page);
             }
+            TrafficView::Mesh => {
+                search_key(&mut t.mesh, k);
+                t.mesh.ensure_visible(page);
+            }
             TrafficView::Blocked => {
                 search_key(&mut t.blocked, k);
                 t.blocked.ensure_visible(page);
@@ -1237,12 +1241,26 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             model.overlay = Overlay::GroupKeys(open_key_picker(model));
             return Vec::new();
         }
+        KeyCode::Char(c @ ('u' | 'p')) if model.traffic.view == TrafficView::Mesh => {
+            model.traffic.toggle_mesh_column(c == 'u');
+        }
         KeyCode::Enter => match model.traffic.view {
             TrafficView::Aggregate => {
                 if let Some(g) = model.traffic.groups.selected_item() {
                     model.traffic.drill = Some(Drill::Pair(g.src.clone(), g.dst.clone()));
                     model.traffic.view = TrafficView::Flows;
                     model.traffic.rebuild_views();
+                }
+            }
+            TrafficView::Mesh => {
+                let t = &mut model.traffic;
+                if let Some(r) = t.mesh.selected_item() {
+                    t.drill = Some(Drill::Mesh {
+                        key: r.key(),
+                        cols: t.mesh_cols,
+                    });
+                    t.view = TrafficView::Flows;
+                    t.rebuild_views();
                 }
             }
             TrafficView::Flows => model.traffic.show_detail = !model.traffic.show_detail,
@@ -1259,6 +1277,7 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             match t.view {
                 TrafficView::Flows => table_key(&mut t.flows, k, page),
                 TrafficView::Aggregate => table_key(&mut t.groups, k, page),
+                TrafficView::Mesh => table_key(&mut t.mesh, k, page),
                 TrafficView::Blocked => table_key(&mut t.blocked, k, page),
             }
         }
@@ -1267,6 +1286,7 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     match t.view {
         TrafficView::Flows => t.flows.ensure_visible(page),
         TrafficView::Aggregate => t.groups.ensure_visible(page),
+        TrafficView::Mesh => t.mesh.ensure_visible(page),
         TrafficView::Blocked => t.blocked.ensure_visible(page),
     }
     Vec::new()
@@ -1357,6 +1377,7 @@ fn scroll_focused(model: &mut Model, down: bool) {
             match t.view {
                 TrafficView::Flows => step(&mut t.flows, down, page),
                 TrafficView::Aggregate => step(&mut t.groups, down, page),
+                TrafficView::Mesh => step(&mut t.mesh, down, page),
                 TrafficView::Blocked => step(&mut t.blocked, down, page),
             }
         }
@@ -2288,8 +2309,8 @@ fn rule_intent(p: &PolicyState, c: char) -> Option<EditIntent> {
 
 /// `w` on Traffic: a draft allow rule from the selected blocked or
 /// potentially blocked flow (Flows view or a drilled pair), or from the
-/// first such flow behind a Blocked row. App-to-app refuses: a pair holds
-/// flows of every decision.
+/// first such flow behind a Blocked or Mesh row. App-to-app refuses: a
+/// pair holds flows of every decision.
 fn flow_rule_key(model: &mut Model) -> Vec<Cmd> {
     if writes_refused(model) {
         return Vec::new();
@@ -2300,6 +2321,10 @@ fn flow_rule_key(model: &mut Model) -> Vec<Cmd> {
         TrafficView::Blocked => t.blocked.selected_item().and_then(|b| {
             let keys = t.effective_keys();
             t.first_flow(|f| b.contains(f, &keys))
+        }),
+        TrafficView::Mesh => t.mesh.selected_item().and_then(|r| {
+            let keys = t.effective_keys();
+            t.first_flow(|f| r.contains(f, &keys, t.mesh_cols))
         }),
         TrafficView::Aggregate => {
             model.status = StatusLine::warn("select a flow in the Flows view (Enter on a pair)");
@@ -2477,6 +2502,8 @@ mod tests {
             m.traffic.groups.rows()
         );
         assert!(update(&mut m, key('v')).is_empty());
+        assert_eq!(m.traffic.view, TrafficView::Mesh);
+        assert!(update(&mut m, key('v')).is_empty());
         assert_eq!(m.traffic.view, TrafficView::Blocked);
         assert_eq!(m.traffic.blocked.len(), 2);
         assert!(update(&mut m, key('v')).is_empty());
@@ -2633,6 +2660,106 @@ mod tests {
     }
 
     #[test]
+    fn mesh_sits_between_app_to_app_and_blocked_and_u_p_regroup_without_requests() {
+        use crate::tui::test_support::model_with_rich_flows;
+        let mut m = model_with_rich_flows();
+        let mut seen = Vec::new();
+        for _ in 0..4 {
+            assert!(update(&mut m, key('v')).is_empty());
+            seen.push(m.traffic.view);
+        }
+        assert_eq!(
+            seen,
+            vec![
+                TrafficView::Aggregate,
+                TrafficView::Mesh,
+                TrafficView::Blocked,
+                TrafficView::Flows
+            ]
+        );
+        quiet(&mut m, key('v'));
+        quiet(&mut m, key('v'));
+        assert_eq!(m.traffic.view, TrafficView::Mesh);
+        assert_eq!(m.traffic.mesh.len(), 30);
+        quiet(&mut m, key('j'));
+        quiet(&mut m, key('s'));
+        assert!(update(&mut m, key('u')).is_empty(), "no request");
+        assert!(!m.traffic.mesh_cols.user);
+        assert_eq!(m.traffic.mesh.len(), 29);
+        assert_eq!(m.traffic.mesh.selected_pos(), 0, "back on the first row");
+        assert_eq!(m.traffic.mesh.sort(), None, "a new table");
+        assert!(update(&mut m, key('p')).is_empty());
+        assert_eq!(m.traffic.mesh.len(), 28);
+        assert_eq!(m.traffic.mesh.columns[0].title, "src");
+        quiet(&mut m, key('u'));
+        quiet(&mut m, key('p'));
+        assert_eq!(m.traffic.mesh.len(), 30);
+        // u and p mean nothing on the other views.
+        quiet(&mut m, key('v'));
+        assert!(update(&mut m, key('u')).is_empty());
+        assert!(m.traffic.mesh_cols.user);
+    }
+
+    #[test]
+    fn enter_on_a_mesh_row_drills_to_its_flows_and_esc_clears() {
+        use crate::tui::test_support::model_with_rich_flows;
+        let mut m = model_with_rich_flows();
+        m.traffic.view = TrafficView::Mesh;
+        quiet(&mut m, key('u'));
+        quiet(&mut m, key('p'));
+        let row = m
+            .traffic
+            .mesh
+            .rows()
+            .iter()
+            .position(|r| r.flows == 3)
+            .unwrap();
+        for _ in 0..row {
+            quiet(&mut m, key('j'));
+        }
+        assert!(update(&mut m, enter()).is_empty());
+        assert_eq!(m.traffic.view, TrafficView::Flows);
+        assert_eq!(
+            m.traffic.flows.len(),
+            3,
+            "java, batch and python3 to shop-db-p"
+        );
+        assert!(m.traffic.flows.rows().iter().all(|r| r.port == Some(5432)));
+        assert!(matches!(m.traffic.drill, Some(Drill::Mesh { .. })));
+        assert_eq!(
+            m.traffic.drill.as_ref().unwrap().title(),
+            "shop/prod → shop/prod 5432/tcp"
+        );
+        assert!(update(&mut m, kc(KeyCode::Esc)).is_empty());
+        assert!(m.traffic.drill.is_none());
+        assert_eq!(m.traffic.flows.len(), 30);
+    }
+
+    #[test]
+    fn w_on_a_mesh_row_drafts_from_its_first_blocked_flow() {
+        use crate::tui::test_support::model_with_rich_flows;
+        let mut m = writes_on(model_with_rich_flows());
+        m.traffic.view = TrafficView::Mesh;
+        assert!(update(&mut m, key('w')).is_empty());
+        assert_eq!(m.status.text, "this flow is allowed; nothing to add");
+        let pos = m
+            .traffic
+            .mesh
+            .rows()
+            .iter()
+            .position(|r| r.blocked > 0)
+            .unwrap();
+        for _ in 0..pos {
+            quiet(&mut m, key('j'));
+        }
+        assert!(update(&mut m, key('w')).is_empty(), "no request");
+        let Overlay::Form(f) = &m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        assert_eq!(f.title, "Allow rule from flow");
+    }
+
+    #[test]
     fn enter_in_aggregate_drills_into_the_pair_and_esc_clears() {
         use crate::tui::model::TrafficView;
         use crate::tui::test_support::model_with_flows;
@@ -2779,27 +2906,28 @@ mod tests {
     }
 
     #[test]
-    fn search_captures_keys_on_aggregate_and_blocked_views() {
+    fn search_captures_keys_on_aggregate_mesh_and_blocked_views() {
         use crate::tui::test_support::model_with_flows;
-        for presses in [1, 2] {
+        for presses in [1, 2, 3] {
             let mut m = model_with_flows();
             for _ in 0..presses {
-                update(&mut m, key('v'));
+                quiet(&mut m, key('v'));
             }
-            update(&mut m, key('/'));
+            quiet(&mut m, key('/'));
             for c in ['q', ':', '?'] {
-                update(&mut m, key(c));
+                quiet(&mut m, key(c));
             }
             assert_eq!(m.screen, Screen::Traffic);
             assert!(!m.quit);
             assert_eq!(m.overlay, Overlay::None);
             let table_search = |m: &Model| match m.traffic.view {
                 TrafficView::Aggregate => m.traffic.groups.search_text().to_string(),
+                TrafficView::Mesh => m.traffic.mesh.search_text().to_string(),
                 TrafficView::Blocked => m.traffic.blocked.search_text().to_string(),
                 TrafficView::Flows => unreachable!("v moved off Flows"),
             };
             assert_eq!(table_search(&m), "q:?");
-            update(
+            quiet(
                 &mut m,
                 Msg::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
             );
@@ -5735,7 +5863,8 @@ mod tests {
     fn help_scrolls_to_its_last_line_and_reopens_at_the_top() {
         use crate::tui::ui::widgets::overlay::{HELP_LINES, help_last_scroll};
         let mut m = model_fixture(); // 80x24
-        assert_eq!(HELP_LINES.len(), 32);
+        assert_eq!(HELP_LINES.len(), 33);
+        assert!(HELP_LINES.iter().any(|(k, _)| *k == "Mesh     u / p"));
         assert!(HELP_LINES.iter().any(|(_, d)| *d == ":writes [on|off]"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "IP lists Enter"));
         assert!(
@@ -5745,7 +5874,7 @@ mod tests {
         );
         update(&mut m, key('?'));
         let last = help_last_scroll(24);
-        assert_eq!(last, 10, "32 lines, 22 rows inside the box");
+        assert_eq!(last, 11, "33 lines, 22 rows inside the box");
 
         for _ in 0..40 {
             update(&mut m, key('j'));

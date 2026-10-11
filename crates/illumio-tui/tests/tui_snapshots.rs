@@ -1086,3 +1086,26 @@ fn flow_detail_shows_both_label_sets_and_the_bytes() {
     assert!(out.contains("ip lists: Corp"), "{out}");
     assert!(!out.contains("bytes in"), "{out}");
 }
+
+#[test]
+fn traffic_mesh_80x24_160x48_and_light() {
+    use illumio_tui::tui::model::TrafficView;
+    use illumio_tui::tui::test_support::model_with_rich_flows;
+    let mut m = model_with_rich_flows();
+    m.traffic.view = TrafficView::Mesh;
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("Mesh"), "{out}");
+    assert!(out.contains("u user · p process · Enter drills"), "{out}");
+    assert!(
+        out.contains("www-data") && out.contains("ipl:Corp/-"),
+        "{out}"
+    );
+    assert!(!out.contains("dst proc"), "from 120 columns: {out}");
+    insta::assert_snapshot!("traffic_mesh_80x24", out);
+    let out = render_to_string(&m, 160, 48);
+    assert!(out.contains("dst proc") && out.contains("nginx"), "{out}");
+    assert!(out.contains("pot.blocked"), "{out}");
+    insta::assert_snapshot!("traffic_mesh_160x48", out);
+    m.set_theme("light");
+    insta::assert_snapshot!("light_traffic_mesh_160x48", render_styled(&m, 160, 48));
+}

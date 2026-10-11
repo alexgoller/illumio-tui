@@ -11,8 +11,8 @@ use pce::models::{
     Rule, RuleSet, Service, VenHealth, Workload,
 };
 use pce::traffic::{
-    BlockedGroup, FlowGroup, ResolvedFlow, blocked_summary, group_by_labels, group_key, group_text,
-    keys_or_default, keys_seen,
+    BlockedGroup, FlowGroup, MeshColumns, MeshKey, MeshRow, ResolvedFlow, blocked_summary,
+    group_by_labels, group_key, group_text, keys_or_default, keys_seen, mesh, mesh_key,
 };
 use pce::write::Plan;
 use pce::{IpListSize, NameIndex, RuleKind, RuleSetView, RuleView, StatsSnapshot, ip_list_size};
@@ -456,14 +456,17 @@ fn short_time_narrow(s: &str) -> String {
 pub enum TrafficView {
     Flows,
     Aggregate,
+    Mesh,
     Blocked,
 }
 
 impl TrafficView {
+    /// `v`: Flows, App-to-app, Mesh, Blocked, then Flows again.
     pub fn next(self) -> Self {
         match self {
             TrafficView::Flows => TrafficView::Aggregate,
-            TrafficView::Aggregate => TrafficView::Blocked,
+            TrafficView::Aggregate => TrafficView::Mesh,
+            TrafficView::Mesh => TrafficView::Blocked,
             TrafficView::Blocked => TrafficView::Flows,
         }
     }
@@ -472,9 +475,115 @@ impl TrafficView {
         match self {
             TrafficView::Flows => "Flows",
             TrafficView::Aggregate => "App-to-app",
+            TrafficView::Mesh => "Mesh",
             TrafficView::Blocked => "Blocked",
         }
     }
+}
+
+/// `allowed`, `pot.blocked`, `blocked` or `unknown`: a mesh row's dominant
+/// decision in the 11-cell column.
+fn mesh_decision(r: &MeshRow) -> String {
+    match r.dominant() {
+        pce::models::PolicyDecision::PotentiallyBlocked => "pot.blocked".into(),
+        d => d.as_str().into(),
+    }
+}
+
+/// The Mesh view's columns; user and process only when `cols` shows them.
+pub fn mesh_columns(cols: MeshColumns) -> Vec<Column<MeshRow>> {
+    let mut out: Vec<Column<MeshRow>> = Vec::new();
+    if cols.user {
+        out.push(Column {
+            title: "user",
+            width: 12,
+            cell: |r| r.user.clone().unwrap_or_else(|| "-".into()),
+            key: |r| SortKey::Text(r.user.clone().unwrap_or_default()),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 8,
+        });
+    }
+    if cols.process {
+        out.push(Column {
+            title: "process",
+            width: 14,
+            cell: |r| r.process.clone().unwrap_or_else(|| "-".into()),
+            key: |r| SortKey::Text(r.process.clone().unwrap_or_default()),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 10,
+        });
+    }
+    let rest: [Column<MeshRow>; 6] = [
+        Column {
+            title: "src",
+            width: 18,
+            cell: |r| r.src.join("/"),
+            key: |r| SortKey::Text(r.src.join("/")),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 14,
+        },
+        Column {
+            title: "dst",
+            width: 18,
+            cell: |r| r.dst.join("/"),
+            key: |r| SortKey::Text(r.dst.join("/")),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 14,
+        },
+        Column {
+            title: "service",
+            width: 10,
+            cell: |r| r.service_text(),
+            key: |r| SortKey::Num(u64::from(r.port.unwrap_or(0))),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 9,
+        },
+        Column {
+            title: "dst proc",
+            width: 12,
+            cell: |r| r.dst_process.clone().unwrap_or_else(|| "-".into()),
+            key: |r| SortKey::Text(r.dst_process.clone().unwrap_or_default()),
+            right: false,
+            hide_below: 120,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "conns",
+            width: 8,
+            cell: |r| r.connections.to_string(),
+            key: |r| SortKey::Num(r.connections),
+            right: true,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 6,
+        },
+        Column {
+            title: "decision",
+            width: 11,
+            cell: mesh_decision,
+            key: |r| SortKey::Text(mesh_decision(r)),
+            right: false,
+            hide_below: 0,
+            narrow: Some(|r| match r.dominant() {
+                pce::models::PolicyDecision::PotentiallyBlocked => "pot.blk".into(),
+                d => d.as_str().into(),
+            }),
+            narrow_width: 8,
+        },
+    ];
+    out.extend(rest);
+    out
 }
 
 pub fn group_columns() -> Vec<Column<FlowGroup>> {
@@ -757,6 +866,9 @@ pub struct TrafficState {
     /// runs there, never per draw): what every view and column groups by.
     pub keys: Vec<String>,
     pub groups: TableView<FlowGroup>,
+    pub mesh: TableView<MeshRow>,
+    /// The Mesh view's optional columns (`u`, `p`); both shown at first.
+    pub mesh_cols: MeshColumns,
     pub blocked: TableView<BlockedGroup>,
     /// What the Flows view is narrowed to.
     pub drill: Option<Drill>,
@@ -766,6 +878,12 @@ pub struct TrafficState {
     pub rule_form: Option<Form>,
 }
 
+/// Both optional Mesh columns shown.
+pub const MESH_ALL: MeshColumns = MeshColumns {
+    user: true,
+    process: true,
+};
+
 /// The keys `all labels` lists first when the flows carry them.
 pub const PREFERRED_KEYS: [&str; 4] = ["app", "env", "role", "loc"];
 
@@ -774,6 +892,8 @@ pub const PREFERRED_KEYS: [&str; 4] = ["app", "env", "role", "loc"];
 pub enum Drill {
     /// An App-to-app or treemap pair: source and destination group keys.
     Pair(Vec<String>, Vec<String>),
+    /// A Mesh row, under the columns it was grouped with.
+    Mesh { key: MeshKey, cols: MeshColumns },
 }
 
 impl Drill {
@@ -783,6 +903,7 @@ impl Drill {
             Drill::Pair(src, dst) => {
                 &group_key(&f.src, keys) == src && &group_key(&f.dst, keys) == dst
             }
+            Drill::Mesh { key, cols } => &mesh_key(f, keys, *cols) == key,
         }
     }
 
@@ -790,6 +911,12 @@ impl Drill {
     pub fn title(&self) -> String {
         match self {
             Drill::Pair(src, dst) => format!("{} → {}", src.join("/"), dst.join("/")),
+            Drill::Mesh { key, .. } => format!(
+                "{} → {} {}",
+                key.src.join("/"),
+                key.dst.join("/"),
+                key.service_text()
+            ),
         }
     }
 }
@@ -808,6 +935,8 @@ impl TrafficState {
             all_keys: false,
             keys: keys_or_default(keys),
             groups: TableView::new(group_columns()),
+            mesh: TableView::new(mesh_columns(MESH_ALL)),
+            mesh_cols: MESH_ALL,
             blocked: TableView::new(blocked_columns()),
             drill: None,
             auto: AutoRefresh::new(auto_min_seconds),
@@ -877,10 +1006,24 @@ impl TrafficState {
             .map(|f| FlowRow::new(f.clone(), keys))
             .collect();
         let groups = group_by_labels(flows, keys);
+        let mesh_rows = mesh(flows, keys, self.mesh_cols);
         let blocked = blocked_summary(flows, keys);
         self.flows.set_rows(shown);
         self.groups.set_rows(groups);
+        self.mesh.set_rows(mesh_rows);
         self.blocked.set_rows(blocked);
+    }
+
+    /// `u` / `p` on the Mesh view: show or hide a column, regroup, and start
+    /// again at the first row (a new table: sort and search reset too).
+    pub fn toggle_mesh_column(&mut self, user: bool) {
+        if user {
+            self.mesh_cols.user = !self.mesh_cols.user;
+        } else {
+            self.mesh_cols.process = !self.mesh_cols.process;
+        }
+        self.mesh = TableView::new(mesh_columns(self.mesh_cols));
+        self.rebuild_views();
     }
 
     /// Whether the active view's table is capturing keys for a search.
@@ -888,6 +1031,7 @@ impl TrafficState {
         match self.view {
             TrafficView::Flows => self.flows.is_searching(),
             TrafficView::Aggregate => self.groups.is_searching(),
+            TrafficView::Mesh => self.mesh.is_searching(),
             TrafficView::Blocked => self.blocked.is_searching(),
         }
     }
@@ -2598,6 +2742,48 @@ mod tests {
         many.sources = vec!["a".into(), "b".into(), "c".into(), "d".into(), "e".into()];
         assert_eq!((cols[2].cell)(&many), "8 hosts");
         assert_eq!((cols[6].cell)(&many), "a, b, c, d, e +5");
+    }
+
+    #[test]
+    fn mesh_columns_follow_the_toggles_and_fit_80_columns() {
+        use crate::tui::ui::widgets::table::visible_columns;
+        let titles = |cols: MeshColumns| -> Vec<&'static str> {
+            mesh_columns(cols).iter().map(|c| c.title).collect()
+        };
+        assert_eq!(
+            titles(MESH_ALL),
+            vec![
+                "user", "process", "src", "dst", "service", "dst proc", "conns", "decision"
+            ]
+        );
+        assert_eq!(
+            titles(MeshColumns::default()),
+            vec!["src", "dst", "service", "dst proc", "conns", "decision"]
+        );
+        let cols = mesh_columns(MESH_ALL);
+        let at80 = visible_columns(&cols, 80);
+        let width: u16 = at80.iter().map(|c| c.1).sum::<u16>() + at80.len() as u16 - 1 + 2;
+        assert!(width <= 78, "{width}");
+        assert!(
+            !at80.iter().any(|c| cols[c.0].title == "dst proc"),
+            "from 120 columns"
+        );
+        let at160 = visible_columns(&cols, 160);
+        let width: u16 = at160.iter().map(|c| c.1).sum::<u16>() + at160.len() as u16 - 1 + 2;
+        assert!(width <= 158, "{width}");
+        let rows = mesh(
+            &crate::tui::test_support::fixture_flows_rich(),
+            &["app".to_string(), "env".to_string()],
+            MESH_ALL,
+        );
+        let pb = rows
+            .iter()
+            .find(|r| r.dominant() == pce::models::PolicyDecision::PotentiallyBlocked)
+            .unwrap();
+        assert_eq!((cols[7].cell)(pb), "pot.blocked");
+        assert_eq!((cols[7].narrow.unwrap())(pb), "pot.blk");
+        let icmp = rows.iter().find(|r| r.proto == "icmp").unwrap();
+        assert_eq!((cols[1].cell)(icmp), "-", "no process");
     }
 
     #[test]

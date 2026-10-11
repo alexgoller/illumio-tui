@@ -31,7 +31,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ("/", "search in the current table (Enter keep, Esc clear)"),
     ("r", "refresh the current screen (bypasses the cache)"),
     ("a", "toggle auto-refresh for the current screen"),
-    ("Traffic  v", "cycle Flows · App-to-app · Blocked"),
+    ("Traffic  v", "cycle Flows · App-to-app · Mesh · Blocked"),
     (
         "Traffic  f",
         "edit filter: window src dst service decisions",
@@ -39,11 +39,12 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ("Traffic  g", "pick the label keys every view groups by"),
     (
         "Traffic  Enter",
-        "detail (flows) · drill into a pair (aggregate)",
+        "detail (flows) · drill into a row (app-to-app, mesh)",
     ),
+    ("Mesh     u / p", "show or hide the user · process columns"),
     (
         "Traffic  w",
-        "draft allow rule from a blocked flow (writes)",
+        "draft allow rule from a blocked flow or row (writes)",
     ),
     ("w form   Ctrl-A Ctrl-N", "all labels · new ruleset"),
     ("Policy   d", "toggle draft / active"),
