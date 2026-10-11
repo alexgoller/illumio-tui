@@ -10,10 +10,10 @@ use crate::tui::model::{
 use crate::tui::msg::{Cmd, Msg, ObjectsPayload, QueryOutcome};
 use crate::tui::ui::widgets::overlay::help_last_scroll;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use pce::CacheMode;
 use pce::models::{EventFilter, PolicyScope};
 use pce::traffic::QueryProgress;
-use pce::write::Plan;
+use pce::write::{Outcome, Plan, WriteError};
+use pce::{CacheMode, WriteMethod};
 use std::time::Instant;
 
 pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
@@ -426,6 +426,60 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 Err(e) => fail(model, "pending", &e, false),
             }
             Vec::new()
+        }
+        Msg::WriteDone {
+            kind,
+            method,
+            result,
+        } => {
+            // The runtime dropped `policy:pending`; the next `p` fetches again.
+            model.policy.pending = None;
+            match result {
+                Ok(Outcome::Written(w)) => {
+                    let verb = match method {
+                        Some(WriteMethod::Post) => "created",
+                        Some(WriteMethod::Put) => "updated",
+                        Some(WriteMethod::Delete) => "deleted",
+                        None => "wrote",
+                    };
+                    let mut text = format!("{verb} {}", w.href);
+                    if w.pending {
+                        text.push_str(" (pending)");
+                    }
+                    if !w.dropped_fields.is_empty() {
+                        text.push_str(&format!(
+                            "; the PCE dropped {}",
+                            w.dropped_fields.join(", ")
+                        ));
+                    }
+                    for warning in &w.warnings {
+                        text.push_str("; ");
+                        text.push_str(warning);
+                    }
+                    model.status = if w.warnings.is_empty() && w.dropped_fields.is_empty() {
+                        StatusLine::info(text)
+                    } else {
+                        StatusLine::warn(text)
+                    };
+                    reload_after_write(model, kind)
+                }
+                Ok(Outcome::Skipped { reason, .. }) => {
+                    model.status = StatusLine::info(format!("skipped: {reason}"));
+                    Vec::new()
+                }
+                Err(e @ WriteError::Unanswered(_)) => {
+                    model.status = StatusLine::error("write not answered; reloading");
+                    model.overlay = Overlay::Error(format!(
+                        "the request was sent but not answered; check the PCE before retrying: {e}"
+                    ));
+                    reload_after_write(model, kind)
+                }
+                Err(e) => {
+                    model.status = StatusLine::error("write failed; nothing reloaded");
+                    model.overlay = Overlay::Error(format!("write failed: {e}"));
+                    Vec::new()
+                }
+            }
         }
         Msg::Planned(result) => {
             match result {
@@ -1229,6 +1283,21 @@ fn load_workloads(model: &mut Model, mode: CacheMode) -> Vec<Cmd> {
     model.workloads.auto.last_run = Some(Instant::now());
     model.workloads.auto.from_tick = false;
     vec![Cmd::LoadWorkloads(mode)]
+}
+
+/// One reload of the written kind's table, past the cache (the writer
+/// already invalidated it).
+fn reload_after_write(model: &mut Model, kind: pce::write::ObjectKind) -> Vec<Cmd> {
+    match kind {
+        pce::write::ObjectKind::Label => load_objects(model, ObjectKind::Labels, CacheMode::Bypass),
+        pce::write::ObjectKind::IpList => {
+            load_objects(model, ObjectKind::IpLists, CacheMode::Bypass)
+        }
+        pce::write::ObjectKind::Service => {
+            load_objects(model, ObjectKind::Services, CacheMode::Bypass)
+        }
+        pce::write::ObjectKind::Workload => load_workloads(model, CacheMode::Bypass),
+    }
 }
 
 fn workloads_page(model: &Model) -> usize {
@@ -4781,5 +4850,152 @@ mod tests {
             m.status.text
         );
         assert_eq!(m.overlay, Overlay::None);
+    }
+
+    fn written(href: &str, pending: bool) -> pce::write::Written {
+        pce::write::Written {
+            href: href.into(),
+            pending,
+            status: 201,
+            object: serde_json::json!({ "href": href }),
+            dropped_fields: vec![],
+            warnings: vec![],
+        }
+    }
+
+    #[test]
+    fn write_done_reports_reloads_the_kind_once_and_forgets_pending() {
+        use crate::tui::model::ObjectKind;
+        use crate::tui::test_support::model_with_objects;
+        use pce::write::Outcome;
+        let mut m = model_with_objects();
+        m.policy.pending = Some(vec![]);
+        let cmds = update(
+            &mut m,
+            Msg::WriteDone {
+                kind: pce::write::ObjectKind::IpList,
+                method: Some(pce::WriteMethod::Post),
+                result: Ok(Outcome::Written(written(
+                    "/orgs/5/sec_policy/draft/ip_lists/9",
+                    true,
+                ))),
+            },
+        );
+        assert_eq!(
+            cmds,
+            vec![Cmd::LoadObjects {
+                kind: ObjectKind::IpLists,
+                mode: pce::CacheMode::Bypass
+            }]
+        );
+        assert_eq!(
+            m.status.text,
+            "created /orgs/5/sec_policy/draft/ip_lists/9 (pending)"
+        );
+        assert_eq!(m.status.kind, StatusKind::Info);
+        assert!(m.policy.pending.is_none(), "the next p fetches again");
+        let mut w = written("/orgs/5/labels/9", false);
+        w.warnings = vec!["audit entry could not be written to x: denied".into()];
+        let cmds = update(
+            &mut m,
+            Msg::WriteDone {
+                kind: pce::write::ObjectKind::Label,
+                method: Some(pce::WriteMethod::Put),
+                result: Ok(Outcome::Written(w)),
+            },
+        );
+        assert_eq!(
+            cmds,
+            vec![Cmd::LoadObjects {
+                kind: ObjectKind::Labels,
+                mode: pce::CacheMode::Bypass
+            }]
+        );
+        assert_eq!(m.status.kind, StatusKind::Warn);
+        assert_eq!(
+            m.status.text,
+            "updated /orgs/5/labels/9; audit entry could not be written to x: denied"
+        );
+        let cmds = update(
+            &mut m,
+            Msg::WriteDone {
+                kind: pce::write::ObjectKind::Workload,
+                method: Some(pce::WriteMethod::Delete),
+                result: Ok(Outcome::Written(written("/orgs/5/workloads/aaaa-3", false))),
+            },
+        );
+        assert_eq!(cmds, vec![Cmd::LoadWorkloads(pce::CacheMode::Bypass)]);
+        assert_eq!(m.status.text, "deleted /orgs/5/workloads/aaaa-3");
+        let cmds = update(
+            &mut m,
+            Msg::WriteDone {
+                kind: pce::write::ObjectKind::Label,
+                method: None,
+                result: Ok(Outcome::Skipped {
+                    existing_href: "/orgs/5/labels/1".into(),
+                    reason: "label role=web exists".into(),
+                }),
+            },
+        );
+        assert!(cmds.is_empty());
+        assert_eq!(m.status.text, "skipped: label role=web exists");
+    }
+
+    #[test]
+    fn write_errors_open_the_overlay_and_only_unanswered_reloads() {
+        use crate::tui::model::ObjectKind;
+        use crate::tui::test_support::model_with_objects;
+        use pce::PceError;
+        use pce::write::WriteError;
+        let mut m = model_with_objects();
+        let cmds = update(
+            &mut m,
+            Msg::WriteDone {
+                kind: pce::write::ObjectKind::Service,
+                method: Some(pce::WriteMethod::Delete),
+                result: Err(WriteError::Pce(PceError::Rejected {
+                    status: 406,
+                    body: "object_in_use: referenced by a rule".into(),
+                })),
+            },
+        );
+        assert!(cmds.is_empty(), "a rejected write reloads nothing");
+        match &m.overlay {
+            Overlay::Error(t) => assert!(
+                t.starts_with("write failed: ")
+                    && t.contains("object_in_use: referenced by a rule"),
+                "{t}"
+            ),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(m.status.kind, StatusKind::Error);
+        m.overlay = Overlay::None;
+        let cmds = update(
+            &mut m,
+            Msg::WriteDone {
+                kind: pce::write::ObjectKind::Service,
+                method: Some(pce::WriteMethod::Put),
+                result: Err(WriteError::Unanswered(PceError::Timeout(
+                    std::time::Duration::from_secs(30),
+                ))),
+            },
+        );
+        assert_eq!(
+            cmds,
+            vec![Cmd::LoadObjects {
+                kind: ObjectKind::Services,
+                mode: pce::CacheMode::Bypass
+            }],
+            "the user sees the real state"
+        );
+        match &m.overlay {
+            Overlay::Error(t) => assert!(
+                t.starts_with(
+                    "the request was sent but not answered; check the PCE before retrying"
+                ),
+                "{t}"
+            ),
+            other => panic!("{other:?}"),
+        }
     }
 }

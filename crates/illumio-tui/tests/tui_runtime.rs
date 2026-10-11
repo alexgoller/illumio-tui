@@ -9,7 +9,7 @@ use pce::{Credentials, Pce};
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{body_json, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn pce_for(server: &MockServer) -> Arc<Pce> {
@@ -941,4 +941,342 @@ async fn plan_write_needs_the_runtime_writer_and_sends_nothing() {
         "planning a label makes no request"
     );
     assert!(audit.entries().is_empty(), "nothing sent, nothing audited");
+}
+
+/// The four index lists, each expected `n` times (startup plus reloads).
+async fn mount_lists(server: &MockServer, labels: u64, ip_lists: u64, services: u64) {
+    for (p, body, n) in [
+        (
+            "/api/v2/orgs/5/labels",
+            include_str!("../../../fixtures/labels.json"),
+            labels,
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/label_groups",
+            include_str!("../../../fixtures/label_groups.json"),
+            1,
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/ip_lists",
+            include_str!("../../../fixtures/ip_lists.json"),
+            ip_lists,
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/services",
+            include_str!("../../../fixtures/services.json"),
+            services,
+        ),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(p))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(body)
+                    .insert_header("Content-Type", "application/json"),
+            )
+            .expect(n)
+            .mount(server)
+            .await;
+    }
+}
+
+/// Each key after its delay in ms.
+fn press(keys: Vec<(u64, KeyCode)>) -> impl futures::Stream<Item = Event> {
+    stream::iter(keys).then(|(ms, code)| async move {
+        tokio::time::sleep(Duration::from_millis(ms)).await;
+        Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
+    })
+}
+
+fn ch(c: char) -> KeyCode {
+    KeyCode::Char(c)
+}
+
+/// Typing `text` into a form, 20 ms per character.
+fn typed(text: &str) -> Vec<(u64, KeyCode)> {
+    text.chars().map(|c| (20, KeyCode::Char(c))).collect()
+}
+
+/// Connects (health is mounted here), presses `keys`, returns the model.
+async fn key_session(
+    server: &MockServer,
+    model: Model,
+    writer: Option<WriteGuard>,
+    keys: Vec<(u64, KeyCode)>,
+) -> Model {
+    Mock::given(method("GET"))
+        .and(path("/api/v2/health"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "normal"})))
+        .expect(1)
+        .mount(server)
+        .await;
+    let pce = pce_for(server);
+    let (mut rt, _tx) = match writer {
+        Some(g) => Runtime::with_writer(pce, model, g),
+        None => Runtime::new(pce, model),
+    };
+    rt.execute(Cmd::Connect);
+    run_loop(&mut rt, Box::pin(press(keys)), &mut |_| {}).await
+}
+
+/// Methods the mock PCE received other than GET.
+async fn writes_seen(server: &MockServer) -> Vec<String> {
+    server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .iter()
+        .map(|r| r.method.to_string())
+        .filter(|m| m != "GET")
+        .collect()
+}
+
+#[tokio::test]
+async fn writes_disabled_editing_keys_send_nothing() {
+    use illumio_tui::tui::model::{Overlay, StatusKind};
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    let keys = vec![
+        (500, ch('3')),
+        (50, ch('n')),
+        (50, ch('e')),
+        (50, ch('x')),
+        (50, KeyCode::Tab),
+        (50, KeyCode::Tab),
+        (50, ch('e')),
+        (200, KeyCode::F(12)),
+    ];
+    let model = key_session(&server, model(), None, keys).await;
+    assert_eq!(model.stats.calls, 5, "health + four lists");
+    assert!(writes_seen(&server).await.is_empty());
+    assert_eq!(model.status.text, "writes are not enabled");
+    assert_eq!(model.status.kind, StatusKind::Warn);
+    assert_eq!(model.overlay, Overlay::None);
+}
+
+#[tokio::test]
+async fn create_label_posts_once_audits_as_tui_and_reloads_labels_once() {
+    let server = MockServer::start().await;
+    mount_lists(&server, 2, 1, 1).await;
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/labels"))
+        .and(body_json(json!({"key": "app", "value": "web2"})))
+        .respond_with(
+            ResponseTemplate::new(201)
+                .set_body_json(json!({"href": "/orgs/5/labels/9", "key": "app", "value": "web2"})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let audit = MemoryAudit::new();
+    let mut keys = vec![(500, ch('3')), (50, ch('n'))];
+    keys.extend(typed("app"));
+    keys.push((20, KeyCode::Tab));
+    keys.extend(typed("web2"));
+    keys.extend([(50, KeyCode::Enter), (300, ch('y')), (400, KeyCode::F(12))]);
+    let model = key_session(
+        &server,
+        writes_model(),
+        Some(tui_guard(audit.clone())),
+        keys,
+    )
+    .await;
+    assert_eq!(model.status.text, "created /orgs/5/labels/9");
+    assert_eq!(
+        model.stats.calls, 7,
+        "health + four lists + POST + one labels reload"
+    );
+    assert_eq!(writes_seen(&server).await, vec!["POST"]);
+    let entries = audit.entries();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].source, "tui");
+    assert_eq!(entries[0].method, pce::WriteMethod::Post);
+    assert_eq!(entries[0].status, Some(201));
+    assert_eq!(model.busy, 0);
+}
+
+#[tokio::test]
+async fn update_ip_list_puts_only_the_changed_ranges() {
+    let server = MockServer::start().await;
+    mount_lists(&server, 1, 2, 1).await;
+    let corp = json!({
+        "href": "/orgs/5/sec_policy/draft/ip_lists/21", "name": "Corp", "description": "Office ranges",
+        "ip_ranges": [{"from_ip": "10.1.0.0", "to_ip": "10.1.255.255", "exclusion": false}],
+        "fqdns": [{"fqdn": "*.corp.example"}], "update_type": "create"
+    });
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/sec_policy/draft/ip_lists/21"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(corp.clone()))
+        .expect(1)
+        .mount(&server)
+        .await;
+    // A real PCE answers 204 here and the writer re-fetches (one more GET);
+    // answering with the object keeps the count to the plan's GET.
+    Mock::given(method("PUT"))
+        .and(path("/api/v2/orgs/5/sec_policy/draft/ip_lists/21"))
+        .and(body_json(json!({"ip_ranges": [
+            {"from_ip": "10.1.0.0", "to_ip": "10.1.255.255"},
+            {"from_ip": "10.2.0.0/16"}
+        ]})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(corp))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let audit = MemoryAudit::new();
+    let mut keys = vec![
+        (500, ch('3')),
+        (50, KeyCode::Tab),
+        (50, KeyCode::Tab),
+        (50, ch('j')),
+        (50, ch('e')),
+        (20, KeyCode::Tab),
+        (20, KeyCode::Tab),
+    ];
+    keys.extend(typed(", 10.2.0.0/16"));
+    keys.extend([(50, KeyCode::Enter), (300, ch('y')), (400, KeyCode::F(12))]);
+    let model = key_session(
+        &server,
+        writes_model(),
+        Some(tui_guard(audit.clone())),
+        keys,
+    )
+    .await;
+    assert_eq!(
+        model.status.text,
+        "updated /orgs/5/sec_policy/draft/ip_lists/21 (pending)"
+    );
+    assert_eq!(
+        model.stats.calls, 8,
+        "health + four lists + plan GET + PUT + one IP lists reload"
+    );
+    assert_eq!(writes_seen(&server).await, vec!["PUT"]);
+    assert_eq!(audit.entries().len(), 1);
+    assert_eq!(model.busy, 0);
+}
+
+#[tokio::test]
+async fn delete_service_rejected_shows_the_body_and_does_not_reload() {
+    use illumio_tui::tui::model::Overlay;
+    let server = MockServer::start().await;
+    mount_lists(&server, 1, 1, 1).await; // services: the startup load only
+    Mock::given(method("DELETE"))
+        .and(path("/api/v2/orgs/5/sec_policy/draft/services/30"))
+        .respond_with(ResponseTemplate::new(406).set_body_json(json!([
+            {"token": "object_in_use", "message": "service is referenced by a rule"}
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let audit = MemoryAudit::new();
+    let keys = vec![
+        (500, ch('3')),
+        (50, KeyCode::Tab),
+        (50, KeyCode::Tab),
+        (50, KeyCode::Tab),
+        (50, ch('x')), // All Services
+        (300, ch('y')),
+        (400, KeyCode::F(12)),
+    ];
+    let model = key_session(
+        &server,
+        writes_model(),
+        Some(tui_guard(audit.clone())),
+        keys,
+    )
+    .await;
+    match &model.overlay {
+        Overlay::Error(t) => assert!(
+            t.contains("object_in_use: service is referenced by a rule"),
+            "{t}"
+        ),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(
+        writes_seen(&server).await,
+        vec!["DELETE"],
+        "sent once, never retried"
+    );
+    assert_eq!(
+        model.stats.calls, 6,
+        "health + four lists + DELETE, no reload"
+    );
+    let entries = audit.entries();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].status, Some(406));
+    assert_eq!(model.busy, 0);
+}
+
+#[tokio::test]
+async fn cancelled_confirm_sends_nothing() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    let audit = MemoryAudit::new();
+    let mut keys = vec![(500, ch('3')), (50, ch('n'))];
+    keys.extend(typed("app"));
+    keys.push((20, KeyCode::Tab));
+    keys.extend(typed("web2"));
+    keys.extend([(50, KeyCode::Enter), (300, ch('n')), (200, KeyCode::F(12))]);
+    let model = key_session(
+        &server,
+        writes_model(),
+        Some(tui_guard(audit.clone())),
+        keys,
+    )
+    .await;
+    assert_eq!(model.status.text, "cancelled, nothing sent");
+    assert!(writes_seen(&server).await.is_empty());
+    assert!(audit.entries().is_empty());
+    assert_eq!(model.stats.calls, 5);
+}
+
+#[tokio::test]
+async fn switching_to_a_profile_without_writes_drops_the_guard_and_the_marker() {
+    use illumio_tui::cli::GlobalArgs;
+    use illumio_tui::tui::model::{Overlay, StatusKind};
+    use illumio_tui::tui::msg::Msg;
+    use illumio_tui::tui::test_support::render_to_string;
+    let a = MockServer::start().await;
+    let b = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/health"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .expect(1)
+        .mount(&b)
+        .await;
+    mount_objects(&b).await;
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = two_profile_config(dir.path(), &b);
+    let global = GlobalArgs {
+        config: Some(cfg),
+        profile: Some("a".into()),
+        ..Default::default()
+    };
+    let (mut rt, tx) = Runtime::with_args(pce_for(&a), writes_model(), global);
+    rt.writer = Some(Arc::new(tui_guard(MemoryAudit::new())));
+    let header = |m: &Model| {
+        render_to_string(m, 80, 24)
+            .lines()
+            .next()
+            .unwrap_or("")
+            .to_string()
+    };
+    assert!(header(&rt.model).contains("✎ writes"));
+    tx.send(Msg::Command(illumio_tui::tui::commands::Command::Profile(
+        "b".into(),
+    )))
+    .unwrap();
+    let keys = vec![(700, ch('3')), (100, ch('n')), (200, KeyCode::F(12))];
+    let model = run_loop(&mut rt, Box::pin(press(keys)), &mut |_| {}).await;
+    assert_eq!(model.profile.name, "b");
+    assert!(rt.writer.is_none(), "the old profile's guard is gone");
+    assert!(!model.writes.enabled);
+    assert!(!header(&model).contains("writes"), "{}", header(&model));
+    assert_eq!(model.status.kind, StatusKind::Warn);
+    assert_eq!(model.status.text, model.writes.refusal());
+    assert_eq!(model.overlay, Overlay::None);
+    assert_eq!(
+        model.stats.calls, 5,
+        "health + four lists; n made no request"
+    );
+    assert!(a.received_requests().await.unwrap_or_default().is_empty());
 }

@@ -8,7 +8,7 @@ use pce::models::{
     Service, Workload,
 };
 use pce::traffic::{QueryProgress, ResolvedFlow};
-use pce::write::Plan;
+use pce::write::{Outcome, Plan, WriteError};
 use pce::{CacheMode, StatsSnapshot};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -90,6 +90,13 @@ pub enum Msg {
     ProfileSwitched(Result<(ProfileInfo, Limits), String>),
     /// A planned write (the exact request) or why it could not be planned.
     Planned(Result<(Plan, pce::write::ObjectKind), String>),
+    /// The result of one sent write. `method` names what was sent (None for
+    /// a plan that was a no-op).
+    WriteDone {
+        kind: pce::write::ObjectKind,
+        method: Option<pce::WriteMethod>,
+        result: Result<Outcome, WriteError>,
+    },
 }
 
 #[derive(Debug, Clone)]

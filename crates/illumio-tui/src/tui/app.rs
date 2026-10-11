@@ -14,7 +14,7 @@ use crossterm::event::{
 };
 use futures::{Stream, StreamExt};
 use pce::models::WorkloadFilter;
-use pce::write::{IfMissing, JsonlAudit, Plan, WriteContext, WriteError, WriteGuard};
+use pce::write::{IfMissing, JsonlAudit, Plan, WriteContext, WriteError, WriteGuard, WriteRefused};
 use pce::{CacheMode, NameIndex, Pce};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -140,11 +140,26 @@ impl Runtime {
                     let _ = tx.send(Msg::Stats(pce.stats()));
                 });
             }
-            // Sending is wired in Task 7; until then `y` sends nothing.
-            Cmd::ExecuteWrite { .. } => {
-                self.model.status = crate::tui::model::StatusLine::warn(
-                    "sending is not available yet; nothing sent",
-                );
+            Cmd::ExecuteWrite { plan, kind } => {
+                self.model.busy += 1;
+                let (pce, tx) = self.task_ctx();
+                let guard = self.writer.clone();
+                let method = plan.request().map(|r| r.method);
+                tokio::spawn(async move {
+                    // `execute` sends once, audits, and invalidates the kind's cache prefix.
+                    let result = match &guard {
+                        Some(guard) => pce.writer(guard).execute(plan).await,
+                        None => Err(WriteError::Refused(WriteRefused::FlagMissing)),
+                    };
+                    // Pending changes are not under the kind's prefix.
+                    pce.invalidate("policy:pending");
+                    let _ = tx.send(Msg::WriteDone {
+                        kind,
+                        method,
+                        result,
+                    });
+                    let _ = tx.send(Msg::Stats(pce.stats()));
+                });
             }
             Cmd::SwitchProfile(name) => {
                 self.model.busy += 1;
@@ -381,6 +396,7 @@ impl Runtime {
                 | Msg::EventsLoaded(_)
                 | Msg::ProfileSwitched(_)
                 | Msg::Planned(_)
+                | Msg::WriteDone { .. }
         );
         let cmds = update(&mut self.model, msg);
         if task_result {
