@@ -1383,6 +1383,11 @@ fn reload_after_write(model: &mut Model, kind: pce::write::ObjectKind) -> Vec<Cm
             load_objects(model, ObjectKind::Services, CacheMode::Bypass)
         }
         pce::write::ObjectKind::Workload => load_workloads(model, CacheMode::Bypass),
+        // Policy kinds are written by the CLI only (Plan 6 brings them here).
+        pce::write::ObjectKind::RuleSet
+        | pce::write::ObjectKind::Rule
+        | pce::write::ObjectKind::DenyRule
+        | pce::write::ObjectKind::Provision => Vec::new(),
     }
 }
 

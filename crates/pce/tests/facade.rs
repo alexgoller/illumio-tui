@@ -529,7 +529,9 @@ async fn active_lists_are_cached_under_objects_and_dropped_by_a_write() {
     assert_eq!(p.stats().calls, 2, "one GET per list");
     // `Writer::execute` invalidates the kind's prefix; for IP lists and
     // services that is `objects:`, which must cover the active lists too.
-    p.invalidate(pce::write::ObjectKind::IpList.cache_prefix());
+    for prefix in pce::write::ObjectKind::IpList.cache_prefixes() {
+        p.invalidate(prefix);
+    }
     assert!(!p.active_ip_lists(CacheMode::Use).await.unwrap().hit);
     assert!(!p.active_services(CacheMode::Use).await.unwrap().hit);
     assert_eq!(p.stats().calls, 4);

@@ -25,8 +25,8 @@ pub use services::{ServiceDraft, ServicePatch};
 pub use specs::{InterfaceSpec, IpRangeSpec, PortSpec};
 pub use workloads::{LabelRemoval, WorkloadDraft, WorkloadPatch};
 
-/// What kind of object a plan touches; decides the cache prefix and whether
-/// the result waits for provisioning.
+/// What kind of object a plan touches; decides the cache prefixes and
+/// whether the result waits for provisioning.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ObjectKind {
@@ -34,19 +34,34 @@ pub enum ObjectKind {
     IpList,
     Service,
     Workload,
+    RuleSet,
+    Rule,
+    DenyRule,
+    /// `POST sec_policy`: changes active policy and therefore every
+    /// policy and object list the cache holds.
+    Provision,
 }
 
 impl ObjectKind {
-    pub fn cache_prefix(self) -> &'static str {
+    pub fn cache_prefixes(self) -> &'static [&'static str] {
         match self {
-            ObjectKind::Label | ObjectKind::IpList | ObjectKind::Service => "objects:",
-            ObjectKind::Workload => "workloads",
+            ObjectKind::Label | ObjectKind::IpList | ObjectKind::Service => &["objects:"],
+            ObjectKind::Workload => &["workloads"],
+            ObjectKind::RuleSet | ObjectKind::Rule | ObjectKind::DenyRule => &["policy:"],
+            ObjectKind::Provision => &["policy:", "objects:"],
         }
     }
 
     /// Policy objects live in draft until provisioned.
     pub fn pending(self) -> bool {
-        matches!(self, ObjectKind::IpList | ObjectKind::Service)
+        matches!(
+            self,
+            ObjectKind::IpList
+                | ObjectKind::Service
+                | ObjectKind::RuleSet
+                | ObjectKind::Rule
+                | ObjectKind::DenyRule
+        )
     }
 
     pub fn as_str(self) -> &'static str {
@@ -55,6 +70,10 @@ impl ObjectKind {
             ObjectKind::IpList => "ip_list",
             ObjectKind::Service => "service",
             ObjectKind::Workload => "workload",
+            ObjectKind::RuleSet => "rule_set",
+            ObjectKind::Rule => "rule",
+            ObjectKind::DenyRule => "deny_rule",
+            ObjectKind::Provision => "provision",
         }
     }
 }
@@ -210,6 +229,71 @@ pub fn checked_href(href: &str, segment: &str, org_id: u64) -> Result<String, Wr
     }
 }
 
+fn valid_id(id: &str) -> bool {
+    !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
+
+/// A rule or deny rule href inside a ruleset, parsed strictly by component:
+/// `/orgs/<org>/sec_policy/<draft|active>/<parent>/<id>/<child>/<id>`, each
+/// id `[A-Za-z0-9-]+`, `active` rewritten to `draft`, a foreign org refused.
+pub fn checked_nested_href(
+    href: &str,
+    parent: &str,
+    child: &str,
+    org_id: u64,
+) -> Result<String, WriteError> {
+    let href = href.trim().trim_end_matches('/');
+    let bad = || {
+        WriteError::invalid(format!(
+            "{href:?} is not a {child} href (expected /orgs/<org>/sec_policy/draft/{parent}/<id>/{child}/<id>)"
+        ))
+    };
+    let parts: Vec<&str> = href.split('/').collect();
+    let ["", "orgs", org, "sec_policy", scope, p, pid, c, cid] = parts.as_slice() else {
+        return Err(bad());
+    };
+    let org_ok = !org.is_empty() && org.bytes().all(|b| b.is_ascii_digit());
+    if *p != parent || *c != child || !valid_id(pid) || !valid_id(cid) || !org_ok {
+        return Err(bad());
+    }
+    let org: u64 = org.parse().map_err(|_| bad())?;
+    if org != org_id {
+        return Err(WriteError::invalid(format!(
+            "{href} belongs to org {org}, profile is org {org_id}"
+        )));
+    }
+    match *scope {
+        "draft" | "active" => Ok(format!(
+            "/orgs/{org}/sec_policy/draft/{parent}/{pid}/{child}/{cid}"
+        )),
+        _ => Err(WriteError::invalid(format!(
+            "{href}: only draft policy objects can be written"
+        ))),
+    }
+}
+
+/// [`checked_href`] for policy objects: the `/sec_policy/<scope>/` form
+/// only. `checked_href` alone also accepts `/orgs/N/rule_sets/ID`, which
+/// names no ruleset.
+pub fn checked_policy_href(href: &str, segment: &str, org_id: u64) -> Result<String, WriteError> {
+    let out = checked_href(href, segment, org_id)?;
+    if out.split('/').nth(3) == Some("sec_policy") {
+        Ok(out)
+    } else {
+        Err(WriteError::invalid(format!(
+            "{:?} is not a {segment} href (expected /orgs/<org>/sec_policy/draft/{segment}/<id>)",
+            href.trim()
+        )))
+    }
+}
+
+/// The ruleset href of a rule or deny rule href (the first seven
+/// components). Call it on an href that passed [`checked_nested_href`].
+pub fn parent_href(nested: &str) -> String {
+    let parts: Vec<&str> = nested.trim().trim_end_matches('/').split('/').collect();
+    parts[..parts.len().min(7)].join("/")
+}
+
 /// A value counts as "present" for `dropped_fields` when it is not null,
 /// not an empty array, object or string.
 fn present(v: &Value) -> bool {
@@ -349,7 +433,9 @@ impl<'a> Writer<'a> {
                 audit.location()
             ));
         }
-        self.pce.invalidate(kind.cache_prefix());
+        for prefix in kind.cache_prefixes() {
+            self.pce.invalidate(prefix);
+        }
 
         let object = if request.method == WriteMethod::Delete {
             Value::Null
@@ -421,10 +507,168 @@ mod tests {
 
     #[test]
     fn object_kind_prefixes_and_pending() {
-        assert_eq!(ObjectKind::Label.cache_prefix(), "objects:");
-        assert_eq!(ObjectKind::Workload.cache_prefix(), "workloads");
-        assert!(ObjectKind::IpList.pending());
-        assert!(!ObjectKind::Label.pending());
-        assert!(!ObjectKind::Workload.pending());
+        assert_eq!(ObjectKind::Label.cache_prefixes(), &["objects:"]);
+        assert_eq!(ObjectKind::IpList.cache_prefixes(), &["objects:"]);
+        assert_eq!(ObjectKind::Workload.cache_prefixes(), &["workloads"]);
+        assert_eq!(ObjectKind::RuleSet.cache_prefixes(), &["policy:"]);
+        assert_eq!(ObjectKind::Rule.cache_prefixes(), &["policy:"]);
+        assert_eq!(ObjectKind::DenyRule.cache_prefixes(), &["policy:"]);
+        assert_eq!(
+            ObjectKind::Provision.cache_prefixes(),
+            &["policy:", "objects:"]
+        );
+        for k in [
+            ObjectKind::IpList,
+            ObjectKind::Service,
+            ObjectKind::RuleSet,
+            ObjectKind::Rule,
+            ObjectKind::DenyRule,
+        ] {
+            assert!(k.pending(), "{k:?}");
+        }
+        for k in [
+            ObjectKind::Label,
+            ObjectKind::Workload,
+            ObjectKind::Provision,
+        ] {
+            assert!(!k.pending(), "{k:?}");
+        }
+        assert_eq!(ObjectKind::DenyRule.as_str(), "deny_rule");
+        assert_eq!(ObjectKind::Provision.as_str(), "provision");
+        assert_eq!(
+            serde_json::to_value(ObjectKind::RuleSet).unwrap(),
+            json!("rule_set")
+        );
+    }
+
+    fn nested_err(href: &str, child: &str) -> String {
+        match checked_nested_href(href, "rule_sets", child, 5).unwrap_err() {
+            WriteError::Invalid(m) => m.join("; "),
+            other => panic!("{href}: expected Invalid, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nested_hrefs_pass_and_active_is_rewritten() {
+        assert_eq!(
+            checked_nested_href(
+                " /orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1/ ",
+                "rule_sets",
+                "sec_rules",
+                5
+            )
+            .unwrap(),
+            "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1"
+        );
+        assert_eq!(
+            checked_nested_href(
+                "/orgs/5/sec_policy/active/rule_sets/24206847997116627/deny_rules/0a-B",
+                "rule_sets",
+                "deny_rules",
+                5
+            )
+            .unwrap(),
+            "/orgs/5/sec_policy/draft/rule_sets/24206847997116627/deny_rules/0a-B"
+        );
+    }
+
+    #[test]
+    fn nested_other_scopes_are_refused() {
+        for scope in ["42", "Draft", "", "pending"] {
+            let m = nested_err(
+                &format!("/orgs/5/sec_policy/{scope}/rule_sets/100/sec_rules/1"),
+                "sec_rules",
+            );
+            assert!(!m.is_empty(), "{scope}");
+        }
+    }
+
+    #[test]
+    fn nested_dot_and_empty_segments_are_refused() {
+        for href in [
+            "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/..",
+            "/orgs/5/sec_policy/draft/rule_sets/../sec_rules/1",
+            "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1/../2",
+            "/orgs/5/sec_policy/draft/rule_sets/./100/sec_rules/1",
+            "/orgs/5/sec_policy/draft/rule_sets//sec_rules/1",
+            "/orgs/5/sec_policy/draft/rule_sets/100//1",
+            "//orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1",
+            "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/%2e%2e",
+            "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1_2",
+            "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1.2",
+            "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/",
+        ] {
+            let m = nested_err(href, "sec_rules");
+            assert!(
+                m.contains("expected /orgs/<org>/sec_policy/draft/rule_sets/<id>/sec_rules/<id>"),
+                "{href}: {m}"
+            );
+        }
+    }
+
+    #[test]
+    fn nested_wrong_parent_child_or_flat_is_refused() {
+        nested_err(
+            "/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/7",
+            "sec_rules",
+        );
+        nested_err(
+            "/orgs/5/sec_policy/draft/ip_lists/100/sec_rules/1",
+            "sec_rules",
+        );
+        let m = nested_err("/orgs/5/sec_policy/draft/rule_sets/100", "sec_rules");
+        assert!(m.contains("is not a sec_rules href"), "{m}");
+        // checked_href keeps refusing nested paths.
+        assert!(
+            checked_href(
+                "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1",
+                "rule_sets",
+                5
+            )
+            .is_err()
+        );
+        assert!(
+            checked_href(
+                "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1",
+                "sec_rules",
+                5
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn nested_foreign_org_is_refused_with_both_ids() {
+        let m = nested_err(
+            "/orgs/7/sec_policy/draft/rule_sets/100/sec_rules/1",
+            "sec_rules",
+        );
+        assert!(m.contains("org 7") && m.contains("org 5"), "{m}");
+    }
+
+    #[test]
+    fn parent_href_strips_the_rule_part() {
+        assert_eq!(
+            parent_href("/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1"),
+            "/orgs/5/sec_policy/draft/rule_sets/100"
+        );
+        assert_eq!(
+            parent_href("/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8/"),
+            "/orgs/5/sec_policy/draft/rule_sets/100"
+        );
+    }
+
+    #[test]
+    fn policy_hrefs_refuse_the_flat_form() {
+        assert_eq!(
+            checked_policy_href("/orgs/5/sec_policy/active/rule_sets/100", "rule_sets", 5).unwrap(),
+            "/orgs/5/sec_policy/draft/rule_sets/100"
+        );
+        let err = checked_policy_href("/orgs/5/rule_sets/100", "rule_sets", 5).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("expected /orgs/<org>/sec_policy/draft/rule_sets/<id>"),
+            "{err}"
+        );
     }
 }

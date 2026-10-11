@@ -1,7 +1,7 @@
 //! Rulesets, allow rules, deny rules, and pending provisioning changes.
 use super::common::Ref;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -47,6 +47,12 @@ pub struct Actor {
     pub ip_list: Option<Ref>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exclusion: Option<bool>,
+
+    /// Fields this model does not name (`sec_connect` is named; `caps`,
+    /// `egress_services`, `use_workload_subnets` and future ones are not),
+    /// carried through a round trip.
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -98,6 +104,12 @@ pub struct Rule {
     pub network_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_type: Option<String>,
+
+    /// Fields this model does not name (`sec_connect` is named; `caps`,
+    /// `egress_services`, `use_workload_subnets` and future ones are not),
+    /// carried through a round trip.
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -117,6 +129,12 @@ pub struct DenyRule {
     pub override_: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_type: Option<String>,
+
+    /// Fields this model does not name (`sec_connect` is named; `caps`,
+    /// `egress_services`, `use_workload_subnets` and future ones are not),
+    /// carried through a round trip.
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -141,6 +159,12 @@ pub struct RuleSet {
     pub created_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
+
+    /// Fields this model does not name (`sec_connect` is named; `caps`,
+    /// `egress_services`, `use_workload_subnets` and future ones are not),
+    /// carried through a round trip.
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -262,5 +286,44 @@ mod tests {
         assert_eq!(PolicyScope::Draft.segment(), "draft");
         assert_eq!(PolicyScope::parse("ACTIVE"), Some(PolicyScope::Active));
         assert_eq!(PolicyScope::parse("x"), None);
+    }
+
+    #[test]
+    fn unknown_fields_survive_a_round_trip() {
+        let v = serde_json::json!({
+            "href": "/orgs/5/sec_policy/draft/rule_sets/100", "name": "Shop-Prod", "enabled": true,
+            "caps": ["write"], "ip_tables_rules": [],
+            "scopes": [[{"label": {"href": "/orgs/5/labels/3"}, "exclusion": false, "future": 1}]],
+            "rules": [{
+                "href": "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1", "enabled": true,
+                "providers": [{"label": {"href": "/orgs/5/labels/2"}, "future": "x"}],
+                "consumers": [{"actors": "ams"}],
+                "ingress_services": [{"port": 443, "proto": 6}],
+                "sec_connect": false, "egress_services": [], "use_workload_subnets": ["providers"],
+                "consuming_security_principals": []
+            }],
+            "deny_rules": [{
+                "href": "/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8", "enabled": true,
+                "providers": [{"actors": "ams"}], "consumers": [{"actors": "ams"}],
+                "ingress_services": [{"port": 22, "proto": 6}], "override": true, "network_type": "brn"
+            }]
+        });
+        let rs: RuleSet = serde_json::from_value(v.clone()).unwrap();
+        assert_eq!(rs.extra["caps"], serde_json::json!(["write"]));
+        assert_eq!(rs.scopes[0][0].extra["future"], 1);
+        assert_eq!(
+            rs.rules[0].extra["use_workload_subnets"],
+            serde_json::json!(["providers"])
+        );
+        assert_eq!(rs.rules[0].providers[0].extra["future"], "x");
+        assert_eq!(rs.deny_rules[0].extra["network_type"], "brn");
+        assert_eq!(
+            rs.rules[0].sec_connect,
+            Some(false),
+            "named fields stay named"
+        );
+        assert!(!rs.rules[0].extra.contains_key("sec_connect"));
+        let back = serde_json::to_value(&rs).unwrap();
+        assert_eq!(back, v, "nothing lost, nothing added");
     }
 }
