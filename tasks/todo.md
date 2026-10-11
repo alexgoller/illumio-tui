@@ -79,3 +79,22 @@ Spec: docs/superpowers/specs/2026-10-10-pce-writes-design.md · Plan: docs/super
 - The live write smoke (`PCE_LIVE_WRITES=1 cargo test -p pce --test live_writes`) was NOT run against any PCE: the shared demo PCE is approved for reads only. Without the env it prints the skip line and passes. Writes are unproven against a real PCE until it is run on a designated non-production one.
 - Request counts (final-review fix wave, `--no-cache`, asserted in `tests/cli_writes.rs`): `workloads update <href> --set-labels a=1,b=2 --yes` sends 4 requests (one `/labels` GET, the workload GET, the PUT, the re-fetch); `iplists update Corp --add-fqdn x --yes` sends 4 (one `/ip_lists` GET, the href GET, the PUT, the re-fetch). Name resolution reads only the one list it needs; before the fix every resolved name built the four-list name index (four GETs uncached, more when a command resolved several names).
 - Unverified against a live PCE (no write-approved PCE yet): `workloads update --add-ip/--remove-ip` (the interfaces PUT, with `network`, `loopback`, `href` and null extras dropped before sending) and FQDN `description`/unknown fields carried through an IP list update.
+
+## Plan 4: TUI editing (labels, IP lists, services, unmanaged workloads; pending diff)
+Spec: docs/superpowers/specs/2026-10-11-tui-editing-design.md · Plan: docs/superpowers/plans/2026-10-11-tui-editing.md
+- [x] Task 1 Library: active IP lists and services
+- [x] Task 2 Writes state, runtime guard and header marker
+- [x] Task 3 Form overlay
+- [x] Task 4 Edit intents and form adapters
+- [x] Task 5 Editing keys, scrollable help, hints
+- [x] Task 6 Plan and confirm
+- [x] Task 7 Execute, report and reload
+- [x] Task 8 Pending diff
+- [x] Task 9 Docs, tracking, final gate and request-free smoke
+
+## Review (Plan 4)
+- Shipped: `· ✎ writes` header marker while profile and `--allow-writes` both allow writes; `n`/`e`/`x` on Labels & objects and unmanaged Workloads, with refusals that send nothing; a form overlay with CLI-grammar list fields; a confirm overlay that shows summary, `METHOD path` and body before `y` sends once; status line report and one reload after a write; a navigable pending list on Policy with `Enter` diffing a draft IP list or service against active (one cached GET).
+- Final gate: fmt, clippy `-D warnings`, `cargo test --workspace` pass, 457 tests, 0 failed; the CLI sources and tests are untouched by Plan 4 (empty diff stat).
+- Smoke against demo100 (headless, `--env-file`, scratch `XDG_STATE_HOME`, `PCE_LIVE_WRITES` unset, script never presses `y`): A (flag missing) 5 calls before and after `n`; B (profile not enabled) 5 and 5; C (form opened and cancelled, label planned and its confirm overlay cancelled with `n`) 5 calls up to Policy, 7 after loading Policy and the pending list; the first pending entry was a rule set (`rule diffs arrive with Plan 5`). Extra run D: selecting a pending service and `Enter` cost one GET (7 to 8 calls).
+- No write was sent to any PCE; the audit log in the scratch state dir had 0 lines. The TUI write path is proven by the wiremock runtime tests in `tests/tui_runtime.rs` only.
+- Deviations reported by tasks: none recorded here.

@@ -48,6 +48,9 @@ Module map under `crates/illumio-tui/src/tui/`:
 | `commands` | parser for the `:` prompt |
 | `filter` | the filter editor and its conversion to a traffic query |
 | `table` | sortable, searchable table state shared by every screen |
+| `form` | the generic edit form (fields, keys, horizontal scroll) |
+| `edit` | edit intents, pre-filled forms, form to library draft or patch |
+| `diff` | draft against active for a pending IP list or service |
 | `ui/` | theme, layout, per-screen drawing and widgets (panels, overlays) |
 
 One message, top to bottom: pressing `r` on Traffic.
@@ -111,6 +114,36 @@ type/code, a port without a protocol). Workloads are written only
 when the PCE reports `managed: false` and no VEN. The CLI layer
 (`cli/write.rs`) owns `--dry-run`/`--yes`, exact name resolution and the
 envelope (`meta.write`).
+
+### TUI editing
+
+The model knows only `WritesState` (enabled, reason); the runtime owns
+`Option<Arc<WriteGuard>>`, built in `run` and again on every `:profile`
+switch from the same inputs as the CLI (profile `writes`, `--allow-writes`,
+the JSONL audit log) with `source: "tui"`. A switch to a profile without
+writes drops the guard and the header marker.
+
+One edit, top to bottom: `e` on an IP list.
+
+1. `update` checks `model.writes`, clones the selected list into
+   `EditIntent::UpdateIpList` and opens `Overlay::Form` pre-filled by
+   `edit::start`.
+2. `Enter`: `edit::build_intent` diffs the fields against the original into
+   an `IpListPatch` (`Ok(None)` when nothing changed) and returns
+   `Cmd::PlanWrite`.
+3. `app` spawns a task: `pce.writer(&guard).plan_update_ip_list` fetches the
+   list once and returns the `Plan`; `Msg::Planned` opens
+   `Overlay::ConfirmWrite` with summary, `METHOD path` and the pretty body.
+4. `y`: `Cmd::ExecuteWrite`; the task calls `Writer::execute` once (audit,
+   cache prefix invalidated) and drops `policy:pending`; `Msg::WriteDone`
+   sets the status line and reloads the IP lists once with `Bypass`.
+
+`n`/`Esc` on the confirm overlay or the form sends nothing. The pending
+overlay keeps a selection; `Enter` sends `Cmd::LoadDiff` with the
+`PendingChange`; the task reads the draft list and
+`Pce::active_ip_lists`/`active_services` through the cache and
+`tui/diff.rs` computes `+`/`-`/same lines, so a second diff of the same kind
+within five minutes costs nothing.
 
 ## Testing
 

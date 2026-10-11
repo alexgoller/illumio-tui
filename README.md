@@ -182,6 +182,39 @@ retrying"), audited with `phase: "sent"`. Exit code 6 means the guard refused
 (profile, flag, or audit log not writable). `health --json` reports
 `"writes": true|false`. Rulesets, rules and provisioning are the next stage.
 
+### Editing in the TUI
+
+With writes enabled for the profile and `illumio-tui --allow-writes`, the
+header shows `· ✎ writes` and two screens take three keys: on Labels &
+objects (labels, IP lists, services) and Workloads (unmanaged workloads only)
+`n` creates, `e` edits the selected row and `x` deletes it. Without either
+switch the keys print the reason in the status line and send nothing. Label
+groups are read-only.
+
+A form takes one line per field; lists are comma-separated in the CLI
+grammar: ranges `10.0.0.0/8, 10.1.0.0-10.1.255.255, !10.0.5.0/24`, FQDNs
+`*.corp.example`, ports `443/tcp, 8000-8100/udp, icmp`, addresses
+`10.0.0.5, 10.0.0.6/24`, labels `app=web, env=prod` (resolved through the
+loaded index, never with a request; a label created in the TUI joins the
+index after the next `r` on Labels & objects). `Tab`/`Shift-Tab` move between fields,
+`Ctrl-U` clears one, `Enter` checks the form, `Esc` leaves without a request.
+An edit sends only what changed; an edit that changes nothing says
+`no changes`.
+
+The confirm overlay is the TUI's dry run: it shows the summary,
+`METHOD path` and the JSON body (`j`/`k` scroll). `y` sends it once, `n` or
+`Esc` cancels with `cancelled, nothing sent`. The status line then reports
+`created <href> (pending)`, `updated <href>` or `deleted <href>`, and that
+table reloads once. A rejected write (400/406/409/422) shows the PCE's
+message and reloads nothing; an unanswered one says to check the PCE before
+retrying and reloads. TUI writes go to the same audit log with
+`"source": "tui"`.
+
+On the Policy screen `p` lists pending changes; `j`/`k` select one, and
+`Enter` on a pending IP list or service shows what it changes against the
+active version (`+` added, `-` removed, unchanged entries dimmed). That costs
+one GET for the active list of the kind, cached for five minutes.
+
 ## PCE protection
 
 Every request is user-caused, throttled (2/s), cached, and counted.
