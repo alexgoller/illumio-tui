@@ -99,8 +99,8 @@ log opens for append. Writes are two-phase: `plan_create_*`, `plan_update_*`
 and `plan_delete_*` build a `Plan` (the exact `WriteRequest`, or a `Noop` when
 `--if-missing` found an exact match) without sending anything; `execute` sends
 it once through `PceClient::write` (no retry, 400/406/409/422 -> `Rejected`),
-appends the audit entry in a single write, invalidates the cache prefix of the
-kind (`objects:` or `workloads`), and re-fetches the object after a 204. A
+appends the audit entry in a single write, invalidates the cache prefixes of the
+kind (`objects:`, `workloads`, `policy:`, or both `policy:` and `objects:` after a provision), and re-fetches the object after a 204. A
 timeout, connection loss, gateway status or undecodable 2xx body after the
 request left is reported as `write_unanswered` ("may have applied") and
 audited with `phase: "sent"`; a failed re-fetch, a POST without an href or an
@@ -114,6 +114,19 @@ type/code, a port without a protocol). Workloads are written only
 when the PCE reports `managed: false` and no VEN. The CLI layer
 (`cli/write.rs`) owns `--dry-run`/`--yes`, exact name resolution and the
 envelope (`meta.write`).
+
+Policy writes (Plan 5) add `write/actors.rs` (`ActorRef`, `ServiceRef`: the
+typed sides of a rule and the members of a scope), `write/rule_sets.rs`,
+`write/rules.rs` and `write/provision.rs`. Rules and deny rules live under
+their ruleset's href (`checked_nested_href`); an update reads the rule once
+as JSON and applies the patch to that JSON, so untouched providers,
+consumers and services go back exactly as the PCE returned them, unknown
+keys included; the policy models carry an `extra` map for the same reason.
+`plan_provision` reads `sec_policy/pending` once (bypassing the cache) and
+sends an explicit `change_subset`; a pending rule maps to its ruleset. The
+CLI parses actor and service tokens (`ActorToken`, `ServiceToken`) before
+any request and resolves names against lists it fetches at most once per
+command (`Lists`).
 
 ### TUI editing
 
@@ -156,4 +169,4 @@ recorded-shape test treats an empty recorded list as a pass (it prints a
 note rather than failing), since an empty list is a valid shape, not a
 recording error. `PCE_LIVE=1` enables the single live test.
 
-`crates/pce/tests/write_contract.rs` pins every write body with wiremock; `crates/illumio-tui/tests/cli_writes.rs` covers the guard, exit codes 2/4/6, dry runs and the audit file. `live_writes.rs` is opt-in (`PCE_LIVE_WRITES=1`) and only ever creates and deletes one label.
+`crates/pce/tests/write_contract.rs` pins every write body with wiremock; `crates/illumio-tui/tests/cli_writes.rs` covers the guard, exit codes 2/4/6, dry runs and the audit file. `crates/pce/tests/policy_writes.rs` pins every policy body (rulesets, rules, deny rules, provisioning, managed labels) with wiremock. `live_writes.rs` is opt-in (`PCE_LIVE_WRITES=1`); it creates and deletes one label, and runs a draft ruleset and rule lifecycle that plans but never sends a provision.

@@ -100,3 +100,25 @@ Spec: docs/superpowers/specs/2026-10-11-tui-editing-design.md · Plan: docs/supe
 - Deviations reported by tasks: Task 8 had two accepted deviations (`Ref::new(&diff.href)` bound to a local in `render_diff` for a borrow fix; `std::slice::from_ref(&c)` instead of `&[c.clone()]` in the diff tests on clippy's advice). Task 5 wrote its tests after the implementation (no RED run).
 - Final whole-branch review (opus): 0 Critical, 5 Important, 7 Minor. One fix wave (5 commits, a9c43f8..417e935), re-reviewed clean: one write in flight at a time and a late plan never lands on another overlay (typed-ahead `y`); reloaded labels rebuild the name index at no extra request (and the README now says what `r` does); workload addresses match the shown text first and a prefix removal is refused instead of reported as "no changes"; an unanswered write whose audit failed still reloads; the confirm overlay wraps its body; the `✎ writes` marker sits before the host so a long hostname cannot push it off screen; the stale "loading the active version of ..." status is replaced. Gate after the wave: 467 tests, 0 failed.
 - Parked (documented, not fixed): wrapping counts characters not display cells; the confirm overlay's summary and `METHOD path` lines still clip when very long; a typed non-canonical IPv6 token against the PCE's spelling still shows as remove plus add (untouched forms are fine); `k` in the confirm overlay does not re-clamp after a resize; removing a duplicated entry fails closed with a planner error; in-field cursor movement is not in the form (spec 4.3), so editing a long list means Ctrl-U and retyping.
+
+## Plan 5: policy writes (rulesets, rules, deny rules, provisioning, managed labels)
+Spec: docs/superpowers/specs/2026-10-11-policy-writes-design.md · Plan: docs/superpowers/plans/2026-10-11-policy-writes.md
+- [x] Task 1 Models and kinds
+- [x] Task 2 Actors and services
+- [x] Task 3 Rulesets
+- [x] Task 4 Rules and deny rules
+- [x] Task 5 Provisioning
+- [x] Task 6 Managed workload labels and the label-group lookup
+- [x] Task 7 CLI token grammar and resolution
+- [x] Task 8 CLI rulesets, rules and deny rules
+- [x] Task 9 CLI provisioning, managed labels and the guard table
+- [x] Task 10 Docs, tracking, opt-in live test, dry-run smoke, final gate
+
+## Review (Plan 5)
+- Shipped: `policy rulesets add|update|delete`, `policy rules add|update|delete`, `policy deny-rules add|update|delete` (draft only, compact actor and service token grammar, names resolved with at most one list GET per kind); `policy provision --all|NAMES|HREFS` (one pending GET, explicit `change_subset` grouped by type, `counts` per type); `workloads update --managed-labels` (labels-only PUT, other flags exit 2); 23-entry guard table.
+- Gate: `cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` green, 555 tests, 0 failed (illumio-tui lib 182, cli 24, cli_writes 67, tui_runtime 30, tui_snapshots 33; pce lib 92, client 9, facade 10, live 1, live_writes 2 (skipping), policy_writes 29, recorded 2, traffic_poll 8, write_contract 64; xtask 2).
+- TUI diff vs main: one file, `crates/illumio-tui/src/tui/update.rs`, +5 lines (the `RuleSet | Rule | DenyRule | Provision` arm in `reload_after_write`).
+- Smoke against demo100, dry runs only, `--yes` never passed, `PCE_LIVE_WRITES` unset, scratch `XDG_STATE_HOME`: `policy provision --all --dry-run` api_calls 1 (POST /orgs/5636114/sec_policy, counts rule_sets=2 services=2); `policy rules add "Quarantine Policy: Strict" ... --dry-run` api_calls 1 (POST .../rule_sets/24206847997116627/sec_rules); `policy rulesets add smoke-test --dry-run` api_calls 0 (POST .../rule_sets, scopes [[]]). Audit file `<scratch>/state/illumio-tui/writes.jsonl` is 0 bytes (0 lines). No write was sent.
+- `crates/pce/tests/live_writes.rs` was extended with `live_ruleset_and_rule_lifecycle` and NOT run with `PCE_LIVE_WRITES=1`; without it both tests print the skip line and pass.
+- Deviations: see the per-task reports in `.superpowers/sdd/2026-10-11-policy-writes/`. README: the brief's sentence that a pending object of another type makes `--all` refuse was replaced, because the code groups every pending type generically and only refuses an href it cannot parse.
+- Parked: see the final whole-branch review of Plan 5 for the items it names.

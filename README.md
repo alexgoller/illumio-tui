@@ -180,7 +180,64 @@ connection, gateway status (502/503/504) or undecodable 2xx body is
 `write_unanswered` (exit 4, "write may have applied; check the PCE before
 retrying"), audited with `phase: "sent"`. Exit code 6 means the guard refused
 (profile, flag, or audit log not writable). `health --json` reports
-`"writes": true|false`. Rulesets, rules and provisioning are the next stage.
+`"writes": true|false`. Policy writes are below.
+
+### Policy writes
+
+Rulesets, allow rules and deny rules are written to draft (`"pending": true`)
+and reach the workloads when they are provisioned. Every command takes
+`--dry-run` and `--yes` like the object writes; a ruleset is named by its
+name (case-insensitive, one list GET) or its href, a rule or deny rule only by
+its href (`policy rules <ruleset> --json` lists them).
+
+    illumio-tui --allow-writes policy rulesets add Web-Tier --scope app=web,env=prod --yes
+    illumio-tui --allow-writes policy rulesets update Web-Tier --clear-scopes --dry-run
+    illumio-tui --allow-writes policy rules add Web-Tier --provider app=web --consumer iplist:Corp --service 443/tcp --yes --json
+    illumio-tui --allow-writes policy rules update /orgs/1/sec_policy/draft/rule_sets/7/sec_rules/9 --add-consumer '!iplist:Guest' --dry-run
+    illumio-tui --allow-writes policy deny-rules add Web-Tier --provider all --consumer iplist:Any --service 23/tcp --override --yes
+    illumio-tui --allow-writes policy provision --all --dry-run
+    illumio-tui --allow-writes policy provision Web-Tier --description "web tier v2" --yes
+    illumio-tui --allow-writes workloads update web-01 --add-label env=prod --managed-labels --yes
+
+Providers, consumers and scope members (`--provider`, `--consumer`,
+`--scope`, `--add-*`/`--remove-*`):
+
+| token | meaning |
+|-------|---------|
+| `app=web`, `label:app=web` | a label |
+| `group:NAME` | a label group |
+| `iplist:NAME` | an IP list |
+| `workload:HOST` | a workload, by hostname, then by name |
+| `all` | every workload |
+| `!TOKEN` | exclusion (labels, label groups and IP lists only; quote it in the shell) |
+| `/orgs/N/...` | an href of one of these kinds, checked without a request |
+
+Services (`--service`): a service name (`HTTPS`, or `service:NAME` when the
+name looks like a port), an inline port (`443/tcp`, `8000-8100/udp`, `icmp`)
+or a service href. A `--scope` holds labels and label groups only,
+comma-separated; repeat `--scope` for alternatives; no `--scope` means
+everywhere. Each object list is read at most once per command, and only
+when a token needs it; unknown names are exit 2 with up to five similar
+names, before any write.
+
+`rules update` and `deny-rules update` re-read the rule and send only the
+keys that change; a changed provider, consumer or service list is sent whole
+with the untouched entries exactly as the PCE returned them, and a
+`--remove-*` that matches nothing is exit 2. Virtual service and virtual
+server actors are not supported. A ruleset `PUT` never carries its rules.
+
+`policy provision --all` reads the pending list once and provisions every
+pending object by explicit href, grouped by type (rulesets, IP lists,
+services, label groups, virtual services, firewall settings, and so on); a
+changed rule is provisioned through its ruleset. With names or hrefs instead
+of `--all`, each must be pending and unrelated pending entries are left
+alone. `data.counts` gives the number of objects per type; nothing pending
+is `skipped` (exit 0). If the PCE rejects a type it does not accept in a
+subset, the rejection is reported with its body.
+
+`workloads update --managed-labels` changes the labels of a VEN-managed
+workload with a `PUT` that carries only `labels`; any other flag with it is
+exit 2 before any request. Without it, managed workloads stay refused.
 
 ### Editing in the TUI
 
