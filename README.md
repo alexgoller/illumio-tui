@@ -320,12 +320,34 @@ neither in its list payload nor loaded, the diff shows them unchanged under
 `deny rules not compared (<side> not fetched)` rather than guessing.
 
 On Traffic, `w` on a blocked or potentially blocked flow (Flows view or a
-drilled pair) opens an allow-rule form pre-filled from the flow: the
-destination's labels as providers, the source's as consumers (an unlabeled
-workload as `workload:<href>`, else its IP lists, else `all`), `port/proto`
-as the service, and Unscoped `y` when the source has no labels. Type the
-ruleset's name or href; a name costs one draft ruleset read at submit, and
-an unknown name brings the form back with similar names.
+drilled pair) opens an allow-rule form pre-filled from the flow in the label
+model below: the destination's tier (`role=db`) as providers; as consumers
+the source's tier when it is in the destination's scope, else its scope and
+tier (`app=crm, env=prod, role=web`) with Unscoped `y`; an endpoint without
+the label asked for falls back to `workload:<href>`, else its IP lists, else
+`all`. Other dimensions (`loc`, your own keys) are not pre-filled: `Ctrl-A`
+swaps in every attached label and back (what you typed is kept). The
+service is the flow's `port/proto`. The ruleset is pre-filled when exactly
+one loaded draft ruleset is scoped like the destination; otherwise the hint
+names that scope (`scope app=shop, env=prod`). Type the ruleset's name or
+href; a name costs one draft ruleset read at submit, and an unknown name
+brings the form back with similar names. When the destination has a scope,
+`Ctrl-N` on that form creates the ruleset under that name scoped like the
+destination (its own confirm and POST), then plans the rule into it for a
+second confirm; cancelling either sends nothing more.
+
+### Label model
+
+Rulesets are scoped by `app` and `env`, rules select tiers by `role`. Other
+names, per profile:
+
+    [profiles.prod.labels]
+    scope_keys = ["app", "env"]   # the labels a ruleset scope is made of
+    tier_key = "role"             # the label a rule selects a tier by
+
+or `ILLUMIO_SCOPE_KEYS=app,env` and `ILLUMIO_TIER_KEY=role`, which outrank
+the profile. An empty key list is refused. Only the TUI's `w` pre-fill uses
+them.
 
 ## PCE protection
 

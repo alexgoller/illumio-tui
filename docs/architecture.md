@@ -187,6 +187,21 @@ fallback). A provision also reloads the pending list and reports
 `y` was pressed. A plan with nothing to send (`Plan::Noop`, such as an update
 whose fields already match) is an info status, never a request.
 
+The `w` pre-fill follows the profile's label model (`Limits.scope_keys`,
+`Limits.tier_key`, from `[profiles.<name>.labels]` or `ILLUMIO_SCOPE_KEYS` /
+`ILLUMIO_TIER_KEY`): `edit::start` takes a `FlowPrefill` (those keys and the
+loaded draft rulesets, `Model::flow_prefill`) and fills providers with the
+destination's tier, consumers with the source's tier (same scope) or its
+scope and tier (unscoped), and the ruleset with the one loaded draft ruleset
+whose scope is the destination's (by label href); nothing is requested.
+`Form.alt` holds every attached label for `Ctrl-A`. When the plan says the
+typed name is unknown and the destination has a scope, the form offers
+`Ctrl-N` (`Form.offers_ruleset`): it plans `CreateRuleSet` scoped like the
+destination and keeps the rule in `PolicyState.rule_after_ruleset`; the
+ruleset's `WriteDone(Ok)` plans `CreateRule` into the new href (a second
+confirm), and any failure, cancel or profile switch drops it. Both writes
+reload the draft rulesets.
+
 `Enter` on a pending ruleset reads the draft rulesets (cached) and the active
 ones (one GET, five minutes); `diff::rule_set_diff_for` lists name,
 description, state, scopes and one line per rule, matched by href. Each

@@ -155,3 +155,17 @@ Spec: docs/superpowers/specs/2026-10-11-tui-policy-editing-design.md · Plan: do
   - Task 7: the help key column widened from 24 to 25 cells; the writes-off runtime test counts requests server-side per session.
 - Final whole-branch review: 0 Critical, 2 Important fixed in one wave (ruleset diff treats inline-empty deny lists as authoritative when the PCE inlines deny rules; update Noop shown as info), plus the rules-pane scope title Alex asked for. The same wave guarded a late `DiffLoaded`, named the rule in a rule delete confirm, fixed the `provisioned <version href>` wording and the help spacing; report in `.superpowers/sdd/2026-10-11-tui-policy-editing/final-fix-report.md`.
 - Parked: allow/deny duplication (~50 lines); ambiguous/pending-delete names render but cannot resolve back; late DiffLoaded guard added; `w` not exercised on demo100 (no blocked flows in the window); help column 25; `Box<ResolvedFlow>`. Per-task minor lists in `.superpowers/sdd/2026-10-11-tui-policy-editing/progress.md`.
+
+## Issue #3: label-model rule writing
+Brief: .superpowers/sdd/issue-3/brief.md · Report: .superpowers/sdd/issue-3/report.md
+- [x] 1 Config: `[profiles.<name>.labels]` scope_keys/tier_key, `ILLUMIO_SCOPE_KEYS` / `ILLUMIO_TIER_KEY`, carried in `Limits`
+- [x] 2 `w` pre-fill in the label model (tiers, scopes, the matching loaded draft ruleset or a scope hint)
+- [x] 3 `Ctrl-A` swaps in every attached label and back
+- [x] 4 `Ctrl-N` on an unknown ruleset name: create the scoped ruleset, then the rule (two confirms, two POSTs)
+- [x] 5 Docs (README Traffic `w` + Label model, architecture paragraph)
+
+## Review (Issue #3)
+- Shipped: the `w` form pre-fills providers with the destination's tier and consumers with the source's tier (same scope) or its scope and tier (unscoped); `loc` and custom keys are never pre-filled; the ruleset is the one loaded draft ruleset scoped like the destination, else empty with `scope app=…, env=…` as the hint. `Ctrl-A` toggles every attached label. An unknown ruleset name with a scoped destination offers `Ctrl-N`, which creates the ruleset scoped like the destination and then plans the rule into it for a second confirm. Dimension names come from `[profiles.<name>.labels]` or `ILLUMIO_SCOPE_KEYS` / `ILLUMIO_TIER_KEY`.
+- Gate: `cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` green, 631 tests, 0 failed (illumio-tui lib 234, cli 24, cli_writes 71, tui_runtime 42, tui_snapshots 38; pce unchanged).
+- Unchanged: `crates/pce`, `src/cli`, the CLI tests, dependencies. Snapshots changed: `form_rule_from_flow_80x24`, `form_rule_from_flow_light_styled_80x24`.
+- Deviations: the Ctrl-N offer keeps the planner's similar names in front of it; `Ctrl-A` / `Ctrl-N` are not in the help overlay (the form footer and error say them); not smoke-tested against a PCE.
