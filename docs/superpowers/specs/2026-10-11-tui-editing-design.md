@@ -153,7 +153,8 @@ confirmation text.
 
 ### 4.3 The form
 
-One generic form struct, in `tui/form.rs`, modelled on `FilterEditor`:
+One generic form struct, in `tui/form.rs`, modelled on `FilterEditor`, held
+in `Overlay::Form(Form)`:
 
 ```rust
 pub struct Form {
@@ -208,7 +209,27 @@ with the existing `IpRangeSpec::parse`, `PortSpec::parse` and
 
 ### 4.4 Adapters: form to draft or patch
 
-`tui/edit.rs` turns a validated form into the Plan 3 types:
+`tui/edit.rs` turns a validated form (or a delete intent) into one
+`WriteIntent`, the value `Cmd::PlanWrite` carries:
+
+```rust
+pub enum WriteIntent {
+    CreateLabel(LabelDraft),
+    UpdateLabel { href: String, value: String },
+    DeleteLabel { href: String },
+    CreateIpList(IpListDraft),
+    UpdateIpList { href: String, patch: IpListPatch },
+    DeleteIpList { href: String },
+    CreateService(ServiceDraft),
+    UpdateService { href: String, patch: ServicePatch },
+    DeleteService { href: String },
+    CreateWorkload(WorkloadDraft),
+    UpdateWorkload { href: String, patch: WorkloadPatch },
+    DeleteWorkload { href: String },
+}
+```
+
+The adapters build the drafts and patches as follows:
 
 - Create: `LabelDraft`, `IpListDraft`, `ServiceDraft`, `WorkloadDraft`.
 - Update: `IpListPatch`, `ServicePatch`, `WorkloadPatch` are computed
@@ -247,8 +268,7 @@ name.
 
 ### 5.1 `PlanWrite`
 
-`WriteIntent` carries the draft or patch plus the target href. The runtime
-spawns a task that builds `pce.writer(&guard)` and calls the matching
+The runtime spawns a task that builds `pce.writer(&guard)` and calls the matching
 planner (`plan_create_*` with `IfMissing::Create`, `plan_update_*`,
 `plan_delete_*`). Planners for IP lists, services and workloads fetch the
 current object once (one GET, as in the CLI); label planners make no
@@ -275,9 +295,8 @@ than the line, exactly like other task failures (`fail`).
 
 ### 5.2 `ExecuteWrite`
 
-`y` turns the overlay into `Overlay::Pending`-style waiting state: the
-confirm overlay closes, the status line shows "sending …", `busy` is up. The
-task calls `writer.execute(plan)` once. `Msg::WriteDone`:
+On `y` the confirm overlay closes, the status line shows "sending …" and
+`busy` is up until the result arrives. The task calls `writer.execute(plan)` once. `Msg::WriteDone`:
 
 - `Ok(Outcome::Written(w))`: status line `created <href> (pending)` /
   `updated <href>` / `deleted <href>`; `w.warnings` are appended to the
@@ -306,7 +325,8 @@ only be `AuditUnwritable` or a library invariant; it surfaces through the
 
 `Overlay::Pending` gains a selection: `PolicyState.pending_selected: usize`,
 moved with `j`/`k`, `Up`/`Down`. `Enter` on an entry whose `object_type` is
-`ip_lists` or `services` issues `Cmd::LoadDiff { href, kind }`; on any other
+`ip_lists` or `services` issues `Cmd::LoadDiff { href: String, kind:
+pce::write::ObjectKind }` (only `IpList` and `Service` occur); on any other
 entry the status line says "rule diffs arrive with Plan 5" (or "no diff for
 <object_type>" for label groups and others).
 
