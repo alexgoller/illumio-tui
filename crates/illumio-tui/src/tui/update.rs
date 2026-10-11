@@ -3887,12 +3887,20 @@ mod tests {
                     auto_refresh_min_seconds: 300,
                     traffic_max_results: 500,
                     traffic_default_window: "1h".into(),
+                    scope_keys: vec!["site".into()],
+                    tier_key: "tier".into(),
                 },
             ))),
         );
         assert_eq!(cmds, vec![Cmd::Connect]);
         assert_eq!(m.limits.traffic_max_results, 500);
         assert_eq!(m.limits.auto_refresh_min_seconds, 300);
+        assert_eq!(
+            m.limits.scope_keys,
+            vec!["site"],
+            "the label model follows the profile"
+        );
+        assert_eq!(m.limits.tier_key, "tier");
         assert_eq!(m.limits.traffic_default_window, "1h");
         assert_eq!(m.traffic.filter.max_results, 500);
         assert_eq!(m.traffic.filter.window, "1h");
@@ -4270,6 +4278,8 @@ mod tests {
                     auto_refresh_min_seconds: 60,
                     traffic_max_results: 1000,
                     traffic_default_window: "24h".into(),
+                    scope_keys: vec!["app".into(), "env".into()],
+                    tier_key: "role".into(),
                 },
             ))),
         );

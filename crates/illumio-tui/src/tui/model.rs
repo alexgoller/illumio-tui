@@ -1825,6 +1825,10 @@ pub struct Limits {
     pub auto_refresh_min_seconds: u64,
     pub traffic_max_results: u32,
     pub traffic_default_window: String,
+    /// Label keys a ruleset scope is made of (`app`, `env`).
+    pub scope_keys: Vec<String>,
+    /// The label key that names a tier (`role`).
+    pub tier_key: String,
 }
 
 #[derive(Debug)]
@@ -1881,10 +1885,13 @@ impl Model {
             profile,
             theme_name,
             theme,
+            // The defaults; `app::run` and a profile switch set the profile's.
             limits: Limits {
                 auto_refresh_min_seconds,
                 traffic_max_results,
                 traffic_default_window,
+                scope_keys: crate::config::DEFAULT_SCOPE_KEYS.map(String::from).to_vec(),
+                tier_key: crate::config::DEFAULT_TIER_KEY.into(),
             },
             screen: Screen::Traffic,
             overlay: Overlay::None,

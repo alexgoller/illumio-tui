@@ -3,6 +3,8 @@
 //! selected profile in `~/.config/illumio-tui/config.toml`, then defaults.
 //! `writes` (profile) or `ILLUMIO_WRITES` (env) enables write commands;
 //! nothing is written unless `--allow-writes` is also given.
+//! `[profiles.<name>.labels]` (or `ILLUMIO_SCOPE_KEYS`, `ILLUMIO_TIER_KEY`)
+//! names the label model the TUI writes rules in.
 //! The tool never writes secrets anywhere.
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -34,6 +36,9 @@ pub struct Profile {
     pub writes: Option<bool>,
     #[serde(default, skip_serializing_if = "Limits::is_empty")]
     pub limits: Limits,
+    /// The label model rules are written in (`[profiles.<name>.labels]`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<LabelsConfig>,
     /// Unknown keys, round-tripped verbatim.
     #[serde(default, flatten)]
     pub extra: toml::Table,
@@ -57,6 +62,7 @@ impl std::fmt::Debug for Profile {
             .field("api_secret_cmd", &self.api_secret_cmd)
             .field("writes", &self.writes)
             .field("limits", &self.limits)
+            .field("labels", &self.labels)
             // Unknown keys could be anything; print their names only.
             .field("extra", &self.extra.keys().collect::<Vec<_>>())
             .finish()
@@ -78,6 +84,27 @@ impl Limits {
             && self.traffic_max_results.is_none()
             && self.traffic_default_window.is_none()
     }
+}
+
+/// Rulesets are scoped by `scope_keys` (`app`, `env`); rules select tiers
+/// by `tier_key` (`role`). Used by the TUI's `w` pre-fill only.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct LabelsConfig {
+    pub scope_keys: Option<Vec<String>>,
+    pub tier_key: Option<String>,
+}
+
+pub const DEFAULT_SCOPE_KEYS: [&str; 2] = ["app", "env"];
+pub const DEFAULT_TIER_KEY: &str = "role";
+
+/// Trimmed, empty entries dropped; `None` when nothing is left.
+fn key_list<'a>(items: impl Iterator<Item = &'a str>) -> Option<Vec<String>> {
+    let keys: Vec<String> = items
+        .map(str::trim)
+        .filter(|k| !k.is_empty())
+        .map(String::from)
+        .collect();
+    (!keys.is_empty()).then_some(keys)
 }
 
 /// Values given on the command line.
@@ -104,6 +131,10 @@ pub struct ResolvedConfig {
     pub traffic_max_results: u32,
     pub traffic_default_window: String,
     pub writes: bool,
+    /// Label keys a ruleset scope is made of, in order.
+    pub scope_keys: Vec<String>,
+    /// The label key that names a tier inside a scope.
+    pub tier_key: String,
 }
 
 impl ResolvedConfig {
@@ -290,6 +321,29 @@ pub fn resolve(
         },
     };
 
+    let labels = profile.labels.clone().unwrap_or_default();
+    let scope_keys = match env_str("ILLUMIO_SCOPE_KEYS") {
+        Some(raw) => key_list(raw.split(',')).ok_or_else(|| {
+            ConfigError::Message("ILLUMIO_SCOPE_KEYS must name at least one key".into())
+        })?,
+        None => match &labels.scope_keys {
+            Some(list) => key_list(list.iter().map(String::as_str)).ok_or_else(|| {
+                ConfigError::Message("labels.scope_keys must name at least one key".into())
+            })?,
+            None => DEFAULT_SCOPE_KEYS.map(String::from).to_vec(),
+        },
+    };
+    let tier_key = env_str("ILLUMIO_TIER_KEY")
+        .or_else(|| {
+            labels
+                .tier_key
+                .as_deref()
+                .map(str::trim)
+                .filter(|k| !k.is_empty())
+                .map(String::from)
+        })
+        .unwrap_or_else(|| DEFAULT_TIER_KEY.into());
+
     Ok(ResolvedConfig {
         profile_name,
         scheme,
@@ -316,6 +370,8 @@ pub fn resolve(
             })?,
             None => profile.writes.unwrap_or(false),
         },
+        scope_keys,
+        tier_key,
     })
 }
 
@@ -530,6 +586,71 @@ api_secret_cmd = "echo   from-command  "
         let shown = format!("{:?}", f2.profiles["demo"]);
         assert!(shown.contains("writes: Some(true)"), "{shown}");
         assert!(!shown.contains("file-secret"));
+    }
+
+    #[test]
+    fn label_model_defaults_profile_values_and_env_outranks() {
+        let r = resolve(&file(), &Overrides::default(), &env(&[])).unwrap();
+        assert_eq!(r.scope_keys, vec!["app", "env"]);
+        assert_eq!(r.tier_key, "role");
+        let f: ConfigFile = toml::from_str(
+            r#"
+[profiles.default]
+host = "h"
+org_id = 1
+api_key = "k"
+api_secret = "s"
+
+[profiles.default.labels]
+scope_keys = ["app", " site ", ""]
+tier_key = "tier"
+"#,
+        )
+        .unwrap();
+        let r = resolve(&f, &Overrides::default(), &env(&[])).unwrap();
+        assert_eq!(
+            r.scope_keys,
+            vec!["app", "site"],
+            "trimmed, empty entries dropped"
+        );
+        assert_eq!(r.tier_key, "tier");
+        let r = resolve(
+            &f,
+            &Overrides::default(),
+            &env(&[
+                ("ILLUMIO_SCOPE_KEYS", " env , ,loc "),
+                ("ILLUMIO_TIER_KEY", " role "),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(r.scope_keys, vec!["env", "loc"], "env outranks the profile");
+        assert_eq!(r.tier_key, "role");
+        let shown = format!("{:?}", f.profiles["default"]);
+        assert!(shown.contains("tier_key: Some(\"tier\")"), "{shown}");
+    }
+
+    #[test]
+    fn an_empty_scope_key_list_is_refused() {
+        let err = resolve(
+            &file(),
+            &Overrides::default(),
+            &env(&[("ILLUMIO_SCOPE_KEYS", " , ,")]),
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "ILLUMIO_SCOPE_KEYS must name at least one key"
+        );
+        let mut f = file();
+        f.profiles.get_mut("demo").unwrap().labels = Some(LabelsConfig {
+            scope_keys: Some(vec![" ".into()]),
+            tier_key: None,
+        });
+        let err = resolve(&f, &Overrides::default(), &env(&[])).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "labels.scope_keys must name at least one key"
+        );
     }
 
     #[test]

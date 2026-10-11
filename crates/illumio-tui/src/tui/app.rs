@@ -210,6 +210,8 @@ impl Runtime {
                                 auto_refresh_min_seconds: ctx.config.auto_refresh_min_seconds,
                                 traffic_max_results: ctx.config.traffic_max_results,
                                 traffic_default_window: ctx.config.traffic_default_window.clone(),
+                                scope_keys: ctx.config.scope_keys.clone(),
+                                tier_key: ctx.config.tier_key.clone(),
                             };
                             let (writer, writes) = build_writer(&ctx);
                             (ctx.pce, info, limits, writer, writes)
@@ -710,7 +712,7 @@ pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
         org_id: cfg.org_id,
     };
     let theme = global.theme.clone().unwrap_or_else(|| "dark".into());
-    let model = Model::new_connecting(
+    let mut model = Model::new_connecting(
         profile,
         theme,
         cfg.auto_refresh_min_seconds,
@@ -718,6 +720,8 @@ pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
         cfg.traffic_default_window.clone(),
         writes,
     );
+    model.limits.scope_keys = cfg.scope_keys.clone();
+    model.limits.tier_key = cfg.tier_key.clone();
     let (mut rt, _tx) = Runtime::with_args(Arc::new(ctx.pce), model, global);
     rt.writer = writer.map(Arc::new);
     rt.execute(Cmd::Connect);
@@ -867,6 +871,8 @@ mod tests {
                 auto_refresh_min_seconds: 60,
                 traffic_max_results: 1000,
                 traffic_default_window: "24h".into(),
+                scope_keys: vec!["app".into(), "env".into()],
+                tier_key: "role".into(),
             },
             None,
             WritesState::off("writes need --allow-writes"),
