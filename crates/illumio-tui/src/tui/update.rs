@@ -261,12 +261,13 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             Vec::new()
         }
         Msg::RuleSetsLoaded { scope, result } => {
+            // A reload a write asked for keeps the write's report. Taken before
+            // the scope check: an ignored answer must not leave the flag set.
+            let quiet = std::mem::take(&mut model.policy.quiet_reload);
             if scope != model.policy.scope {
                 return Vec::new(); // the user toggled draft/active meanwhile
             }
             model.policy.loading = false;
-            // A reload a write asked for keeps the write's report.
-            let quiet = std::mem::take(&mut model.policy.quiet_reload);
             match result {
                 Ok((raw, age)) => {
                     model.policy.loaded_at = Some(Instant::now());
@@ -1812,7 +1813,7 @@ fn workloads_edit_key(model: &mut Model, c: char) -> Vec<Cmd> {
     begin_edit(model, intent)
 }
 
-/// `n` / `e` / `x` on Policy (and `N` on the rules pane): draft only.
+/// `n` / `e` / `x` on the rulesets pane: draft only.
 fn policy_edit_key(model: &mut Model, c: char) -> Vec<Cmd> {
     if writes_refused(model) {
         return Vec::new();
@@ -1821,11 +1822,7 @@ fn policy_edit_key(model: &mut Model, c: char) -> Vec<Cmd> {
         model.status = StatusLine::warn("switch to draft to edit policy");
         return Vec::new();
     }
-    let intent = match model.policy.pane {
-        PolicyPane::RuleSets => ruleset_intent(&model.policy, c),
-        PolicyPane::Rules => None,
-    };
-    let Some(intent) = intent else {
+    let Some(intent) = ruleset_intent(&model.policy, c) else {
         model.status = StatusLine::warn("no row selected");
         return Vec::new();
     };
@@ -5658,6 +5655,49 @@ mod tests {
         assert!(
             cmds.is_empty(),
             "a draft write does not change the active view"
+        );
+    }
+
+    #[test]
+    fn quiet_reload_does_not_outlive_a_scope_switch() {
+        use crate::tui::test_support::model_with_policy;
+        use pce::write::Outcome;
+        let mut m = model_with_policy();
+        m.screen = Screen::Policy;
+        update(
+            &mut m,
+            Msg::WriteDone {
+                kind: pce::write::ObjectKind::RuleSet,
+                method: Some(pce::WriteMethod::Post),
+                result: Ok(Outcome::Written(written(
+                    "/orgs/5/sec_policy/draft/rule_sets/102",
+                    true,
+                ))),
+            },
+        );
+        assert!(m.policy.quiet_reload);
+        m.policy.loading = false;
+        update(&mut m, key('d')); // to active while the reload is in flight
+        let sets = m.policy.raw.clone();
+        update(
+            &mut m,
+            Msg::RuleSetsLoaded {
+                scope: PolicyScope::Draft,
+                result: Ok((sets.clone(), 0)),
+            },
+        );
+        assert!(!m.policy.quiet_reload, "the ignored answer took the flag");
+        update(
+            &mut m,
+            Msg::RuleSetsLoaded {
+                scope: PolicyScope::Active,
+                result: Ok((sets, 0)),
+            },
+        );
+        assert!(
+            m.status.text.ends_with("rulesets (active)"),
+            "{}",
+            m.status.text
         );
     }
 }

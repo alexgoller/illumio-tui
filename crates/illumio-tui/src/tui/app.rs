@@ -817,4 +817,21 @@ mod tests {
             Some("writes need --allow-writes")
         );
     }
+
+    #[test]
+    fn a_delete_summary_names_the_object_not_the_href() {
+        let plan = Plan::Send {
+            request: pce::write::WriteRequest {
+                method: pce::WriteMethod::Delete,
+                path: "/orgs/5/sec_policy/draft/rule_sets/100".into(),
+                body: None,
+                summary: "delete /orgs/5/sec_policy/draft/rule_sets/100".into(),
+            },
+            kind: pce::write::ObjectKind::RuleSet,
+        };
+        let Plan::Send { request, .. } = named(plan, "rule_set", "Shop-Prod") else {
+            panic!("a send stays a send")
+        };
+        assert_eq!(request.summary, "delete rule_set Shop-Prod");
+    }
 }
