@@ -120,5 +120,10 @@ Spec: docs/superpowers/specs/2026-10-11-policy-writes-design.md · Plan: docs/su
 - TUI diff vs main: one file, `crates/illumio-tui/src/tui/update.rs`, +5 lines (the `RuleSet | Rule | DenyRule | Provision` arm in `reload_after_write`).
 - Smoke against demo100, dry runs only, `--yes` never passed, `PCE_LIVE_WRITES` unset, scratch `XDG_STATE_HOME`: `policy provision --all --dry-run` api_calls 1 (POST /orgs/5636114/sec_policy, counts rule_sets=2 services=2); `policy rules add "Quarantine Policy: Strict" ... --dry-run` api_calls 1 (POST .../rule_sets/24206847997116627/sec_rules); `policy rulesets add smoke-test --dry-run` api_calls 0 (POST .../rule_sets, scopes [[]]). Audit file `<scratch>/state/illumio-tui/writes.jsonl` is 0 bytes (0 lines). No write was sent.
 - `crates/pce/tests/live_writes.rs` was extended with `live_ruleset_and_rule_lifecycle` and NOT run with `PCE_LIVE_WRITES=1`; without it both tests print the skip line and pass.
-- Deviations: see the per-task reports in `.superpowers/sdd/2026-10-11-policy-writes/`. README: the brief's sentence that a pending object of another type makes `--all` refuse was replaced, because the code groups every pending type generically and only refuses an href it cannot parse.
-- Parked: see the final whole-branch review of Plan 5 for the items it names.
+- Deviations reported by tasks:
+  - Task 5: pending hrefs are grouped generically by object type (controller ruling over the spec's fixed list); a small `NOT_POLICY` deny-list (`workloads`, `labels`) keeps non-policy segments refused; after a fix round, id-less singleton hrefs such as `/orgs/N/sec_policy/draft/firewall_settings` are accepted and grouped (test `id_less_singletons_are_grouped_and_accepted`).
+  - Task 7 (fix round): prefixed hrefs (`label:`, `group:`, `iplist:`, `workload:`, `service:` + `/orgs/...`) resolve through the strict library checkers with no list GET.
+  - Task 8: the `policy rules [RULESET]` list positional became optional so `add|update|delete` sit beside it; a ruleset literally named `add`, `update` or `delete` is addressed by href.
+  - Task 3: the no-op reason is `rule_set <name> already matches` (name included).
+  - Task 10: README says `--all` groups every pending type generically, and unknown-name errors list up to five similar names.
+- Parked: filled in after the whole-branch review

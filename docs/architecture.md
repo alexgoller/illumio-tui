@@ -100,7 +100,8 @@ and `plan_delete_*` build a `Plan` (the exact `WriteRequest`, or a `Noop` when
 `--if-missing` found an exact match) without sending anything; `execute` sends
 it once through `PceClient::write` (no retry, 400/406/409/422 -> `Rejected`),
 appends the audit entry in a single write, invalidates the cache prefixes of the
-kind (`objects:`, `workloads`, `policy:`, or both `policy:` and `objects:` after a provision), and re-fetches the object after a 204. A
+kind (`objects:`, `workloads`, `policy:`, or both `policy:` and `objects:`
+after a provision), and re-fetches the object after a 204. A
 timeout, connection loss, gateway status or undecodable 2xx body after the
 request left is reported as `write_unanswered` ("may have applied") and
 audited with `phase: "sent"`; a failed re-fetch, a POST without an href or an
@@ -169,4 +170,10 @@ recorded-shape test treats an empty recorded list as a pass (it prints a
 note rather than failing), since an empty list is a valid shape, not a
 recording error. `PCE_LIVE=1` enables the single live test.
 
-`crates/pce/tests/write_contract.rs` pins every write body with wiremock; `crates/illumio-tui/tests/cli_writes.rs` covers the guard, exit codes 2/4/6, dry runs and the audit file. `crates/pce/tests/policy_writes.rs` pins every policy body (rulesets, rules, deny rules, provisioning, managed labels) with wiremock. `live_writes.rs` is opt-in (`PCE_LIVE_WRITES=1`); it creates and deletes one label, and runs a draft ruleset and rule lifecycle that plans but never sends a provision.
+`crates/pce/tests/write_contract.rs` pins every write body with wiremock;
+`crates/illumio-tui/tests/cli_writes.rs` covers the guard, exit codes 2/4/6, dry
+runs and the audit file. `crates/pce/tests/policy_writes.rs` pins every policy
+body (rulesets, rules, deny rules, provisioning, managed labels) with wiremock.
+`live_writes.rs` is opt-in (`PCE_LIVE_WRITES=1`); it creates and deletes one
+label, and runs a draft ruleset and rule lifecycle that plans but never sends a
+provision.

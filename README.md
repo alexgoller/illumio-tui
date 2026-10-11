@@ -233,11 +233,14 @@ changed rule is provisioned through its ruleset. With names or hrefs instead
 of `--all`, each must be pending and unrelated pending entries are left
 alone. `data.counts` gives the number of objects per type; nothing pending
 is `skipped` (exit 0). If the PCE rejects a type it does not accept in a
-subset, the rejection is reported with its body.
+subset, the rejection is reported with its body. A pending href that is
+not a draft policy object href (or cannot be parsed) refuses `--all` before
+any write.
 
 `workloads update --managed-labels` changes the labels of a VEN-managed
-workload with a `PUT` that carries only `labels`; any other flag with it is
-exit 2 before any request. Without it, managed workloads stay refused.
+workload with a `PUT` that carries only `labels`; `--name`, `--hostname`,
+`--description`, `--add-ip` and `--remove-ip` with it are exit 2 before any
+request. Without it, managed workloads stay refused.
 
 ### Editing in the TUI
 
