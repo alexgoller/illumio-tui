@@ -58,9 +58,13 @@ pub enum EditIntent {
     UpdateDenyRule(DenyRule, String),
     DeleteRule {
         href: String,
+        /// The rule as the rules pane shows it, for the confirm text.
+        name: String,
     },
     DeleteDenyRule {
         href: String,
+        /// The rule as the rules pane shows it, for the confirm text.
+        name: String,
     },
     /// `w` on a blocked flow: a draft allow rule pre-filled from it.
     RuleFromFlow(Box<ResolvedFlow>),
@@ -125,6 +129,8 @@ pub enum WriteIntent {
     },
     DeleteRule {
         href: String,
+        /// The rule as the rules pane shows it, for the confirm text.
+        name: String,
     },
     CreateDenyRule {
         ruleset_href: String,
@@ -136,6 +142,8 @@ pub enum WriteIntent {
     },
     DeleteDenyRule {
         href: String,
+        /// The rule as the rules pane shows it, for the confirm text.
+        name: String,
     },
     /// `P` in the pending overlay: the marked entries, or everything.
     Provision(ProvisionRequest),
@@ -294,8 +302,12 @@ pub fn start(intent: EditIntent, index: Option<&NameIndex>) -> Start {
             let fields = deny_rule_fields(Some(&d), idx);
             form(title, fields, EditIntent::UpdateDenyRule(d, rs))
         }
-        EditIntent::DeleteRule { href } => Start::Plan(WriteIntent::DeleteRule { href }),
-        EditIntent::DeleteDenyRule { href } => Start::Plan(WriteIntent::DeleteDenyRule { href }),
+        EditIntent::DeleteRule { href, name } => {
+            Start::Plan(WriteIntent::DeleteRule { href, name })
+        }
+        EditIntent::DeleteDenyRule { href, name } => {
+            Start::Plan(WriteIntent::DeleteDenyRule { href, name })
+        }
         EditIntent::RuleFromFlow(f) => {
             let fields = flow_rule_fields(&f);
             form(
@@ -2174,6 +2186,7 @@ mod tests {
         let Start::Plan(w) = start(
             EditIntent::DeleteRule {
                 href: "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1".into(),
+                name: "allow role=db ← role=web PostgreSQL".into(),
             },
             None,
         ) else {
@@ -2182,7 +2195,8 @@ mod tests {
         assert_eq!(
             w,
             WriteIntent::DeleteRule {
-                href: "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1".into()
+                href: "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1".into(),
+                name: "allow role=db ← role=web PostgreSQL".into(),
             }
         );
         assert_eq!(w.kind(), pce::write::ObjectKind::Rule);
@@ -2263,6 +2277,7 @@ mod tests {
         let Start::Plan(w) = start(
             EditIntent::DeleteDenyRule {
                 href: "/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8".into(),
+                name: "override_deny role=db ← All workloads 22/tcp".into(),
             },
             None,
         ) else {

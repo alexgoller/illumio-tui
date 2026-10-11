@@ -545,7 +545,7 @@ async fn plan_intent(
             w.plan_create_rule(&href, &draft)?
         }
         WriteIntent::UpdateRule { href, patch } => w.plan_update_rule(&href, &patch).await?,
-        WriteIntent::DeleteRule { href } => w.plan_delete_rule(&href)?,
+        WriteIntent::DeleteRule { href, name } => named(w.plan_delete_rule(&href)?, "rule", &name),
         WriteIntent::CreateDenyRule {
             ruleset_href,
             draft,
@@ -553,7 +553,9 @@ async fn plan_intent(
         WriteIntent::UpdateDenyRule { href, patch } => {
             w.plan_update_deny_rule(&href, &patch).await?
         }
-        WriteIntent::DeleteDenyRule { href } => w.plan_delete_deny_rule(&href)?,
+        WriteIntent::DeleteDenyRule { href, name } => {
+            named(w.plan_delete_deny_rule(&href)?, "rule", &name)
+        }
         // One pending GET past the cache, then the explicit change subset.
         WriteIntent::Provision(req) => w.plan_provision(&req).await?,
     };
@@ -892,5 +894,41 @@ mod tests {
             panic!("a send stays a send")
         };
         assert_eq!(request.summary, "delete rule_set Shop-Prod");
+    }
+
+    /// A rule delete plans without a request; its confirm names the rule as
+    /// the rules pane shows it.
+    #[tokio::test]
+    async fn a_rule_delete_summary_is_the_rule_line() {
+        use pce::write::MemoryAudit;
+        let pce = Pce::new(
+            pce::PceClient::new(pce::ClientConfig::new(
+                "pce.invalid",
+                5,
+                pce::Credentials::new("k", "s"),
+            ))
+            .unwrap(),
+        );
+        let guard = WriteGuard::new(true, true, Box::new(MemoryAudit::new()), write_ctx()).unwrap();
+        for (intent, want) in [
+            (
+                WriteIntent::DeleteRule {
+                    href: "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1".into(),
+                    name: "allow role=db ← role=web PostgreSQL".into(),
+                },
+                "delete rule allow role=db ← role=web PostgreSQL",
+            ),
+            (
+                WriteIntent::DeleteDenyRule {
+                    href: "/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8".into(),
+                    name: "override_deny role=db ← All workloads 22/tcp".into(),
+                },
+                "delete rule override_deny role=db ← All workloads 22/tcp",
+            ),
+        ] {
+            let (plan, _) = plan_intent(&pce, &guard, intent).await.unwrap();
+            assert_eq!(plan.request().unwrap().summary, want);
+        }
+        assert_eq!(pce.stats().calls, 0, "a delete plans without a request");
     }
 }

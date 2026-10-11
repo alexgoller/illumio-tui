@@ -799,6 +799,22 @@ pub fn rule_kind_name(kind: RuleKind) -> &'static str {
     }
 }
 
+/// A rule on one line as the rules pane names it: `allow role=db ← role=web
+/// PostgreSQL` (kind, providers ← consumers, services), ` (disabled)` when off.
+pub fn rule_line(r: &RuleView) -> String {
+    let mut s = format!(
+        "{} {} ← {} {}",
+        rule_kind_name(r.kind),
+        actor_names(&r.providers),
+        actor_names(&r.consumers),
+        service_names(&r.services)
+    );
+    if !r.enabled {
+        s.push_str(" (disabled)");
+    }
+    s
+}
+
 fn on_off(enabled: bool) -> String {
     if enabled { "✓".into() } else { "✗".into() }
 }

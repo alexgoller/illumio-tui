@@ -5,7 +5,7 @@ use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::form::FormEvent;
 use crate::tui::model::{
     Connection, EventsFilterEdit, Model, ObjectKind, Overlay, PendingAction, PolicyPane,
-    PolicyState, QueryState, Screen, StatusLine, TrafficData, TrafficView,
+    PolicyState, QueryState, Screen, StatusLine, TrafficData, TrafficView, rule_line,
 };
 use crate::tui::msg::{Cmd, Msg, ObjectsPayload, QueryOutcome};
 use crate::tui::ui::widgets::overlay::{confirm_write_last_scroll, help_last_scroll};
@@ -459,9 +459,14 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::DiffLoaded(result) => {
             model.policy.diff_loading = false;
             match result {
-                Ok(diff) => {
+                // Only over the list it came from (or none): a late diff
+                // never replaces another overlay, such as a provision plan.
+                Ok(diff) if matches!(model.overlay, Overlay::Pending | Overlay::None) => {
                     model.status = StatusLine::info(format!("diff of {}", diff.name));
                     model.overlay = Overlay::Diff { diff, scroll: 0 };
+                }
+                Ok(_) => {
+                    model.status = StatusLine::info("diff ready; reopen the pending list");
                 }
                 Err(e) => fail(model, "diff", &e, false),
             }
@@ -545,10 +550,10 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             match result {
                 // Keys typed while the plan was on its way belong to the
                 // overlay they went to; a `y` there must not confirm this.
-                Ok((plan, _)) if plan.request().is_some() && model.overlay != Overlay::None => {
+                Ok((Plan::Send { .. }, _)) if model.overlay != Overlay::None => {
                     model.status = StatusLine::warn("request discarded, nothing sent");
                 }
-                Ok((plan, kind)) if plan.request().is_some() => {
+                Ok((plan @ Plan::Send { .. }, kind)) => {
                     model.status = StatusLine::info("review the request: y sends it, n cancels");
                     model.overlay = Overlay::ConfirmWrite {
                         plan,
@@ -556,22 +561,11 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         scroll: 0,
                     };
                 }
-                // Provisioning with nothing pending is an answer, not a failure.
-                Ok((Plan::Noop { reason, .. }, pce::write::ObjectKind::Provision)) => {
+                // Nothing to send is an answer, not a failure: provisioning
+                // with nothing pending, an update whose fields already match
+                // (a stale form, a retyped entry), a create that exists.
+                Ok((Plan::Noop { reason, .. }, _)) => {
                     model.status = StatusLine::info(reason);
-                }
-                // Cannot happen with `IfMissing::Create`; reported, never sent.
-                Ok((plan, _)) => {
-                    let reason = match plan {
-                        Plan::Noop { reason, .. } => reason,
-                        Plan::Send { .. } => String::new(),
-                    };
-                    fail(
-                        model,
-                        "write",
-                        &format!("nothing to send ({reason})"),
-                        false,
-                    );
                 }
                 Err(e) => {
                     // A `w` form comes back with the planner's answer (an
@@ -1976,8 +1970,14 @@ fn rule_intent(p: &PolicyState, c: char) -> Option<EditIntent> {
     let view = p.rules.selected_item()?;
     let href = view.href.clone();
     match (c, view.kind == RuleKind::Allow) {
-        ('x', true) => Some(EditIntent::DeleteRule { href }),
-        ('x', false) => Some(EditIntent::DeleteDenyRule { href }),
+        ('x', true) => Some(EditIntent::DeleteRule {
+            href,
+            name: rule_line(view),
+        }),
+        ('x', false) => Some(EditIntent::DeleteDenyRule {
+            href,
+            name: rule_line(view),
+        }),
         (_, true) => p
             .find_rule(&href)
             .map(|(r, rs)| EditIntent::UpdateRule(r, rs)),
@@ -5248,15 +5248,62 @@ mod tests {
             &mut m,
             Msg::Planned(Ok((noop, pce::write::ObjectKind::Label))),
         );
-        assert_eq!(m.status.kind, StatusKind::Error);
+        assert_eq!(m.status, StatusLine::info("label role=web exists"));
+        assert_eq!(m.overlay, Overlay::None);
+    }
+
+    #[test]
+    fn an_update_with_nothing_to_change_is_an_answer_not_a_failure() {
+        let mut m = writes_on(model_fixture());
+        m.writes.in_flight = true;
+        let noop = pce::write::Plan::Noop {
+            existing_href: "/orgs/5/sec_policy/draft/rule_sets/100".into(),
+            reason: "rule_set Shop-Prod already matches".into(),
+        };
         assert!(
-            m.status
-                .text
-                .contains("nothing to send (label role=web exists)"),
-            "{}",
-            m.status.text
+            update(
+                &mut m,
+                Msg::Planned(Ok((noop, pce::write::ObjectKind::RuleSet)))
+            )
+            .is_empty()
+        );
+        assert!(!m.writes.in_flight);
+        assert_eq!(
+            m.status,
+            StatusLine::info("rule_set Shop-Prod already matches")
         );
         assert_eq!(m.overlay, Overlay::None);
+    }
+
+    #[test]
+    fn a_late_diff_never_replaces_another_overlay() {
+        use crate::tui::diff::{DiffKind, ObjectDiff};
+        use crate::tui::test_support::{model_with_policy, provision_plan};
+        let diff = ObjectDiff {
+            name: "Corp".into(),
+            href: "/orgs/5/sec_policy/draft/ip_lists/21".into(),
+            change: DiffKind::Created,
+            lines: Vec::new(),
+        };
+        let mut m = model_with_policy();
+        m.policy.diff_loading = true;
+        let confirm = Overlay::ConfirmWrite {
+            plan: provision_plan(),
+            kind: pce::write::ObjectKind::Provision,
+            scroll: 0,
+        };
+        m.overlay = confirm.clone();
+        assert!(update(&mut m, Msg::DiffLoaded(Ok(diff.clone()))).is_empty());
+        assert!(!m.policy.diff_loading);
+        assert_eq!(m.overlay, confirm, "the provision plan stays");
+        assert_eq!(
+            m.status,
+            StatusLine::info("diff ready; reopen the pending list")
+        );
+        // Over no overlay (the list was closed) the diff opens.
+        m.overlay = Overlay::None;
+        update(&mut m, Msg::DiffLoaded(Ok(diff.clone())));
+        assert_eq!(m.overlay, Overlay::Diff { diff, scroll: 0 });
     }
 
     fn written(href: &str, pending: bool) -> pce::write::Written {
@@ -5962,7 +6009,8 @@ mod tests {
         assert_eq!(
             update(&mut m, key('x')),
             vec![Cmd::PlanWrite(WriteIntent::DeleteDenyRule {
-                href: "/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8".into()
+                href: "/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8".into(),
+                name: "override_deny role=db ← All workloads 22/tcp".into(),
             })]
         );
         m.writes.in_flight = false;
@@ -5979,7 +6027,8 @@ mod tests {
         assert_eq!(
             update(&mut m, key('x')),
             vec![Cmd::PlanWrite(WriteIntent::DeleteRule {
-                href: "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1".into()
+                href: "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1".into(),
+                name: "allow role=db ← role=web PostgreSQL".into(),
             })]
         );
     }
