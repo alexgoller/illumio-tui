@@ -43,17 +43,7 @@ impl NameIndex {
         services: &[Service],
     ) -> Self {
         let mut idx = Self::default();
-        for l in labels {
-            idx.labels.insert(l.href.clone(), l.clone());
-            if !l.is_deleted() {
-                idx.label_by_kv
-                    .insert((l.key.clone(), l.value.clone()), l.href.clone());
-                idx.keys
-                    .entry(l.key.clone())
-                    .or_default()
-                    .insert(l.value.clone());
-            }
-        }
+        idx.insert_labels(labels);
         for g in groups {
             idx.label_groups
                 .insert(canon(&g.href).into_owned(), g.clone());
@@ -67,6 +57,36 @@ impl NameIndex {
             idx.services.insert(canon(&s.href).into_owned(), s.clone());
         }
         idx
+    }
+
+    /// This index with its labels replaced by `labels`; label groups, IP
+    /// lists and services are kept. For a caller that reloaded only the
+    /// labels (the TUI after a label write or `r` on Labels), so the index
+    /// follows without fetching the other three lists again.
+    pub fn with_labels(&self, labels: &[Label]) -> Self {
+        let mut idx = Self {
+            label_groups: self.label_groups.clone(),
+            ip_lists: self.ip_lists.clone(),
+            ip_list_by_name: self.ip_list_by_name.clone(),
+            services: self.services.clone(),
+            ..Self::default()
+        };
+        idx.insert_labels(labels);
+        idx
+    }
+
+    fn insert_labels(&mut self, labels: &[Label]) {
+        for l in labels {
+            self.labels.insert(l.href.clone(), l.clone());
+            if !l.is_deleted() {
+                self.label_by_kv
+                    .insert((l.key.clone(), l.value.clone()), l.href.clone());
+                self.keys
+                    .entry(l.key.clone())
+                    .or_default()
+                    .insert(l.value.clone());
+            }
+        }
     }
 
     pub fn label(&self, href: &str) -> Option<&Label> {
@@ -414,6 +434,41 @@ mod tests {
             None,
             "deleted labels never match filters"
         );
+    }
+
+    #[test]
+    fn with_labels_replaces_the_labels_and_keeps_the_rest() {
+        let idx = index();
+        let mut labels: Vec<Label> =
+            serde_json::from_str(include_str!("../../../fixtures/labels.json")).unwrap();
+        labels.push(
+            serde_json::from_value(serde_json::json!({
+                "href": "/orgs/5/labels/9", "key": "app", "value": "web2"
+            }))
+            .unwrap(),
+        );
+        let next = idx.with_labels(&labels);
+        assert_eq!(next.label_href("app", "web2"), Some("/orgs/5/labels/9"));
+        assert_eq!(next.label_text("/orgs/5/labels/9"), "app=web2");
+        assert_eq!(next.values_for_key("app"), vec!["shop", "web2"]);
+        assert_eq!(next.label_href("app", "shop"), Some("/orgs/5/labels/3"));
+        assert_eq!(
+            idx.label_href("app", "web2"),
+            None,
+            "the original is unchanged"
+        );
+        // Groups, IP lists and services are carried over as they were.
+        let fresh = NameIndex::new(&labels, &[], &[], &[]);
+        assert_eq!(next.label_groups.len(), idx.label_groups.len());
+        assert!(!next.label_groups.is_empty() && fresh.label_groups.is_empty());
+        assert_eq!(next.ip_lists.len(), idx.ip_lists.len());
+        assert_eq!(next.ip_list_by_name, idx.ip_list_by_name);
+        assert_eq!(next.services.len(), idx.services.len());
+        assert!(!next.services.is_empty());
+        // Labels gone from the list are gone from the index.
+        let only_new = idx.with_labels(&labels[labels.len() - 1..]);
+        assert_eq!(only_new.label_href("app", "shop"), None);
+        assert_eq!(only_new.label_keys(), vec!["app"]);
     }
 
     #[test]

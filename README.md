@@ -196,7 +196,8 @@ grammar: ranges `10.0.0.0/8, 10.1.0.0-10.1.255.255, !10.0.5.0/24`, FQDNs
 `*.corp.example`, ports `443/tcp, 8000-8100/udp, icmp`, addresses
 `10.0.0.5, 10.0.0.6/24`, labels `app=web, env=prod` (resolved through the
 loaded index, never with a request; a label created in the TUI joins the
-index after the next `r` on Labels & objects). `Tab`/`Shift-Tab` move between
+index when the labels reload after the write, and `r` on Labels refreshes it
+from the PCE). `Tab`/`Shift-Tab` move between
 fields, `Ctrl-U` clears one, `Enter` checks the form, `Esc` leaves without a
 request.
 An edit sends only what changed; an edit that changes nothing says

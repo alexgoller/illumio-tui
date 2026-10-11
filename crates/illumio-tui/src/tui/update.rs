@@ -368,6 +368,17 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             model.objects.loading[i] = false;
             match result {
                 Ok(payload) => {
+                    // New labels reach the name index (and so the forms and
+                    // filters) at no extra request; the other lists are kept.
+                    if let (
+                        ObjectsPayload::Labels(v, _),
+                        Connection::Connected {
+                            index: Some(idx), ..
+                        },
+                    ) = (&payload, &mut model.connection)
+                    {
+                        *idx = std::sync::Arc::new(idx.with_labels(v));
+                    }
                     let o = &mut model.objects;
                     let age = match payload {
                         ObjectsPayload::Labels(v, a) => {
@@ -5363,5 +5374,74 @@ mod tests {
         assert_eq!(m.status.kind, StatusKind::Warn);
         assert_eq!(m.status.text, "request discarded, nothing sent");
         assert!(!m.writes.in_flight);
+    }
+
+    #[test]
+    fn a_created_label_joins_the_name_index_when_the_labels_reload() {
+        use crate::tui::model::ObjectKind;
+        use crate::tui::test_support::model_with_objects;
+        let mut m = model_with_objects();
+        assert_eq!(m.index().unwrap().label_href("app", "web2"), None);
+        let cmds = update(
+            &mut m,
+            Msg::WriteDone {
+                kind: pce::write::ObjectKind::Label,
+                method: Some(pce::WriteMethod::Post),
+                result: Ok(pce::write::Outcome::Written(written(
+                    "/orgs/5/labels/9",
+                    false,
+                ))),
+            },
+        );
+        assert_eq!(
+            cmds,
+            vec![Cmd::LoadObjects {
+                kind: ObjectKind::Labels,
+                mode: pce::CacheMode::Bypass
+            }],
+            "the one reload the write already costs"
+        );
+        let mut labels: Vec<pce::models::Label> =
+            serde_json::from_str(include_str!("../../../../fixtures/labels.json")).unwrap();
+        labels.push(
+            serde_json::from_value(serde_json::json!({
+                "href": "/orgs/5/labels/9", "key": "app", "value": "web2"
+            }))
+            .unwrap(),
+        );
+        let cmds = update(
+            &mut m,
+            Msg::ObjectsLoaded {
+                kind: ObjectKind::Labels,
+                result: Ok(ObjectsPayload::Labels(labels, 0)),
+            },
+        );
+        assert!(cmds.is_empty(), "the index is rebuilt without a request");
+        let idx = m.index().expect("still connected with an index");
+        assert_eq!(idx.label_href("app", "web2"), Some("/orgs/5/labels/9"));
+        assert_eq!(
+            idx.ip_list_name("/orgs/5/sec_policy/draft/ip_lists/21"),
+            Some("Corp"),
+            "IP lists are kept"
+        );
+        assert_eq!(
+            idx.service_name("/orgs/5/sec_policy/draft/services/31"),
+            Some("PostgreSQL"),
+            "services are kept"
+        );
+        // A form opened now resolves the new label.
+        assert!(
+            edit::build_intent(
+                &{
+                    let mut f = edit::form_for(EditIntent::CreateWorkload, Some(idx.as_ref()))
+                        .expect("a form");
+                    f.fields[0].value = "printer-1".into();
+                    f.fields[4].value = "app=web2".into();
+                    f
+                },
+                Some(idx.as_ref())
+            )
+            .is_ok_and(|i| i.is_some())
+        );
     }
 }
