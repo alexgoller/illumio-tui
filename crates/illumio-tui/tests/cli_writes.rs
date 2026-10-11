@@ -2800,6 +2800,14 @@ mod policy {
                 .success(),
         );
         assert_eq!(pc(&out), (json!(2), json!(1)));
+        // Three --impact runs (three processes, no shared cache): each reads
+        // the workloads once and the rulesets once (the by-name run shares
+        // that read for the name), so an href adds no name-resolution read;
+        // the planner GETs each updated rule once.
+        assert_eq!(gets(&server, "/orgs/5/workloads").await, 3);
+        assert_eq!(gets(&server, "/orgs/5/sec_policy/draft/rule_sets").await, 3);
+        assert_eq!(gets(&server, RULE_2).await, 1);
+        assert_eq!(gets(&server, DENY_8).await, 1);
         assert!(
             server
                 .received_requests()
@@ -2808,6 +2816,68 @@ mod policy {
                 .iter()
                 .all(|r| r.method.as_str() == "GET")
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn update_impact_of_a_rule_missing_from_the_rulesets_is_exit_4_before_workloads() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_lists(&server).await;
+        mount_get(&server, "/orgs/5/workloads", fixture_workloads()).await;
+        let missing = format!("{RS_100}/sec_rules/77");
+        let mut rule = fixture_rule_sets()[0]["rules"][1].clone();
+        rule["href"] = json!(missing);
+        mount_get(&server, &missing, rule).await;
+        let a = writer(&server, state.path())
+            .args([
+                "policy",
+                "rules",
+                "update",
+                &missing,
+                "--add-consumer",
+                "all",
+                "--dry-run",
+                "--impact",
+            ])
+            .assert()
+            .code(4);
+        assert_eq!(stderr_json(&a)["error"]["kind"], "not_found");
+        assert_eq!(gets(&server, "/orgs/5/workloads").await, 0);
+        assert!(
+            server
+                .received_requests()
+                .await
+                .unwrap()
+                .iter()
+                .all(|r| r.method.as_str() == "GET")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rules_add_yes_impact_fails_on_a_workloads_error_before_any_post() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_lists(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/workloads"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+        writer(&server, state.path())
+            .args(SHOP_RULE)
+            .args(["--yes", "--impact"])
+            .assert()
+            .failure();
+        assert!(
+            server
+                .received_requests()
+                .await
+                .unwrap()
+                .iter()
+                .all(|r| r.method.as_str() == "GET"),
+            "no POST"
+        );
+        assert!(audit_lines(state.path()).is_empty());
     }
 }
 

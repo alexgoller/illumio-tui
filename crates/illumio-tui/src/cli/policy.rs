@@ -677,17 +677,22 @@ async fn planned_impact(ctx: &Context, plan: &Plan) -> Result<Option<(Impact, bo
         .ok_or_else(|| not_found(rs_href))?;
     let base = if !is_rule_href(&req.path) {
         None
-    } else if req.path.contains("/deny_rules/") {
-        deny_rules_of(ctx, rs)
-            .await?
-            .iter()
-            .find(|d| d.href == req.path)
-            .map(RuleActors::of_deny)
     } else {
-        rs.rules
-            .iter()
-            .find(|r| r.href == req.path)
-            .map(RuleActors::of_rule)
+        let found = if req.path.contains("/deny_rules/") {
+            deny_rules_of(ctx, rs)
+                .await?
+                .iter()
+                .find(|d| d.href == req.path)
+                .map(RuleActors::of_deny)
+        } else {
+            rs.rules
+                .iter()
+                .find(|r| r.href == req.path)
+                .map(RuleActors::of_rule)
+        };
+        // An update's untouched sides come from the loaded rule: without it
+        // the impact would be computed on empty sides.
+        Some(found.ok_or_else(|| not_found(&req.path))?)
     };
     let actors = RuleActors::planned(req.body.as_ref(), base.as_ref());
     let w = impact_workloads(ctx).await?;
@@ -704,6 +709,19 @@ async fn planned_impact(ctx: &Context, plan: &Plan) -> Result<Option<(Impact, bo
         &inputs,
     );
     Ok(Some((impact, sets.truncated || w.truncated)))
+}
+
+/// [`planned_impact`] when `--impact` was given, else `None` (no read).
+async fn maybe_impact(
+    ctx: &Context,
+    impact: bool,
+    plan: &Plan,
+) -> Result<Option<(Impact, bool)>, CliError> {
+    if impact {
+        planned_impact(ctx, plan).await
+    } else {
+        Ok(None)
+    }
 }
 
 /// `policy rules impact <href>`: one rule or deny rule of the draft
@@ -1025,11 +1043,7 @@ async fn rule_add(ctx: &Context, a: &RuleAddArgs) -> Result<(), CliError> {
         resolve_labels_as: resolve_labels_as(&a.resolve_providers_as, &a.resolve_consumers_as),
     };
     let plan = ctx.pce.writer(&guard).plan_create_rule(&ruleset, &draft)?;
-    let impact = if a.impact {
-        planned_impact(ctx, &plan).await?
-    } else {
-        None
-    };
+    let impact = maybe_impact(ctx, a.impact, &plan).await?;
     run_rule_plan(ctx, &a.write, &guard, plan, impact).await
 }
 
@@ -1063,11 +1077,7 @@ async fn rule_update(ctx: &Context, a: &RuleUpdateArgs) -> Result<(), CliError> 
         .writer(&guard)
         .plan_update_rule(&href, &patch)
         .await?;
-    let impact = if a.impact {
-        planned_impact(ctx, &plan).await?
-    } else {
-        None
-    };
+    let impact = maybe_impact(ctx, a.impact, &plan).await?;
     run_rule_plan(ctx, &a.write, &guard, plan, impact).await
 }
 
@@ -1094,11 +1104,7 @@ async fn deny_rule_add(ctx: &Context, a: &DenyRuleAddArgs) -> Result<(), CliErro
         .pce
         .writer(&guard)
         .plan_create_deny_rule(&ruleset, &draft)?;
-    let impact = if a.impact {
-        planned_impact(ctx, &plan).await?
-    } else {
-        None
-    };
+    let impact = maybe_impact(ctx, a.impact, &plan).await?;
     run_rule_plan(ctx, &a.write, &guard, plan, impact).await
 }
 
@@ -1131,11 +1137,7 @@ async fn deny_rule_update(ctx: &Context, a: &DenyRuleUpdateArgs) -> Result<(), C
         .writer(&guard)
         .plan_update_deny_rule(&href, &patch)
         .await?;
-    let impact = if a.impact {
-        planned_impact(ctx, &plan).await?
-    } else {
-        None
-    };
+    let impact = maybe_impact(ctx, a.impact, &plan).await?;
     run_rule_plan(ctx, &a.write, &guard, plan, impact).await
 }
 
