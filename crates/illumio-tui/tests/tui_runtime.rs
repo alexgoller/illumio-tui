@@ -1893,9 +1893,10 @@ async fn w_on_an_allowed_flow_sends_nothing() {
     );
 }
 
-#[tokio::test]
-async fn writes_disabled_policy_and_traffic_keys_send_nothing() {
-    use illumio_tui::tui::model::{Overlay, StatusKind};
+/// One fresh session on the Policy screen: `keys`, then a probe `F12`. Returns
+/// the model and how many requests the mock server itself received (which must
+/// equal the client's own count).
+async fn policy_session(keys: &[(u64, KeyCode)]) -> (Model, usize) {
     let server = MockServer::start().await;
     mount_objects(&server).await;
     mount_rule_sets(&server, 1).await;
@@ -1906,33 +1907,60 @@ async fn writes_disabled_policy_and_traffic_keys_send_nothing() {
                 .set_body_string(include_str!("../../../fixtures/pending_list.json"))
                 .insert_header("Content-Type", "application/json"),
         )
-        .expect(1)
         .mount(&server)
         .await;
-    let keys = vec![
-        (500, ch('2')),
-        (300, ch('n')),
-        (50, ch('e')),
-        (50, ch('x')),
-        (50, KeyCode::Tab),
-        (50, ch('n')),
-        (50, ch('N')),
-        (50, ch('e')),
-        (50, ch('x')),
-        (50, ch('p')),
-        (300, ch('P')),
-        (50, KeyCode::Esc),
-        (50, ch('1')),
-        (50, ch('w')),
-        (200, KeyCode::F(12)),
-    ];
-    let model = key_session(&server, model(), None, keys).await;
-    assert_eq!(
-        model.stats.calls, 7,
-        "health + four lists + rulesets + pending; no editing key costs a request"
-    );
+    let mut all = vec![(500, ch('2'))];
+    all.extend_from_slice(keys);
+    all.push((200, KeyCode::F(12)));
+    let model = key_session(&server, model(), None, all).await;
+    let seen = server.received_requests().await.unwrap().len();
     assert!(writes_seen(&server).await.is_empty());
-    assert_eq!(model.status.text, "writes are not enabled");
-    assert_eq!(model.status.kind, StatusKind::Warn);
-    assert_eq!(model.overlay, Overlay::None);
+    assert_eq!(seen as u64, model.stats.calls, "server and client agree");
+    (model, seen)
+}
+
+#[tokio::test]
+async fn writes_disabled_policy_and_traffic_keys_send_nothing() {
+    use illumio_tui::tui::model::{Overlay, StatusKind};
+    let refused = "writes are not enabled";
+    // (keys before the refused key, the refused key, overlay left open)
+    let tab = (300, KeyCode::Tab);
+    let p = (400, ch('p'));
+    type Keys = Vec<(u64, KeyCode)>;
+    let cases: Vec<(&str, Keys, (u64, KeyCode), Overlay)> = vec![
+        ("rulesets n", vec![], (300, ch('n')), Overlay::None),
+        ("rulesets e", vec![], (300, ch('e')), Overlay::None),
+        ("rulesets x", vec![], (300, ch('x')), Overlay::None),
+        ("rules n", vec![tab], (300, ch('n')), Overlay::None),
+        ("rules N", vec![tab], (300, ch('N')), Overlay::None),
+        ("rules e", vec![tab], (300, ch('e')), Overlay::None),
+        ("rules x", vec![tab], (300, ch('x')), Overlay::None),
+        ("pending P", vec![p], (300, ch('P')), Overlay::Pending),
+    ];
+    for (name, before, key, overlay) in cases {
+        // Baseline: the same session without the refused key.
+        let (base, base_calls) = policy_session(&before).await;
+        assert_ne!(base.status.text, refused, "{name}: baseline");
+        let mut keys = before.clone();
+        keys.push(key);
+        let (m, calls) = policy_session(&keys).await;
+        assert_eq!(m.status.text, refused, "{name}");
+        assert_eq!(m.status.kind, StatusKind::Warn, "{name}");
+        assert_eq!(m.overlay, overlay, "{name}");
+        assert_eq!(calls, base_calls, "{name}: the key cost a request");
+    }
+    // Traffic `w` on a selected row of the flows fixture, loaded model-side
+    // (no query request); the refusal is the writes-off path.
+    use illumio_tui::tui::test_support::model_with_flows;
+    let server = MockServer::start().await;
+    let m = model_with_flows();
+    assert!(!m.writes.enabled, "writes stay off");
+    let reason = m.writes.reason.clone().expect("the fixture says why");
+    let (mut rt, _tx) = Runtime::new(pce_for(&server), m);
+    let keys = vec![(100, ch('j')), (100, ch('w')), (200, KeyCode::F(12))];
+    let m = run_loop(&mut rt, Box::pin(press(keys)), &mut |_| {}).await;
+    assert_eq!(m.status.text, reason);
+    assert_eq!(m.status.kind, StatusKind::Warn);
+    assert_eq!(m.overlay, Overlay::None);
+    assert!(server.received_requests().await.unwrap().is_empty());
 }
