@@ -597,6 +597,7 @@ pub fn render_diff(model: &Model, diff: &ObjectDiff, scroll: u16, f: &mut Frame,
     let kind = match href.object_type() {
         "ip_lists" => "IP list",
         "services" => "service",
+        "rule_sets" => "ruleset",
         other => other,
     };
     let title = format!("{kind} {} · {}", plain(&diff.name), diff.change.as_str());

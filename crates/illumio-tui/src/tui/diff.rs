@@ -1,9 +1,12 @@
-//! What a pending IP list or service changes against its active version.
+//! What a pending IP list, service or ruleset changes against its active version.
 //! Pure: the runtime loads both lists, these functions compare them. Every
 //! entry is listed, unchanged ones with `Sign::Same`, so the reader sees the
 //! whole object.
-use pce::models::{IpList, PendingChange, Service};
+use crate::tui::edit::{actor_tokens, service_tokens};
+use crate::tui::model::rule_kind_name;
+use pce::models::{Actor, IngressService, IpList, PendingChange, RuleSet, Service};
 use pce::write::IpRangeSpec;
+use pce::{NameIndex, RuleKind, RuleSetView};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiffKind {
@@ -192,11 +195,20 @@ impl Diffable for Service {
     }
 }
 
+impl Diffable for RuleSet {
+    fn href(&self) -> &str {
+        &self.href
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
 fn diff_for<T: Diffable>(
     change: &PendingChange,
     draft: &[T],
     active: &[T],
-    diff: fn(Option<&T>, Option<&T>) -> Vec<DiffLine>,
+    diff: impl Fn(Option<&T>, Option<&T>) -> Vec<DiffLine>,
 ) -> ObjectDiff {
     let key = draft_href(&change.href);
     let d = draft.iter().find(|x| draft_href(x.href()) == key);
@@ -240,6 +252,140 @@ pub fn service_diff_for(
     active: &[Service],
 ) -> ObjectDiff {
     diff_for(change, draft, active, diff_service)
+}
+
+fn yes_no(on: bool) -> &'static str {
+    if on { "yes" } else { "no" }
+}
+
+/// `allow role=web ← iplist:Corp 443/tcp`: kind, providers ← consumers,
+/// services, in the form's token grammar; ` (disabled)` when it is off.
+/// Unknown objects show their href, compared in draft form.
+fn rule_summary(
+    kind: RuleKind,
+    providers: &[Actor],
+    consumers: &[Actor],
+    services: &[IngressService],
+    enabled: bool,
+    idx: &NameIndex,
+) -> String {
+    let mut s = format!(
+        "{} {} ← {} {}",
+        rule_kind_name(kind),
+        actor_tokens(providers, idx).join(", "),
+        actor_tokens(consumers, idx).join(", "),
+        service_tokens(services, idx).join(", ")
+    );
+    if !enabled {
+        s.push_str(" (disabled)");
+    }
+    s.replace("/sec_policy/active/", "/sec_policy/draft/")
+}
+
+/// Every allow and deny rule of `rs` as (draft href, summary), allow rules first.
+fn rule_lines(rs: &RuleSet, idx: &NameIndex) -> Vec<(String, String)> {
+    let allow = rs.rules.iter().map(|r| {
+        (
+            draft_href(&r.href),
+            rule_summary(
+                RuleKind::Allow,
+                &r.providers,
+                &r.consumers,
+                &r.ingress_services,
+                r.enabled,
+                idx,
+            ),
+        )
+    });
+    let deny = rs.deny_rules.iter().map(|d| {
+        let kind = if d.override_ {
+            RuleKind::OverrideDeny
+        } else {
+            RuleKind::Deny
+        };
+        (
+            draft_href(&d.href),
+            rule_summary(
+                kind,
+                &d.providers,
+                &d.consumers,
+                &d.ingress_services,
+                d.enabled,
+                idx,
+            ),
+        )
+    });
+    allow.chain(deny).collect()
+}
+
+/// Draft rules in order (same, changed as `-` old `+` new, or added), then
+/// rules only the active side has.
+fn rules(out: &mut Vec<DiffLine>, active: &[(String, String)], draft: &[(String, String)]) {
+    let line = |sign, text: &str| DiffLine {
+        sign,
+        text: text.to_string(),
+    };
+    for (href, d) in draft {
+        match active.iter().find(|(h, _)| h == href) {
+            Some((_, a)) if a == d => out.push(line(Sign::Same, d)),
+            Some((_, a)) => {
+                out.push(line(Sign::Removed, a));
+                out.push(line(Sign::Added, d));
+            }
+            None => out.push(line(Sign::Added, d)),
+        }
+    }
+    for (href, a) in active {
+        if !draft.iter().any(|(h, _)| h == href) {
+            out.push(line(Sign::Removed, a));
+        }
+    }
+}
+
+/// A ruleset's name, description, state and scopes (`-`/`+` when they
+/// differ), then one line per rule, matched by href.
+pub fn diff_rule_set(
+    active: Option<&RuleSet>,
+    draft: Option<&RuleSet>,
+    idx: &NameIndex,
+) -> Vec<DiffLine> {
+    let mut out = Vec::new();
+    field(
+        &mut out,
+        "name",
+        active.map(|r| r.name.as_str()),
+        draft.map(|r| r.name.as_str()),
+    );
+    field(
+        &mut out,
+        "description",
+        active.and_then(|r| non_empty(&r.description)),
+        draft.and_then(|r| non_empty(&r.description)),
+    );
+    field(
+        &mut out,
+        "enabled",
+        active.map(|r| yes_no(r.enabled)),
+        draft.map(|r| yes_no(r.enabled)),
+    );
+    let scopes = |r: &RuleSet| RuleSetView::from_rule_set(r, idx).scopes.join(" | ");
+    let (a, d) = (active.map(scopes), draft.map(scopes));
+    field(&mut out, "scopes", a.as_deref(), d.as_deref());
+    rules(
+        &mut out,
+        &active.map(|r| rule_lines(r, idx)).unwrap_or_default(),
+        &draft.map(|r| rule_lines(r, idx)).unwrap_or_default(),
+    );
+    out
+}
+
+pub fn rule_set_diff_for(
+    change: &PendingChange,
+    draft: &[RuleSet],
+    active: &[RuleSet],
+    idx: &NameIndex,
+) -> ObjectDiff {
+    diff_for(change, draft, active, |a, d| diff_rule_set(a, d, idx))
 }
 
 #[cfg(test)]
@@ -379,5 +525,61 @@ mod tests {
         let d = service_diff_for(&unnamed, &[draft], &[active]);
         assert_eq!(d.name, "Web");
         assert_eq!(d.change, DiffKind::Updated);
+    }
+
+    #[test]
+    fn a_ruleset_diff_lists_fields_and_one_line_per_rule() {
+        use crate::tui::test_support::{fixture_index, rule_set_diff_fixture};
+        let (active, draft) = rule_set_diff_fixture();
+        assert_eq!(
+            diff_rule_set(Some(&active), Some(&draft), &fixture_index()),
+            vec![
+                line(Sign::Same, "name: Shop-Prod"),
+                line(Sign::Removed, "description: Ringfence"),
+                line(Sign::Added, "description: Ringfence shop"),
+                line(Sign::Same, "enabled: yes"),
+                line(Sign::Same, "scopes: app=shop & env=prod"),
+                line(Sign::Same, "allow role=db ← role=web PostgreSQL"),
+                line(
+                    Sign::Removed,
+                    "allow role=web ← iplist:Corp 443/tcp, 8000-8099/tcp"
+                ),
+                line(Sign::Added, "allow role=web ← iplist:Corp 443/tcp"),
+                line(
+                    Sign::Added,
+                    "allow role=web ← iplist:Any (0.0.0.0/0 and ::/0) 22/tcp"
+                ),
+                line(
+                    Sign::Same,
+                    "deny all ← iplist:Any (0.0.0.0/0 and ::/0) 23/tcp"
+                ),
+                line(Sign::Same, "override_deny role=db ← all 22/tcp"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_created_ruleset_is_all_added() {
+        use crate::tui::test_support::fixture_index;
+        let sets: Vec<RuleSet> =
+            serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
+        let change = PendingChange {
+            href: "/orgs/5/sec_policy/draft/rule_sets/101".into(),
+            change_type: "create".into(),
+            name: Some("Global-Infra".into()),
+            object_type: "rule_sets".into(),
+        };
+        let d = rule_set_diff_for(&change, &sets, &[], &fixture_index());
+        assert_eq!(d.name, "Global-Infra");
+        assert_eq!(d.change, DiffKind::Created);
+        assert_eq!(
+            d.lines,
+            vec![
+                line(Sign::Added, "name: Global-Infra"),
+                line(Sign::Added, "enabled: no"),
+                line(Sign::Added, "scopes: All"),
+                line(Sign::Added, "allow all ← group:All prod envs All Services"),
+            ]
+        );
     }
 }

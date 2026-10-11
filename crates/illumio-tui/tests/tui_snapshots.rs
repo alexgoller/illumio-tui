@@ -779,3 +779,35 @@ fn pending_marks_and_provision_confirm_80x24() {
         render_styled(&c, 80, 24)
     );
 }
+
+#[test]
+fn pending_rule_set_diff_80x24() {
+    use illumio_tui::tui::diff::{DiffKind, ObjectDiff, diff_rule_set};
+    use illumio_tui::tui::model::{Overlay, Screen};
+    use illumio_tui::tui::test_support::{fixture_index, rule_set_diff_fixture};
+    let (active, draft) = rule_set_diff_fixture();
+    let mut m = model_with_policy();
+    m.screen = Screen::Policy;
+    m.overlay = Overlay::Diff {
+        diff: ObjectDiff {
+            name: "Shop-Prod".into(),
+            href: draft.href.clone(),
+            change: DiffKind::Updated,
+            lines: diff_rule_set(Some(&active), Some(&draft), &fixture_index()),
+        },
+        scroll: 0,
+    };
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("ruleset Shop-Prod · updated"), "{out}");
+    assert!(
+        out.contains("+ allow role=web ← iplist:Corp 443/tcp"),
+        "{out}"
+    );
+    assert!(out.contains("- description: Ringfence"), "{out}");
+    insta::assert_snapshot!("pending_rule_set_diff_80x24", out);
+    m.set_theme("light");
+    insta::assert_snapshot!(
+        "pending_rule_set_diff_light_styled_80x24",
+        render_styled(&m, 80, 24)
+    );
+}

@@ -1464,8 +1464,8 @@ fn reload_after_write(model: &mut Model, kind: pce::write::ObjectKind) -> Vec<Cm
     }
 }
 
-/// `Enter` on the pending overlay: one diff request for an IP list or a
-/// service; anything else says why there is none.
+/// `Enter` on the pending overlay: one diff request for an IP list, a
+/// service or a ruleset; anything else says why there is none.
 fn pending_diff(model: &mut Model) -> Vec<Cmd> {
     let Some(change) = model
         .policy
@@ -1479,8 +1479,10 @@ fn pending_diff(model: &mut Model) -> Vec<Cmd> {
     let kind = match change.object_type.as_str() {
         "ip_lists" => pce::write::ObjectKind::IpList,
         "services" => pce::write::ObjectKind::Service,
-        "rule_sets" | "sec_rules" | "deny_rules" => {
-            model.status = StatusLine::info("rule diffs arrive with Plan 5");
+        "rule_sets" => pce::write::ObjectKind::RuleSet,
+        // A rule is provisioned, and diffed, through its ruleset.
+        "sec_rules" | "deny_rules" => {
+            model.status = StatusLine::info("rule changes show in their ruleset's diff");
             return Vec::new();
         }
         other => {
@@ -5378,8 +5380,15 @@ mod tests {
         });
         update(&mut m, Msg::PendingLoaded(Ok(pending.clone())));
         assert_eq!(m.policy.pending_selected, 0);
-        assert!(update(&mut m, enter()).is_empty(), "entry 0 is a ruleset");
-        assert_eq!(m.status.text, "rule diffs arrive with Plan 5");
+        assert_eq!(
+            update(&mut m, enter()),
+            vec![Cmd::LoadDiff {
+                change: pending[0].clone(),
+                kind: pce::write::ObjectKind::RuleSet
+            }],
+            "entry 0 is a ruleset"
+        );
+        m.policy.diff_loading = false;
         assert_eq!(m.overlay, Overlay::Pending);
         update(&mut m, key('j')); // Corp
         let cmds = update(&mut m, enter());
@@ -6060,5 +6069,24 @@ mod tests {
             Overlay::Error("write failed: 406".into()),
             "the reload does not replace the error"
         );
+    }
+
+    #[test]
+    fn a_pending_rule_entry_points_at_its_ruleset() {
+        use crate::tui::test_support::model_with_policy;
+        let mut m = model_with_policy();
+        m.screen = Screen::Policy;
+        update(
+            &mut m,
+            Msg::PendingLoaded(Ok(vec![pce::models::PendingChange {
+                href: "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1".into(),
+                change_type: "update".into(),
+                name: None,
+                object_type: "sec_rules".into(),
+            }])),
+        );
+        assert!(update(&mut m, enter()).is_empty());
+        assert_eq!(m.status.text, "rule changes show in their ruleset's diff");
+        assert!(!m.policy.diff_loading);
     }
 }

@@ -215,6 +215,29 @@ pub fn ip_list_delete_plan() -> pce::write::Plan {
 
 /// The plan `P` shows for the two fixture pending entries (a ruleset and an
 /// IP list), as `Writer::plan_provision` builds it.
+/// Shop-Prod as active, and a draft of it with a new description, rule 2
+/// without its 8000-8099/tcp service and a new rule 4: the ruleset diff the
+/// tests and the snapshot draw.
+pub fn rule_set_diff_fixture() -> (pce::models::RuleSet, pce::models::RuleSet) {
+    let sets: Vec<pce::models::RuleSet> =
+        serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json"))
+            .expect("rule sets fixture");
+    let active = sets[0].clone();
+    let mut draft = active.clone();
+    draft.description = Some("Ringfence shop".into());
+    draft.rules[1].ingress_services.truncate(1);
+    draft.rules.push(
+        serde_json::from_value(serde_json::json!({
+            "href": "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/4", "enabled": true,
+            "providers": [{"label": {"href": "/orgs/5/labels/1"}}],
+            "consumers": [{"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/20"}}],
+            "ingress_services": [{"port": 22, "proto": 6}]
+        }))
+        .expect("rule 4"),
+    );
+    (active, draft)
+}
+
 pub fn provision_plan() -> pce::write::Plan {
     pce::write::Plan::Send {
         request: pce::write::WriteRequest {

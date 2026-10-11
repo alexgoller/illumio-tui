@@ -1754,3 +1754,59 @@ async fn provision_all_lists_every_pending_entry() {
     assert_eq!(audit.entries().len(), 1);
     assert_eq!(model.busy, 0);
 }
+
+#[tokio::test]
+async fn ruleset_diff_fetches_the_active_rulesets_once() {
+    use illumio_tui::tui::diff::{DiffKind, Sign};
+    use illumio_tui::tui::model::Overlay;
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    mount_rule_sets(&server, 1).await; // the screen; the diff reads it from the cache
+    for (p, body) in [
+        (
+            "/api/v2/orgs/5/sec_policy/pending",
+            include_str!("../../../fixtures/pending_list.json"),
+        ),
+        ("/api/v2/orgs/5/sec_policy/active/rule_sets", "[]"),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(p))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(body)
+                    .insert_header("Content-Type", "application/json"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+    let keys = vec![
+        (500, ch('2')),
+        (300, ch('p')),
+        (300, KeyCode::Enter), // Global-Infra, a pending create
+        (300, KeyCode::Esc),
+        (50, KeyCode::Enter),
+        (300, KeyCode::F(12)),
+    ];
+    let model = key_session(&server, model(), None, keys).await;
+    match &model.overlay {
+        Overlay::Diff { diff, scroll } => {
+            assert_eq!(diff.name, "Global-Infra");
+            assert_eq!(diff.change, DiffKind::Created);
+            assert!(diff.lines.iter().all(|l| l.sign == Sign::Added), "{diff:?}");
+            assert!(
+                diff.lines
+                    .iter()
+                    .any(|l| l.text == "allow all ← group:All prod envs All Services"),
+                "{diff:?}"
+            );
+            assert_eq!(*scroll, 0);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(
+        model.stats.calls, 8,
+        "health + four lists + rulesets + pending + one active rulesets GET; the second Enter is free"
+    );
+    assert_eq!(model.busy, 0);
+}

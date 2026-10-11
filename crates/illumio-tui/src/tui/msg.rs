@@ -142,7 +142,7 @@ pub enum Cmd {
         plan: Plan,
         kind: pce::write::ObjectKind,
     },
-    /// The draft and active list of one kind (cached) for a pending entry.
+    /// The draft and active list of one kind (cached) for a pending IP list, service or ruleset.
     LoadDiff {
         change: PendingChange,
         kind: pce::write::ObjectKind,

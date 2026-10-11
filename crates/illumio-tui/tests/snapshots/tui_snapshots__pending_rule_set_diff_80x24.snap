@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Labels & objects  │  4 Workloads  │  5 Events
+╭ Rulesets ──────────────────────────────────────────────────── draft · 5s ago ╮
+│  ruleset                on  scopes                              rules pending│
+│▸ Shop-Prod              ✓   app=shop & env=prod                     4        │
+│ ╭ ruleset Shop-Prod · updated ───────────────────────── Esc back · q close ╮ │
+│ │  name: Shop-Prod                                                         │ │
+│ │- description: Ringfence                                                  │ │
+╰─│+ description: Ringfence shop                                             │─╯
+╭ │  enabled: yes                                                            │─╮
+│ │  scopes: app=shop & env=prod                                             │ │
+│▸│  allow role=db ← role=web PostgreSQL                                     │ │
+│ │- allow role=web ← iplist:Corp 443/tcp, 8000-8099/tcp                     │ │
+│ │+ allow role=web ← iplist:Corp 443/tcp                                    │/│
+│ │+ allow role=web ← iplist:Any (0.0.0.0/0 and ::/0) 22/tcp                 │ │
+│ │  deny all ← iplist:Any (0.0.0.0/0 and ::/0) 23/tcp                       │ │
+│ │  override_deny role=db ← all 22/tcp                                      │ │
+│ ╰──────────────────────────────────────────────────────────────────────────╯ │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ready         d scope  p pending  Enter detail  Tab pane  a auto  : cmd  ? help

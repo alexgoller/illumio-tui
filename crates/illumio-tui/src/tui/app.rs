@@ -165,8 +165,10 @@ impl Runtime {
             Cmd::LoadDiff { change, kind } => {
                 self.model.busy += 1;
                 let (pce, tx) = self.task_ctx();
+                // A ruleset diff names labels and lists through the loaded index.
+                let index = self.model.index().cloned();
                 tokio::spawn(async move {
-                    let result = load_diff(&pce, &change, kind)
+                    let result = load_diff(&pce, &change, kind, index.as_deref())
                         .await
                         .map_err(|e| e.to_string());
                     let _ = tx.send(Msg::DiffLoaded(result));
@@ -564,6 +566,7 @@ async fn load_diff(
     pce: &Pce,
     change: &PendingChange,
     kind: pce::write::ObjectKind,
+    index: Option<&NameIndex>,
 ) -> pce::Result<ObjectDiff> {
     match kind {
         pce::write::ObjectKind::IpList => {
@@ -575,6 +578,23 @@ async fn load_diff(
             let draft = pce.services(CacheMode::Use).await?.value;
             let active = pce.active_services(CacheMode::Use).await?.value;
             Ok(diff::service_diff_for(change, &draft, &active))
+        }
+        pce::write::ObjectKind::RuleSet => {
+            let draft = pce
+                .rule_sets(PolicyScope::Draft, CacheMode::Use)
+                .await?
+                .value;
+            let active = pce
+                .rule_sets(PolicyScope::Active, CacheMode::Use)
+                .await?
+                .value;
+            let empty = NameIndex::default();
+            Ok(diff::rule_set_diff_for(
+                change,
+                &draft,
+                &active,
+                index.unwrap_or(&empty),
+            ))
         }
         other => Err(pce::PceError::Invalid(format!(
             "no diff for {}",
