@@ -1,4 +1,5 @@
 //! Every event the TUI reacts to, and every side effect it may request.
+use crate::tui::diff::ObjectDiff;
 use crate::tui::edit::WriteIntent;
 use crate::tui::filter::TrafficFilter;
 use crate::tui::model::{Limits, ObjectKind, ProfileInfo, Screen};
@@ -97,6 +98,7 @@ pub enum Msg {
         method: Option<pce::WriteMethod>,
         result: Result<Outcome, WriteError>,
     },
+    DiffLoaded(Result<ObjectDiff, String>),
 }
 
 #[derive(Debug, Clone)]
@@ -138,6 +140,11 @@ pub enum Cmd {
     /// `y` on the confirm overlay: send this plan once.
     ExecuteWrite {
         plan: Plan,
+        kind: pce::write::ObjectKind,
+    },
+    /// The draft and active list of one kind (cached) for a pending entry.
+    LoadDiff {
+        change: PendingChange,
         kind: pce::write::ObjectKind,
     },
     Quit,
@@ -197,6 +204,16 @@ impl PartialEq for Cmd {
                 Cmd::ExecuteWrite { plan: pa, kind: ka },
                 Cmd::ExecuteWrite { plan: pb, kind: kb },
             ) => pa.request() == pb.request() && ka == kb,
+            (
+                Cmd::LoadDiff {
+                    change: ca,
+                    kind: ka,
+                },
+                Cmd::LoadDiff {
+                    change: cb,
+                    kind: kb,
+                },
+            ) => ca == cb && ka == kb,
             _ => false,
         }
     }

@@ -569,3 +569,35 @@ fn confirm_write_overlay_shows_method_path_and_body() {
         render_styled(&l, 80, 24)
     );
 }
+
+#[test]
+fn pending_diff_overlay_80x24() {
+    use illumio_tui::tui::diff::{DiffKind, ObjectDiff, diff_ip_list};
+    use illumio_tui::tui::model::{Overlay, Screen};
+    use illumio_tui::tui::test_support::model_with_policy;
+    let mut m = model_with_policy();
+    m.screen = Screen::Policy;
+    let lists: Vec<pce::models::IpList> =
+        serde_json::from_str(include_str!("../../../fixtures/ip_lists.json")).unwrap();
+    let mut draft = lists[1].clone();
+    draft.description = Some("Office and lab".into());
+    draft
+        .ip_ranges
+        .push(serde_json::from_value(serde_json::json!({"from_ip": "10.2.0.0/16"})).unwrap());
+    m.overlay = Overlay::Diff {
+        diff: ObjectDiff {
+            name: "Corp".into(),
+            href: draft.href.clone(),
+            change: DiffKind::Updated,
+            lines: diff_ip_list(Some(&lists[1]), Some(&draft)),
+        },
+        scroll: 0,
+    };
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("IP list Corp · updated"), "{out}");
+    assert!(out.contains("+ range 10.2.0.0/16"), "{out}");
+    assert!(out.contains("- description: Office ranges"), "{out}");
+    insta::assert_snapshot!("pending_diff_80x24", out);
+    m.set_theme("light");
+    insta::assert_snapshot!("pending_diff_light_styled_80x24", render_styled(&m, 80, 24));
+}

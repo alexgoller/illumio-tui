@@ -420,10 +420,19 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             match result {
                 Ok(p) => {
                     model.status = StatusLine::info(format!("{} pending changes", p.len()));
+                    model.policy.pending_selected = 0;
                     model.policy.pending = Some(p);
                     model.overlay = Overlay::Pending;
                 }
                 Err(e) => fail(model, "pending", &e, false),
+            }
+            Vec::new()
+        }
+        Msg::DiffLoaded(result) => {
+            model.policy.diff_loading = false;
+            match result {
+                Ok(diff) => model.overlay = Overlay::Diff { diff, scroll: 0 },
+                Err(e) => fail(model, "diff", &e, false),
             }
             Vec::new()
         }
@@ -839,7 +848,44 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 _ => Vec::new(),
             }
         }
-        Overlay::RuleDetail(_) | Overlay::Pending | Overlay::Error(_) => {
+        Overlay::Pending => {
+            let n = model.policy.pending.as_ref().map_or(0, Vec::len);
+            match k.code {
+                KeyCode::Esc | KeyCode::Char('q') => model.overlay = Overlay::None,
+                KeyCode::Down | KeyCode::Char('j') => {
+                    model.policy.pending_selected =
+                        (model.policy.pending_selected + 1).min(n.saturating_sub(1));
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    model.policy.pending_selected = model.policy.pending_selected.saturating_sub(1);
+                }
+                KeyCode::Enter => return pending_diff(model),
+                _ => {}
+            }
+            Vec::new()
+        }
+        Overlay::Diff { diff, scroll } => {
+            let last = u16::try_from(diff.lines.len().saturating_sub(1)).unwrap_or(u16::MAX);
+            match k.code {
+                KeyCode::Esc => model.overlay = Overlay::Pending,
+                KeyCode::Char('q') => model.overlay = Overlay::None,
+                KeyCode::Down | KeyCode::Char('j') => {
+                    model.overlay = Overlay::Diff {
+                        diff,
+                        scroll: (scroll + 1).min(last),
+                    };
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    model.overlay = Overlay::Diff {
+                        diff,
+                        scroll: scroll.saturating_sub(1),
+                    };
+                }
+                _ => {}
+            }
+            Vec::new()
+        }
+        Overlay::RuleDetail(_) | Overlay::Error(_) => {
             if matches!(k.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) {
                 model.overlay = Overlay::None;
             }
@@ -1298,6 +1344,42 @@ fn reload_after_write(model: &mut Model, kind: pce::write::ObjectKind) -> Vec<Cm
         }
         pce::write::ObjectKind::Workload => load_workloads(model, CacheMode::Bypass),
     }
+}
+
+/// `Enter` on the pending overlay: one diff request for an IP list or a
+/// service; anything else says why there is none.
+fn pending_diff(model: &mut Model) -> Vec<Cmd> {
+    let Some(change) = model
+        .policy
+        .pending
+        .as_ref()
+        .and_then(|p| p.get(model.policy.pending_selected))
+        .cloned()
+    else {
+        return Vec::new();
+    };
+    let kind = match change.object_type.as_str() {
+        "ip_lists" => pce::write::ObjectKind::IpList,
+        "services" => pce::write::ObjectKind::Service,
+        "rule_sets" | "sec_rules" | "deny_rules" => {
+            model.status = StatusLine::info("rule diffs arrive with Plan 5");
+            return Vec::new();
+        }
+        other => {
+            model.status = StatusLine::info(format!("no diff for {other}"));
+            return Vec::new();
+        }
+    };
+    if model.policy.diff_loading {
+        model.status = StatusLine::info("diff already loading");
+        return Vec::new();
+    }
+    model.policy.diff_loading = true;
+    model.status = StatusLine::info(format!(
+        "loading the active version of {}",
+        change.name.as_deref().unwrap_or(&change.href)
+    ));
+    vec![Cmd::LoadDiff { change, kind }]
 }
 
 fn workloads_page(model: &Model) -> usize {
@@ -4997,5 +5079,107 @@ mod tests {
             ),
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn pending_list_selects_with_j_k_and_enter_asks_for_one_diff() {
+        use crate::tui::test_support::model_with_policy;
+        let mut m = model_with_policy();
+        m.screen = Screen::Policy;
+        let mut pending = pce::models::parse_pending(
+            serde_json::from_str(include_str!("../../../../fixtures/pending_list.json")).unwrap(),
+        );
+        pending.push(pce::models::PendingChange {
+            href: "/orgs/5/sec_policy/draft/label_groups/7".into(),
+            change_type: "update".into(),
+            name: Some("G".into()),
+            object_type: "label_groups".into(),
+        });
+        update(&mut m, Msg::PendingLoaded(Ok(pending.clone())));
+        assert_eq!(m.policy.pending_selected, 0);
+        assert!(update(&mut m, enter()).is_empty(), "entry 0 is a ruleset");
+        assert_eq!(m.status.text, "rule diffs arrive with Plan 5");
+        assert_eq!(m.overlay, Overlay::Pending);
+        update(&mut m, key('j')); // Corp
+        let cmds = update(&mut m, enter());
+        assert_eq!(
+            cmds,
+            vec![Cmd::LoadDiff {
+                change: pending[1].clone(),
+                kind: pce::write::ObjectKind::IpList
+            }]
+        );
+        assert!(m.policy.diff_loading);
+        assert!(
+            update(&mut m, enter()).is_empty(),
+            "one diff in flight at a time"
+        );
+        assert_eq!(m.status.text, "diff already loading");
+        m.policy.diff_loading = false;
+        update(&mut m, key('j'));
+        update(&mut m, key('j'));
+        assert_eq!(m.policy.pending_selected, 2, "stops at the last entry");
+        assert!(update(&mut m, enter()).is_empty());
+        assert_eq!(m.status.text, "no diff for label_groups");
+        update(&mut m, key('k'));
+        assert_eq!(m.policy.pending_selected, 1);
+        update(&mut m, kc(KeyCode::Esc));
+        assert_eq!(m.overlay, Overlay::None);
+    }
+
+    #[test]
+    fn diff_loaded_opens_the_overlay_esc_returns_and_q_closes() {
+        use crate::tui::diff::{DiffKind, DiffLine, ObjectDiff, Sign};
+        use crate::tui::test_support::model_with_policy;
+        let mut m = model_with_policy();
+        m.policy.pending = Some(vec![]);
+        m.overlay = Overlay::Pending;
+        m.policy.diff_loading = true;
+        let diff = ObjectDiff {
+            name: "Corp".into(),
+            href: "/orgs/5/sec_policy/draft/ip_lists/21".into(),
+            change: DiffKind::Created,
+            lines: vec![
+                DiffLine {
+                    sign: Sign::Added,
+                    text: "name: Corp".into(),
+                },
+                DiffLine {
+                    sign: Sign::Added,
+                    text: "range 10.1.0.0-10.1.255.255".into(),
+                },
+            ],
+        };
+        assert!(update(&mut m, Msg::DiffLoaded(Ok(diff.clone()))).is_empty());
+        assert!(!m.policy.diff_loading);
+        assert_eq!(
+            m.overlay,
+            Overlay::Diff {
+                diff: diff.clone(),
+                scroll: 0
+            }
+        );
+        update(&mut m, key('j'));
+        update(&mut m, key('j'));
+        assert_eq!(
+            m.overlay,
+            Overlay::Diff {
+                diff: diff.clone(),
+                scroll: 1
+            },
+            "stops at the last line"
+        );
+        update(&mut m, kc(KeyCode::Esc));
+        assert_eq!(m.overlay, Overlay::Pending, "Esc returns to the list");
+        update(&mut m, Msg::DiffLoaded(Ok(diff)));
+        update(&mut m, key('q'));
+        assert_eq!(m.overlay, Overlay::None, "q closes both");
+        m.overlay = Overlay::Pending;
+        update(
+            &mut m,
+            Msg::DiffLoaded(Err("not found: /orgs/5/sec_policy/active/ip_lists".into())),
+        );
+        assert_eq!(m.status.kind, StatusKind::Error);
+        assert_eq!(m.overlay, Overlay::Pending);
     }
 }

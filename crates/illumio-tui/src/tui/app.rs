@@ -3,6 +3,7 @@
 //! `Cmd`s by spawning tasks on a shared `Arc<Pce>`.
 use crate::cli::error::CliError;
 use crate::cli::{Context, GlobalArgs};
+use crate::tui::diff::{self, ObjectDiff};
 use crate::tui::edit::WriteIntent;
 use crate::tui::model::ObjectKind;
 use crate::tui::model::{Limits, Model, ProfileInfo, WritesState};
@@ -13,7 +14,7 @@ use crossterm::event::{
     EventStream,
 };
 use futures::{Stream, StreamExt};
-use pce::models::WorkloadFilter;
+use pce::models::{PendingChange, WorkloadFilter};
 use pce::write::{IfMissing, JsonlAudit, Plan, WriteContext, WriteError, WriteGuard, WriteRefused};
 use pce::{CacheMode, NameIndex, Pce};
 use std::path::PathBuf;
@@ -158,6 +159,17 @@ impl Runtime {
                         method,
                         result,
                     });
+                    let _ = tx.send(Msg::Stats(pce.stats()));
+                });
+            }
+            Cmd::LoadDiff { change, kind } => {
+                self.model.busy += 1;
+                let (pce, tx) = self.task_ctx();
+                tokio::spawn(async move {
+                    let result = load_diff(&pce, &change, kind)
+                        .await
+                        .map_err(|e| e.to_string());
+                    let _ = tx.send(Msg::DiffLoaded(result));
                     let _ = tx.send(Msg::Stats(pce.stats()));
                 });
             }
@@ -397,6 +409,7 @@ impl Runtime {
                 | Msg::ProfileSwitched(_)
                 | Msg::Planned(_)
                 | Msg::WriteDone { .. }
+                | Msg::DiffLoaded(_)
         );
         let cmds = update(&mut self.model, msg);
         if task_result {
@@ -510,6 +523,32 @@ fn named(mut plan: Plan, kind: &str, name: &str) -> Plan {
         request.summary = format!("delete {kind} {name}");
     }
     plan
+}
+
+/// The draft and active list of one kind through the cache, compared
+/// locally. The draft list is usually cached by the name index, so the
+/// common cost is one GET for the active list, and none when both are fresh.
+async fn load_diff(
+    pce: &Pce,
+    change: &PendingChange,
+    kind: pce::write::ObjectKind,
+) -> pce::Result<ObjectDiff> {
+    match kind {
+        pce::write::ObjectKind::IpList => {
+            let draft = pce.ip_lists(CacheMode::Use).await?.value;
+            let active = pce.active_ip_lists(CacheMode::Use).await?.value;
+            Ok(diff::ip_list_diff_for(change, &draft, &active))
+        }
+        pce::write::ObjectKind::Service => {
+            let draft = pce.services(CacheMode::Use).await?.value;
+            let active = pce.active_services(CacheMode::Use).await?.value;
+            Ok(diff::service_diff_for(change, &draft, &active))
+        }
+        other => Err(pce::PceError::Invalid(format!(
+            "no diff for {}",
+            other.as_str()
+        ))),
+    }
 }
 
 fn to_msg(e: Event) -> Option<Msg> {

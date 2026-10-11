@@ -1280,3 +1280,70 @@ async fn switching_to_a_profile_without_writes_drops_the_guard_and_the_marker() 
     );
     assert!(a.received_requests().await.unwrap_or_default().is_empty());
 }
+
+#[tokio::test]
+async fn pending_diff_fetches_the_active_list_once() {
+    use illumio_tui::tui::diff::{DiffKind, Sign};
+    use illumio_tui::tui::model::Overlay;
+    let server = MockServer::start().await;
+    mount_objects(&server).await; // the draft list: the startup load only
+    for (p, body, n) in [
+        (
+            "/api/v2/orgs/5/sec_policy/draft/rule_sets",
+            include_str!("../../../fixtures/rule_sets.json").to_string(),
+            1,
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/pending",
+            include_str!("../../../fixtures/pending_list.json").to_string(),
+            1,
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/active/ip_lists",
+            json!([{"href": "/orgs/5/sec_policy/active/ip_lists/20", "name": "Any (0.0.0.0/0 and ::/0)",
+                    "ip_ranges": [{"from_ip": "0.0.0.0/0"}, {"from_ip": "::/0"}]}])
+            .to_string(),
+            1,
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/rule_sets/100/deny_rules",
+            "[]".to_string(),
+            0,
+        ),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(p))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(body)
+                    .insert_header("Content-Type", "application/json"),
+            )
+            .expect(n)
+            .mount(&server)
+            .await;
+    }
+    let keys = vec![
+        (500, ch('2')),
+        (300, ch('p')),
+        (300, ch('j')), // Corp, a pending create
+        (50, KeyCode::Enter),
+        (300, KeyCode::Esc),
+        (50, KeyCode::Enter),
+        (300, KeyCode::F(12)),
+    ];
+    let model = key_session(&server, model(), None, keys).await;
+    match &model.overlay {
+        Overlay::Diff { diff, scroll } => {
+            assert_eq!(diff.name, "Corp");
+            assert_eq!(diff.change, DiffKind::Created);
+            assert!(diff.lines.iter().all(|l| l.sign == Sign::Added), "{diff:?}");
+            assert_eq!(*scroll, 0);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(
+        model.stats.calls, 8,
+        "health + four lists + rulesets + pending + one active list; the second Enter is free"
+    );
+    assert_eq!(model.busy, 0);
+}

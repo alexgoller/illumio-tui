@@ -1,4 +1,5 @@
 //! Modal overlays drawn on top of the current screen: help and the `:` prompt.
+use crate::tui::diff::{ObjectDiff, Sign};
 use crate::tui::filter::{FIELD_NAMES, FilterEditor};
 use crate::tui::form::{Form, visible_tail};
 use crate::tui::model::{Model, Screen, rule_kind_name};
@@ -476,13 +477,27 @@ pub fn render_pending(model: &Model, f: &mut Frame, area: Rect) {
     let r = centered(area, 70, 16);
     f.render_widget(Clear, r);
     let pending = model.policy.pending.as_deref().unwrap_or(&[]);
-    let mut lines: Vec<Line> = if pending.is_empty() {
+    let rows = r.height.saturating_sub(2) as usize;
+    let sel = model
+        .policy
+        .pending_selected
+        .min(pending.len().saturating_sub(1));
+    // Keep the selection in view.
+    let first = sel.saturating_sub(rows.saturating_sub(1));
+    let lines: Vec<Line> = if pending.is_empty() {
         vec![Line::from(Span::styled("none", t.dim_style()))]
     } else {
         pending
             .iter()
-            .map(|c| {
+            .enumerate()
+            .skip(first)
+            .take(rows)
+            .map(|(i, c)| {
                 Line::from(vec![
+                    Span::styled(
+                        if i == sel { "▸ " } else { "  " },
+                        Style::new().fg(t.accent),
+                    ),
                     Span::styled(format!("{:<16}", c.object_type), t.header_style()),
                     Span::styled(format!("{:<8}", c.change_type), Style::new().fg(t.warn)),
                     Span::styled(c.name.clone().unwrap_or_else(|| c.href.clone()), t.base()),
@@ -490,19 +505,54 @@ pub fn render_pending(model: &Model, f: &mut Frame, area: Rect) {
             })
             .collect()
     };
-    let rows = r.height.saturating_sub(2) as usize;
-    if lines.len() > rows {
-        let hidden = lines.len() - (rows - 1);
-        lines.truncate(rows - 1);
-        lines.push(Line::from(Span::styled(
-            format!("… {hidden} more"),
-            t.dim_style(),
-        )));
-    }
-    let meta = format!("{} · Esc closes", pending.len());
+    let meta = if pending.is_empty() {
+        "0 · Esc closes".to_string()
+    } else {
+        format!("{}/{} · Enter diff · Esc closes", sel + 1, pending.len())
+    };
     f.render_widget(
         Paragraph::new(lines)
             .block(panel("Pending changes", &meta, t, true))
+            .style(t.base()),
+        r,
+    );
+}
+
+pub fn render_diff(model: &Model, diff: &ObjectDiff, scroll: u16, f: &mut Frame, area: Rect) {
+    let t = &model.theme;
+    let r = centered(area, 76, (diff.lines.len() as u16).saturating_add(2).max(5));
+    f.render_widget(Clear, r);
+    let rows = r.height.saturating_sub(2) as usize;
+    let first = (scroll as usize).min(diff.lines.len().saturating_sub(rows));
+    let lines: Vec<Line> = diff
+        .lines
+        .iter()
+        .skip(first)
+        .take(rows)
+        .map(|l| {
+            let (sign, style) = match l.sign {
+                Sign::Added => ("+ ", Style::new().fg(t.ok)),
+                Sign::Removed => ("- ", Style::new().fg(t.bad)),
+                Sign::Same => ("  ", t.dim_style()),
+            };
+            Line::from(Span::styled(format!("{sign}{}", plain(&l.text)), style))
+        })
+        .collect();
+    let href = pce::models::Ref::new(&diff.href);
+    let kind = match href.object_type() {
+        "ip_lists" => "IP list",
+        "services" => "service",
+        other => other,
+    };
+    let title = format!("{kind} {} · {}", plain(&diff.name), diff.change.as_str());
+    let meta = if diff.lines.len() > rows {
+        "j/k scroll · Esc back · q close"
+    } else {
+        "Esc back · q close"
+    };
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(panel(&title, meta, t, true))
             .style(t.base()),
         r,
     );

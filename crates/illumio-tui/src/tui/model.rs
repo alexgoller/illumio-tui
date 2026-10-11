@@ -1,4 +1,5 @@
 //! All TUI state. No I/O, no terminal types beyond sizes.
+use crate::tui::diff::ObjectDiff;
 use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::form::Form;
 use crate::tui::table::{Column, SortKey, TableView};
@@ -177,6 +178,11 @@ pub enum Overlay {
         kind: pce::write::ObjectKind,
         scroll: u16,
     },
+    /// A pending IP list or service against its active version.
+    Diff {
+        diff: ObjectDiff,
+        scroll: u16,
+    },
 }
 
 impl PartialEq for Overlay {
@@ -212,6 +218,16 @@ impl PartialEq for Overlay {
                     action: ab,
                 },
             ) => ra == rb && aa == ab,
+            (
+                Overlay::Diff {
+                    diff: a,
+                    scroll: sa,
+                },
+                Overlay::Diff {
+                    diff: b,
+                    scroll: sb,
+                },
+            ) => a == b && sa == sb,
             // `RuleView` is not `PartialEq`; a rule is identified by its href.
             (Overlay::RuleDetail(a), Overlay::RuleDetail(b)) => a.href == b.href,
             (
@@ -916,6 +932,10 @@ pub struct PolicyState {
     pub pending: Option<Vec<PendingChange>>,
     /// A pending-changes request is in flight (`p` does not send another).
     pub pending_loading: bool,
+    /// The highlighted entry of the pending overlay.
+    pub pending_selected: usize,
+    /// A diff request is in flight (`Enter` does not send another).
+    pub diff_loading: bool,
     pub auto: AutoRefresh,
 }
 
@@ -935,6 +955,8 @@ impl PolicyState {
             bypass_deny: false,
             pending: None,
             pending_loading: false,
+            pending_selected: 0,
+            diff_loading: false,
             auto: AutoRefresh::new(min_refresh),
         }
     }
