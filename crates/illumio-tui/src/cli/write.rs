@@ -9,7 +9,7 @@ use clap::Args;
 use pce::models::{IpList, Label, LabelGroup, Service};
 use pce::write::{
     ActorKind, ActorRef, JsonlAudit, Outcome, Plan, PortSpec, ServiceRef, WriteContext, WriteError,
-    WriteGuard, WriteRefused, WriteRequest, Written, checked_policy_href,
+    WriteGuard, WriteRefused, WriteRequest, Written, checked_href, checked_policy_href,
 };
 use serde::Serialize;
 
@@ -321,6 +321,8 @@ fn label_group_in(groups: &[LabelGroup], name: &str) -> Result<String, CliError>
     )
 }
 
+/// Legacy: passes hrefs through unchecked; the token resolver
+/// (`resolve_actor`) is the checked path (Task 8 migrates the commands).
 pub async fn resolve_ip_list(ctx: &Context, name: &str) -> Result<String, CliError> {
     if is_href(name) {
         return Ok(name.trim().to_string());
@@ -328,6 +330,8 @@ pub async fn resolve_ip_list(ctx: &Context, name: &str) -> Result<String, CliErr
     ip_list_in(&ctx.pce.ip_lists(ctx.cache_mode).await?.value, name)
 }
 
+/// Legacy: passes hrefs through unchecked; the token resolver
+/// (`resolve_service_ref`) is the checked path (Task 8 migrates the commands).
 pub async fn resolve_service(ctx: &Context, name: &str) -> Result<String, CliError> {
     if is_href(name) {
         return Ok(name.trim().to_string());
@@ -343,7 +347,7 @@ pub async fn resolve_workload(
     target: &str,
 ) -> Result<String, CliError> {
     if is_href(target) {
-        return Ok(target.trim().to_string());
+        return Ok(checked_href(target, "workloads", ctx.config.org_id)?);
     }
     Ok(ctx.pce.writer(guard).find_workload(target).await?.href)
 }
@@ -399,7 +403,7 @@ impl ActorToken {
         };
         if rest.eq_ignore_ascii_case("all") {
             return if exclusion {
-                Err("all cannot be excluded".into())
+                Err(format!("{s:?}: all cannot be excluded"))
             } else {
                 Ok(Self::All)
             };
@@ -431,6 +435,13 @@ impl ActorToken {
             return Ok(Self::Workload { name: name? });
         }
         let spec = rest.strip_prefix("label:").unwrap_or(rest);
+        if spec != rest && is_href(spec) {
+            // `label:<href>` is checked as a label href at resolution.
+            return Ok(Self::Label {
+                spec: spec.to_string(),
+                exclusion,
+            });
+        }
         if spec.contains('=') {
             let (k, v) = parse_kv(spec).map_err(|e| e.to_string())?;
             return Ok(Self::Label {
@@ -602,11 +613,71 @@ fn with_exclusion(mut a: ActorRef, exclusion: bool) -> ActorRef {
     a
 }
 
+/// Tokens that carry an href are checked by the library's strict checkers
+/// for the kind their prefix names, with no list consulted. `None` for
+/// tokens that name an object (or `all`).
+fn actor_from_href_token(token: &ActorToken, org_id: u64) -> Option<Result<ActorRef, CliError>> {
+    let (kind, href, segment, policy, exclusion) = match token {
+        ActorToken::Href { href, exclusion } => {
+            return Some(
+                ActorRef::from_href(href, org_id)
+                    .map(|a| with_exclusion(a, *exclusion))
+                    .map_err(CliError::from),
+            );
+        }
+        ActorToken::Label { spec, exclusion } if is_href(spec) => {
+            (ActorKind::Label, spec, "labels", false, *exclusion)
+        }
+        ActorToken::LabelGroup { name, exclusion } if is_href(name) => (
+            ActorKind::LabelGroup,
+            name,
+            "label_groups",
+            true,
+            *exclusion,
+        ),
+        ActorToken::IpList { name, exclusion } if is_href(name) => {
+            (ActorKind::IpList, name, "ip_lists", true, *exclusion)
+        }
+        ActorToken::Workload { name } if is_href(name) => {
+            (ActorKind::Workload, name, "workloads", false, false)
+        }
+        _ => return None,
+    };
+    let checked = if policy {
+        checked_policy_href(href, segment, org_id)
+    } else {
+        checked_href(href, segment, org_id)
+    };
+    Some(
+        checked
+            .map(|h| with_exclusion(ActorRef::new(kind, h), exclusion))
+            .map_err(CliError::from),
+    )
+}
+
+fn service_from_href_token(
+    token: &ServiceToken,
+    org_id: u64,
+) -> Option<Result<ServiceRef, CliError>> {
+    match token {
+        ServiceToken::Href(h) => Some(ServiceRef::from_href(h, org_id).map_err(CliError::from)),
+        ServiceToken::Name(n) if is_href(n) => {
+            Some(ServiceRef::from_href(n, org_id).map_err(CliError::from))
+        }
+        _ => None,
+    }
+}
+
 pub async fn resolve_actor(
     ctx: &Context,
     token: &ActorToken,
     lists: &mut Lists<'_>,
 ) -> Result<ActorRef, CliError> {
+    if let Some(done) = actor_from_href_token(token, ctx.config.org_id) {
+        let actor = done?;
+        actor.validate().map_err(CliError::Args)?;
+        return Ok(actor);
+    }
     let actor = match token {
         ActorToken::All => ActorRef::all(),
         ActorToken::Href { href, exclusion } => {
@@ -665,6 +736,9 @@ pub async fn resolve_service_ref(
     token: &ServiceToken,
     lists: &mut Lists<'_>,
 ) -> Result<ServiceRef, CliError> {
+    if let Some(done) = service_from_href_token(token, ctx.config.org_id) {
+        return done;
+    }
     match token {
         ServiceToken::Href(h) => Ok(ServiceRef::from_href(h, ctx.config.org_id)?),
         ServiceToken::Port(p) => Ok(ServiceRef::Port(p.clone())),
@@ -866,7 +940,7 @@ mod tests {
     fn actor_tokens_refuse_bad_input() {
         assert_eq!(
             ActorToken::parse("!all").unwrap_err(),
-            "all cannot be excluded"
+            r#""!all": all cannot be excluded"#
         );
         assert!(
             ActorToken::parse("!workload:x")
@@ -955,5 +1029,66 @@ mod tests {
                 .len(),
             2
         );
+    }
+
+    #[test]
+    fn prefixed_hrefs_resolve_through_the_strict_checkers_without_lists() {
+        // The href paths are pure (no Context, no Lists, no request), so
+        // these tests cannot fetch anything.
+        let org = 5;
+        let actor = |s: &str| {
+            let tok = ActorToken::parse(s).unwrap();
+            actor_from_href_token(&tok, org).expect("href token")
+        };
+        let a = actor("label:/orgs/5/labels/1").unwrap();
+        assert_eq!(
+            (a.kind, a.href.as_deref()),
+            (ActorKind::Label, Some("/orgs/5/labels/1"))
+        );
+        assert!(actor("!label:/orgs/5/labels/1").unwrap().exclusion);
+        let a = actor("group:/orgs/5/sec_policy/active/label_groups/2").unwrap();
+        assert_eq!(a.kind, ActorKind::LabelGroup);
+        assert_eq!(
+            a.href.as_deref(),
+            Some("/orgs/5/sec_policy/draft/label_groups/2")
+        );
+        let a = actor("!iplist:/orgs/5/sec_policy/draft/ip_lists/3").unwrap();
+        assert_eq!(a.kind, ActorKind::IpList);
+        assert!(a.exclusion);
+        let a = actor("workload:/orgs/5/workloads/abc").unwrap();
+        assert_eq!(a.kind, ActorKind::Workload);
+        assert_eq!(a.href.as_deref(), Some("/orgs/5/workloads/abc"));
+        assert!(
+            actor("iplist:/orgs/5/labels/1")
+                .unwrap_err()
+                .to_string()
+                .contains("ip_lists")
+        );
+        assert!(
+            actor("group:/orgs/5/labels/1")
+                .unwrap_err()
+                .to_string()
+                .contains("label_groups")
+        );
+        assert!(
+            actor("workload:/orgs/5/labels/1")
+                .unwrap_err()
+                .to_string()
+                .contains("workloads")
+        );
+        assert!(actor("label:/orgs/9/labels/1").is_err(), "wrong org");
+        assert!(actor_from_href_token(&ActorToken::parse("app=web").unwrap(), org).is_none());
+        assert!(actor_from_href_token(&ActorToken::parse("iplist:Corp").unwrap(), org).is_none());
+
+        let svc = |s: &str| service_from_href_token(&ServiceToken::parse(s).unwrap(), org);
+        assert_eq!(
+            svc("service:/orgs/5/sec_policy/active/services/31")
+                .unwrap()
+                .unwrap(),
+            ServiceRef::Href("/orgs/5/sec_policy/draft/services/31".into())
+        );
+        assert!(svc("service:/orgs/5/labels/1").unwrap().is_err());
+        assert!(svc("HTTPS").is_none());
+        assert!(svc("443/tcp").is_none());
     }
 }
