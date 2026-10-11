@@ -116,20 +116,24 @@ fn count(spans: &[Span]) -> u128 {
     })
 }
 
-/// `999`, `65.5K`, `1.5M`, `2.0G`. The value is rounded before the unit is
-/// picked, so `999_999` is `1.0M`, never `1000.0K`.
+/// `999`, `65.5K`, `1.5M`, `2.0G`, up to `999.9Q`; anything larger (an
+/// IPv6 `/1` is 1.7e38) is `1.7e38`. Every form is at most six characters,
+/// so it fits a table cell. The value is rounded before the unit is picked,
+/// so `999_999` is `1.0M`, never `1000.0K`.
 pub(crate) fn human(n: u128) -> String {
     if n < 1_000 {
         return n.to_string();
     }
     let f = n as f64;
-    for (unit, scale) in [('K', 1e3), ('M', 1e6)] {
+    let units = ['K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y', 'R', 'Q'];
+    for (i, unit) in units.into_iter().enumerate() {
+        let scale = 1e3f64.powi(i as i32 + 1);
         let tenths = (f / scale * 10.0).round();
         if tenths < 10_000.0 {
             return format!("{:.1}{unit}", tenths / 10.0);
         }
     }
-    format!("{:.1}G", f / 1e9)
+    format!("{f:.1e}")
 }
 
 pub fn ip_list_size(list: &IpList) -> IpListSize {
@@ -370,7 +374,36 @@ mod tests {
         assert_eq!(human(999_960), "1.0M");
         assert_eq!(human(999_999_999), "1.0G");
         assert_eq!(human(1_000_000), "1.0M");
-        assert!(human(u128::MAX).ends_with('G'));
+    }
+
+    #[test]
+    fn human_has_a_unit_for_every_ipv6_prefix_and_never_exceeds_six_chars() {
+        assert_eq!(human(1 << 40), "1.1T");
+        assert_eq!(human(1 << 64), "18.4E");
+        assert_eq!(human(1 << 96), "79.2R");
+        assert_eq!(human(1 << 100), "1.3Q");
+        assert_eq!(human(u128::MAX >> 1), "1.7e38");
+        assert_eq!(human(u128::MAX), "3.4e38");
+        for shift in 0..128 {
+            let s = human(1u128 << shift);
+            assert!(s.len() <= 6, "{s} for 2^{shift}");
+        }
+    }
+
+    #[test]
+    fn ipv6_list_sizes_fit_the_size_column() {
+        // The IP lists screen's size column is 10 cells wide.
+        for (cidr, want) in [
+            ("2001:db8::/64", "18.4E"),
+            ("2001:db8::/48", "1.2Y"),
+            ("2001:db8::/32", "79.2R"),
+            ("::/1", "1.7e38"),
+        ] {
+            let s = size(json!([{"from_ip": cidr}]));
+            assert_eq!(s.display(), want, "{cidr}");
+            assert!(s.display().len() <= 10, "{cidr}");
+        }
+        assert_eq!(size(json!([{"from_ip": "::/0"}])).display(), "any (::/0)");
     }
 
     #[test]
