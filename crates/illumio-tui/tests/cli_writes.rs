@@ -131,7 +131,7 @@ fn allow_writes_is_a_global_flag_with_help() {
 }
 
 /// Every write subcommand, with arguments that would otherwise be valid.
-const ALL_WRITES: [&[&str]; 12] = [
+const ALL_WRITES: [&[&str]; 23] = [
     &["labels", "add", "a=b"],
     &["labels", "update", "/orgs/5/labels/1", "--value", "x"],
     &["labels", "delete", "/orgs/5/labels/1"],
@@ -162,6 +162,81 @@ const ALL_WRITES: [&[&str]; 12] = [
         "d",
     ],
     &["workloads", "delete", "/orgs/5/workloads/u1"],
+    &[
+        "workloads",
+        "update",
+        "/orgs/5/workloads/m1",
+        "--add-label",
+        "app=x",
+        "--managed-labels",
+    ],
+    &["policy", "rulesets", "add", "X"],
+    &[
+        "policy",
+        "rulesets",
+        "update",
+        "/orgs/5/sec_policy/draft/rule_sets/1",
+        "--description",
+        "d",
+    ],
+    &[
+        "policy",
+        "rulesets",
+        "delete",
+        "/orgs/5/sec_policy/draft/rule_sets/1",
+    ],
+    &[
+        "policy",
+        "rules",
+        "add",
+        "/orgs/5/sec_policy/draft/rule_sets/1",
+        "--provider",
+        "all",
+        "--consumer",
+        "all",
+        "--service",
+        "443/tcp",
+    ],
+    &[
+        "policy",
+        "rules",
+        "update",
+        "/orgs/5/sec_policy/draft/rule_sets/1/sec_rules/2",
+        "--description",
+        "d",
+    ],
+    &[
+        "policy",
+        "rules",
+        "delete",
+        "/orgs/5/sec_policy/draft/rule_sets/1/sec_rules/2",
+    ],
+    &[
+        "policy",
+        "deny-rules",
+        "add",
+        "/orgs/5/sec_policy/draft/rule_sets/1",
+        "--provider",
+        "all",
+        "--consumer",
+        "all",
+        "--service",
+        "22/tcp",
+    ],
+    &[
+        "policy",
+        "deny-rules",
+        "update",
+        "/orgs/5/sec_policy/draft/rule_sets/1/deny_rules/3",
+        "--override",
+    ],
+    &[
+        "policy",
+        "deny-rules",
+        "delete",
+        "/orgs/5/sec_policy/draft/rule_sets/1/deny_rules/3",
+    ],
+    &["policy", "provision", "--all"],
 ];
 
 #[tokio::test(flavor = "multi_thread")]
@@ -2344,5 +2419,329 @@ mod policy {
                 .success(),
         );
         assert_eq!(out["data"]["skipped"], true);
+    }
+}
+
+mod provision {
+    use super::policy::{fixture_rule_sets, mount_get};
+    use super::*;
+
+    fn pending_dict() -> Value {
+        serde_json::from_str(include_str!("../../../fixtures/pending_dict.json")).unwrap()
+    }
+
+    fn all_body() -> Value {
+        json!({
+            "update_description": "illumio-tui provision",
+            "change_subset": {
+                "ip_lists": [{"href": "/orgs/5/sec_policy/draft/ip_lists/21"}],
+                "rule_sets": [{"href": "/orgs/5/sec_policy/draft/rule_sets/101"}]
+            }
+        })
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn all_dry_run_lists_every_pending_href_with_counts() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_get(&server, "/orgs/5/sec_policy/pending", pending_dict()).await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args(["policy", "provision", "--all", "--dry-run"])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["method"], "POST");
+        assert_eq!(out["data"]["path"], "/orgs/5/sec_policy");
+        assert_eq!(out["data"]["body"], all_body());
+        assert_eq!(
+            out["data"]["counts"],
+            json!({"ip_lists": 1, "rule_sets": 1})
+        );
+        assert_eq!(out["data"]["summary"], "provision 1 ip_list, 1 rule_set");
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+        assert!(audit_lines(state.path()).is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn by_ruleset_name_and_href_with_a_description() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_get(&server, "/orgs/5/sec_policy/pending", pending_dict()).await;
+        mount_get(
+            &server,
+            "/orgs/5/sec_policy/draft/rule_sets",
+            fixture_rule_sets(),
+        )
+        .await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "policy",
+                    "provision",
+                    "global-infra",
+                    "/orgs/5/sec_policy/active/ip_lists/21",
+                    "--description",
+                    "change 42",
+                    "--dry-run",
+                ])
+                .assert()
+                .success(),
+        );
+        let mut expected = all_body();
+        expected["update_description"] = json!("change 42");
+        assert_eq!(out["data"]["body"], expected);
+        assert_eq!(
+            count(&server, "GET", "/api/v2/orgs/5/sec_policy/draft/rule_sets").await,
+            1
+        );
+        assert_eq!(
+            count(&server, "GET", "/api/v2/orgs/5/sec_policy/pending").await,
+            1
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_non_pending_href_is_exit_2_and_nothing_pending_is_skipped() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_get(&server, "/orgs/5/sec_policy/pending", pending_dict()).await;
+        let a = writer(&server, state.path())
+            .args([
+                "policy",
+                "provision",
+                "/orgs/5/sec_policy/draft/services/31",
+                "--yes",
+            ])
+            .assert()
+            .code(2);
+        assert_eq!(stderr_json(&a)["error"]["kind"], "invalid");
+        assert_eq!(
+            stderr_json(&a)["error"]["message"],
+            "/orgs/5/sec_policy/draft/services/31 has no pending changes"
+        );
+        let empty = MockServer::start().await;
+        mount_get(&empty, "/orgs/5/sec_policy/pending", json!([])).await;
+        let out = stdout_json(
+            writer(&empty, state.path())
+                .args(["policy", "provision", "--all", "--yes"])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["skipped"], true);
+        assert_eq!(out["data"]["reason"], "nothing pending");
+        assert!(audit_lines(state.path()).is_empty());
+        writer(&empty, state.path())
+            .args(["policy", "provision", "--dry-run"])
+            .assert()
+            .code(2);
+        writer(&empty, state.path())
+            .args(["policy", "provision", "--all", "Global-Infra", "--dry-run"])
+            .assert()
+            .code(2);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sends_once_and_reports_the_version_in_json_and_table() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_get(&server, "/orgs/5/sec_policy/pending", pending_dict()).await;
+        Mock::given(method("POST"))
+            .and(path("/api/v2/orgs/5/sec_policy"))
+            .and(body_json(all_body()))
+            .respond_with(
+                ResponseTemplate::new(201)
+                    .set_body_json(json!({"href": "/orgs/5/sec_policy/12", "version": 12})),
+            )
+            .expect(2)
+            .mount(&server)
+            .await;
+        let a = writer(&server, state.path())
+            .args(["policy", "provision", "--all", "--yes"])
+            .assert()
+            .success();
+        assert_no_secret(&a);
+        let out = stdout_json(a);
+        assert_eq!(out["data"]["href"], "/orgs/5/sec_policy/12");
+        assert_eq!(out["data"]["pending"], false);
+        assert_eq!(
+            out["data"]["counts"],
+            json!({"ip_lists": 1, "rule_sets": 1})
+        );
+        assert_eq!(out["data"]["dropped_fields"], json!([]));
+        assert_eq!(out["meta"]["write"]["method"], "POST");
+        assert_eq!(out["meta"]["write"]["path"], "/orgs/5/sec_policy");
+        let mut t = cmd(&server);
+        t.env("ILLUMIO_WRITES", "1")
+            .env("XDG_STATE_HOME", state.path());
+        t.args([
+            "--allow-writes",
+            "--table",
+            "policy",
+            "provision",
+            "--all",
+            "--yes",
+        ])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("provisioned")
+                .and(predicate::str::contains("/orgs/5/sec_policy/12"))
+                .and(predicate::str::contains("ip_lists=1, rule_sets=1")),
+        );
+        let lines = audit_lines(state.path());
+        assert_eq!(lines.len(), 2, "one audit line per send");
+        assert_eq!(lines[0]["body"], all_body());
+    }
+}
+
+mod managed_labels {
+    use super::policy::{fixture_labels, fixture_workloads, mount_get};
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn managed_labels_relabels_a_managed_workload_with_labels_only() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_get(&server, "/orgs/5/labels", fixture_labels()).await;
+        mount_get(
+            &server,
+            "/orgs/5/workloads/aaaa-1",
+            fixture_workloads()[0].clone(),
+        )
+        .await;
+        Mock::given(method("PUT"))
+            .and(path("/api/v2/orgs/5/workloads/aaaa-1"))
+            .and(body_json(json!({"labels": [
+                {"href": "/orgs/5/labels/1"}, {"href": "/orgs/5/labels/3"},
+                {"href": "/orgs/5/labels/4"}, {"href": "/orgs/5/labels/5"}
+            ]})))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "workloads",
+                    "update",
+                    "/orgs/5/workloads/aaaa-1",
+                    "--add-label",
+                    "loc=eu",
+                    "--managed-labels",
+                    "--yes",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["href"], "/orgs/5/workloads/aaaa-1");
+        assert_eq!(out["data"]["pending"], false);
+        assert_eq!(audit_lines(state.path()).len(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn managed_labels_by_hostname_dry_run() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_get(&server, "/orgs/5/labels", fixture_labels()).await;
+        mount_get(&server, "/orgs/5/workloads", fixture_workloads()).await;
+        mount_get(
+            &server,
+            "/orgs/5/workloads/aaaa-1",
+            fixture_workloads()[0].clone(),
+        )
+        .await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "workloads",
+                    "update",
+                    "host-1.example",
+                    "--remove-label",
+                    "role",
+                    "--managed-labels",
+                    "--dry-run",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["method"], "PUT");
+        assert_eq!(
+            out["data"]["body"],
+            json!({"labels": [{"href": "/orgs/5/labels/3"}, {"href": "/orgs/5/labels/4"}]})
+        );
+        assert_eq!(out["data"]["summary"], "relabel workload host-1.example");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn managed_labels_refuses_other_changes_before_any_request() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        for extra in [
+            ["--description", "x"],
+            ["--name", "y"],
+            ["--hostname", "h"],
+            ["--add-ip", "10.0.0.9"],
+            ["--remove-ip", "10.0.0.9"],
+        ] {
+            let a = writer(&server, state.path())
+                .args([
+                    "workloads",
+                    "update",
+                    "/orgs/5/workloads/aaaa-1",
+                    "--add-label",
+                    "loc=eu",
+                    "--managed-labels",
+                    "--yes",
+                ])
+                .args(extra)
+                .assert()
+                .code(2);
+            assert_eq!(
+                stderr_json(&a)["error"]["message"],
+                "--managed-labels allows label changes only",
+                "{extra:?}"
+            );
+        }
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_managed_workload_without_the_flag_is_still_refused() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_get(&server, "/orgs/5/labels", fixture_labels()).await;
+        mount_get(
+            &server,
+            "/orgs/5/workloads/aaaa-1",
+            fixture_workloads()[0].clone(),
+        )
+        .await;
+        let a = writer(&server, state.path())
+            .args([
+                "workloads",
+                "update",
+                "/orgs/5/workloads/aaaa-1",
+                "--add-label",
+                "loc=eu",
+                "--yes",
+            ])
+            .assert()
+            .code(2);
+        assert!(
+            stderr_json(&a)["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("VEN-managed")
+        );
+        assert!(
+            server
+                .received_requests()
+                .await
+                .unwrap()
+                .iter()
+                .all(|r| r.method.as_str() == "GET")
+        );
+        assert!(audit_lines(state.path()).is_empty());
     }
 }

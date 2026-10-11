@@ -7,11 +7,13 @@ use super::error::CliError;
 use super::output::{TableRows, WriteMeta};
 use clap::Args;
 use pce::models::{IpList, Label, LabelGroup, Service};
+use pce::write::provision_counts;
 use pce::write::{
     ActorKind, ActorRef, JsonlAudit, Outcome, Plan, PortSpec, ServiceRef, WriteContext, WriteError,
     WriteGuard, WriteRefused, WriteRequest, Written, checked_href, checked_policy_href,
 };
 use serde::Serialize;
+use std::collections::BTreeMap;
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct WriteFlags {
@@ -75,10 +77,55 @@ pub enum WriteOutput {
         href: String,
         reason: String,
     },
+    /// `policy provision --dry-run`: the request and its object counts.
+    ProvisionDryRun {
+        #[serde(flatten)]
+        request: WriteRequest,
+        counts: BTreeMap<String, usize>,
+    },
+    /// `policy provision --yes`: the new policy version and the counts.
+    Provisioned {
+        #[serde(flatten)]
+        written: Written,
+        counts: BTreeMap<String, usize>,
+    },
 }
 
 fn compact(v: &serde_json::Value) -> String {
     serde_json::to_string(v).unwrap_or_default()
+}
+
+fn row(k: &str, v: String) -> Vec<String> {
+    vec![k.to_string(), v]
+}
+
+fn request_rows(r: &WriteRequest) -> Vec<Vec<String>> {
+    vec![
+        row("method", r.method.as_str().into()),
+        row("path", r.path.clone()),
+        row("summary", r.summary.clone()),
+        row("body", r.body.as_ref().map(compact).unwrap_or_default()),
+    ]
+}
+
+fn written_rows(w: &Written) -> Vec<Vec<String>> {
+    vec![
+        row("href", w.href.clone()),
+        row("pending", w.pending.to_string()),
+        row("status", w.status.to_string()),
+        row("dropped_fields", w.dropped_fields.join(", ")),
+        row("warnings", w.warnings.join("; ")),
+        row("object", compact(&w.object)),
+    ]
+}
+
+/// `ip_lists=1, rule_sets=3`.
+fn counts_text(counts: &BTreeMap<String, usize>) -> String {
+    counts
+        .iter()
+        .map(|(k, n)| format!("{k}={n}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 impl TableRows for WriteOutput {
@@ -86,22 +133,9 @@ impl TableRows for WriteOutput {
         vec!["field", "value"]
     }
     fn rows(&self) -> Vec<Vec<String>> {
-        let row = |k: &str, v: String| vec![k.to_string(), v];
         match self {
-            WriteOutput::DryRun(r) => vec![
-                row("method", r.method.as_str().into()),
-                row("path", r.path.clone()),
-                row("summary", r.summary.clone()),
-                row("body", r.body.as_ref().map(compact).unwrap_or_default()),
-            ],
-            WriteOutput::Written(w) => vec![
-                row("href", w.href.clone()),
-                row("pending", w.pending.to_string()),
-                row("status", w.status.to_string()),
-                row("dropped_fields", w.dropped_fields.join(", ")),
-                row("warnings", w.warnings.join("; ")),
-                row("object", compact(&w.object)),
-            ],
+            WriteOutput::DryRun(r) => request_rows(r),
+            WriteOutput::Written(w) => written_rows(w),
             WriteOutput::Skipped {
                 skipped,
                 href,
@@ -111,6 +145,19 @@ impl TableRows for WriteOutput {
                 row("href", href.clone()),
                 row("reason", reason.clone()),
             ],
+            WriteOutput::ProvisionDryRun { request, counts } => {
+                let mut rows = request_rows(request);
+                rows.push(row("counts", counts_text(counts)));
+                rows
+            }
+            WriteOutput::Provisioned { written, counts } => {
+                let mut rows = vec![
+                    row("provisioned", written.href.clone()),
+                    row("counts", counts_text(counts)),
+                ];
+                rows.extend(written_rows(written));
+                rows
+            }
         }
     }
 }
@@ -122,6 +169,27 @@ pub async fn run_plan(
     flags: &WriteFlags,
     guard: &WriteGuard,
     plan: Plan,
+) -> Result<(), CliError> {
+    send(ctx, flags, guard, plan, false).await
+}
+
+/// [`run_plan`] for `policy provision`: the dry run and the result carry
+/// `counts` (object type to number of hrefs in `change_subset`).
+pub async fn run_provision_plan(
+    ctx: &Context,
+    flags: &WriteFlags,
+    guard: &WriteGuard,
+    plan: Plan,
+) -> Result<(), CliError> {
+    send(ctx, flags, guard, plan, true).await
+}
+
+async fn send(
+    ctx: &Context,
+    flags: &WriteFlags,
+    guard: &WriteGuard,
+    plan: Plan,
+    with_counts: bool,
 ) -> Result<(), CliError> {
     let (request, kind) = match plan {
         Plan::Noop {
@@ -139,8 +207,14 @@ pub async fn run_plan(
         }
         Plan::Send { request, kind } => (request, kind),
     };
+    let counts = with_counts
+        .then(|| provision_counts(request.body.as_ref().unwrap_or(&serde_json::Value::Null)));
     if flags.dry_run {
-        return ctx.emit_write(&WriteOutput::DryRun(request), None);
+        let out = match counts {
+            Some(counts) => WriteOutput::ProvisionDryRun { request, counts },
+            None => WriteOutput::DryRun(request),
+        };
+        return ctx.emit_write(&out, None);
     }
     let method = request.method;
     let path = request.path.clone();
@@ -157,7 +231,11 @@ pub async fn run_plan(
                 status: w.status,
                 audit: guard.audit_location(),
             };
-            ctx.emit_write(&WriteOutput::Written(w), Some(meta))
+            let out = match counts {
+                Some(counts) => WriteOutput::Provisioned { written: w, counts },
+                None => WriteOutput::Written(w),
+            };
+            ctx.emit_write(&out, Some(meta))
         }
         Outcome::Skipped {
             existing_href,

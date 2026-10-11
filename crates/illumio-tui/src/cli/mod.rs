@@ -87,7 +87,7 @@ pub enum Command {
     Events(events::EventsArgs),
     /// List workloads; add, update or delete an unmanaged one
     Workloads(workloads::WorkloadsCmd),
-    /// Rulesets, rules, pending changes
+    /// Rulesets, rules, deny rules, pending changes, provisioning
     #[command(subcommand)]
     Policy(policy::PolicyCmd),
     /// Explorer traffic queries

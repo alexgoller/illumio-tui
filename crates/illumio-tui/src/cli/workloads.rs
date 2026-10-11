@@ -3,11 +3,15 @@
 use super::context::{Context, cache_label};
 use super::error::CliError;
 use super::output::TableRows;
-use super::write::{self, WriteFlags, is_href, label_in, parse_kv, resolve_labels, run_plan};
+use super::write::{
+    self, WriteFlags, label_in, parse_kv, resolve_labels, resolve_workload, run_plan,
+};
 use clap::{Args, Subcommand};
 use pce::PceError;
 use pce::models::{VenHealth, Workload, WorkloadFilter};
-use pce::write::{IfMissing, InterfaceSpec, LabelRemoval, WorkloadDraft, WorkloadPatch};
+use pce::write::{
+    IfMissing, InterfaceSpec, LabelRemoval, LabelsPatch, WorkloadDraft, WorkloadPatch,
+};
 use serde::Serialize;
 
 #[derive(Args, Debug, Clone, Default)]
@@ -56,7 +60,7 @@ pub struct WorkloadsCmd {
 pub enum WorkloadsAction {
     /// Create an unmanaged workload (needs writes enabled and --allow-writes)
     Add(WorkloadAddArgs),
-    /// Change an unmanaged workload's name, hostname, interfaces or labels
+    /// Change an unmanaged workload's name, hostname, interfaces or labels; with --managed-labels, a VEN-managed workload's labels
     Update(WorkloadUpdateArgs),
     /// Delete an unmanaged workload
     Delete(WorkloadDeleteArgs),
@@ -113,6 +117,9 @@ pub struct WorkloadUpdateArgs {
     /// Label to remove: key (any value) or key=value (repeatable)
     #[arg(long = "remove-label")]
     pub remove_labels: Vec<String>,
+    /// Change labels on a VEN-managed workload (label flags only; the PUT carries only labels)
+    #[arg(long)]
+    pub managed_labels: bool,
     #[command(flatten)]
     pub write: WriteFlags,
 }
@@ -164,20 +171,19 @@ async fn workload_add(ctx: &Context, a: &WorkloadAddArgs) -> Result<(), CliError
     run_plan(ctx, &a.write, &guard, plan).await
 }
 
-/// An href as given, or an exact hostname/name match (one or two reads).
-async fn workload_href(
-    ctx: &Context,
-    guard: &pce::write::WriteGuard,
-    target: &str,
-) -> Result<String, CliError> {
-    if is_href(target) {
-        return Ok(target.trim().to_string());
-    }
-    Ok(ctx.pce.writer(guard).find_workload(target).await?.href)
-}
-
 async fn workload_update(ctx: &Context, a: &WorkloadUpdateArgs) -> Result<(), CliError> {
     let guard = write::prepare(ctx, &a.write)?;
+    if a.managed_labels
+        && (a.name.is_some()
+            || a.hostname.is_some()
+            || a.description.is_some()
+            || !a.add_ips.is_empty()
+            || !a.remove_ips.is_empty())
+    {
+        return Err(CliError::Args(
+            "--managed-labels allows label changes only".into(),
+        ));
+    }
     let remove_labels = a
         .remove_labels
         .iter()
@@ -234,29 +240,36 @@ async fn workload_update(ctx: &Context, a: &WorkloadUpdateArgs) -> Result<(), Cl
         }
         None => None,
     };
-    let patch = WorkloadPatch {
-        name: a.name.clone(),
-        hostname: a.hostname.clone(),
-        description: a.description.clone(),
-        add_addresses: a.add_ips.clone(),
-        remove_addresses: a.remove_ips.clone(),
-        set_labels,
-        add_labels: resolve(&a.add_labels)?,
-        remove_labels,
-    };
-    let href = workload_href(ctx, &guard, &a.target).await?;
+    let add_labels = resolve(&a.add_labels)?;
+    let href = resolve_workload(ctx, &guard, &a.target).await?;
     let idx = pce::NameIndex::new(&labels, &[], &[], &[]);
-    let plan = ctx
-        .pce
-        .writer(&guard)
-        .plan_update_workload(&href, &patch, &idx)
-        .await?;
+    let w = ctx.pce.writer(&guard);
+    let plan = if a.managed_labels {
+        let patch = LabelsPatch {
+            set_labels,
+            add_labels,
+            remove_labels,
+        };
+        w.plan_relabel_workload(&href, &patch, &idx).await?
+    } else {
+        let patch = WorkloadPatch {
+            name: a.name.clone(),
+            hostname: a.hostname.clone(),
+            description: a.description.clone(),
+            add_addresses: a.add_ips.clone(),
+            remove_addresses: a.remove_ips.clone(),
+            set_labels,
+            add_labels,
+            remove_labels,
+        };
+        w.plan_update_workload(&href, &patch, &idx).await?
+    };
     run_plan(ctx, &a.write, &guard, plan).await
 }
 
 async fn workload_delete(ctx: &Context, a: &WorkloadDeleteArgs) -> Result<(), CliError> {
     let guard = write::prepare(ctx, &a.write)?;
-    let href = workload_href(ctx, &guard, &a.target).await?;
+    let href = resolve_workload(ctx, &guard, &a.target).await?;
     let plan = ctx.pce.writer(&guard).plan_delete_workload(&href).await?;
     run_plan(ctx, &a.write, &guard, plan).await
 }

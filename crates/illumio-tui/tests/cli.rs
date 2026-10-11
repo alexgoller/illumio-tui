@@ -47,6 +47,7 @@ fn every_flag_has_help_text() {
     for args in [
         vec!["--help"],
         vec!["workloads", "--help"],
+        vec!["policy", "provision", "--help"],
         vec!["traffic", "query", "--help"],
         vec!["policy", "rulesets", "--help"],
         vec!["policy", "rules", "--help"],

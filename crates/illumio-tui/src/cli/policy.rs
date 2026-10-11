@@ -11,8 +11,8 @@ use super::write::{
 use clap::{Args, Subcommand};
 use pce::models::{PendingChange, PolicyScope, ResolveLabelsAs, RuleSet};
 use pce::write::{
-    ActorRef, DenyRuleDraft, DenyRulePatch, IfMissing, RuleDraft, RulePatch, RuleSetDraft,
-    RuleSetPatch, ServiceRef, WriteError, checked_nested_href,
+    ActorRef, DenyRuleDraft, DenyRulePatch, IfMissing, ProvisionRequest, ProvisionSubset,
+    RuleDraft, RulePatch, RuleSetDraft, RuleSetPatch, ServiceRef, WriteError, checked_nested_href,
 };
 use pce::{PceError, RuleSetView, RuleView};
 use serde::Serialize;
@@ -28,6 +28,8 @@ pub enum PolicyCmd {
     DenyRules(DenyRulesAction),
     /// List changes waiting to be provisioned
     Pending,
+    /// Provision pending changes (needs writes enabled and --allow-writes)
+    Provision(ProvisionArgs),
 }
 
 /// `policy rulesets` lists by default; `add`, `update` and `delete` write.
@@ -281,6 +283,20 @@ pub struct DenyRuleDeleteArgs {
     pub write: WriteFlags,
 }
 
+#[derive(Args, Debug)]
+pub struct ProvisionArgs {
+    /// Provision every pending change
+    #[arg(long, conflicts_with = "targets", required_unless_present = "targets")]
+    pub all: bool,
+    /// Ruleset names, or hrefs of pending rulesets, rules, IP lists, services or label groups
+    pub targets: Vec<String>,
+    /// Description recorded with the new policy version
+    #[arg(long)]
+    pub description: Option<String>,
+    #[command(flatten)]
+    pub write: WriteFlags,
+}
+
 #[derive(Args, Debug, Clone, Default)]
 pub struct RulesetsArgs {
     /// Read active policy instead of draft
@@ -415,6 +431,7 @@ pub async fn run(ctx: &Context, cmd: &PolicyCmd) -> Result<(), CliError> {
             DenyRulesAction::Delete(a) => deny_rule_delete(ctx, a).await,
         },
         PolicyCmd::Pending => pending(ctx).await,
+        PolicyCmd::Provision(a) => provision(ctx, a).await,
     }
 }
 
@@ -832,4 +849,42 @@ async fn deny_rule_delete(ctx: &Context, a: &DenyRuleDeleteArgs) -> Result<(), C
     let guard = write::prepare(ctx, &a.write)?;
     let plan = ctx.pce.writer(&guard).plan_delete_deny_rule(&a.deny_rule)?;
     run_plan(ctx, &a.write, &guard, plan).await
+}
+
+/// Hrefs as given (the planner checks them); names resolved as rulesets
+/// with one draft list GET, made only when a name is given.
+async fn provision_targets(ctx: &Context, targets: &[String]) -> Result<Vec<String>, CliError> {
+    let sets = if targets.iter().all(|t| is_href(t)) {
+        Vec::new()
+    } else {
+        ctx.pce
+            .rule_sets(PolicyScope::Draft, ctx.cache_mode)
+            .await?
+            .value
+    };
+    targets
+        .iter()
+        .map(|t| {
+            if is_href(t) {
+                Ok(t.trim().to_string())
+            } else {
+                ruleset_named(&sets, t.trim())
+            }
+        })
+        .collect()
+}
+
+async fn provision(ctx: &Context, a: &ProvisionArgs) -> Result<(), CliError> {
+    let guard = write::prepare(ctx, &a.write)?;
+    let subset = if a.all {
+        ProvisionSubset::All
+    } else {
+        ProvisionSubset::Hrefs(provision_targets(ctx, &a.targets).await?)
+    };
+    let req = ProvisionRequest {
+        description: a.description.clone(),
+        subset,
+    };
+    let plan = ctx.pce.writer(&guard).plan_provision(&req).await?;
+    write::run_provision_plan(ctx, &a.write, &guard, plan).await
 }
