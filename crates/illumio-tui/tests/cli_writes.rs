@@ -131,7 +131,7 @@ fn allow_writes_is_a_global_flag_with_help() {
 }
 
 /// Every write subcommand, with arguments that would otherwise be valid.
-const ALL_WRITES: [&[&str]; 23] = [
+const ALL_WRITES: [&[&str]; 27] = [
     &["labels", "add", "a=b"],
     &["labels", "update", "/orgs/5/labels/1", "--value", "x"],
     &["labels", "delete", "/orgs/5/labels/1"],
@@ -235,6 +235,49 @@ const ALL_WRITES: [&[&str]; 23] = [
         "deny-rules",
         "delete",
         "/orgs/5/sec_policy/draft/rule_sets/1/deny_rules/3",
+    ],
+    &[
+        "policy",
+        "rules",
+        "add",
+        "/orgs/5/sec_policy/draft/rule_sets/1",
+        "--provider",
+        "all",
+        "--consumer",
+        "all",
+        "--service",
+        "443/tcp",
+        "--impact",
+    ],
+    &[
+        "policy",
+        "rules",
+        "update",
+        "/orgs/5/sec_policy/draft/rule_sets/1/sec_rules/2",
+        "--description",
+        "d",
+        "--impact",
+    ],
+    &[
+        "policy",
+        "deny-rules",
+        "add",
+        "/orgs/5/sec_policy/draft/rule_sets/1",
+        "--provider",
+        "all",
+        "--consumer",
+        "all",
+        "--service",
+        "22/tcp",
+        "--impact",
+    ],
+    &[
+        "policy",
+        "deny-rules",
+        "update",
+        "/orgs/5/sec_policy/draft/rule_sets/1/deny_rules/3",
+        "--override",
+        "--impact",
     ],
     &["policy", "provision", "--all"],
 ];
@@ -2492,6 +2535,208 @@ mod policy {
                 .success(),
         );
         assert_eq!(out["data"]["skipped"], true);
+    }
+
+    const SHOP_RULE: [&str; 10] = [
+        "policy",
+        "rules",
+        "add",
+        "Shop-Prod",
+        "--provider",
+        "role=web",
+        "--consumer",
+        "iplist:Corp",
+        "--service",
+        "443/tcp",
+    ];
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rules_add_dry_run_impact_reads_workloads_once_and_sends_nothing() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_lists(&server).await;
+        mount_get(&server, "/orgs/5/workloads", fixture_workloads()).await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args(SHOP_RULE)
+                .args(["--dry-run", "--impact"])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["method"], "POST");
+        assert_eq!(out["data"]["path"], format!("{RS_100}/sec_rules"));
+        assert_eq!(
+            out["data"]["body"]["providers"],
+            json!([{"label": {"href": "/orgs/5/labels/1"}}])
+        );
+        let impact = &out["data"]["impact"];
+        assert_eq!(
+            (impact["providers"].clone(), impact["consumers"].clone()),
+            (json!(1), json!(0))
+        );
+        assert_eq!(
+            impact["per_scope"],
+            json!([{"scope": ["app=shop", "env=prod"], "providers": 1, "consumers": 0}])
+        );
+        assert_eq!(impact["ip_lists"][0]["name"], "Corp");
+        assert_eq!(impact["ip_lists"][0]["side"], "consumer");
+        assert_eq!(out["meta"]["truncated"], false);
+        assert_eq!(gets(&server, "/orgs/5/workloads").await, 1);
+        assert_eq!(
+            gets(&server, "/orgs/5/sec_policy/draft/rule_sets").await,
+            1,
+            "the name and the scopes share one read"
+        );
+        assert!(
+            server
+                .received_requests()
+                .await
+                .unwrap()
+                .iter()
+                .all(|r| r.method.as_str() == "GET"),
+            "a dry run sends no write"
+        );
+        assert!(audit_lines(state.path()).is_empty());
+        // Without --impact the dry run keeps its shape and reads no workloads.
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args(SHOP_RULE)
+                .arg("--dry-run")
+                .assert()
+                .success(),
+        );
+        assert!(out["data"].get("impact").is_none());
+        assert_eq!(gets(&server, "/orgs/5/workloads").await, 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rules_add_yes_impact_is_computed_before_the_post() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_lists(&server).await;
+        mount_get(&server, "/orgs/5/workloads", fixture_workloads()).await;
+        Mock::given(method("POST"))
+            .and(path(format!("/api/v2{RS_100}/sec_rules")))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+                "href": format!("{RS_100}/sec_rules/9"), "enabled": true,
+                "providers": [{"label": {"href": "/orgs/5/labels/1"}}],
+                "consumers": [{"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/21"}}],
+                "ingress_services": [{"port": 443, "proto": 6}]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args(SHOP_RULE)
+                .args(["--yes", "--impact"])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["href"], format!("{RS_100}/sec_rules/9"));
+        assert_eq!(out["data"]["pending"], true);
+        assert_eq!(out["data"]["impact"]["providers"], 1);
+        assert_eq!(out["meta"]["write"]["method"], "POST");
+        let requests = server.received_requests().await.unwrap();
+        let at = |m: &str, p: &str| {
+            requests
+                .iter()
+                .position(|r| r.method.as_str() == m && r.url.path() == p)
+                .unwrap()
+        };
+        assert!(
+            at("GET", "/api/v2/orgs/5/workloads")
+                < at("POST", &format!("/api/v2{RS_100}/sec_rules")),
+            "the impact is computed before the send"
+        );
+        assert_eq!(audit_lines(state.path()).len(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rule_and_deny_rule_updates_with_impact_merge_the_loaded_rule() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_lists(&server).await;
+        mount_get(&server, "/orgs/5/workloads", fixture_workloads()).await;
+        mount_get(&server, RULE_2, fixture_rule_sets()[0]["rules"][1].clone()).await;
+        let deny: Value =
+            serde_json::from_str(include_str!("../../../fixtures/deny_rules.json")).unwrap();
+        mount_get(&server, DENY_8, deny[1].clone()).await;
+        let pc = |out: &Value| {
+            (
+                out["data"]["impact"]["providers"].clone(),
+                out["data"]["impact"]["consumers"].clone(),
+            )
+        };
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "policy",
+                    "rules",
+                    "update",
+                    RULE_2,
+                    "--add-consumer",
+                    "all",
+                    "--dry-run",
+                    "--impact",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["method"], "PUT");
+        assert_eq!(
+            pc(&out),
+            (json!(1), json!(4)),
+            "providers from the loaded rule; unscoped, so every workload consumes"
+        );
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "policy",
+                    "deny-rules",
+                    "update",
+                    DENY_8,
+                    "--add-provider",
+                    "role=web",
+                    "--dry-run",
+                    "--impact",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(
+            pc(&out),
+            (json!(2), json!(2)),
+            "role=db or role=web inside the scope; deny consumers stay scoped"
+        );
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "policy",
+                    "deny-rules",
+                    "add",
+                    "Shop-Prod",
+                    "--provider",
+                    "all",
+                    "--consumer",
+                    "role=web",
+                    "--service",
+                    "22/tcp",
+                    "--dry-run",
+                    "--impact",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(pc(&out), (json!(2), json!(1)));
+        assert!(
+            server
+                .received_requests()
+                .await
+                .unwrap()
+                .iter()
+                .all(|r| r.method.as_str() == "GET")
+        );
     }
 }
 

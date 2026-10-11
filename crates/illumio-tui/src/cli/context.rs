@@ -96,7 +96,18 @@ impl Context {
         data: &super::write::WriteOutput,
         write: Option<WriteMeta>,
     ) -> Result<(), CliError> {
-        let mut meta = self.meta("none", false, None);
+        self.emit_write_with(data, write, false)
+    }
+
+    /// [`Context::emit_write`] with `meta.truncated` from a read the output
+    /// depends on (the workload list behind `--impact`).
+    pub fn emit_write_with(
+        &self,
+        data: &super::write::WriteOutput,
+        write: Option<WriteMeta>,
+        truncated: bool,
+    ) -> Result<(), CliError> {
+        let mut meta = self.meta("none", truncated, None);
         meta.write = write;
         let mut out = std::io::stdout().lock();
         match self.format {

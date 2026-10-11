@@ -6,15 +6,15 @@ use super::error::CliError;
 use super::output::TableRows;
 use super::write::{
     self, ActorToken, Lists, ServiceToken, WriteFlags, is_href, parse_actors, parse_scopes,
-    parse_services, resolve_actors, resolve_scopes, resolve_services, run_plan,
+    parse_services, resolve_actors, resolve_scopes, resolve_services, run_plan, run_rule_plan,
 };
 use clap::{Args, Subcommand};
-use pce::impact::{Impact, ImpactInputs, RuleActors, rule_impact, rule_set_href_of};
+use pce::impact::{Impact, ImpactInputs, RuleActors, is_rule_href, rule_impact, rule_set_href_of};
 use pce::models::{
     DenyRule, PendingChange, PolicyScope, ResolveLabelsAs, RuleSet, Workload, WorkloadFilter,
 };
 use pce::write::{
-    ActorRef, DenyRuleDraft, DenyRulePatch, IfMissing, ProvisionRequest, ProvisionSubset,
+    ActorRef, DenyRuleDraft, DenyRulePatch, IfMissing, Plan, ProvisionRequest, ProvisionSubset,
     RuleDraft, RulePatch, RuleSetDraft, RuleSetPatch, ServiceRef, WriteError, checked_nested_href,
 };
 use pce::{Cached, PceError, RuleKind, RuleSetView, RuleView};
@@ -199,6 +199,9 @@ pub struct RuleAddArgs {
     /// Resolve consumer labels as workloads or virtual_services (repeatable; the other side defaults to workloads)
     #[arg(long = "resolve-consumers-as", value_parser = ["workloads", "virtual_services"])]
     pub resolve_consumers_as: Vec<String>,
+    /// Also report the rule's impact (workloads matched as providers and consumers), computed before anything is sent; one workloads read, cached
+    #[arg(long)]
+    pub impact: bool,
     #[command(flatten)]
     pub write: WriteFlags,
 }
@@ -224,6 +227,9 @@ pub struct RuleUpdateArgs {
     /// Consumers must come from inside the ruleset's scopes
     #[arg(long)]
     pub scoped_consumers: bool,
+    /// Also report the rule's impact (workloads matched as providers and consumers), computed before anything is sent; one workloads read, cached
+    #[arg(long)]
+    pub impact: bool,
     #[command(flatten)]
     pub write: WriteFlags,
 }
@@ -257,6 +263,9 @@ pub struct DenyRuleAddArgs {
     /// Override deny: evaluated before the allow rules
     #[arg(long = "override")]
     pub override_: bool,
+    /// Also report the rule's impact (workloads matched as providers and consumers), computed before anything is sent; one workloads read, cached
+    #[arg(long)]
+    pub impact: bool,
     #[command(flatten)]
     pub write: WriteFlags,
 }
@@ -282,6 +291,9 @@ pub struct DenyRuleUpdateArgs {
     /// Make it a regular deny
     #[arg(long)]
     pub no_override: bool,
+    /// Also report the rule's impact (workloads matched as providers and consumers), computed before anything is sent; one workloads read, cached
+    #[arg(long)]
+    pub impact: bool,
     #[command(flatten)]
     pub write: WriteFlags,
 }
@@ -638,6 +650,62 @@ async fn impact_workloads(ctx: &Context) -> Result<Cached<Vec<Workload>>, CliErr
         .await?)
 }
 
+/// `--impact` on a rule write: the impact of what the plan would send (its
+/// body, an update's untouched sides from the loaded rule) in the target
+/// ruleset's scopes over the workloads; the rulesets and the workloads are
+/// cached reads, made after the guard and the plan. `None` for a plan with
+/// nothing to send.
+async fn planned_impact(ctx: &Context, plan: &Plan) -> Result<Option<(Impact, bool)>, CliError> {
+    let Some(req) = plan.request() else {
+        return Ok(None);
+    };
+    let not_found = |p: &str| {
+        CliError::Pce(PceError::NotFound {
+            path: p.to_string(),
+        })
+    };
+    let rs_href = rule_set_href_of(&req.path).ok_or_else(|| not_found(&req.path))?;
+    let idx = ctx.pce.name_index(ctx.cache_mode).await?;
+    let sets = ctx
+        .pce
+        .rule_sets(PolicyScope::Draft, ctx.cache_mode)
+        .await?;
+    let rs = sets
+        .value
+        .iter()
+        .find(|r| r.href == rs_href)
+        .ok_or_else(|| not_found(rs_href))?;
+    let base = if !is_rule_href(&req.path) {
+        None
+    } else if req.path.contains("/deny_rules/") {
+        deny_rules_of(ctx, rs)
+            .await?
+            .iter()
+            .find(|d| d.href == req.path)
+            .map(RuleActors::of_deny)
+    } else {
+        rs.rules
+            .iter()
+            .find(|r| r.href == req.path)
+            .map(RuleActors::of_rule)
+    };
+    let actors = RuleActors::planned(req.body.as_ref(), base.as_ref());
+    let w = impact_workloads(ctx).await?;
+    let inputs = ImpactInputs {
+        workloads: &w.value,
+        index: idx.as_ref(),
+        truncated: w.truncated,
+    };
+    let impact = rule_impact(
+        &rs.scopes,
+        &actors.providers,
+        &actors.consumers,
+        actors.unscoped_consumers,
+        &inputs,
+    );
+    Ok(Some((impact, sets.truncated || w.truncated)))
+}
+
 /// `policy rules impact <href>`: one rule or deny rule of the draft
 /// rulesets (an active href folds to draft) with its impact; exit 2 for an
 /// href of the wrong shape, 4 when no such rule is loaded.
@@ -957,7 +1025,12 @@ async fn rule_add(ctx: &Context, a: &RuleAddArgs) -> Result<(), CliError> {
         resolve_labels_as: resolve_labels_as(&a.resolve_providers_as, &a.resolve_consumers_as),
     };
     let plan = ctx.pce.writer(&guard).plan_create_rule(&ruleset, &draft)?;
-    run_plan(ctx, &a.write, &guard, plan).await
+    let impact = if a.impact {
+        planned_impact(ctx, &plan).await?
+    } else {
+        None
+    };
+    run_rule_plan(ctx, &a.write, &guard, plan, impact).await
 }
 
 async fn rule_update(ctx: &Context, a: &RuleUpdateArgs) -> Result<(), CliError> {
@@ -990,7 +1063,12 @@ async fn rule_update(ctx: &Context, a: &RuleUpdateArgs) -> Result<(), CliError> 
         .writer(&guard)
         .plan_update_rule(&href, &patch)
         .await?;
-    run_plan(ctx, &a.write, &guard, plan).await
+    let impact = if a.impact {
+        planned_impact(ctx, &plan).await?
+    } else {
+        None
+    };
+    run_rule_plan(ctx, &a.write, &guard, plan, impact).await
 }
 
 async fn rule_delete(ctx: &Context, a: &RuleDeleteArgs) -> Result<(), CliError> {
@@ -1016,7 +1094,12 @@ async fn deny_rule_add(ctx: &Context, a: &DenyRuleAddArgs) -> Result<(), CliErro
         .pce
         .writer(&guard)
         .plan_create_deny_rule(&ruleset, &draft)?;
-    run_plan(ctx, &a.write, &guard, plan).await
+    let impact = if a.impact {
+        planned_impact(ctx, &plan).await?
+    } else {
+        None
+    };
+    run_rule_plan(ctx, &a.write, &guard, plan, impact).await
 }
 
 async fn deny_rule_update(ctx: &Context, a: &DenyRuleUpdateArgs) -> Result<(), CliError> {
@@ -1048,7 +1131,12 @@ async fn deny_rule_update(ctx: &Context, a: &DenyRuleUpdateArgs) -> Result<(), C
         .writer(&guard)
         .plan_update_deny_rule(&href, &patch)
         .await?;
-    run_plan(ctx, &a.write, &guard, plan).await
+    let impact = if a.impact {
+        planned_impact(ctx, &plan).await?
+    } else {
+        None
+    };
+    run_rule_plan(ctx, &a.write, &guard, plan, impact).await
 }
 
 async fn deny_rule_delete(ctx: &Context, a: &DenyRuleDeleteArgs) -> Result<(), CliError> {

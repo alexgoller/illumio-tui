@@ -9,6 +9,7 @@ use crate::tokens::with_exclusion;
 pub use crate::tokens::{ActorToken, ServiceToken, is_href};
 pub(crate) use crate::tokens::{similar, with_similar};
 use clap::Args;
+use pce::Impact;
 use pce::models::{IpList, Label, LabelGroup, Service};
 use pce::write::provision_counts;
 use pce::write::{
@@ -92,6 +93,20 @@ pub enum WriteOutput {
         written: Written,
         counts: BTreeMap<String, usize>,
     },
+    /// A rule or deny-rule dry run with `--impact`: the request and the
+    /// impact of what it would send.
+    DryRunImpact {
+        #[serde(flatten)]
+        request: WriteRequest,
+        impact: Impact,
+    },
+    /// A rule or deny-rule write sent with `--impact`: the result and the
+    /// impact computed before the send.
+    WrittenImpact {
+        #[serde(flatten)]
+        written: Written,
+        impact: Impact,
+    },
 }
 
 fn compact(v: &serde_json::Value) -> String {
@@ -131,6 +146,13 @@ fn counts_text(counts: &BTreeMap<String, usize>) -> String {
         .join(", ")
 }
 
+/// `impact` and one `ip list` row per IP-list actor.
+fn impact_rows(i: &Impact) -> Vec<Vec<String>> {
+    let mut rows = vec![row("impact", i.summary())];
+    rows.extend(i.ip_lists.iter().map(|l| row("ip list", l.line())));
+    rows
+}
+
 impl TableRows for WriteOutput {
     fn headers(&self) -> Vec<&'static str> {
         vec!["field", "value"]
@@ -161,8 +183,27 @@ impl TableRows for WriteOutput {
                 rows.extend(written_rows(written));
                 rows
             }
+            WriteOutput::DryRunImpact { request, impact } => {
+                let mut rows = request_rows(request);
+                rows.extend(impact_rows(impact));
+                rows
+            }
+            WriteOutput::WrittenImpact { written, impact } => {
+                let mut rows = written_rows(written);
+                rows.extend(impact_rows(impact));
+                rows
+            }
         }
     }
+}
+
+/// What a write's output carries besides the request or the result.
+enum Extra {
+    None,
+    /// `policy provision`: object counts from `change_subset`.
+    Counts,
+    /// `--impact` on a rule write, and whether its reads were truncated.
+    Impact(Impact, bool),
 }
 
 /// Dry run prints the request; otherwise the plan is executed once and the
@@ -173,7 +214,7 @@ pub async fn run_plan(
     guard: &WriteGuard,
     plan: Plan,
 ) -> Result<(), CliError> {
-    send(ctx, flags, guard, plan, false).await
+    send(ctx, flags, guard, plan, Extra::None).await
 }
 
 /// [`run_plan`] for `policy provision`: the dry run and the result carry
@@ -184,7 +225,24 @@ pub async fn run_provision_plan(
     guard: &WriteGuard,
     plan: Plan,
 ) -> Result<(), CliError> {
-    send(ctx, flags, guard, plan, true).await
+    send(ctx, flags, guard, plan, Extra::Counts).await
+}
+
+/// [`run_plan`] for a rule or deny-rule write: with an `impact` (from
+/// `--impact`, computed before anything is sent) the dry run and the result
+/// carry it, and `meta.truncated` reports a truncated read behind it.
+pub async fn run_rule_plan(
+    ctx: &Context,
+    flags: &WriteFlags,
+    guard: &WriteGuard,
+    plan: Plan,
+    impact: Option<(Impact, bool)>,
+) -> Result<(), CliError> {
+    let extra = match impact {
+        Some((impact, truncated)) => Extra::Impact(impact, truncated),
+        None => Extra::None,
+    };
+    send(ctx, flags, guard, plan, extra).await
 }
 
 async fn send(
@@ -192,32 +250,35 @@ async fn send(
     flags: &WriteFlags,
     guard: &WriteGuard,
     plan: Plan,
-    with_counts: bool,
+    extra: Extra,
 ) -> Result<(), CliError> {
+    let truncated = matches!(extra, Extra::Impact(_, true));
     let (request, kind) = match plan {
         Plan::Noop {
             existing_href,
             reason,
         } => {
-            return ctx.emit_write(
+            return ctx.emit_write_with(
                 &WriteOutput::Skipped {
                     skipped: true,
                     href: existing_href,
                     reason,
                 },
                 None,
+                truncated,
             );
         }
         Plan::Send { request, kind } => (request, kind),
     };
-    let counts = with_counts
+    let counts = matches!(extra, Extra::Counts)
         .then(|| provision_counts(request.body.as_ref().unwrap_or(&serde_json::Value::Null)));
     if flags.dry_run {
-        let out = match counts {
-            Some(counts) => WriteOutput::ProvisionDryRun { request, counts },
-            None => WriteOutput::DryRun(request),
+        let out = match (extra, counts) {
+            (Extra::Impact(impact, _), _) => WriteOutput::DryRunImpact { request, impact },
+            (_, Some(counts)) => WriteOutput::ProvisionDryRun { request, counts },
+            _ => WriteOutput::DryRun(request),
         };
-        return ctx.emit_write(&out, None);
+        return ctx.emit_write_with(&out, None, truncated);
     }
     let method = request.method;
     let path = request.path.clone();
@@ -234,22 +295,24 @@ async fn send(
                 status: w.status,
                 audit: guard.audit_location(),
             };
-            let out = match counts {
-                Some(counts) => WriteOutput::Provisioned { written: w, counts },
-                None => WriteOutput::Written(w),
+            let out = match (extra, counts) {
+                (Extra::Impact(impact, _), _) => WriteOutput::WrittenImpact { written: w, impact },
+                (_, Some(counts)) => WriteOutput::Provisioned { written: w, counts },
+                _ => WriteOutput::Written(w),
             };
-            ctx.emit_write(&out, Some(meta))
+            ctx.emit_write_with(&out, Some(meta), truncated)
         }
         Outcome::Skipped {
             existing_href,
             reason,
-        } => ctx.emit_write(
+        } => ctx.emit_write_with(
             &WriteOutput::Skipped {
                 skipped: true,
                 href: existing_href,
                 reason,
             },
             None,
+            truncated,
         ),
     }
 }
