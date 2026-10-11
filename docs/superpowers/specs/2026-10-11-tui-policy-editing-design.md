@@ -80,9 +80,8 @@ named Corp; similar: …"). No request is made.
 
 All keys go through the Plan 4 refusals: writes off (reason in the status
 line), a write in flight, no row selected. In the active scope (`d`) the
-keys refuse with "switch to draft to edit policy". `n`/`e`/`x` on the
-rulesets pane in the rules pane's absence behave as above; `N` on the
-rulesets pane is unbound.
+keys refuse with "switch to draft to edit policy". `N` is bound only on
+the rules pane; on the rulesets pane it does nothing.
 
 ### 4.2 Forms
 
