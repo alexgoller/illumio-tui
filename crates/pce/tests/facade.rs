@@ -496,3 +496,41 @@ async fn events_are_cached_briefly_and_default_to_500_rows() {
     assert!(p.events(&f, CacheMode::Use).await.unwrap().hit);
     assert_eq!(p.ttls().events, Duration::from_secs(60));
 }
+
+#[tokio::test]
+async fn active_lists_are_cached_under_objects_and_dropped_by_a_write() {
+    let server = MockServer::start().await;
+    for (p, body) in [
+        (
+            "/api/v2/orgs/5/sec_policy/active/ip_lists",
+            json!([{"href": "/orgs/5/sec_policy/active/ip_lists/20", "name": "Any", "ip_ranges": [{"from_ip": "0.0.0.0/0"}]}]),
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/active/services",
+            json!([{"href": "/orgs/5/sec_policy/active/services/32", "name": "Web", "service_ports": [{"port": 443, "proto": 6}]}]),
+        ),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(p))
+            .and(query_param("max_results", "10000"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .expect(2)
+            .mount(&server)
+            .await;
+    }
+    let p = pce_for(&server);
+    let lists = p.active_ip_lists(CacheMode::Use).await.unwrap();
+    assert!(!lists.hit);
+    assert_eq!(lists.value[0].name, "Any");
+    assert!(p.active_ip_lists(CacheMode::Use).await.unwrap().hit);
+    let services = p.active_services(CacheMode::Use).await.unwrap();
+    assert_eq!(services.value[0].service_ports[0].port, Some(443));
+    assert!(p.active_services(CacheMode::Use).await.unwrap().hit);
+    assert_eq!(p.stats().calls, 2, "one GET per list");
+    // `Writer::execute` invalidates the kind's prefix; for IP lists and
+    // services that is `objects:`, which must cover the active lists too.
+    p.invalidate(pce::write::ObjectKind::IpList.cache_prefix());
+    assert!(!p.active_ip_lists(CacheMode::Use).await.unwrap().hit);
+    assert!(!p.active_services(CacheMode::Use).await.unwrap().hit);
+    assert_eq!(p.stats().calls, 4);
+}

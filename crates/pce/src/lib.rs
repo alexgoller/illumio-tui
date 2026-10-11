@@ -157,6 +157,34 @@ impl Pce {
             .await
     }
 
+    /// Provisioned IP lists, for the TUI's pending diff. Cached under
+    /// `objects:` so a write invalidates them with the draft lists; kept five
+    /// minutes like the rest of the active policy.
+    pub async fn active_ip_lists(&self, mode: CacheMode) -> Result<Cached<Vec<models::IpList>>> {
+        let path = self.client.org_path("sec_policy/active/ip_lists");
+        self.cached_list(
+            "objects:active_ip_lists",
+            &path,
+            vec![],
+            self.ttls.policy,
+            mode,
+        )
+        .await
+    }
+
+    /// Provisioned services, for the TUI's pending diff (see `active_ip_lists`).
+    pub async fn active_services(&self, mode: CacheMode) -> Result<Cached<Vec<models::Service>>> {
+        let path = self.client.org_path("sec_policy/active/services");
+        self.cached_list(
+            "objects:active_services",
+            &path,
+            vec![],
+            self.ttls.policy,
+            mode,
+        )
+        .await
+    }
+
     /// Loads (or reuses) the four object lists and builds the name index.
     pub async fn name_index(&self, mode: CacheMode) -> Result<Arc<NameIndex>> {
         if mode == CacheMode::Use
