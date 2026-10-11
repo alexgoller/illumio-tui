@@ -730,3 +730,52 @@ fn rule_and_deny_rule_forms_80x24() {
         render_styled(&d, 80, 24)
     );
 }
+
+#[test]
+fn pending_marks_and_provision_confirm_80x24() {
+    use illumio_tui::tui::model::{Overlay, Screen, WritesState};
+    use illumio_tui::tui::test_support::provision_plan;
+    let mut m = model_with_policy();
+    m.screen = Screen::Policy;
+    m.policy.pending = Some(pce::models::parse_pending(
+        serde_json::from_str(include_str!("../../../fixtures/pending_list.json")).unwrap(),
+    ));
+    m.policy.pending_selected = 1;
+    m.policy
+        .pending_marked
+        .insert("/orgs/5/sec_policy/draft/ip_lists/21".into());
+    m.overlay = Overlay::Pending;
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("[x] ip_lists"), "{out}");
+    assert!(out.contains("[ ] rule_sets"), "{out}");
+    assert!(out.contains("2/2 · 1 marked"), "{out}");
+    assert!(
+        out.contains("j/k select · Space mark · Enter diff · P provision · Esc"),
+        "{out}"
+    );
+    insta::assert_snapshot!("policy_pending_marks_80x24", out);
+    m.set_theme("light");
+    insta::assert_snapshot!(
+        "policy_pending_marks_light_styled_80x24",
+        render_styled(&m, 80, 24)
+    );
+    // What an admin sees after `P`: writes on, so the header carries the marker.
+    let mut c = model_with_policy();
+    c.writes = WritesState::on();
+    c.screen = Screen::Policy;
+    c.overlay = Overlay::ConfirmWrite {
+        plan: provision_plan(),
+        kind: pce::write::ObjectKind::Provision,
+        scroll: 0,
+    };
+    let out = render_to_string(&c, 80, 24);
+    assert!(out.contains("provision 1 ip_list, 1 rule_set"), "{out}");
+    assert!(out.contains("POST /orgs/5/sec_policy"), "{out}");
+    assert!(out.contains("\"change_subset\""), "{out}");
+    insta::assert_snapshot!("confirm_provision_80x24", out);
+    c.set_theme("light");
+    insta::assert_snapshot!(
+        "confirm_provision_light_styled_80x24",
+        render_styled(&c, 80, 24)
+    );
+}

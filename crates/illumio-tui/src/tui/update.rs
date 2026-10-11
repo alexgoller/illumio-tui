@@ -1,6 +1,6 @@
 //! Pure state transitions. Never performs I/O; returns `Cmd`s instead.
 use crate::tui::commands::{self, Command};
-use crate::tui::edit::{self, EditIntent, Start};
+use crate::tui::edit::{self, EditIntent, Start, WriteIntent};
 use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::form::FormEvent;
 use crate::tui::model::{
@@ -12,7 +12,7 @@ use crate::tui::ui::widgets::overlay::{confirm_write_last_scroll, help_last_scro
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use pce::models::{EventFilter, PolicyScope};
 use pce::traffic::QueryProgress;
-use pce::write::{Outcome, Plan, WriteError};
+use pce::write::{Outcome, Plan, ProvisionRequest, ProvisionSubset, WriteError, provision_counts};
 use pce::{CacheMode, RuleKind, WriteMethod};
 use std::time::Instant;
 
@@ -435,12 +435,24 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             model.policy.pending_loading = false;
             match result {
                 Ok(p) => {
-                    model.status = StatusLine::info(format!("{} pending changes", p.len()));
+                    let n = p.len();
+                    // After a provision the reload keeps its report in front.
+                    model.status = StatusLine::info(match model.policy.provisioned.take() {
+                        Some(done) => format!("{done}; {n} pending changes left"),
+                        None => format!("{n} pending changes"),
+                    });
                     model.policy.pending_selected = 0;
+                    model.policy.pending_marked.clear();
                     model.policy.pending = Some(p);
-                    model.overlay = Overlay::Pending;
+                    // Never over another overlay (an error a provision left open).
+                    if matches!(model.overlay, Overlay::None | Overlay::Pending) {
+                        model.overlay = Overlay::Pending;
+                    }
                 }
-                Err(e) => fail(model, "pending", &e, false),
+                Err(e) => {
+                    model.policy.provisioned = None;
+                    fail(model, "pending", &e, false);
+                }
             }
             Vec::new()
         }
@@ -463,18 +475,25 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             model.writes.in_flight = false;
             // The runtime dropped `policy:pending`; the next `p` fetches again.
             model.policy.pending = None;
+            model.policy.pending_marked.clear();
+            let counts = model.policy.provision_counts.take();
             match result {
                 Ok(Outcome::Written(w)) => {
-                    let verb = match method {
-                        Some(WriteMethod::Post) => "created",
-                        Some(WriteMethod::Put) => "updated",
-                        Some(WriteMethod::Delete) => "deleted",
-                        None => "wrote",
+                    let mut text = if kind == pce::write::ObjectKind::Provision {
+                        format!("provisioned {}: {}", w.href, counts.unwrap_or_default())
+                    } else {
+                        let verb = match method {
+                            Some(WriteMethod::Post) => "created",
+                            Some(WriteMethod::Put) => "updated",
+                            Some(WriteMethod::Delete) => "deleted",
+                            None => "wrote",
+                        };
+                        let mut t = format!("{verb} {}", w.href);
+                        if w.pending {
+                            t.push_str(" (pending)");
+                        }
+                        t
                     };
-                    let mut text = format!("{verb} {}", w.href);
-                    if w.pending {
-                        text.push_str(" (pending)");
-                    }
                     if !w.dropped_fields.is_empty() {
                         text.push_str(&format!(
                             "; the PCE dropped {}",
@@ -490,6 +509,9 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     } else {
                         StatusLine::warn(text)
                     };
+                    if kind == pce::write::ObjectKind::Provision {
+                        model.policy.provisioned = Some(model.status.text.clone());
+                    }
                     reload_after_write(model, kind)
                 }
                 Ok(Outcome::Skipped { reason, .. }) => {
@@ -532,6 +554,10 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         kind,
                         scroll: 0,
                     };
+                }
+                // Provisioning with nothing pending is an answer, not a failure.
+                Ok((Plan::Noop { reason, .. }, pce::write::ObjectKind::Provision)) => {
+                    model.status = StatusLine::info(reason);
                 }
                 // Cannot happen with `IfMissing::Create`; reported, never sent.
                 Ok((plan, _)) => {
@@ -859,6 +885,12 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             let last = u16::try_from(last).unwrap_or(u16::MAX);
             match k.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    if kind == pce::write::ObjectKind::Provision {
+                        // The answer is the new policy version; the counts
+                        // come from what is sent.
+                        model.policy.provision_counts =
+                            Some(counts_text(plan.request().and_then(|r| r.body.as_ref())));
+                    }
                     model.overlay = Overlay::None;
                     model.status = StatusLine::info("sending …");
                     model.writes.in_flight = true;
@@ -899,6 +931,19 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 KeyCode::Up | KeyCode::Char('k') => {
                     model.policy.pending_selected = model.policy.pending_selected.saturating_sub(1);
                 }
+                KeyCode::Char(' ') => {
+                    let p = &mut model.policy;
+                    if let Some(href) = p
+                        .pending
+                        .as_ref()
+                        .and_then(|l| l.get(p.pending_selected))
+                        .map(|c| c.href.clone())
+                        && !p.pending_marked.remove(&href)
+                    {
+                        p.pending_marked.insert(href);
+                    }
+                }
+                KeyCode::Char('P') => return provision_key(model),
                 KeyCode::Enter => return pending_diff(model),
                 _ => {}
             }
@@ -1408,8 +1453,14 @@ fn reload_after_write(model: &mut Model, kind: pce::write::ObjectKind) -> Vec<Cm
             model.policy.quiet_reload = true;
             load_rule_sets(model, CacheMode::Bypass)
         }
-        // Not started from the TUI yet.
-        pce::write::ObjectKind::Provision => Vec::new(),
+        // Provisioning changes both scopes and the pending list.
+        pce::write::ObjectKind::Provision => {
+            model.policy.quiet_reload = true;
+            let mut cmds = load_rule_sets(model, CacheMode::Bypass);
+            model.policy.pending_loading = true;
+            cmds.push(Cmd::LoadPending(CacheMode::Bypass));
+            cmds
+        }
     }
 }
 
@@ -1447,6 +1498,45 @@ fn pending_diff(model: &mut Model) -> Vec<Cmd> {
         change.name.as_deref().unwrap_or(&change.href)
     ));
     vec![Cmd::LoadDiff { change, kind }]
+}
+
+const PROVISION_DESCRIPTION: &str = "illumio-tui provision";
+
+/// `P` in the pending overlay: provision the marked entries, or everything
+/// pending when none is marked. The plan reads the pending list once more,
+/// past the cache, and the confirm overlay shows the exact body.
+fn provision_key(model: &mut Model) -> Vec<Cmd> {
+    if writes_refused(model) {
+        return Vec::new();
+    }
+    if model.policy.pending.as_ref().is_none_or(Vec::is_empty) {
+        model.status = StatusLine::info("nothing pending");
+        return Vec::new();
+    }
+    let marked = &model.policy.pending_marked;
+    let subset = if marked.is_empty() {
+        ProvisionSubset::All
+    } else {
+        ProvisionSubset::Hrefs(marked.iter().cloned().collect())
+    };
+    model.overlay = Overlay::None;
+    model.status = StatusLine::info("planning…");
+    model.writes.in_flight = true;
+    vec![Cmd::PlanWrite(WriteIntent::Provision(ProvisionRequest {
+        description: Some(PROVISION_DESCRIPTION.into()),
+        subset,
+    }))]
+}
+
+/// `ip_lists=1, rule_sets=2`: what a provision body lists, per type, as the
+/// CLI prints it.
+fn counts_text(body: Option<&serde_json::Value>) -> String {
+    body.map(provision_counts)
+        .unwrap_or_default()
+        .iter()
+        .map(|(k, n)| format!("{k}={n}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn workloads_page(model: &Model) -> usize {
@@ -5821,5 +5911,154 @@ mod tests {
             assert!(update(&mut m, key(c)).is_empty(), "{c}");
             assert_eq!(m.status.text, "no row selected");
         }
+    }
+
+    fn pending_fixture() -> Vec<pce::models::PendingChange> {
+        pce::models::parse_pending(
+            serde_json::from_str(include_str!("../../../../fixtures/pending_list.json")).unwrap(),
+        )
+    }
+
+    #[test]
+    fn space_marks_entries_and_p_plans_the_marked_or_all() {
+        use crate::tui::edit::WriteIntent;
+        use crate::tui::test_support::model_with_policy;
+        let provision = |subset| {
+            vec![Cmd::PlanWrite(WriteIntent::Provision(ProvisionRequest {
+                description: Some("illumio-tui provision".into()),
+                subset,
+            }))]
+        };
+        let mut m = writes_on(model_with_policy());
+        m.screen = Screen::Policy;
+        update(&mut m, Msg::PendingLoaded(Ok(pending_fixture())));
+        assert_eq!(m.overlay, Overlay::Pending);
+        update(&mut m, key(' '));
+        assert!(
+            m.policy
+                .pending_marked
+                .contains("/orgs/5/sec_policy/draft/rule_sets/101")
+        );
+        update(&mut m, key(' '));
+        assert!(m.policy.pending_marked.is_empty(), "Space toggles");
+        update(&mut m, key('j'));
+        update(&mut m, key(' '));
+        assert_eq!(
+            update(&mut m, key('P')),
+            provision(ProvisionSubset::Hrefs(vec![
+                "/orgs/5/sec_policy/draft/ip_lists/21".into()
+            ]))
+        );
+        assert_eq!(
+            m.overlay,
+            Overlay::None,
+            "the confirm overlay opens on the plan's answer"
+        );
+        assert!(m.writes.in_flight);
+        m.writes.in_flight = false;
+        update(&mut m, Msg::PendingLoaded(Ok(pending_fixture())));
+        assert!(
+            m.policy.pending_marked.is_empty(),
+            "a reload clears the marks"
+        );
+        assert_eq!(
+            update(&mut m, key('P')),
+            provision(ProvisionSubset::All),
+            "no marks: everything pending"
+        );
+        m.writes.in_flight = false;
+        update(&mut m, Msg::PendingLoaded(Ok(vec![])));
+        assert!(update(&mut m, key('P')).is_empty());
+        assert_eq!(m.status.text, "nothing pending");
+        let mut off = model_with_policy();
+        off.screen = Screen::Policy;
+        update(&mut off, Msg::PendingLoaded(Ok(pending_fixture())));
+        assert!(update(&mut off, key('P')).is_empty());
+        assert_eq!(off.status.text, "started without --allow-writes");
+        assert_eq!(off.overlay, Overlay::Pending);
+    }
+
+    #[test]
+    fn provision_confirm_reports_the_counts_and_reloads_pending_and_rulesets() {
+        use crate::tui::test_support::{model_with_policy, provision_plan};
+        use pce::write::Outcome;
+        let mut m = writes_on(model_with_policy());
+        m.screen = Screen::Policy;
+        update(
+            &mut m,
+            Msg::Planned(Ok((provision_plan(), pce::write::ObjectKind::Provision))),
+        );
+        assert_eq!(
+            update(&mut m, key('y')),
+            vec![Cmd::ExecuteWrite {
+                plan: provision_plan(),
+                kind: pce::write::ObjectKind::Provision
+            }]
+        );
+        assert_eq!(
+            m.policy.provision_counts.as_deref(),
+            Some("ip_lists=1, rule_sets=1")
+        );
+        let cmds = update(
+            &mut m,
+            Msg::WriteDone {
+                kind: pce::write::ObjectKind::Provision,
+                method: Some(pce::WriteMethod::Post),
+                result: Ok(Outcome::Written(written("/orgs/5/sec_policy/7", false))),
+            },
+        );
+        assert_eq!(
+            cmds,
+            vec![
+                Cmd::LoadRuleSets {
+                    scope: PolicyScope::Draft,
+                    mode: pce::CacheMode::Bypass
+                },
+                Cmd::LoadPending(pce::CacheMode::Bypass),
+            ]
+        );
+        let report = "provisioned /orgs/5/sec_policy/7: ip_lists=1, rule_sets=1";
+        assert_eq!(m.status.text, report);
+        assert!(m.policy.provision_counts.is_none());
+        let sets = m.policy.raw.clone();
+        update(
+            &mut m,
+            Msg::RuleSetsLoaded {
+                scope: PolicyScope::Draft,
+                result: Ok((sets, 0)),
+            },
+        );
+        assert_eq!(
+            m.status.text, report,
+            "the rulesets reload keeps the report"
+        );
+        update(&mut m, Msg::PendingLoaded(Ok(vec![])));
+        assert_eq!(m.status.text, format!("{report}; 0 pending changes left"));
+        assert_eq!(m.overlay, Overlay::Pending);
+    }
+
+    #[test]
+    fn nothing_to_provision_is_an_info_and_a_pending_reload_never_hides_an_error() {
+        let mut m = writes_on(model_fixture());
+        update(
+            &mut m,
+            Msg::Planned(Ok((
+                pce::write::Plan::Noop {
+                    existing_href: "/orgs/5/sec_policy/pending".into(),
+                    reason: "nothing pending".into(),
+                },
+                pce::write::ObjectKind::Provision,
+            ))),
+        );
+        assert_eq!(m.status.kind, StatusKind::Info);
+        assert_eq!(m.status.text, "nothing pending");
+        assert_eq!(m.overlay, Overlay::None);
+        m.overlay = Overlay::Error("write failed: 406".into());
+        update(&mut m, Msg::PendingLoaded(Ok(vec![])));
+        assert_eq!(
+            m.overlay,
+            Overlay::Error("write failed: 406".into()),
+            "the reload does not replace the error"
+        );
     }
 }

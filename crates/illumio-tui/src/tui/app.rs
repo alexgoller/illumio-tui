@@ -542,6 +542,8 @@ async fn plan_intent(
             w.plan_update_deny_rule(&href, &patch).await?
         }
         WriteIntent::DeleteDenyRule { href } => w.plan_delete_deny_rule(&href)?,
+        // One pending GET past the cache, then the explicit change subset.
+        WriteIntent::Provision(req) => w.plan_provision(&req).await?,
     };
     Ok((plan, kind))
 }

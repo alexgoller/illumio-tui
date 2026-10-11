@@ -6,9 +6,9 @@ expression: out
   1 Traffic  │  2 Policy  │  3 Labels & objects  │  4 Workloads  │  5 Events
 ╭ Rulesets ──────────────────────────────────────────────────── draft · 5s ago ╮
 │  ruleset                on  scopes                              rules pending│
-│▸ Sh╭ Pending changes ──────────────────── 1/2 · Enter diff · Esc closes ╮    │
-│  Gl│▸ rule_sets       create  Global-Infra                              │ate │
-│    │  ip_lists        create  Corp                                      │    │
+│▸ Sh╭ Pending changes ────────────────────────────────────────────── 1/2 ╮    │
+│  Gl│▸ [ ] rule_sets       create  Global-Infra                          │ate │
+│    │  [ ] ip_lists        create  Corp                                  │    │
 │    │                                                                    │    │
 ╰────│                                                                    │────╯
 ╭ Rul│                                                                    │────╮
@@ -20,7 +20,7 @@ expression: out
 │    │                                                                    │    │
 │    │                                                                    │    │
 │    │                                                                    │    │
-│    │                                                                    │    │
+│    │j/k select · Space mark · Enter diff · P provision · Esc            │    │
 │    ╰────────────────────────────────────────────────────────────────────╯    │
 │                                                                              │
 │                                                                              │

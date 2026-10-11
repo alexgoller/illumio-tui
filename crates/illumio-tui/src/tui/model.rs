@@ -11,7 +11,7 @@ use pce::models::{
 use pce::traffic::{BlockedGroup, FlowGroup, ResolvedFlow, blocked_summary, group_by_labels};
 use pce::write::Plan;
 use pce::{NameIndex, RuleKind, RuleSetView, RuleView, StatsSnapshot};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
@@ -945,6 +945,15 @@ pub struct PolicyState {
     /// The next rulesets result was asked for by a write: it keeps the
     /// write's report in the status line instead of `N rulesets`.
     pub quiet_reload: bool,
+    /// Pending entries marked with `Space` for `P` (hrefs); cleared when the
+    /// list is loaded again.
+    pub pending_marked: BTreeSet<String>,
+    /// The counts of the provision just sent (`ip_lists=1, rule_sets=2`),
+    /// taken from its body at `y`: the PCE's answer does not repeat them.
+    pub provision_counts: Option<String>,
+    /// The report of the provision just done; the pending reload it caused
+    /// shows it in front of the new count.
+    pub provisioned: Option<String>,
     pub auto: AutoRefresh,
 }
 
@@ -967,6 +976,9 @@ impl PolicyState {
             pending_selected: 0,
             diff_loading: false,
             quiet_reload: false,
+            pending_marked: BTreeSet::new(),
+            provision_counts: None,
+            provisioned: None,
             auto: AutoRefresh::new(min_refresh),
         }
     }

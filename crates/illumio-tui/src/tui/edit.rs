@@ -14,8 +14,9 @@ use pce::models::{
 };
 use pce::write::{
     ActorKind, ActorRef, DenyRuleDraft, DenyRulePatch, InterfaceSpec, IpListDraft, IpListPatch,
-    IpRangeSpec, LabelDraft, PortSpec, RuleDraft, RulePatch, RuleSetDraft, RuleSetPatch,
-    ServiceDraft, ServicePatch, ServiceRef, WorkloadDraft, WorkloadPatch, WriteRequest,
+    IpRangeSpec, LabelDraft, PortSpec, ProvisionRequest, RuleDraft, RulePatch, RuleSetDraft,
+    RuleSetPatch, ServiceDraft, ServicePatch, ServiceRef, WorkloadDraft, WorkloadPatch,
+    WriteRequest,
 };
 
 /// Where a new allow rule goes: the selected ruleset (Policy) or the name
@@ -133,6 +134,8 @@ pub enum WriteIntent {
     DeleteDenyRule {
         href: String,
     },
+    /// `P` in the pending overlay: the marked entries, or everything.
+    Provision(ProvisionRequest),
 }
 
 impl WriteIntent {
@@ -159,6 +162,7 @@ impl WriteIntent {
             WriteIntent::CreateDenyRule { .. }
             | WriteIntent::UpdateDenyRule { .. }
             | WriteIntent::DeleteDenyRule { .. } => pce::write::ObjectKind::DenyRule,
+            WriteIntent::Provision(_) => pce::write::ObjectKind::Provision,
         }
     }
 }

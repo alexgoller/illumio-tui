@@ -212,3 +212,23 @@ pub fn ip_list_delete_plan() -> pce::write::Plan {
         kind: pce::write::ObjectKind::IpList,
     }
 }
+
+/// The plan `P` shows for the two fixture pending entries (a ruleset and an
+/// IP list), as `Writer::plan_provision` builds it.
+pub fn provision_plan() -> pce::write::Plan {
+    pce::write::Plan::Send {
+        request: pce::write::WriteRequest {
+            method: pce::WriteMethod::Post,
+            path: "/orgs/5/sec_policy".into(),
+            body: Some(serde_json::json!({
+                "update_description": "illumio-tui provision",
+                "change_subset": {
+                    "ip_lists": [{"href": "/orgs/5/sec_policy/draft/ip_lists/21"}],
+                    "rule_sets": [{"href": "/orgs/5/sec_policy/draft/rule_sets/101"}]
+                }
+            })),
+            summary: "provision 1 ip_list, 1 rule_set".into(),
+        },
+        kind: pce::write::ObjectKind::Provision,
+    }
+}

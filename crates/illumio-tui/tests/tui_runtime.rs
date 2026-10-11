@@ -1628,3 +1628,129 @@ async fn delete_deny_rule_sends_one_delete() {
     assert_eq!(audit.entries()[0].method, pce::WriteMethod::Delete);
     assert_eq!(model.busy, 0);
 }
+
+/// Three pending entries (served the same on every GET, expected
+/// `pending_gets` times) and the provision POST with exactly `body`.
+async fn mount_provision(server: &MockServer, pending_gets: u64, body: serde_json::Value) {
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/sec_policy/pending"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {"href": "/orgs/5/sec_policy/draft/rule_sets/101", "change_type": "create", "name": "Global-Infra"},
+            {"href": "/orgs/5/sec_policy/draft/ip_lists/21", "change_type": "create", "name": "Corp"},
+            {"href": "/orgs/5/sec_policy/draft/services/32", "change_type": "update", "name": "Web"}
+        ])))
+        .expect(pending_gets)
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/sec_policy"))
+        .and(body_json(body))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "href": "/orgs/5/sec_policy/7",
+            "commit_message": "illumio-tui provision"
+        })))
+        .expect(1)
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn provision_marked_posts_exactly_the_marked_hrefs() {
+    use illumio_tui::tui::model::Overlay;
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    mount_rule_sets(&server, 2).await; // the screen + the reload
+    // Opening the list, the plan's fresh read, the reload.
+    mount_provision(
+        &server,
+        3,
+        json!({
+            "update_description": "illumio-tui provision",
+            "change_subset": {
+                "rule_sets": [{"href": "/orgs/5/sec_policy/draft/rule_sets/101"}],
+                "services": [{"href": "/orgs/5/sec_policy/draft/services/32"}]
+            }
+        }),
+    )
+    .await;
+    let audit = MemoryAudit::new();
+    let keys = vec![
+        (500, ch('2')),
+        (300, ch('p')),
+        (300, ch(' ')), // Global-Infra
+        (50, ch('j')),
+        (50, ch('j')),
+        (50, ch(' ')), // Web
+        (50, ch('P')),
+        (300, ch('y')),
+        (500, KeyCode::F(12)),
+    ];
+    let model = key_session(
+        &server,
+        writes_model(),
+        Some(tui_guard(audit.clone())),
+        keys,
+    )
+    .await;
+    assert_eq!(
+        model.status.text,
+        "provisioned /orgs/5/sec_policy/7: rule_sets=1, services=1; 3 pending changes left"
+    );
+    assert_eq!(
+        model.overlay,
+        Overlay::Pending,
+        "the list reloads into its overlay"
+    );
+    assert_eq!(
+        model.stats.calls, 11,
+        "health + four lists + rulesets + pending + the plan's pending read + POST + rulesets + pending"
+    );
+    assert_eq!(writes_seen(&server).await, vec!["POST"]);
+    let entries = audit.entries();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].path, "/orgs/5/sec_policy");
+    assert_eq!(model.busy, 0);
+}
+
+#[tokio::test]
+async fn provision_all_lists_every_pending_entry() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    mount_rule_sets(&server, 2).await;
+    mount_provision(
+        &server,
+        3,
+        json!({
+            "update_description": "illumio-tui provision",
+            "change_subset": {
+                "ip_lists": [{"href": "/orgs/5/sec_policy/draft/ip_lists/21"}],
+                "rule_sets": [{"href": "/orgs/5/sec_policy/draft/rule_sets/101"}],
+                "services": [{"href": "/orgs/5/sec_policy/draft/services/32"}]
+            }
+        }),
+    )
+    .await;
+    let audit = MemoryAudit::new();
+    let keys = vec![
+        (500, ch('2')),
+        (300, ch('p')),
+        (300, ch('P')),
+        (300, ch('y')),
+        (500, KeyCode::F(12)),
+    ];
+    let model = key_session(
+        &server,
+        writes_model(),
+        Some(tui_guard(audit.clone())),
+        keys,
+    )
+    .await;
+    assert_eq!(
+        model.status.text,
+        "provisioned /orgs/5/sec_policy/7: ip_lists=1, rule_sets=1, services=1; 3 pending changes left"
+    );
+    assert_eq!(model.stats.calls, 11);
+    assert_eq!(writes_seen(&server).await, vec!["POST"]);
+    assert_eq!(audit.entries().len(), 1);
+    assert_eq!(model.busy, 0);
+}

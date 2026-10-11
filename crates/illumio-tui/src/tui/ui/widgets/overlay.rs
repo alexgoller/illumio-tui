@@ -512,19 +512,24 @@ pub fn render_rule_detail(model: &Model, rule: &RuleView, f: &mut Frame, area: R
     );
 }
 
+/// The pending overlay's key line, the last row inside its box.
+const PENDING_KEYS: &str = "j/k select · Space mark · Enter diff · P provision · Esc";
+
 pub fn render_pending(model: &Model, f: &mut Frame, area: Rect) {
     let t = &model.theme;
     let r = centered(area, 70, 16);
     f.render_widget(Clear, r);
     let pending = model.policy.pending.as_deref().unwrap_or(&[]);
-    let rows = r.height.saturating_sub(2) as usize;
+    let marked = &model.policy.pending_marked;
+    // Rows inside the borders, less the key line.
+    let rows = (r.height.saturating_sub(2) as usize).saturating_sub(1);
     let sel = model
         .policy
         .pending_selected
         .min(pending.len().saturating_sub(1));
     // Keep the selection in view.
     let first = sel.saturating_sub(rows.saturating_sub(1));
-    let lines: Vec<Line> = if pending.is_empty() {
+    let mut lines: Vec<Line> = if pending.is_empty() {
         vec![Line::from(Span::styled("none", t.dim_style()))]
     } else {
         pending
@@ -538,6 +543,14 @@ pub fn render_pending(model: &Model, f: &mut Frame, area: Rect) {
                         if i == sel { "▸ " } else { "  " },
                         Style::new().fg(t.accent),
                     ),
+                    Span::styled(
+                        if marked.contains(&c.href) {
+                            "[x] "
+                        } else {
+                            "[ ] "
+                        },
+                        Style::new().fg(t.accent),
+                    ),
                     Span::styled(format!("{:<16}", c.object_type), t.header_style()),
                     Span::styled(format!("{:<8}", c.change_type), Style::new().fg(t.warn)),
                     Span::styled(c.name.clone().unwrap_or_else(|| c.href.clone()), t.base()),
@@ -545,10 +558,12 @@ pub fn render_pending(model: &Model, f: &mut Frame, area: Rect) {
             })
             .collect()
     };
-    let meta = if pending.is_empty() {
-        "0 · Esc closes".to_string()
-    } else {
-        format!("{}/{} · Enter diff · Esc closes", sel + 1, pending.len())
+    lines.resize(rows, Line::from(""));
+    lines.push(Line::from(Span::styled(PENDING_KEYS, t.dim_style())));
+    let meta = match (pending.len(), marked.len()) {
+        (0, _) => "0".to_string(),
+        (n, 0) => format!("{}/{n}", sel + 1),
+        (n, m) => format!("{}/{n} · {m} marked", sel + 1),
     };
     f.render_widget(
         Paragraph::new(lines)

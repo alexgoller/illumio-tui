@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui ✎ writes · pce.example · org 5 ●             api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Labels & objects  │  4 Workloads  │  5 Events
+╭ ╭ Send this request? ─────────────────────────────────── y send · n cancel ╮ ╮
+│ │provision 1 ip_list, 1 rule_set                                           │g│
+│▸│POST /orgs/5/sec_policy                                                   │ │
+│ │                                                                          │ │
+│ │{                                                                         │ │
+│ │  "change_subset": {                                                      │ │
+╰─│    "ip_lists": [                                                         │─╯
+╭ │      {                                                                   │─╮
+│ │        "href": "/orgs/5/sec_policy/draft/ip_lists/21"                    │ │
+│▸│      }                                                                   │ │
+│ │    ],                                                                    │ │
+│ │    "rule_sets": [                                                        │/│
+│ │      {                                                                   │ │
+│ │        "href": "/orgs/5/sec_policy/draft/rule_sets/101"                  │ │
+│ │      }                                                                   │ │
+│ │    ]                                                                     │ │
+│ │  },                                                                      │ │
+│ │  "update_description": "illumio-tui provision"                           │ │
+│ │}                                                                         │ │
+│ ╰──────────────────────────────────────────────────────────────────────────╯ │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ready                   n/N:new e:edit x:del  d scope  p pending  : cmd  ? help
