@@ -187,7 +187,13 @@ pub fn render_form(model: &Model, form: &Form, f: &mut Frame, area: Rect) {
     // Two rows per field (value, hint), the error row and the borders.
     let r = centered(area, 70, (form.fields.len() as u16) * 2 + 3);
     f.render_widget(Clear, r);
-    let block = panel(&form.title, "Tab next · Enter review · Esc cancel", t, true);
+    // A long title (a rule in a ruleset) would be cut by the full hint.
+    let meta = if form.title.chars().count() + 36 + 6 <= r.width as usize - 2 {
+        "Tab next · Enter review · Esc cancel"
+    } else {
+        "Enter review · Esc cancel"
+    };
+    let block = panel(&form.title, meta, t, true);
     // Borders (2), the focus marker (2), the label column and the cursor (1).
     let width = (r.width as usize).saturating_sub(2 + 2 + FORM_LABEL_WIDTH + 1);
     let mut lines: Vec<Line> = Vec::new();
@@ -592,13 +598,14 @@ pub fn render_diff(model: &Model, diff: &ObjectDiff, scroll: u16, f: &mut Frame,
     );
 }
 
-/// Key hints for the status line. With writes on, Objects and Workloads lead
+/// Key hints for the status line. With writes on, Objects, Workloads and Policy lead
 /// with the edit keys and drop their least used hints so the status text
 /// keeps room at 80 columns.
 pub fn screen_hint(screen: Screen, writes: bool) -> &'static str {
     match (screen, writes) {
         (Screen::Objects, true) => "n:new e:edit x:del  Tab type  Enter detail",
         (Screen::Workloads, true) => "n:new e:edit x:del  t/T traffic  Enter detail",
+        (Screen::Policy, true) => "n/N:new e:edit x:del  d scope  p pending",
         (Screen::Traffic, _) => "f filter  r run  a auto  v view  s sort  / search",
         (Screen::Policy, _) => "d scope  p pending  Enter detail  Tab pane  a auto",
         (Screen::Objects, false) => "Tab type  Enter detail  r refresh  a auto  / search",

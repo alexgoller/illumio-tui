@@ -9,13 +9,23 @@ use crate::tokens::{
 use crate::tui::form::{Field, Form};
 use pce::NameIndex;
 use pce::models::{
-    Actor, Fqdn, IngressService, Interface, IpList, Label, RuleSet, Service, Workload,
+    Actor, DenyRule, Fqdn, IngressService, Interface, IpList, Label, Rule, RuleSet, Service,
+    Workload,
 };
 use pce::write::{
-    ActorKind, ActorRef, InterfaceSpec, IpListDraft, IpListPatch, IpRangeSpec, LabelDraft,
-    PortSpec, RuleSetDraft, RuleSetPatch, ServiceDraft, ServicePatch, ServiceRef, WorkloadDraft,
-    WorkloadPatch, WriteRequest,
+    ActorKind, ActorRef, DenyRuleDraft, DenyRulePatch, InterfaceSpec, IpListDraft, IpListPatch,
+    IpRangeSpec, LabelDraft, PortSpec, RuleDraft, RulePatch, RuleSetDraft, RuleSetPatch,
+    ServiceDraft, ServicePatch, ServiceRef, WorkloadDraft, WorkloadPatch, WriteRequest,
 };
+
+/// Where a new allow rule goes: the selected ruleset (Policy) or the name
+/// or href typed into a `w` form. A name costs one draft ruleset read at
+/// plan time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RulesetTarget {
+    Href(String),
+    Name(String),
+}
 
 /// What `n`, `e` or `x` on Objects or Workloads asks for.
 #[derive(Debug, Clone, PartialEq)]
@@ -35,6 +45,21 @@ pub enum EditIntent {
     CreateRuleSet,
     UpdateRuleSet(RuleSet),
     DeleteRuleSet(RuleSet),
+    CreateRule {
+        ruleset_href: String,
+    },
+    CreateDenyRule {
+        ruleset_href: String,
+    },
+    /// The rule as loaded and its ruleset's href.
+    UpdateRule(Rule, String),
+    UpdateDenyRule(DenyRule, String),
+    DeleteRule {
+        href: String,
+    },
+    DeleteDenyRule {
+        href: String,
+    },
 }
 
 /// What `Cmd::PlanWrite` carries: the library draft or patch, or the href
@@ -42,20 +67,72 @@ pub enum EditIntent {
 #[derive(Debug, Clone, PartialEq)]
 pub enum WriteIntent {
     CreateLabel(LabelDraft),
-    UpdateLabel { href: String, value: String },
-    DeleteLabel { href: String, name: String },
+    UpdateLabel {
+        href: String,
+        value: String,
+    },
+    DeleteLabel {
+        href: String,
+        name: String,
+    },
     CreateIpList(IpListDraft),
-    UpdateIpList { href: String, patch: IpListPatch },
-    DeleteIpList { href: String, name: String },
+    UpdateIpList {
+        href: String,
+        patch: IpListPatch,
+    },
+    DeleteIpList {
+        href: String,
+        name: String,
+    },
     CreateService(ServiceDraft),
-    UpdateService { href: String, patch: ServicePatch },
-    DeleteService { href: String, name: String },
+    UpdateService {
+        href: String,
+        patch: ServicePatch,
+    },
+    DeleteService {
+        href: String,
+        name: String,
+    },
     CreateWorkload(WorkloadDraft),
-    UpdateWorkload { href: String, patch: WorkloadPatch },
-    DeleteWorkload { href: String, name: String },
+    UpdateWorkload {
+        href: String,
+        patch: WorkloadPatch,
+    },
+    DeleteWorkload {
+        href: String,
+        name: String,
+    },
     CreateRuleSet(RuleSetDraft),
-    UpdateRuleSet { href: String, patch: RuleSetPatch },
-    DeleteRuleSet { href: String, name: String },
+    UpdateRuleSet {
+        href: String,
+        patch: RuleSetPatch,
+    },
+    DeleteRuleSet {
+        href: String,
+        name: String,
+    },
+    CreateRule {
+        ruleset: RulesetTarget,
+        draft: RuleDraft,
+    },
+    UpdateRule {
+        href: String,
+        patch: RulePatch,
+    },
+    DeleteRule {
+        href: String,
+    },
+    CreateDenyRule {
+        ruleset_href: String,
+        draft: DenyRuleDraft,
+    },
+    UpdateDenyRule {
+        href: String,
+        patch: DenyRulePatch,
+    },
+    DeleteDenyRule {
+        href: String,
+    },
 }
 
 impl WriteIntent {
@@ -76,6 +153,12 @@ impl WriteIntent {
             WriteIntent::CreateRuleSet(_)
             | WriteIntent::UpdateRuleSet { .. }
             | WriteIntent::DeleteRuleSet { .. } => pce::write::ObjectKind::RuleSet,
+            WriteIntent::CreateRule { .. }
+            | WriteIntent::UpdateRule { .. }
+            | WriteIntent::DeleteRule { .. } => pce::write::ObjectKind::Rule,
+            WriteIntent::CreateDenyRule { .. }
+            | WriteIntent::UpdateDenyRule { .. }
+            | WriteIntent::DeleteDenyRule { .. } => pce::write::ObjectKind::DenyRule,
         }
     }
 }
@@ -176,6 +259,36 @@ pub fn start(intent: EditIntent, index: Option<&NameIndex>) -> Start {
             name: rs.name,
             href: rs.href,
         }),
+        EditIntent::CreateRule { ruleset_href } => form(
+            format!("New allow rule in ruleset {}", href_id(&ruleset_href)),
+            rule_fields(None, idx),
+            EditIntent::CreateRule { ruleset_href },
+        ),
+        EditIntent::CreateDenyRule { ruleset_href } => form(
+            format!("New deny rule in ruleset {}", href_id(&ruleset_href)),
+            deny_rule_fields(None, idx),
+            EditIntent::CreateDenyRule { ruleset_href },
+        ),
+        EditIntent::UpdateRule(r, rs) => {
+            let title = format!(
+                "Edit allow rule {} in ruleset {}",
+                href_id(&r.href),
+                href_id(&rs)
+            );
+            let fields = rule_fields(Some(&r), idx);
+            form(title, fields, EditIntent::UpdateRule(r, rs))
+        }
+        EditIntent::UpdateDenyRule(d, rs) => {
+            let title = format!(
+                "Edit deny rule {} in ruleset {}",
+                href_id(&d.href),
+                href_id(&rs)
+            );
+            let fields = deny_rule_fields(Some(&d), idx);
+            form(title, fields, EditIntent::UpdateDenyRule(d, rs))
+        }
+        EditIntent::DeleteRule { href } => Start::Plan(WriteIntent::DeleteRule { href }),
+        EditIntent::DeleteDenyRule { href } => Start::Plan(WriteIntent::DeleteDenyRule { href }),
     }
 }
 
@@ -359,6 +472,267 @@ fn resolve_scopes(text: &str, idx: &NameIndex, org_id: u64) -> Result<Vec<Vec<Ac
         .iter()
         .map(|s| resolve_actor_tokens(s, idx, org_id).map_err(|e| format!("Scopes: {e}")))
         .collect()
+}
+
+const ACTORS_HINT: &str = "app=web, group:Name, iplist:Corp, all, !env=dev";
+const SERVICES_HINT: &str = "443/tcp, 8000-8100/udp, icmp, HTTPS";
+const UNSCOPED_HINT: &str = "y: consumers outside the ruleset's scope";
+const OVERRIDE_HINT: &str = "y: evaluated before allow rules";
+const CANNOT_EDIT_RULE: &str = "this rule has entries the form cannot edit; use the CLI";
+
+/// The last segment of an href, for form titles.
+fn href_id(href: &str) -> &str {
+    href.rsplit('/').next().unwrap_or(href)
+}
+
+/// Providers, Consumers and Services, pre-filled from a rule's lists.
+fn side_fields(
+    sides: Option<(&[Actor], &[Actor], &[IngressService])>,
+    idx: &NameIndex,
+) -> Vec<Field> {
+    let (p, c, s) = sides.map_or_else(
+        || (String::new(), String::new(), String::new()),
+        |(p, c, s)| {
+            (
+                actor_tokens(p, idx).join(", "),
+                actor_tokens(c, idx).join(", "),
+                service_tokens(s, idx).join(", "),
+            )
+        },
+    );
+    vec![
+        Field::new("Providers", p, ACTORS_HINT, true),
+        Field::new("Consumers", c, ACTORS_HINT, true),
+        Field::new("Services", s, SERVICES_HINT, true),
+    ]
+}
+
+fn rule_fields(r: Option<&Rule>, idx: &NameIndex) -> Vec<Field> {
+    let mut fields = side_fields(
+        r.map(|r| (&r.providers[..], &r.consumers[..], &r.ingress_services[..])),
+        idx,
+    );
+    fields.extend([
+        Field::new(
+            "Description",
+            r.and_then(|r| r.description.clone()).unwrap_or_default(),
+            "optional",
+            false,
+        ),
+        Field::new(
+            "Enabled",
+            yn(r.is_none_or(|r| r.enabled)),
+            YES_NO_HINT,
+            true,
+        ),
+        Field::new(
+            "Unscoped",
+            yn(r.is_some_and(|r| r.unscoped_consumers.unwrap_or(false))),
+            UNSCOPED_HINT,
+            true,
+        ),
+    ]);
+    fields
+}
+
+fn deny_rule_fields(d: Option<&DenyRule>, idx: &NameIndex) -> Vec<Field> {
+    let mut fields = side_fields(
+        d.map(|d| (&d.providers[..], &d.consumers[..], &d.ingress_services[..])),
+        idx,
+    );
+    fields.extend([
+        Field::new(
+            "Description",
+            d.and_then(|d| d.description.clone()).unwrap_or_default(),
+            "optional",
+            false,
+        ),
+        Field::new(
+            "Enabled",
+            yn(d.is_none_or(|d| d.enabled)),
+            YES_NO_HINT,
+            true,
+        ),
+        Field::new(
+            "Override",
+            yn(d.is_some_and(|d| d.override_)),
+            OVERRIDE_HINT,
+            true,
+        ),
+    ]);
+    fields
+}
+
+/// A Providers or Consumers field to actors.
+fn actor_field(
+    form: &Form,
+    label: &str,
+    idx: &NameIndex,
+    org_id: u64,
+) -> Result<Vec<ActorRef>, String> {
+    let tokens = items(form.value(label))
+        .iter()
+        .map(|t| ActorToken::parse(t.as_str()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("{label}: {e}"))?;
+    resolve_actor_tokens(&tokens, idx, org_id).map_err(|e| format!("{label}: {e}"))
+}
+
+/// The Services field to rule services.
+fn service_field(form: &Form, idx: &NameIndex, org_id: u64) -> Result<Vec<ServiceRef>, String> {
+    let tokens = items(form.value("Services"))
+        .iter()
+        .map(|t| ServiceToken::parse(t.as_str()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Services: {e}"))?;
+    resolve_service_tokens(&tokens, idx, org_id).map_err(|e| format!("Services: {e}"))
+}
+
+/// The new allow rule a Policy `n` form (or a `w` form) describes.
+fn rule_draft(form: &Form, idx: &NameIndex, org_id: u64) -> Result<RuleDraft, String> {
+    let d = RuleDraft {
+        description: non_empty(form.value("Description").trim().to_string()),
+        enabled: yes_no(form, "Enabled")?,
+        providers: actor_field(form, "Providers", idx, org_id)?,
+        consumers: actor_field(form, "Consumers", idx, org_id)?,
+        services: service_field(form, idx, org_id)?,
+        unscoped_consumers: yes_no(form, "Unscoped")?,
+        resolve_labels_as: None,
+    };
+    d.validate().map_err(|e| e.join("; "))?;
+    Ok(d)
+}
+
+fn deny_rule_draft(form: &Form, idx: &NameIndex, org_id: u64) -> Result<DenyRuleDraft, String> {
+    let d = DenyRuleDraft {
+        description: non_empty(form.value("Description").trim().to_string()),
+        enabled: yes_no(form, "Enabled")?,
+        providers: actor_field(form, "Providers", idx, org_id)?,
+        consumers: actor_field(form, "Consumers", idx, org_id)?,
+        services: service_field(form, idx, org_id)?,
+        override_: yes_no(form, "Override")?,
+    };
+    d.validate().map_err(|e| e.join("; "))?;
+    Ok(d)
+}
+
+fn actor_editable(a: &Actor) -> bool {
+    ActorRef::from_actor(a).is_ok()
+}
+
+fn service_editable(s: &IngressService) -> bool {
+    match ServiceRef::from_ingress(s) {
+        ServiceRef::Href(_) => true,
+        ServiceRef::Port(p) => port_token(&p).is_some(),
+    }
+}
+
+/// What an edited Providers or Consumers field adds and removes, matched
+/// against the shown tokens first: a token still there keeps the PCE's
+/// entry, a token gone removes exactly that entry, a new token is resolved
+/// through the index. A token retyped in another spelling of a shown
+/// entry is neither added nor removed. A field holding an entry the
+/// grammar cannot express may not change.
+fn actor_changes(
+    label: &str,
+    current: &[Actor],
+    text: &str,
+    idx: &NameIndex,
+    org_id: u64,
+) -> Result<(Vec<ActorRef>, Vec<ActorRef>), String> {
+    let shown = actor_tokens(current, idx);
+    let typed = items(text);
+    if typed == shown {
+        return Ok((Vec::new(), Vec::new()));
+    }
+    if !current.iter().all(actor_editable) {
+        return Err(format!("{label}: {CANNOT_EDIT_RULE}"));
+    }
+    let mut remove = Vec::new();
+    for (a, t) in current.iter().zip(&shown) {
+        if !typed.contains(t) {
+            remove.push(ActorRef::from_actor(a).map_err(|e| format!("{label}: {e}"))?);
+        }
+    }
+    let new = typed
+        .iter()
+        .filter(|t| !shown.contains(t))
+        .map(|t| ActorToken::parse(t.as_str()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("{label}: {e}"))?;
+    let mut add = resolve_actor_tokens(&new, idx, org_id).map_err(|e| format!("{label}: {e}"))?;
+    add.retain(|a| match remove.iter().position(|r| r.same_actor(a)) {
+        Some(i) => {
+            remove.remove(i);
+            false
+        }
+        None => true,
+    });
+    Ok((add, remove))
+}
+
+/// [`actor_changes`] for the Services field.
+fn service_changes(
+    current: &[IngressService],
+    text: &str,
+    idx: &NameIndex,
+    org_id: u64,
+) -> Result<(Vec<ServiceRef>, Vec<ServiceRef>), String> {
+    let shown = service_tokens(current, idx);
+    let typed = items(text);
+    if typed == shown {
+        return Ok((Vec::new(), Vec::new()));
+    }
+    if !current.iter().all(service_editable) {
+        return Err(format!("Services: {CANNOT_EDIT_RULE}"));
+    }
+    let mut remove: Vec<ServiceRef> = current
+        .iter()
+        .zip(&shown)
+        .filter(|(_, t)| !typed.contains(t))
+        .map(|(s, _)| ServiceRef::from_ingress(s))
+        .collect();
+    let new = typed
+        .iter()
+        .filter(|t| !shown.contains(t))
+        .map(|t| ServiceToken::parse(t.as_str()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Services: {e}"))?;
+    let mut add =
+        resolve_service_tokens(&new, idx, org_id).map_err(|e| format!("Services: {e}"))?;
+    add.retain(|a| match remove.iter().position(|r| r.same_service(a)) {
+        Some(i) => {
+            remove.remove(i);
+            false
+        }
+        None => true,
+    });
+    Ok((add, remove))
+}
+
+/// The one draft ruleset named `name` (any case; a pending deletion does
+/// not count), for a rule typed into a named ruleset.
+pub fn ruleset_href_named(sets: &[RuleSet], name: &str) -> Result<String, String> {
+    let name = name.trim();
+    let live = || {
+        sets.iter()
+            .filter(|rs| rs.update_type.as_deref() != Some("delete"))
+    };
+    let hits: Vec<&str> = live()
+        .filter(|rs| rs.name.eq_ignore_ascii_case(name))
+        .map(|rs| rs.href.as_str())
+        .collect();
+    match hits.as_slice() {
+        [one] => Ok(one.to_string()),
+        [] => Err(with_similar(
+            format!("no ruleset named {name:?}"),
+            &similar(name, live().map(|rs| rs.name.as_str())),
+        )),
+        many => Err(format!(
+            "{name:?} names several rulesets: {}; use the href",
+            many.join(", ")
+        )),
+    }
 }
 
 fn join(items: impl Iterator<Item = String>) -> String {
@@ -926,12 +1300,90 @@ pub fn build_intent(
                 }))
             }
         }
+        EditIntent::CreateRule { ruleset_href } => {
+            let draft = rule_draft(form, need_index(index)?, org_id)?;
+            Ok(Some(WriteIntent::CreateRule {
+                ruleset: RulesetTarget::Href(ruleset_href.clone()),
+                draft,
+            }))
+        }
+        EditIntent::CreateDenyRule { ruleset_href } => {
+            let draft = deny_rule_draft(form, need_index(index)?, org_id)?;
+            Ok(Some(WriteIntent::CreateDenyRule {
+                ruleset_href: ruleset_href.clone(),
+                draft,
+            }))
+        }
+        EditIntent::UpdateRule(r, _) => {
+            let idx = need_index(index)?;
+            let (add_providers, remove_providers) =
+                actor_changes("Providers", &r.providers, &v("Providers"), idx, org_id)?;
+            let (add_consumers, remove_consumers) =
+                actor_changes("Consumers", &r.consumers, &v("Consumers"), idx, org_id)?;
+            let (add_services, remove_services) =
+                service_changes(&r.ingress_services, &v("Services"), idx, org_id)?;
+            let enabled = yes_no(form, "Enabled")?;
+            let unscoped = yes_no(form, "Unscoped")?;
+            let patch = RulePatch {
+                description: changed(r.description.as_deref().unwrap_or(""), v("Description")),
+                enabled: (enabled != r.enabled).then_some(enabled),
+                add_providers,
+                remove_providers,
+                add_consumers,
+                remove_consumers,
+                add_services,
+                remove_services,
+                unscoped_consumers: (unscoped != r.unscoped_consumers.unwrap_or(false))
+                    .then_some(unscoped),
+                resolve_labels_as: None,
+            };
+            if patch.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(WriteIntent::UpdateRule {
+                    href: r.href.clone(),
+                    patch,
+                }))
+            }
+        }
+        EditIntent::UpdateDenyRule(d, _) => {
+            let idx = need_index(index)?;
+            let (add_providers, remove_providers) =
+                actor_changes("Providers", &d.providers, &v("Providers"), idx, org_id)?;
+            let (add_consumers, remove_consumers) =
+                actor_changes("Consumers", &d.consumers, &v("Consumers"), idx, org_id)?;
+            let (add_services, remove_services) =
+                service_changes(&d.ingress_services, &v("Services"), idx, org_id)?;
+            let enabled = yes_no(form, "Enabled")?;
+            let override_ = yes_no(form, "Override")?;
+            let patch = DenyRulePatch {
+                description: changed(d.description.as_deref().unwrap_or(""), v("Description")),
+                enabled: (enabled != d.enabled).then_some(enabled),
+                add_providers,
+                remove_providers,
+                add_consumers,
+                remove_consumers,
+                add_services,
+                remove_services,
+                override_: (override_ != d.override_).then_some(override_),
+            };
+            if patch.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(WriteIntent::UpdateDenyRule {
+                    href: d.href.clone(),
+                    patch,
+                }))
+            }
+        }
         // Deletes never open a form (`start`); a form never carries one.
         EditIntent::DeleteLabel(_)
         | EditIntent::DeleteIpList(_)
         | EditIntent::DeleteService(_)
         | EditIntent::DeleteWorkload(_)
-        | EditIntent::DeleteRuleSet(_) => Err("a delete has no form".into()),
+        | EditIntent::DeleteRuleSet(_)
+        | EditIntent::DeleteRule { .. }
+        | EditIntent::DeleteDenyRule { .. } => Err("a delete has no form".into()),
     }
 }
 
@@ -1498,5 +1950,255 @@ mod tests {
             }
         );
         assert_eq!(w.kind(), pce::write::ObjectKind::RuleSet);
+    }
+
+    const SHOP: &str = "/orgs/5/sec_policy/draft/rule_sets/100";
+
+    #[test]
+    fn rule_forms_create_allow_and_deny_rules_from_tokens() {
+        let mut f = form(EditIntent::CreateRule {
+            ruleset_href: SHOP.into(),
+        });
+        assert_eq!(f.title, "New allow rule in ruleset 100");
+        assert_eq!(
+            f.fields.iter().map(|x| x.label).collect::<Vec<_>>(),
+            vec![
+                "Providers",
+                "Consumers",
+                "Services",
+                "Description",
+                "Enabled",
+                "Unscoped"
+            ]
+        );
+        assert_eq!((f.value("Enabled"), f.value("Unscoped")), ("y", "n"));
+        set(&mut f, "Providers", "role=db");
+        set(&mut f, "Consumers", "role=web, !env=prod");
+        set(&mut f, "Services", "PostgreSQL, 443/tcp");
+        assert_eq!(
+            build(&f).unwrap(),
+            Some(WriteIntent::CreateRule {
+                ruleset: RulesetTarget::Href(SHOP.into()),
+                draft: RuleDraft {
+                    description: None,
+                    enabled: true,
+                    providers: vec![ActorRef::new(ActorKind::Label, "/orgs/5/labels/2")],
+                    consumers: vec![
+                        ActorRef::new(ActorKind::Label, "/orgs/5/labels/1"),
+                        ActorRef::new(ActorKind::Label, "/orgs/5/labels/4").excluded(),
+                    ],
+                    services: vec![
+                        ServiceRef::Href("/orgs/5/sec_policy/draft/services/31".into()),
+                        ServiceRef::Port(PortSpec::parse("443/tcp").unwrap()),
+                    ],
+                    unscoped_consumers: false,
+                    resolve_labels_as: None,
+                },
+            })
+        );
+        set(&mut f, "Consumers", "workload:web-1");
+        assert_eq!(
+            build(&f).unwrap_err(),
+            "Consumers: workload names resolve in the CLI; use workload:/orgs/… here"
+        );
+        let mut d = form(EditIntent::CreateDenyRule {
+            ruleset_href: SHOP.into(),
+        });
+        assert_eq!(d.title, "New deny rule in ruleset 100");
+        assert_eq!(
+            d.fields.iter().map(|x| x.label).collect::<Vec<_>>(),
+            vec![
+                "Providers",
+                "Consumers",
+                "Services",
+                "Description",
+                "Enabled",
+                "Override"
+            ]
+        );
+        set(&mut d, "Providers", "all");
+        set(&mut d, "Consumers", "iplist:Corp");
+        set(&mut d, "Services", "23/tcp");
+        set(&mut d, "Override", "y");
+        assert_eq!(
+            build(&d).unwrap(),
+            Some(WriteIntent::CreateDenyRule {
+                ruleset_href: SHOP.into(),
+                draft: DenyRuleDraft {
+                    description: None,
+                    enabled: true,
+                    providers: vec![ActorRef::all()],
+                    consumers: vec![ActorRef::new(
+                        ActorKind::IpList,
+                        "/orgs/5/sec_policy/draft/ip_lists/21"
+                    )],
+                    services: vec![ServiceRef::Port(PortSpec::parse("23/tcp").unwrap())],
+                    override_: true,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn rule_edit_patches_only_what_changed() {
+        let corp = rule_sets()[0].rules[1].clone(); // role=web ← Corp, 443/tcp + 8000-8099/tcp
+        let mut f = form(EditIntent::UpdateRule(corp, SHOP.into()));
+        assert_eq!(f.title, "Edit allow rule 2 in ruleset 100");
+        assert_eq!(f.value("Providers"), "role=web");
+        assert_eq!(f.value("Consumers"), "iplist:Corp");
+        assert_eq!(f.value("Services"), "443/tcp, 8000-8099/tcp");
+        assert_eq!(f.value("Description"), "corp to web");
+        assert_eq!(f.value("Unscoped"), "y");
+        assert_eq!(
+            build(&f).unwrap(),
+            None,
+            "a pre-filled form changes nothing"
+        );
+        set(&mut f, "Consumers", "iplist:Corp, role=db");
+        set(&mut f, "Services", "443/tcp");
+        set(&mut f, "Unscoped", "n");
+        assert_eq!(
+            build(&f).unwrap(),
+            Some(WriteIntent::UpdateRule {
+                href: "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/2".into(),
+                patch: RulePatch {
+                    add_consumers: vec![ActorRef::new(ActorKind::Label, "/orgs/5/labels/2")],
+                    remove_services: vec![ServiceRef::Port(
+                        PortSpec::parse("8000-8099/tcp").unwrap()
+                    )],
+                    unscoped_consumers: Some(false),
+                    ..RulePatch::default()
+                },
+            })
+        );
+        // Another spelling of a shown entry is neither added nor removed.
+        let mut g = form(EditIntent::UpdateRule(
+            rule_sets()[0].rules[0].clone(),
+            SHOP.into(),
+        ));
+        assert_eq!(g.value("Consumers"), "role=web");
+        set(&mut g, "Consumers", "label:role=web");
+        assert_eq!(build(&g).unwrap(), None);
+        let Start::Plan(w) = start(
+            EditIntent::DeleteRule {
+                href: "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1".into(),
+            },
+            None,
+        ) else {
+            panic!("a delete opens no form")
+        };
+        assert_eq!(
+            w,
+            WriteIntent::DeleteRule {
+                href: "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1".into()
+            }
+        );
+        assert_eq!(w.kind(), pce::write::ObjectKind::Rule);
+    }
+
+    #[test]
+    fn inexpressible_entries_refuse_a_changed_field_only() {
+        let mut rule = rule_sets()[0].rules[0].clone(); // web to db
+        rule.providers.push(actor(
+            json!({"virtual_service": {"href": "/orgs/5/sec_policy/draft/virtual_services/9"}}),
+        ));
+        rule.ingress_services
+            .push(serde_json::from_value(json!({"proto": -1})).unwrap());
+        let mut f = form(EditIntent::UpdateRule(rule, SHOP.into()));
+        assert_eq!(
+            f.value("Providers"),
+            "role=db, /orgs/5/sec_policy/draft/virtual_services/9"
+        );
+        assert_eq!(f.value("Services"), "PostgreSQL, ?");
+        assert_eq!(build(&f).unwrap(), None, "shown as it is, nothing changes");
+        set(&mut f, "Description", "web to db, reviewed");
+        let Some(WriteIntent::UpdateRule { patch, .. }) = build(&f).unwrap() else {
+            panic!("not an update")
+        };
+        assert_eq!(
+            patch,
+            RulePatch {
+                description: Some("web to db, reviewed".into()),
+                ..RulePatch::default()
+            },
+            "the untouched lists are carried by the library as the PCE returned them"
+        );
+        set(&mut f, "Providers", "role=db");
+        assert_eq!(
+            build(&f).unwrap_err(),
+            "Providers: this rule has entries the form cannot edit; use the CLI"
+        );
+        set(
+            &mut f,
+            "Providers",
+            "role=db, /orgs/5/sec_policy/draft/virtual_services/9",
+        );
+        set(&mut f, "Services", "PostgreSQL, ?, 443/tcp");
+        assert_eq!(
+            build(&f).unwrap_err(),
+            "Services: this rule has entries the form cannot edit; use the CLI"
+        );
+    }
+
+    #[test]
+    fn deny_rule_edit_flips_override_and_state() {
+        let deny = rule_sets()[0].deny_rules[1].clone(); // override, role=db ← all, 22/tcp
+        let mut f = form(EditIntent::UpdateDenyRule(deny, SHOP.into()));
+        assert_eq!(f.title, "Edit deny rule 8 in ruleset 100");
+        assert_eq!(
+            (
+                f.value("Providers"),
+                f.value("Consumers"),
+                f.value("Services"),
+                f.value("Override")
+            ),
+            ("role=db", "all", "22/tcp", "y")
+        );
+        assert_eq!(build(&f).unwrap(), None);
+        set(&mut f, "Override", "n");
+        set(&mut f, "Enabled", "n");
+        assert_eq!(
+            build(&f).unwrap(),
+            Some(WriteIntent::UpdateDenyRule {
+                href: "/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8".into(),
+                patch: DenyRulePatch {
+                    enabled: Some(false),
+                    override_: Some(false),
+                    ..DenyRulePatch::default()
+                },
+            })
+        );
+        let Start::Plan(w) = start(
+            EditIntent::DeleteDenyRule {
+                href: "/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8".into(),
+            },
+            None,
+        ) else {
+            panic!("a delete opens no form")
+        };
+        assert_eq!(w.kind(), pce::write::ObjectKind::DenyRule);
+    }
+
+    #[test]
+    fn ruleset_names_resolve_to_one_live_draft_ruleset() {
+        let mut sets = rule_sets();
+        assert_eq!(ruleset_href_named(&sets, " shop-prod ").unwrap(), SHOP);
+        assert_eq!(
+            ruleset_href_named(&sets, "Shop").unwrap_err(),
+            r#"no ruleset named "Shop"; similar: Shop-Prod"#
+        );
+        sets[0].update_type = Some("delete".into());
+        assert_eq!(
+            ruleset_href_named(&sets, "Shop-Prod").unwrap_err(),
+            r#"no ruleset named "Shop-Prod""#,
+            "a pending deletion does not count"
+        );
+        let mut twin = sets[1].clone();
+        twin.href = "/orgs/5/sec_policy/draft/rule_sets/102".into();
+        sets.push(twin);
+        assert_eq!(
+            ruleset_href_named(&sets, "Global-Infra").unwrap_err(),
+            r#""Global-Infra" names several rulesets: /orgs/5/sec_policy/draft/rule_sets/101, /orgs/5/sec_policy/draft/rule_sets/102; use the href"#
+        );
     }
 }

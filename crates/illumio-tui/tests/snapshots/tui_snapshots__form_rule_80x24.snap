@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Labels & objects  │  4 Workloads  │  5 Events
+╭ Rulesets ──────────────────────────────────────────────────── draft · 5s ago ╮
+│  ruleset                on  scopes                              rules pending│
+│▸ Sh╭ Edit allow rule 2 in ruleset 100 ─────── Enter review · Esc cancel ╮    │
+│  Gl│▸ Providers*    role=web▏                                           │ate │
+│    │                app=web, group:Name, iplist:Corp, all, !env=dev     │    │
+│    │  Consumers*    iplist:Corp                                         │    │
+╰────│                app=web, group:Name, iplist:Corp, all, !env=dev     │────╯
+╭ Rul│  Services*     443/tcp, 8000-8099/tcp                              │────╮
+│  ki│                443/tcp, 8000-8100/udp, icmp, HTTPS                 │    │
+│▸ ov│  Description   corp to web                                         │    │
+│  al│                optional                                            │    │
+│  al│  Enabled*      y                                                   │099/│
+│  de│                y or n                                              │    │
+│    │  Unscoped*     y                                                   │    │
+│    │                y: consumers outside the ruleset's scope            │    │
+│    │* required                                                          │    │
+│    ╰────────────────────────────────────────────────────────────────────╯    │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ready         d scope  p pending  Enter detail  Tab pane  a auto  : cmd  ? help

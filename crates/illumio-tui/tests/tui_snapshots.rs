@@ -686,3 +686,47 @@ fn rule_set_form_80x24() {
         render_styled(&m, 80, 24)
     );
 }
+
+#[test]
+fn rule_and_deny_rule_forms_80x24() {
+    use illumio_tui::tui::edit::{EditIntent, form_for};
+    use illumio_tui::tui::model::{Overlay, Screen};
+    use illumio_tui::tui::test_support::fixture_index;
+    let idx = fixture_index();
+    let mut m = model_with_policy();
+    m.screen = Screen::Policy;
+    let shop = m.policy.raw[0].clone();
+    m.overlay = Overlay::Form(
+        form_for(
+            EditIntent::UpdateRule(shop.rules[1].clone(), shop.href.clone()),
+            Some(idx.as_ref()),
+        )
+        .expect("a form"),
+    );
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("Edit allow rule 2 in ruleset 100"), "{out}");
+    assert!(out.contains("iplist:Corp"), "{out}");
+    assert!(out.contains("443/tcp, 8000-8099/tcp"), "{out}");
+    assert!(out.contains("Unscoped*"), "{out}");
+    insta::assert_snapshot!("form_rule_80x24", out);
+    m.set_theme("light");
+    insta::assert_snapshot!("form_rule_light_styled_80x24", render_styled(&m, 80, 24));
+    let mut d = model_with_policy();
+    d.screen = Screen::Policy;
+    d.overlay = Overlay::Form(
+        form_for(
+            EditIntent::UpdateDenyRule(shop.deny_rules[1].clone(), shop.href.clone()),
+            Some(idx.as_ref()),
+        )
+        .expect("a form"),
+    );
+    let out = render_to_string(&d, 80, 24);
+    assert!(out.contains("Edit deny rule 8 in ruleset 100"), "{out}");
+    assert!(out.contains("Override*"), "{out}");
+    insta::assert_snapshot!("form_deny_rule_80x24", out);
+    d.set_theme("light");
+    insta::assert_snapshot!(
+        "form_deny_rule_light_styled_80x24",
+        render_styled(&d, 80, 24)
+    );
+}

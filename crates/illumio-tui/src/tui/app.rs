@@ -4,7 +4,7 @@
 use crate::cli::error::CliError;
 use crate::cli::{Context, GlobalArgs};
 use crate::tui::diff::{self, ObjectDiff};
-use crate::tui::edit::WriteIntent;
+use crate::tui::edit::{self, RulesetTarget, WriteIntent};
 use crate::tui::model::ObjectKind;
 use crate::tui::model::{Limits, Model, ProfileInfo, WritesState};
 use crate::tui::msg::{Cmd, Msg, ObjectsPayload, QueryOutcome};
@@ -14,7 +14,7 @@ use crossterm::event::{
     EventStream,
 };
 use futures::{Stream, StreamExt};
-use pce::models::{PendingChange, WorkloadFilter};
+use pce::models::{PendingChange, PolicyScope, WorkloadFilter};
 use pce::write::{IfMissing, JsonlAudit, Plan, WriteContext, WriteError, WriteGuard, WriteRefused};
 use pce::{CacheMode, NameIndex, Pce};
 use std::path::PathBuf;
@@ -478,7 +478,8 @@ fn writer_from(
 
 /// The library planner for one intent, through the guard. Creates use
 /// `IfMissing::Create`; IP list, service and workload updates and workload
-/// deletes fetch the object once; label plans make no request.
+/// deletes fetch the object once; label plans make no request. A ruleset typed
+/// by name costs one draft ruleset read (through the cache) before the rule is planned.
 async fn plan_intent(
     pce: &Pce,
     guard: &WriteGuard,
@@ -517,6 +518,30 @@ async fn plan_intent(
         WriteIntent::DeleteRuleSet { href, name } => {
             named(w.plan_delete_rule_set(&href)?, "rule_set", &name)
         }
+        WriteIntent::CreateRule { ruleset, draft } => {
+            let href = match ruleset {
+                RulesetTarget::Href(h) => h,
+                // The only read a form causes: the draft rulesets, through the cache.
+                RulesetTarget::Name(n) => {
+                    let sets = pce
+                        .rule_sets(PolicyScope::Draft, CacheMode::Use)
+                        .await?
+                        .value;
+                    edit::ruleset_href_named(&sets, &n).map_err(WriteError::invalid)?
+                }
+            };
+            w.plan_create_rule(&href, &draft)?
+        }
+        WriteIntent::UpdateRule { href, patch } => w.plan_update_rule(&href, &patch).await?,
+        WriteIntent::DeleteRule { href } => w.plan_delete_rule(&href)?,
+        WriteIntent::CreateDenyRule {
+            ruleset_href,
+            draft,
+        } => w.plan_create_deny_rule(&ruleset_href, &draft)?,
+        WriteIntent::UpdateDenyRule { href, patch } => {
+            w.plan_update_deny_rule(&href, &patch).await?
+        }
+        WriteIntent::DeleteDenyRule { href } => w.plan_delete_deny_rule(&href)?,
     };
     Ok((plan, kind))
 }

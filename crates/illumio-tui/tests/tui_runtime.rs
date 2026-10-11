@@ -1464,3 +1464,167 @@ async fn create_ruleset_posts_once_and_reloads_the_rulesets_once() {
     assert_eq!(entries[0].source, "tui");
     assert_eq!(model.busy, 0);
 }
+
+#[tokio::test]
+async fn create_rule_from_policy_posts_once_and_reloads_once() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    mount_rule_sets(&server, 2).await;
+    let body = json!({
+        "enabled": true,
+        "providers": [{"label": {"href": "/orgs/5/labels/2"}}],
+        "consumers": [{"label": {"href": "/orgs/5/labels/1"}}],
+        "ingress_services": [{"port": 443, "proto": 6}],
+        "unscoped_consumers": false,
+        "resolve_labels_as": {"providers": ["workloads"], "consumers": ["workloads"]}
+    });
+    let mut created = body.clone();
+    created["href"] = json!("/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/9");
+    Mock::given(method("POST"))
+        .and(path(
+            "/api/v2/orgs/5/sec_policy/draft/rule_sets/100/sec_rules",
+        ))
+        .and(body_json(body))
+        .respond_with(ResponseTemplate::new(201).set_body_json(created))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let audit = MemoryAudit::new();
+    let mut keys = vec![(500, ch('2')), (300, KeyCode::Tab), (50, ch('n'))];
+    keys.extend(typed("role=db"));
+    keys.push((20, KeyCode::Tab));
+    keys.extend(typed("role=web"));
+    keys.push((20, KeyCode::Tab));
+    keys.extend(typed("443/tcp"));
+    keys.extend([(50, KeyCode::Enter), (300, ch('y')), (400, KeyCode::F(12))]);
+    let model = key_session(
+        &server,
+        writes_model(),
+        Some(tui_guard(audit.clone())),
+        keys,
+    )
+    .await;
+    assert_eq!(
+        model.status.text,
+        "created /orgs/5/sec_policy/draft/rule_sets/100/sec_rules/9 (pending)"
+    );
+    assert_eq!(
+        model.stats.calls, 8,
+        "health + four lists + rulesets + POST + one rulesets reload"
+    );
+    assert_eq!(writes_seen(&server).await, vec!["POST"]);
+    assert_eq!(audit.entries().len(), 1);
+    assert_eq!(model.busy, 0);
+}
+
+#[tokio::test]
+async fn edit_rule_puts_only_the_changed_services() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    mount_rule_sets(&server, 2).await;
+    let rule = json!({
+        "href": "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1", "enabled": true,
+        "description": "web to db",
+        "providers": [{"label": {"href": "/orgs/5/labels/2"}}],
+        "consumers": [{"label": {"href": "/orgs/5/labels/1"}}],
+        "ingress_services": [{"href": "/orgs/5/sec_policy/draft/services/31"}],
+        "resolve_labels_as": {"providers": ["workloads"], "consumers": ["workloads"]},
+        "unscoped_consumers": false, "sec_connect": false, "stateless": false,
+        "machine_auth": false, "network_type": "brn", "update_type": null
+    });
+    Mock::given(method("GET"))
+        .and(path(
+            "/api/v2/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(rule.clone()))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let mut updated = rule;
+    updated["ingress_services"] = json!([
+        {"href": "/orgs/5/sec_policy/draft/services/31"},
+        {"port": 443, "proto": 6}
+    ]);
+    Mock::given(method("PUT"))
+        .and(path(
+            "/api/v2/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1",
+        ))
+        .and(body_json(json!({"ingress_services": [
+            {"href": "/orgs/5/sec_policy/draft/services/31"},
+            {"port": 443, "proto": 6}
+        ]})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(updated))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let audit = MemoryAudit::new();
+    let mut keys = vec![
+        (500, ch('2')),
+        (300, KeyCode::Tab),
+        (50, ch('j')), // allow rule 1 (the override deny rule sorts first)
+        (50, ch('e')),
+        (20, KeyCode::Tab),
+        (20, KeyCode::Tab),
+    ];
+    keys.extend(typed(", 443/tcp"));
+    keys.extend([(50, KeyCode::Enter), (300, ch('y')), (400, KeyCode::F(12))]);
+    let model = key_session(
+        &server,
+        writes_model(),
+        Some(tui_guard(audit.clone())),
+        keys,
+    )
+    .await;
+    assert_eq!(
+        model.status.text,
+        "updated /orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1 (pending)"
+    );
+    assert_eq!(
+        model.stats.calls, 9,
+        "health + four lists + rulesets + the plan's rule GET + PUT + one rulesets reload"
+    );
+    assert_eq!(writes_seen(&server).await, vec!["PUT"]);
+    assert_eq!(audit.entries().len(), 1);
+    assert_eq!(model.busy, 0);
+}
+
+#[tokio::test]
+async fn delete_deny_rule_sends_one_delete() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    mount_rule_sets(&server, 2).await;
+    Mock::given(method("DELETE"))
+        .and(path(
+            "/api/v2/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8",
+        ))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let audit = MemoryAudit::new();
+    let keys = vec![
+        (500, ch('2')),
+        (300, KeyCode::Tab),
+        (50, ch('x')), // row 0: the override deny rule 8
+        (300, ch('y')),
+        (400, KeyCode::F(12)),
+    ];
+    let model = key_session(
+        &server,
+        writes_model(),
+        Some(tui_guard(audit.clone())),
+        keys,
+    )
+    .await;
+    assert_eq!(
+        model.status.text,
+        "deleted /orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8 (pending)"
+    );
+    assert_eq!(
+        model.stats.calls, 8,
+        "health + four lists + rulesets + DELETE + one rulesets reload"
+    );
+    assert_eq!(writes_seen(&server).await, vec!["DELETE"]);
+    assert_eq!(audit.entries()[0].method, pce::WriteMethod::Delete);
+    assert_eq!(model.busy, 0);
+}

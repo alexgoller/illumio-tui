@@ -5,8 +5,8 @@ use crate::tui::form::Form;
 use crate::tui::table::{Column, SortKey, TableView};
 use crate::tui::ui::theme::Theme;
 use pce::models::{
-    DenyRule, Event, EventFilter, IpList, Label, LabelGroup, PendingChange, PolicyScope, RuleSet,
-    Service, VenHealth, Workload,
+    DenyRule, Event, EventFilter, IpList, Label, LabelGroup, PendingChange, PolicyScope, Rule,
+    RuleSet, Service, VenHealth, Workload,
 };
 use pce::traffic::{BlockedGroup, FlowGroup, ResolvedFlow, blocked_summary, group_by_labels};
 use pce::write::Plan;
@@ -1039,6 +1039,36 @@ impl PolicyState {
         self.raw.iter().find(|r| r.href == href)
     }
 
+    /// An allow rule by href, with its ruleset's href.
+    pub fn find_rule(&self, href: &str) -> Option<(Rule, String)> {
+        self.raw.iter().find_map(|rs| {
+            rs.rules
+                .iter()
+                .find(|r| r.href == href)
+                .map(|r| (r.clone(), rs.href.clone()))
+        })
+    }
+
+    /// A deny rule by href (inline, or fetched from the fallback endpoint),
+    /// with its ruleset's href.
+    pub fn find_deny_rule(&self, href: &str) -> Option<(DenyRule, String)> {
+        self.raw
+            .iter()
+            .find_map(|rs| {
+                rs.deny_rules
+                    .iter()
+                    .find(|d| d.href == href)
+                    .map(|d| (d.clone(), rs.href.clone()))
+            })
+            .or_else(|| {
+                self.fallback_deny.iter().find_map(|(rs, list)| {
+                    list.iter()
+                        .find(|d| d.href == href)
+                        .map(|d| (d.clone(), rs.clone()))
+                })
+            })
+    }
+
     /// The selected ruleset has no inline deny rules and its endpoint list was
     /// neither fetched nor requested: the rules pane may be missing deny rules.
     pub fn deny_not_loaded(&self) -> bool {
@@ -1958,5 +1988,38 @@ mod tests {
             assert!((c.cell)(&e).len() < 5, "{}", c.title);
         }
         assert_eq!((event_columns()[0].cell)(&e), "");
+    }
+
+    #[test]
+    fn rules_are_found_by_href_inline_or_in_the_deny_fallback() {
+        let mut p = PolicyState::new(60);
+        p.raw = serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
+        let (r, rs) = p
+            .find_rule("/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/2")
+            .unwrap();
+        assert_eq!(r.description.as_deref(), Some("corp to web"));
+        assert_eq!(rs, "/orgs/5/sec_policy/draft/rule_sets/100");
+        let (d, _) = p
+            .find_deny_rule("/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8")
+            .unwrap();
+        assert!(d.override_);
+        assert!(
+            p.find_rule("/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8")
+                .is_none()
+        );
+        let fetched: DenyRule = serde_json::from_value(serde_json::json!({
+            "href": "/orgs/5/sec_policy/draft/rule_sets/101/deny_rules/9",
+            "providers": [{"actors": "ams"}], "consumers": [{"actors": "ams"}],
+            "ingress_services": [{"port": 23, "proto": 6}]
+        }))
+        .unwrap();
+        p.fallback_deny.insert(
+            "/orgs/5/sec_policy/draft/rule_sets/101".into(),
+            vec![fetched],
+        );
+        let (_, rs) = p
+            .find_deny_rule("/orgs/5/sec_policy/draft/rule_sets/101/deny_rules/9")
+            .unwrap();
+        assert_eq!(rs, "/orgs/5/sec_policy/draft/rule_sets/101");
     }
 }

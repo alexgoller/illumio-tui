@@ -13,7 +13,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use pce::models::{EventFilter, PolicyScope};
 use pce::traffic::QueryProgress;
 use pce::write::{Outcome, Plan, WriteError};
-use pce::{CacheMode, WriteMethod};
+use pce::{CacheMode, RuleKind, WriteMethod};
 use std::time::Instant;
 
 pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
@@ -1282,8 +1282,10 @@ fn policy_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 model.status = model.policy.auto.toggle();
                 return Vec::new();
             }
-            KeyCode::Char(c @ ('n' | 'e' | 'x')) if model.policy.pane == PolicyPane::RuleSets => {
-                return policy_edit_key(model, c);
+            KeyCode::Char(c @ ('n' | 'e' | 'x')) => return policy_edit_key(model, c),
+            // `N` (a deny rule) is bound on the rules pane only.
+            KeyCode::Char('N') if model.policy.pane == PolicyPane::Rules => {
+                return policy_edit_key(model, 'N');
             }
             KeyCode::Tab | KeyCode::BackTab => {
                 model.policy.pane = match model.policy.pane {
@@ -1822,7 +1824,11 @@ fn policy_edit_key(model: &mut Model, c: char) -> Vec<Cmd> {
         model.status = StatusLine::warn("switch to draft to edit policy");
         return Vec::new();
     }
-    let Some(intent) = ruleset_intent(&model.policy, c) else {
+    let intent = match model.policy.pane {
+        PolicyPane::RuleSets => ruleset_intent(&model.policy, c),
+        PolicyPane::Rules => rule_intent(&model.policy, c),
+    };
+    let Some(intent) = intent else {
         model.status = StatusLine::warn("no row selected");
         return Vec::new();
     };
@@ -1840,6 +1846,29 @@ fn ruleset_intent(p: &PolicyState, c: char) -> Option<EditIntent> {
     } else {
         EditIntent::DeleteRuleSet(rs)
     })
+}
+
+/// `n` / `N` a new allow / deny rule in the selected ruleset; `e` / `x` the
+/// selected rule, allow or deny by its kind, found by href in what was loaded.
+fn rule_intent(p: &PolicyState, c: char) -> Option<EditIntent> {
+    let ruleset_href = p.selected_href()?;
+    match c {
+        'n' => return Some(EditIntent::CreateRule { ruleset_href }),
+        'N' => return Some(EditIntent::CreateDenyRule { ruleset_href }),
+        _ => {}
+    }
+    let view = p.rules.selected_item()?;
+    let href = view.href.clone();
+    match (c, view.kind == RuleKind::Allow) {
+        ('x', true) => Some(EditIntent::DeleteRule { href }),
+        ('x', false) => Some(EditIntent::DeleteDenyRule { href }),
+        (_, true) => p
+            .find_rule(&href)
+            .map(|(r, rs)| EditIntent::UpdateRule(r, rs)),
+        (_, false) => p
+            .find_deny_rule(&href)
+            .map(|(d, rs)| EditIntent::UpdateDenyRule(d, rs)),
+    }
 }
 
 /// `:draft` / `:active`: like `d` on the Policy screen, but explicit. The scope
@@ -5699,5 +5728,98 @@ mod tests {
             "{}",
             m.status.text
         );
+    }
+
+    #[test]
+    fn rule_keys_open_prefilled_forms_and_x_plans_by_kind() {
+        use crate::tui::edit::WriteIntent;
+        use crate::tui::test_support::model_with_policy;
+        let mut m = writes_on(model_with_policy());
+        m.screen = Screen::Policy;
+        update(&mut m, kc(KeyCode::Tab));
+        assert_eq!(m.policy.pane, PolicyPane::Rules);
+        update(&mut m, key('n'));
+        assert!(
+            matches!(&m.overlay, Overlay::Form(f) if f.title == "New allow rule in ruleset 100"),
+            "{:?}",
+            m.overlay
+        );
+        update(&mut m, kc(KeyCode::Esc));
+        update(&mut m, key('N'));
+        assert!(
+            matches!(&m.overlay, Overlay::Form(f) if f.title == "New deny rule in ruleset 100"),
+            "{:?}",
+            m.overlay
+        );
+        update(&mut m, kc(KeyCode::Esc));
+        // Row 0 is the override deny rule 8 (evaluation order).
+        update(&mut m, key('e'));
+        match &m.overlay {
+            Overlay::Form(f) => {
+                assert_eq!(f.title, "Edit deny rule 8 in ruleset 100");
+                assert_eq!(f.value("Override"), "y");
+            }
+            other => panic!("{other:?}"),
+        }
+        update(&mut m, kc(KeyCode::Esc));
+        assert_eq!(
+            update(&mut m, key('x')),
+            vec![Cmd::PlanWrite(WriteIntent::DeleteDenyRule {
+                href: "/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8".into()
+            })]
+        );
+        m.writes.in_flight = false;
+        update(&mut m, key('j')); // allow rule 1
+        update(&mut m, key('e'));
+        match &m.overlay {
+            Overlay::Form(f) => {
+                assert_eq!(f.title, "Edit allow rule 1 in ruleset 100");
+                assert_eq!(f.value("Services"), "PostgreSQL");
+            }
+            other => panic!("{other:?}"),
+        }
+        update(&mut m, kc(KeyCode::Esc));
+        assert_eq!(
+            update(&mut m, key('x')),
+            vec![Cmd::PlanWrite(WriteIntent::DeleteRule {
+                href: "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1".into()
+            })]
+        );
+    }
+
+    #[test]
+    fn rules_pane_keys_go_through_the_same_refusals() {
+        use crate::tui::test_support::model_with_policy;
+        let mut m = model_with_policy();
+        m.screen = Screen::Policy;
+        update(&mut m, kc(KeyCode::Tab));
+        for c in ['n', 'N', 'e', 'x'] {
+            assert!(update(&mut m, key(c)).is_empty(), "{c}");
+            assert_eq!(m.status.text, "started without --allow-writes");
+            assert_eq!(m.overlay, Overlay::None);
+        }
+        let mut m = writes_on(model_with_policy());
+        m.screen = Screen::Policy;
+        m.policy.scope = PolicyScope::Active;
+        update(&mut m, kc(KeyCode::Tab));
+        for c in ['n', 'N', 'e', 'x'] {
+            assert!(update(&mut m, key(c)).is_empty(), "{c}");
+            assert_eq!(m.status.text, "switch to draft to edit policy");
+            assert_eq!(m.overlay, Overlay::None);
+        }
+        // `N` means nothing on the rulesets pane.
+        let mut m = writes_on(model_with_policy());
+        m.screen = Screen::Policy;
+        m.status = StatusLine::info("ready");
+        assert!(update(&mut m, key('N')).is_empty());
+        assert_eq!(m.overlay, Overlay::None);
+        assert_eq!(m.status.text, "ready");
+        // No rule rows: e and x have nothing to act on.
+        update(&mut m, kc(KeyCode::Tab));
+        m.policy.rules.set_rows(Vec::new());
+        for c in ['e', 'x'] {
+            assert!(update(&mut m, key(c)).is_empty(), "{c}");
+            assert_eq!(m.status.text, "no row selected");
+        }
     }
 }
