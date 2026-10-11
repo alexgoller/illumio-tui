@@ -4,7 +4,7 @@
 use crate::cli::error::CliError;
 use crate::cli::{Context, GlobalArgs};
 use crate::tui::model::ObjectKind;
-use crate::tui::model::{Limits, Model, ProfileInfo};
+use crate::tui::model::{Limits, Model, ProfileInfo, WritesState};
 use crate::tui::msg::{Cmd, Msg, ObjectsPayload, QueryOutcome};
 use crate::tui::{update, view};
 use crossterm::event::{
@@ -13,7 +13,9 @@ use crossterm::event::{
 };
 use futures::{Stream, StreamExt};
 use pce::models::WorkloadFilter;
+use pce::write::{JsonlAudit, WriteContext, WriteGuard};
 use pce::{CacheMode, Pce};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -39,13 +41,17 @@ impl TaskTx {
     }
 }
 
-/// What a `:profile` switch built off the event loop: the new client and what
-/// the model needs to know about it, or the error to show.
-type SwitchResult = Result<(Pce, ProfileInfo, Limits), String>;
+/// What a `:profile` switch built off the event loop: the new client, what
+/// the model needs to know about it and the new profile's write guard, or
+/// the error to show.
+type SwitchResult = Result<(Pce, ProfileInfo, Limits, Option<WriteGuard>, WritesState), String>;
 
 pub struct Runtime {
     pub pce: Arc<Pce>,
     pub model: Model,
+    /// The current profile's write guard; `None` while writes are off. Only
+    /// the runtime holds it: `update` sees `model.writes` and nothing else.
+    pub writer: Option<Arc<WriteGuard>>,
     /// The flags the TUI started with; `:profile` rebuilds the connection from them.
     global: Option<GlobalArgs>,
     generation: Arc<AtomicU64>,
@@ -59,7 +65,7 @@ pub struct Runtime {
 
 impl Runtime {
     pub fn new(pce: Arc<Pce>, model: Model) -> (Self, UnboundedSender<Msg>) {
-        Self::build(pce, model, None)
+        Self::build(pce, model, None, None)
     }
 
     pub fn with_args(
@@ -67,13 +73,23 @@ impl Runtime {
         model: Model,
         global: GlobalArgs,
     ) -> (Self, UnboundedSender<Msg>) {
-        Self::build(pce, model, Some(global))
+        Self::build(pce, model, Some(global), None)
+    }
+
+    /// A runtime that may write (tests; `run` builds the guard from config).
+    pub fn with_writer(
+        pce: Arc<Pce>,
+        model: Model,
+        writer: WriteGuard,
+    ) -> (Self, UnboundedSender<Msg>) {
+        Self::build(pce, model, None, Some(Arc::new(writer)))
     }
 
     fn build(
         pce: Arc<Pce>,
         model: Model,
         global: Option<GlobalArgs>,
+        writer: Option<Arc<WriteGuard>>,
     ) -> (Self, UnboundedSender<Msg>) {
         let (tx, rx) = unbounded_channel();
         let (switch_tx, switch_rx) = unbounded_channel();
@@ -81,6 +97,7 @@ impl Runtime {
             Self {
                 pce,
                 model,
+                writer,
                 global,
                 generation: Arc::new(AtomicU64::new(0)),
                 tx: tx.clone(),
@@ -133,7 +150,8 @@ impl Runtime {
                                 traffic_max_results: ctx.config.traffic_max_results,
                                 traffic_default_window: ctx.config.traffic_default_window.clone(),
                             };
-                            (ctx.pce, info, limits)
+                            let (writer, writes) = build_writer(&ctx);
+                            (ctx.pce, info, limits, writer, writes)
                         })
                         .map_err(|e| e.to_string());
                     let _ = done.send(result);
@@ -312,8 +330,10 @@ impl Runtime {
             self.apply(m);
         }
         let msg = match result {
-            Ok((pce, info, limits)) => {
+            Ok((pce, info, limits, writer, writes)) => {
                 self.pce = Arc::new(pce);
+                self.writer = writer.map(Arc::new);
+                self.model.writes = writes;
                 self.generation.fetch_add(1, Ordering::SeqCst);
                 Msg::ProfileSwitched(Ok((info, limits)))
             }
@@ -357,6 +377,50 @@ impl Runtime {
         } else {
             None
         }
+    }
+}
+
+const AUDIT_PATH_UNKNOWN: &str = "audit log path unknown: no $XDG_STATE_HOME and no home directory";
+
+/// The TUI's write guard for one profile, from the same inputs as the CLI's
+/// (`cli/write.rs`, `write_guard`): the profile's `writes`, the
+/// `--allow-writes` the TUI was started with, and the JSONL audit log, with
+/// `source: "tui"`. Any refusal leaves writes off with its reason.
+fn build_writer(ctx: &Context) -> (Option<WriteGuard>, WritesState) {
+    writer_from(
+        ctx.config.writes,
+        ctx.allow_writes,
+        JsonlAudit::default_path(),
+        WriteContext {
+            profile: ctx.config.profile_name.clone(),
+            host: ctx.config.host.clone(),
+            org_id: ctx.config.org_id,
+            source: "tui".into(),
+        },
+    )
+}
+
+fn writer_from(
+    profile_allows: bool,
+    flag_allows: bool,
+    audit_path: Option<PathBuf>,
+    ctx: WriteContext,
+) -> (Option<WriteGuard>, WritesState) {
+    // Profile and flag first: a run without them never touches the audit path.
+    if let Err(refused) = WriteGuard::check(profile_allows, flag_allows) {
+        return (None, WritesState::off(refused.to_string()));
+    }
+    let Some(path) = audit_path else {
+        return (None, WritesState::off(AUDIT_PATH_UNKNOWN));
+    };
+    match WriteGuard::new(
+        profile_allows,
+        flag_allows,
+        Box::new(JsonlAudit::new(path)),
+        ctx,
+    ) {
+        Ok(guard) => (Some(guard), WritesState::on()),
+        Err(refused) => (None, WritesState::off(refused.to_string())),
     }
 }
 
@@ -418,6 +482,7 @@ where
             60,
             1000,
             "24h".into(),
+            WritesState::default(),
         ),
     )
 }
@@ -444,6 +509,7 @@ fn install_panic_hook() {
 /// CLI, takes over the terminal, and restores it on every exit path.
 pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
     let ctx = Context::new(&global)?;
+    let (writer, writes) = build_writer(&ctx);
     let cfg = &ctx.config;
     let profile = ProfileInfo {
         name: cfg.profile_name.clone(),
@@ -457,8 +523,10 @@ pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
         cfg.auto_refresh_min_seconds,
         cfg.traffic_max_results,
         cfg.traffic_default_window.clone(),
+        writes,
     );
     let (mut rt, _tx) = Runtime::with_args(Arc::new(ctx.pce), model, global);
+    rt.writer = writer.map(Arc::new);
     rt.execute(Cmd::Connect);
 
     let mut terminal = ratatui::init();
@@ -526,5 +594,95 @@ mod tests {
         let first = |what| seen.iter().position(|s| *s == what);
         assert!(first("restore").is_some(), "{seen:?}");
         assert!(first("restore") < first("previous"), "{seen:?}");
+    }
+
+    fn write_ctx() -> WriteContext {
+        WriteContext {
+            profile: "demo".into(),
+            host: "pce.example".into(),
+            org_id: 5,
+            source: "tui".into(),
+        }
+    }
+
+    #[test]
+    fn writer_needs_both_switches_and_a_writable_audit_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = || Some(dir.path().join("illumio-tui").join("writes.jsonl"));
+        let (g, w) = writer_from(false, true, path(), write_ctx());
+        assert!(g.is_none());
+        assert!(!w.enabled);
+        assert!(
+            w.reason
+                .as_deref()
+                .unwrap()
+                .contains("not enabled for this profile"),
+            "{w:?}"
+        );
+        let (g, w) = writer_from(true, false, path(), write_ctx());
+        assert!(g.is_none());
+        assert_eq!(w.reason.as_deref(), Some("writes need --allow-writes"));
+        let (g, w) = writer_from(true, true, None, write_ctx());
+        assert!(g.is_none());
+        assert_eq!(w.reason.as_deref(), Some(AUDIT_PATH_UNKNOWN));
+        let blocker = dir.path().join("a-file");
+        std::fs::write(&blocker, "x").unwrap();
+        let (g, w) = writer_from(true, true, Some(blocker.join("writes.jsonl")), write_ctx());
+        assert!(g.is_none());
+        assert!(
+            w.reason
+                .as_deref()
+                .unwrap()
+                .starts_with("audit log is not writable"),
+            "{w:?}"
+        );
+        let (g, w) = writer_from(true, true, path(), write_ctx());
+        assert_eq!(w, WritesState::on());
+        assert_eq!(g.unwrap().context().source, "tui");
+    }
+
+    #[tokio::test]
+    async fn a_switch_without_a_guard_drops_it_and_clears_the_marker() {
+        use pce::write::MemoryAudit;
+        let pce = || {
+            Pce::new(
+                pce::PceClient::new(pce::ClientConfig::new(
+                    "pce.invalid",
+                    5,
+                    pce::Credentials::new("k", "s"),
+                ))
+                .unwrap(),
+            )
+        };
+        let guard = WriteGuard::new(true, true, Box::new(MemoryAudit::new()), write_ctx()).unwrap();
+        let mut model = crate::tui::test_support::model_fixture();
+        model.writes = WritesState::on();
+        let (mut rt, _tx) = Runtime::with_writer(Arc::new(pce()), model, guard);
+        assert!(rt.writer.is_some());
+        // A failed switch keeps the guard and the marker.
+        rt.finish_switch(Err("profile \"nope\" not found".into()));
+        assert!(rt.writer.is_some());
+        assert!(rt.model.writes.enabled);
+        rt.finish_switch(Ok((
+            pce(),
+            ProfileInfo {
+                name: "ro".into(),
+                host: "pce.invalid".into(),
+                org_id: 5,
+            },
+            Limits {
+                auto_refresh_min_seconds: 60,
+                traffic_max_results: 1000,
+                traffic_default_window: "24h".into(),
+            },
+            None,
+            WritesState::off("writes need --allow-writes"),
+        )));
+        assert!(rt.writer.is_none());
+        assert!(!rt.model.writes.enabled);
+        assert_eq!(
+            rt.model.writes.reason.as_deref(),
+            Some("writes need --allow-writes")
+        );
     }
 }

@@ -99,6 +99,39 @@ impl StatusLine {
     }
 }
 
+/// Whether editing keys may start a write flow. The guard itself lives in
+/// the runtime (`Runtime::writer`); the model never holds it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WritesState {
+    /// Both switches on and the audit sink writable.
+    pub enabled: bool,
+    /// Why not, for the status line.
+    pub reason: Option<String>,
+}
+
+impl WritesState {
+    pub fn on() -> Self {
+        Self {
+            enabled: true,
+            reason: None,
+        }
+    }
+
+    pub fn off(reason: impl Into<String>) -> Self {
+        Self {
+            enabled: false,
+            reason: Some(reason.into()),
+        }
+    }
+
+    /// The status-line text for an editing key pressed while writes are off.
+    pub fn refusal(&self) -> String {
+        self.reason
+            .clone()
+            .unwrap_or_else(|| "writes are not enabled".into())
+    }
+}
+
 /// A modal drawn on top of the current screen. Later tasks add `Error`, `Detail`.
 #[derive(Debug, Clone)]
 pub enum Overlay {
@@ -1688,6 +1721,8 @@ pub struct Model {
     pub size: (u16, u16),
     pub focused: bool,
     pub status: StatusLine,
+    /// Set at startup and on every profile switch from the runtime's guard.
+    pub writes: WritesState,
     /// Number of background tasks in flight; the runtime ticks at 250 ms while > 0.
     pub busy: usize,
     /// A `:profile` switch is being built off the event loop; a second one
@@ -1704,6 +1739,7 @@ impl Model {
         auto_refresh_min_seconds: u64,
         traffic_max_results: u32,
         traffic_default_window: String,
+        writes: WritesState,
     ) -> Self {
         let theme = Theme::from_name(&theme_name);
         let traffic = TrafficState::new(
@@ -1736,6 +1772,7 @@ impl Model {
             size: (80, 24),
             focused: true,
             status: StatusLine::info("connecting…"),
+            writes,
             busy: 0,
             switching: false,
             quit: false,

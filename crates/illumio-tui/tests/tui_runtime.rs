@@ -1,7 +1,7 @@
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use futures::{StreamExt, stream};
 use illumio_tui::tui::app::{Runtime, run_loop};
-use illumio_tui::tui::model::{Connection, Model, ProfileInfo};
+use illumio_tui::tui::model::{Connection, Model, ProfileInfo, WritesState};
 use illumio_tui::tui::msg::Cmd;
 use pce::client::{ClientConfig, PceClient};
 use pce::{Credentials, Pce};
@@ -42,6 +42,7 @@ fn model() -> Model {
         60,
         1000,
         "24h".into(),
+        WritesState::default(),
     )
 }
 

@@ -424,3 +424,25 @@ fn events_wide_editor_and_light_styled() {
     m.set_theme("light");
     insta::assert_snapshot!("light_events_160x48", render_styled(&m, 160, 48));
 }
+
+#[test]
+fn header_shows_the_writes_marker_only_when_enabled() {
+    use illumio_tui::tui::model::WritesState;
+    let mut m = model_fixture();
+    let first = |m: &illumio_tui::tui::Model| {
+        render_to_string(m, 80, 24)
+            .lines()
+            .next()
+            .unwrap_or("")
+            .to_string()
+    };
+    assert!(!first(&m).contains("writes"), "{}", first(&m));
+    m.writes = WritesState::on();
+    assert!(first(&m).contains("● · ✎ writes"), "{}", first(&m));
+    insta::assert_snapshot!("header_writes_dark_styled_80x24", render_styled(&m, 80, 24));
+    m.set_theme("light");
+    insta::assert_snapshot!(
+        "header_writes_light_styled_80x24",
+        render_styled(&m, 80, 24)
+    );
+}

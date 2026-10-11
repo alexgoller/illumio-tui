@@ -1828,6 +1828,7 @@ mod tests {
             60,
             1000,
             "24h".into(),
+            crate::tui::model::WritesState::default(),
         );
         assert!(matches!(m.connection, Connection::Connecting));
         let cmds = update(&mut m, Msg::Connected);

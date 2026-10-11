@@ -70,14 +70,18 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect) {
     };
     let kb = model.stats.bytes as f64 / 1024.0;
     let right = format!("api {} calls · {kb:.1} KB ", model.stats.calls);
-    let left = Line::from(vec![
+    let mut spans = vec![
         Span::styled(" illumio-tui ", t.title_style()),
         Span::styled(
             format!("{} · org {} ", model.profile.host, model.profile.org_id),
             Style::new().fg(t.fg),
         ),
         conn,
-    ]);
+    ];
+    if model.writes.enabled {
+        spans.push(Span::styled(" · ✎ writes", Style::new().fg(t.warn)));
+    }
+    let left = Line::from(spans);
     let left_w = left.width() as u16;
     let right_w = Line::from(right.as_str()).width() as u16;
     f.render_widget(Paragraph::new(left).style(t.base()), area);

@@ -32,7 +32,14 @@ pub fn model_fixture() -> Model {
         host: "pce.example".into(),
         org_id: 5,
     };
-    let mut m = Model::new_connecting(profile, "dark".into(), 60, 1000, "24h".into());
+    let mut m = Model::new_connecting(
+        profile,
+        "dark".into(),
+        60,
+        1000,
+        "24h".into(),
+        crate::tui::model::WritesState::off("started without --allow-writes"),
+    );
     m.connection = Connection::Connected {
         index: Some(fixture_index()),
         index_age_secs: 0,
