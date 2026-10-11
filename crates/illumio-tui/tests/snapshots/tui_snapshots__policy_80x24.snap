@@ -11,7 +11,7 @@ expression: out
 │                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭ Rules · Shop-Prod ───────────────────────────────────────────────────────────╮
+╭ Rules · app=shop, env=prod ──────────────────────────────────────────────────╮
 │  kind          on  consumers           providers          services           │
 │▸ override_deny ✓   All workloads       role=db            22/tcp             │
 │  allow         ✓   role=web            role=db            PostgreSQL         │

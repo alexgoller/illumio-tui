@@ -4,7 +4,7 @@ expression: "render_to_string(&m, 160, 48)"
 ---
  illumio-tui pce.example · org 5 ●                                                                                                        api 5 calls · 20.8 KB
   1 Traffic  │  2 Policy  │  3 Labels & objects  │  4 Workloads  │  5 Events
-╭ Rulesets ──────────────────────────────────────────── draft · 5s ago ╮╭ Rules · Shop-Prod ───────────────────────────────────────────────────────────────────╮
+╭ Rulesets ──────────────────────────────────────────── draft · 5s ago ╮╭ Rules · app=shop, env=prod ──────────────────────────────────────────────────────────╮
 │  ruleset                on  scopes                      rules pending││  kind          on  consumers             providers              services             │
 │▸ Shop-Prod              ✓   app=shop & env=prod             4        ││▸ override_deny ✓   All workloads         role=db                22/tcp               │
 │  Global-Infra           ✗   All                             1 create ││  allow         ✓   role=web              role=db                PostgreSQL           │

@@ -464,7 +464,7 @@ fn rule_set_fields(rs: Option<&RuleSet>, idx: &NameIndex) -> Vec<Field> {
 
 /// Scopes as the Scopes field shows them, `app=web, env=prod | group:G`;
 /// empty for a ruleset that applies everywhere (`[[]]` or `[]`).
-fn scopes_text(scopes: &[Vec<Actor>], idx: &NameIndex) -> String {
+pub fn scopes_text(scopes: &[Vec<Actor>], idx: &NameIndex) -> String {
     scopes
         .iter()
         .filter(|s| !s.is_empty())

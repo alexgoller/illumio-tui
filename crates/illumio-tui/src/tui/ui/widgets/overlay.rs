@@ -63,7 +63,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "filter · event as JSON · sort by severity",
     ),
     (
-        "n / e / x  (writes)",
+        "n / e / x (writes)",
         "new / edit / delete on Objects, Workloads, Policy",
     ),
     (
