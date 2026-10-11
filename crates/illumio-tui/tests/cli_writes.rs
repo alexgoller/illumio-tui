@@ -2681,6 +2681,32 @@ mod policy {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn rules_add_impact_with_providers_resolved_as_virtual_services_counts_none() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_lists(&server).await;
+        mount_get(&server, "/orgs/5/workloads", fixture_workloads()).await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args(SHOP_RULE)
+                .args([
+                    "--resolve-providers-as",
+                    "virtual_services",
+                    "--dry-run",
+                    "--impact",
+                ])
+                .assert()
+                .success(),
+        );
+        let impact = &out["data"]["impact"];
+        assert_eq!(impact["providers"], 0);
+        assert_eq!(
+            impact["unsupported"],
+            json!(["providers resolve as virtual_services only"])
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn rules_add_yes_impact_is_computed_before_the_post() {
         let server = MockServer::start().await;
         let state = tempfile::tempdir().unwrap();

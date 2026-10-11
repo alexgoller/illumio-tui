@@ -234,10 +234,16 @@ counts under its own `key`, its sub-groups expanded once, cycles ended);
 `all` matches everything, a workload actor its href, IP lists and virtual
 services nothing (lists are reported with their size, virtual services as
 `unsupported`); exclusions remove last. Label groups and IP lists are looked
-up in the `NameIndex` (`label_group`, `ip_list`). `RuleActors` carries a
-rule's sides from a loaded rule or deny rule, or from a planned request body
-merged over the loaded rule, so the CLI and the TUI evaluate exactly what
-would be sent.
+up in the `NameIndex` (`label_group`, `ip_list`). A label the index does not
+know yet counts under the key the workloads carry for it (`WorkloadLabel.key`,
+gathered once per evaluation); a label group it does not know is skipped and
+noted in `unsupported` (`label_group <href> unknown to the index`) instead of
+zeroing the side. `RuleActors` carries a rule's sides, and per side whether
+`resolve_labels_as` names `workloads` (deny rules always do): a side resolved
+as virtual services only matches no workload through its labels, groups or
+`all`, and says so in `unsupported`. It comes from a loaded rule or deny rule,
+or from a planned request body merged over the loaded rule, so the CLI and the
+TUI evaluate exactly what would be sent.
 
 The TUI reads the workload list only on `i` (`Cmd::LoadWorkloads(Use)`,
 nothing when it is cached or on its way). `tui/impact.rs` computes from

@@ -3,11 +3,11 @@
 //! caller brings the workloads (one cached read) and the name index; IP
 //! lists are reported with their size, never expanded into peers.
 use crate::iplist_size::{IpListSize, ip_list_size};
-use crate::models::{Actor, DenyRule, Rule, Workload};
+use crate::models::{Actor, DenyRule, ResolveLabelsAs, Rule, Workload};
 use crate::resolve::{NameIndex, canon, describe_actor};
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// What a rule is evaluated over. Label groups and IP lists are looked up
 /// in `index`, which is built from the same lists.
@@ -68,7 +68,10 @@ pub struct Impact {
     pub consumers: usize,
     pub per_scope: Vec<ScopeImpact>,
     pub ip_lists: Vec<IpListRef>,
-    /// Virtual service and virtual server hrefs: not evaluated, not counted.
+    /// What was not evaluated: a side resolved as virtual services only
+    /// (`providers resolve as virtual_services only`), a label group unknown
+    /// to the index (`label_group <href> unknown to the index`, skipped), and
+    /// virtual service and virtual server hrefs (not counted).
     pub unsupported: Vec<String>,
     /// The workload list was truncated: the counts are lower bounds.
     pub truncated: bool,
@@ -106,34 +109,66 @@ impl Impact {
 }
 
 /// The sides of a rule the evaluator needs.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RuleActors {
     pub providers: Vec<Actor>,
     pub consumers: Vec<Actor>,
     pub unscoped_consumers: bool,
+    /// The providers' labels, label groups and `all` resolve to workloads
+    /// (`resolve_labels_as.providers` names `workloads`); when not, they
+    /// match no workload.
+    pub providers_as_workloads: bool,
+    /// The same for the consumers.
+    pub consumers_as_workloads: bool,
+}
+
+impl Default for RuleActors {
+    fn default() -> Self {
+        Self {
+            providers: Vec::new(),
+            consumers: Vec::new(),
+            unscoped_consumers: false,
+            providers_as_workloads: true,
+            consumers_as_workloads: true,
+        }
+    }
+}
+
+/// Per side whether `resolve_labels_as` names `workloads`.
+fn as_workloads(r: &ResolveLabelsAs) -> (bool, bool) {
+    let has = |v: &[String]| v.iter().any(|s| s == "workloads");
+    (has(&r.providers), has(&r.consumers))
 }
 
 impl RuleActors {
+    /// A rule without `resolve_labels_as` resolves both sides as workloads.
     pub fn of_rule(r: &Rule) -> Self {
+        let (p, c) = r
+            .resolve_labels_as
+            .as_ref()
+            .map_or((true, true), as_workloads);
         Self {
             providers: r.providers.clone(),
             consumers: r.consumers.clone(),
             unscoped_consumers: r.unscoped_consumers.unwrap_or(false),
+            providers_as_workloads: p,
+            consumers_as_workloads: c,
         }
     }
 
-    /// A deny rule's consumers are always scoped.
+    /// A deny rule's consumers are always scoped, and both sides resolve as
+    /// workloads.
     pub fn of_deny(d: &DenyRule) -> Self {
         Self {
             providers: d.providers.clone(),
             consumers: d.consumers.clone(),
-            unscoped_consumers: false,
+            ..Self::default()
         }
     }
 
     /// What a planned rule write leaves: the body's `providers`,
-    /// `consumers` and `unscoped_consumers` where it has them, `base`'s
-    /// (the loaded rule, for an update) otherwise.
+    /// `consumers`, `unscoped_consumers` and `resolve_labels_as` where it has
+    /// them, `base`'s (the loaded rule, for an update) otherwise.
     pub fn planned(body: Option<&Value>, base: Option<&RuleActors>) -> Self {
         let base = base.cloned().unwrap_or_default();
         let side = |key: &str, old: Vec<Actor>| {
@@ -141,6 +176,13 @@ impl RuleActors {
                 .and_then(|v| serde_json::from_value::<Vec<Actor>>(v.clone()).ok())
                 .unwrap_or(old)
         };
+        let (p, c) = body
+            .and_then(|b| b.get("resolve_labels_as"))
+            .and_then(|v| serde_json::from_value::<ResolveLabelsAs>(v.clone()).ok())
+            .map_or(
+                (base.providers_as_workloads, base.consumers_as_workloads),
+                |r| as_workloads(&r),
+            );
         Self {
             providers: side("providers", base.providers),
             consumers: side("consumers", base.consumers),
@@ -148,6 +190,8 @@ impl RuleActors {
                 .and_then(|b| b.get("unscoped_consumers"))
                 .and_then(Value::as_bool)
                 .unwrap_or(base.unscoped_consumers),
+            providers_as_workloads: p,
+            consumers_as_workloads: c,
         }
     }
 }
@@ -200,28 +244,92 @@ struct Matcher {
     excluded: HashSet<String>,
 }
 
+/// What a side or scope evaluation needs besides its actors: the index,
+/// each workload label's key as the workloads carry it (for labels the
+/// index does not know yet), and the notes collected for `unsupported`.
+struct Ctx<'a> {
+    idx: &'a NameIndex,
+    keys: HashMap<&'a str, &'a str>,
+    notes: Vec<String>,
+}
+
+impl<'a> Ctx<'a> {
+    fn new(idx: &'a NameIndex, workloads: &'a [Workload]) -> Self {
+        let keys = workloads
+            .iter()
+            .flat_map(|w| &w.labels)
+            .filter_map(|l| Some((l.href.as_str(), l.key.as_deref()?)))
+            .collect();
+        Self {
+            idx,
+            keys,
+            notes: Vec::new(),
+        }
+    }
+
+    fn note(&mut self, n: String) {
+        if !self.notes.contains(&n) {
+            self.notes.push(n);
+        }
+    }
+
+    /// The group's member labels, or `None` (and a note) when the index does
+    /// not know the group: it is skipped rather than matching nobody.
+    fn group(&mut self, href: &str) -> Option<HashSet<String>> {
+        if self.idx.label_group(href).is_none() {
+            self.note(format!("label_group {href} unknown to the index"));
+            return None;
+        }
+        Some(group_members(href, self.idx))
+    }
+
+    /// A label's key: from the index, else from a workload carrying it, else
+    /// a bucket of its own.
+    fn key(&self, href: &str) -> String {
+        self.idx.label(href).map_or_else(
+            || {
+                self.keys
+                    .get(href)
+                    .map_or_else(|| format!("?{href}"), |k| (*k).to_string())
+            },
+            |l| l.key.clone(),
+        )
+    }
+}
+
 impl Matcher {
-    fn new(actors: &[Actor], idx: &NameIndex) -> Self {
+    /// `as_workloads == false`: the side's labels, label groups and `all`
+    /// resolve as virtual services, so only workload actors can match.
+    fn new(actors: &[Actor], as_workloads: bool, ctx: &mut Ctx) -> Self {
         let mut m = Self::default();
         for a in actors {
             let excluded = a.exclusion == Some(true);
             if a.actors.as_deref() == Some("ams") {
-                m.all |= !excluded;
+                m.all |= !excluded && as_workloads;
             } else if let Some(l) = &a.label {
+                if !as_workloads {
+                    continue;
+                }
                 if excluded {
                     m.excluded.insert(l.href.clone());
                 } else {
-                    let key = idx
-                        .label(&l.href)
-                        .map_or_else(|| format!("?{}", l.href), |x| x.key.clone());
-                    m.by_key.entry(key).or_default().insert(l.href.clone());
+                    m.by_key
+                        .entry(ctx.key(&l.href))
+                        .or_default()
+                        .insert(l.href.clone());
                 }
             } else if let Some(g) = &a.label_group {
-                let members = group_members(&g.href, idx);
+                let Some(members) = ctx.group(&g.href) else {
+                    continue;
+                };
+                if !as_workloads {
+                    continue;
+                }
                 if excluded {
                     m.excluded.extend(members);
                 } else {
-                    let key = idx
+                    let key = ctx
+                        .idx
                         .label_group(&g.href)
                         .map(|x| x.key.clone())
                         .filter(|k| !k.is_empty())
@@ -257,22 +365,23 @@ impl Matcher {
 struct Scope(Vec<(Option<HashSet<String>>, bool)>);
 
 impl Scope {
-    fn new(members: &[Actor], idx: &NameIndex) -> Self {
+    /// A member group the index does not know is skipped, with a note.
+    fn new(members: &[Actor], ctx: &mut Ctx) -> Self {
         Self(
             members
                 .iter()
-                .map(|a| {
+                .filter_map(|a| {
                     let hrefs = if a.actors.as_deref() == Some("ams") {
                         None
                     } else if let Some(l) = &a.label {
                         Some(HashSet::from([l.href.clone()]))
                     } else if let Some(g) = &a.label_group {
-                        Some(group_members(&g.href, idx))
+                        Some(ctx.group(&g.href)?)
                     } else {
                         // Any other kind in a scope matches nothing.
                         Some(HashSet::new())
                     };
-                    (hrefs, a.exclusion == Some(true))
+                    Some((hrefs, a.exclusion == Some(true)))
                 })
                 .collect(),
         )
@@ -292,22 +401,9 @@ impl Scope {
 /// `{w matching consumers}` kept to `Si` unless `unscoped_consumers`; the
 /// totals are the unions over the scopes. A ruleset without scopes is one
 /// empty scope (everywhere).
-pub fn rule_impact(
-    scopes: &[Vec<Actor>],
-    providers: &[Actor],
-    consumers: &[Actor],
-    unscoped_consumers: bool,
-    inputs: &ImpactInputs,
-) -> Impact {
+pub fn rule_impact(scopes: &[Vec<Actor>], actors: &RuleActors, inputs: &ImpactInputs) -> Impact {
     let labels = workload_labels(inputs.workloads);
-    rule_impact_with(
-        scopes,
-        providers,
-        consumers,
-        unscoped_consumers,
-        inputs,
-        &labels,
-    )
+    rule_impact_with(scopes, actors, inputs, &labels)
 }
 
 /// Each workload's label hrefs, in list order. Built once and shared by
@@ -323,13 +419,13 @@ pub fn workload_labels(workloads: &[Workload]) -> Vec<HashSet<&str>> {
 /// `inputs.workloads`) brought by the caller.
 pub fn rule_impact_with(
     scopes: &[Vec<Actor>],
-    providers: &[Actor],
-    consumers: &[Actor],
-    unscoped_consumers: bool,
+    actors: &RuleActors,
     inputs: &ImpactInputs,
     labels: &[HashSet<&str>],
 ) -> Impact {
     debug_assert_eq!(labels.len(), inputs.workloads.len());
+    let (providers, consumers) = (&actors.providers[..], &actors.consumers[..]);
+    let unscoped_consumers = actors.unscoped_consumers;
     let idx = inputs.index;
     let everywhere = [Vec::new()];
     let scopes = if scopes.is_empty() {
@@ -337,8 +433,17 @@ pub fn rule_impact_with(
     } else {
         scopes
     };
-    let p = Matcher::new(providers, idx);
-    let c = Matcher::new(consumers, idx);
+    let mut ctx = Ctx::new(idx, inputs.workloads);
+    let p = Matcher::new(providers, actors.providers_as_workloads, &mut ctx);
+    let c = Matcher::new(consumers, actors.consumers_as_workloads, &mut ctx);
+    for (side, as_workloads) in [
+        ("providers", actors.providers_as_workloads),
+        ("consumers", actors.consumers_as_workloads),
+    ] {
+        if !as_workloads {
+            ctx.note(format!("{side} resolve as virtual_services only"));
+        }
+    }
     let is_p: Vec<bool> = inputs
         .workloads
         .iter()
@@ -355,7 +460,7 @@ pub fn rule_impact_with(
     let mut all_c = HashSet::new();
     let mut per_scope = Vec::with_capacity(scopes.len());
     for members in scopes {
-        let scope = Scope::new(members, idx);
+        let scope = Scope::new(members, &mut ctx);
         let (mut sp, mut sc) = (0, 0);
         for (i, l) in labels.iter().enumerate() {
             let inside = scope.contains(l);
@@ -375,7 +480,7 @@ pub fn rule_impact_with(
         });
     }
     let mut ip_lists = Vec::new();
-    let mut unsupported = Vec::new();
+    let mut unsupported = ctx.notes;
     for (side, actors) in [(Side::Provider, providers), (Side::Consumer, consumers)] {
         for a in actors {
             if let Some(r) = &a.ip_list {
@@ -472,13 +577,16 @@ mod tests {
             index: &idx,
             truncated: false,
         };
-        rule_impact(
-            scopes,
-            &actors(providers),
-            &actors(consumers),
-            unscoped,
-            &inputs,
-        )
+        rule_impact(scopes, &sides(providers, consumers, unscoped), &inputs)
+    }
+
+    fn sides(providers: Value, consumers: Value, unscoped: bool) -> RuleActors {
+        RuleActors {
+            providers: actors(providers),
+            consumers: actors(consumers),
+            unscoped_consumers: unscoped,
+            ..RuleActors::default()
+        }
     }
 
     const EVERYWHERE: &[Vec<Actor>] = &[];
@@ -494,13 +602,7 @@ mod tests {
             truncated: false,
         };
         let at = |a: RuleActors, scopes: &[Vec<Actor>]| {
-            let i = rule_impact(
-                scopes,
-                &a.providers,
-                &a.consumers,
-                a.unscoped_consumers,
-                &inputs,
-            );
+            let i = rule_impact(scopes, &a, &inputs);
             (i.providers, i.consumers)
         };
         let shop = &sets[0];
@@ -629,10 +731,13 @@ mod tests {
             json!([{"label_group": {"href": "/orgs/5/sec_policy/draft/label_groups/10"}}]),
         )];
         assert_eq!(run(&scope, all(), all(), false).providers, 2);
-        // A group the index does not know matches nothing.
+        // A group the index does not know is skipped (with a note): alone
+        // it leaves nothing positive, so nobody matches.
         let unknown =
             json!([{"label_group": {"href": "/orgs/5/sec_policy/draft/label_groups/77"}}]);
-        assert_eq!(run(EVERYWHERE, unknown, all(), false).providers, 0);
+        let i = run(EVERYWHERE, unknown, all(), false);
+        assert_eq!(i.providers, 0);
+        assert_eq!(i.unsupported.len(), 1);
     }
 
     #[test]
@@ -695,7 +800,7 @@ mod tests {
             index: &idx,
             truncated: true,
         };
-        let i = rule_impact(&[], &actors(all()), &actors(all()), false, &inputs);
+        let i = rule_impact(&[], &sides(all(), all(), false), &inputs);
         assert!(i.truncated);
         assert_eq!(i.pc(), "≥4/≥4");
         assert_eq!(
@@ -711,13 +816,7 @@ mod tests {
                 .map(RuleActors::of_rule)
                 .chain(rs.deny_rules.iter().map(RuleActors::of_deny));
             for a in sides {
-                let i = rule_impact(
-                    &rs.scopes,
-                    &a.providers,
-                    &a.consumers,
-                    a.unscoped_consumers,
-                    &inputs,
-                );
+                let i = rule_impact(&rs.scopes, &a, &inputs);
                 assert!(i.providers <= w.len() && i.consumers <= w.len());
                 for s in &i.per_scope {
                     assert!(s.providers <= i.providers && s.consumers <= i.consumers);
@@ -739,20 +838,148 @@ mod tests {
         assert_eq!(labels.len(), w.len());
         for rs in rule_sets() {
             for a in rs.rules.iter().map(RuleActors::of_rule) {
-                let args = (&rs.scopes[..], &a.providers[..], &a.consumers[..]);
                 assert_eq!(
-                    rule_impact(args.0, args.1, args.2, a.unscoped_consumers, &inputs),
-                    rule_impact_with(
-                        args.0,
-                        args.1,
-                        args.2,
-                        a.unscoped_consumers,
-                        &inputs,
-                        &labels
-                    )
+                    rule_impact(&rs.scopes, &a, &inputs),
+                    rule_impact_with(&rs.scopes, &a, &inputs, &labels)
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_label_unknown_to_the_index_counts_under_the_key_its_workloads_carry() {
+        let idx = index();
+        let mut w = workloads();
+        // aaaa-3 carries role=cache, a label created after the index was built.
+        w[2].labels = serde_json::from_value(json!([
+            {"href": "/orgs/5/labels/99", "key": "role", "value": "cache"}
+        ]))
+        .unwrap();
+        let inputs = ImpactInputs {
+            workloads: &w,
+            index: &idx,
+            truncated: false,
+        };
+        // role=web OR role=cache: the unknown label joins the role bucket.
+        let i = rule_impact(
+            EVERYWHERE,
+            &sides(json!([label(1), label(99)]), all(), false),
+            &inputs,
+        );
+        assert_eq!(i.providers, 2);
+        assert!(i.unsupported.is_empty(), "{:?}", i.unsupported);
+        // A label neither the index nor any workload knows still matches nobody.
+        let i = rule_impact(
+            EVERYWHERE,
+            &sides(json!([label(98)]), all(), false),
+            &inputs,
+        );
+        assert_eq!(i.providers, 0);
+    }
+
+    #[test]
+    fn an_unknown_label_group_is_noted_and_does_not_zero_the_side() {
+        let g77 = "/orgs/5/sec_policy/draft/label_groups/77";
+        let i = run(
+            EVERYWHERE,
+            json!([{"label_group": {"href": g77}}, label(3)]),
+            all(),
+            false,
+        );
+        assert_eq!(i.providers, 2, "app=shop still counts");
+        assert_eq!(
+            i.unsupported,
+            vec![format!("label_group {g77} unknown to the index")]
+        );
+        // As a scope member: skipped with the same note, once.
+        let scopes = vec![actors(json!([{"label_group": {"href": g77}}, label(3)]))];
+        let i = run(
+            &scopes,
+            json!([{"label_group": {"href": g77}}]),
+            all(),
+            false,
+        );
+        assert_eq!(i.consumers, 2, "the scope is app=shop");
+        assert_eq!(
+            i.unsupported,
+            vec![format!("label_group {g77} unknown to the index")]
+        );
+    }
+
+    #[test]
+    fn a_side_resolved_as_virtual_services_matches_no_workload() {
+        let idx = index();
+        let w = workloads();
+        let inputs = ImpactInputs {
+            workloads: &w,
+            index: &idx,
+            truncated: false,
+        };
+        let a = RuleActors {
+            providers_as_workloads: false,
+            ..sides(
+                json!([{"actors": "ams"}, label(1), {"workload": {"href": "/orgs/5/workloads/aaaa-3"}}]),
+                all(),
+                false,
+            )
+        };
+        let i = rule_impact(EVERYWHERE, &a, &inputs);
+        assert_eq!(
+            (i.providers, i.consumers),
+            (1, 4),
+            "only the workload actor matches"
+        );
+        assert_eq!(
+            i.unsupported,
+            vec!["providers resolve as virtual_services only".to_string()]
+        );
+        let c = RuleActors {
+            consumers_as_workloads: false,
+            ..sides(all(), all(), false)
+        };
+        let i = rule_impact(EVERYWHERE, &c, &inputs);
+        assert_eq!((i.providers, i.consumers), (4, 0));
+        assert_eq!(
+            i.unsupported,
+            vec!["consumers resolve as virtual_services only".to_string()]
+        );
+    }
+
+    #[test]
+    fn resolve_labels_as_is_read_from_the_rule_and_the_planned_body() {
+        let sets = rule_sets();
+        let mut r = sets[0].rules[0].clone();
+        r.resolve_labels_as = Some(ResolveLabelsAs {
+            providers: vec!["virtual_services".into()],
+            consumers: vec!["workloads".into(), "virtual_services".into()],
+        });
+        let a = RuleActors::of_rule(&r);
+        assert_eq!(
+            (a.providers_as_workloads, a.consumers_as_workloads),
+            (false, true)
+        );
+        r.resolve_labels_as = None;
+        let a = RuleActors::of_rule(&r);
+        assert_eq!(
+            (a.providers_as_workloads, a.consumers_as_workloads),
+            (true, true)
+        );
+        let body = json!({"resolve_labels_as": {"providers": ["workloads"], "consumers": ["virtual_services"]}});
+        let p = RuleActors::planned(Some(&body), Some(&a));
+        assert_eq!(
+            (p.providers_as_workloads, p.consumers_as_workloads),
+            (true, false)
+        );
+        let kept = RuleActors::planned(Some(&json!({})), Some(&p));
+        assert_eq!(
+            (kept.providers_as_workloads, kept.consumers_as_workloads),
+            (true, false)
+        );
+        let d = RuleActors::of_deny(&sets[0].deny_rules[0]);
+        assert_eq!(
+            (d.providers_as_workloads, d.consumers_as_workloads),
+            (true, true)
+        );
     }
 
     #[test]

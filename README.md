@@ -149,8 +149,9 @@ config, 3 auth, 4 PCE error, 5 rate limited, 6 write refused by the guard.
 
 `--impact` on `policy rules <ruleset>` adds each rule's `impact` (JSON) or a `P/C` column
 (table): `providers` and `consumers` (workloads matched, unions over the ruleset's scopes),
-`per_scope`, `ip_lists` (name, href, `size`, side), `unsupported` (virtual services, not
-counted) and `truncated`. `policy rules impact <rule-href>` prints one rule the same way (exit
+`per_scope`, `ip_lists` (name, href, `size`, side), `unsupported` (what was not counted:
+virtual services, a side resolved as `virtual_services` only, a label group unknown to the
+index) and `truncated`. `policy rules impact <rule-href>` prints one rule the same way (exit
 2 for an href of the wrong shape, 4 when the rule is not found). It costs one workloads read,
 through the cache; `meta.truncated` includes it. `iplists` gives every list a `size`: `v4` and
 `v6` address counts as strings, `unbounded` (the included `0.0.0.0/0` or `::/0`, else `null`),

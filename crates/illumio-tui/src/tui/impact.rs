@@ -62,14 +62,7 @@ pub fn compute_with(
         index: idx,
         truncated,
     };
-    rule_impact_with(
-        scopes,
-        &actors.providers,
-        &actors.consumers,
-        actors.unscoped_consumers,
-        &inputs,
-        labels,
-    )
+    rule_impact_with(scopes, actors, &inputs, labels)
 }
 
 /// The same ruleset in either scope (an active href folds to draft).

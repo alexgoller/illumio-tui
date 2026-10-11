@@ -9,7 +9,10 @@ use super::write::{
     parse_services, resolve_actors, resolve_scopes, resolve_services, run_plan, run_rule_plan,
 };
 use clap::{Args, Subcommand};
-use pce::impact::{Impact, ImpactInputs, RuleActors, is_rule_href, rule_impact, rule_set_href_of};
+use pce::impact::{
+    Impact, ImpactInputs, RuleActors, is_rule_href, rule_impact, rule_impact_with,
+    rule_set_href_of, workload_labels,
+};
 use pce::models::{
     DenyRule, PendingChange, PolicyScope, ResolveLabelsAs, RuleSet, Workload, WorkloadFilter,
 };
@@ -599,19 +602,13 @@ async fn rules(ctx: &Context, args: &RulesArgs) -> Result<(), CliError> {
             index: idx.as_ref(),
             truncated: w.truncated,
         };
+        // The workloads' label sets are built once for all the rules.
+        let labels = workload_labels(&w.value);
         rs.rules
             .iter()
             .map(RuleActors::of_rule)
             .chain(deny.iter().map(RuleActors::of_deny))
-            .map(|a| {
-                Some(rule_impact(
-                    &rs.scopes,
-                    &a.providers,
-                    &a.consumers,
-                    a.unscoped_consumers,
-                    &inputs,
-                ))
-            })
+            .map(|a| Some(rule_impact_with(&rs.scopes, &a, &inputs, &labels)))
             .collect()
     } else {
         vec![None; views.len()]
@@ -701,13 +698,7 @@ async fn planned_impact(ctx: &Context, plan: &Plan) -> Result<Option<(Impact, bo
         index: idx.as_ref(),
         truncated: w.truncated,
     };
-    let impact = rule_impact(
-        &rs.scopes,
-        &actors.providers,
-        &actors.consumers,
-        actors.unscoped_consumers,
-        &inputs,
-    );
+    let impact = rule_impact(&rs.scopes, &actors, &inputs);
     Ok(Some((impact, sets.truncated || w.truncated)))
 }
 
@@ -761,13 +752,7 @@ async fn rule_impact_one(ctx: &Context, a: &RuleImpactArgs) -> Result<(), CliErr
         index: idx.as_ref(),
         truncated: w.truncated,
     };
-    let impact = rule_impact(
-        &rs.scopes,
-        &actors.providers,
-        &actors.consumers,
-        actors.unscoped_consumers,
-        &inputs,
-    );
+    let impact = rule_impact(&rs.scopes, &actors, &inputs);
     let out = RuleOut {
         rule,
         impact: Some(impact),
