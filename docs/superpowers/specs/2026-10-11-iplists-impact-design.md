@@ -69,7 +69,7 @@ recomputed on `RuleSetsLoaded`; it costs no request. Columns: `name` (28),
 `used by` (7), `pending` (7, hidden below 70 columns). Detail pane: name,
 description, size line, one line per range (`!` for exclusions, description),
 FQDNs, then `used by:` with one line per referencing rule (`<ruleset> ·
-allow/deny · <one-line summary>`), or `used by: load Policy (3) to see
+allow/deny · <one-line summary>`), or `used by: load Policy (2) to see
 rules`.
 
 Keys: `j/k`, `/`, `s`, `Enter` detail toggle, `r`, `a`, `n`/`e`/`x`
@@ -206,7 +206,7 @@ with `to_actor`).
   workloads once and a second `i` costs nothing; `n` on IP lists creates and
   reloads once; CLI `policy rules --impact` one workloads GET, `--dry-run
   --impact` zero writes, `iplists` size column.
-- Smoke on demo100 (reads only): `6`, detail, `3` → `Enter` → `i` → impact
+- Smoke on demo100 (reads only): `6`, detail, `2` → `Enter` → `i` → impact
   line; CLI `policy rules <first> --impact --json` and `iplists --json`.
 
 ## 6. Out of scope
