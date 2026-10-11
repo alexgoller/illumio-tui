@@ -8,6 +8,7 @@ pub mod audit;
 pub mod guard;
 pub mod ip_lists;
 pub mod labels;
+pub mod rule_sets;
 pub mod services;
 pub mod specs;
 pub mod workloads;
@@ -23,6 +24,7 @@ pub use audit::{AuditEntry, AuditSink, JsonlAudit, MemoryAudit, NullAudit};
 pub use guard::{WriteContext, WriteGuard, WriteRefused};
 pub use ip_lists::{IpListDraft, IpListPatch};
 pub use labels::LabelDraft;
+pub use rule_sets::{RuleSetDraft, RuleSetPatch};
 pub use services::{ServiceDraft, ServicePatch};
 pub use specs::{InterfaceSpec, IpRangeSpec, PortSpec};
 pub use workloads::{LabelRemoval, WorkloadDraft, WorkloadPatch};
@@ -294,6 +296,14 @@ pub fn checked_policy_href(href: &str, segment: &str, org_id: u64) -> Result<Str
 pub fn parent_href(nested: &str) -> String {
     let parts: Vec<&str> = nested.trim().trim_end_matches('/').split('/').collect();
     parts[..parts.len().min(7)].join("/")
+}
+
+/// A fetched object decoded into its model; the error names the href.
+pub(crate) fn decode<T: serde::de::DeserializeOwned>(
+    href: &str,
+    v: Value,
+) -> Result<T, WriteError> {
+    serde_json::from_value(v).map_err(|e| WriteError::Pce(PceError::Decode(format!("{href}: {e}"))))
 }
 
 /// A value counts as "present" for `dropped_fields` when it is not null,
