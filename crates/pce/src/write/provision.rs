@@ -23,6 +23,9 @@ pub struct ProvisionRequest {
     pub subset: ProvisionSubset,
 }
 
+/// Objects that live outside the draft policy and are never provisioned.
+const NOT_POLICY: [&str; 2] = ["workloads", "labels"];
+
 /// Children of a ruleset: provisioned through the ruleset itself.
 const RULE_CHILDREN: [&str; 2] = ["sec_rules", "deny_rules"];
 
@@ -57,8 +60,43 @@ fn summary(counts: &BTreeMap<String, usize>) -> String {
 /// `(object type, draft href)` for a pending or requested href. A rule or
 /// deny rule maps to its ruleset; anything else is a draft policy object
 /// grouped under its own type segment. Parsed by component, checked strictly.
+/// An id-less singleton such as `/orgs/N/sec_policy/draft/firewall_settings`,
+/// parsed by component: matching org, `draft` or `active` (rewritten to
+/// draft), a lowercase type that is a policy object. `None` when the href
+/// has another shape.
+fn checked_singleton_href(
+    trimmed: &str,
+    org_id: u64,
+) -> Option<Result<(String, String), WriteError>> {
+    let parts: Vec<&str> = trimmed.split('/').collect();
+    let ["", "orgs", org, "sec_policy", scope, kind] = parts.as_slice() else {
+        return None;
+    };
+    let type_ok = !kind.is_empty()
+        && !NOT_POLICY.contains(kind)
+        && kind.bytes().all(|b| b.is_ascii_lowercase() || b == b'_');
+    let org_ok = !org.is_empty() && org.bytes().all(|b| b.is_ascii_digit());
+    if !type_ok || !org_ok || !matches!(*scope, "draft" | "active") {
+        return Some(Err(WriteError::invalid(format!(
+            "{trimmed} is not a draft policy object href"
+        ))));
+    }
+    if org.parse::<u64>().ok() != Some(org_id) {
+        return Some(Err(WriteError::invalid(format!(
+            "{trimmed} belongs to org {org}, profile is org {org_id}"
+        ))));
+    }
+    Some(Ok((
+        kind.to_string(),
+        format!("/orgs/{org_id}/sec_policy/draft/{kind}"),
+    )))
+}
+
 fn provisionable(href: &str, org_id: u64) -> Result<(String, String), WriteError> {
     let trimmed = href.trim().trim_end_matches('/');
+    if let Some(single) = checked_singleton_href(trimmed, org_id) {
+        return single;
+    }
     let parts: Vec<&str> = trimmed.split('/').collect();
     if let [_, _, _, _, _, _, _, child, _] = parts.as_slice()
         && RULE_CHILDREN.contains(child)
@@ -78,9 +116,6 @@ fn provisionable(href: &str, org_id: u64) -> Result<(String, String), WriteError
     let checked = checked_policy_href(trimmed, kind, org_id)?;
     Ok((kind.to_string(), checked))
 }
-
-/// Objects that live outside the draft policy and are never provisioned.
-const NOT_POLICY: [&str; 2] = ["workloads", "labels"];
 
 impl Writer<'_> {
     pub async fn plan_provision(&self, req: &ProvisionRequest) -> Result<Plan, WriteError> {

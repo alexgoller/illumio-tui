@@ -1034,6 +1034,7 @@ mod provision {
             "/orgs/5/rule_sets/100",
             "/orgs/5/sec_policy/draft/rule_sets/../ip_lists/21",
             "/orgs/5/sec_policy/draft/workloads/1",
+            "/orgs/5/sec_policy/draft/labels/1",
             "/orgs/7/sec_policy/draft/ip_lists/21",
         ] {
             invalid(w.plan_provision(&hrefs(&[bad])).await.unwrap_err());
@@ -1113,6 +1114,56 @@ mod provision {
                 .unwrap_err(),
         );
         assert!(m.contains("rule_sets"), "{m}");
+    }
+
+    #[tokio::test]
+    async fn id_less_singletons_are_grouped_and_accepted() {
+        let server = MockServer::start().await;
+        mount_pending(
+            &server,
+            json!([
+                {"href": "/orgs/5/sec_policy/draft/firewall_settings", "change_type": "update"},
+                {"href": "/orgs/5/sec_policy/draft/ip_lists/21", "change_type": "create"}
+            ]),
+        )
+        .await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let w = pce.writer(&guard);
+        let plan = w.plan_provision(&all()).await.unwrap();
+        assert_eq!(
+            plan.request().unwrap().body.as_ref().unwrap()["change_subset"],
+            json!({
+                "firewall_settings": [{"href": "/orgs/5/sec_policy/draft/firewall_settings"}],
+                "ip_lists": [{"href": "/orgs/5/sec_policy/draft/ip_lists/21"}]
+            })
+        );
+        assert_eq!(request_count(&server).await, 1);
+        let plan = w
+            .plan_provision(&hrefs(&["/orgs/5/sec_policy/active/firewall_settings/"]))
+            .await
+            .unwrap();
+        assert_eq!(
+            plan.request().unwrap().body.as_ref().unwrap()["change_subset"],
+            json!({"firewall_settings": [{"href": "/orgs/5/sec_policy/draft/firewall_settings"}]})
+        );
+    }
+
+    #[tokio::test]
+    async fn bad_singleton_hrefs_are_refused_before_any_request() {
+        let server = MockServer::start().await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let w = pce.writer(&guard);
+        for bad in [
+            "/orgs/6/sec_policy/draft/firewall_settings",
+            "/orgs/5/sec_policy/draft/../firewall_settings",
+            "/orgs/5/sec_policy/draft/workloads",
+            "/orgs/5/sec_policy/pending/firewall_settings",
+        ] {
+            invalid(w.plan_provision(&hrefs(&[bad])).await.unwrap_err());
+        }
+        assert_eq!(request_count(&server).await, 0);
     }
 
     #[tokio::test]
