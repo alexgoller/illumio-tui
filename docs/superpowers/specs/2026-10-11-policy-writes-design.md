@@ -46,7 +46,8 @@ Success:
 - Providers are evaluated inside the ruleset's scopes; `unscoped_consumers`
   lets consumers come from outside them. A rule draft carries no scopes.
 - A ruleset PUT never carries `rules` or `deny_rules`.
-- Provisioning works on rulesets, IP lists, services and label groups: a
+- Provisioning works on draft policy objects (rulesets, IP lists,
+  services, label groups and any other type the pending list names): a
   changed rule shows up as its ruleset being pending.
 
 ## 3. Library
@@ -121,7 +122,8 @@ impl Writer<'_> {
   exact case-insensitive match, pending deletes skipped); 1 → `Noop`,
   more → `Invalid`.
 - Create: `POST sec_policy/draft/rule_sets` with `{name, description?,
-  enabled, scopes}`; `scopes: []` when unscoped.
+  enabled, scopes}`; `scopes: [[]]` (one empty scope) when unscoped, which
+  is how a real PCE returns an unscoped ruleset.
 - Update: `checked_href(href, "rule_sets")`, one GET, body holds only the
   changed keys; `set_scopes` replaces the whole list; `rules` and
   `deny_rules` never appear.
@@ -195,7 +197,10 @@ impl Writer<'_> {
   An empty resulting set is `Noop { reason: "nothing pending" }`.
 - Body: `{"update_description": <description or "illumio-tui provision">,
   "change_subset": {"rule_sets": [{"href": ..}], "ip_lists": [..],
-  "services": [..], "label_groups": [..]}}`, only non-empty keys.
+  "services": [..], "label_groups": [..], ...}}`, one key per pending
+  object type (grouped generically by the href's type segment, so `All`
+  always means all; the PCE decides which types it accepts), only
+  non-empty keys.
   Rule hrefs never appear: a pending rule is provisioned through its
   ruleset, and `All` already lists the ruleset.
 - `POST sec_policy`; kind `Provision`; summary `provision 3 rule_sets, 1 ip_list`
