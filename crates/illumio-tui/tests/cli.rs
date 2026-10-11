@@ -49,6 +49,8 @@ fn every_flag_has_help_text() {
         vec!["workloads", "--help"],
         vec!["policy", "provision", "--help"],
         vec!["traffic", "query", "--help"],
+        vec!["traffic", "groups", "--help"],
+        vec!["traffic", "mesh", "--help"],
         vec!["policy", "rulesets", "--help"],
         vec!["policy", "rules", "--help"],
         vec!["policy", "rulesets", "add", "--help"],
@@ -1224,4 +1226,153 @@ async fn policy_rules_impact_reports_one_rule_by_href() {
                 .and(predicate::str::contains("scope All"))
                 .and(predicate::str::contains("4/2")),
         );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn traffic_groups_sum_bytes_and_honour_keys() {
+    let server = MockServer::start().await;
+    mount_traffic(&server, 2).await; // two processes, no shared cache
+    let out = stdout_json(
+        cmd(&server)
+            .args(["traffic", "groups", "--window", "1h"])
+            .assert()
+            .success(),
+    );
+    let data = out["data"].as_array().unwrap();
+    assert_eq!(data.len(), 4, "the profile's app,env pairs");
+    assert_eq!(data[0]["src"], json!(["shop", "prod"]));
+    assert_eq!(data[0]["dst"], json!(["shop", "prod"]));
+    assert_eq!(data[0]["connections"], 310);
+    assert_eq!(data[0]["bytes"], 124_000);
+    assert_eq!(data[1]["src"], json!(["ipl:Corp", "-"]));
+    assert_eq!(data[1]["bytes"], 0, "no byte counts: 0 in JSON");
+    assert_eq!(out["meta"]["cache"], "miss");
+    assert_eq!(out["meta"]["truncated"], false);
+    let table = cmd(&server)
+        .args([
+            "traffic", "groups", "--window", "1h", "--keys", "role", "--table",
+        ])
+        .assert()
+        .success();
+    let text = String::from_utf8_lossy(&table.get_output().stdout).to_string();
+    let header = text.lines().next().unwrap();
+    for h in [
+        "src",
+        "dst",
+        "flows",
+        "conns",
+        "bytes",
+        "allowed",
+        "pot.blocked",
+        "blocked",
+    ] {
+        assert!(header.contains(h), "{header}");
+    }
+    assert!(text.contains("web") && text.contains("124000"), "{text}");
+    cmd(&server)
+        .args(["traffic", "groups", "--blocked"])
+        .assert()
+        .code(2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn traffic_mesh_places_processes_by_direction_and_drops_hidden_columns() {
+    let server = MockServer::start().await;
+    mount_traffic(&server, 3).await;
+    let out = stdout_json(
+        cmd(&server)
+            .args(["traffic", "mesh", "--window", "1h"])
+            .assert()
+            .success(),
+    );
+    let rows = out["data"].as_array().unwrap();
+    assert_eq!(rows.len(), 4);
+    assert_eq!(rows[0]["user"], "postgres");
+    assert_eq!(
+        rows[0]["process"], "postgres",
+        "outbound: the source's process"
+    );
+    assert!(rows[0]["dst_process"].is_null());
+    assert_eq!(rows[0]["port"], 5432);
+    assert_eq!(rows[0]["proto"], "tcp");
+    assert_eq!(rows[0]["bytes"], 124_000);
+    assert_eq!(rows[0]["allowed"], 1);
+    let corp = rows
+        .iter()
+        .find(|r| r["src"] == json!(["ipl:Corp", "-"]))
+        .unwrap();
+    assert!(corp["user"].is_null() && corp["process"].is_null());
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "traffic",
+                "mesh",
+                "--window",
+                "1h",
+                "--no-user",
+                "--keys",
+                "role",
+            ])
+            .assert()
+            .success(),
+    );
+    assert!(out["data"][0]["user"].is_null());
+    assert_eq!(out["data"][0]["process"], "postgres");
+    assert_eq!(out["data"][0]["src"], json!(["web"]));
+    let table = cmd(&server)
+        .args([
+            "traffic",
+            "mesh",
+            "--window",
+            "1h",
+            "--no-process",
+            "--table",
+        ])
+        .assert()
+        .success();
+    let text = String::from_utf8_lossy(&table.get_output().stdout).to_string();
+    let header = text.lines().next().unwrap();
+    for h in [
+        "src",
+        "dst",
+        "service",
+        "dst process",
+        "flows",
+        "conns",
+        "bytes",
+        "decision",
+    ] {
+        assert!(header.contains(h), "{header}");
+    }
+    assert_eq!(header.split_whitespace().next(), Some("user"), "{header}");
+    assert!(
+        header.find(" process ") < header.find(" src "),
+        "process comes before src: {header}"
+    );
+    assert!(text.contains("potentially_blocked"), "{text}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn traffic_groups_and_mesh_dry_runs_send_nothing() {
+    let server = MockServer::start().await;
+    mount_traffic(&server, 0).await;
+    for sub in ["groups", "mesh"] {
+        let out = stdout_json(
+            cmd(&server)
+                .args([
+                    "traffic",
+                    sub,
+                    "--window",
+                    "1h",
+                    "--port",
+                    "443",
+                    "--dry-run",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["services"]["include"], json!([{"port": 443}]));
+        assert_eq!(out["data"]["max_results"], 1000);
+        assert_eq!(out["meta"]["cache"], "none");
+    }
 }
