@@ -106,10 +106,15 @@ impl ResolvedFlow {
 
     /// `5432/tcp`, or just `icmp` when there is no port.
     pub fn service_text(&self) -> String {
-        match self.port {
-            Some(p) => format!("{p}/{}", self.proto),
-            None => self.proto.clone(),
-        }
+        service_text(self.port, &self.proto)
+    }
+}
+
+/// `5432/tcp`, or just `icmp` when there is no port.
+pub(crate) fn service_text(port: Option<u16>, proto: &str) -> String {
+    match port {
+        Some(p) => format!("{p}/{proto}"),
+        None => proto.to_string(),
     }
 }
 
