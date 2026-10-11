@@ -4,6 +4,7 @@ use illumio_tui::tui::app::{Runtime, run_loop};
 use illumio_tui::tui::model::{Connection, Model, ProfileInfo, WritesState};
 use illumio_tui::tui::msg::Cmd;
 use pce::client::{ClientConfig, PceClient};
+use pce::write::{MemoryAudit, WriteContext, WriteGuard};
 use pce::{Credentials, Pce};
 use serde_json::json;
 use std::sync::Arc;
@@ -863,4 +864,81 @@ async fn a_slow_profile_switch_does_not_block_the_event_loop() {
     assert_eq!(model.stats.calls, 5, "health + four lists on the new PCE");
     assert_eq!(model.busy, 0);
     assert!(a.received_requests().await.unwrap_or_default().is_empty());
+}
+
+/// The test model with writes on (the runtime guard is given separately).
+fn writes_model() -> Model {
+    let mut m = model();
+    m.writes = WritesState::on();
+    m
+}
+
+/// A guard like the one `run` builds, auditing into memory.
+fn tui_guard(audit: Arc<MemoryAudit>) -> WriteGuard {
+    WriteGuard::new(
+        true,
+        true,
+        Box::new(audit),
+        WriteContext {
+            profile: "t".into(),
+            host: "h".into(),
+            org_id: 5,
+            source: "tui".into(),
+        },
+    )
+    .unwrap()
+}
+
+/// One key no screen or overlay uses, after `ms`: lets queued tasks finish.
+fn wait(ms: u64) -> impl futures::Stream<Item = Event> {
+    stream::once(async move {
+        tokio::time::sleep(Duration::from_millis(ms)).await;
+        Event::Key(KeyEvent::new(KeyCode::F(12), KeyModifiers::NONE))
+    })
+}
+
+#[tokio::test]
+async fn plan_write_needs_the_runtime_writer_and_sends_nothing() {
+    use illumio_tui::tui::edit::WriteIntent;
+    use illumio_tui::tui::model::Overlay;
+    use pce::write::LabelDraft;
+    let server = MockServer::start().await;
+    let intent = WriteIntent::CreateLabel(LabelDraft::new("app", "web2"));
+    // No writer: refused, although the model says writes are on.
+    let (mut rt, _tx) = Runtime::new(pce_for(&server), writes_model());
+    rt.execute(Cmd::PlanWrite(intent.clone()));
+    let model = run_loop(&mut rt, Box::pin(wait(300)), &mut |_| {}).await;
+    assert_eq!(
+        model.status.text, "write: writes are not enabled",
+        "{:?}",
+        model.status
+    );
+    assert_eq!(model.overlay, Overlay::None);
+    assert_eq!(model.busy, 0);
+    // With a writer: the confirm overlay shows the POST; planning a label sends nothing.
+    let audit = MemoryAudit::new();
+    let (mut rt, _tx) =
+        Runtime::with_writer(pce_for(&server), writes_model(), tui_guard(audit.clone()));
+    rt.execute(Cmd::PlanWrite(intent));
+    let model = run_loop(&mut rt, Box::pin(wait(300)), &mut |_| {}).await;
+    match &model.overlay {
+        Overlay::ConfirmWrite { plan, kind, scroll } => {
+            let req = plan.request().expect("a request");
+            assert_eq!(req.method, pce::WriteMethod::Post);
+            assert_eq!(req.path, "/orgs/5/labels");
+            assert_eq!(*kind, pce::write::ObjectKind::Label);
+            assert_eq!(*scroll, 0);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(model.busy, 0);
+    assert!(
+        server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .is_empty(),
+        "planning a label makes no request"
+    );
+    assert!(audit.entries().is_empty(), "nothing sent, nothing audited");
 }

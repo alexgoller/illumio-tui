@@ -6,6 +6,7 @@ use crate::tui::ui::layout::centered;
 use crate::tui::ui::screens::workloads::plain;
 use crate::tui::ui::widgets::panel::panel;
 use pce::RuleView;
+use pce::write::Plan;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
@@ -337,6 +338,44 @@ pub fn render_confirm(model: &Model, reason: &str, f: &mut Frame, area: Rect) {
         .block(block)
         .style(t.base())
         .wrap(Wrap { trim: true }),
+        r,
+    );
+}
+
+pub fn render_confirm_write(model: &Model, plan: &Plan, scroll: u16, f: &mut Frame, area: Rect) {
+    let t = &model.theme;
+    let Some(req) = plan.request() else {
+        return;
+    };
+    let body = crate::tui::edit::request_body_lines(req);
+    // Borders, the summary, `METHOD path` and a blank line around the body.
+    let r = centered(area, 76, (body.len() as u16).saturating_add(5));
+    f.render_widget(Clear, r);
+    let rows = r.height.saturating_sub(5) as usize;
+    let first = (scroll as usize).min(body.len().saturating_sub(rows));
+    let mut lines = vec![
+        Line::from(Span::styled(plain(&req.summary), Style::new().fg(t.warn))),
+        Line::from(Span::styled(
+            format!("{} {}", req.method.as_str(), plain(&req.path)),
+            t.header_style(),
+        )),
+        Line::from(""),
+    ];
+    lines.extend(
+        body.iter()
+            .skip(first)
+            .take(rows)
+            .map(|l| Line::from(Span::styled(plain(l), t.base()))),
+    );
+    let meta = if body.len() > rows {
+        "j/k scroll · y send · n cancel"
+    } else {
+        "y send · n cancel"
+    };
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(panel("Send this request?", meta, t, true))
+            .style(t.base()),
         r,
     );
 }

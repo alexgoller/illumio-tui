@@ -8,6 +8,7 @@ use pce::models::{
     Service, Workload,
 };
 use pce::traffic::{QueryProgress, ResolvedFlow};
+use pce::write::Plan;
 use pce::{CacheMode, StatsSnapshot};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -87,6 +88,8 @@ pub enum Msg {
     /// The runtime rebuilt the connection for `:profile <name>` (or could not);
     /// the new profile's PCE-load limits come with it.
     ProfileSwitched(Result<(ProfileInfo, Limits), String>),
+    /// A planned write (the exact request) or why it could not be planned.
+    Planned(Result<(Plan, pce::write::ObjectKind), String>),
 }
 
 #[derive(Debug, Clone)]
@@ -125,6 +128,11 @@ pub enum Cmd {
     /// Plan a write (one GET for IP lists, services and workloads; none for
     /// labels) and show it in the confirm overlay. Never sends a write.
     PlanWrite(WriteIntent),
+    /// `y` on the confirm overlay: send this plan once.
+    ExecuteWrite {
+        plan: Plan,
+        kind: pce::write::ObjectKind,
+    },
     Quit,
 }
 
@@ -178,6 +186,10 @@ impl PartialEq for Cmd {
             ) => fa == fb && ma == mb,
             (Cmd::SwitchProfile(a), Cmd::SwitchProfile(b)) => a == b,
             (Cmd::PlanWrite(a), Cmd::PlanWrite(b)) => a == b,
+            (
+                Cmd::ExecuteWrite { plan: pa, kind: ka },
+                Cmd::ExecuteWrite { plan: pb, kind: kb },
+            ) => pa.request() == pb.request() && ka == kb,
             _ => false,
         }
     }

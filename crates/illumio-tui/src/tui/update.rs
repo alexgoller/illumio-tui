@@ -13,6 +13,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use pce::CacheMode;
 use pce::models::{EventFilter, PolicyScope};
 use pce::traffic::QueryProgress;
+use pce::write::Plan;
 use std::time::Instant;
 
 pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
@@ -426,6 +427,33 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             }
             Vec::new()
         }
+        Msg::Planned(result) => {
+            match result {
+                Ok((plan, kind)) if plan.request().is_some() => {
+                    model.status = StatusLine::info("review the request: y sends it, n cancels");
+                    model.overlay = Overlay::ConfirmWrite {
+                        plan,
+                        kind,
+                        scroll: 0,
+                    };
+                }
+                // Cannot happen with `IfMissing::Create`; reported, never sent.
+                Ok((plan, _)) => {
+                    let reason = match plan {
+                        Plan::Noop { reason, .. } => reason,
+                        Plan::Send { .. } => String::new(),
+                    };
+                    fail(
+                        model,
+                        "write",
+                        &format!("nothing to send ({reason})"),
+                        false,
+                    );
+                }
+                Err(e) => fail(model, "write", &e, false),
+            }
+            Vec::new()
+        }
     }
 }
 
@@ -722,6 +750,41 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 }
             }
         },
+        Overlay::ConfirmWrite { plan, kind, scroll } => {
+            let lines = plan
+                .request()
+                .map_or(1, |r| edit::request_body_lines(r).len());
+            let last = u16::try_from(lines.saturating_sub(1)).unwrap_or(u16::MAX);
+            match k.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    model.overlay = Overlay::None;
+                    model.status = StatusLine::info("sending …");
+                    vec![Cmd::ExecuteWrite { plan, kind }]
+                }
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                    model.overlay = Overlay::None;
+                    model.status = StatusLine::info("cancelled, nothing sent");
+                    Vec::new()
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    model.overlay = Overlay::ConfirmWrite {
+                        plan,
+                        kind,
+                        scroll: (scroll + 1).min(last),
+                    };
+                    Vec::new()
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    model.overlay = Overlay::ConfirmWrite {
+                        plan,
+                        kind,
+                        scroll: scroll.saturating_sub(1),
+                    };
+                    Vec::new()
+                }
+                _ => Vec::new(),
+            }
+        }
         Overlay::RuleDetail(_) | Overlay::Pending | Overlay::Error(_) => {
             if matches!(k.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) {
                 model.overlay = Overlay::None;
@@ -4619,5 +4682,104 @@ mod tests {
         update(&mut m, kc(KeyCode::Esc));
         update(&mut m, key('?'));
         assert_eq!(m.help_scroll, 0, "the help reopens at the top");
+    }
+
+    #[test]
+    fn planned_opens_the_confirm_overlay_and_y_sends_once() {
+        use crate::tui::test_support::label_post_plan;
+        let mut m = writes_on(model_fixture());
+        let planned = Msg::Planned(Ok((label_post_plan(), pce::write::ObjectKind::Label)));
+        assert!(update(&mut m, planned).is_empty());
+        assert!(matches!(
+            &m.overlay,
+            Overlay::ConfirmWrite { scroll: 0, .. }
+        ));
+        update(&mut m, key('j'));
+        update(&mut m, key('j'));
+        assert!(matches!(
+            &m.overlay,
+            Overlay::ConfirmWrite { scroll: 2, .. }
+        ));
+        for _ in 0..10 {
+            update(&mut m, key('j'));
+        }
+        // The body is four lines: `{`, key, value, `}`.
+        assert!(
+            matches!(&m.overlay, Overlay::ConfirmWrite { scroll: 3, .. }),
+            "stops at the last body line: {:?}",
+            m.overlay
+        );
+        update(&mut m, key('k'));
+        assert!(matches!(
+            &m.overlay,
+            Overlay::ConfirmWrite { scroll: 2, .. }
+        ));
+        assert!(update(&mut m, key('q')).is_empty());
+        assert!(!m.quit, "q does not quit from the confirm overlay");
+        let cmds = update(&mut m, key('y'));
+        assert_eq!(
+            cmds,
+            vec![Cmd::ExecuteWrite {
+                plan: label_post_plan(),
+                kind: pce::write::ObjectKind::Label
+            }]
+        );
+        assert_eq!(m.overlay, Overlay::None);
+        assert_eq!(m.status.text, "sending …");
+        assert!(
+            update(&mut m, key('y')).is_empty(),
+            "a second y has no overlay to answer"
+        );
+    }
+
+    #[test]
+    fn n_or_esc_cancels_and_a_failed_plan_reports() {
+        use crate::tui::test_support::ip_list_delete_plan;
+        for code in [KeyCode::Char('n'), KeyCode::Esc] {
+            let mut m = writes_on(model_fixture());
+            update(
+                &mut m,
+                Msg::Planned(Ok((ip_list_delete_plan(), pce::write::ObjectKind::IpList))),
+            );
+            assert!(update(&mut m, kc(code)).is_empty());
+            assert_eq!(m.overlay, Overlay::None);
+            assert_eq!(m.status.text, "cancelled, nothing sent");
+        }
+        let mut m = writes_on(model_fixture());
+        update(
+            &mut m,
+            Msg::Planned(Err("not found: /orgs/5/sec_policy/draft/ip_lists/9".into())),
+        );
+        assert_eq!(m.status.kind, StatusKind::Error);
+        assert_eq!(
+            m.status.text,
+            "write: not found: /orgs/5/sec_policy/draft/ip_lists/9"
+        );
+        assert_eq!(
+            m.overlay,
+            Overlay::None,
+            "short errors stay in the status line"
+        );
+        let long = "range 10.9.0.0/16 is not in Corp; an IP list needs at least one range or FQDN";
+        update(&mut m, Msg::Planned(Err(long.into())));
+        assert_eq!(m.overlay, Overlay::Error(format!("write: {long}")));
+        let mut m = writes_on(model_fixture());
+        let noop = pce::write::Plan::Noop {
+            existing_href: "/orgs/5/labels/1".into(),
+            reason: "label role=web exists".into(),
+        };
+        update(
+            &mut m,
+            Msg::Planned(Ok((noop, pce::write::ObjectKind::Label))),
+        );
+        assert_eq!(m.status.kind, StatusKind::Error);
+        assert!(
+            m.status
+                .text
+                .contains("nothing to send (label role=web exists)"),
+            "{}",
+            m.status.text
+        );
+        assert_eq!(m.overlay, Overlay::None);
     }
 }

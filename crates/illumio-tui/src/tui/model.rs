@@ -8,6 +8,7 @@ use pce::models::{
     Service, VenHealth, Workload,
 };
 use pce::traffic::{BlockedGroup, FlowGroup, ResolvedFlow, blocked_summary, group_by_labels};
+use pce::write::Plan;
 use pce::{NameIndex, RuleKind, RuleSetView, RuleView, StatsSnapshot};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
@@ -169,6 +170,13 @@ pub enum Overlay {
     },
     /// Create or edit form for a label, IP list, service or workload.
     Form(Form),
+    /// The exact request a write would send; `y` sends it, `n`/`Esc` cancel.
+    /// `scroll` is the first body line shown.
+    ConfirmWrite {
+        plan: Plan,
+        kind: pce::write::ObjectKind,
+        scroll: u16,
+    },
 }
 
 impl PartialEq for Overlay {
@@ -182,6 +190,18 @@ impl PartialEq for Overlay {
             | (Overlay::Error(a), Overlay::Error(b)) => a == b,
             (Overlay::FilterEditor(a), Overlay::FilterEditor(b)) => a == b,
             (Overlay::Form(a), Overlay::Form(b)) => a == b,
+            (
+                Overlay::ConfirmWrite {
+                    plan: pa,
+                    kind: ka,
+                    scroll: sa,
+                },
+                Overlay::ConfirmWrite {
+                    plan: pb,
+                    kind: kb,
+                    scroll: sb,
+                },
+            ) => pa.request() == pb.request() && ka == kb && sa == sb,
             (
                 Overlay::Confirm {
                     reason: ra,

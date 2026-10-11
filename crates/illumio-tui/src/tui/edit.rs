@@ -7,7 +7,7 @@ use pce::NameIndex;
 use pce::models::{Fqdn, IpList, Label, Service, Workload};
 use pce::write::{
     InterfaceSpec, IpListDraft, IpListPatch, IpRangeSpec, LabelDraft, PortSpec, ServiceDraft,
-    ServicePatch, WorkloadDraft, WorkloadPatch,
+    ServicePatch, WorkloadDraft, WorkloadPatch, WriteRequest,
 };
 
 /// What `n`, `e` or `x` on Objects or Workloads asks for.
@@ -575,6 +575,19 @@ pub fn build_intent(form: &Form, index: Option<&NameIndex>) -> Result<Option<Wri
         | EditIntent::DeleteIpList(_)
         | EditIntent::DeleteService(_)
         | EditIntent::DeleteWorkload(_) => Err("a delete has no form".into()),
+    }
+}
+
+/// The request body as the confirm overlay shows it: pretty JSON, one entry
+/// per line, or `(no body)` for a delete.
+pub fn request_body_lines(req: &WriteRequest) -> Vec<String> {
+    match &req.body {
+        Some(b) => serde_json::to_string_pretty(b)
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_string)
+            .collect(),
+        None => vec!["(no body)".to_string()],
     }
 }
 

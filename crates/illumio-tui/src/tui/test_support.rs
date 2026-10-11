@@ -186,3 +186,29 @@ pub fn render_styled(model: &Model, w: u16, h: u16) -> String {
     }
     out
 }
+
+/// The plan the confirm overlay shows for a new label `app=web2`.
+pub fn label_post_plan() -> pce::write::Plan {
+    pce::write::Plan::Send {
+        request: pce::write::WriteRequest {
+            method: pce::WriteMethod::Post,
+            path: "/orgs/5/labels".into(),
+            body: Some(serde_json::json!({"key": "app", "value": "web2"})),
+            summary: "create label app=web2".into(),
+        },
+        kind: pce::write::ObjectKind::Label,
+    }
+}
+
+/// The plan for `x` on the Corp IP list, with the TUI's named summary.
+pub fn ip_list_delete_plan() -> pce::write::Plan {
+    pce::write::Plan::Send {
+        request: pce::write::WriteRequest {
+            method: pce::WriteMethod::Delete,
+            path: "/orgs/5/sec_policy/draft/ip_lists/21".into(),
+            body: None,
+            summary: "delete ip_list Corp".into(),
+        },
+        kind: pce::write::ObjectKind::IpList,
+    }
+}

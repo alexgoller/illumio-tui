@@ -522,3 +522,50 @@ fn ip_list_form_80x24_scrolls_the_active_field() {
     m.set_theme("light");
     insta::assert_snapshot!("form_ip_list_light_styled_80x24", render_styled(&m, 80, 24));
 }
+
+#[test]
+fn confirm_write_overlay_shows_method_path_and_body() {
+    use illumio_tui::tui::model::{Overlay, Screen};
+    use illumio_tui::tui::test_support::{
+        ip_list_delete_plan, label_post_plan, model_with_objects,
+    };
+    let mut m = model_with_objects();
+    m.screen = Screen::Objects;
+    m.overlay = Overlay::ConfirmWrite {
+        plan: label_post_plan(),
+        kind: pce::write::ObjectKind::Label,
+        scroll: 0,
+    };
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("create label app=web2"), "{out}");
+    assert!(out.contains("POST /orgs/5/labels"), "{out}");
+    assert!(out.contains("\"value\": \"web2\""), "{out}");
+    assert!(out.contains("y send · n cancel"), "{out}");
+    insta::assert_snapshot!("confirm_label_post_80x24", out);
+    let mut l = model_with_objects();
+    l.screen = Screen::Objects;
+    l.set_theme("light");
+    l.overlay = m.overlay.clone();
+    insta::assert_snapshot!(
+        "confirm_label_post_light_styled_80x24",
+        render_styled(&l, 80, 24)
+    );
+    m.overlay = Overlay::ConfirmWrite {
+        plan: ip_list_delete_plan(),
+        kind: pce::write::ObjectKind::IpList,
+        scroll: 0,
+    };
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("delete ip_list Corp"), "{out}");
+    assert!(
+        out.contains("DELETE /orgs/5/sec_policy/draft/ip_lists/21"),
+        "{out}"
+    );
+    assert!(out.contains("(no body)"), "{out}");
+    insta::assert_snapshot!("confirm_ip_list_delete_80x24", out);
+    l.overlay = m.overlay.clone();
+    insta::assert_snapshot!(
+        "confirm_ip_list_delete_light_styled_80x24",
+        render_styled(&l, 80, 24)
+    );
+}

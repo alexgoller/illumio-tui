@@ -3,6 +3,7 @@
 //! `Cmd`s by spawning tasks on a shared `Arc<Pce>`.
 use crate::cli::error::CliError;
 use crate::cli::{Context, GlobalArgs};
+use crate::tui::edit::WriteIntent;
 use crate::tui::model::ObjectKind;
 use crate::tui::model::{Limits, Model, ProfileInfo, WritesState};
 use crate::tui::msg::{Cmd, Msg, ObjectsPayload, QueryOutcome};
@@ -13,8 +14,8 @@ use crossterm::event::{
 };
 use futures::{Stream, StreamExt};
 use pce::models::WorkloadFilter;
-use pce::write::{JsonlAudit, WriteContext, WriteGuard};
-use pce::{CacheMode, Pce};
+use pce::write::{IfMissing, JsonlAudit, Plan, WriteContext, WriteError, WriteGuard};
+use pce::{CacheMode, NameIndex, Pce};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -124,10 +125,25 @@ impl Runtime {
     pub fn execute(&mut self, cmd: Cmd) {
         match cmd {
             Cmd::Quit => self.model.quit = true,
-            // Planning is wired in Task 6; until then nothing is planned or sent.
-            Cmd::PlanWrite(_) => {
+            Cmd::PlanWrite(intent) => {
+                self.model.busy += 1;
+                let (pce, tx) = self.task_ctx();
+                let guard = self.writer.clone();
+                tokio::spawn(async move {
+                    let result = match guard {
+                        None => Err("writes are not enabled".to_string()),
+                        Some(guard) => plan_intent(&pce, &guard, intent)
+                            .await
+                            .map_err(|e| e.to_string()),
+                    };
+                    let _ = tx.send(Msg::Planned(result));
+                    let _ = tx.send(Msg::Stats(pce.stats()));
+                });
+            }
+            // Sending is wired in Task 7; until then `y` sends nothing.
+            Cmd::ExecuteWrite { .. } => {
                 self.model.status = crate::tui::model::StatusLine::warn(
-                    "planning is not available yet; nothing sent",
+                    "sending is not available yet; nothing sent",
                 );
             }
             Cmd::SwitchProfile(name) => {
@@ -364,6 +380,7 @@ impl Runtime {
                 | Msg::WorkloadsLoaded(_)
                 | Msg::EventsLoaded(_)
                 | Msg::ProfileSwitched(_)
+                | Msg::Planned(_)
         );
         let cmds = update(&mut self.model, msg);
         if task_result {
@@ -428,6 +445,55 @@ fn writer_from(
         Ok(guard) => (Some(guard), WritesState::on()),
         Err(refused) => (None, WritesState::off(refused.to_string())),
     }
+}
+
+/// The library planner for one intent, through the guard. Creates use
+/// `IfMissing::Create`; IP list, service and workload updates and workload
+/// deletes fetch the object once; label plans make no request.
+async fn plan_intent(
+    pce: &Pce,
+    guard: &WriteGuard,
+    intent: WriteIntent,
+) -> Result<(Plan, pce::write::ObjectKind), WriteError> {
+    let w = pce.writer(guard);
+    let kind = intent.kind();
+    let plan = match intent {
+        WriteIntent::CreateLabel(d) => w.plan_create_label(&d, IfMissing::Create).await?,
+        WriteIntent::UpdateLabel { href, value } => w.plan_update_label(&href, &value)?,
+        WriteIntent::DeleteLabel { href, name } => {
+            named(w.plan_delete_label(&href)?, "label", &name)
+        }
+        WriteIntent::CreateIpList(d) => w.plan_create_ip_list(&d, IfMissing::Create).await?,
+        WriteIntent::UpdateIpList { href, patch } => w.plan_update_ip_list(&href, &patch).await?,
+        WriteIntent::DeleteIpList { href, name } => {
+            named(w.plan_delete_ip_list(&href)?, "ip_list", &name)
+        }
+        WriteIntent::CreateService(d) => w.plan_create_service(&d, IfMissing::Create).await?,
+        WriteIntent::UpdateService { href, patch } => w.plan_update_service(&href, &patch).await?,
+        WriteIntent::DeleteService { href, name } => {
+            named(w.plan_delete_service(&href)?, "service", &name)
+        }
+        WriteIntent::CreateWorkload(d) => w.plan_create_workload(&d, IfMissing::Create).await?,
+        // The TUI only sends `set_labels`, which `WorkloadPatch::apply` never
+        // resolves through the index (only add/remove do), so an empty index
+        // costs no request.
+        WriteIntent::UpdateWorkload { href, patch } => {
+            w.plan_update_workload(&href, &patch, &NameIndex::default())
+                .await?
+        }
+        // The library's summary already names the workload.
+        WriteIntent::DeleteWorkload { href, .. } => w.plan_delete_workload(&href).await?,
+    };
+    Ok((plan, kind))
+}
+
+/// The library's delete summary names the href; the confirm overlay names
+/// the object. Only `summary` changes: it is neither sent nor audited.
+fn named(mut plan: Plan, kind: &str, name: &str) -> Plan {
+    if let Plan::Send { request, .. } = &mut plan {
+        request.summary = format!("delete {kind} {name}");
+    }
+    plan
 }
 
 fn to_msg(e: Event) -> Option<Msg> {
