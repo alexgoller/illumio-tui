@@ -1919,6 +1919,20 @@ impl Model {
         self.theme = Theme::from_name(name);
     }
 
+    /// What a `w` form is pre-filled from: the profile's label model and
+    /// the draft rulesets the Policy screen loaded (none for the active scope).
+    pub fn flow_prefill(&self) -> crate::tui::edit::FlowPrefill<'_> {
+        crate::tui::edit::FlowPrefill {
+            scope_keys: &self.limits.scope_keys,
+            tier_key: &self.limits.tier_key,
+            rulesets: if self.policy.scope == PolicyScope::Draft {
+                &self.policy.raw
+            } else {
+                &[]
+            },
+        }
+    }
+
     pub fn index(&self) -> Option<&std::sync::Arc<pce::NameIndex>> {
         match &self.connection {
             Connection::Connected { index, .. } => index.as_ref(),

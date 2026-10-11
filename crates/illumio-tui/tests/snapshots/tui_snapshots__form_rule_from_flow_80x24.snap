@@ -7,8 +7,8 @@ expression: out
 ╭ Filters ────────────────────────────────── window 24h · cap 1000 · unbounded ╮
 │wind╭ Allow rule from flow ──────── Tab next · Enter review · Esc cancel ╮    │
 ╰────│▸ Ruleset*      ▏                                                   │────╯
-╭ Res│                ruleset name or href                                │ago ╮
-│4 fl│  Providers*    app=shop, env=prod, role=web                        │████│
+╭ Res│                scope app=shop, env=prod                            │ago ╮
+│4 fl│  Providers*    role=web                                            │████│
 ╰────│                app=web, group:Name, iplist:Corp, all, !env=dev     │────╯
 ╭ Flo│  Consumers*    iplist:Corp                                         │────╮
 │  la│                app=web, group:Name, iplist:Corp, all, !env=dev     │    │
@@ -20,7 +20,7 @@ expression: out
 │    │                y or n                                              │    │
 ╰────│  Unscoped*     y                                                   │────╯
 ╭ Det│                y: consumers outside the ruleset's scope            │ows ╮
-│sele│* required                                                          │    │
+│sele│* required · Ctrl-A all labels                                      │    │
 │    ╰────────────────────────────────────────────────────────────────────╯    │
 │                                                                              │
 │                                                                              │

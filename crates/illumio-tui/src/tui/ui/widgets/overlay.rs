@@ -239,7 +239,14 @@ pub fn render_form(model: &Model, form: &Form, f: &mut Frame, area: Rect) {
     }
     lines.push(match &form.error {
         Some(e) => Line::from(Span::styled(plain(e), Style::new().fg(t.bad))),
-        None => Line::from(Span::styled("* required", t.dim_style())),
+        None => Line::from(Span::styled(
+            match (&form.alt, form.expanded) {
+                (None, _) => "* required",
+                (Some(_), false) => "* required · Ctrl-A all labels",
+                (Some(_), true) => "* required · Ctrl-A model view",
+            },
+            t.dim_style(),
+        )),
     });
     f.render_widget(
         Paragraph::new(lines)

@@ -7,7 +7,6 @@ use crate::tokens::{
     service_from_href_token, similar, split_kv, with_exclusion, with_similar,
 };
 use crate::tui::form::{Field, Form};
-use pce::NameIndex;
 use pce::models::{
     Actor, DenyRule, Fqdn, IngressService, Interface, IpList, Label, Rule, RuleSet, Service,
     Workload,
@@ -19,6 +18,19 @@ use pce::write::{
     RuleSetPatch, ServiceDraft, ServicePatch, ServiceRef, WorkloadDraft, WorkloadPatch,
     WriteRequest, checked_policy_href,
 };
+use pce::{NameIndex, ResolvedLabel};
+use std::borrow::Cow;
+use std::collections::BTreeSet;
+
+/// What a `w` form is pre-filled from besides the flow: the label model
+/// (rulesets scoped by `scope_keys`, tiers selected by `tier_key`) and the
+/// draft rulesets already loaded (empty when none are). Never a request.
+#[derive(Debug, Clone, Copy)]
+pub struct FlowPrefill<'a> {
+    pub scope_keys: &'a [String],
+    pub tier_key: &'a str,
+    pub rulesets: &'a [RuleSet],
+}
 
 /// Where a new allow rule goes: the selected ruleset (Policy) or the name
 /// or href typed into a `w` form. A name costs one draft ruleset read at
@@ -193,7 +205,7 @@ const LABELS_HINT: &str = "app=web, env=prod";
 
 /// The form for a create or update (pre-filled from the object; the key of a
 /// label and the href of anything are never editable), or the delete intent.
-pub fn start(intent: EditIntent, index: Option<&NameIndex>) -> Start {
+pub fn start(intent: EditIntent, index: Option<&NameIndex>, prefill: FlowPrefill) -> Start {
     // Policy forms render actors through the index; without one they show hrefs.
     let empty = NameIndex::default();
     let idx = index.unwrap_or(&empty);
@@ -309,19 +321,21 @@ pub fn start(intent: EditIntent, index: Option<&NameIndex>) -> Start {
             Start::Plan(WriteIntent::DeleteDenyRule { href, name })
         }
         EditIntent::RuleFromFlow(f) => {
-            let fields = flow_rule_fields(&f);
-            form(
-                "Allow rule from flow".into(),
-                fields,
-                EditIntent::RuleFromFlow(f),
-            )
+            let (fields, alt) = flow_rule_fields(&f, prefill);
+            let mut form = Form::new("Allow rule from flow", fields, EditIntent::RuleFromFlow(f));
+            form.alt = Some(alt);
+            Start::Form(form)
         }
     }
 }
 
 /// The form a create or update intent opens; `None` for a delete.
-pub fn form_for(intent: EditIntent, index: Option<&NameIndex>) -> Option<Form> {
-    match start(intent, index) {
+pub fn form_for(
+    intent: EditIntent,
+    index: Option<&NameIndex>,
+    prefill: FlowPrefill,
+) -> Option<Form> {
+    match start(intent, index, prefill) {
         Start::Form(f) => Some(f),
         Start::Plan(_) => None,
     }
@@ -764,22 +778,37 @@ pub fn ruleset_href_named(sets: &[RuleSet], name: &str) -> Result<String, String
 
 const RULESET_HINT: &str = "ruleset name or href";
 
-/// An endpoint as actor tokens, the narrowest that is known: its labels,
-/// else its workload, else its IP lists, else `all`.
-fn endpoint_tokens(e: &ResolvedEndpoint) -> Vec<String> {
-    if !e.labels.is_empty() {
-        return e
-            .labels
-            .iter()
-            .map(|l| {
-                if l.key == "?" || l.value.contains([',', '|']) {
-                    l.href.clone()
-                } else {
-                    format!("{}={}", l.key, l.value)
-                }
-            })
-            .collect();
+/// A label as an actor token; an unknown key or an awkward value keeps its href.
+fn label_token(l: &ResolvedLabel) -> String {
+    if l.key == "?" || l.value.contains([',', '|']) {
+        l.href.clone()
+    } else {
+        format!("{}={}", l.key, l.value)
     }
+}
+
+/// The endpoint's labels whose key is a scope key, in `scope_keys` order
+/// (a key the endpoint has no label for is absent).
+pub fn scope_of<'e>(e: &'e ResolvedEndpoint, scope_keys: &[String]) -> Vec<&'e ResolvedLabel> {
+    scope_keys
+        .iter()
+        .filter_map(|k| e.labels.iter().find(|l| &l.key == k))
+        .collect()
+}
+
+/// The endpoint's tier: its label with the tier key.
+pub fn tier_of<'e>(e: &'e ResolvedEndpoint, tier_key: &str) -> Option<&'e ResolvedLabel> {
+    e.labels.iter().find(|l| l.key == tier_key)
+}
+
+/// Labels as `app=shop, env=prod`.
+pub fn labels_tokens(labels: &[&ResolvedLabel]) -> String {
+    join(labels.iter().map(|l| label_token(l)))
+}
+
+/// An endpoint without the labels asked for: its workload, else its IP
+/// lists, else `all`.
+fn unlabelled_tokens(e: &ResolvedEndpoint) -> Vec<String> {
     if let Some(h) = &e.workload_href {
         return vec![format!("workload:{h}")];
     }
@@ -789,23 +818,78 @@ fn endpoint_tokens(e: &ResolvedEndpoint) -> Vec<String> {
     vec!["all".into()]
 }
 
-/// The `w` form: the ruleset to type, then an allow rule from the
-/// destination (providers) to the source (consumers) on the flow's port.
-fn flow_rule_fields(f: &ResolvedFlow) -> Vec<Field> {
-    vec![
-        Field::new("Ruleset", "", RULESET_HINT, true),
-        Field::new(
-            "Providers",
-            endpoint_tokens(&f.dst).join(", "),
-            ACTORS_HINT,
-            true,
+/// An endpoint as actor tokens, the narrowest that is known: every label it
+/// has, else its workload, else its IP lists, else `all`.
+fn endpoint_tokens(e: &ResolvedEndpoint) -> Vec<String> {
+    if e.labels.is_empty() {
+        return unlabelled_tokens(e);
+    }
+    e.labels.iter().map(label_token).collect()
+}
+
+/// Label tokens, or the unlabelled fallback when there are none.
+fn tokens_or_fallback(labels: Vec<&ResolvedLabel>, e: &ResolvedEndpoint) -> String {
+    if labels.is_empty() {
+        unlabelled_tokens(e).join(", ")
+    } else {
+        labels_tokens(&labels)
+    }
+}
+
+/// The one live draft ruleset with a scope of exactly these labels (by
+/// href); `None` when none or several have one.
+fn ruleset_scoped(sets: &[RuleSet], scope: &[&ResolvedLabel]) -> Option<String> {
+    let want: BTreeSet<&str> = scope.iter().map(|l| l.href.as_str()).collect();
+    let equal = |s: &Vec<Actor>| {
+        s.iter().all(|a| a.label.is_some())
+            && s.iter()
+                .filter_map(|a| a.label.as_ref().map(|r| r.href.as_str()))
+                .collect::<BTreeSet<_>>()
+                == want
+    };
+    let hits: Vec<&RuleSet> = sets
+        .iter()
+        .filter(|rs| rs.update_type.as_deref() != Some("delete"))
+        .filter(|rs| rs.scopes.iter().any(equal))
+        .collect();
+    match hits.as_slice() {
+        [one] => Some(one.name.clone()),
+        _ => None,
+    }
+}
+
+/// The `w` form in the label model: the ruleset whose scope is the
+/// destination's scope, the destination's tier as providers, the source's
+/// tier as consumers when it shares that scope (else its scope and tier,
+/// unscoped), on the flow's port. The alternates are every attached label.
+fn flow_rule_fields(f: &ResolvedFlow, p: FlowPrefill) -> (Vec<Field>, Vec<(usize, String)>) {
+    let dst_scope = scope_of(&f.dst, p.scope_keys);
+    let src_scope = scope_of(&f.src, p.scope_keys);
+    let providers = tokens_or_fallback(tier_of(&f.dst, p.tier_key).into_iter().collect(), &f.dst);
+    let same_scope = !dst_scope.is_empty()
+        && dst_scope
+            .iter()
+            .map(|l| &l.href)
+            .eq(src_scope.iter().map(|l| &l.href));
+    let consumers = if same_scope {
+        tokens_or_fallback(tier_of(&f.src, p.tier_key).into_iter().collect(), &f.src)
+    } else {
+        let mut labels = src_scope;
+        labels.extend(tier_of(&f.src, p.tier_key));
+        tokens_or_fallback(labels, &f.src)
+    };
+    let (ruleset, hint) = match ruleset_scoped(p.rulesets, &dst_scope) {
+        _ if dst_scope.is_empty() => (String::new(), Cow::Borrowed(RULESET_HINT)),
+        Some(name) => (name, Cow::Borrowed(RULESET_HINT)),
+        None => (
+            String::new(),
+            Cow::Owned(format!("scope {}", labels_tokens(&dst_scope))),
         ),
-        Field::new(
-            "Consumers",
-            endpoint_tokens(&f.src).join(", "),
-            ACTORS_HINT,
-            true,
-        ),
+    };
+    let fields = vec![
+        Field::new("Ruleset", ruleset, hint, true),
+        Field::new("Providers", providers, ACTORS_HINT, true),
+        Field::new("Consumers", consumers, ACTORS_HINT, true),
         Field::new("Services", f.service_text(), SERVICES_HINT, true),
         Field::new(
             "Description",
@@ -819,8 +903,13 @@ fn flow_rule_fields(f: &ResolvedFlow) -> Vec<Field> {
             false,
         ),
         Field::new("Enabled", "y", YES_NO_HINT, true),
-        Field::new("Unscoped", yn(f.src.labels.is_empty()), UNSCOPED_HINT, true),
-    ]
+        Field::new("Unscoped", yn(!same_scope), UNSCOPED_HINT, true),
+    ];
+    let alt = vec![
+        (1, endpoint_tokens(&f.dst).join(", ")),
+        (2, endpoint_tokens(&f.src).join(", ")),
+    ];
+    (fields, alt)
 }
 
 /// The Ruleset field of a `w` form: an href, checked without a request, or
@@ -1523,8 +1612,38 @@ mod tests {
         serde_json::from_str(include_str!("../../../../fixtures/workloads.json")).unwrap()
     }
 
+    /// For forms other than `w`.
+    const NO_PREFILL: FlowPrefill<'static> = FlowPrefill {
+        scope_keys: &[],
+        tier_key: "role",
+        rulesets: &[],
+    };
+
     fn form(intent: EditIntent) -> Form {
-        form_for(intent, Some(&*fixture_index())).expect("a create or update intent")
+        form_with(intent, &["app", "env"], "role", &[])
+    }
+
+    /// A form pre-filled with this label model and these draft rulesets.
+    fn form_with(intent: EditIntent, scope: &[&str], tier: &str, sets: &[RuleSet]) -> Form {
+        let scope_keys: Vec<String> = scope.iter().map(|k| k.to_string()).collect();
+        let prefill = FlowPrefill {
+            scope_keys: &scope_keys,
+            tier_key: tier,
+            rulesets: sets,
+        };
+        form_for(intent, Some(&*fixture_index()), prefill).expect("a create or update intent")
+    }
+
+    fn flow_form(flow: &ResolvedFlow) -> Form {
+        form(EditIntent::RuleFromFlow(Box::new(flow.clone())))
+    }
+
+    fn label(href: &str, key: &str, value: &str) -> pce::ResolvedLabel {
+        pce::ResolvedLabel {
+            href: href.into(),
+            key: key.into(),
+            value: value.into(),
+        }
     }
 
     fn set(f: &mut Form, label: &str, value: &str) {
@@ -1770,7 +1889,11 @@ mod tests {
 
     #[test]
     fn deletes_skip_the_form_and_carry_the_name() {
-        let Start::Plan(w) = start(EditIntent::DeleteIpList(ip_lists()[1].clone()), None) else {
+        let Start::Plan(w) = start(
+            EditIntent::DeleteIpList(ip_lists()[1].clone()),
+            None,
+            NO_PREFILL,
+        ) else {
             panic!("a delete opens no form")
         };
         assert_eq!(
@@ -1781,7 +1904,11 @@ mod tests {
             }
         );
         assert_eq!(w.kind(), pce::write::ObjectKind::IpList);
-        let Start::Plan(w) = start(EditIntent::DeleteLabel(labels()[0].clone()), None) else {
+        let Start::Plan(w) = start(
+            EditIntent::DeleteLabel(labels()[0].clone()),
+            None,
+            NO_PREFILL,
+        ) else {
             panic!("a delete opens no form")
         };
         assert_eq!(
@@ -1791,7 +1918,14 @@ mod tests {
                 name: "role=web".into()
             }
         );
-        assert!(form_for(EditIntent::DeleteWorkload(workloads()[2].clone()), None).is_none());
+        assert!(
+            form_for(
+                EditIntent::DeleteWorkload(workloads()[2].clone()),
+                None,
+                NO_PREFILL
+            )
+            .is_none()
+        );
     }
 
     fn rule_sets() -> Vec<pce::models::RuleSet> {
@@ -2043,7 +2177,11 @@ mod tests {
             Some(vec![]),
             "an emptied Scopes field means everywhere"
         );
-        let Start::Plan(w) = start(EditIntent::DeleteRuleSet(rule_sets()[0].clone()), None) else {
+        let Start::Plan(w) = start(
+            EditIntent::DeleteRuleSet(rule_sets()[0].clone()),
+            None,
+            NO_PREFILL,
+        ) else {
             panic!("a delete opens no form")
         };
         assert_eq!(
@@ -2189,6 +2327,7 @@ mod tests {
                 name: "allow role=db ← role=web PostgreSQL".into(),
             },
             None,
+            NO_PREFILL,
         ) else {
             panic!("a delete opens no form")
         };
@@ -2280,6 +2419,7 @@ mod tests {
                 name: "override_deny role=db ← All workloads 22/tcp".into(),
             },
             None,
+            NO_PREFILL,
         ) else {
             panic!("a delete opens no form")
         };
@@ -2312,7 +2452,7 @@ mod tests {
     #[test]
     fn flow_prefill_covers_every_endpoint_shape() {
         let flows = crate::tui::test_support::fixture_flows();
-        let f = form(EditIntent::RuleFromFlow(Box::new(flows[1].clone()))); // Corp -> host-1, 8443/tcp
+        let f = flow_form(&flows[1]); // Corp -> host-1 (app=shop, env=prod, role=web), 8443/tcp
         assert_eq!(f.title, "Allow rule from flow");
         assert_eq!(
             f.fields.iter().map(|x| x.label).collect::<Vec<_>>(),
@@ -2326,54 +2466,167 @@ mod tests {
                 "Unscoped"
             ]
         );
-        assert_eq!(f.value("Ruleset"), "");
-        assert_eq!(f.value("Providers"), "app=shop, env=prod, role=web");
-        assert_eq!(f.value("Consumers"), "iplist:Corp");
+        assert_eq!(f.value("Providers"), "role=web", "the tier only");
+        assert_eq!(
+            f.value("Consumers"),
+            "iplist:Corp",
+            "no labels: the narrowest known"
+        );
         assert_eq!(f.value("Services"), "8443/tcp");
         assert_eq!(
             f.value("Description"),
             "allow 10.1.4.9 to host-1.example on 8443/tcp"
         );
         assert_eq!((f.value("Enabled"), f.value("Unscoped")), ("y", "y"));
-        let g = form(EditIntent::RuleFromFlow(Box::new(flows[2].clone()))); // unmanaged-nas -> host-2, icmp
-        assert_eq!(g.value("Providers"), "app=shop, env=prod, role=db");
+        let g = flow_form(&flows[2]); // unmanaged-nas -> host-2, icmp
+        assert_eq!(g.value("Providers"), "role=db");
         assert_eq!(g.value("Consumers"), "workload:/orgs/5/workloads/aaaa-3");
+        assert_eq!(g.value("Unscoped"), "y", "a source without labels");
         assert_eq!(g.value("Services"), "icmp");
         assert_eq!(
             g.value("Description"),
             "allow unmanaged-nas to host-2.example on icmp"
         );
-        let h = form(EditIntent::RuleFromFlow(Box::new(flows[0].clone()))); // a labelled source
-        assert_eq!(h.value("Consumers"), "app=shop, env=prod, role=web");
-        assert_eq!(h.value("Unscoped"), "n");
         let mut odd = flows[1].clone();
         odd.src = pce::traffic::ResolvedEndpoint {
             ip: Some("10.9.9.9".into()),
             ..pce::traffic::ResolvedEndpoint::default()
         };
-        odd.dst.labels.push(pce::ResolvedLabel {
-            href: "/orgs/5/labels/99".into(),
-            key: "?".into(),
-            value: "/orgs/5/labels/99".into(),
-        });
-        let o = form(EditIntent::RuleFromFlow(Box::new(odd.clone())));
+        odd.dst
+            .labels
+            .push(label("/orgs/5/labels/99", "?", "/orgs/5/labels/99"));
+        let o = flow_form(&odd);
         assert_eq!(
             o.value("Consumers"),
             "all",
             "nothing known about the source"
         );
+        assert_eq!(o.value("Providers"), "role=web");
         assert_eq!(
-            o.value("Providers"),
-            "app=shop, env=prod, role=web, /orgs/5/labels/99",
-            "an unknown label keeps its href"
+            o.alt.as_ref().unwrap()[0],
+            (
+                1,
+                "app=shop, env=prod, role=web, /orgs/5/labels/99".to_string()
+            ),
+            "an unknown label keeps its href among all labels"
         );
         odd.src.workload_href = Some("/orgs/5/workloads/aaaa-9".into());
         odd.src.ip_lists = vec!["Any (0.0.0.0/0 and ::/0)".into()];
-        let w = form(EditIntent::RuleFromFlow(Box::new(odd)));
+        let w = flow_form(&odd);
         assert_eq!(
             w.value("Consumers"),
             "workload:/orgs/5/workloads/aaaa-9",
             "a workload is narrower than the IP lists of its address"
+        );
+    }
+
+    #[test]
+    fn flow_prefill_follows_the_label_model() {
+        let flows = crate::tui::test_support::fixture_flows();
+        // Same scope (app=shop, env=prod) on both sides: tiers only, scoped.
+        let same = flow_form(&flows[0]);
+        assert_eq!(same.value("Providers"), "role=db");
+        assert_eq!(same.value("Consumers"), "role=web");
+        assert_eq!(same.value("Unscoped"), "n");
+        // A source in another scope: its scope and tier, unscoped.
+        let mut other = flows[0].clone();
+        other.src.labels = vec![
+            label("/orgs/5/labels/3", "app", "shop"),
+            label("/orgs/5/labels/7", "env", "dev"),
+            label("/orgs/5/labels/5", "loc", "eu"),
+            label("/orgs/5/labels/2", "role", "db"),
+        ];
+        let o = flow_form(&other);
+        assert_eq!(
+            o.value("Consumers"),
+            "app=shop, env=dev, role=db",
+            "loc is never pre-filled"
+        );
+        assert_eq!(o.value("Unscoped"), "y");
+        // No tier on the destination: the narrowest known instead.
+        let mut no_tier = flows[0].clone();
+        no_tier.dst.labels.retain(|l| l.key != "role");
+        no_tier
+            .dst
+            .labels
+            .push(label("/orgs/5/labels/5", "loc", "eu"));
+        let n = flow_form(&no_tier);
+        assert_eq!(n.value("Providers"), "workload:/orgs/5/workloads/aaaa-2");
+        // No scope on the destination: the hint stays, consumers are outside.
+        let mut no_scope = flows[0].clone();
+        no_scope.dst.labels.retain(|l| l.key == "role");
+        let s = flow_form(&no_scope);
+        assert_eq!(s.value("Ruleset"), "");
+        assert_eq!(s.fields[0].hint, RULESET_HINT);
+        assert_eq!(s.value("Providers"), "role=db");
+        assert_eq!(s.value("Consumers"), "app=shop, env=prod, role=web");
+        assert_eq!(s.value("Unscoped"), "y");
+        // Configured keys: scoped by app alone, tiers by env.
+        let c = form_with(
+            EditIntent::RuleFromFlow(Box::new(flows[0].clone())),
+            &["app"],
+            "env",
+            &[],
+        );
+        assert_eq!(c.value("Providers"), "env=prod");
+        assert_eq!(c.value("Consumers"), "env=prod");
+        assert_eq!(c.value("Unscoped"), "n");
+        let c = form_with(
+            EditIntent::RuleFromFlow(Box::new(flows[1].clone())),
+            &["app"],
+            "env",
+            &[],
+        );
+        assert_eq!(c.fields[0].hint, "scope app=shop");
+    }
+
+    #[test]
+    fn the_ruleset_is_the_one_whose_scope_is_the_destination_scope() {
+        let flows = crate::tui::test_support::fixture_flows();
+        let intent = || EditIntent::RuleFromFlow(Box::new(flows[1].clone()));
+        // Shop-Prod is scoped app=shop, env=prod; Global-Infra has an empty scope.
+        let one = form_with(intent(), &["app", "env"], "role", &rule_sets());
+        assert_eq!(one.value("Ruleset"), "Shop-Prod");
+        assert_eq!(one.fields[0].hint, RULESET_HINT);
+        // A ruleset with several scopes matches through any of them.
+        let mut sets = rule_sets();
+        let mut more = sets[0].clone();
+        more.href = "/orgs/5/sec_policy/draft/rule_sets/102".into();
+        more.name = "Shop-Prod-2".into();
+        more.scopes.insert(
+            0,
+            vec![actor(json!({"label": {"href": "/orgs/5/labels/5"}}))],
+        );
+        sets.push(more.clone());
+        let two = form_with(intent(), &["app", "env"], "role", &sets);
+        assert_eq!(two.value("Ruleset"), "", "two match: the user chooses");
+        assert_eq!(two.fields[0].hint, "scope app=shop, env=prod");
+        // A ruleset pending deletion does not count.
+        sets[2].update_type = Some("delete".into());
+        let back = form_with(intent(), &["app", "env"], "role", &sets);
+        assert_eq!(back.value("Ruleset"), "Shop-Prod");
+        // None matches: empty, the scope in the hint.
+        let none = form_with(intent(), &["app", "env"], "role", &rule_sets()[1..]);
+        assert_eq!(none.value("Ruleset"), "");
+        assert_eq!(none.fields[0].hint, "scope app=shop, env=prod");
+    }
+
+    #[test]
+    fn a_flow_form_keeps_every_label_one_key_away() {
+        let flows = crate::tui::test_support::fixture_flows();
+        let f = flow_form(&flows[0]);
+        assert_eq!(
+            f.alt,
+            Some(vec![
+                (1, "app=shop, env=prod, role=db".to_string()),
+                (2, "app=shop, env=prod, role=web".to_string()),
+            ])
+        );
+        assert!(!f.expanded);
+        assert_eq!(
+            form(EditIntent::CreateLabel).alt,
+            None,
+            "other forms have none"
         );
     }
 
@@ -2385,11 +2638,7 @@ mod tests {
         let want = RuleDraft {
             description: Some("allow 10.1.4.9 to host-1.example on 8443/tcp".into()),
             enabled: true,
-            providers: vec![
-                ActorRef::new(ActorKind::Label, "/orgs/5/labels/3"),
-                ActorRef::new(ActorKind::Label, "/orgs/5/labels/4"),
-                ActorRef::new(ActorKind::Label, "/orgs/5/labels/1"),
-            ],
+            providers: vec![ActorRef::new(ActorKind::Label, "/orgs/5/labels/1")],
             consumers: vec![ActorRef::new(
                 ActorKind::IpList,
                 "/orgs/5/sec_policy/draft/ip_lists/21",

@@ -1830,7 +1830,12 @@ fn writes_refused(model: &mut Model) -> bool {
 
 /// A create or update opens its form; a delete goes straight to planning.
 fn begin_edit(model: &mut Model, intent: EditIntent) -> Vec<Cmd> {
-    match edit::start(intent, model.index().map(|i| i.as_ref())) {
+    let start = edit::start(
+        intent,
+        model.index().map(|i| i.as_ref()),
+        model.flow_prefill(),
+    );
+    match start {
         Start::Form(f) => {
             model.overlay = Overlay::Form(f);
             Vec::new()
@@ -5773,8 +5778,12 @@ mod tests {
         assert!(
             edit::build_intent(
                 &{
-                    let mut f = edit::form_for(EditIntent::CreateWorkload, Some(idx.as_ref()))
-                        .expect("a form");
+                    let mut f = edit::form_for(
+                        EditIntent::CreateWorkload,
+                        Some(idx.as_ref()),
+                        m.flow_prefill(),
+                    )
+                    .expect("a form");
                     f.fields[0].value = "printer-1".into();
                     f.fields[4].value = "app=web2".into();
                     f
@@ -6306,6 +6315,37 @@ mod tests {
                 "select a flow in the Flows view (Enter on a pair)"
             );
             assert_eq!(m.overlay, Overlay::None);
+        }
+    }
+
+    #[test]
+    fn w_prefills_from_the_profile_label_model_and_the_loaded_draft_rulesets() {
+        use crate::tui::test_support::{fixture_index, model_with_flows};
+        let mut m = writes_on(model_with_flows());
+        let raw: Vec<pce::models::RuleSet> =
+            serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
+        m.policy.set_rule_sets(raw, &fixture_index());
+        update(&mut m, key('j'));
+        assert!(update(&mut m, key('w')).is_empty(), "no request");
+        match &m.overlay {
+            Overlay::Form(f) => {
+                assert_eq!(f.value("Ruleset"), "Shop-Prod", "the loaded draft ruleset");
+                assert_eq!(f.value("Providers"), "role=web");
+            }
+            other => panic!("{other:?}"),
+        }
+        // Another profile's model: tiers by env, scoped by app.
+        m.overlay = Overlay::None;
+        m.limits.scope_keys = vec!["app".into()];
+        m.limits.tier_key = "env".into();
+        update(&mut m, key('w'));
+        match &m.overlay {
+            Overlay::Form(f) => {
+                assert_eq!(f.value("Ruleset"), "", "Shop-Prod is scoped by app and env");
+                assert_eq!(f.fields[0].hint, "scope app=shop");
+                assert_eq!(f.value("Providers"), "env=prod");
+            }
+            other => panic!("{other:?}"),
         }
     }
 

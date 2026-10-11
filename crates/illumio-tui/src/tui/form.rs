@@ -3,14 +3,16 @@
 //! single-line and the cursor is always at the end of the active field.
 use crate::tui::edit::EditIntent;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use std::borrow::Cow;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Field {
     /// "Name", "Ranges".
     pub label: &'static str,
     pub value: String,
-    /// Example input shown under the field.
-    pub hint: &'static str,
+    /// Example input shown under the field (or what to type, such as the
+    /// scope a `w` form's ruleset needs).
+    pub hint: Cow<'static, str>,
     pub required: bool,
 }
 
@@ -18,13 +20,13 @@ impl Field {
     pub fn new(
         label: &'static str,
         value: impl Into<String>,
-        hint: &'static str,
+        hint: impl Into<Cow<'static, str>>,
         required: bool,
     ) -> Self {
         Self {
             label,
             value: value.into(),
-            hint,
+            hint: hint.into(),
             required,
         }
     }
@@ -40,6 +42,11 @@ pub struct Form {
     pub error: Option<String>,
     /// What to build on Enter.
     pub intent: EditIntent,
+    /// Alternate values of some fields, by index: `Ctrl-A` swaps them in
+    /// (a `w` form: every attached label instead of the label model).
+    pub alt: Option<Vec<(usize, String)>>,
+    /// The alternates are shown (`Ctrl-A` was pressed an odd number of times).
+    pub expanded: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,7 +66,23 @@ impl Form {
             active: 0,
             error: None,
             intent,
+            alt: None,
+            expanded: false,
         }
+    }
+
+    /// `Ctrl-A`: the listed fields and their alternates trade places, so the
+    /// text the user left becomes the alternate. Nothing without alternates.
+    fn swap_alternates(&mut self) {
+        let Some(alt) = self.alt.as_mut() else {
+            return;
+        };
+        for (i, other) in alt.iter_mut() {
+            if let Some(f) = self.fields.get_mut(*i) {
+                std::mem::swap(&mut f.value, other);
+            }
+        }
+        self.expanded = !self.expanded;
     }
 
     /// The value of the field with this label ("" when there is none).
@@ -95,6 +118,7 @@ impl Form {
                     f.value.pop();
                 }
             }
+            KeyCode::Char('a') if ctrl => self.swap_alternates(),
             KeyCode::Char('u') if ctrl => {
                 if let Some(f) = self.fields.get_mut(self.active) {
                     f.value.clear();
@@ -200,6 +224,62 @@ mod tests {
         assert_eq!(f.on_key(k(KeyCode::Enter)), FormEvent::Submit);
         assert_eq!(f.error, None);
         assert_eq!(f.on_key(k(KeyCode::Esc)), FormEvent::Cancel);
+    }
+
+    fn ctrl(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
+    fn flow_like() -> Form {
+        let mut f = Form::new(
+            "Allow rule from flow",
+            vec![
+                Field::new("Ruleset", "", "name", true),
+                Field::new("Providers", "role=web", "actors", true),
+                Field::new("Consumers", "iplist:Corp", "actors", true),
+            ],
+            EditIntent::CreateLabel,
+        );
+        f.alt = Some(vec![
+            (1, "app=shop, env=prod, role=web".into()),
+            (2, "iplist:Corp, loc=eu".into()),
+        ]);
+        f
+    }
+
+    #[test]
+    fn ctrl_a_swaps_the_alternates_and_twice_restores_the_model_view() {
+        let mut f = flow_like();
+        let model_view = f.clone();
+        assert_eq!(f.on_key(ctrl('a')), FormEvent::Continue);
+        assert!(f.expanded);
+        assert_eq!(f.value("Providers"), "app=shop, env=prod, role=web");
+        assert_eq!(f.value("Consumers"), "iplist:Corp, loc=eu");
+        assert_eq!(f.value("Ruleset"), "", "unlisted fields stay");
+        f.on_key(ctrl('a'));
+        assert_eq!(f, model_view, "twice is the model view again");
+        // Without alternates the key does nothing.
+        let mut plain = label_form();
+        let before = plain.clone();
+        plain.on_key(ctrl('a'));
+        assert_eq!(plain, before);
+    }
+
+    #[test]
+    fn ctrl_a_keeps_what_the_user_typed_as_the_alternate() {
+        let mut f = flow_like();
+        f.active = 1;
+        for _ in 0..3 {
+            f.on_key(k(KeyCode::Backspace));
+        }
+        f.on_key(k(KeyCode::Char('d')));
+        f.on_key(k(KeyCode::Char('b')));
+        assert_eq!(f.value("Providers"), "role=db");
+        f.on_key(ctrl('a'));
+        assert_eq!(f.value("Providers"), "app=shop, env=prod, role=web");
+        f.on_key(ctrl('a'));
+        assert_eq!(f.value("Providers"), "role=db", "the edit comes back");
+        assert!(!f.expanded);
     }
 
     #[test]

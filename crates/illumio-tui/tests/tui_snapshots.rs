@@ -673,7 +673,12 @@ fn rule_set_form_80x24() {
     let shop = m.policy.raw[0].clone();
     let idx = fixture_index();
     m.overlay = Overlay::Form(
-        form_for(EditIntent::UpdateRuleSet(shop), Some(idx.as_ref())).expect("a form"),
+        form_for(
+            EditIntent::UpdateRuleSet(shop),
+            Some(idx.as_ref()),
+            m.flow_prefill(),
+        )
+        .expect("a form"),
     );
     let out = render_to_string(&m, 80, 24);
     assert!(out.contains("Edit ruleset Shop-Prod"), "{out}");
@@ -700,6 +705,7 @@ fn rule_and_deny_rule_forms_80x24() {
         form_for(
             EditIntent::UpdateRule(shop.rules[1].clone(), shop.href.clone()),
             Some(idx.as_ref()),
+            m.flow_prefill(),
         )
         .expect("a form"),
     );
@@ -717,6 +723,7 @@ fn rule_and_deny_rule_forms_80x24() {
         form_for(
             EditIntent::UpdateDenyRule(shop.deny_rules[1].clone(), shop.href.clone()),
             Some(idx.as_ref()),
+            d.flow_prefill(),
         )
         .expect("a form"),
     );
@@ -823,15 +830,19 @@ fn rule_from_flow_form_80x24() {
         form_for(
             EditIntent::RuleFromFlow(Box::new(fixture_flows()[1].clone())),
             Some(idx.as_ref()),
+            m.flow_prefill(),
         )
         .expect("a form"),
     );
     let out = render_to_string(&m, 80, 24);
     assert!(out.contains("Allow rule from flow"), "{out}");
     assert!(out.contains("Ruleset*"), "{out}");
-    assert!(out.contains("app=shop, env=prod, role=web"), "{out}");
+    assert!(out.contains("role=web"), "{out}");
+    assert!(!out.contains("app=shop, env=prod, role=web"), "{out}");
+    assert!(out.contains("scope app=shop, env=prod"), "{out}");
     assert!(out.contains("iplist:Corp"), "{out}");
     assert!(out.contains("8443/tcp"), "{out}");
+    assert!(out.contains("Ctrl-A all labels"), "{out}");
     insta::assert_snapshot!("form_rule_from_flow_80x24", out);
     m.set_theme("light");
     insta::assert_snapshot!(

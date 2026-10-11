@@ -1830,11 +1830,7 @@ async fn w_creates_a_rule_in_the_named_ruleset() {
     mount_rule_sets(&server, 2).await; // the name lookup + the reload
     let body = json!({
         "enabled": true,
-        "providers": [
-            {"label": {"href": "/orgs/5/labels/3"}},
-            {"label": {"href": "/orgs/5/labels/4"}},
-            {"label": {"href": "/orgs/5/labels/1"}}
-        ],
+        "providers": [{"label": {"href": "/orgs/5/labels/1"}}],
         "consumers": [{"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/21"}}],
         "ingress_services": [{"port": 8443, "proto": 6}],
         "unscoped_consumers": true,
