@@ -63,7 +63,7 @@ or a profile in `~/.config/illumio-tui/config.toml`:
     org_id = 1
     api_key = "api_..."
     api_secret_cmd = "op read op://vault/pce/secret"
-    writes = true    # optional: allow write commands (they still need --allow-writes)
+    writes = true    # optional: allow writes (the CLI still needs --yes, the TUI :writes on)
 
 `--env-file .env` loads a dotenv file for one run. Connection settings can
 also be overridden per run with global flags: `--host`, `--pce-port`,
@@ -79,7 +79,8 @@ has its own `--port` service-port filter).
 
 Six screens: `1` Traffic, `2` Policy, `3` Objects, `4` Workloads, `5` Events, `6` IP lists. The
 `:` prompt takes `:traffic`, `:policy`, `:objects`, `:workloads`, `:events`, `:iplists`,
-`:filter <expr>`, `:window <dur>`, `:profile <name>`, `:draft`, `:active`, `:help` and `:q`.
+`:filter <expr>`, `:window <dur>`, `:profile <name>`, `:writes [on|off]`, `:draft`, `:active`,
+`:help` and `:q`.
 `?` shows the full key map, `Esc` closes overlays, `q` or `Ctrl-C` quits. The mouse wheel
 scrolls the current table and a click on a tab switches screen; on a terminal narrower than
 the full tab row the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`, `IPs`.
@@ -117,7 +118,8 @@ title, and switches itself off after a failed refresh.
 `api_secret_cmd`, so the command must be non-interactive (no prompts): the TUI owns the
 terminal. Exported `PCE_HOST`, `PCE_PORT`, `PCE_ORG_ID`, `API_KEY` and `API_SECRET` still
 outrank the target profile on a switch, as they do at startup; the header shows the host
-actually in use.
+actually in use. `:writes on` stays on across a switch, and the new profile's own `writes`
+decides whether it may write.
 
 Startup makes exactly five requests (health plus the four object lists). The first visit to
 Workloads and to Events costs one request each; going back to them costs none. IP lists (`6`)
@@ -160,10 +162,12 @@ through the cache; `meta.truncated` includes it. `iplists` gives every list a `s
 
 ## Writes
 
-Writes are off until two things say yes: the profile (`writes = true`, or
-`ILLUMIO_WRITES=1` in the environment) and the invocation (`--allow-writes`).
-Every write command prints the exact request with `--dry-run` and needs
-`--yes` to send it (the two flags conflict). A dry run's `data` is
+Writes are off unless the profile says yes (`writes = true`, or
+`ILLUMIO_WRITES=1` in the environment); a profile without it is exit 6
+(`write_refused`), even for a dry run. Every write command prints the exact
+request with `--dry-run` and needs `--yes` to send it (the two flags
+conflict; with neither, it is exit 2 and nothing is sent). `--allow-writes`
+is still accepted but no longer needed and changes nothing. A dry run's `data` is
 `{method, path, body, summary}`: the method, the API path, the JSON body that
 would be sent (absent for a delete) and a one-line summary. Each sent request
 is appended to `~/.local/state/illumio-tui/writes.jsonl` (or
@@ -173,14 +177,14 @@ Nothing is ever retried.
 IP lists and services are written to draft and wait for provisioning
 (`"pending": true`); labels and workloads take effect at once.
 
-    illumio-tui --allow-writes labels add app=web --yes
-    illumio-tui --allow-writes labels add app=web --if-missing --yes     # no-op when it exists
-    illumio-tui --allow-writes iplists add Corp --range 10.0.0.0/8 --fqdn '*.corp.example' --yes
-    illumio-tui --allow-writes iplists update Corp --add-range 10.2.0.0/16 --dry-run
-    illumio-tui --allow-writes services add PostgreSQL --port 5432/tcp --yes
-    illumio-tui --allow-writes workloads add printer-1 --ip 10.0.0.50/24 --label app=print --yes
-    illumio-tui --allow-writes workloads update printer-1 --add-label env=lab --yes
-    illumio-tui --allow-writes workloads delete printer-1 --yes
+    illumio-tui labels add app=web --yes
+    illumio-tui labels add app=web --if-missing --yes     # no-op when it exists
+    illumio-tui iplists add Corp --range 10.0.0.0/8 --fqdn '*.corp.example' --yes
+    illumio-tui iplists update Corp --add-range 10.2.0.0/16 --dry-run
+    illumio-tui services add PostgreSQL --port 5432/tcp --yes
+    illumio-tui workloads add printer-1 --ip 10.0.0.50/24 --label app=print --yes
+    illumio-tui workloads update printer-1 --add-label env=lab --yes
+    illumio-tui workloads delete printer-1 --yes
 
 `--port` takes `P/PROTO`, `P-Q/PROTO` (`443/tcp`, `8000-8100/udp`, `53/17`)
 or a protocol name (`tcp`, `udp`, `icmp`, `icmpv6`); a bare number such as
@@ -223,14 +227,14 @@ A rule's inline services are tcp or udp, with or without a port (`443/tcp`,
 is therefore resolved to the ICMP service object (the built-in one, whatever
 its name), and refused when the PCE has none.
 
-    illumio-tui --allow-writes policy rulesets add Web-Tier --scope app=web,env=prod --yes
-    illumio-tui --allow-writes policy rulesets update Web-Tier --clear-scopes --dry-run
-    illumio-tui --allow-writes policy rules add Web-Tier --provider app=web --consumer iplist:Corp --service 443/tcp --yes --json
-    illumio-tui --allow-writes policy rules update /orgs/1/sec_policy/draft/rule_sets/7/sec_rules/9 --add-consumer '!iplist:Guest' --dry-run
-    illumio-tui --allow-writes policy deny-rules add Web-Tier --provider all --consumer iplist:Any --service 23/tcp --override --yes
-    illumio-tui --allow-writes policy provision --all --dry-run
-    illumio-tui --allow-writes policy provision Web-Tier --description "web tier v2" --yes
-    illumio-tui --allow-writes workloads update web-01 --add-label env=prod --managed-labels --yes
+    illumio-tui policy rulesets add Web-Tier --scope app=web,env=prod --yes
+    illumio-tui policy rulesets update Web-Tier --clear-scopes --dry-run
+    illumio-tui policy rules add Web-Tier --provider app=web --consumer iplist:Corp --service 443/tcp --yes --json
+    illumio-tui policy rules update /orgs/1/sec_policy/draft/rule_sets/7/sec_rules/9 --add-consumer '!iplist:Guest' --dry-run
+    illumio-tui policy deny-rules add Web-Tier --provider all --consumer iplist:Any --service 23/tcp --override --yes
+    illumio-tui policy provision --all --dry-run
+    illumio-tui policy provision Web-Tier --description "web tier v2" --yes
+    illumio-tui workloads update web-01 --add-label env=prod --managed-labels --yes
 
 Providers, consumers and scope members (`--provider`, `--consumer`,
 `--scope`, `--add-*`/`--remove-*`):
@@ -269,7 +273,7 @@ rule will touch, before anything is sent: with `--dry-run`, `data` is the reques
 workloads from one cached read made after the guard and the plan, so a refused write costs
 nothing.
 
-    illumio-tui --allow-writes policy rules add Shop-Prod --provider role=web --consumer iplist:Corp --service 443/tcp --dry-run --impact --json
+    illumio-tui policy rules add Shop-Prod --provider role=web --consumer iplist:Corp --service 443/tcp --dry-run --impact --json
 
 `policy provision --all` reads the pending list once and provisions every
 pending object by explicit href, grouped by type (rulesets, IP lists,
@@ -289,11 +293,14 @@ request. Without it, managed workloads stay refused.
 
 ### Editing in the TUI
 
-With writes enabled for the profile and `illumio-tui --allow-writes`, the
+The TUI starts with writes off. With writes enabled for the profile, `:writes on` arms
+them for the session (not persisted; `:writes off` disarms them, `:writes` shows the state,
+and `illumio-tui --allow-writes` starts with them on). Then the
 header shows `✎ writes` before the host and three screens take three keys: on Objects (labels,
 services), IP lists and Workloads (unmanaged workloads only)
-`n` creates, `e` edits the selected row and `x` deletes it. Without either
-switch the keys print the reason in the status line and send nothing. Label
+`n` creates, `e` edits the selected row and `x` deletes it, and every request is shown in a
+confirm overlay before `y` sends it once. With writes off the keys print the reason in the
+status line and send nothing. Label
 groups are read-only.
 
 A form takes one line per field; lists are comma-separated in the CLI

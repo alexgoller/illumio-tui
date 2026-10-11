@@ -95,8 +95,10 @@ terminal is needed.
 
 `pce::write` is the only path that mutates the PCE. A `Writer` exists only
 through `Pce::writer(&WriteGuard)`, and a `WriteGuard` cannot be built unless
-the profile allows writes, the caller passed `--allow-writes`, and the audit
-log opens for append. Writes are two-phase: `plan_create_*`, `plan_update_*`
+the profile allows writes (`writes = true` or `ILLUMIO_WRITES=1`) and the
+audit log opens for append. Whether a guard is wanted at all is the caller's
+choice: the CLI builds one for every write command (and sends only with
+`--yes`), the TUI only while `:writes on`. Writes are two-phase: `plan_create_*`, `plan_update_*`
 and `plan_delete_*` build a `Plan` (the exact `WriteRequest`, or a `Noop` when
 `--if-missing` found an exact match) without sending anything; `execute` sends
 it once through `PceClient::write` (no retry, 400/406/409/422 -> `Rejected`),
@@ -134,10 +136,13 @@ lists it fetches at most once per command (`Lists`).
 ### TUI editing
 
 The model knows only `WritesState` (enabled, reason); the runtime owns
-`Option<Arc<WriteGuard>>`, built in `run` and again on every `:profile`
-switch from the same inputs as the CLI (profile `writes`, `--allow-writes`,
-the JSONL audit log) with `source: "tui"`. A switch to a profile without
-writes drops the guard and the header marker.
+`Option<Arc<WriteGuard>>` and the session toggle `writes_wanted` (off at
+startup unless `--allow-writes`; `:writes on|off` sets it through
+`Cmd::SetWrites`, answered by `Msg::WritesSet`). One `build_writer` builds
+the guard from the same inputs as the CLI (profile `writes`, the JSONL audit
+log) with `source: "tui"`, in `run`, on `:writes on` and on every `:profile`
+switch while the toggle is on. A switch to a profile without writes drops
+the guard and the header marker; the toggle itself is never persisted.
 
 One edit, top to bottom: `e` on an IP list.
 

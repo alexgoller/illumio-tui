@@ -86,14 +86,14 @@
 <span class="p">$ </span>illumio-tui profile list
 <span class="p">$ </span>illumio-tui profile use prod
 
-<span class="c"># writes: off unless the profile allows them and --allow-writes is given</span>
-<span class="p">$ </span>illumio-tui --allow-writes labels add app=web --yes
-<span class="p">$ </span>illumio-tui --allow-writes iplists update Corp --add-range 10.2.0.0/16 --dry-run</code></pre>
+<span class="c"># writes: off unless the profile allows them; --yes sends, --dry-run shows</span>
+<span class="p">$ </span>illumio-tui labels add app=web --yes
+<span class="p">$ </span>illumio-tui iplists update Corp --add-range 10.2.0.0/16 --dry-run</code></pre>
 
   <ul>
-    <li>Writes labels, IP lists, services and unmanaged workloads from the CLI: profile opt-in plus <code>--allow-writes</code>, <code>--dry-run</code> shows the request, <code>--yes</code> sends it once, every write lands in a local audit log.</li>
+    <li>Writes labels, IP lists, services and unmanaged workloads from the CLI: profile opt-in (<code>writes = true</code>), <code>--dry-run</code> shows the request, <code>--yes</code> sends it once, every write lands in a local audit log.</li>
     <li>Writes policy from the CLI: rulesets, allow and deny rules with a compact actor grammar (<code>app=web</code>, <code>group:Prod</code>, <code>iplist:Corp</code>, <code>!</code> to exclude), provisioning of everything pending or a chosen few, and label changes on VEN-managed workloads, all with the same dry run, single send and audit log.</li>
-    <li>Edits the same objects in the TUI: <code>n</code> new, <code>e</code> edit, <code>x</code> delete, a header marker while writes are on, the exact request on screen before <code>y</code> sends it once, and a pending-changes diff of a draft IP list or service against active.</li>
+    <li>Edits the same objects in the TUI once <code>:writes on</code> arms them for the session: <code>n</code> new, <code>e</code> edit, <code>x</code> delete, a header marker while writes are on, the exact request on screen before <code>y</code> sends it once, and a pending-changes diff of a draft IP list or service against active.</li>
     <li>Edits policy in the TUI too: rulesets, allow and deny rules on the Policy screen with the same token grammar, marked or complete provisioning from the pending list after the exact <code>change_subset</code> is shown, a ruleset diff against active, and <code>w</code> to turn a blocked flow into a draft allow rule.</li>
     <li>Shows what a rule touches: <code>i</code> in the TUI and <code>--impact</code> in the CLI count the workloads a rule matches as providers and consumers, with ruleset scopes, label groups and exclusions, from one cached workload read, before and after you write it.</li>
   </ul>
