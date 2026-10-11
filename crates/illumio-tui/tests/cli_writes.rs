@@ -259,6 +259,24 @@ async fn every_write_command_is_guarded_and_needs_yes() {
             "{args:?}"
         );
         assert_no_secret(&a);
+        // Flag present, profile writes off (ILLUMIO_WRITES unset): exit 6 for
+        // both --yes and --dry-run, before any request.
+        for mode in ["--yes", "--dry-run"] {
+            let a = cmd(&server)
+                .env("XDG_STATE_HOME", state.path())
+                .arg("--allow-writes")
+                .arg("--json")
+                .args(args)
+                .arg(mode)
+                .assert()
+                .code(6);
+            assert_eq!(
+                stderr_json(&a)["error"]["kind"],
+                "write_refused",
+                "{args:?} {mode}"
+            );
+            assert_no_secret(&a);
+        }
         // --allow-writes without --yes (or --dry-run): exit 2.
         let a = writer(&server, state.path()).args(args).assert().code(2);
         assert_eq!(stderr_json(&a)["error"]["kind"], "args", "{args:?}");
@@ -1635,6 +1653,29 @@ mod policy {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn an_empty_ruleset_name_is_exit_2_before_any_request() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        for args in [
+            &["policy", "rulesets", "add", "", "--if-missing", "--dry-run"][..],
+            &["policy", "rulesets", "add", "  ", "--dry-run"][..],
+            &[
+                "policy",
+                "rulesets",
+                "update",
+                "Shop-Prod",
+                "--name",
+                "",
+                "--dry-run",
+            ][..],
+        ] {
+            let a = writer(&server, state.path()).args(args).assert().code(2);
+            assert_eq!(stderr_json(&a)["error"]["kind"], "invalid", "{args:?}");
+        }
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn rulesets_update_by_name_and_by_href() {
         let server = MockServer::start().await;
         let state = tempfile::tempdir().unwrap();
@@ -1881,10 +1922,41 @@ mod policy {
                 "providers": [{"workload": {"href": "/orgs/5/workloads/aaaa-1"}}],
                 "consumers": [{"actors": "ams"}],
                 "ingress_services": [{"proto": 1}],
-                "unscoped_consumers": false
+                "unscoped_consumers": false,
+                "resolve_labels_as": {"providers": ["workloads"], "consumers": ["workloads"]}
             })
         );
         assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rules_add_explicit_resolve_providers_as_overrides_the_default() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "policy",
+                    "rules",
+                    "add",
+                    RS_100,
+                    "--provider",
+                    "all",
+                    "--consumer",
+                    "all",
+                    "--service",
+                    "443/tcp",
+                    "--resolve-providers-as",
+                    "virtual_services",
+                    "--dry-run",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(
+            out["data"]["body"]["resolve_labels_as"],
+            json!({"providers": ["virtual_services"], "consumers": ["workloads"]})
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -2016,7 +2088,8 @@ mod policy {
             "providers": [{"actors": "ams"}],
             "consumers": [{"actors": "ams"}],
             "ingress_services": [{"port": 443, "proto": 6}],
-            "unscoped_consumers": false
+            "unscoped_consumers": false,
+            "resolve_labels_as": {"providers": ["workloads"], "consumers": ["workloads"]}
         });
         let mut created = body.clone();
         created["href"] = json!(format!("{RS_100}/sec_rules/9"));
@@ -2498,6 +2571,64 @@ mod provision {
         assert_eq!(
             count(&server, "GET", "/api/v2/orgs/5/sec_policy/pending").await,
             1
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_ruleset_pending_deletion_is_provisioned_by_name() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_get(
+            &server,
+            "/orgs/5/sec_policy/pending",
+            json!({"rule_sets": [{"href": "/orgs/5/sec_policy/draft/rule_sets/102", "update_type": "delete", "name": "Gone"}],
+                   "ip_lists": [], "services": [], "label_groups": []}),
+        )
+        .await;
+        mount_get(
+            &server,
+            "/orgs/5/sec_policy/draft/rule_sets",
+            json!([{"href": "/orgs/5/sec_policy/draft/rule_sets/102", "update_type": "delete", "name": "Gone", "enabled": true}]),
+        )
+        .await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args(["policy", "provision", "gone", "--dry-run"])
+                .assert()
+                .success(),
+        );
+        assert_eq!(
+            out["data"]["body"]["change_subset"],
+            json!({"rule_sets": [{"href": "/orgs/5/sec_policy/draft/rule_sets/102"}]})
+        );
+        assert_eq!(
+            count(&server, "GET", "/api/v2/orgs/5/sec_policy/draft/rule_sets").await,
+            1
+        );
+        assert_eq!(
+            count(&server, "GET", "/api/v2/orgs/5/sec_policy/pending").await,
+            1
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_named_ruleset_without_pending_changes_is_reported_by_name_and_href() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_get(&server, "/orgs/5/sec_policy/pending", pending_dict()).await;
+        mount_get(
+            &server,
+            "/orgs/5/sec_policy/draft/rule_sets",
+            fixture_rule_sets(),
+        )
+        .await;
+        let a = writer(&server, state.path())
+            .args(["policy", "provision", "Shop-Prod", "--dry-run"])
+            .assert()
+            .code(2);
+        assert_eq!(
+            stderr_json(&a)["error"]["message"],
+            "Shop-Prod (/orgs/5/sec_policy/draft/rule_sets/100) has no pending changes"
         );
     }
 

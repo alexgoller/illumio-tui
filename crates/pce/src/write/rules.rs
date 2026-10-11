@@ -141,9 +141,12 @@ impl RuleDraft {
         if let Some(d) = &self.description {
             v["description"] = json!(d);
         }
-        if let Some(r) = &self.resolve_labels_as {
-            v["resolve_labels_as"] = json!({"providers": r.providers, "consumers": r.consumers});
-        }
+        // The PCE may require it and every recorded allow rule carries it:
+        // default to workloads on both sides.
+        v["resolve_labels_as"] = match &self.resolve_labels_as {
+            Some(r) => json!({"providers": r.providers, "consumers": r.consumers}),
+            None => json!({"providers": ["workloads"], "consumers": ["workloads"]}),
+        };
         v
     }
 }
@@ -615,6 +618,49 @@ mod tests {
 
     fn label(id: u32) -> ActorRef {
         ActorRef::new(ActorKind::Label, format!("/orgs/5/labels/{id}"))
+    }
+
+    fn draft(resolve: Option<ResolveLabelsAs>) -> RuleDraft {
+        RuleDraft {
+            description: None,
+            enabled: true,
+            providers: vec![label(1)],
+            consumers: vec![ActorRef::all()],
+            services: vec![port("443/tcp")],
+            unscoped_consumers: false,
+            resolve_labels_as: resolve,
+        }
+    }
+
+    #[test]
+    fn a_create_body_defaults_resolve_labels_as_to_workloads_and_an_explicit_value_wins() {
+        assert_eq!(
+            draft(None).to_body()["resolve_labels_as"],
+            json!({"providers": ["workloads"], "consumers": ["workloads"]})
+        );
+        let explicit = draft(Some(ResolveLabelsAs {
+            providers: vec!["virtual_services".into()],
+            consumers: vec!["workloads".into()],
+        }));
+        assert_eq!(
+            explicit.to_body()["resolve_labels_as"],
+            json!({"providers": ["virtual_services"], "consumers": ["workloads"]})
+        );
+    }
+
+    #[test]
+    fn a_virtual_service_provider_survives_byte_identical_when_another_provider_is_removed() {
+        let vs = json!({"virtual_service": {"href": "/orgs/5/sec_policy/draft/virtual_services/1", "name": "vs"}, "extra": 1});
+        let mut current = rule2();
+        current["providers"] = json!([{"label": {"href": "/orgs/5/labels/1"}}, vs.clone()]);
+        let patch = RulePatch {
+            remove_providers: vec![label(1)],
+            ..RulePatch::default()
+        };
+        assert_eq!(
+            apply_rule_patch(&current, &patch).unwrap(),
+            json!({"providers": [vs]})
+        );
     }
 
     #[test]

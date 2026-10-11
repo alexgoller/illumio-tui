@@ -400,7 +400,7 @@ fn label_group_in(groups: &[LabelGroup], name: &str) -> Result<String, CliError>
 }
 
 /// Legacy: passes hrefs through unchecked; the token resolver
-/// (`resolve_actor`) is the checked path (Task 8 migrates the commands).
+/// (`resolve_actor`) is the checked path.
 pub async fn resolve_ip_list(ctx: &Context, name: &str) -> Result<String, CliError> {
     if is_href(name) {
         return Ok(name.trim().to_string());
@@ -409,7 +409,7 @@ pub async fn resolve_ip_list(ctx: &Context, name: &str) -> Result<String, CliErr
 }
 
 /// Legacy: passes hrefs through unchecked; the token resolver
-/// (`resolve_service_ref`) is the checked path (Task 8 migrates the commands).
+/// (`resolve_service_ref`) is the checked path.
 pub async fn resolve_service(ctx: &Context, name: &str) -> Result<String, CliError> {
     if is_href(name) {
         return Ok(name.trim().to_string());

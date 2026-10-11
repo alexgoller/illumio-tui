@@ -518,12 +518,12 @@ fn on_off(on: bool, off: bool) -> Option<bool> {
     }
 }
 
-/// Exactly one live draft ruleset named `name` (case-insensitive); a
-/// pending delete does not count.
-fn ruleset_named(sets: &[RuleSet], name: &str) -> Result<String, CliError> {
+/// Exactly one draft ruleset named `name` (case-insensitive); a pending
+/// delete does not count unless `with_deleted` (provisioning that delete).
+fn ruleset_named(sets: &[RuleSet], name: &str, with_deleted: bool) -> Result<String, CliError> {
     let live = || {
         sets.iter()
-            .filter(|rs| rs.update_type.as_deref() != Some("delete"))
+            .filter(move |rs| with_deleted || rs.update_type.as_deref() != Some("delete"))
     };
     let hits: Vec<&str> = live()
         .filter(|rs| rs.name.eq_ignore_ascii_case(name))
@@ -553,7 +553,7 @@ async fn ruleset_href(ctx: &Context, needle: &str) -> Result<String, CliError> {
         .rule_sets(PolicyScope::Draft, ctx.cache_mode)
         .await?
         .value;
-    ruleset_named(&sets, needle.trim())
+    ruleset_named(&sets, needle.trim(), false)
 }
 
 /// The library's own messages for a rule with an empty side, raised before
@@ -671,6 +671,15 @@ const NOTHING_FOR_RULE: &str = "nothing to change; pass --description, --enabled
 
 async fn ruleset_add(ctx: &Context, a: &RulesetAddArgs) -> Result<(), CliError> {
     let guard = write::prepare(ctx, &a.write)?;
+    // The name errors need no list: an empty name costs no request.
+    RuleSetDraft {
+        name: a.name.clone(),
+        description: None,
+        enabled: true,
+        scopes: Vec::new(),
+    }
+    .validate()
+    .map_err(WriteError::Invalid)?;
     let scopes = parse_scopes(&a.scopes)?;
     let mut lists = Lists::new(&guard);
     let draft = RuleSetDraft {
@@ -705,6 +714,12 @@ async fn ruleset_update(ctx: &Context, a: &RulesetUpdateArgs) -> Result<(), CliE
             "nothing to change; pass --name, --description, --enabled, --disabled, --scope or --clear-scopes".into(),
         ));
     }
+    RuleSetPatch {
+        name: a.name.clone(),
+        ..RuleSetPatch::default()
+    }
+    .validate()
+    .map_err(WriteError::Invalid)?;
     let scopes = parse_scopes(&a.scopes)?;
     let href = ruleset_href(ctx, &a.ruleset).await?;
     let mut lists = Lists::new(&guard);
@@ -851,9 +866,14 @@ async fn deny_rule_delete(ctx: &Context, a: &DenyRuleDeleteArgs) -> Result<(), C
     run_plan(ctx, &a.write, &guard, plan).await
 }
 
-/// Hrefs as given (the planner checks them); names resolved as rulesets
-/// with one draft list GET, made only when a name is given.
-async fn provision_targets(ctx: &Context, targets: &[String]) -> Result<Vec<String>, CliError> {
+/// Hrefs as given (the planner checks them), paired with what the user
+/// typed; names resolved as rulesets (pending deletes included, the
+/// planner's pending check still guards) with one draft list GET, made only
+/// when a name is given.
+async fn provision_targets(
+    ctx: &Context,
+    targets: &[String],
+) -> Result<Vec<(String, String)>, CliError> {
     let sets = if targets.iter().all(|t| is_href(t)) {
         Vec::new()
     } else {
@@ -865,26 +885,53 @@ async fn provision_targets(ctx: &Context, targets: &[String]) -> Result<Vec<Stri
     targets
         .iter()
         .map(|t| {
-            if is_href(t) {
-                Ok(t.trim().to_string())
+            let href = if is_href(t) {
+                t.trim().to_string()
             } else {
-                ruleset_named(&sets, t.trim())
-            }
+                ruleset_named(&sets, t.trim(), true)?
+            };
+            Ok((t.trim().to_string(), href))
         })
         .collect()
 }
 
+/// `<href> has no pending changes` becomes `<typed> (<href>) ...` when the
+/// target was given by name.
+fn name_typed_target(msg: String, typed: &[(String, String)]) -> String {
+    typed
+        .iter()
+        .find(|(t, h)| t != h && msg == format!("{h} has no pending changes"))
+        .map(|(t, h)| format!("{t} ({h}) has no pending changes"))
+        .unwrap_or(msg)
+}
+
 async fn provision(ctx: &Context, a: &ProvisionArgs) -> Result<(), CliError> {
     let guard = write::prepare(ctx, &a.write)?;
+    let mut typed = Vec::new();
     let subset = if a.all {
         ProvisionSubset::All
     } else {
-        ProvisionSubset::Hrefs(provision_targets(ctx, &a.targets).await?)
+        let pairs = provision_targets(ctx, &a.targets).await?;
+        let hrefs = pairs.iter().map(|(_, h)| h.clone()).collect();
+        typed = pairs;
+        ProvisionSubset::Hrefs(hrefs)
     };
     let req = ProvisionRequest {
         description: a.description.clone(),
         subset,
     };
-    let plan = ctx.pce.writer(&guard).plan_provision(&req).await?;
+    let plan = match ctx.pce.writer(&guard).plan_provision(&req).await {
+        Ok(p) => p,
+        // Name what the user typed alongside the href.
+        Err(WriteError::Invalid(errs)) => {
+            return Err(WriteError::Invalid(
+                errs.into_iter()
+                    .map(|m| name_typed_target(m, &typed))
+                    .collect(),
+            )
+            .into());
+        }
+        Err(e) => return Err(e.into()),
+    };
     write::run_provision_plan(ctx, &a.write, &guard, plan).await
 }
