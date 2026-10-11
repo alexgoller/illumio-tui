@@ -69,7 +69,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ),
     (
         "n / e / x (writes)",
-        "new / edit / delete on Objects, Workloads, Policy",
+        "new/edit/delete: Objects, IP lists, Workloads, Policy",
     ),
     (
         "Pending  j/k Space Enter",

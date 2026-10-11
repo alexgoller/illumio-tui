@@ -2106,3 +2106,48 @@ async fn opening_ip_lists_costs_nothing_after_startup_and_r_bypasses_once() {
     assert!(!model.ip_lists.loading);
     assert_eq!(model.busy, 0);
 }
+
+#[tokio::test]
+async fn create_ip_list_on_the_ip_lists_screen_posts_once_and_reloads_once() {
+    let server = MockServer::start().await;
+    mount_lists(&server, 1, 2, 1).await; // IP lists: startup + the reload
+    let body = json!({"name": "Lab", "ip_ranges": [{"from_ip": "10.9.0.0/16"}], "fqdns": []});
+    let mut created = body.clone();
+    created["href"] = json!("/orgs/5/sec_policy/draft/ip_lists/22");
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/sec_policy/draft/ip_lists"))
+        .and(body_json(body))
+        .respond_with(ResponseTemplate::new(201).set_body_json(created))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let audit = MemoryAudit::new();
+    let mut keys = vec![(500, ch('6')), (200, ch('n'))];
+    keys.extend(typed("Lab"));
+    keys.extend([(20, KeyCode::Tab), (20, KeyCode::Tab)]);
+    keys.extend(typed("10.9.0.0/16"));
+    keys.extend([(50, KeyCode::Enter), (300, ch('y')), (400, KeyCode::F(12))]);
+    let model = key_session(
+        &server,
+        writes_model(),
+        Some(tui_guard(audit.clone())),
+        keys,
+    )
+    .await;
+    assert_eq!(
+        model.status.text, "created /orgs/5/sec_policy/draft/ip_lists/22 (pending)",
+        "the reload keeps the write's report"
+    );
+    assert_eq!(
+        model.stats.calls, 7,
+        "health + four lists + POST + one IP lists reload; opening the screen was a cache hit"
+    );
+    assert_eq!(writes_seen(&server).await, vec!["POST"]);
+    assert_eq!(audit.entries().len(), 1);
+    assert_eq!(
+        model.ip_lists.table.len(),
+        2,
+        "the mock list did not change"
+    );
+    assert_eq!(model.busy, 0);
+}

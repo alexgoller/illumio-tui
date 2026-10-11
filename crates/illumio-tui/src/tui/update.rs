@@ -298,6 +298,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         Some(idx) => model.policy.set_rule_sets(raw, &idx),
                         None => model.policy.raw = raw, // built when the index arrives
                     }
+                    model.ip_lists.recount(&model.policy);
                     if !quiet {
                         model.status = StatusLine::info(format!(
                             "{} rulesets ({})",
@@ -330,6 +331,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     if let Some(idx) = model.index().cloned() {
                         model.policy.rebuild_rules(&idx);
                     }
+                    model.ip_lists.recount(&model.policy);
                 }
                 Err(e) if e.contains("not found") => {
                     model.policy.fallback_deny.insert(href, Vec::new());
@@ -1392,6 +1394,7 @@ fn policy_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     PolicyScope::Active => PolicyScope::Draft,
                 };
                 model.policy.clear();
+                model.ip_lists.recount(&model.policy);
                 return load_rule_sets(model, CacheMode::Use);
             }
             KeyCode::Char('r') => {
@@ -5201,6 +5204,81 @@ mod tests {
     }
 
     #[test]
+    fn ip_list_n_and_x_plan_through_the_plan_4_intents() {
+        use crate::tui::edit::WriteIntent;
+        use crate::tui::test_support::model_with_ip_lists;
+        let mut m = writes_on(model_with_ip_lists());
+        m.screen = Screen::IpLists;
+        assert!(update(&mut m, key('n')).is_empty());
+        let Overlay::Form(f) = &m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        assert_eq!(f.title, "New IP list");
+        update(&mut m, kc(KeyCode::Esc));
+        assert_eq!(m.overlay, Overlay::None);
+        update(&mut m, key('j'));
+        assert_eq!(
+            update(&mut m, key('x')),
+            vec![Cmd::PlanWrite(WriteIntent::DeleteIpList {
+                href: "/orgs/5/sec_policy/draft/ip_lists/21".into(),
+                name: "Corp".into(),
+            })]
+        );
+        assert!(m.writes.in_flight);
+    }
+
+    #[test]
+    fn used_by_follows_the_rulesets_as_they_load_and_switch_scope() {
+        let mut m = model_fixture();
+        m.screen = Screen::IpLists;
+        let lists =
+            serde_json::from_str(include_str!("../../../../fixtures/ip_lists.json")).unwrap();
+        update(&mut m, Msg::IpListsLoaded(Ok((lists, 0))));
+        let used = |m: &Model| {
+            m.ip_lists
+                .table
+                .rows()
+                .iter()
+                .map(|r| r.used_by)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(used(&m), vec![None, None]);
+        let raw =
+            serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
+        update(
+            &mut m,
+            Msg::RuleSetsLoaded {
+                scope: PolicyScope::Draft,
+                result: Ok((raw, 0)),
+            },
+        );
+        assert_eq!(used(&m), vec![Some(1), Some(1)]);
+        // Global-Infra's deny rules come from the endpoint; one names Corp.
+        let fetched: pce::models::DenyRule = serde_json::from_value(serde_json::json!({
+            "href": "/orgs/5/sec_policy/draft/rule_sets/101/deny_rules/9",
+            "providers": [{"actors": "ams"}],
+            "consumers": [{"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/21"}}],
+            "ingress_services": [{"port": 23, "proto": 6}]
+        }))
+        .unwrap();
+        update(
+            &mut m,
+            Msg::DenyRulesLoaded {
+                href: "/orgs/5/sec_policy/draft/rule_sets/101".into(),
+                result: Ok(vec![fetched]),
+            },
+        );
+        assert_eq!(used(&m), vec![Some(1), Some(2)]);
+        m.screen = Screen::Policy;
+        update(&mut m, key('d'));
+        assert_eq!(
+            used(&m),
+            vec![None, None],
+            "the active scope is not counted"
+        );
+    }
+
+    #[test]
     fn e_opens_a_prefilled_form_and_enter_plans_only_the_change() {
         use crate::tui::edit::WriteIntent;
         use crate::tui::test_support::model_with_ip_lists;
@@ -5325,6 +5403,11 @@ mod tests {
         let mut m = model_fixture(); // 80x24
         assert_eq!(HELP_LINES.len(), 30);
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "IP lists Enter"));
+        assert!(
+            HELP_LINES
+                .iter()
+                .any(|(_, d)| *d == "new/edit/delete: Objects, IP lists, Workloads, Policy")
+        );
         update(&mut m, key('?'));
         let last = help_last_scroll(24);
         assert_eq!(last, 8, "30 lines, 22 rows inside the box");

@@ -20,7 +20,7 @@ expression: out
 │IP lists Enter           detail: ranges · FQDNs · size · rules using it       │
 │Workloads t/T h H Enter  Traffic as src/dst · unhealthy · health sort · detail│
 │Events   f / Enter / S   filter · event as JSON · sort by severity            │
-│n / e / x (writes)       new / edit / delete on Objects, Workloads, Policy    │
+│n / e / x (writes)       new/edit/delete: Objects, IP lists, Workloads, Policy│
 │Pending  j/k Space Enter select · mark · diff of a pending entry              │
 │Pending  P               provision the marked entries, or all (writes)        │
 │y / n                    send / cancel a shown request                        │

@@ -11,6 +11,8 @@ use pce::write::{
     IfMissing, IpListDraft, IpListPatch, IpRangeSpec, LabelDraft, PortSpec, ServiceDraft,
     ServicePatch,
 };
+use pce::{IpListSize, ip_list_size};
+use serde::Serialize;
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct LabelsArgs {
@@ -161,18 +163,28 @@ impl TableRows for Vec<LabelGroup> {
     }
 }
 
-impl TableRows for Vec<IpList> {
+/// An IP list as `iplists` prints it: the list as the PCE returned it plus
+/// its `size` (no request).
+#[derive(Debug, Serialize)]
+pub struct IpListOut {
+    #[serde(flatten)]
+    pub list: IpList,
+    pub size: IpListSize,
+}
+
+impl TableRows for Vec<IpListOut> {
     fn headers(&self) -> Vec<&'static str> {
-        vec!["name", "ranges", "pending", "href"]
+        vec!["name", "size", "ranges", "pending", "href"]
     }
     fn rows(&self) -> Vec<Vec<String>> {
         self.iter()
-            .map(|l| {
+            .map(|o| {
                 vec![
-                    l.name.clone(),
-                    l.summary(),
-                    pending(&l.update_type),
-                    l.href.clone(),
+                    o.list.name.clone(),
+                    o.size.display(),
+                    o.list.summary(),
+                    pending(&o.list.update_type),
+                    o.list.href.clone(),
                 ]
             })
             .collect()
@@ -374,12 +386,15 @@ async fn ip_list_delete(ctx: &Context, a: &IpListDeleteArgs) -> Result<(), CliEr
 
 pub async fn ip_lists(ctx: &Context) -> Result<(), CliError> {
     let c = ctx.pce.ip_lists(ctx.cache_mode).await?;
-    ctx.emit(
-        &c.value,
-        cache_label(c.hit, ctx.cache_mode),
-        c.truncated,
-        None,
-    )
+    let data: Vec<IpListOut> = c
+        .value
+        .into_iter()
+        .map(|list| IpListOut {
+            size: ip_list_size(&list),
+            list,
+        })
+        .collect();
+    ctx.emit(&data, cache_label(c.hit, ctx.cache_mode), c.truncated, None)
 }
 
 #[derive(Args, Debug)]

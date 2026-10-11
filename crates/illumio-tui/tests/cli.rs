@@ -326,13 +326,25 @@ async fn other_object_lists() {
     assert_eq!(out["data"][0]["name"], "All prod envs");
     let out = stdout_json(cmd(&server).arg("iplists").assert().success());
     assert_eq!(out["data"][1]["name"], "Corp");
+    assert_eq!(
+        out["data"][1]["size"],
+        json!({"v4": "65536", "v6": "0", "unbounded": null, "ranges": 1, "fqdns": 1})
+    );
+    assert_eq!(out["data"][0]["size"]["unbounded"], "0.0.0.0/0");
+    assert_eq!(
+        out["data"][1]["ip_ranges"][0]["from_ip"], "10.1.0.0",
+        "the list keeps its own fields"
+    );
+    assert_eq!(out["meta"]["api_calls"], 1, "the size costs no request");
     cmd(&server)
         .args(["iplists", "--table"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(
-            "10.1.0.0-10.1.255.255, *.corp.example",
-        ));
+        .stdout(
+            predicate::str::contains("10.1.0.0-10.1.255.255, *.corp.example")
+                .and(predicate::str::contains("65.5K"))
+                .and(predicate::str::contains("any (0.0.0.0/0)")),
+        );
     cmd(&server)
         .args(["services", "--table"])
         .assert()
