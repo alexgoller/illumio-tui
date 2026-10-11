@@ -3,6 +3,7 @@
 //! sends it exactly once, audits it, invalidates the cache and re-fetches
 //! the object when the PCE answers with no body. A [`Writer`] exists only
 //! through [`crate::Pce::writer`] with a [`WriteGuard`].
+pub mod actors;
 pub mod audit;
 pub mod guard;
 pub mod ip_lists;
@@ -17,6 +18,7 @@ use crate::{CacheMode, Pce};
 use serde::Serialize;
 use serde_json::Value;
 
+pub use actors::{ActorKind, ActorRef, ServiceRef};
 pub use audit::{AuditEntry, AuditSink, JsonlAudit, MemoryAudit, NullAudit};
 pub use guard::{WriteContext, WriteGuard, WriteRefused};
 pub use ip_lists::{IpListDraft, IpListPatch};
