@@ -5134,6 +5134,29 @@ mod tests {
             assert_eq!(m.status.text, "started without --allow-writes");
             assert_eq!(m.overlay, Overlay::None);
         }
+        let mut m = crate::tui::test_support::model_with_ip_lists();
+        m.screen = Screen::IpLists;
+        for c in ['n', 'e', 'x'] {
+            m.status = StatusLine::info("ready");
+            assert!(update(&mut m, key(c)).is_empty(), "{c}");
+            assert_eq!(m.status.kind, StatusKind::Warn, "{c}");
+            assert_eq!(m.status.text, "started without --allow-writes", "{c}");
+            assert_eq!(m.overlay, Overlay::None);
+        }
+    }
+
+    #[test]
+    fn ip_list_edit_keys_without_a_selected_row_say_so() {
+        let mut m = writes_on(model_fixture());
+        m.screen = Screen::IpLists;
+        assert!(m.ip_lists.table.is_empty());
+        for c in ['e', 'x'] {
+            m.status = StatusLine::info("ready");
+            assert!(update(&mut m, key(c)).is_empty(), "{c}");
+            assert_eq!(m.status.kind, StatusKind::Warn, "{c}");
+            assert_eq!(m.status.text, "no row selected", "{c}");
+            assert_eq!(m.overlay, Overlay::None);
+        }
     }
 
     #[test]

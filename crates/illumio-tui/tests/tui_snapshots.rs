@@ -492,9 +492,9 @@ fn ip_list_form_80x24_scrolls_the_active_field() {
     use illumio_tui::tui::edit::EditIntent;
     use illumio_tui::tui::form::{Field, Form};
     use illumio_tui::tui::model::{Overlay, Screen};
-    use illumio_tui::tui::test_support::model_with_objects;
-    let mut m = model_with_objects();
-    m.screen = Screen::Objects;
+    use illumio_tui::tui::test_support::model_with_ip_lists;
+    let mut m = model_with_ip_lists();
+    m.screen = Screen::IpLists;
     let mut form = Form::new(
         "New IP list",
         vec![
@@ -561,6 +561,9 @@ fn confirm_write_overlay_shows_method_path_and_body() {
         "confirm_label_post_light_styled_80x24",
         render_styled(&l, 80, 24)
     );
+    let mut m = illumio_tui::tui::test_support::model_with_ip_lists();
+    m.writes = WritesState::on();
+    m.screen = Screen::IpLists;
     m.overlay = Overlay::ConfirmWrite {
         plan: ip_list_delete_plan(),
         kind: pce::write::ObjectKind::IpList,
@@ -574,6 +577,10 @@ fn confirm_write_overlay_shows_method_path_and_body() {
     );
     assert!(out.contains("(no body)"), "{out}");
     insta::assert_snapshot!("confirm_ip_list_delete_80x24", out);
+    let mut l = illumio_tui::tui::test_support::model_with_ip_lists();
+    l.writes = WritesState::on();
+    l.screen = Screen::IpLists;
+    l.set_theme("light");
     l.overlay = m.overlay.clone();
     insta::assert_snapshot!(
         "confirm_ip_list_delete_light_styled_80x24",

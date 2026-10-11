@@ -2296,4 +2296,43 @@ mod tests {
         assert_eq!(ObjectKind::Labels.prev(), ObjectKind::Services);
         assert_eq!(ObjectKind::Services.next(), ObjectKind::Labels);
     }
+
+    #[test]
+    fn ip_list_uses_match_the_provider_side_and_fetched_deny_rules() {
+        let mut sets: Vec<serde_json::Value> =
+            serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
+        let deny_on_20 = sets[0]["deny_rules"][0].clone();
+        let mut edge = sets[1].clone();
+        edge["name"] = "Edge".into();
+        edge["href"] = "/orgs/5/sec_policy/draft/rule_sets/102".into();
+        edge["rules"][0]["providers"] =
+            serde_json::json!([{"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/21"}}]);
+        sets.push(edge);
+        let mut p = PolicyState::new(60);
+        p.raw = serde_json::from_value(serde_json::Value::Array(sets)).unwrap();
+        p.loaded_at = Some(Instant::now());
+        p.fallback_deny.insert(
+            "/orgs/5/sec_policy/draft/rule_sets/102".into(),
+            vec![serde_json::from_value(deny_on_20).unwrap()],
+        );
+        let corp = p
+            .ip_list_uses("/orgs/5/sec_policy/draft/ip_lists/21")
+            .unwrap();
+        let corp: Vec<(&str, RuleKind)> =
+            corp.iter().map(|u| (u.ruleset.as_str(), u.kind)).collect();
+        assert_eq!(
+            corp,
+            vec![("Shop-Prod", RuleKind::Allow), ("Edge", RuleKind::Allow)],
+            "Edge names the list as a provider"
+        );
+        let any = p
+            .ip_list_uses("/orgs/5/sec_policy/draft/ip_lists/20")
+            .unwrap();
+        let any: Vec<(&str, RuleKind)> = any.iter().map(|u| (u.ruleset.as_str(), u.kind)).collect();
+        assert_eq!(
+            any,
+            vec![("Shop-Prod", RuleKind::Deny), ("Edge", RuleKind::Deny)],
+            "the second deny rule comes from fallback_deny"
+        );
+    }
 }

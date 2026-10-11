@@ -1043,10 +1043,19 @@ async fn writes_disabled_editing_keys_send_nothing() {
         (50, KeyCode::Tab),
         (50, KeyCode::Tab),
         (50, ch('e')),
+        (50, ch('6')),
+        (300, ch('e')),
+        (50, ch('x')),
         (200, KeyCode::F(12)),
     ];
     let model = key_session(&server, model(), None, keys).await;
+    assert_eq!(model.screen, illumio_tui::tui::model::Screen::IpLists);
     assert_eq!(model.stats.calls, 5, "health + four lists");
+    assert_eq!(
+        server.received_requests().await.unwrap().len() as u64,
+        model.stats.calls,
+        "6 reads the cache; the refused e and x send nothing"
+    );
     assert!(writes_seen(&server).await.is_empty());
     assert_eq!(model.status.text, "writes are not enabled");
     assert_eq!(model.status.kind, StatusKind::Warn);

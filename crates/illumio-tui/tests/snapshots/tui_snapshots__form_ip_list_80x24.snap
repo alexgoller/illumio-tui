@@ -4,15 +4,15 @@ expression: out
 ---
  illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
   1 Traf  │  2 Pol  │  3 Obj  │  4 Wl  │  5 Ev  │  6 IPs
-  Labels  │  Label groups  │  Services
-╭ Labels ────────────────────────────────────────────── cached 3s ago · 6 rows ╮
-│  key              value                      deleted href                    │
-│▸ role             web                                /orgs/5/labels/1        │
-│  ro╭ New IP list ───────────────── Tab next · Enter review · Esc cancel ╮    │
-│  ap│  Name*         Corp                                                │    │
-│  en│                Corp                                                │    │
-│  lo│  Description   Office ranges                                       │    │
-│  ap│                optional                                            │    │
+╭ IP lists ──────────────────────────────────────────── cached 3s ago · 2 rows ╮
+│  name                     size       ranges fqdns used by pending            │
+│▸ Any (0.0.0.0/0 and ::/0)        any      2     0       1                    │
+│  Corp                          65.5K      1     1       1 create             │
+│    ╭ New IP list ───────────────── Tab next · Enter review · Esc cancel ╮    │
+│    │  Name*         Corp                                                │    │
+│    │                Corp                                                │    │
+│    │  Description   Office ranges                                       │    │
+│    │                optional                                            │    │
 │    │▸ Ranges        ….0/16, !10.1.5.0/24, 192.168.0.0/16, 172.16.0.0/12▏│    │
 │    │                10.0.0.0/8, 10.1.0.0-10.1.255.255, !10.0.5.0/24     │    │
 │    │  FQDNs         *.corp.example                                      │    │
@@ -25,4 +25,4 @@ expression: out
 │                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-ready        Tab type  Enter detail  r refresh  a auto  / search  : cmd  ? help
+ready          Enter detail  r refresh  a auto  s sort  / search  : cmd  ? help
