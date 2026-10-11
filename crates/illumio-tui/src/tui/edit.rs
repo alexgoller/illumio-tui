@@ -4,7 +4,7 @@
 //! draft or patch the library plans. Pure: nothing here reaches the PCE.
 use crate::tui::form::{Field, Form};
 use pce::NameIndex;
-use pce::models::{Fqdn, IpList, Label, Service, Workload};
+use pce::models::{Fqdn, Interface, IpList, Label, Service, Workload};
 use pce::write::{
     InterfaceSpec, IpListDraft, IpListPatch, IpRangeSpec, LabelDraft, PortSpec, ServiceDraft,
     ServicePatch, WorkloadDraft, WorkloadPatch, WriteRequest,
@@ -259,10 +259,15 @@ fn ports_text(s: &Service) -> String {
 }
 
 fn addresses_text(w: &Workload) -> String {
-    join(w.interfaces.iter().map(|i| match i.cidr_block {
+    join(w.interfaces.iter().map(interface_text))
+}
+
+/// `ADDR/N` or `ADDR`, spelled as the PCE spells the address.
+fn interface_text(i: &Interface) -> String {
+    match i.cidr_block {
         Some(c) => format!("{}/{c}", i.address),
         None => i.address.clone(),
-    }))
+    }
 }
 
 /// `key=value` from the workload's own label entry, else from the index,
@@ -360,29 +365,41 @@ fn port_changes(s: &Service, tokens: &[String]) -> Result<(Vec<PortSpec>, Vec<Po
     Ok((add, remove))
 }
 
-/// Addresses added (as typed) and removed (by address). A typed address
-/// that exists keeps its interface; with a new prefix it is an add, which
-/// `WorkloadPatch::apply` turns into a prefix change of that interface.
+/// Addresses added (as typed) and removed (by address). An entry spelled
+/// exactly as shown keeps its interface, whatever the PCE's spelling; a
+/// typed address that exists keeps its interface too, and with a new prefix
+/// it is an add, which `WorkloadPatch::apply` turns into a prefix change of
+/// that interface. Dropping a prefix has no such path and is refused.
 fn address_changes(w: &Workload, tokens: &[String]) -> Result<(Vec<String>, Vec<String>), String> {
-    let mut parsed = Vec::new();
+    let mut kept = vec![false; w.interfaces.len()];
+    let mut add = Vec::new();
     for t in tokens {
+        if let Some(n) = w.interfaces.iter().position(|i| interface_text(i) == *t) {
+            kept[n] = true;
+            continue;
+        }
         let spec = InterfaceSpec::parse(t, String::new()).map_err(|e| format!("Addresses: {e}"))?;
-        parsed.push((t.clone(), spec));
+        let Some(n) = w.interfaces.iter().position(|i| i.address == spec.address) else {
+            add.push(t.clone());
+            continue;
+        };
+        kept[n] = true;
+        match (spec.cidr_block, w.interfaces[n].cidr_block) {
+            (None, Some(_)) => {
+                return Err("Addresses: removing a prefix is not supported here; \
+                     remove the address and add it again"
+                    .into());
+            }
+            (Some(new), old) if old != Some(new) => add.push(t.clone()),
+            _ => {}
+        }
     }
-    let add = parsed
-        .iter()
-        .filter(|(_, s)| {
-            !w.interfaces.iter().any(|i| {
-                i.address == s.address && (s.cidr_block.is_none() || s.cidr_block == i.cidr_block)
-            })
-        })
-        .map(|(t, _)| t.clone())
-        .collect();
     let remove = w
         .interfaces
         .iter()
-        .filter(|i| !parsed.iter().any(|(_, s)| s.address == i.address))
-        .map(|i| i.address.clone())
+        .zip(&kept)
+        .filter(|(_, k)| !**k)
+        .map(|(i, _)| i.address.clone())
         .collect();
     Ok((add, remove))
 }
@@ -822,6 +839,36 @@ mod tests {
         assert_eq!(patch.remove_addresses, vec!["10.0.3.30"]);
         assert_eq!(patch.add_addresses, vec!["10.0.3.31"]);
         assert_eq!(patch.set_labels, None, "labels unchanged");
+    }
+
+    #[test]
+    fn untouched_addresses_are_matched_by_their_text_first() {
+        // A PCE spelling the parser would canonicalise (`fe80::1/64`).
+        let mut nas = workloads()[2].clone();
+        nas.interfaces[0].address = "FE80::0001".into();
+        nas.interfaces[0].cidr_block = Some(64);
+        let f = form(EditIntent::UpdateWorkload(nas));
+        assert_eq!(f.value("Addresses"), "FE80::0001/64");
+        assert_eq!(build(&f).unwrap(), None, "an untouched form sends nothing");
+    }
+
+    #[test]
+    fn removing_a_prefix_is_refused_and_changing_one_is_an_add() {
+        let mut nas = workloads()[2].clone();
+        nas.interfaces[0].cidr_block = Some(24);
+        let mut f = form(EditIntent::UpdateWorkload(nas));
+        assert_eq!(f.value("Addresses"), "10.0.3.30/24");
+        set(&mut f, "Addresses", "10.0.3.30");
+        assert_eq!(
+            build(&f).unwrap_err(),
+            "Addresses: removing a prefix is not supported here; remove the address and add it again"
+        );
+        set(&mut f, "Addresses", "10.0.3.30/16");
+        let Some(WriteIntent::UpdateWorkload { patch, .. }) = build(&f).unwrap() else {
+            panic!("not an update")
+        };
+        assert_eq!(patch.add_addresses, vec!["10.0.3.30/16"]);
+        assert!(patch.remove_addresses.is_empty(), "the interface is kept");
     }
 
     #[test]
