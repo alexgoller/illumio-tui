@@ -162,6 +162,18 @@ impl NameIndex {
         self.service(href).map(|s| s.name.as_str())
     }
 
+    /// The one live service named exactly `name` (like the CLI's lookup:
+    /// case-sensitive, pending deletions excluded). `None` when there is no
+    /// such service, or several.
+    pub fn service_href(&self, name: &str) -> Option<&str> {
+        let mut hits = self
+            .services
+            .values()
+            .filter(|s| s.name == name && s.update_type.as_deref() != Some("delete"));
+        let first = hits.next()?;
+        hits.next().is_none().then_some(first.href.as_str())
+    }
+
     /// Resolves label refs, sorted by key. Unknown hrefs get key `?` and the
     /// href as value so nothing silently disappears.
     pub fn resolve_labels(&self, refs: &[Ref]) -> Vec<ResolvedLabel> {
@@ -670,5 +682,29 @@ mod tests {
             relabelled.label_group_href("All prod envs"),
             Some("/orgs/5/sec_policy/draft/label_groups/10")
         );
+    }
+
+    #[test]
+    fn service_href_finds_one_live_service_by_exact_name() {
+        let idx = index();
+        assert_eq!(
+            idx.service_href("Web"),
+            Some("/orgs/5/sec_policy/draft/services/32")
+        );
+        assert_eq!(idx.service_href("web"), None, "exact, like the CLI");
+        assert_eq!(idx.service_href("Nope"), None);
+        let services: Vec<Service> = serde_json::from_value(serde_json::json!([
+            {"href": "/orgs/5/sec_policy/draft/services/41", "name": "Dup"},
+            {"href": "/orgs/5/sec_policy/draft/services/42", "name": "Dup"},
+            {"href": "/orgs/5/sec_policy/draft/services/43", "name": "Gone", "update_type": "delete"}
+        ]))
+        .unwrap();
+        let idx = NameIndex::new(&[], &[], &[], &services);
+        assert_eq!(
+            idx.service_href("Dup"),
+            None,
+            "ambiguous: the href is needed"
+        );
+        assert_eq!(idx.service_href("Gone"), None, "pending deletion");
     }
 }

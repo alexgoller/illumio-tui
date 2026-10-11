@@ -2,12 +2,16 @@
 //! into a pre-filled [`Form`] (create, update) or straight into a
 //! [`WriteIntent`] (delete); [`build_intent`] turns a submitted form into the
 //! draft or patch the library plans. Pure: nothing here reaches the PCE.
+use crate::tokens::{
+    ActorToken, ServiceToken, actor_from_href_token, service_from_href_token, similar, split_kv,
+    with_exclusion, with_similar,
+};
 use crate::tui::form::{Field, Form};
 use pce::NameIndex;
-use pce::models::{Fqdn, Interface, IpList, Label, Service, Workload};
+use pce::models::{Actor, Fqdn, IngressService, Interface, IpList, Label, Service, Workload};
 use pce::write::{
-    InterfaceSpec, IpListDraft, IpListPatch, IpRangeSpec, LabelDraft, PortSpec, ServiceDraft,
-    ServicePatch, WorkloadDraft, WorkloadPatch, WriteRequest,
+    ActorKind, ActorRef, InterfaceSpec, IpListDraft, IpListPatch, IpRangeSpec, LabelDraft,
+    PortSpec, ServiceDraft, ServicePatch, ServiceRef, WorkloadDraft, WorkloadPatch, WriteRequest,
 };
 
 /// What `n`, `e` or `x` on Objects or Workloads asks for.
@@ -439,6 +443,172 @@ fn resolve_labels(text: &str, index: Option<&NameIndex>) -> Result<Vec<String>, 
         .collect()
 }
 
+const WORKLOAD_NAMES: &str = "workload names resolve in the CLI; use workload:/orgs/… here";
+
+/// Provider, consumer or scope tokens to actors through the loaded index.
+/// No request is made: names are looked up in `idx`, hrefs are checked by
+/// the library's strict checkers, and `workload:` takes an href only.
+pub fn resolve_actor_tokens(
+    tokens: &[ActorToken],
+    idx: &NameIndex,
+    org_id: u64,
+) -> Result<Vec<ActorRef>, String> {
+    tokens
+        .iter()
+        .map(|t| resolve_actor_token(t, idx, org_id))
+        .collect()
+}
+
+fn resolve_actor_token(
+    token: &ActorToken,
+    idx: &NameIndex,
+    org_id: u64,
+) -> Result<ActorRef, String> {
+    let actor = match actor_from_href_token(token, org_id) {
+        Some(checked) => checked.map_err(|e| e.to_string())?,
+        None => match token {
+            ActorToken::All => ActorRef::all(),
+            ActorToken::Label { spec, exclusion } => {
+                let (k, v) = split_kv(spec)?;
+                let href = idx
+                    .label_href(&k, &v)
+                    .ok_or_else(|| unknown_label(idx, &k, &v))?;
+                with_exclusion(ActorRef::new(ActorKind::Label, href), *exclusion)
+            }
+            ActorToken::LabelGroup { name, exclusion } => {
+                let href = idx
+                    .label_group_href(name)
+                    .ok_or_else(|| format!("no label group named {name:?}"))?;
+                with_exclusion(ActorRef::new(ActorKind::LabelGroup, href), *exclusion)
+            }
+            ActorToken::IpList { name, exclusion } => {
+                let href = idx.ip_list_href(name).ok_or_else(|| {
+                    let names = idx.ip_list_names();
+                    with_similar(
+                        format!("no IP list named {name:?}"),
+                        &similar(name, names.iter().map(String::as_str)),
+                    )
+                })?;
+                with_exclusion(ActorRef::new(ActorKind::IpList, href), *exclusion)
+            }
+            ActorToken::Workload { .. } => return Err(WORKLOAD_NAMES.into()),
+            ActorToken::Href { href, exclusion } => with_exclusion(
+                ActorRef::from_href(href, org_id).map_err(|e| e.to_string())?,
+                *exclusion,
+            ),
+        },
+    };
+    actor.validate()?;
+    Ok(actor)
+}
+
+fn unknown_label(idx: &NameIndex, k: &str, v: &str) -> String {
+    let known = idx.values_for_key(k);
+    if known.is_empty() {
+        format!("unknown label {k}={v}; no labels have key {k}")
+    } else {
+        format!(
+            "unknown label {k}={v}; known values for {k}: {}",
+            known.join(", ")
+        )
+    }
+}
+
+/// Service tokens to rule services through the loaded index: a port as
+/// typed, a name by exact match, an href through the strict checker.
+pub fn resolve_service_tokens(
+    tokens: &[ServiceToken],
+    idx: &NameIndex,
+    org_id: u64,
+) -> Result<Vec<ServiceRef>, String> {
+    tokens
+        .iter()
+        .map(|t| {
+            if let Some(checked) = service_from_href_token(t, org_id) {
+                return checked.map_err(|e| e.to_string());
+            }
+            match t {
+                ServiceToken::Port(p) => Ok(ServiceRef::Port(p.clone())),
+                ServiceToken::Name(n) => idx
+                    .service_href(n)
+                    .map(|h| ServiceRef::Href(h.to_string()))
+                    .ok_or_else(|| format!("no service named {n:?}")),
+                ServiceToken::Href(h) => {
+                    ServiceRef::from_href(h, org_id).map_err(|e| e.to_string())
+                }
+            }
+        })
+        .collect()
+}
+
+/// A rule's or a scope's actors as form tokens: `app=web`, `group:Name`,
+/// `iplist:Corp`, `all`, `!…`, `workload:/orgs/…`. An object the index
+/// does not know, or whose name would not survive the comma split, shows
+/// its href (which resolves back as it is). An actor the grammar cannot
+/// express shows its href (virtual services and servers) or `?`.
+pub fn actor_tokens(actors: &[Actor], idx: &NameIndex) -> Vec<String> {
+    actors.iter().map(|a| actor_token(a, idx)).collect()
+}
+
+fn actor_token(a: &Actor, idx: &NameIndex) -> String {
+    let Ok(r) = ActorRef::from_actor(a) else {
+        return a
+            .virtual_service
+            .as_ref()
+            .or(a.virtual_server.as_ref())
+            .map_or_else(|| "?".to_string(), |v| v.href.clone());
+    };
+    let Some(href) = r.href else {
+        return "all".into();
+    };
+    let named = match r.kind {
+        ActorKind::Label => idx
+            .label(&href)
+            .filter(|l| !l.is_deleted())
+            .map(Label::display),
+        ActorKind::LabelGroup => idx.label_group_name(&href).map(|n| format!("group:{n}")),
+        ActorKind::IpList => idx.ip_list_name(&href).map(|n| format!("iplist:{n}")),
+        ActorKind::Workload => Some(format!("workload:{href}")),
+        ActorKind::All => None,
+    };
+    let body = named.filter(|t| !t.contains([',', '|'])).unwrap_or(href);
+    if r.exclusion {
+        format!("!{body}")
+    } else {
+        body
+    }
+}
+
+/// A rule's services as form tokens: the service's name (`service:NAME`
+/// when the name would read as a port), `443/tcp`, `8000-8099/tcp`,
+/// `icmp`; an unknown service as its href; an inline port the grammar
+/// cannot type back (`any`, a bare protocol number) as `?`.
+pub fn service_tokens(services: &[IngressService], idx: &NameIndex) -> Vec<String> {
+    services.iter().map(|s| service_token(s, idx)).collect()
+}
+
+fn service_token(s: &IngressService, idx: &NameIndex) -> String {
+    match ServiceRef::from_ingress(s) {
+        ServiceRef::Href(href) => match idx.service_name(&href) {
+            Some(n) if !n.contains([',', '|']) => {
+                if ServiceToken::parse(n) == Ok(ServiceToken::Name(n.to_string())) {
+                    n.to_string()
+                } else {
+                    format!("service:{n}")
+                }
+            }
+            _ => href,
+        },
+        ServiceRef::Port(p) => port_token(&p).unwrap_or_else(|| "?".into()),
+    }
+}
+
+/// `p` as typed (`443/tcp`, `icmp`) when the parser reads it back as `p`.
+fn port_token(p: &PortSpec) -> Option<String> {
+    let t = p.display();
+    PortSpec::parse(&t).is_ok_and(|q| q == *p).then_some(t)
+}
+
 /// The submitted form as a write: `Ok(None)` when an edit changes nothing,
 /// `Err` (shown in the form) when a field does not parse or validate.
 pub fn build_intent(form: &Form, index: Option<&NameIndex>) -> Result<Option<WriteIntent>, String> {
@@ -612,6 +782,7 @@ pub fn request_body_lines(req: &WriteRequest) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::tui::test_support::fixture_index;
+    use serde_json::json;
 
     fn labels() -> Vec<Label> {
         serde_json::from_str(include_str!("../../../../fixtures/labels.json")).unwrap()
@@ -895,5 +1066,170 @@ mod tests {
             }
         );
         assert!(form_for(EditIntent::DeleteWorkload(workloads()[2].clone()), None).is_none());
+    }
+
+    fn rule_sets() -> Vec<pce::models::RuleSet> {
+        serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap()
+    }
+
+    fn actor(v: serde_json::Value) -> Actor {
+        serde_json::from_value(v).unwrap()
+    }
+
+    fn resolve_actors(tokens: &[String]) -> Result<Vec<ActorRef>, String> {
+        let parsed = tokens
+            .iter()
+            .map(|t| ActorToken::parse(t))
+            .collect::<Result<Vec<_>, _>>()?;
+        resolve_actor_tokens(&parsed, &fixture_index(), 5)
+    }
+
+    #[test]
+    fn actor_tokens_render_every_kind_and_resolve_back() {
+        let sets = rule_sets();
+        let actors = vec![
+            sets[0].rules[0].providers[0].clone(), // label 2
+            sets[0].rules[1].consumers[0].clone(), // IP list 21
+            sets[1].rules[0].consumers[0].clone(), // label group 10
+            sets[1].rules[0].providers[0].clone(), // ams
+            actor(json!({"label": {"href": "/orgs/5/labels/1"}, "exclusion": true})),
+            actor(json!({"workload": {"href": "/orgs/5/workloads/aaaa-1"}})),
+            actor(json!({"label": {"href": "/orgs/5/labels/99"}})),
+        ];
+        let tokens = actor_tokens(&actors, &fixture_index());
+        assert_eq!(
+            tokens,
+            vec![
+                "role=db",
+                "iplist:Corp",
+                "group:All prod envs",
+                "all",
+                "!role=web",
+                "workload:/orgs/5/workloads/aaaa-1",
+                "/orgs/5/labels/99",
+            ]
+        );
+        let want: Vec<ActorRef> = actors
+            .iter()
+            .map(|a| ActorRef::from_actor(a).unwrap())
+            .collect();
+        assert_eq!(
+            resolve_actors(&tokens).unwrap(),
+            want,
+            "every token resolves back to its actor"
+        );
+    }
+
+    #[test]
+    fn service_tokens_render_names_and_ports_and_resolve_back() {
+        let sets = rule_sets();
+        let mut services = sets[0].rules[0].ingress_services.clone(); // PostgreSQL
+        services.extend(sets[0].rules[1].ingress_services.clone()); // 443/tcp, 8000-8099/tcp
+        services.extend(sets[1].rules[0].ingress_services.clone()); // All Services
+        services.push(serde_json::from_value(json!({"proto": 1})).unwrap());
+        let tokens = service_tokens(&services, &fixture_index());
+        assert_eq!(
+            tokens,
+            vec![
+                "PostgreSQL",
+                "443/tcp",
+                "8000-8099/tcp",
+                "All Services",
+                "icmp"
+            ]
+        );
+        let parsed: Vec<ServiceToken> = tokens
+            .iter()
+            .map(|t| ServiceToken::parse(t).unwrap())
+            .collect();
+        let want: Vec<ServiceRef> = services.iter().map(ServiceRef::from_ingress).collect();
+        assert_eq!(
+            resolve_service_tokens(&parsed, &fixture_index(), 5).unwrap(),
+            want
+        );
+        // A service named like a protocol keeps its name behind `service:`.
+        let tcp: Service = serde_json::from_value(json!({
+            "href": "/orgs/5/sec_policy/draft/services/40", "name": "tcp", "service_ports": []
+        }))
+        .unwrap();
+        let idx = NameIndex::new(&[], &[], &[], &[tcp]);
+        let svc = vec![IngressService::Ref(pce::models::Ref::new(
+            "/orgs/5/sec_policy/draft/services/40",
+        ))];
+        assert_eq!(service_tokens(&svc, &idx), vec!["service:tcp"]);
+        assert_eq!(
+            resolve_service_tokens(&[ServiceToken::parse("service:tcp").unwrap()], &idx, 5)
+                .unwrap(),
+            vec![ServiceRef::Href(
+                "/orgs/5/sec_policy/draft/services/40".into()
+            )]
+        );
+    }
+
+    #[test]
+    fn inexpressible_entries_render_as_href_or_question_mark() {
+        let idx = fixture_index();
+        let actors = vec![
+            actor(
+                json!({"virtual_service": {"href": "/orgs/5/sec_policy/draft/virtual_services/9"}}),
+            ),
+            Actor::default(),
+        ];
+        assert_eq!(
+            actor_tokens(&actors, &idx),
+            vec!["/orgs/5/sec_policy/draft/virtual_services/9", "?"]
+        );
+        let services: Vec<IngressService> = serde_json::from_value(json!([
+            {"proto": -1},
+            {"proto": 47},
+            {"href": "/orgs/5/sec_policy/draft/services/77"}
+        ]))
+        .unwrap();
+        assert_eq!(
+            service_tokens(&services, &idx),
+            vec!["?", "?", "/orgs/5/sec_policy/draft/services/77"],
+            "`any` and protocol 47 cannot be typed back; an unknown service keeps its href"
+        );
+    }
+
+    #[test]
+    fn resolution_errors_name_what_is_known_and_workload_names_stay_in_the_cli() {
+        let err = |t: &str| resolve_actors(&[t.to_string()]).unwrap_err();
+        assert_eq!(
+            err("app=nope"),
+            "unknown label app=nope; known values for app: shop"
+        );
+        assert_eq!(
+            err("tier=1"),
+            "unknown label tier=1; no labels have key tier"
+        );
+        assert_eq!(
+            err("iplist:Cor"),
+            r#"no IP list named "Cor"; similar: Corp"#
+        );
+        assert_eq!(err("group:Nope"), r#"no label group named "Nope""#);
+        assert_eq!(
+            err("workload:web-1.lab"),
+            "workload names resolve in the CLI; use workload:/orgs/… here"
+        );
+        assert!(
+            resolve_actors(&["/orgs/9/labels/1".into()]).is_err(),
+            "wrong org"
+        );
+        assert_eq!(
+            resolve_actors(&["workload:/orgs/5/workloads/aaaa-3".into()]).unwrap(),
+            vec![ActorRef::new(
+                ActorKind::Workload,
+                "/orgs/5/workloads/aaaa-3"
+            )]
+        );
+        let svc = |t: &str| {
+            resolve_service_tokens(&[ServiceToken::parse(t).unwrap()], &fixture_index(), 5)
+        };
+        assert_eq!(svc("HTTPS").unwrap_err(), r#"no service named "HTTPS""#);
+        assert_eq!(
+            svc("443/tcp").unwrap(),
+            vec![ServiceRef::Port(PortSpec::parse("443/tcp").unwrap())]
+        );
     }
 }
