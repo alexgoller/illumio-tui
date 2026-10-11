@@ -2,27 +2,27 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ Keys ────────────────────────────────── 4-25 of 25 · j/k scroll · Esc closes ╮
-│                        :profile <name>  :draft  :active  :help  :q           │
-│?                       this help                                             │
-│q / Ctrl-C              quit                                                  │
-│↑ ↓ PgUp PgDn Home End  move in the current table                             │
-│s                       cycle sort column and direction                       │
-│/                       search in the current table (Enter keep, Esc clear)   │
-│r                       refresh the current screen (bypasses the cache)       │
-│a                       toggle auto-refresh for the current screen            │
-│Traffic  v              cycle Flows · App-to-app · Blocked                    │
-│Traffic  f              edit filter: window src dst service decisions         │
-│Traffic  g              change the aggregate label keys                       │
-│Traffic  Enter          detail (flows) · drill into a pair (aggregate)        │
-│Policy   d              toggle draft / active                                 │
-│Policy   p              pending changes                                       │
-│Policy   Tab / Enter    pane · rule detail · on a ruleset: load deny rules    │
-│Objects  Tab / Enter    next object type · detail                             │
-│Workloads t/T h H Enter Traffic as src/dst · unhealthy · health sort · detail │
-│Events   f / Enter / S  filter · event as JSON · sort by severity             │
-│n / e / x               new / edit / delete (Objects, Workloads; needs writes)│
-│Pending  j/k Enter      select · diff of a pending IP list or service         │
-│y / n                   send / cancel a shown request                         │
-│Esc                     close overlay / cancel                                │
+╭ Keys ────────────────────────────────── 7-28 of 28 · j/k scroll · Esc closes ╮
+│↑ ↓ PgUp PgDn Home End   move in the current table                            │
+│s                        cycle sort column and direction                      │
+│/                        search in the current table (Enter keep, Esc clear)  │
+│r                        refresh the current screen (bypasses the cache)      │
+│a                        toggle auto-refresh for the current screen           │
+│Traffic  v               cycle Flows · App-to-app · Blocked                   │
+│Traffic  f               edit filter: window src dst service decisions        │
+│Traffic  g               change the aggregate label keys                      │
+│Traffic  Enter           detail (flows) · drill into a pair (aggregate)       │
+│Traffic  w               draft allow rule from a blocked flow (writes)        │
+│Policy   d               toggle draft / active                                │
+│Policy   p               pending changes                                      │
+│Policy   Tab / Enter     pane · rule detail · on a ruleset: load deny rules   │
+│Policy   N               new deny rule in the selected ruleset (rules pane)   │
+│Objects  Tab / Enter     next object type · detail                            │
+│Workloads t/T h H Enter  Traffic as src/dst · unhealthy · health sort · detail│
+│Events   f / Enter / S   filter · event as JSON · sort by severity            │
+│n / e / x  (writes)      new / edit / delete on Objects, Workloads, Policy    │
+│Pending  j/k Space Enter select · mark · diff of a pending entry              │
+│Pending  P               provision the marked entries, or all (writes)        │
+│y / n                    send / cancel a shown request                        │
+│Esc                      close overlay / cancel                               │
 ╰──────────────────────────────────────────────────────────────────────────────╯

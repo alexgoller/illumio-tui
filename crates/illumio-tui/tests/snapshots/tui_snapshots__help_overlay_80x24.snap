@@ -2,27 +2,27 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ Keys ────────────────────────────────── 1-22 of 25 · j/k scroll · Esc closes ╮
-│1 2 3 4 5               Traffic · Policy · Objects · Workloads · Events       │
-│:                       command prompt: :traffic :policy :objects :workloads  │
-│                        :events  :filter <expr>  :window <dur>                │
-│                        :profile <name>  :draft  :active  :help  :q           │
-│?                       this help                                             │
-│q / Ctrl-C              quit                                                  │
-│↑ ↓ PgUp PgDn Home End  move in the current table                             │
-│s                       cycle sort column and direction                       │
-│/                       search in the current table (Enter keep, Esc clear)   │
-│r                       refresh the current screen (bypasses the cache)       │
-│a                       toggle auto-refresh for the current screen            │
-│Traffic  v              cycle Flows · App-to-app · Blocked                    │
-│Traffic  f              edit filter: window src dst service decisions         │
-│Traffic  g              change the aggregate label keys                       │
-│Traffic  Enter          detail (flows) · drill into a pair (aggregate)        │
-│Policy   d              toggle draft / active                                 │
-│Policy   p              pending changes                                       │
-│Policy   Tab / Enter    pane · rule detail · on a ruleset: load deny rules    │
-│Objects  Tab / Enter    next object type · detail                             │
-│Workloads t/T h H Enter Traffic as src/dst · unhealthy · health sort · detail │
-│Events   f / Enter / S  filter · event as JSON · sort by severity             │
-│n / e / x               new / edit / delete (Objects, Workloads; needs writes)│
+╭ Keys ────────────────────────────────── 1-22 of 28 · j/k scroll · Esc closes ╮
+│1 2 3 4 5                Traffic · Policy · Objects · Workloads · Events      │
+│:                        command prompt: :traffic :policy :objects :workloads │
+│                         :events  :filter <expr>  :window <dur>               │
+│                         :profile <name>  :draft  :active  :help  :q          │
+│?                        this help                                            │
+│q / Ctrl-C               quit                                                 │
+│↑ ↓ PgUp PgDn Home End   move in the current table                            │
+│s                        cycle sort column and direction                      │
+│/                        search in the current table (Enter keep, Esc clear)  │
+│r                        refresh the current screen (bypasses the cache)      │
+│a                        toggle auto-refresh for the current screen           │
+│Traffic  v               cycle Flows · App-to-app · Blocked                   │
+│Traffic  f               edit filter: window src dst service decisions        │
+│Traffic  g               change the aggregate label keys                      │
+│Traffic  Enter           detail (flows) · drill into a pair (aggregate)       │
+│Traffic  w               draft allow rule from a blocked flow (writes)        │
+│Policy   d               toggle draft / active                                │
+│Policy   p               pending changes                                      │
+│Policy   Tab / Enter     pane · rule detail · on a ruleset: load deny rules   │
+│Policy   N               new deny rule in the selected ruleset (rules pane)   │
+│Objects  Tab / Enter     next object type · detail                            │
+│Workloads t/T h H Enter  Traffic as src/dst · unhealthy · health sort · detail│
 ╰──────────────────────────────────────────────────────────────────────────────╯

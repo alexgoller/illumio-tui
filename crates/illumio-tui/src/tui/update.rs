@@ -5093,13 +5093,55 @@ mod tests {
     }
 
     #[test]
+    fn policy_and_traffic_edit_keys_wait_for_a_write_in_flight() {
+        use crate::tui::test_support::{model_with_flows, model_with_policy};
+        use crate::tui::ui::widgets::overlay::HELP_LINES;
+        let busy = "a write is already in progress";
+        let mut m = writes_on(model_with_policy());
+        m.screen = Screen::Policy;
+        m.writes.in_flight = true;
+        for c in ['n', 'e', 'x'] {
+            assert!(update(&mut m, key(c)).is_empty(), "{c}");
+            assert_eq!(m.status.text, busy);
+            assert_eq!(m.overlay, Overlay::None);
+        }
+        update(&mut m, kc(KeyCode::Tab));
+        for c in ['n', 'N', 'e', 'x'] {
+            assert!(update(&mut m, key(c)).is_empty(), "{c}");
+            assert_eq!(m.status.text, busy);
+            assert_eq!(m.overlay, Overlay::None);
+        }
+        m.policy.pending = Some(pending_fixture());
+        m.overlay = Overlay::Pending;
+        assert!(update(&mut m, key('P')).is_empty());
+        assert_eq!(m.status.text, busy);
+        assert_eq!(m.overlay, Overlay::Pending);
+        let mut t = writes_on(model_with_flows());
+        t.writes.in_flight = true;
+        update(&mut t, key('j'));
+        assert!(update(&mut t, key('w')).is_empty());
+        assert_eq!(t.status.text, busy);
+        assert_eq!(t.overlay, Overlay::None);
+        // Every new key is in the help.
+        let keys: Vec<&str> = HELP_LINES.iter().map(|(k, _)| *k).collect();
+        for k in [
+            "Traffic  w",
+            "Policy   N",
+            "Pending  j/k Space Enter",
+            "Pending  P",
+        ] {
+            assert!(keys.contains(&k), "{k}");
+        }
+    }
+
+    #[test]
     fn help_scrolls_to_its_last_line_and_reopens_at_the_top() {
         use crate::tui::ui::widgets::overlay::{HELP_LINES, help_last_scroll};
         let mut m = model_fixture(); // 80x24
-        assert_eq!(HELP_LINES.len(), 25);
+        assert_eq!(HELP_LINES.len(), 28);
         update(&mut m, key('?'));
         let last = help_last_scroll(24);
-        assert_eq!(last, 3, "25 lines, 22 rows inside the box");
+        assert_eq!(last, 6, "28 lines, 22 rows inside the box");
         for _ in 0..40 {
             update(&mut m, key('j'));
         }

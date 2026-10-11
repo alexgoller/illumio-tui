@@ -1892,3 +1892,47 @@ async fn w_on_an_allowed_flow_sends_nothing() {
             .is_empty()
     );
 }
+
+#[tokio::test]
+async fn writes_disabled_policy_and_traffic_keys_send_nothing() {
+    use illumio_tui::tui::model::{Overlay, StatusKind};
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    mount_rule_sets(&server, 1).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/sec_policy/pending"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/pending_list.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let keys = vec![
+        (500, ch('2')),
+        (300, ch('n')),
+        (50, ch('e')),
+        (50, ch('x')),
+        (50, KeyCode::Tab),
+        (50, ch('n')),
+        (50, ch('N')),
+        (50, ch('e')),
+        (50, ch('x')),
+        (50, ch('p')),
+        (300, ch('P')),
+        (50, KeyCode::Esc),
+        (50, ch('1')),
+        (50, ch('w')),
+        (200, KeyCode::F(12)),
+    ];
+    let model = key_session(&server, model(), None, keys).await;
+    assert_eq!(
+        model.stats.calls, 7,
+        "health + four lists + rulesets + pending; no editing key costs a request"
+    );
+    assert!(writes_seen(&server).await.is_empty());
+    assert_eq!(model.status.text, "writes are not enabled");
+    assert_eq!(model.status.kind, StatusKind::Warn);
+    assert_eq!(model.overlay, Overlay::None);
+}

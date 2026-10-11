@@ -39,11 +39,19 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "Traffic  Enter",
         "detail (flows) · drill into a pair (aggregate)",
     ),
+    (
+        "Traffic  w",
+        "draft allow rule from a blocked flow (writes)",
+    ),
     ("Policy   d", "toggle draft / active"),
     ("Policy   p", "pending changes"),
     (
         "Policy   Tab / Enter",
         "pane · rule detail · on a ruleset: load deny rules",
+    ),
+    (
+        "Policy   N",
+        "new deny rule in the selected ruleset (rules pane)",
     ),
     ("Objects  Tab / Enter", "next object type · detail"),
     (
@@ -55,12 +63,16 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "filter · event as JSON · sort by severity",
     ),
     (
-        "n / e / x",
-        "new / edit / delete (Objects, Workloads; needs writes)",
+        "n / e / x  (writes)",
+        "new / edit / delete on Objects, Workloads, Policy",
     ),
     (
-        "Pending  j/k Enter",
-        "select · diff of a pending IP list or service",
+        "Pending  j/k Space Enter",
+        "select · mark · diff of a pending entry",
+    ),
+    (
+        "Pending  P",
+        "provision the marked entries, or all (writes)",
     ),
     ("y / n", "send / cancel a shown request"),
     ("Esc", "close overlay / cancel"),
@@ -98,7 +110,7 @@ pub fn render_help(model: &Model, f: &mut Frame, area: Rect) {
         .take(rows)
         .map(|(k, d)| {
             Line::from(vec![
-                Span::styled(format!("{k:<24}"), t.header_style()),
+                Span::styled(format!("{k:<25}"), t.header_style()),
                 Span::styled(*d, t.base()),
             ])
         })
