@@ -8,7 +8,7 @@ use crate::tui::model::{
     QueryState, Screen, StatusLine, TrafficData, TrafficView,
 };
 use crate::tui::msg::{Cmd, Msg, ObjectsPayload, QueryOutcome};
-use crate::tui::ui::widgets::overlay::help_last_scroll;
+use crate::tui::ui::widgets::overlay::{confirm_write_last_scroll, help_last_scroll};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use pce::models::{EventFilter, PolicyScope};
 use pce::traffic::QueryProgress;
@@ -843,10 +843,11 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             }
         },
         Overlay::ConfirmWrite { plan, kind, scroll } => {
-            let lines = plan
+            let area = ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1);
+            let last = plan
                 .request()
-                .map_or(1, |r| edit::request_body_lines(r).len());
-            let last = u16::try_from(lines.saturating_sub(1)).unwrap_or(u16::MAX);
+                .map_or(0, |r| confirm_write_last_scroll(r, area));
+            let last = u16::try_from(last).unwrap_or(u16::MAX);
             match k.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
                     model.overlay = Overlay::None;
@@ -4896,25 +4897,27 @@ mod tests {
             &m.overlay,
             Overlay::ConfirmWrite { scroll: 0, .. }
         ));
+        // The body is four lines: `{`, key, value, `}`; at 80x24 all show.
         update(&mut m, key('j'));
-        update(&mut m, key('j'));
-        assert!(matches!(
-            &m.overlay,
-            Overlay::ConfirmWrite { scroll: 2, .. }
-        ));
+        assert!(
+            matches!(&m.overlay, Overlay::ConfirmWrite { scroll: 0, .. }),
+            "nothing to scroll: {:?}",
+            m.overlay
+        );
+        // Eight rows leave three for the body: the last page starts at line 1.
+        m.size = (80, 8);
         for _ in 0..10 {
             update(&mut m, key('j'));
         }
-        // The body is four lines: `{`, key, value, `}`.
         assert!(
-            matches!(&m.overlay, Overlay::ConfirmWrite { scroll: 3, .. }),
-            "stops at the last body line: {:?}",
+            matches!(&m.overlay, Overlay::ConfirmWrite { scroll: 1, .. }),
+            "stops where the last line is drawn: {:?}",
             m.overlay
         );
         update(&mut m, key('k'));
         assert!(matches!(
             &m.overlay,
-            Overlay::ConfirmWrite { scroll: 2, .. }
+            Overlay::ConfirmWrite { scroll: 0, .. }
         ));
         assert!(update(&mut m, key('q')).is_empty());
         assert!(!m.quit, "q does not quit from the confirm overlay");
@@ -5442,6 +5445,36 @@ mod tests {
                 Some(idx.as_ref())
             )
             .is_ok_and(|i| i.is_some())
+        );
+    }
+
+    #[test]
+    fn confirm_scroll_counts_wrapped_lines() {
+        let long = "w".repeat(150);
+        let plan = pce::write::Plan::Send {
+            request: pce::write::WriteRequest {
+                method: pce::WriteMethod::Post,
+                path: "/orgs/5/labels".into(),
+                body: Some(serde_json::json!({"key": "app", "value": long})),
+                summary: "create label".into(),
+            },
+            kind: pce::write::ObjectKind::Label,
+        };
+        let mut m = writes_on(model_fixture());
+        update(
+            &mut m,
+            Msg::Planned(Ok((plan, pce::write::ObjectKind::Label))),
+        );
+        // 74 columns inside the box: the value line takes three rows, so six
+        // body rows in all; nine terminal rows leave four.
+        m.size = (80, 9);
+        for _ in 0..10 {
+            update(&mut m, key('j'));
+        }
+        assert!(
+            matches!(&m.overlay, Overlay::ConfirmWrite { scroll: 2, .. }),
+            "{:?}",
+            m.overlay
         );
     }
 }

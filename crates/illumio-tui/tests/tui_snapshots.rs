@@ -472,13 +472,21 @@ fn header_shows_the_writes_marker_only_when_enabled() {
     };
     assert!(!first(&m).contains("writes"), "{}", first(&m));
     m.writes = WritesState::on();
-    assert!(first(&m).contains("● · ✎ writes"), "{}", first(&m));
+    assert!(
+        first(&m).starts_with(" illumio-tui ✎ writes · pce.example · org 5 ●"),
+        "{}",
+        first(&m)
+    );
     insta::assert_snapshot!("header_writes_dark_styled_80x24", render_styled(&m, 80, 24));
     m.set_theme("light");
     insta::assert_snapshot!(
         "header_writes_light_styled_80x24",
         render_styled(&m, 80, 24)
     );
+    // A host too long for the row cannot push the safety marker off it.
+    m.profile.host =
+        "policy-compute-engine-01.customer-production.datacenter.example.internal".into();
+    assert!(first(&m).contains("✎ writes"), "{}", first(&m));
 }
 
 #[test]
@@ -525,11 +533,14 @@ fn ip_list_form_80x24_scrolls_the_active_field() {
 
 #[test]
 fn confirm_write_overlay_shows_method_path_and_body() {
+    use illumio_tui::tui::model::WritesState;
     use illumio_tui::tui::model::{Overlay, Screen};
     use illumio_tui::tui::test_support::{
         ip_list_delete_plan, label_post_plan, model_with_objects,
     };
+    // What an admin sees: writes on, so the header carries the marker.
     let mut m = model_with_objects();
+    m.writes = WritesState::on();
     m.screen = Screen::Objects;
     m.overlay = Overlay::ConfirmWrite {
         plan: label_post_plan(),
@@ -537,12 +548,14 @@ fn confirm_write_overlay_shows_method_path_and_body() {
         scroll: 0,
     };
     let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("✎ writes"), "{out}");
     assert!(out.contains("create label app=web2"), "{out}");
     assert!(out.contains("POST /orgs/5/labels"), "{out}");
     assert!(out.contains("\"value\": \"web2\""), "{out}");
     assert!(out.contains("y send · n cancel"), "{out}");
     insta::assert_snapshot!("confirm_label_post_80x24", out);
     let mut l = model_with_objects();
+    l.writes = WritesState::on();
     l.screen = Screen::Objects;
     l.set_theme("light");
     l.overlay = m.overlay.clone();
@@ -567,6 +580,54 @@ fn confirm_write_overlay_shows_method_path_and_body() {
     insta::assert_snapshot!(
         "confirm_ip_list_delete_light_styled_80x24",
         render_styled(&l, 80, 24)
+    );
+}
+
+#[test]
+fn confirm_write_overlay_wraps_a_long_value_instead_of_clipping_it() {
+    use illumio_tui::tui::model::{Overlay, Screen, WritesState};
+    use illumio_tui::tui::test_support::model_with_objects;
+    let description = "Office ranges for the Frankfurt, Munich and Hamburg sites, \
+        agreed with the network team in the October change window; review after the \
+        Q1 migration END";
+    let plan = pce::write::Plan::Send {
+        request: pce::write::WriteRequest {
+            method: pce::WriteMethod::Post,
+            path: "/orgs/5/sec_policy/draft/ip_lists".into(),
+            body: Some(serde_json::json!({
+                "name": "Corp",
+                "description": description,
+                "ip_ranges": [{"from_ip": "10.1.0.0/16"}]
+            })),
+            summary: "create ip_list Corp".into(),
+        },
+        kind: pce::write::ObjectKind::IpList,
+    };
+    let mut m = model_with_objects();
+    m.writes = WritesState::on();
+    m.screen = Screen::Objects;
+    m.overlay = Overlay::ConfirmWrite {
+        plan,
+        kind: pce::write::ObjectKind::IpList,
+        scroll: 0,
+    };
+    let out = render_to_string(&m, 80, 24);
+    // Every character of the value is drawn, across the wrapped lines.
+    let squeeze = |s: &str| s.split_whitespace().collect::<String>();
+    let drawn: String = out
+        .lines()
+        .filter_map(|l| l.split('│').nth(2))
+        .map(squeeze)
+        .collect();
+    assert!(
+        drawn.contains(&squeeze(&format!("\"description\": \"{description}\","))),
+        "{out}"
+    );
+    insta::assert_snapshot!("confirm_long_description_80x24", out);
+    m.set_theme("light");
+    insta::assert_snapshot!(
+        "confirm_long_description_light_styled_80x24",
+        render_styled(&m, 80, 24)
     );
 }
 

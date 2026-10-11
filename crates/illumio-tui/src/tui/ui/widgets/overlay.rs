@@ -7,7 +7,7 @@ use crate::tui::ui::layout::centered;
 use crate::tui::ui::screens::workloads::plain;
 use crate::tui::ui::widgets::panel::panel;
 use pce::RuleView;
-use pce::write::Plan;
+use pce::write::{Plan, WriteRequest};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
@@ -343,17 +343,56 @@ pub fn render_confirm(model: &Model, reason: &str, f: &mut Frame, area: Rect) {
     );
 }
 
+/// Widest the confirm box gets; borders take two of these columns.
+const CONFIRM_WIDTH: u16 = 76;
+/// Rows around the body: borders, the summary, `METHOD path`, a blank line.
+const CONFIRM_CHROME: u16 = 5;
+
+/// The confirm box in `area`, the request body wrapped to its inner width
+/// (the box is the dry run: nothing may be clipped), and how many body rows
+/// fit. Shared by the renderer and the scroll keys so they cannot drift.
+fn confirm_write_layout(req: &WriteRequest, area: Rect) -> (Rect, Vec<String>, usize) {
+    let width = usize::from(CONFIRM_WIDTH.min(area.width).saturating_sub(2));
+    let body: Vec<String> = crate::tui::edit::request_body_lines(req)
+        .iter()
+        .flat_map(|l| wrap_chars(&plain(l), width))
+        .collect();
+    let height = u16::try_from(body.len())
+        .unwrap_or(u16::MAX)
+        .saturating_add(CONFIRM_CHROME);
+    let r = centered(area, CONFIRM_WIDTH, height);
+    let rows = usize::from(r.height.saturating_sub(CONFIRM_CHROME));
+    (r, body, rows)
+}
+
+/// The first wrapped body line shown when scrolled to the end.
+pub fn confirm_write_last_scroll(req: &WriteRequest, area: Rect) -> usize {
+    let (_, body, rows) = confirm_write_layout(req, area);
+    body.len().saturating_sub(rows)
+}
+
+/// `line` in pieces of at most `width` characters; an empty line stays one.
+fn wrap_chars(line: &str, width: usize) -> Vec<String> {
+    let chars: Vec<char> = line.chars().collect();
+    if chars.is_empty() || width == 0 {
+        return vec![line.to_string()];
+    }
+    chars.chunks(width).map(|c| c.iter().collect()).collect()
+}
+
 pub fn render_confirm_write(model: &Model, plan: &Plan, scroll: u16, f: &mut Frame, area: Rect) {
     let t = &model.theme;
     let Some(req) = plan.request() else {
         return;
     };
-    let body = crate::tui::edit::request_body_lines(req);
-    // Borders, the summary, `METHOD path` and a blank line around the body.
-    let r = centered(area, 76, (body.len() as u16).saturating_add(5));
+    let (r, body, rows) = confirm_write_layout(req, area);
     f.render_widget(Clear, r);
-    let rows = r.height.saturating_sub(5) as usize;
     let first = (scroll as usize).min(body.len().saturating_sub(rows));
+    let meta = if body.len() > rows {
+        "j/k scroll · y send · n cancel"
+    } else {
+        "y send · n cancel"
+    };
     let mut lines = vec![
         Line::from(Span::styled(plain(&req.summary), Style::new().fg(t.warn))),
         Line::from(Span::styled(
@@ -363,16 +402,11 @@ pub fn render_confirm_write(model: &Model, plan: &Plan, scroll: u16, f: &mut Fra
         Line::from(""),
     ];
     lines.extend(
-        body.iter()
+        body.into_iter()
             .skip(first)
             .take(rows)
-            .map(|l| Line::from(Span::styled(plain(l), t.base()))),
+            .map(|l| Line::from(Span::styled(l, t.base()))),
     );
-    let meta = if body.len() > rows {
-        "j/k scroll · y send · n cancel"
-    } else {
-        "y send · n cancel"
-    };
     f.render_widget(
         Paragraph::new(lines)
             .block(panel("Send this request?", meta, t, true))

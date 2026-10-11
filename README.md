@@ -185,7 +185,7 @@ retrying"), audited with `phase: "sent"`. Exit code 6 means the guard refused
 ### Editing in the TUI
 
 With writes enabled for the profile and `illumio-tui --allow-writes`, the
-header shows `· ✎ writes` and two screens take three keys: on Labels &
+header shows `✎ writes` before the host and two screens take three keys: on Labels &
 objects (labels, IP lists, services) and Workloads (unmanaged workloads only)
 `n` creates, `e` edits the selected row and `x` deletes it. Without either
 switch the keys print the reason in the status line and send nothing. Label
@@ -204,7 +204,8 @@ An edit sends only what changed; an edit that changes nothing says
 `no changes`.
 
 The confirm overlay is the TUI's dry run: it shows the summary,
-`METHOD path` and the JSON body (`j`/`k` scroll). `y` sends it once, `n` or
+`METHOD path` and the whole JSON body, long values wrapped (`j`/`k`
+scroll). `y` sends it once, `n` or
 `Esc` cancels with `cancelled, nothing sent`. The status line then reports
 `created <href> (pending)`, `updated <href>` or `deleted <href>`, and that
 table reloads once. A rejected write shows the PCE's

@@ -97,8 +97,9 @@ test is unchanged.
 
 ### 3.3 Header marker
 
-`render_header` appends ` · ✎ writes` after the glyph, in the theme's warn
-colour, when `model.writes.enabled`. Nothing is shown otherwise. The marker
+`render_header` draws `✎ writes · ` right after the title and before the
+host, in the theme's warn colour, when `model.writes.enabled`, so a long
+hostname cannot push it off the row. Nothing is shown otherwise. The marker
 is part of both theme snapshots.
 
 ## 4. Editing flow
