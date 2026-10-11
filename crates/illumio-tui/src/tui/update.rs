@@ -5,7 +5,7 @@ use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::form::FormEvent;
 use crate::tui::model::{
     Connection, EventsFilterEdit, Model, ObjectKind, Overlay, PendingAction, PolicyPane,
-    PolicyState, QueryState, Screen, StatusLine, TrafficData, TrafficView, rule_line,
+    PolicyState, QueryState, Screen, StatusLine, TrafficData, TrafficView, WritesState, rule_line,
 };
 use crate::tui::msg::{Cmd, Msg, ObjectsPayload, QueryOutcome};
 use crate::tui::ui::widgets::overlay::{confirm_write_last_scroll, help_last_scroll};
@@ -476,6 +476,18 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     fail(model, "IP lists", &e, tripped);
                 }
             }
+            Vec::new()
+        }
+        Msg::WritesSet(state) => {
+            model.writes = WritesState {
+                in_flight: false,
+                ..state
+            };
+            model.status = if model.writes.enabled {
+                StatusLine::info(writes_status(&model.writes))
+            } else {
+                StatusLine::warn(writes_status(&model.writes))
+            };
             Vec::new()
         }
         Msg::ProfileSwitched(result) => match result {
@@ -2054,6 +2066,20 @@ fn objects_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
 
 /// Writes off, or a write already on its way: the reason goes to the status
 /// line and the key does nothing else.
+/// `writes on`, or `writes off: <reason>` (just the reason when it already
+/// says so, as `WRITES_OFF` does).
+fn writes_status(writes: &WritesState) -> String {
+    if writes.enabled {
+        return "writes on".into();
+    }
+    let reason = writes.refusal();
+    if reason.starts_with("writes off") {
+        reason
+    } else {
+        format!("writes off: {reason}")
+    }
+}
+
 fn writes_refused(model: &mut Model) -> bool {
     if !model.writes.enabled {
         model.status = StatusLine::warn(model.writes.refusal());
@@ -2313,6 +2339,21 @@ pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
             }
             model.switching = true;
             vec![Cmd::SwitchProfile(name)]
+        }
+        Command::Writes(None) => {
+            model.status = StatusLine::info(writes_status(&model.writes));
+            Vec::new()
+        }
+        Command::Writes(Some(on)) => {
+            if model.writes.in_flight {
+                model.status = StatusLine::warn("finish or cancel the write first");
+                return Vec::new();
+            }
+            if model.switching {
+                model.status = StatusLine::info("profile switch in progress");
+                return Vec::new();
+            }
+            vec![Cmd::SetWrites(on)]
         }
         Command::Draft => show_policy(model, PolicyScope::Draft),
         Command::Active => show_policy(model, PolicyScope::Active),
@@ -5203,14 +5244,14 @@ mod tests {
         for c in ['n', 'e', 'x'] {
             assert!(update(&mut m, key(c)).is_empty(), "{c}");
             assert_eq!(m.status.kind, StatusKind::Warn);
-            assert_eq!(m.status.text, "started without --allow-writes");
+            assert_eq!(m.status.text, crate::tui::model::WRITES_OFF);
             assert_eq!(m.overlay, Overlay::None);
         }
         let mut m = model_with_workloads();
         m.screen = Screen::Workloads;
         for c in ['n', 'e', 'x'] {
             assert!(update(&mut m, key(c)).is_empty(), "{c}");
-            assert_eq!(m.status.text, "started without --allow-writes");
+            assert_eq!(m.status.text, crate::tui::model::WRITES_OFF);
             assert_eq!(m.overlay, Overlay::None);
         }
         let mut m = crate::tui::test_support::model_with_ip_lists();
@@ -5219,7 +5260,7 @@ mod tests {
             m.status = StatusLine::info("ready");
             assert!(update(&mut m, key(c)).is_empty(), "{c}");
             assert_eq!(m.status.kind, StatusKind::Warn, "{c}");
-            assert_eq!(m.status.text, "started without --allow-writes", "{c}");
+            assert_eq!(m.status.text, crate::tui::model::WRITES_OFF, "{c}");
             assert_eq!(m.overlay, Overlay::None);
         }
     }
@@ -5477,7 +5518,8 @@ mod tests {
     fn help_scrolls_to_its_last_line_and_reopens_at_the_top() {
         use crate::tui::ui::widgets::overlay::{HELP_LINES, help_last_scroll};
         let mut m = model_fixture(); // 80x24
-        assert_eq!(HELP_LINES.len(), 31);
+        assert_eq!(HELP_LINES.len(), 32);
+        assert!(HELP_LINES.iter().any(|(_, d)| *d == ":writes [on|off]"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "IP lists Enter"));
         assert!(
             HELP_LINES
@@ -5486,7 +5528,7 @@ mod tests {
         );
         update(&mut m, key('?'));
         let last = help_last_scroll(24);
-        assert_eq!(last, 9, "31 lines, 22 rows inside the box");
+        assert_eq!(last, 10, "32 lines, 22 rows inside the box");
 
         for _ in 0..40 {
             update(&mut m, key('j'));
@@ -6186,7 +6228,7 @@ mod tests {
         for c in ['n', 'e', 'x'] {
             assert!(update(&mut m, key(c)).is_empty(), "{c}");
             assert_eq!(m.status.kind, StatusKind::Warn);
-            assert_eq!(m.status.text, "started without --allow-writes");
+            assert_eq!(m.status.text, crate::tui::model::WRITES_OFF);
             assert_eq!(m.overlay, Overlay::None);
         }
         let mut m = writes_on(model_with_policy());
@@ -6381,7 +6423,7 @@ mod tests {
         update(&mut m, kc(KeyCode::Tab));
         for c in ['n', 'N', 'e', 'x'] {
             assert!(update(&mut m, key(c)).is_empty(), "{c}");
-            assert_eq!(m.status.text, "started without --allow-writes");
+            assert_eq!(m.status.text, crate::tui::model::WRITES_OFF);
             assert_eq!(m.overlay, Overlay::None);
         }
         let mut m = writes_on(model_with_policy());
@@ -6470,7 +6512,7 @@ mod tests {
         off.screen = Screen::Policy;
         update(&mut off, Msg::PendingLoaded(Ok(pending_fixture())));
         assert!(update(&mut off, key('P')).is_empty());
-        assert_eq!(off.status.text, "started without --allow-writes");
+        assert_eq!(off.status.text, crate::tui::model::WRITES_OFF);
         assert_eq!(off.overlay, Overlay::Pending);
     }
 
@@ -6614,7 +6656,7 @@ mod tests {
         use crate::tui::test_support::model_with_flows;
         let mut m = model_with_flows();
         assert!(update(&mut m, key('w')).is_empty());
-        assert_eq!(m.status.text, "started without --allow-writes");
+        assert_eq!(m.status.text, crate::tui::model::WRITES_OFF);
         let mut m = writes_on(model_with_flows());
         assert!(update(&mut m, key('w')).is_empty(), "row 0 is allowed");
         assert_eq!(m.status.kind, StatusKind::Warn);
@@ -7148,5 +7190,67 @@ mod tests {
         assert_eq!(m.policy.confirm_impact, None);
         assert!(update(&mut m, key('i')).is_empty());
         assert!(!m.workloads.loading);
+    }
+
+    #[test]
+    fn writes_command_shows_or_asks_for_the_toggle() {
+        use crate::tui::model::WRITES_OFF;
+        let mut m = model_fixture();
+        let cmd = |on| Msg::Command(Command::Writes(on));
+        assert!(update(&mut m, cmd(None)).is_empty());
+        assert_eq!(m.status.kind, StatusKind::Info);
+        assert_eq!(m.status.text, WRITES_OFF);
+        assert_eq!(update(&mut m, cmd(Some(true))), vec![Cmd::SetWrites(true)]);
+        assert_eq!(
+            update(&mut m, cmd(Some(false))),
+            vec![Cmd::SetWrites(false)]
+        );
+        assert!(
+            !m.writes.enabled,
+            "only the runtime's answer changes the state"
+        );
+        let mut m = writes_on(model_fixture());
+        assert!(update(&mut m, cmd(None)).is_empty());
+        assert_eq!(m.status.text, "writes on");
+        m.writes.reason = None;
+        m.writes.enabled = false;
+        update(&mut m, cmd(None));
+        assert_eq!(m.status.text, "writes off: writes are not enabled");
+    }
+
+    #[test]
+    fn writes_toggle_waits_for_a_write_or_a_profile_switch() {
+        for on in [true, false] {
+            let mut m = writes_on(model_fixture());
+            m.writes.in_flight = true;
+            assert!(update(&mut m, Msg::Command(Command::Writes(Some(on)))).is_empty());
+            assert_eq!(m.status.kind, StatusKind::Warn);
+            assert_eq!(m.status.text, "finish or cancel the write first");
+            let mut m = writes_on(model_fixture());
+            m.switching = true;
+            assert!(update(&mut m, Msg::Command(Command::Writes(Some(on)))).is_empty());
+            assert_eq!(m.status.kind, StatusKind::Info);
+            assert_eq!(m.status.text, "profile switch in progress");
+        }
+    }
+
+    #[test]
+    fn writes_set_replaces_the_state_and_says_so() {
+        use crate::tui::model::{WRITES_OFF, WritesState};
+        let mut m = model_fixture();
+        assert!(update(&mut m, Msg::WritesSet(WritesState::on())).is_empty());
+        assert_eq!(m.writes, WritesState::on());
+        assert_eq!(m.status.kind, StatusKind::Info);
+        assert_eq!(m.status.text, "writes on");
+        let denied = "writes are not enabled for this profile; set writes = true in the profile or ILLUMIO_WRITES=1";
+        let mut off = WritesState::off(denied);
+        off.in_flight = true;
+        assert!(update(&mut m, Msg::WritesSet(off)).is_empty());
+        assert_eq!(m.writes, WritesState::off(denied), "in_flight stays false");
+        assert_eq!(m.status.kind, StatusKind::Warn);
+        assert_eq!(m.status.text, format!("writes off: {denied}"));
+        update(&mut m, Msg::WritesSet(WritesState::off(WRITES_OFF)));
+        assert_eq!(m.status.text, WRITES_OFF);
+        assert!(m.writes.reason.is_some());
     }
 }

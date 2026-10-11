@@ -38,7 +38,7 @@ pub fn model_fixture() -> Model {
         60,
         1000,
         "24h".into(),
-        crate::tui::model::WritesState::off("started without --allow-writes"),
+        crate::tui::model::WritesState::off(crate::tui::model::WRITES_OFF),
     );
     m.connection = Connection::Connected {
         index: Some(fixture_index()),

@@ -22,6 +22,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     (":", "command prompt: :traffic :policy :objects :workloads"),
     ("", ":events  :iplists  :filter <expr>  :window <dur>"),
     ("", ":profile <name>  :draft  :active  :help  :q"),
+    ("", ":writes [on|off]"),
     ("?", "this help"),
     ("q / Ctrl-C", "quit"),
     ("↑ ↓ PgUp PgDn Home End", "move in the current table"),

@@ -15,7 +15,7 @@ use crossterm::event::{
 };
 use futures::{Stream, StreamExt};
 use pce::models::{DenyRule, PendingChange, PolicyScope, WorkloadFilter};
-use pce::write::{IfMissing, JsonlAudit, Plan, WriteContext, WriteError, WriteGuard};
+use pce::write::{IfMissing, JsonlAudit, Plan, WriteContext, WriteError, WriteGuard, WriteRefused};
 use pce::{CacheMode, NameIndex, Pce};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -44,9 +44,9 @@ impl TaskTx {
 }
 
 /// What a `:profile` switch built off the event loop: the new client, what
-/// the model needs to know about it and the new profile's write guard, or
-/// the error to show.
-type SwitchResult = Result<(Pce, ProfileInfo, Limits, Option<WriteGuard>, WritesState), String>;
+/// the model needs to know about it and what its write guard is built from,
+/// or the error to show.
+type SwitchResult = Result<(Pce, ProfileInfo, Limits, WriteInputs), String>;
 
 pub struct Runtime {
     pub pce: Arc<Pce>,
@@ -54,6 +54,13 @@ pub struct Runtime {
     /// The current profile's write guard; `None` while writes are off. Only
     /// the runtime holds it: `update` sees `model.writes` and nothing else.
     pub writer: Option<Arc<WriteGuard>>,
+    /// The session's write toggle (`--allow-writes` at startup, `:writes
+    /// on|off` later). It outlives `:profile`: a switch builds the new
+    /// profile's guard only while it is on.
+    pub writes_wanted: bool,
+    /// What the current profile's guard is built from; `None` for a runtime
+    /// built without a profile (tests), which refuses `:writes on`.
+    pub write_inputs: Option<WriteInputs>,
     /// The flags the TUI started with; `:profile` rebuilds the connection from them.
     global: Option<GlobalArgs>,
     generation: Arc<AtomicU64>,
@@ -99,7 +106,9 @@ impl Runtime {
             Self {
                 pce,
                 model,
+                writes_wanted: writer.is_some() || global.as_ref().is_some_and(|g| g.allow_writes),
                 writer,
+                write_inputs: None,
                 global,
                 generation: Arc::new(AtomicU64::new(0)),
                 tx: tx.clone(),
@@ -126,6 +135,20 @@ impl Runtime {
     pub fn execute(&mut self, cmd: Cmd) {
         match cmd {
             Cmd::Quit => self.model.quit = true,
+            // Synchronous and request-free: the guard only checks the audit log.
+            Cmd::SetWrites(on) => {
+                self.writes_wanted = on;
+                let (writer, writes) = match &self.write_inputs {
+                    Some(inputs) => build_writer(inputs, on),
+                    None if on => (
+                        None,
+                        WritesState::off(WriteRefused::ProfileDenies.to_string()),
+                    ),
+                    None => (None, WritesState::off(WRITES_OFF)),
+                };
+                self.writer = writer.map(Arc::new);
+                self.apply(Msg::WritesSet(writes));
+            }
             Cmd::PlanWrite(intent) => {
                 self.model.busy += 1;
                 let (pce, tx) = self.task_ctx();
@@ -213,9 +236,8 @@ impl Runtime {
                                 scope_keys: ctx.config.scope_keys.clone(),
                                 tier_key: ctx.config.tier_key.clone(),
                             };
-                            let (writer, writes) =
-                                build_writer(&WriteInputs::from_context(&ctx), global.allow_writes);
-                            (ctx.pce, info, limits, writer, writes)
+                            let inputs = WriteInputs::from_context(&ctx);
+                            (ctx.pce, info, limits, inputs)
                         })
                         .map_err(|e| e.to_string());
                     let _ = done.send(result);
@@ -403,9 +425,12 @@ impl Runtime {
             self.apply(m);
         }
         let msg = match result {
-            Ok((pce, info, limits, writer, writes)) => {
+            Ok((pce, info, limits, inputs)) => {
+                // The new profile's own `writes` decides, while the toggle is on.
+                let (writer, writes) = build_writer(&inputs, self.writes_wanted);
                 self.pce = Arc::new(pce);
                 self.writer = writer.map(Arc::new);
+                self.write_inputs = Some(inputs);
                 self.model.writes = writes;
                 self.generation.fetch_add(1, Ordering::SeqCst);
                 Msg::ProfileSwitched(Ok((info, limits)))
@@ -724,7 +749,8 @@ fn install_panic_hook() {
 /// CLI, takes over the terminal, and restores it on every exit path.
 pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
     let ctx = Context::new(&global)?;
-    let (writer, writes) = build_writer(&WriteInputs::from_context(&ctx), global.allow_writes);
+    let inputs = WriteInputs::from_context(&ctx);
+    let (writer, writes) = build_writer(&inputs, global.allow_writes);
     let cfg = &ctx.config;
     let profile = ProfileInfo {
         name: cfg.profile_name.clone(),
@@ -744,6 +770,7 @@ pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
     model.limits.tier_key = cfg.tier_key.clone();
     let (mut rt, _tx) = Runtime::with_args(Arc::new(ctx.pce), model, global);
     rt.writer = writer.map(Arc::new);
+    rt.write_inputs = Some(inputs);
     rt.execute(Cmd::Connect);
 
     let mut terminal = ratatui::init();
@@ -863,48 +890,181 @@ mod tests {
         assert_eq!(g.unwrap().context().source, "tui");
     }
 
+    fn test_pce() -> Pce {
+        Pce::new(
+            pce::PceClient::new(pce::ClientConfig::new(
+                "pce.invalid",
+                5,
+                pce::Credentials::new("k", "s"),
+            ))
+            .unwrap(),
+        )
+    }
+
+    fn limits() -> Limits {
+        Limits {
+            auto_refresh_min_seconds: 60,
+            traffic_max_results: 1000,
+            traffic_default_window: "24h".into(),
+            scope_keys: vec!["app".into(), "env".into()],
+            tier_key: "role".into(),
+        }
+    }
+
+    fn profile(name: &str) -> ProfileInfo {
+        ProfileInfo {
+            name: name.into(),
+            host: "pce.invalid".into(),
+            org_id: 5,
+        }
+    }
+
+    fn inputs(profile_allows: bool, audit_path: Option<PathBuf>) -> WriteInputs {
+        WriteInputs {
+            profile_allows,
+            audit_path,
+            ctx: write_ctx(),
+        }
+    }
+
+    fn key(c: char) -> Msg {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))
+    }
+
+    /// Types `:<cmd>` and Enter into the runtime, as a user would.
+    fn command(rt: &mut Runtime, cmd: &str) {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        for c in std::iter::once(':').chain(cmd.chars()) {
+            rt.apply(key(c));
+        }
+        rt.apply(Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
+    }
+
     #[tokio::test]
-    async fn a_switch_without_a_guard_drops_it_and_clears_the_marker() {
+    async fn a_switch_to_a_read_only_profile_drops_the_guard_and_clears_the_marker() {
         use pce::write::MemoryAudit;
-        let pce = || {
-            Pce::new(
-                pce::PceClient::new(pce::ClientConfig::new(
-                    "pce.invalid",
-                    5,
-                    pce::Credentials::new("k", "s"),
-                ))
-                .unwrap(),
-            )
-        };
         let guard = WriteGuard::new(true, Box::new(MemoryAudit::new()), write_ctx()).unwrap();
         let mut model = crate::tui::test_support::model_fixture();
         model.writes = WritesState::on();
-        let (mut rt, _tx) = Runtime::with_writer(Arc::new(pce()), model, guard);
+        let (mut rt, _tx) = Runtime::with_writer(Arc::new(test_pce()), model, guard);
         assert!(rt.writer.is_some());
+        assert!(rt.writes_wanted);
         // A failed switch keeps the guard and the marker.
         rt.finish_switch(Err("profile \"nope\" not found".into()));
         assert!(rt.writer.is_some());
         assert!(rt.model.writes.enabled);
         rt.finish_switch(Ok((
-            pce(),
-            ProfileInfo {
-                name: "ro".into(),
-                host: "pce.invalid".into(),
-                org_id: 5,
-            },
-            Limits {
-                auto_refresh_min_seconds: 60,
-                traffic_max_results: 1000,
-                traffic_default_window: "24h".into(),
-                scope_keys: vec!["app".into(), "env".into()],
-                tier_key: "role".into(),
-            },
-            None,
-            WritesState::off(WRITES_OFF),
+            test_pce(),
+            profile("ro"),
+            limits(),
+            inputs(false, None),
         )));
         assert!(rt.writer.is_none());
         assert!(!rt.model.writes.enabled);
-        assert_eq!(rt.model.writes.reason.as_deref(), Some(WRITES_OFF));
+        assert_eq!(
+            rt.model.writes.reason.as_deref(),
+            Some(WriteRefused::ProfileDenies.to_string().as_str())
+        );
+        assert!(rt.writes_wanted, "the toggle outlives the switch");
+    }
+
+    #[tokio::test]
+    async fn the_toggle_decides_whether_a_switch_builds_a_guard() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = || Some(dir.path().join("writes.jsonl"));
+        let model = crate::tui::test_support::model_fixture();
+        let (mut rt, _tx) = Runtime::new(Arc::new(test_pce()), model);
+        assert!(!rt.writes_wanted);
+        // Toggle off: a writes-enabled profile stays off.
+        rt.model.switching = true;
+        rt.finish_switch(Ok((
+            test_pce(),
+            profile("rw"),
+            limits(),
+            inputs(true, path()),
+        )));
+        assert!(rt.writer.is_none());
+        assert_eq!(rt.model.writes, WritesState::off(WRITES_OFF));
+        command(&mut rt, "writes on");
+        assert!(rt.writer.is_some());
+        // Toggle on: the next profile's own `writes` decides.
+        rt.model.switching = true;
+        rt.finish_switch(Ok((
+            test_pce(),
+            profile("rw2"),
+            limits(),
+            inputs(true, path()),
+        )));
+        assert!(rt.writer.is_some());
+        assert_eq!(rt.model.writes, WritesState::on());
+    }
+
+    #[tokio::test]
+    async fn writes_on_arms_the_edit_keys_and_writes_off_disarms_them() {
+        use crate::tui::model::{Overlay, Screen, StatusKind};
+        let dir = tempfile::tempdir().unwrap();
+        let mut model = crate::tui::test_support::model_with_objects();
+        model.screen = Screen::Objects;
+        let (mut rt, _tx) = Runtime::new(Arc::new(test_pce()), model);
+        rt.write_inputs = Some(inputs(true, Some(dir.path().join("writes.jsonl"))));
+        rt.apply(key('n'));
+        assert_eq!(rt.model.status.text, WRITES_OFF);
+        assert_eq!(rt.model.overlay, Overlay::None);
+
+        command(&mut rt, "writes on");
+        assert!(rt.writer.is_some());
+        assert!(rt.writes_wanted);
+        assert_eq!(rt.model.writes, WritesState::on());
+        assert_eq!(rt.model.status.text, "writes on");
+        rt.apply(key('n'));
+        assert!(
+            matches!(rt.model.overlay, Overlay::Form(_)),
+            "{:?}",
+            rt.model.overlay
+        );
+        rt.apply(Msg::Key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Esc,
+            crossterm::event::KeyModifiers::NONE,
+        )));
+
+        command(&mut rt, "writes off");
+        assert!(rt.writer.is_none());
+        assert!(!rt.writes_wanted);
+        assert_eq!(rt.model.writes, WritesState::off(WRITES_OFF));
+        assert_eq!(rt.model.status.kind, StatusKind::Warn);
+        assert_eq!(rt.model.status.text, WRITES_OFF);
+        rt.apply(key('n'));
+        assert_eq!(rt.model.status.text, WRITES_OFF);
+        assert_eq!(rt.model.overlay, Overlay::None);
+        assert_eq!(rt.pce.stats().calls, 0, "the toggle sends no request");
+    }
+
+    #[tokio::test]
+    async fn writes_on_says_why_it_stays_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = crate::tui::test_support::model_fixture();
+        let (mut rt, _tx) = Runtime::new(Arc::new(test_pce()), model);
+        let denies = WriteRefused::ProfileDenies.to_string();
+        for (inputs, reason) in [
+            (
+                Some(inputs(false, Some(dir.path().join("writes.jsonl")))),
+                denies.as_str(),
+            ),
+            (Some(inputs(true, None)), AUDIT_PATH_UNKNOWN),
+            (None, denies.as_str()),
+        ] {
+            rt.write_inputs = inputs;
+            command(&mut rt, "writes on");
+            assert!(rt.writer.is_none(), "{reason}");
+            assert_eq!(rt.model.writes, WritesState::off(reason));
+            assert_eq!(rt.model.status.text, format!("writes off: {reason}"));
+        }
+        command(&mut rt, "writes");
+        assert_eq!(
+            rt.model.status.text,
+            format!("writes off: {}", WriteRefused::ProfileDenies)
+        );
     }
 
     #[test]

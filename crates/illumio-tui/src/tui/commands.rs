@@ -7,6 +7,8 @@ pub enum Command {
     Filter(String),
     Window(String),
     Profile(String),
+    /// `:writes on` / `:writes off`; bare `:writes` shows the state.
+    Writes(Option<bool>),
     Draft,
     Active,
     Quit,
@@ -49,6 +51,12 @@ pub fn parse(input: &str) -> Result<Command, String> {
         ),
         "window" => with_arg(Command::Window, "window <duration>  (e.g. 1h, 24h, 7d)"),
         "profile" => with_arg(Command::Profile, "profile <name>"),
+        "writes" => match arg {
+            "" => Ok(Command::Writes(None)),
+            "on" => Ok(Command::Writes(Some(true))),
+            "off" => Ok(Command::Writes(Some(false))),
+            _ => Err("usage: :writes [on|off]".into()),
+        },
         "draft" => no_arg(Command::Draft),
         "active" => no_arg(Command::Active),
         "q" | "quit" => no_arg(Command::Quit),
@@ -84,6 +92,9 @@ mod tests {
             parse("profile prod").unwrap(),
             Command::Profile("prod".into())
         );
+        assert_eq!(parse("writes").unwrap(), Command::Writes(None));
+        assert_eq!(parse("writes on").unwrap(), Command::Writes(Some(true)));
+        assert_eq!(parse("writes off").unwrap(), Command::Writes(Some(false)));
         assert_eq!(parse("draft").unwrap(), Command::Draft);
         assert_eq!(parse("active").unwrap(), Command::Active);
         assert_eq!(parse("q").unwrap(), Command::Quit);
@@ -102,6 +113,11 @@ mod tests {
         assert!(parse("filter").unwrap_err().contains("usage"));
         assert!(parse("window").unwrap_err().contains("usage"));
         assert!(parse("profile").unwrap_err().contains("usage"));
+        assert_eq!(parse("writes yes").unwrap_err(), "usage: :writes [on|off]");
+        assert_eq!(
+            parse("writes on now").unwrap_err(),
+            "usage: :writes [on|off]"
+        );
         assert!(
             parse("traffic extra")
                 .unwrap_err()

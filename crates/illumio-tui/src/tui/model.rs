@@ -133,7 +133,7 @@ pub struct WritesState {
     pub reason: Option<String>,
     /// A plan or a send is on its way: set when `Cmd::PlanWrite` or
     /// `Cmd::ExecuteWrite` is emitted, cleared when its answer lands (and by
-    /// `Model::reset_data`). Editing keys and `:profile` wait for it.
+    /// `Model::reset_data`). Editing keys, `:profile` and `:writes` wait for it.
     pub in_flight: bool,
 }
 
@@ -2115,7 +2115,8 @@ pub struct Model {
     pub size: (u16, u16),
     pub focused: bool,
     pub status: StatusLine,
-    /// Set at startup and on every profile switch from the runtime's guard.
+    /// Set at startup, on every profile switch and on `:writes on|off` from
+    /// the runtime's guard.
     pub writes: WritesState,
     /// First help line shown; `Overlay::Help` is reopened at the top.
     pub help_scroll: usize,

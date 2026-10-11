@@ -2,7 +2,7 @@
 use crate::tui::diff::ObjectDiff;
 use crate::tui::edit::WriteIntent;
 use crate::tui::filter::TrafficFilter;
-use crate::tui::model::{Limits, ObjectKind, ProfileInfo, Screen};
+use crate::tui::model::{Limits, ObjectKind, ProfileInfo, Screen, WritesState};
 use crossterm::event::{KeyEvent, MouseEvent};
 use pce::models::{
     DenyRule, Event, EventFilter, IpList, Label, LabelGroup, PendingChange, PolicyScope, RuleSet,
@@ -102,6 +102,9 @@ pub enum Msg {
         result: Result<Outcome, WriteError>,
     },
     DiffLoaded(Result<ObjectDiff, String>),
+    /// The runtime applied `:writes on|off`: the guard was built (or refused,
+    /// with the reason) or dropped.
+    WritesSet(WritesState),
 }
 
 #[derive(Debug, Clone)]
@@ -139,6 +142,9 @@ pub enum Cmd {
     },
     /// Rebuild the client for another profile from the config (no request).
     SwitchProfile(String),
+    /// `:writes on|off`: build the current profile's write guard, or drop it
+    /// (no request). The runtime answers with `Msg::WritesSet`.
+    SetWrites(bool),
     /// Plan a write (one GET for IP lists, services and workloads; none for
     /// labels) and show it in the confirm overlay. Never sends a write.
     PlanWrite(WriteIntent),
@@ -208,6 +214,7 @@ impl PartialEq for Cmd {
                 },
             ) => fa == fb && ma == mb,
             (Cmd::SwitchProfile(a), Cmd::SwitchProfile(b)) => a == b,
+            (Cmd::SetWrites(a), Cmd::SetWrites(b)) => a == b,
             (Cmd::PlanWrite(a), Cmd::PlanWrite(b)) => a == b,
             (
                 Cmd::ExecuteWrite { plan: pa, kind: ka },
