@@ -3057,6 +3057,64 @@ mod tests {
     }
 
     #[test]
+    fn the_treemap_cursor_on_the_last_tile_is_clamped_when_a_relayout_has_fewer() {
+        let mut m = on_treemap(160, 48);
+        let before = m.traffic.treemap.targets().len();
+        m.traffic.treemap.cursor = before - 1;
+        quiet(&mut m, Msg::Resize(80, 24));
+        let tm = &m.traffic.treemap;
+        let after = tm.targets().len();
+        assert!(after < before, "{before} -> {after}");
+        assert_eq!(tm.cursor, after - 1, "clamped onto the last tile");
+        let cur = tm.current().expect("a valid tile");
+        assert!(!tm.tile(cur).label.is_empty());
+        // The same through `b`: bytes leave fewer tiles at 80x24.
+        let mut m = on_treemap(80, 24);
+        let conns = m.traffic.treemap.targets().len();
+        m.traffic.treemap.cursor = conns - 1;
+        quiet(&mut m, key('b'));
+        let tm = &m.traffic.treemap;
+        assert!(
+            tm.targets().len() < conns,
+            "{conns} -> {}",
+            tm.targets().len()
+        );
+        assert_eq!(tm.cursor, tm.targets().len() - 1);
+        assert!(tm.current().is_some_and(|c| !tm.tile(c).label.is_empty()));
+    }
+
+    #[test]
+    fn a_terminal_too_small_for_the_treemap_takes_every_key_quietly() {
+        use pce::traffic::treemap::Rect;
+        let mut m = on_treemap(80, 24);
+        quiet(&mut m, Msg::Resize(40, 10));
+        assert_eq!(m.traffic.treemap.area, Rect::default());
+        assert!(m.traffic.treemap.tiles.is_empty());
+        assert_eq!(m.traffic.treemap.current(), None);
+        for msg in [
+            key('h'),
+            key('j'),
+            key('k'),
+            key('l'),
+            kc(KeyCode::Left),
+            enter(),
+            key('b'),
+            key('b'),
+            kc(KeyCode::Esc),
+        ] {
+            quiet(&mut m, msg);
+        }
+        assert_eq!(m.traffic.view, TrafficView::Treemap);
+        assert!(m.traffic.treemap.tiles.is_empty());
+        quiet(&mut m, Msg::Resize(80, 24));
+        assert_eq!(
+            m.traffic.treemap.tiles.len(),
+            9,
+            "back when the terminal grows"
+        );
+    }
+
+    #[test]
     fn new_keys_and_a_new_result_drop_the_zoom() {
         let mut m = on_treemap(80, 24);
         quiet(&mut m, enter());

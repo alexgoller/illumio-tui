@@ -1161,9 +1161,12 @@ fn an_empty_result_draws_the_treemap_like_an_empty_table() {
 #[test]
 fn mesh_and_treemap_keep_the_truncated_marker() {
     use illumio_tui::tui::model::TrafficView;
+    use illumio_tui::tui::msg::Msg;
     use illumio_tui::tui::test_support::model_with_rich_flows;
+    use illumio_tui::tui::update;
     let mut m = model_with_rich_flows();
     m.traffic.data.as_mut().unwrap().truncated = true;
+    assert!(update(&mut m, Msg::Resize(160, 48)).is_empty());
     for view in [TrafficView::Mesh, TrafficView::Treemap] {
         m.traffic.view = view;
         let out = render_to_string(&m, 160, 48);

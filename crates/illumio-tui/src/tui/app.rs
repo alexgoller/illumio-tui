@@ -733,6 +733,15 @@ where
     )
 }
 
+/// The model starts at 80x24 and otherwise learns the size only from
+/// `Event::Resize`: tell it the real one before the first draw, through
+/// `update` like any resize, so the treemap fills the panel it is drawn in.
+fn learn_size<B: ratatui::backend::Backend>(rt: &mut Runtime, terminal: &ratatui::Terminal<B>) {
+    if let Ok(size) = terminal.size() {
+        rt.apply(Msg::Resize(size.width, size.height));
+    }
+}
+
 /// Runs `restore` first on every panic, then the hook that was installed
 /// before (ratatui's, which leaves raw mode and the alternate screen).
 fn chain_panic_hook(restore: impl Fn() + Send + Sync + 'static) {
@@ -779,6 +788,7 @@ pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
     rt.execute(Cmd::Connect);
 
     let mut terminal = ratatui::init();
+    learn_size(&mut rt, &terminal);
     install_panic_hook(); // after ratatui's, so mouse reporting is switched off first
     let _ = crossterm::execute!(std::io::stdout(), EnableMouseCapture, EnableFocusChange);
     let result = {
@@ -972,6 +982,30 @@ mod tests {
             Some(WriteRefused::ProfileDenies.to_string().as_str())
         );
         assert!(rt.writes_wanted, "the toggle outlives the switch");
+    }
+
+    #[tokio::test]
+    async fn the_model_learns_the_terminal_size_before_the_first_draw_and_keeps_it_across_a_switch()
+    {
+        use crate::tui::ui::screens::traffic::treemap_area;
+        let model = crate::tui::test_support::model_fixture();
+        let (mut rt, _tx) = Runtime::new(Arc::new(test_pce()), model);
+        assert_eq!(rt.model.size, (80, 24));
+        let terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(200, 50)).unwrap();
+        learn_size(&mut rt, &terminal);
+        assert_eq!(rt.model.size, (200, 50));
+        assert_eq!(rt.model.traffic.treemap.area, treemap_area((200, 50)));
+        assert_eq!(rt.model.traffic.treemap.area.w, 198);
+        // A profile switch resets the data but not the terminal.
+        rt.model.switching = true;
+        rt.finish_switch(Ok((
+            test_pce(),
+            profile("rw"),
+            limits(),
+            inputs(false, None),
+        )));
+        assert_eq!(rt.model.size, (200, 50));
+        assert_eq!(rt.model.traffic.treemap.area, treemap_area((200, 50)));
     }
 
     #[tokio::test]
