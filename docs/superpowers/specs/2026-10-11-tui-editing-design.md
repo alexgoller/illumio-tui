@@ -304,14 +304,22 @@ On `y` the confirm overlay closes, the status line shows "sending …" and
   GET). The `Writer` already invalidated the cache prefix, and
   `policy:pending` is invalidated too so the next `p` sees the change.
 - `Ok(Outcome::Skipped)`: status line with the reason, no reload.
-- `Err(WriteError::Unanswered(_))`: `Overlay::Error` with "the request was
-  sent but not answered; check the PCE before retrying" plus the error; the
-  table reloads so the user sees the real state.
+- `Err(WriteError::Unanswered(_))`, also wrapped in `AuditFailed`:
+  `Overlay::Error` with "the request was sent but not answered: " plus the
+  error (whose text carries "check the PCE before retrying", and for a
+  failed audit the audit log path); the table reloads so the user sees the
+  real state.
 - Other `Err`: `Overlay::Error` with the error's display (`Rejected` shows
   the PCE's body as the CLI does). Nothing reloads.
 
 The key handler for `y` runs only in `ConfirmWrite`; a second `y` while
-`busy` is impossible because the overlay is gone.
+`busy` is impossible because the overlay is gone. One write is in flight at
+a time (`WritesState.in_flight`, from `Cmd::PlanWrite` or
+`Cmd::ExecuteWrite` until `Msg::Planned` or `Msg::WriteDone`): `n` / `e` /
+`x` say "a write is already in progress" and `:profile` says "finish or
+cancel the write first". A plan that lands while another overlay is open is
+discarded ("request discarded, nothing sent"), so keys typed ahead into that
+overlay never confirm it.
 
 ### 5.3 Guard refusals at run time
 

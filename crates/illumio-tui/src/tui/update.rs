@@ -431,7 +431,10 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::DiffLoaded(result) => {
             model.policy.diff_loading = false;
             match result {
-                Ok(diff) => model.overlay = Overlay::Diff { diff, scroll: 0 },
+                Ok(diff) => {
+                    model.status = StatusLine::info(format!("diff of {}", diff.name));
+                    model.overlay = Overlay::Diff { diff, scroll: 0 };
+                }
                 Err(e) => fail(model, "diff", &e, false),
             }
             Vec::new()
@@ -477,11 +480,18 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     model.status = StatusLine::info(format!("skipped: {reason}"));
                     Vec::new()
                 }
-                Err(e @ WriteError::Unanswered(_)) => {
-                    model.status = StatusLine::error("write not answered; reloading");
-                    model.overlay = Overlay::Error(format!(
-                        "the request was sent but not answered; check the PCE before retrying: {e}"
-                    ));
+                // The write may have applied: say so once (the error's own
+                // text carries the advice) and reload to show the real state.
+                // A failed audit names its log in the error text.
+                Err(e) if is_unanswered(&e) => {
+                    let audited = !matches!(e, WriteError::AuditFailed { .. });
+                    model.status = StatusLine::error(if audited {
+                        "write not answered; reloading"
+                    } else {
+                        "write not answered and not audited; reloading"
+                    });
+                    model.overlay =
+                        Overlay::Error(format!("the request was sent but not answered: {e}"));
                     reload_after_write(model, kind)
                 }
                 Err(e) => {
@@ -1338,6 +1348,15 @@ fn load_workloads(model: &mut Model, mode: CacheMode) -> Vec<Cmd> {
     model.workloads.auto.last_run = Some(Instant::now());
     model.workloads.auto.from_tick = false;
     vec![Cmd::LoadWorkloads(mode)]
+}
+
+/// Sent but not answered, whether or not its audit entry was written.
+fn is_unanswered(e: &WriteError) -> bool {
+    match e {
+        WriteError::Unanswered(_) => true,
+        WriteError::AuditFailed { write, .. } => is_unanswered(write),
+        _ => false,
+    }
 }
 
 /// One reload of the written kind's table, past the cache (the writer
@@ -5092,12 +5111,66 @@ mod tests {
             "the user sees the real state"
         );
         match &m.overlay {
-            Overlay::Error(t) => assert!(
-                t.starts_with(
-                    "the request was sent but not answered; check the PCE before retrying"
-                ),
-                "{t}"
-            ),
+            Overlay::Error(t) => {
+                assert!(
+                    t.starts_with("the request was sent but not answered: "),
+                    "{t}"
+                );
+                assert_eq!(
+                    t.matches("check the PCE before retrying").count(),
+                    1,
+                    "the advice reads once: {t}"
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_unanswered_write_whose_audit_failed_still_reloads_and_names_the_audit_log() {
+        use crate::tui::model::ObjectKind;
+        use crate::tui::test_support::model_with_objects;
+        use pce::PceError;
+        use pce::write::WriteError;
+        let mut m = model_with_objects();
+        let cmds = update(
+            &mut m,
+            Msg::WriteDone {
+                kind: pce::write::ObjectKind::IpList,
+                method: Some(pce::WriteMethod::Put),
+                result: Err(WriteError::AuditFailed {
+                    write: Box::new(WriteError::Unanswered(PceError::Timeout(
+                        std::time::Duration::from_secs(30),
+                    ))),
+                    error: "/home/a/.local/state/illumio-tui/audit.jsonl: permission denied".into(),
+                }),
+            },
+        );
+        assert_eq!(
+            cmds,
+            vec![Cmd::LoadObjects {
+                kind: ObjectKind::IpLists,
+                mode: pce::CacheMode::Bypass
+            }],
+            "the write may have applied: one reload shows the real state"
+        );
+        assert_eq!(m.status.kind, StatusKind::Error);
+        assert_eq!(
+            m.status.text,
+            "write not answered and not audited; reloading"
+        );
+        match &m.overlay {
+            Overlay::Error(t) => {
+                assert!(
+                    t.starts_with("the request was sent but not answered: "),
+                    "{t}"
+                );
+                assert!(
+                    t.contains("/home/a/.local/state/illumio-tui/audit.jsonl: permission denied"),
+                    "{t}"
+                );
+                assert_eq!(t.matches("check the PCE before retrying").count(), 1, "{t}");
+            }
             other => panic!("{other:?}"),
         }
     }
@@ -5156,6 +5229,7 @@ mod tests {
         m.policy.pending = Some(vec![]);
         m.overlay = Overlay::Pending;
         m.policy.diff_loading = true;
+        m.status = StatusLine::info("loading the active version of Corp");
         let diff = ObjectDiff {
             name: "Corp".into(),
             href: "/orgs/5/sec_policy/draft/ip_lists/21".into(),
@@ -5173,6 +5247,11 @@ mod tests {
         };
         assert!(update(&mut m, Msg::DiffLoaded(Ok(diff.clone()))).is_empty());
         assert!(!m.policy.diff_loading);
+        assert_eq!(m.status.kind, StatusKind::Info);
+        assert_eq!(
+            m.status.text, "diff of Corp",
+            "the loading status is replaced"
+        );
         assert_eq!(
             m.overlay,
             Overlay::Diff {
@@ -5196,11 +5275,16 @@ mod tests {
         update(&mut m, key('q'));
         assert_eq!(m.overlay, Overlay::None, "q closes both");
         m.overlay = Overlay::Pending;
+        m.status = StatusLine::info("loading the active version of Corp");
         update(
             &mut m,
             Msg::DiffLoaded(Err("not found: /orgs/5/sec_policy/active/ip_lists".into())),
         );
         assert_eq!(m.status.kind, StatusKind::Error);
+        assert_eq!(
+            m.status.text,
+            "diff: not found: /orgs/5/sec_policy/active/ip_lists"
+        );
         assert_eq!(m.overlay, Overlay::Pending);
     }
 
