@@ -915,6 +915,32 @@ fn ip_lists_screen_80x24_and_160x48_with_detail() {
 }
 
 #[test]
+fn ip_list_detail_with_many_ranges_keeps_used_by_visible_80x24() {
+    use illumio_tui::tui::test_support::model_with_ip_lists;
+    let mut m = model_with_ip_lists();
+    let ranges: Vec<_> = (0..10)
+        .map(|i| serde_json::json!({"from_ip": format!("10.0.{i}.0/24")}))
+        .collect();
+    let many: pce::models::IpList = serde_json::from_value(serde_json::json!({
+        "href": "/orgs/5/sec_policy/draft/ip_lists/20", "name": "Any (0.0.0.0/0 and ::/0)",
+        "ip_ranges": ranges
+    }))
+    .unwrap();
+    m.ip_lists.set_lists(vec![many], &m.policy);
+    m.screen = Screen::IpLists;
+    m.ip_lists.show_detail = true;
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("used by Shop-Prod · deny"), "{out}");
+    assert!(out.contains("+7 more ranges"), "{out}");
+    insta::assert_snapshot!("ip_list_detail_many_ranges_80x24", out);
+    m.set_theme("light");
+    insta::assert_snapshot!(
+        "ip_list_detail_many_ranges_light_styled_80x24",
+        render_styled(&m, 80, 24)
+    );
+}
+
+#[test]
 fn the_tab_row_uses_short_titles_only_when_the_full_row_does_not_fit() {
     let m = model_fixture();
     let narrow = render_to_string(&m, 80, 24);

@@ -1,6 +1,6 @@
 //! IP lists screen: every draft IP list with its size, entry counts and how
-//! many loaded rules use it, and a detail pane for the selected one (ranges,
-//! FQDNs, size, the rules by name). No request beyond the list itself.
+//! many loaded rules use it, and a detail pane for the selected one (size,
+//! the rules by name, the first ranges and FQDNs). No request beyond the list itself.
 use crate::tui::model::{IpListRow, Model, rule_kind_name};
 use crate::tui::ui::screens::objects::{DetailLine, clip, items};
 use crate::tui::ui::widgets::bars::age_text;
@@ -117,9 +117,22 @@ fn render_detail(model: &Model, f: &mut Frame, area: Rect) {
     f.render_widget(Paragraph::new(text).block(block), area);
 }
 
-/// Name and description, size, one line per range (`!` before an
-/// exclusion, its description after), the FQDNs, and the loaded rules that
-/// name the list.
+/// Range and FQDN lines shown before `+N more` (the CLI prints them all).
+const MAX_ENTRIES: usize = 3;
+
+/// `items` with at most `MAX_ENTRIES` values, then `+N more <noun>`.
+fn capped(head: &'static str, mut values: Vec<String>, noun: &str) -> Vec<DetailLine> {
+    let hidden = values.len().saturating_sub(MAX_ENTRIES);
+    values.truncate(MAX_ENTRIES);
+    if hidden > 0 {
+        values.push(format!("+{hidden} more {noun}"));
+    }
+    items(head, values)
+}
+
+/// Name and description, size, the loaded rules that name the list, then
+/// the first ranges (`!` before an exclusion, its description after) and
+/// FQDNs: what a long list cannot push out of the pane comes first.
 fn detail_lines(model: &Model, row: &IpListRow) -> Vec<DetailLine> {
     let l = &row.list;
     let mut out = vec![
@@ -132,6 +145,7 @@ fn detail_lines(model: &Model, row: &IpListRow) -> Vec<DetailLine> {
         ),
         (Some("size"), size_text(&row.size)),
     ];
+    out.extend(used_by_lines(model, &l.href));
     let ranges: Vec<String> = l
         .ip_ranges
         .iter()
@@ -153,15 +167,15 @@ fn detail_lines(model: &Model, row: &IpListRow) -> Vec<DetailLine> {
         })
         .collect();
     if !ranges.is_empty() || l.fqdns.is_empty() {
-        out.extend(items("ranges", ranges));
+        out.extend(capped("ranges", ranges, "ranges"));
     }
     if !l.fqdns.is_empty() {
-        out.extend(items(
+        out.extend(capped(
             "fqdns",
             l.fqdns.iter().map(|f| f.fqdn.clone()).collect(),
+            "FQDNs",
         ));
     }
-    out.extend(used_by_lines(model, &l.href));
     out
 }
 
@@ -224,18 +238,51 @@ mod tests {
             vec![
                 "list    Corp  Office ranges",
                 "size    65.5K addresses (65536 IPv4, 0 IPv6)",
+                "used by Shop-Prod · allow · role=web ← ipl:Corp",
                 "ranges  10.1.0.0-10.1.255.255",
                 "fqdns   *.corp.example",
-                "used by Shop-Prod · allow · role=web ← ipl:Corp",
             ]
         );
         let any = text(&detail_lines(&m, &m.ip_lists.table.rows()[0]));
         assert_eq!(any[1], "size    any (0.0.0.0/0)");
-        assert_eq!(any[2], "ranges  0.0.0.0/0");
-        assert_eq!(any[3], "        ::/0");
         assert_eq!(
-            any[4],
+            any[2],
             "used by Shop-Prod · deny · All workloads ← ipl:Any (0.0.0.0/0 and ::/0)"
+        );
+        assert_eq!(any[3], "ranges  0.0.0.0/0");
+        assert_eq!(any[4], "        ::/0");
+    }
+
+    #[test]
+    fn size_and_used_by_come_first_and_ranges_and_fqdns_stop_at_three() {
+        let mut m = model_with_ip_lists();
+        let ranges: Vec<_> = (0..10)
+            .map(|i| serde_json::json!({"from_ip": format!("10.0.{i}.0/24")}))
+            .collect();
+        let fqdns: Vec<_> = (0..5)
+            .map(|i| serde_json::json!({"fqdn": format!("h{i}.example")}))
+            .collect();
+        let many: pce::models::IpList = serde_json::from_value(serde_json::json!({
+            "href": "/orgs/5/sec_policy/draft/ip_lists/21", "name": "Corp",
+            "ip_ranges": ranges, "fqdns": fqdns
+        }))
+        .unwrap();
+        m.ip_lists.set_lists(vec![many], &m.policy);
+        assert_eq!(
+            text(&detail_lines(&m, &m.ip_lists.table.rows()[0])),
+            vec![
+                "list    Corp",
+                "size    2.6K addresses (2560 IPv4, 0 IPv6)",
+                "used by Shop-Prod · allow · role=web ← ipl:Corp",
+                "ranges  10.0.0.0/24",
+                "        10.0.1.0/24",
+                "        10.0.2.0/24",
+                "        +7 more ranges",
+                "fqdns   h0.example",
+                "        h1.example",
+                "        h2.example",
+                "        +2 more FQDNs",
+            ]
         );
     }
 
@@ -246,10 +293,7 @@ mod tests {
             serde_json::from_str(include_str!("../../../../../../fixtures/ip_lists.json")).unwrap();
         m.ip_lists.set_lists(lists, &m.policy);
         let lines = text(&detail_lines(&m, &m.ip_lists.table.rows()[1]));
-        assert_eq!(
-            lines.last().unwrap(),
-            "used by load Policy (2) to see rules"
-        );
+        assert_eq!(lines[2], "used by load Policy (2) to see rules");
         let excluded: pce::models::IpList = serde_json::from_value(serde_json::json!({
             "href": "/orgs/5/sec_policy/draft/ip_lists/30", "name": "Lab",
             "ip_ranges": [
@@ -261,7 +305,8 @@ mod tests {
         m.ip_lists.set_lists(vec![excluded], &m.policy);
         let lines = text(&detail_lines(&m, &m.ip_lists.table.rows()[0]));
         assert_eq!(lines[1], "size    128 addresses (128 IPv4, 0 IPv6)");
-        assert_eq!(lines[2], "ranges  10.0.0.0/24  lab net");
-        assert_eq!(lines[3], "        !10.0.0.128/25");
+        assert_eq!(lines[2], "used by load Policy (2) to see rules");
+        assert_eq!(lines[3], "ranges  10.0.0.0/24  lab net");
+        assert_eq!(lines[4], "        !10.0.0.128/25");
     }
 }

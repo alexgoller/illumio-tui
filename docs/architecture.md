@@ -221,8 +221,8 @@ overlay than the pending list is open does not replace it.
 `pce::iplist_size` counts an IP list's addresses per family with std
 integers (`Ipv4Addr` as `u32`, `Ipv6Addr` as `u128`): included ranges are
 merged, exclusions subtract only their overlap, a CIDR's host bits are
-ignored, and an included `0.0.0.0/0` or `::/0`, or 2^24 addresses and more,
-makes the list `unbounded`. JSON carries `v4`/`v6` as strings.
+ignored, and only an included `0.0.0.0/0` or `::/0` makes the list
+`unbounded` (`any`); every other list keeps its real size (`16.8M` for a /8). JSON carries `v4`/`v6` as strings.
 
 `pce::impact::rule_impact` evaluates a rule over a workload list: for each
 ruleset scope (none means one empty scope, everywhere) the providers are the

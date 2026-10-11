@@ -6,8 +6,8 @@ use serde::{Serialize, Serializer};
 use std::net::IpAddr;
 
 /// The size of one IP list. `v4` and `v6` count addresses after exclusions;
-/// `unbounded` says why the list counts as "any": an included `0.0.0.0/0` or
-/// `::/0`, or at least 2^24 addresses. JSON carries `v4` and `v6` as strings
+/// `unbounded` names the included `0.0.0.0/0` or `::/0` that makes the list
+/// "any"; every other list is bounded, however large. JSON carries `v4` and `v6` as strings
 /// (an IPv6 count does not fit a JSON number).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct IpListSize {
@@ -25,8 +25,6 @@ fn as_string<S: Serializer>(n: &u128, s: S) -> Result<S::Ok, S::Error> {
     s.serialize_str(&n.to_string())
 }
 
-/// From here on a list counts as unbounded: 2^24 addresses (a /8).
-const UNBOUNDED_AT: u128 = 1 << 24;
 /// The last IPv4 address as an integer.
 const V4_LAST: u128 = u32::MAX as u128;
 
@@ -118,15 +116,20 @@ fn count(spans: &[Span]) -> u128 {
     })
 }
 
-/// `999`, `65.5K`, `1.5M`, `2.0G`.
-fn human(n: u128) -> String {
-    let f = n as f64;
-    match n {
-        0..1_000 => n.to_string(),
-        1_000..1_000_000 => format!("{:.1}K", f / 1e3),
-        1_000_000..1_000_000_000 => format!("{:.1}M", f / 1e6),
-        _ => format!("{:.1}G", f / 1e9),
+/// `999`, `65.5K`, `1.5M`, `2.0G`. The value is rounded before the unit is
+/// picked, so `999_999` is `1.0M`, never `1000.0K`.
+pub(crate) fn human(n: u128) -> String {
+    if n < 1_000 {
+        return n.to_string();
     }
+    let f = n as f64;
+    for (unit, scale) in [('K', 1e3), ('M', 1e6)] {
+        let tenths = (f / scale * 10.0).round();
+        if tenths < 10_000.0 {
+            return format!("{:.1}{unit}", tenths / 10.0);
+        }
+    }
+    format!("{:.1}G", f / 1e9)
 }
 
 pub fn ip_list_size(list: &IpList) -> IpListSize {
@@ -151,9 +154,6 @@ pub fn ip_list_size(list: &IpList) -> IpListSize {
     let [inc_v4, inc_v6] = include;
     let v4 = count(&subtract(merge(inc_v4), &exclude[0]));
     let v6 = count(&subtract(merge(inc_v6), &exclude[1]));
-    if unbounded.is_none() && v4.saturating_add(v6) >= UNBOUNDED_AT {
-        unbounded = Some("≥16M addresses".to_string());
-    }
     IpListSize {
         v4,
         v6,
@@ -278,7 +278,7 @@ mod tests {
     }
 
     #[test]
-    fn everything_and_huge_lists_are_unbounded() {
+    fn only_everything_is_unbounded_and_big_lists_keep_their_size() {
         let any4 = size(json!([{"from_ip": "0.0.0.0/0"}]));
         assert_eq!(any4.unbounded.as_deref(), Some("0.0.0.0/0"));
         assert_eq!(any4.v4, 1 << 32);
@@ -294,14 +294,27 @@ mod tests {
         ]));
         assert_eq!(internet.unbounded.as_deref(), Some("0.0.0.0/0"));
         assert_eq!(internet.v4, (1 << 32) - (1 << 24));
+        // Only /0 is any: every bounded list shows its real size.
         let a8 = size(json!([{"from_ip": "10.0.0.0/8"}]));
-        assert_eq!(a8.unbounded.as_deref(), Some("≥16M addresses"));
-        assert_eq!(a8.display(), "any (≥16M addresses)");
+        assert_eq!(a8.unbounded, None);
+        assert_eq!(a8.display(), "16.8M");
+        let a1 = size(json!([{"from_ip": "0.0.0.0/1"}]));
+        assert_eq!(a1.unbounded, None);
+        assert_eq!(a1.display(), "2.1G");
         let a9 = size(json!([{"from_ip": "10.0.0.0/9"}]));
         assert_eq!(a9.unbounded, None);
         assert_eq!(a9.display(), "8.4M");
         assert!(a8.sort_key() > a9.sort_key());
+        assert!(any4.sort_key() > a1.sort_key(), "any sorts last");
         assert_eq!(a9.sort_key(), 1 << 23);
+        let rfc1918 = size(json!([
+            {"from_ip": "10.0.0.0/8"},
+            {"from_ip": "172.16.0.0/12"},
+            {"from_ip": "192.168.0.0/16"}
+        ]));
+        assert_eq!(rfc1918.unbounded, None);
+        assert_eq!(rfc1918.v4, 17_891_328);
+        assert_eq!(rfc1918.display(), "17.9M");
     }
 
     #[test]
@@ -347,6 +360,17 @@ mod tests {
         assert_eq!(human(1_000), "1.0K");
         assert_eq!(human(1_500_000), "1.5M");
         assert_eq!(human(2_000_000_000), "2.0G");
+    }
+
+    #[test]
+    fn human_rounds_before_it_picks_the_unit() {
+        assert_eq!(human(999_999), "1.0M");
+        assert_eq!(human(999_950), "1.0M");
+        assert_eq!(human(999_949), "999.9K");
+        assert_eq!(human(999_960), "1.0M");
+        assert_eq!(human(999_999_999), "1.0G");
+        assert_eq!(human(1_000_000), "1.0M");
+        assert!(human(u128::MAX).ends_with('G'));
     }
 
     #[test]

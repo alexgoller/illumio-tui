@@ -99,10 +99,11 @@ the full tab row the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`, `IPs`.
   about to be written. Impact uses the ruleset's scopes, unscoped consumers, label groups (with
   their sub-groups), exclusions, `all` and workload actors; IP lists are sized, never expanded.
 - **Objects**: labels, label groups and services; `Tab` next type, `Enter` detail.
-- **IP lists**: name, size (addresses after exclusions: `65.5K`; `any` for `0.0.0.0/0`, `::/0`
-  or 16M addresses and more; `5 FQDNs` for a list of names only), ranges, FQDNs, `used by` (rules of the loaded draft rulesets that
-  name the list; `-` until Policy is loaded) and pending; `Enter` shows the ranges, FQDNs, the
-  size and those rules. With writes on, `n` / `e` / `x` create, edit and delete.
+- **IP lists**: name, size (addresses after exclusions: `65.5K`, `16.8M` for a /8; `any` only
+  for an included `0.0.0.0/0` or `::/0`; `5 FQDNs` for a list of names only), ranges, FQDNs,
+  `used by` (rules of the loaded draft rulesets that name the list; `-` until Policy is loaded)
+  and pending; `Enter` shows the size, those rules, then the first ranges and FQDNs. With
+  writes on, `n` / `e` / `x` create, edit and delete.
 - **Workloads**: VEN health columns and a summary line, `h` unhealthy only, `H` sort by
   severity, `t` / `T` jump to Traffic with the workload as source / destination.
 - **Events**: severity-coloured audit events, `f` edit severity / type / window, `S` sort by
@@ -152,8 +153,8 @@ config, 3 auth, 4 PCE error, 5 rate limited, 6 write refused by the guard.
 counted) and `truncated`. `policy rules impact <rule-href>` prints one rule the same way (exit
 2 for an href of the wrong shape, 4 when the rule is not found). It costs one workloads read,
 through the cache; `meta.truncated` includes it. `iplists` gives every list a `size`: `v4` and
-`v6` address counts as strings, `unbounded` (`0.0.0.0/0`, `::/0` or `≥16M addresses`), `ranges`
-and `fqdns`.
+`v6` address counts as strings, `unbounded` (the included `0.0.0.0/0` or `::/0`, else `null`),
+`ranges` and `fqdns`.
 
 ## Writes
 

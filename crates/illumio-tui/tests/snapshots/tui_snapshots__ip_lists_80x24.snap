@@ -18,9 +18,9 @@ expression: out
 ╭ Detail ───────────────────────────────────────────────────────── Enter hides ╮
 │list    Corp  Office ranges                                                   │
 │size    65.5K addresses (65536 IPv4, 0 IPv6)                                  │
+│used by Shop-Prod · allow · role=web ← ipl:Corp                               │
 │ranges  10.1.0.0-10.1.255.255                                                 │
 │fqdns   *.corp.example                                                        │
-│used by Shop-Prod · allow · role=web ← ipl:Corp                               │
 │                                                                              │
 │                                                                              │
 │                                                                              │
