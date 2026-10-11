@@ -180,13 +180,22 @@ with the error (`TrafficState.rule_form`). `P` in the pending overlay plans a
 `ProvisionRequest` (the marked hrefs, or all), which reads the pending list
 once more past the cache. After `WriteDone` a policy write reloads the draft
 rulesets once with `Bypass` (`PolicyState.quiet_reload` keeps the write's
-report in the status line); a provision also reloads the pending list and
-reports `provisioned <version>: <counts>`, the counts taken from the body
-when `y` was pressed.
+report in the status line); when the selected ruleset's inline deny list is
+empty, that reload may cost one more GET for its deny rules (the on-demand
+fallback). A provision also reloads the pending list and reports
+`provisioned <version href>: <counts>`, the counts taken from the body when
+`y` was pressed. A plan with nothing to send (`Plan::Noop`, such as an update
+whose fields already match) is an info status, never a request.
 
 `Enter` on a pending ruleset reads the draft rulesets (cached) and the active
-ones (one GET, five minutes); `diff::diff_rule_set` lists name, description,
-state, scopes and one line per rule, matched by href.
+ones (one GET, five minutes); `diff::rule_set_diff_for` lists name,
+description, state, scopes and one line per rule, matched by href. Each
+side's deny rules are a `DenySide`: its inline list; else the draft fallback
+the Policy screen fetched; else none when that side's list payload inlines
+deny rules for any ruleset (the PCE then inlines them for all, so empty
+means zero); else unfetched, in which case deny rules are not compared and a
+note says which side was not fetched. A diff that arrives while another
+overlay than the pending list is open does not replace it.
 
 ## Testing
 

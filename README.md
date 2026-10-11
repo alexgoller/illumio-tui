@@ -288,7 +288,9 @@ On the Policy screen, in the draft scope, the same three keys edit policy:
 on the rulesets pane `n` opens a new ruleset (Name, Description, Enabled
 `y`/`n`, Scopes), `e` edits the selected one and `x` deletes it; on the
 rules pane `n` adds an allow rule and `N` a deny rule to the selected
-ruleset, `e` edits the selected rule (allow or deny) and `x` deletes it. In
+ruleset, `e` edits the selected rule (allow or deny) and `x` deletes it. The
+rules pane title shows the selected ruleset's scopes
+(`Rules · app=shop, env=prod | app=shop, env=staging`, or `Scopeless`). In
 the active scope the keys say `switch to draft to edit policy`.
 
 Rule fields use the CLI's token grammar, comma-separated: Providers and
@@ -307,11 +309,15 @@ with `use the CLI`.
 In the pending overlay (`p`), `Space` marks entries and `P` provisions the
 marked ones, or everything pending when none is marked. The confirm overlay
 shows the exact `POST /orgs/N/sec_policy` body with its `change_subset`;
-`y` sends it once, the status line says `provisioned <version>: <counts>`,
-and the pending list and the rulesets reload. `Enter` on a pending ruleset
-shows its changes against active: name, description, state, scopes and one
+`y` sends it once, the status line says `provisioned <version href>: <counts>`,
+and the pending list and the rulesets reload. After any policy write the
+draft rulesets reload once; when the selected ruleset's inline deny list is
+empty, that may cost one more GET for its deny rules. `Enter` on a pending
+ruleset shows its changes against active: name, description, state, scopes and one
 line per rule (`+ allow app=web ← iplist:Corp 443/tcp`), for one GET of the
-active rulesets, cached for five minutes.
+active rulesets, cached for five minutes. When one side's deny rules were
+neither in its list payload nor loaded, the diff shows them unchanged under
+`deny rules not compared (<side> not fetched)` rather than guessing.
 
 On Traffic, `w` on a blocked or potentially blocked flow (Flows view or a
 drilled pair) opens an allow-rule form pre-filled from the flow: the
