@@ -1,5 +1,6 @@
 //! All TUI state. No I/O, no terminal types beyond sizes.
 use crate::tui::filter::{FilterEditor, TrafficFilter};
+use crate::tui::form::Form;
 use crate::tui::table::{Column, SortKey, TableView};
 use crate::tui::ui::theme::Theme;
 use pce::models::{
@@ -166,6 +167,8 @@ pub enum Overlay {
         event: Event,
         scroll: usize,
     },
+    /// Create or edit form for a label, IP list, service or workload.
+    Form(Form),
 }
 
 impl PartialEq for Overlay {
@@ -178,6 +181,7 @@ impl PartialEq for Overlay {
             | (Overlay::GroupKeys { input: a }, Overlay::GroupKeys { input: b })
             | (Overlay::Error(a), Overlay::Error(b)) => a == b,
             (Overlay::FilterEditor(a), Overlay::FilterEditor(b)) => a == b,
+            (Overlay::Form(a), Overlay::Form(b)) => a == b,
             (
                 Overlay::Confirm {
                     reason: ra,

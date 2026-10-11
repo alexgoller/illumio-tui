@@ -1,7 +1,9 @@
 //! Modal overlays drawn on top of the current screen: help and the `:` prompt.
 use crate::tui::filter::{FIELD_NAMES, FilterEditor};
+use crate::tui::form::{Form, visible_tail};
 use crate::tui::model::{Model, Screen, rule_kind_name};
 use crate::tui::ui::layout::centered;
+use crate::tui::ui::screens::workloads::plain;
 use crate::tui::ui::widgets::panel::panel;
 use pce::RuleView;
 use ratatui::Frame;
@@ -141,6 +143,59 @@ pub fn render_filter_editor(model: &Model, e: &FilterEditor, f: &mut Frame, area
         }
     }
     f.render_widget(Paragraph::new(lines).block(block).style(t.base()), r);
+}
+
+/// Label column width inside the form (the `*` of a required field included).
+const FORM_LABEL_WIDTH: usize = 14;
+
+pub fn render_form(model: &Model, form: &Form, f: &mut Frame, area: Rect) {
+    let t = &model.theme;
+    // Two rows per field (value, hint), the error row and the borders.
+    let r = centered(area, 70, (form.fields.len() as u16) * 2 + 3);
+    f.render_widget(Clear, r);
+    let block = panel(&form.title, "Tab next · Enter review · Esc cancel", t, true);
+    // Borders (2), the focus marker (2), the label column and the cursor (1).
+    let width = (r.width as usize).saturating_sub(2 + 2 + FORM_LABEL_WIDTH + 1);
+    let mut lines: Vec<Line> = Vec::new();
+    for (i, field) in form.fields.iter().enumerate() {
+        let on = i == form.active;
+        let label = if field.required {
+            format!("{}*", field.label)
+        } else {
+            field.label.to_string()
+        };
+        let shown = plain(&visible_tail(&field.value, width));
+        lines.push(Line::from(vec![
+            Span::styled(if on { "▸ " } else { "  " }, Style::new().fg(t.accent)),
+            Span::styled(
+                format!("{label:<w$}", w = FORM_LABEL_WIDTH),
+                t.header_style(),
+            ),
+            Span::styled(
+                format!("{shown}{}", if on { "▏" } else { "" }),
+                if on {
+                    Style::new().fg(t.fg).bg(t.selected_bg)
+                } else {
+                    t.base()
+                },
+            ),
+        ]));
+        lines.push(Line::from(Span::styled(
+            format!("{:w$}{}", "", field.hint, w = 2 + FORM_LABEL_WIDTH),
+            t.dim_style(),
+        )));
+    }
+    lines.push(match &form.error {
+        Some(e) => Line::from(Span::styled(plain(e), Style::new().fg(t.bad))),
+        None => Line::from(Span::styled("* required", t.dim_style())),
+    });
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(block)
+            .style(t.base())
+            .wrap(Wrap { trim: false }),
+        r,
+    );
 }
 
 /// Field names of the events editor, in the order of `Overlay::EventsEditor::values`.

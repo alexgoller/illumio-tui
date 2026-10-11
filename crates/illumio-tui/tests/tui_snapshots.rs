@@ -446,3 +446,45 @@ fn header_shows_the_writes_marker_only_when_enabled() {
         render_styled(&m, 80, 24)
     );
 }
+
+#[test]
+fn ip_list_form_80x24_scrolls_the_active_field() {
+    use illumio_tui::tui::edit::EditIntent;
+    use illumio_tui::tui::form::{Field, Form};
+    use illumio_tui::tui::model::{Overlay, Screen};
+    use illumio_tui::tui::test_support::model_with_objects;
+    let mut m = model_with_objects();
+    m.screen = Screen::Objects;
+    let mut form = Form::new(
+        "New IP list",
+        vec![
+            Field::new("Name", "Corp", "Corp", true),
+            Field::new("Description", "Office ranges", "optional", false),
+            Field::new(
+                "Ranges",
+                "10.1.0.0-10.1.255.255, 10.2.0.0/16, !10.1.5.0/24, 192.168.0.0/16, 172.16.0.0/12",
+                "10.0.0.0/8, 10.1.0.0-10.1.255.255, !10.0.5.0/24",
+                false,
+            ),
+            Field::new(
+                "FQDNs",
+                "*.corp.example",
+                "*.corp.example, api.example.com",
+                false,
+            ),
+        ],
+        EditIntent::CreateIpList,
+    );
+    form.active = 2;
+    m.overlay = Overlay::Form(form);
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("New IP list"), "{out}");
+    assert!(out.contains("Name*"), "required fields are marked: {out}");
+    assert!(
+        out.contains("…") && out.contains("172.16.0.0/12▏"),
+        "the end of the active field stays visible: {out}"
+    );
+    insta::assert_snapshot!("form_ip_list_80x24", out);
+    m.set_theme("light");
+    insta::assert_snapshot!("form_ip_list_light_styled_80x24", render_styled(&m, 80, 24));
+}

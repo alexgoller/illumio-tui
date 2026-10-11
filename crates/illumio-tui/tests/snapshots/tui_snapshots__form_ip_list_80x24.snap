@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Labels & objects  │  4 Workloads  │  5 Events
+  Labels  │  Label groups  │  IP lists  │  Services
+╭ Labels ────────────────────────────────────────────── cached 3s ago · 6 rows ╮
+│  key              value                      deleted href                    │
+│▸ role             web                                /orgs/5/labels/1        │
+│  ro╭ New IP list ───────────────── Tab next · Enter review · Esc cancel ╮    │
+│  ap│  Name*         Corp                                                │    │
+│  en│                Corp                                                │    │
+│  lo│  Description   Office ranges                                       │    │
+│  ap│                optional                                            │    │
+│    │▸ Ranges        ….0/16, !10.1.5.0/24, 192.168.0.0/16, 172.16.0.0/12▏│    │
+│    │                10.0.0.0/8, 10.1.0.0-10.1.255.255, !10.0.5.0/24     │    │
+│    │  FQDNs         *.corp.example                                      │    │
+│    │                *.corp.example, api.example.com                     │    │
+│    │* required                                                          │    │
+│    ╰────────────────────────────────────────────────────────────────────╯    │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ready        Tab type  Enter detail  r refresh  a auto  / search  : cmd  ? help

@@ -57,6 +57,7 @@ pub fn view(model: &Model, f: &mut Frame) {
         Overlay::EventDetail { event, scroll } => {
             widgets::overlay::render_event_detail(model, event, *scroll, f, area)
         }
+        Overlay::Form(form) => widgets::overlay::render_form(model, form, f, area),
     }
 }
 

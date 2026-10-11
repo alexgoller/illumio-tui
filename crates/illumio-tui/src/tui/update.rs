@@ -1,6 +1,7 @@
 //! Pure state transitions. Never performs I/O; returns `Cmd`s instead.
 use crate::tui::commands::{self, Command};
 use crate::tui::filter::{FilterEditor, TrafficFilter};
+use crate::tui::form::FormEvent;
 use crate::tui::model::{
     Connection, EventsFilterEdit, Model, ObjectKind, Overlay, PendingAction, PolicyPane,
     QueryState, Screen, StatusLine, TrafficData, TrafficView,
@@ -678,6 +679,17 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 event,
                 scroll: next,
             };
+            Vec::new()
+        }
+        Overlay::Form(mut form) => {
+            match form.on_key(k) {
+                FormEvent::Continue => model.overlay = Overlay::Form(form),
+                // Submit is wired to planning in Task 5; until then it sends nothing.
+                FormEvent::Cancel | FormEvent::Submit => {
+                    model.overlay = Overlay::None;
+                    model.status = StatusLine::info("cancelled, nothing sent");
+                }
+            }
             Vec::new()
         }
         Overlay::RuleDetail(_) | Overlay::Pending | Overlay::Error(_) => {
@@ -4273,5 +4285,32 @@ mod tests {
             vec![Cmd::LoadIndex(CacheMode::Use)]
         );
         assert!(!m.objects.index_failed && !m.workloads.index_failed);
+    }
+
+    #[test]
+    fn a_form_overlay_takes_every_key_and_esc_sends_nothing() {
+        use crate::tui::edit::EditIntent;
+        use crate::tui::form::{Field, Form};
+        let mut m = model_fixture();
+        m.overlay = Overlay::Form(Form::new(
+            "New label",
+            vec![
+                Field::new("Key", "", "app", true),
+                Field::new("Value", "", "web", true),
+            ],
+            EditIntent::CreateLabel,
+        ));
+        for c in "q2?".chars() {
+            assert!(update(&mut m, key(c)).is_empty());
+        }
+        assert!(!m.quit, "q is typed, not a quit");
+        assert_eq!(m.screen, Screen::Traffic);
+        let Overlay::Form(f) = &m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        assert_eq!(f.value("Key"), "q2?");
+        assert!(update(&mut m, kc(KeyCode::Esc)).is_empty());
+        assert_eq!(m.overlay, Overlay::None);
+        assert_eq!(m.status.text, "cancelled, nothing sent");
     }
 }
