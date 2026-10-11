@@ -58,3 +58,7 @@ Captured after corrections and review findings, so the same mistake is not repea
 - Any late async result (`DiffLoaded`, `Planned`, `PendingLoaded`) must check which overlay is open before replacing it; the typed-ahead `y` guard from Plan 4 generalises to "never swap a modal under the user".
 - Writes-off runtime tests must count requests at the mock server and assert the status after each key; a client-side counter and a final status can both lie.
 - Form-to-draft adapters get reused by new entry points (`w` from a flow) only if the form shape, not the key handler, is the unit; keep the pre-fill as data.
+
+## Hotfix 2026-10-11
+
+- The first live rule write found that the PCE refuses inline ICMP: the `sec_rule_ingress_services` schema takes `proto` in [6, 17] only (port optional, meaning all ports), and ICMP is the `ilo_defaults`/`ICMP` service object. The opt-in live test had never run; a schema assumption needs one real write per shape.

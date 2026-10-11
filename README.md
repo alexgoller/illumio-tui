@@ -191,6 +191,11 @@ and reach the workloads when they are provisioned. Every command takes
 name (case-insensitive, one list GET) or its href, a rule or deny rule only by
 its href (`policy rules <ruleset> --json` lists them).
 
+A rule's inline services are tcp or udp, with or without a port (`443/tcp`,
+`tcp`); the PCE takes no other protocol there. `--service icmp` (or `icmpv6`)
+is therefore resolved to the ICMP service object (the built-in one, whatever
+its name), and refused when the PCE has none.
+
     illumio-tui --allow-writes policy rulesets add Web-Tier --scope app=web,env=prod --yes
     illumio-tui --allow-writes policy rulesets update Web-Tier --clear-scopes --dry-run
     illumio-tui --allow-writes policy rules add Web-Tier --provider app=web --consumer iplist:Corp --service 443/tcp --yes --json

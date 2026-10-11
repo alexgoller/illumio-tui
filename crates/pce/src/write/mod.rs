@@ -29,7 +29,8 @@ pub use labels::LabelDraft;
 pub use provision::{ProvisionRequest, ProvisionSubset, provision_counts};
 pub use rule_sets::{RuleSetDraft, RuleSetPatch};
 pub use rules::{
-    DenyRuleDraft, DenyRulePatch, RuleDraft, RulePatch, apply_deny_rule_patch, apply_rule_patch,
+    DenyRuleDraft, DenyRulePatch, INLINE_SERVICE, RuleDraft, RulePatch, apply_deny_rule_patch,
+    apply_rule_patch,
 };
 pub use services::{ServiceDraft, ServicePatch};
 pub use specs::{InterfaceSpec, IpRangeSpec, PortSpec};

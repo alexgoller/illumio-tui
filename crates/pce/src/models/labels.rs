@@ -147,6 +147,12 @@ pub struct Service {
     pub service_ports: Vec<ServicePort>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_type: Option<String>,
+    /// `com.illumio.ilo_defaults` for the PCE's built-in services.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_data_set: Option<String>,
+    /// `ICMP` for the built-in ICMP service, whatever it is named.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_data_reference: Option<String>,
 }
 
 impl Service {

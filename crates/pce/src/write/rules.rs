@@ -77,6 +77,19 @@ fn check_actors<'a>(actors: impl Iterator<Item = &'a ActorRef>, errs: &mut Vec<S
     }
 }
 
+pub const INLINE_SERVICE: &str = "inline rule services take tcp or udp (optionally with a port, for example 443/tcp or tcp); for icmp and other protocols use a service object (service:<name> or an href)";
+
+/// A rule's inline service is tcp or udp, with or without a port; the PCE
+/// refuses any other protocol (those are service objects).
+fn check_services<'a>(services: impl Iterator<Item = &'a ServiceRef>, errs: &mut Vec<String>) {
+    let bad = services
+        .into_iter()
+        .any(|s| matches!(s, ServiceRef::Port(p) if !matches!(p.proto, 6 | 17)));
+    if bad && !errs.iter().any(|e| e == INLINE_SERVICE) {
+        errs.push(INLINE_SERVICE.into());
+    }
+}
+
 fn check_sides(
     providers: &[ActorRef],
     consumers: &[ActorRef],
@@ -93,6 +106,7 @@ fn check_sides(
         errs.push("a rule needs at least one service".into());
     }
     check_actors(providers.iter().chain(consumers), errs);
+    check_services(services.iter(), errs);
 }
 
 fn check_resolve(r: &ResolveLabelsAs, errs: &mut Vec<String>) {
@@ -301,6 +315,7 @@ impl Sides<'_> {
 
     fn check(&self, errs: &mut Vec<String>) {
         check_actors(self.add_providers.iter().chain(self.add_consumers), errs);
+        check_services(self.add_services.iter(), errs);
     }
 
     fn apply(&self, current: &Value, body: &mut Map<String, Value>, errs: &mut Vec<String>) {
@@ -595,6 +610,42 @@ mod tests {
     use super::*;
     use crate::write::actors::ActorKind;
     use crate::write::specs::PortSpec;
+
+    #[test]
+    fn deny_rule_bodies_carry_no_resolve_labels_as() {
+        let d = DenyRuleDraft {
+            description: None,
+            enabled: true,
+            providers: vec![ActorRef::all()],
+            consumers: vec![ActorRef::all()],
+            services: vec![port("23/tcp")],
+            override_: true,
+        };
+        assert!(d.validate().is_ok());
+        assert!(d.to_body().get("resolve_labels_as").is_none());
+    }
+
+    #[test]
+    fn inline_services_take_tcp_or_udp_with_or_without_a_port() {
+        let d = |s: &str| RuleDraft {
+            description: None,
+            enabled: true,
+            providers: vec![ActorRef::all()],
+            consumers: vec![ActorRef::all()],
+            services: vec![port(s)],
+            unscoped_consumers: false,
+            resolve_labels_as: None,
+        };
+        for ok in ["443/tcp", "tcp", "udp", "8000-8100/udp"] {
+            assert!(d(ok).validate().is_ok(), "{ok}");
+        }
+        for bad in ["icmp", "icmpv6"] {
+            assert_eq!(
+                d(bad).validate().unwrap_err(),
+                vec![INLINE_SERVICE.to_string()]
+            );
+        }
+    }
 
     fn rule2() -> Value {
         json!({

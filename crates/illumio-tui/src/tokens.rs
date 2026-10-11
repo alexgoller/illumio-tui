@@ -160,6 +160,25 @@ impl ActorToken {
     }
 }
 
+/// An `icmp` or `icmpv6` token in a rule: a rule's inline services take
+/// tcp and udp only, so it becomes the ICMP service object's href.
+/// `None` for any other port token.
+pub fn icmp_service_ref(p: &PortSpec, idx: &pce::NameIndex) -> Option<Result<ServiceRef, String>> {
+    if !matches!(p.proto, 1 | 58) {
+        return None;
+    }
+    Some(
+        idx.icmp_service_href()
+            .map(|h| ServiceRef::Href(h.to_string()))
+            .ok_or_else(|| {
+                format!(
+                    "{}; no ICMP service object found",
+                    pce::write::INLINE_SERVICE
+                )
+            }),
+    )
+}
+
 /// One service token: an href, an inline port, or a service name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ServiceToken {

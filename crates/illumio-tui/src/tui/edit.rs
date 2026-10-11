@@ -321,7 +321,7 @@ pub fn start(intent: EditIntent, index: Option<&NameIndex>, prefill: FlowPrefill
             Start::Plan(WriteIntent::DeleteDenyRule { href, name })
         }
         EditIntent::RuleFromFlow(f) => {
-            let (fields, alt) = flow_rule_fields(&f, prefill);
+            let (fields, alt) = flow_rule_fields(&f, idx, prefill);
             let mut form = Form::new("Allow rule from flow", fields, EditIntent::RuleFromFlow(f));
             form.alt = Some(alt);
             Start::Form(form)
@@ -933,7 +933,11 @@ fn ruleset_scoped(sets: &[RuleSet], scope: &[&ResolvedLabel]) -> Option<String> 
 /// destination's scope, the destination's tier as providers, the source's
 /// tier as consumers when it shares that scope (else its scope and tier,
 /// unscoped), on the flow's port. The alternates are every attached label.
-fn flow_rule_fields(f: &ResolvedFlow, p: FlowPrefill) -> (Vec<Field>, Vec<(usize, String)>) {
+fn flow_rule_fields(
+    f: &ResolvedFlow,
+    idx: &NameIndex,
+    p: FlowPrefill,
+) -> (Vec<Field>, Vec<(usize, String)>) {
     let dst_scope = scope_of(&f.dst, p.scope_keys);
     let src_scope = scope_of(&f.src, p.scope_keys);
     let providers = tokens_or_fallback(tier_of(&f.dst, p.tier_key).into_iter().collect(), &f.dst);
@@ -961,7 +965,7 @@ fn flow_rule_fields(f: &ResolvedFlow, p: FlowPrefill) -> (Vec<Field>, Vec<(usize
         Field::new("Ruleset", ruleset, hint, true),
         Field::new("Providers", providers, ACTORS_HINT, true),
         Field::new("Consumers", consumers, ACTORS_HINT, true),
-        Field::new("Services", f.service_text(), SERVICES_HINT, true),
+        Field::new("Services", flow_services_text(f, idx), SERVICES_HINT, true),
         Field::new(
             "Description",
             format!(
@@ -1280,7 +1284,8 @@ pub fn resolve_service_tokens(
                 return checked.map_err(|e| e.to_string());
             }
             match t {
-                ServiceToken::Port(p) => Ok(ServiceRef::Port(p.clone())),
+                ServiceToken::Port(p) => crate::tokens::icmp_service_ref(p, idx)
+                    .unwrap_or_else(|| Ok(ServiceRef::Port(p.clone()))),
                 ServiceToken::Name(n) => idx
                     .service_href(n)
                     .map(|h| ServiceRef::Href(h.to_string()))
@@ -1342,17 +1347,34 @@ pub fn service_tokens(services: &[IngressService], idx: &NameIndex) -> Vec<Strin
 fn service_token(s: &IngressService, idx: &NameIndex) -> String {
     match ServiceRef::from_ingress(s) {
         ServiceRef::Href(href) => match idx.service_name(&href) {
-            Some(n) if !n.contains([',', '|']) => {
-                if ServiceToken::parse(n) == Ok(ServiceToken::Name(n.to_string())) {
-                    n.to_string()
-                } else {
-                    format!("service:{n}")
-                }
-            }
+            Some(n) if !n.contains([',', '|']) => service_name_token(n),
             _ => href,
         },
         ServiceRef::Port(p) => port_token(&p).unwrap_or_else(|| "?".into()),
     }
+}
+
+/// A service's name as the token grammar reads it back: bare, or
+/// `service:NAME` when the name would read as a port (`ICMP`, `443`).
+fn service_name_token(n: &str) -> String {
+    if ServiceToken::parse(n) == Ok(ServiceToken::Name(n.to_string())) {
+        n.to_string()
+    } else {
+        format!("service:{n}")
+    }
+}
+
+/// The Services text of a `w` form. A rule's inline services are tcp and
+/// udp, so an icmp or icmpv6 flow is offered as the ICMP service object's
+/// name; with none in the index the protocol token stays, and submit shows
+/// that no ICMP service object was found.
+fn flow_services_text(f: &ResolvedFlow, idx: &NameIndex) -> String {
+    if matches!(f.proto.as_str(), "icmp" | "icmpv6")
+        && let Some(s) = idx.icmp_service().filter(|s| !s.name.contains([',', '|']))
+    {
+        return service_name_token(&s.name);
+    }
+    f.service_text()
 }
 
 /// `p` as typed (`443/tcp`, `icmp`) when the parser reads it back as `p`.
@@ -1668,7 +1690,7 @@ pub fn request_body_lines(req: &WriteRequest) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::tui::test_support::fixture_index;
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     fn labels() -> Vec<Label> {
         serde_json::from_str(include_str!("../../../../fixtures/labels.json")).unwrap()
@@ -2057,7 +2079,7 @@ mod tests {
         let mut services = sets[0].rules[0].ingress_services.clone(); // PostgreSQL
         services.extend(sets[0].rules[1].ingress_services.clone()); // 443/tcp, 8000-8099/tcp
         services.extend(sets[1].rules[0].ingress_services.clone()); // All Services
-        services.push(serde_json::from_value(json!({"proto": 1})).unwrap());
+        services.push(serde_json::from_value(json!({"proto": 6})).unwrap());
         let tokens = service_tokens(&services, &fixture_index());
         assert_eq!(
             tokens,
@@ -2066,7 +2088,7 @@ mod tests {
                 "443/tcp",
                 "8000-8099/tcp",
                 "All Services",
-                "icmp"
+                "tcp"
             ]
         );
         let parsed: Vec<ServiceToken> = tokens
@@ -2649,6 +2671,101 @@ mod tests {
             &[],
         );
         assert_eq!(c.fields[0].hint, "scope app=shop");
+    }
+
+    /// The `w` form for `flow` against an index that also holds `extra` services.
+    fn flow_form_with_services(flow: &ResolvedFlow, extra: Vec<Value>) -> Form {
+        let services: Vec<Service> = extra
+            .into_iter()
+            .map(|v| serde_json::from_value(v).unwrap())
+            .collect();
+        let idx = NameIndex::new(&[], &[], &[], &services);
+        let prefill = FlowPrefill {
+            scope_keys: &[],
+            tier_key: "role",
+            rulesets: &[],
+        };
+        form_for(
+            EditIntent::RuleFromFlow(Box::new(flow.clone())),
+            Some(&idx),
+            prefill,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn w_prefills_the_icmp_service_name_for_an_icmp_flow() {
+        let flows = crate::tui::test_support::fixture_flows();
+        let icmp = &flows[2]; // unmanaged-nas -> host-2, icmp
+        let f = flow_form_with_services(
+            icmp,
+            vec![
+                json!({"href": "/orgs/5/sec_policy/draft/services/1", "name": "Web", "service_ports": [{"port": 80, "proto": 6}]}),
+                json!({"href": "/orgs/5/sec_policy/draft/services/2", "name": "S-ICMP", "service_ports": [{"proto": 1}, {"proto": 58}],
+                       "external_data_set": "com.illumio.ilo_defaults", "external_data_reference": "ICMP"}),
+            ],
+        );
+        assert_eq!(f.value("Services"), "S-ICMP");
+        assert_eq!(
+            f.value("Description"),
+            "allow unmanaged-nas to host-2.example on icmp"
+        );
+        // A service named like the protocol keeps its name behind `service:`.
+        let f = flow_form_with_services(
+            icmp,
+            vec![
+                json!({"href": "/orgs/5/sec_policy/draft/services/3", "name": "ICMP", "service_ports": [{"proto": 1}]}),
+            ],
+        );
+        assert_eq!(f.value("Services"), "service:ICMP");
+    }
+
+    #[test]
+    fn w_keeps_icmp_without_a_service_object_and_submit_refuses_it() {
+        let flows = crate::tui::test_support::fixture_flows();
+        let mut f = flow_form(&flows[2]);
+        assert_eq!(f.value("Services"), "icmp");
+        set(&mut f, "Ruleset", "/orgs/5/sec_policy/draft/rule_sets/100");
+        set(&mut f, "Providers", "role=db");
+        set(&mut f, "Consumers", "role=web");
+        let err = build(&f).unwrap_err();
+        assert!(err.contains("no ICMP service object found"), "{err}");
+        assert!(err.contains("use a service object"), "{err}");
+    }
+
+    #[test]
+    fn icmp_tokens_resolve_to_the_icmp_service_href() {
+        let svc: Service = serde_json::from_value(json!({
+            "href": "/orgs/5/sec_policy/draft/services/2", "name": "S-ICMP",
+            "service_ports": [{"proto": 1}, {"proto": 58}],
+            "external_data_set": "com.illumio.ilo_defaults", "external_data_reference": "ICMP"
+        }))
+        .unwrap();
+        let idx = NameIndex::new(&[], &[], &[], &[svc]);
+        for t in ["icmp", "icmpv6"] {
+            assert_eq!(
+                resolve_service_tokens(&[ServiceToken::parse(t).unwrap()], &idx, 5).unwrap(),
+                vec![ServiceRef::Href(
+                    "/orgs/5/sec_policy/draft/services/2".into()
+                )]
+            );
+        }
+        let none = NameIndex::default();
+        let e =
+            resolve_service_tokens(&[ServiceToken::parse("icmp").unwrap()], &none, 5).unwrap_err();
+        assert!(e.ends_with("; no ICMP service object found"), "{e}");
+    }
+
+    #[test]
+    fn w_leaves_a_tcp_flow_as_a_port_even_with_service_objects() {
+        let flows = crate::tui::test_support::fixture_flows();
+        let f = flow_form_with_services(
+            &flows[0],
+            vec![
+                json!({"href": "/orgs/5/sec_policy/draft/services/3", "name": "ICMP", "service_ports": [{"proto": 1}]}),
+            ],
+        );
+        assert_eq!(f.value("Services"), "5432/tcp");
     }
 
     #[test]
