@@ -3,15 +3,11 @@ source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
  illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
-  1 Traffic  │  2 Policy  │  3 Labels & objects  │  4 Workloads  │  5 Events
-  Labels  │  Label groups  │  IP lists  │  Services
+  1 Traf  │  2 Pol  │  3 Obj  │  4 Wl  │  5 Ev  │  6 IPs
 ╭ IP lists ──────────────────────────────────────────── cached 3s ago · 2 rows ╮
-│  name                     ranges                                      pending│
-│▸ Any (0.0.0.0/0 and ::/0) 0.0.0.0/0, ::/0                                    │
-│  Corp                     10.1.0.0-10.1.255.255, *.corp.example       create │
-│                                                                              │
-│                                                                              │
-│                                                                              │
+│  name                     size       ranges fqdns used by pending            │
+│  Any (0.0.0.0/0 and ::/0)        any      2     0       1                    │
+│▸ Corp                          65.5K      1     1       1 create             │
 │                                                                              │
 │                                                                              │
 │                                                                              │
@@ -20,9 +16,13 @@ expression: out
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭ Detail ───────────────────────────────────────────────────────── Enter hides ╮
-│list    Any (0.0.0.0/0 and ::/0)                                              │
-│ranges  0.0.0.0/0                                                             │
-│        ::/0                                                                  │
+│list    Corp  Office ranges                                                   │
+│size    65.5K addresses (65536 IPv4, 0 IPv6)                                  │
+│ranges  10.1.0.0-10.1.255.255                                                 │
+│fqdns   *.corp.example                                                        │
+│used by Shop-Prod · allow · role=web ← ipl:Corp                               │
+│                                                                              │
+│                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-ready        Tab type  Enter detail  r refresh  a auto  / search  : cmd  ? help
+ready          Enter detail  r refresh  a auto  s sort  / search  : cmd  ? help

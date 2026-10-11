@@ -155,6 +155,8 @@ fn status_hint_lists_the_edit_keys_only_with_writes() {
     assert!(last(&m).contains("n:new e:edit x:del"), "{}", last(&m));
     m.screen = Screen::Workloads;
     assert!(last(&m).contains("n:new e:edit x:del"), "{}", last(&m));
+    m.screen = Screen::IpLists;
+    assert!(last(&m).contains("n:new e:edit x:del"), "{}", last(&m));
     m.screen = Screen::Traffic;
     assert!(!last(&m).contains("n:new"), "{}", last(&m));
 }
@@ -287,11 +289,7 @@ fn objects_screen_tabs_80x24() {
     assert!(out.contains("role") && out.contains("web"), "{out}");
     assert!(out.contains("cached 3s ago"), "{out}");
     insta::assert_snapshot!("objects_labels_80x24", out);
-    m.objects.kind = ObjectKind::IpLists;
     m.objects.show_detail = true;
-    let out = render_to_string(&m, 80, 24);
-    assert!(out.contains("0.0.0.0/0"), "{out}");
-    insta::assert_snapshot!("objects_iplists_detail_80x24", out);
     m.objects.kind = ObjectKind::Services;
     insta::assert_snapshot!("objects_services_160x48", render_to_string(&m, 160, 48));
 }
@@ -882,5 +880,42 @@ fn rule_from_flow_form_offering_ctrl_n_80x24() {
     insta::assert_snapshot!(
         "form_rule_from_flow_ctrl_n_light_styled_80x24",
         render_styled(&m, 80, 24)
+    );
+}
+
+#[test]
+fn ip_lists_screen_80x24_and_160x48_with_detail() {
+    use illumio_tui::tui::test_support::model_with_ip_lists;
+    let mut m = model_with_ip_lists();
+    m.screen = Screen::IpLists;
+    m.ip_lists.table.select_next(); // Corp
+    m.ip_lists.show_detail = true;
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("6 IPs"), "{out}");
+    assert!(out.contains("65.5K"), "{out}");
+    assert!(out.contains("used by Shop-Prod · allow"), "{out}");
+    insta::assert_snapshot!("ip_lists_80x24", out);
+    let out = render_to_string(&m, 160, 48);
+    assert!(out.contains("6 IP lists"), "{out}");
+    assert!(out.contains("65536 IPv4"), "{out}");
+    insta::assert_snapshot!("ip_lists_160x48", out);
+    m.set_theme("light");
+    insta::assert_snapshot!("ip_lists_light_styled_80x24", render_styled(&m, 80, 24));
+}
+
+#[test]
+fn the_tab_row_uses_short_titles_only_when_the_full_row_does_not_fit() {
+    let m = model_fixture();
+    let narrow = render_to_string(&m, 80, 24);
+    let row = narrow.lines().nth(1).unwrap();
+    assert!(
+        row.contains("1 Traf") && row.contains("3 Obj") && row.contains("6 IPs"),
+        "{row}"
+    );
+    let wide = render_to_string(&m, 160, 48);
+    let row = wide.lines().nth(1).unwrap();
+    assert!(
+        row.contains("3 Objects") && row.contains("6 IP lists"),
+        "{row}"
     );
 }

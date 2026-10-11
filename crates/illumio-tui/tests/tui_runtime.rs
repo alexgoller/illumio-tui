@@ -422,7 +422,6 @@ async fn opening_objects_after_startup_costs_zero_requests() {
     assert!(model.objects.loaded(), "{:?}", model.objects.ages);
     assert_eq!(model.objects.labels.len(), 6);
     assert_eq!(model.objects.groups.len(), 1);
-    assert_eq!(model.objects.ip_lists.len(), 2);
     assert_eq!(model.objects.services.len(), 3);
     assert!(model.objects.loading.iter().all(|l| !l));
     assert_eq!(model.busy, 0);
@@ -1124,10 +1123,8 @@ async fn update_ip_list_puts_only_the_changed_ranges() {
         .await;
     let audit = MemoryAudit::new();
     let mut keys = vec![
-        (500, ch('3')),
-        (50, KeyCode::Tab),
-        (50, KeyCode::Tab),
-        (50, ch('j')),
+        (500, ch('6')),
+        (200, ch('j')),
         (50, ch('e')),
         (20, KeyCode::Tab),
         (20, KeyCode::Tab),
@@ -1170,7 +1167,6 @@ async fn delete_service_rejected_shows_the_body_and_does_not_reload() {
     let audit = MemoryAudit::new();
     let keys = vec![
         (500, ch('3')),
-        (50, KeyCode::Tab),
         (50, KeyCode::Tab),
         (50, KeyCode::Tab),
         (50, ch('x')), // All Services
@@ -1252,15 +1248,10 @@ async fn a_y_typed_ahead_into_the_prompt_never_confirms_a_late_plan() {
     let key = |c: KeyCode| Event::Key(KeyEvent::new(c, KeyModifiers::NONE));
     // Services, then `x`, `:` and `y` in one burst: a ready stream never
     // yields, so all three keys land before the spawned plan can answer.
-    let keys = press(vec![
-        (500, ch('3')),
-        (50, KeyCode::Tab),
-        (50, KeyCode::Tab),
-        (50, KeyCode::Tab),
-    ])
-    .chain(stream::iter([key(ch('x')), key(ch(':')), key(ch('y'))]))
-    .chain(wait(300)) // the plan lands here, on the open prompt
-    .chain(press(vec![(0, ch('y')), (200, KeyCode::F(12))]));
+    let keys = press(vec![(500, ch('3')), (50, KeyCode::Tab), (50, KeyCode::Tab)])
+        .chain(stream::iter([key(ch('x')), key(ch(':')), key(ch('y'))]))
+        .chain(wait(300)) // the plan lands here, on the open prompt
+        .chain(press(vec![(0, ch('y')), (200, KeyCode::F(12))]));
     let model = run_loop(&mut rt, Box::pin(keys), &mut |_| {}).await;
     assert_eq!(
         model.overlay,
@@ -2090,4 +2081,19 @@ async fn writes_disabled_policy_and_traffic_keys_send_nothing() {
     assert_eq!(m.status.kind, StatusKind::Warn);
     assert_eq!(m.overlay, Overlay::None);
     assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn opening_ip_lists_costs_nothing_after_startup_and_r_bypasses_once() {
+    let server = MockServer::start().await;
+    mount_lists(&server, 1, 2, 1).await; // IP lists: the startup load and the r
+    let model = objects_session(
+        &server,
+        &[(500, '6'), (300, '1'), (100, '6'), (300, 'r'), (400, 'q')],
+    )
+    .await;
+    assert_eq!(model.stats.calls, 6, "health + four lists + the r refresh");
+    assert_eq!(model.ip_lists.table.len(), 2);
+    assert!(!model.ip_lists.loading);
+    assert_eq!(model.busy, 0);
 }

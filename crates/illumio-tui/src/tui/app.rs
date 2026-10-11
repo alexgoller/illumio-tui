@@ -322,10 +322,6 @@ impl Runtime {
                             .label_groups(mode)
                             .await
                             .map(|c| ObjectsPayload::LabelGroups(c.value, c.age.as_secs())),
-                        ObjectKind::IpLists => pce
-                            .ip_lists(mode)
-                            .await
-                            .map(|c| ObjectsPayload::IpLists(c.value, c.age.as_secs())),
                         ObjectKind::Services => pce
                             .services(mode)
                             .await
@@ -333,6 +329,19 @@ impl Runtime {
                     }
                     .map_err(|e| e.to_string());
                     let _ = tx.send(Msg::ObjectsLoaded { kind, result });
+                    let _ = tx.send(Msg::Stats(pce.stats()));
+                });
+            }
+            Cmd::LoadIpLists(mode) => {
+                self.model.busy += 1;
+                let (pce, tx) = self.task_ctx();
+                tokio::spawn(async move {
+                    let result = pce
+                        .ip_lists(mode)
+                        .await
+                        .map(|c| (c.value, c.age.as_secs()))
+                        .map_err(|e| e.to_string());
+                    let _ = tx.send(Msg::IpListsLoaded(result));
                     let _ = tx.send(Msg::Stats(pce.stats()));
                 });
             }
@@ -418,6 +427,7 @@ impl Runtime {
                 | Msg::DenyRulesLoaded { .. }
                 | Msg::PendingLoaded(_)
                 | Msg::ObjectsLoaded { .. }
+                | Msg::IpListsLoaded(_)
                 | Msg::WorkloadsLoaded(_)
                 | Msg::EventsLoaded(_)
                 | Msg::ProfileSwitched(_)

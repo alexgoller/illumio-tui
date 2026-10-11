@@ -91,7 +91,7 @@ pub fn model_with_policy() -> Model {
     m
 }
 
-/// A connected model with the four fixture object lists loaded (ages of 3 s).
+/// A connected model with the three fixture object lists loaded (ages of 3 s).
 pub fn model_with_objects() -> Model {
     let mut m = model_fixture();
     let o = &mut m.objects;
@@ -103,15 +103,23 @@ pub fn model_with_objects() -> Model {
         serde_json::from_str(include_str!("../../../../fixtures/label_groups.json"))
             .expect("groups fixture"),
     );
-    o.ip_lists.set_rows(
-        serde_json::from_str(include_str!("../../../../fixtures/ip_lists.json"))
-            .expect("ip lists fixture"),
-    );
     o.services.set_rows(
         serde_json::from_str(include_str!("../../../../fixtures/services.json"))
             .expect("services fixture"),
     );
-    o.ages = [Some(3); 4];
+    o.ages = [Some(3); 3];
+    m
+}
+
+/// `model_with_policy` plus the two fixture IP lists (loaded 3 s ago): sizes
+/// computed, `used_by` counted from the loaded draft rulesets.
+pub fn model_with_ip_lists() -> Model {
+    let mut m = model_with_policy();
+    let lists: Vec<IpList> =
+        serde_json::from_str(include_str!("../../../../fixtures/ip_lists.json"))
+            .expect("ip lists fixture");
+    m.ip_lists.set_lists(lists, &m.policy);
+    m.ip_lists.loaded_at = Some(Instant::now() - Duration::from_secs(3));
     m
 }
 

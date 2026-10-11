@@ -5,12 +5,12 @@ use crate::tui::form::Form;
 use crate::tui::table::{Column, SortKey, TableView};
 use crate::tui::ui::theme::Theme;
 use pce::models::{
-    DenyRule, Event, EventFilter, IpList, Label, LabelGroup, PendingChange, PolicyScope, Rule,
-    RuleSet, Service, VenHealth, Workload,
+    Actor, DenyRule, Event, EventFilter, IpList, Label, LabelGroup, PendingChange, PolicyScope,
+    Rule, RuleSet, Service, VenHealth, Workload,
 };
 use pce::traffic::{BlockedGroup, FlowGroup, ResolvedFlow, blocked_summary, group_by_labels};
 use pce::write::Plan;
-use pce::{NameIndex, RuleKind, RuleSetView, RuleView, StatsSnapshot};
+use pce::{IpListSize, NameIndex, RuleKind, RuleSetView, RuleView, StatsSnapshot, ip_list_size};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
@@ -22,24 +22,40 @@ pub enum Screen {
     Objects,
     Workloads,
     Events,
+    IpLists,
 }
 
 impl Screen {
-    pub const ALL: [Screen; 5] = [
+    /// In tab order; a screen's key is its position plus one.
+    pub const ALL: [Screen; 6] = [
         Screen::Traffic,
         Screen::Policy,
         Screen::Objects,
         Screen::Workloads,
         Screen::Events,
+        Screen::IpLists,
     ];
 
     pub fn title(self) -> &'static str {
         match self {
             Screen::Traffic => "Traffic",
             Screen::Policy => "Policy",
-            Screen::Objects => "Labels & objects",
+            Screen::Objects => "Objects",
             Screen::Workloads => "Workloads",
             Screen::Events => "Events",
+            Screen::IpLists => "IP lists",
+        }
+    }
+
+    /// The tab row's label when the full titles do not fit.
+    pub fn short_title(self) -> &'static str {
+        match self {
+            Screen::Traffic => "Traf",
+            Screen::Policy => "Pol",
+            Screen::Objects => "Obj",
+            Screen::Workloads => "Wl",
+            Screen::Events => "Ev",
+            Screen::IpLists => "IPs",
         }
     }
 
@@ -981,6 +997,15 @@ pub struct PolicyState {
     pub auto: AutoRefresh,
 }
 
+/// One loaded rule that names an IP list, for the IP lists screen.
+#[derive(Debug, Clone)]
+pub struct IpListUse {
+    pub ruleset: String,
+    pub kind: RuleKind,
+    pub providers: Vec<Actor>,
+    pub consumers: Vec<Actor>,
+}
+
 impl PolicyState {
     pub fn new(min_refresh: u64) -> Self {
         Self {
@@ -1106,6 +1131,52 @@ impl PolicyState {
             })
     }
 
+    /// The rules of the loaded draft rulesets (allow, deny, fetched deny)
+    /// that name the IP list `href` on either side; `None` until draft
+    /// rulesets are loaded. Costs no request.
+    pub fn ip_list_uses(&self, href: &str) -> Option<Vec<IpListUse>> {
+        if self.scope != PolicyScope::Draft || self.loaded_at.is_none() {
+            return None;
+        }
+        let names = |v: &[Actor]| {
+            v.iter()
+                .any(|a| a.ip_list.as_ref().is_some_and(|r| r.href == href))
+        };
+        let mut out = Vec::new();
+        for rs in &self.raw {
+            for r in &rs.rules {
+                if names(&r.providers) || names(&r.consumers) {
+                    out.push(IpListUse {
+                        ruleset: rs.name.clone(),
+                        kind: RuleKind::Allow,
+                        providers: r.providers.clone(),
+                        consumers: r.consumers.clone(),
+                    });
+                }
+            }
+            let deny: &[DenyRule] = if rs.deny_rules.is_empty() {
+                self.fallback_deny.get(&rs.href).map_or(&[], Vec::as_slice)
+            } else {
+                &rs.deny_rules
+            };
+            for d in deny {
+                if names(&d.providers) || names(&d.consumers) {
+                    out.push(IpListUse {
+                        ruleset: rs.name.clone(),
+                        kind: if d.override_ {
+                            RuleKind::OverrideDeny
+                        } else {
+                            RuleKind::Deny
+                        },
+                        providers: d.providers.clone(),
+                        consumers: d.consumers.clone(),
+                    });
+                }
+            }
+        }
+        Some(out)
+    }
+
     /// The selected ruleset has no inline deny rules and its endpoint list was
     /// neither fetched nor requested: the rules pane may be missing deny rules.
     pub fn deny_not_loaded(&self) -> bool {
@@ -1137,15 +1208,13 @@ impl PolicyState {
 pub enum ObjectKind {
     Labels,
     LabelGroups,
-    IpLists,
     Services,
 }
 
 impl ObjectKind {
-    pub const ALL: [ObjectKind; 4] = [
+    pub const ALL: [ObjectKind; 3] = [
         ObjectKind::Labels,
         ObjectKind::LabelGroups,
-        ObjectKind::IpLists,
         ObjectKind::Services,
     ];
 
@@ -1154,18 +1223,17 @@ impl ObjectKind {
     }
 
     pub fn next(self) -> Self {
-        Self::ALL[(self.index() + 1) % 4]
+        Self::ALL[(self.index() + 1) % Self::ALL.len()]
     }
 
     pub fn prev(self) -> Self {
-        Self::ALL[(self.index() + 3) % 4]
+        Self::ALL[(self.index() + Self::ALL.len() - 1) % Self::ALL.len()]
     }
 
     pub fn title(self) -> &'static str {
         match self {
             ObjectKind::Labels => "Labels",
             ObjectKind::LabelGroups => "Label groups",
-            ObjectKind::IpLists => "IP lists",
             ObjectKind::Services => "Services",
         }
     }
@@ -1277,41 +1345,6 @@ pub fn group_columns_objects() -> Vec<Column<LabelGroup>> {
     ]
 }
 
-pub fn ip_list_columns() -> Vec<Column<IpList>> {
-    vec![
-        Column {
-            title: "name",
-            width: 28,
-            cell: |l| l.name.clone(),
-            key: |l| SortKey::Text(l.name.clone()),
-            right: false,
-            hide_below: 0,
-            narrow: None,
-            narrow_width: 24,
-        },
-        Column {
-            title: "ranges",
-            width: 0,
-            cell: |l| l.summary(),
-            key: |l| SortKey::Num(l.ip_ranges.len() as u64),
-            right: false,
-            hide_below: 0,
-            narrow: None,
-            narrow_width: 0,
-        },
-        Column {
-            title: "pending",
-            width: 7,
-            cell: |l| l.update_type.clone().unwrap_or_default(),
-            key: |l| SortKey::Text(l.update_type.clone().unwrap_or_default()),
-            right: false,
-            hide_below: 70,
-            narrow: None,
-            narrow_width: 0,
-        },
-    ]
-}
-
 pub fn service_columns() -> Vec<Column<Service>> {
     vec![
         Column {
@@ -1352,13 +1385,12 @@ pub struct ObjectsState {
     pub kind: ObjectKind,
     pub labels: TableView<Label>,
     pub groups: TableView<LabelGroup>,
-    pub ip_lists: TableView<IpList>,
     pub services: TableView<Service>,
     /// Cache age in seconds when each kind (indexed by `ObjectKind::index`) was loaded.
-    pub ages: [Option<u64>; 4],
+    pub ages: [Option<u64>; 3],
     /// When each kind arrived, so the shown age keeps growing.
-    pub loaded_at: [Option<Instant>; 4],
-    pub loading: [bool; 4],
+    pub loaded_at: [Option<Instant>; 3],
+    pub loading: [bool; 3],
     pub show_detail: bool,
     /// The startup index load failed; `r` retries it.
     pub index_failed: bool,
@@ -1371,11 +1403,10 @@ impl ObjectsState {
             kind: ObjectKind::Labels,
             labels: TableView::new(label_columns()),
             groups: TableView::new(group_columns_objects()),
-            ip_lists: TableView::new(ip_list_columns()),
             services: TableView::new(service_columns()),
-            ages: [None; 4],
-            loaded_at: [None; 4],
-            loading: [false; 4],
+            ages: [None; 3],
+            loaded_at: [None; 3],
+            loading: [false; 3],
             show_detail: false,
             index_failed: false,
             auto: AutoRefresh::new(min_refresh),
@@ -1391,7 +1422,6 @@ impl ObjectsState {
         match self.kind {
             ObjectKind::Labels => self.labels.is_searching(),
             ObjectKind::LabelGroups => self.groups.is_searching(),
-            ObjectKind::IpLists => self.ip_lists.is_searching(),
             ObjectKind::Services => self.services.is_searching(),
         }
     }
@@ -1401,7 +1431,6 @@ impl ObjectsState {
         match self.kind {
             ObjectKind::Labels => self.labels.selected_item().is_some(),
             ObjectKind::LabelGroups => self.groups.selected_item().is_some(),
-            ObjectKind::IpLists => self.ip_lists.selected_item().is_some(),
             ObjectKind::Services => self.services.selected_item().is_some(),
         }
     }
@@ -1410,6 +1439,141 @@ impl ObjectsState {
     pub fn age_secs(&self, kind: ObjectKind) -> Option<u64> {
         let i = kind.index();
         self.ages[i].map(|a| a + self.loaded_at[i].map_or(0, |t| t.elapsed().as_secs()))
+    }
+}
+
+/// An IP list with what its screen derives from it once per load.
+#[derive(Debug, Clone)]
+pub struct IpListRow {
+    pub list: IpList,
+    pub size: IpListSize,
+    /// Rules of the loaded draft rulesets that name the list; `None` until
+    /// the Policy screen loaded them.
+    pub used_by: Option<usize>,
+}
+
+pub fn ip_list_columns() -> Vec<Column<IpListRow>> {
+    vec![
+        Column {
+            title: "name",
+            width: 28,
+            cell: |r| r.list.name.clone(),
+            key: |r| SortKey::Text(r.list.name.clone()),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 24,
+        },
+        Column {
+            title: "size",
+            width: 10,
+            // `any (0.0.0.0/0)` does not fit; the detail shows the reason.
+            cell: |r| {
+                if r.size.unbounded.is_some() {
+                    "any".to_string()
+                } else {
+                    r.size.display()
+                }
+            },
+            key: |r| SortKey::Num(r.size.sort_key()),
+            right: true,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "ranges",
+            width: 6,
+            cell: |r| r.list.ip_ranges.len().to_string(),
+            key: |r| SortKey::Num(r.list.ip_ranges.len() as u64),
+            right: true,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "fqdns",
+            width: 5,
+            cell: |r| r.list.fqdns.len().to_string(),
+            key: |r| SortKey::Num(r.list.fqdns.len() as u64),
+            right: true,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "used by",
+            width: 7,
+            cell: |r| r.used_by.map_or_else(|| "-".to_string(), |n| n.to_string()),
+            key: |r| SortKey::Num(r.used_by.map_or(0, |n| n as u64 + 1)),
+            right: true,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "pending",
+            width: 7,
+            cell: |r| r.list.update_type.clone().unwrap_or_default(),
+            key: |r| SortKey::Text(r.list.update_type.clone().unwrap_or_default()),
+            right: false,
+            hide_below: 70,
+            narrow: None,
+            narrow_width: 0,
+        },
+    ]
+}
+
+#[derive(Debug)]
+pub struct IpListsState {
+    pub table: TableView<IpListRow>,
+    /// Cache age in seconds when the lists arrived.
+    pub age_secs: u64,
+    pub loaded_at: Option<Instant>,
+    pub loading: bool,
+    pub show_detail: bool,
+    pub auto: AutoRefresh,
+}
+
+impl IpListsState {
+    pub fn new(min_refresh: u64) -> Self {
+        Self {
+            table: TableView::new(ip_list_columns()),
+            age_secs: 0,
+            loaded_at: None,
+            loading: false,
+            show_detail: false,
+            auto: AutoRefresh::new(min_refresh),
+        }
+    }
+
+    /// The rows for `lists`: sizes computed, `used_by` from the loaded rulesets.
+    pub fn set_lists(&mut self, lists: Vec<IpList>, policy: &PolicyState) {
+        self.table.set_rows(
+            lists
+                .into_iter()
+                .map(|list| IpListRow {
+                    size: ip_list_size(&list),
+                    used_by: policy.ip_list_uses(&list.href).map(|u| u.len()),
+                    list,
+                })
+                .collect(),
+        );
+    }
+
+    /// `used_by` again from `policy` (the rulesets changed); no request.
+    pub fn recount(&mut self, policy: &PolicyState) {
+        let rows = self
+            .table
+            .rows()
+            .iter()
+            .cloned()
+            .map(|mut r| {
+                r.used_by = policy.ip_list_uses(&r.list.href).map(|u| u.len());
+                r
+            })
+            .collect();
+        self.table.set_rows(rows);
     }
 }
 
@@ -1847,6 +2011,7 @@ pub struct Model {
     pub traffic: TrafficState,
     pub policy: PolicyState,
     pub objects: ObjectsState,
+    pub ip_lists: IpListsState,
     pub workloads: WorkloadsState,
     pub events: EventsState,
     pub connection: Connection,
@@ -1884,6 +2049,7 @@ impl Model {
         );
         let policy = PolicyState::new(auto_refresh_min_seconds);
         let objects = ObjectsState::new(auto_refresh_min_seconds);
+        let ip_lists = IpListsState::new(auto_refresh_min_seconds);
         let workloads = WorkloadsState::new(auto_refresh_min_seconds);
         let events = EventsState::new(auto_refresh_min_seconds);
         Self {
@@ -1903,6 +2069,7 @@ impl Model {
             traffic,
             policy,
             objects,
+            ip_lists,
             workloads,
             events,
             connection: Connection::Connecting,
@@ -1950,6 +2117,7 @@ impl Model {
         self.traffic.auto.enabled
             || self.policy.auto.enabled
             || self.objects.auto.enabled
+            || self.ip_lists.auto.enabled
             || self.workloads.auto.enabled
             || self.events.auto.enabled
     }
@@ -1975,6 +2143,7 @@ impl Model {
         self.traffic = traffic;
         self.policy = PolicyState::new(min);
         self.objects = ObjectsState::new(min);
+        self.ip_lists = IpListsState::new(min);
         self.workloads = WorkloadsState::new(min);
         self.events = EventsState::new(min);
         self.stats = StatsSnapshot { calls: 0, bytes: 0 };
@@ -2079,5 +2248,52 @@ mod tests {
             .find_deny_rule("/orgs/5/sec_policy/draft/rule_sets/101/deny_rules/9")
             .unwrap();
         assert_eq!(rs, "/orgs/5/sec_policy/draft/rule_sets/101");
+    }
+
+    #[test]
+    fn ip_list_rows_carry_their_size_and_how_many_loaded_rules_use_them() {
+        let lists: Vec<IpList> =
+            serde_json::from_str(include_str!("../../../../fixtures/ip_lists.json")).unwrap();
+        let mut s = IpListsState::new(60);
+        let mut p = PolicyState::new(60);
+        s.set_lists(lists, &p);
+        assert_eq!(s.table.rows()[1].size.display(), "65.5K");
+        assert_eq!(s.table.rows()[1].used_by, None, "no rulesets loaded");
+        p.raw = serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
+        p.loaded_at = Some(Instant::now());
+        s.recount(&p);
+        let used: Vec<Option<usize>> = s.table.rows().iter().map(|r| r.used_by).collect();
+        assert_eq!(used, vec![Some(1), Some(1)], "deny rule 7 and allow rule 2");
+        let uses = p
+            .ip_list_uses("/orgs/5/sec_policy/draft/ip_lists/21")
+            .unwrap();
+        assert_eq!(uses[0].ruleset, "Shop-Prod");
+        assert_eq!(uses[0].kind, RuleKind::Allow);
+        p.scope = PolicyScope::Active;
+        s.recount(&p);
+        assert_eq!(s.table.rows()[0].used_by, None, "only draft rulesets count");
+        let cols = ip_list_columns();
+        let titles: Vec<&str> = cols.iter().map(|c| c.title).collect();
+        assert_eq!(
+            titles,
+            vec!["name", "size", "ranges", "fqdns", "used by", "pending"]
+        );
+        let rows = s.table.rows();
+        assert_eq!((cols[1].cell)(&rows[0]), "any");
+        assert_eq!((cols[1].cell)(&rows[1]), "65.5K");
+        assert_eq!((cols[2].cell)(&rows[0]), "2");
+        assert_eq!((cols[3].cell)(&rows[1]), "1");
+        assert_eq!((cols[4].cell)(&rows[0]), "-");
+        assert!(
+            (cols[1].key)(&rows[0]) > (cols[1].key)(&rows[1]),
+            "any sorts last"
+        );
+        assert_eq!(Screen::ALL.len(), 6);
+        assert_eq!(Screen::IpLists.title(), "IP lists");
+        assert_eq!(Screen::IpLists.short_title(), "IPs");
+        assert_eq!(Screen::Objects.title(), "Objects");
+        assert_eq!(ObjectKind::ALL.len(), 3);
+        assert_eq!(ObjectKind::Labels.prev(), ObjectKind::Services);
+        assert_eq!(ObjectKind::Services.next(), ObjectKind::Labels);
     }
 }

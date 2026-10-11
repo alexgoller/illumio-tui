@@ -101,13 +101,29 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect) {
     }
 }
 
-/// Tab labels; `Tabs` draws each one between `TAB_PAD` padding cells.
-fn tab_labels() -> Vec<String> {
-    Screen::ALL
-        .iter()
-        .enumerate()
-        .map(|(i, s)| format!(" {} {} ", i + 1, s.title()))
-        .collect()
+/// Tab labels for a row `width` cells wide: the full titles when the whole
+/// row fits, else the short ones. `Tabs` draws each between `TAB_PAD` cells.
+fn tab_labels(width: u16) -> Vec<String> {
+    let labels = |title: fn(Screen) -> &'static str| -> Vec<String> {
+        Screen::ALL
+            .iter()
+            .enumerate()
+            .map(|(i, s)| format!(" {} {} ", i + 1, title(*s)))
+            .collect()
+    };
+    let full = labels(Screen::title);
+    if row_width(&full) <= width {
+        full
+    } else {
+        labels(Screen::short_title)
+    }
+}
+
+/// Cells the whole tab row takes: every tab and the dividers between them.
+fn row_width(labels: &[String]) -> u16 {
+    let divider = TAB_DIVIDER.chars().count() as u16;
+    let tabs: u16 = labels.iter().map(|l| tab_width(l)).sum();
+    tabs + divider * (labels.len() as u16).saturating_sub(1)
 }
 
 /// Padding cells either side of a label, and the divider between tabs; shared
@@ -128,7 +144,7 @@ pub fn tab_at(x: u16, width: u16) -> Option<Screen> {
     }
     let divider = TAB_DIVIDER.chars().count() as u16;
     let mut start = 0u16;
-    for (label, screen) in tab_labels().iter().zip(Screen::ALL) {
+    for (label, screen) in tab_labels(width).iter().zip(Screen::ALL) {
         let w = tab_width(label);
         if x >= start && x < start + w {
             return Some(screen);
@@ -138,11 +154,11 @@ pub fn tab_at(x: u16, width: u16) -> Option<Screen> {
     None
 }
 
-/// A column inside the given tab's label (test helper for `tab_at`).
-pub fn tab_x(screen: Screen) -> u16 {
+/// A column inside the given tab's label on a row `width` cells wide (test helper for `tab_at`).
+pub fn tab_x(screen: Screen, width: u16) -> u16 {
     let divider = TAB_DIVIDER.chars().count() as u16;
     let mut start = 0u16;
-    for (label, s) in tab_labels().iter().zip(Screen::ALL) {
+    for (label, s) in tab_labels(width).iter().zip(Screen::ALL) {
         if s == screen {
             return start + TAB_PAD.chars().count() as u16;
         }
@@ -153,7 +169,7 @@ pub fn tab_x(screen: Screen) -> u16 {
 
 fn render_tabs(model: &Model, f: &mut Frame, area: Rect) {
     let t = &model.theme;
-    let titles: Vec<Line> = tab_labels().into_iter().map(Line::from).collect();
+    let titles: Vec<Line> = tab_labels(area.width).into_iter().map(Line::from).collect();
     let tabs = Tabs::new(titles)
         .select(model.screen.index())
         .style(Style::new().fg(t.dim).bg(t.bg))
@@ -205,6 +221,10 @@ fn render_body(model: &Model, f: &mut Frame, area: Rect) {
         screens::events::render_screen(model, f, area);
         return;
     }
+    if model.screen == Screen::IpLists && model.is_connected() {
+        screens::iplists::render_screen(model, f, area);
+        return;
+    }
     let block = widgets::panel::panel(model.screen.title(), "", t, true);
     let text = match &model.connection {
         Connection::Connecting => "connecting…",
@@ -221,22 +241,37 @@ mod tests {
     #[test]
     fn tab_at_matches_the_rendered_row() {
         for s in Screen::ALL {
-            assert_eq!(tab_at(tab_x(s), 80), Some(s));
+            assert_eq!(tab_at(tab_x(s, 80), 80), Some(s));
         }
-        let first_len = tab_width(&tab_labels()[0]);
+        let first_len = tab_width(&tab_labels(80)[0]);
         assert_eq!(tab_at(first_len, 80), None, "divider");
         assert_eq!(tab_at(79, 80), None, "past the last tab");
-        let x = tab_x(Screen::Workloads);
+        let x = tab_x(Screen::Workloads, 80);
         assert_eq!(tab_at(x, x), None, "clipped by a narrow terminal");
-        // The rendered row puts each label exactly where tab_at expects it.
+        // The rendered row puts each label exactly where tab_at expects it,
+        // with the short titles at 80 columns and the full ones at 160.
         let m = crate::tui::test_support::model_fixture();
-        let out = crate::tui::test_support::render_to_string(&m, 80, 24);
-        let row: Vec<char> = out.lines().nth(1).unwrap().chars().collect();
-        for s in Screen::ALL {
-            let x = tab_x(s) as usize;
-            assert!(row[x + 1].is_ascii_digit(), "the label's number follows x");
-            assert_eq!(row[x - 1], ' ', "padding cell before the label");
-            assert_eq!(tab_at(x as u16 + 1, 80), Some(s));
+        for (w, h) in [(80u16, 24u16), (160, 48)] {
+            let out = crate::tui::test_support::render_to_string(&m, w, h);
+            let row: Vec<char> = out.lines().nth(1).unwrap().chars().collect();
+            for s in Screen::ALL {
+                let x = tab_x(s, w) as usize;
+                assert!(row[x + 1].is_ascii_digit(), "the label's number follows x");
+                assert_eq!(row[x - 1], ' ', "padding cell before the label");
+                assert_eq!(tab_at(x as u16 + 1, w), Some(s));
+            }
         }
+    }
+
+    #[test]
+    fn the_tab_row_shortens_only_when_the_full_row_does_not_fit() {
+        let full = tab_labels(160);
+        assert_eq!(row_width(&full), 84, "six full titles and five dividers");
+        assert_eq!(full[2], " 3 Objects ");
+        assert_eq!(full[5], " 6 IP lists ");
+        assert_eq!(tab_labels(84)[5], " 6 IP lists ");
+        assert_eq!(tab_labels(83)[5], " 6 IPs ");
+        assert_eq!(tab_labels(83)[0], " 1 Traf ");
+        assert_eq!(row_width(&tab_labels(80)), 58);
     }
 }

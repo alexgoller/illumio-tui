@@ -16,11 +16,11 @@ use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
 
 pub const HELP_LINES: &[(&str, &str)] = &[
     (
-        "1 2 3 4 5",
-        "Traffic · Policy · Objects · Workloads · Events",
+        "1 2 3 4 5 6",
+        "Traffic · Policy · Objects · Workloads · Events · IPs",
     ),
     (":", "command prompt: :traffic :policy :objects :workloads"),
-    ("", ":events  :filter <expr>  :window <dur>"),
+    ("", ":events  :iplists  :filter <expr>  :window <dur>"),
     ("", ":profile <name>  :draft  :active  :help  :q"),
     ("?", "this help"),
     ("q / Ctrl-C", "quit"),
@@ -55,6 +55,10 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "new deny rule in the selected ruleset (rules pane)",
     ),
     ("Objects  Tab / Enter", "next object type · detail"),
+    (
+        "IP lists Enter",
+        "detail: ranges · FQDNs · size · rules using it",
+    ),
     (
         "Workloads t/T h H Enter",
         "Traffic as src/dst · unhealthy · health sort · detail",
@@ -667,6 +671,8 @@ pub fn screen_hint(screen: Screen, writes: bool) -> &'static str {
         (Screen::Policy, _) => "d scope  p pending  Enter detail  Tab pane  a auto",
         (Screen::Objects, false) => "Tab type  Enter detail  r refresh  a auto  / search",
         (Screen::Workloads, false) => "t/T traffic  h/H health  Enter detail  r refresh",
+        (Screen::IpLists, true) => "n:new e:edit x:del  Enter detail  r refresh",
+        (Screen::IpLists, false) => "Enter detail  r refresh  a auto  s sort  / search",
         (Screen::Events, _) => "f filter  r refresh  a auto  S severity  Enter detail",
     }
 }

@@ -1,10 +1,11 @@
-//! Labels & objects screen: a tab strip of the four object kinds, the current
-//! kind's table, and an optional detail pane for the selected object.
+//! Objects screen: a tab strip of the three object kinds (labels, label groups,
+//! services), the current kind's table, and an optional detail pane for the
+//! selected object.
 use crate::tui::model::{Model, ObjectKind};
 use crate::tui::ui::widgets::bars::age_text;
 use crate::tui::ui::widgets::panel::panel;
 use crate::tui::ui::widgets::table::{header_meta, render};
-use pce::models::{IpList, Label, LabelGroup, Service};
+use pce::models::{Label, LabelGroup, Service};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -45,12 +46,7 @@ pub fn render_screen(model: &Model, f: &mut Frame, body: Rect) {
             "loading objects…"
         };
         f.render_widget(
-            Paragraph::new(Span::styled(note, t.dim_style())).block(panel(
-                "Labels & objects",
-                "",
-                t,
-                true,
-            )),
+            Paragraph::new(Span::styled(note, t.dim_style())).block(panel("Objects", "", t, true)),
             body,
         );
         return;
@@ -91,11 +87,6 @@ fn render_table(model: &Model, f: &mut Frame, area: Rect) {
             o.groups.len(),
             o.groups.rows().len(),
             header_meta(&o.groups),
-        ),
-        ObjectKind::IpLists => (
-            o.ip_lists.len(),
-            o.ip_lists.rows().len(),
-            header_meta(&o.ip_lists),
         ),
         ObjectKind::Services => (
             o.services.len(),
@@ -140,9 +131,6 @@ fn render_table(model: &Model, f: &mut Frame, area: Rect) {
         ObjectKind::LabelGroups => render(f, area, &o.groups, t, block, &|_: &LabelGroup| {
             Style::default()
         }),
-        ObjectKind::IpLists => render(f, area, &o.ip_lists, t, block, &|_: &IpList| {
-            Style::default()
-        }),
         ObjectKind::Services => render(f, area, &o.services, t, block, &|_: &Service| {
             Style::default()
         }),
@@ -157,7 +145,6 @@ fn render_detail(model: &Model, f: &mut Frame, area: Rect) {
     let lines = match o.kind {
         ObjectKind::Labels => o.labels.selected_item().map(|l| label_lines(l)),
         ObjectKind::LabelGroups => o.groups.selected_item().map(|g| group_lines(model, g)),
-        ObjectKind::IpLists => o.ip_lists.selected_item().map(|l| ip_list_lines(l)),
         ObjectKind::Services => o.services.selected_item().map(|s| service_lines(s)),
     };
     let Some(lines) = lines else {
@@ -242,44 +229,6 @@ fn group_lines(model: &Model, g: &LabelGroup) -> Vec<DetailLine> {
         out.extend(items(
             "groups",
             g.sub_groups.iter().map(|r| group(&r.href)).collect(),
-        ));
-    }
-    out
-}
-
-fn ip_list_lines(l: &IpList) -> Vec<DetailLine> {
-    let mut out = vec![(
-        Some("list"),
-        match &l.description {
-            Some(d) if !d.is_empty() => format!("{}  {d}", l.name),
-            _ => l.name.clone(),
-        },
-    )];
-    let ranges: Vec<String> = l
-        .ip_ranges
-        .iter()
-        .map(|r| {
-            let mut s = String::new();
-            if r.exclusion.unwrap_or(false) {
-                s.push_str("exclude ");
-            }
-            s.push_str(&r.from_ip);
-            if let Some(to) = &r.to_ip {
-                s.push_str(&format!(" - {to}"));
-            }
-            if let Some(d) = r.description.as_deref().filter(|d| !d.is_empty()) {
-                s.push_str(&format!("  {d}"));
-            }
-            s
-        })
-        .collect();
-    if !ranges.is_empty() || l.fqdns.is_empty() {
-        out.extend(items("ranges", ranges));
-    }
-    if !l.fqdns.is_empty() {
-        out.extend(items(
-            "fqdns",
-            l.fqdns.iter().map(|f| f.fqdn.clone()).collect(),
         ));
     }
     out

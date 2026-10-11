@@ -4,8 +4,8 @@ expression: "render_styled(&m, 80, 24)"
 ---
  illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
     @0:Rgb(198, 120, 221)/Rgb(16, 18, 24) @13:Rgb(220, 222, 228)/Rgb(16, 18, 24) @33:Rgb(152, 195, 121)/Rgb(16, 18, 24) @34:Rgb(220, 222, 228)/Rgb(16, 18, 24) @58:Rgb(120, 126, 140)/Rgb(16, 18, 24)
-  1 Traffic  │  2 Policy  │  3 Labels & objects  │  4 Workloads  │  5 Events
-    @0:Rgb(120, 126, 140)/Rgb(16, 18, 24) @1:Rgb(97, 175, 239)/Rgb(16, 18, 24) @12:Rgb(120, 126, 140)/Rgb(16, 18, 24)
+  1 Traf  │  2 Pol  │  3 Obj  │  4 Wl  │  5 Ev  │  6 IPs
+    @0:Rgb(120, 126, 140)/Rgb(16, 18, 24) @1:Rgb(97, 175, 239)/Rgb(16, 18, 24) @9:Rgb(120, 126, 140)/Rgb(16, 18, 24)
 ╭ Filters ────────────────────────────────── window 24h · cap 1000 · unbounded ╮
     @0:Rgb(70, 76, 92)/Rgb(16, 18, 24) @2:Rgb(198, 120, 221)/Rgb(16, 18, 24) @9:Rgb(70, 76, 92)/Rgb(16, 18, 24) @45:Rgb(120, 126, 140)/Rgb(16, 18, 24) @78:Rgb(70, 76, 92)/Rgb(16, 18, 24)
 │window 24h  src *  dst *  svc *  decision all                                 │

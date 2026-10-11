@@ -30,7 +30,6 @@ pub struct QueryOutcome {
 pub enum ObjectsPayload {
     Labels(Vec<Label>, u64),
     LabelGroups(Vec<LabelGroup>, u64),
-    IpLists(Vec<IpList>, u64),
     Services(Vec<Service>, u64),
 }
 
@@ -82,6 +81,8 @@ pub enum Msg {
         kind: ObjectKind,
         result: Result<ObjectsPayload, String>,
     },
+    /// The draft IP lists with the cache age in seconds.
+    IpListsLoaded(Result<(Vec<IpList>, u64), String>),
     /// Workloads with the cache age in seconds.
     WorkloadsLoaded(Result<(Vec<Workload>, u64), String>),
     /// Events, the cache age in seconds and the `(since, until)` the request used.
@@ -127,6 +128,8 @@ pub enum Cmd {
         kind: ObjectKind,
         mode: CacheMode,
     },
+    /// The draft IP lists for the IP lists screen (the index's own list, cached).
+    LoadIpLists(CacheMode),
     LoadWorkloads(CacheMode),
     LoadEvents {
         filter: EventFilter,
@@ -190,6 +193,7 @@ impl PartialEq for Cmd {
             (Cmd::LoadObjects { kind: ka, mode: ma }, Cmd::LoadObjects { kind: kb, mode: mb }) => {
                 ka == kb && ma == mb
             }
+            (Cmd::LoadIpLists(a), Cmd::LoadIpLists(b)) => a == b,
             (Cmd::LoadWorkloads(a), Cmd::LoadWorkloads(b)) => a == b,
             (
                 Cmd::LoadEvents {
