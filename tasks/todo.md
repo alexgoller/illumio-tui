@@ -126,4 +126,5 @@ Spec: docs/superpowers/specs/2026-10-11-policy-writes-design.md · Plan: docs/su
   - Task 8: the `policy rules [RULESET]` list positional became optional so `add|update|delete` sit beside it; a ruleset literally named `add`, `update` or `delete` is addressed by href.
   - Task 3: the no-op reason is `rule_set <name> already matches` (name included).
   - Task 10: README says `--all` groups every pending type generically, and unknown-name errors list up to five similar names.
-- Parked: filled in after the whole-branch review
+- Parked: wrapping/`who` duplication cosmetic items; ASCII-only case folding in name matches; `workload:` lookups are not cached per token; actors with two kind keys parse by precedence (not a PCE shape); an identical relabel sends a redundant PUT; the singleton parser accepts collection hrefs (explicit targets must be pending); `resolve_labels_as` is compared order-sensitively (redundant PUT, no loss).
+- Final whole-branch review: 0 Critical, 3 Important fixed in one wave (guard table profile-off proof, resolve_labels_as default, provisioning a ruleset pending deletion by name).

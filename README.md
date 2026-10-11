@@ -217,8 +217,11 @@ name looks like a port), an inline port (`443/tcp`, `8000-8100/udp`, `icmp`)
 or a service href. A `--scope` holds labels and label groups only,
 comma-separated; repeat `--scope` for alternatives; no `--scope` means
 everywhere. Each object list is read at most once per command, and only
-when a token needs it; unknown names are exit 2 with up to five similar
-names, before any write.
+when a token needs it, except that each `workload:HOST` token is looked up
+on its own (one or two reads each); unknown names are exit 2 with up to five
+similar names, before any write. A new rule's `resolve_labels_as` defaults
+to `workloads` on both sides; `--resolve-providers-as` and
+`--resolve-consumers-as` override it (deny rules carry none).
 
 `rules update` and `deny-rules update` re-read the rule and send only the
 keys that change; a changed provider, consumer or service list is sent whole
