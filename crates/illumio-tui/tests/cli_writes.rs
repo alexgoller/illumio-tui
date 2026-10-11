@@ -1377,3 +1377,972 @@ mod workloads {
         );
     }
 }
+
+mod policy {
+    use super::*;
+    use wiremock::matchers::query_param;
+
+    pub const RS_100: &str = "/orgs/5/sec_policy/draft/rule_sets/100";
+    pub const RULE_2: &str = "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/2";
+    pub const DENY_8: &str = "/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8";
+
+    pub fn fixture_labels() -> Value {
+        serde_json::from_str(include_str!("../../../fixtures/labels.json")).unwrap()
+    }
+    pub fn fixture_label_groups() -> Value {
+        serde_json::from_str(include_str!("../../../fixtures/label_groups.json")).unwrap()
+    }
+    pub fn fixture_ip_lists() -> Value {
+        serde_json::from_str(include_str!("../../../fixtures/ip_lists.json")).unwrap()
+    }
+    pub fn fixture_services() -> Value {
+        serde_json::from_str(include_str!("../../../fixtures/services.json")).unwrap()
+    }
+    pub fn fixture_rule_sets() -> Value {
+        serde_json::from_str(include_str!("../../../fixtures/rule_sets.json")).unwrap()
+    }
+    pub fn fixture_workloads() -> Value {
+        serde_json::from_str(include_str!("../../../fixtures/workloads.json")).unwrap()
+    }
+
+    pub async fn mount_get(server: &MockServer, p: &str, body: Value) {
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v2{p}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(server)
+            .await;
+    }
+
+    /// Labels, label groups, IP lists, services and the draft rulesets.
+    pub async fn mount_lists(server: &MockServer) {
+        mount_get(server, "/orgs/5/labels", fixture_labels()).await;
+        mount_get(
+            server,
+            "/orgs/5/sec_policy/draft/label_groups",
+            fixture_label_groups(),
+        )
+        .await;
+        mount_get(
+            server,
+            "/orgs/5/sec_policy/draft/ip_lists",
+            fixture_ip_lists(),
+        )
+        .await;
+        mount_get(
+            server,
+            "/orgs/5/sec_policy/draft/services",
+            fixture_services(),
+        )
+        .await;
+        mount_get(
+            server,
+            "/orgs/5/sec_policy/draft/rule_sets",
+            fixture_rule_sets(),
+        )
+        .await;
+    }
+
+    async fn gets(server: &MockServer, p: &str) -> usize {
+        count(server, "GET", &format!("/api/v2{p}")).await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rulesets_add_resolves_scopes_with_one_get_per_kind() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_lists(&server).await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "policy",
+                    "rulesets",
+                    "add",
+                    "Web-Tier",
+                    "--scope",
+                    "app=shop,env=prod",
+                    "--scope",
+                    "group:All prod envs",
+                    "--dry-run",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["method"], "POST");
+        assert_eq!(out["data"]["path"], "/orgs/5/sec_policy/draft/rule_sets");
+        assert_eq!(
+            out["data"]["body"],
+            json!({
+                "name": "Web-Tier", "enabled": true,
+                "scopes": [
+                    [{"label": {"href": "/orgs/5/labels/3"}}, {"label": {"href": "/orgs/5/labels/4"}}],
+                    [{"label_group": {"href": "/orgs/5/sec_policy/draft/label_groups/10"}}]
+                ]
+            })
+        );
+        assert_eq!(gets(&server, "/orgs/5/labels").await, 1);
+        assert_eq!(
+            gets(&server, "/orgs/5/sec_policy/draft/label_groups").await,
+            1
+        );
+        assert_eq!(server.received_requests().await.unwrap().len(), 2);
+        assert_eq!(out["meta"]["api_calls"], 2);
+        assert!(
+            audit_lines(state.path()).is_empty(),
+            "a dry run is not audited"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rulesets_add_unscoped_disabled_and_if_missing() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_lists(&server).await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "policy",
+                    "rulesets",
+                    "add",
+                    "Global",
+                    "--disabled",
+                    "--dry-run",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(
+            out["data"]["body"],
+            json!({"name": "Global", "enabled": false, "scopes": [[]]})
+        );
+        assert!(server.received_requests().await.unwrap().is_empty());
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "policy",
+                    "rulesets",
+                    "add",
+                    "shop-prod",
+                    "--if-missing",
+                    "--dry-run",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["skipped"], true);
+        assert_eq!(out["data"]["href"], RS_100);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rulesets_add_scope_with_an_ip_list_is_refused_before_any_request() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        let a = writer(&server, state.path())
+            .args([
+                "policy",
+                "rulesets",
+                "add",
+                "X",
+                "--scope",
+                "iplist:Corp",
+                "--dry-run",
+            ])
+            .assert()
+            .code(2);
+        assert_eq!(
+            stderr_json(&a)["error"]["message"],
+            "scopes take labels and label groups only"
+        );
+        writer(&server, state.path())
+            .args(["policy", "rulesets", "add", "X", "--scope", "--dry-run"])
+            .assert()
+            .code(2);
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rulesets_update_by_name_and_by_href() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_lists(&server).await;
+        mount_get(&server, RS_100, fixture_rule_sets()[0].clone()).await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "policy",
+                    "rulesets",
+                    "update",
+                    "shop-prod",
+                    "--clear-scopes",
+                    "--disabled",
+                    "--dry-run",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["method"], "PUT");
+        assert_eq!(out["data"]["path"], RS_100);
+        assert_eq!(
+            out["data"]["body"],
+            json!({"enabled": false, "scopes": [[]]})
+        );
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "policy",
+                    "rulesets",
+                    "update",
+                    RS_100,
+                    "--description",
+                    "Ringfence v2",
+                    "--enabled",
+                    "--dry-run",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["body"], json!({"description": "Ringfence v2"}));
+        assert_eq!(
+            gets(&server, "/orgs/5/sec_policy/draft/rule_sets").await,
+            1,
+            "only the name needed the list"
+        );
+        assert_eq!(gets(&server, RS_100).await, 2);
+        writer(&server, state.path())
+            .args([
+                "policy",
+                "rulesets",
+                "update",
+                RS_100,
+                "--scope",
+                "app=shop",
+                "--clear-scopes",
+                "--dry-run",
+            ])
+            .assert()
+            .code(2);
+        let a = writer(&server, state.path())
+            .args(["policy", "rulesets", "update", RS_100, "--dry-run"])
+            .assert()
+            .code(2);
+        assert!(
+            stderr_json(&a)["error"]["message"]
+                .as_str()
+                .unwrap()
+                .starts_with("nothing to change")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rulesets_unknown_and_ambiguous_names() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_lists(&server).await;
+        let a = writer(&server, state.path())
+            .args(["policy", "rulesets", "delete", "shop", "--dry-run"])
+            .assert()
+            .code(2);
+        assert_eq!(
+            stderr_json(&a)["error"]["message"],
+            r#"no ruleset named "shop"; similar: Shop-Prod"#
+        );
+        let dup = MockServer::start().await;
+        mount_get(
+            &dup,
+            "/orgs/5/sec_policy/draft/rule_sets",
+            json!([
+                {"href": "/orgs/5/sec_policy/draft/rule_sets/200", "name": "Dup"},
+                {"href": "/orgs/5/sec_policy/draft/rule_sets/201", "name": "DUP"}
+            ]),
+        )
+        .await;
+        let a = writer(&dup, state.path())
+            .args(["policy", "rulesets", "delete", "dup", "--dry-run"])
+            .assert()
+            .code(2);
+        assert_eq!(
+            stderr_json(&a)["error"]["message"],
+            r#""dup" names several rulesets: /orgs/5/sec_policy/draft/rule_sets/200, /orgs/5/sec_policy/draft/rule_sets/201; use the href"#
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rulesets_delete_by_name_with_table_output() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_lists(&server).await;
+        let mut t = cmd(&server);
+        t.env("ILLUMIO_WRITES", "1")
+            .env("XDG_STATE_HOME", state.path());
+        t.args([
+            "--allow-writes",
+            "--table",
+            "policy",
+            "rulesets",
+            "delete",
+            "Global-Infra",
+            "--dry-run",
+        ])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("DELETE").and(predicate::str::contains(
+                "/orgs/5/sec_policy/draft/rule_sets/101",
+            )),
+        )
+        .stderr(predicate::str::contains("cache none"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rules_add_resolves_the_mixed_grammar_with_one_get_per_kind() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_lists(&server).await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "policy",
+                    "rules",
+                    "add",
+                    "shop-prod",
+                    "--provider",
+                    "role=web",
+                    "--provider",
+                    "group:All prod envs",
+                    "--consumer",
+                    "iplist:Corp",
+                    "--consumer",
+                    "!iplist:Any (0.0.0.0/0 and ::/0)",
+                    "--consumer",
+                    "all",
+                    "--service",
+                    "PostgreSQL",
+                    "--service",
+                    "443/tcp",
+                    "--service",
+                    "8000-8099/tcp",
+                    "--service",
+                    "/orgs/5/sec_policy/active/services/32",
+                    "--description",
+                    "web tier",
+                    "--unscoped-consumers",
+                    "--resolve-providers-as",
+                    "workloads",
+                    "--dry-run",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["method"], "POST");
+        assert_eq!(out["data"]["path"], format!("{RS_100}/sec_rules"));
+        assert_eq!(
+            out["data"]["body"],
+            json!({
+                "enabled": true, "description": "web tier",
+                "providers": [
+                    {"label": {"href": "/orgs/5/labels/1"}},
+                    {"label_group": {"href": "/orgs/5/sec_policy/draft/label_groups/10"}}
+                ],
+                "consumers": [
+                    {"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/21"}},
+                    {"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/20"}, "exclusion": true},
+                    {"actors": "ams"}
+                ],
+                "ingress_services": [
+                    {"href": "/orgs/5/sec_policy/draft/services/31"},
+                    {"port": 443, "proto": 6},
+                    {"port": 8000, "to_port": 8099, "proto": 6},
+                    {"href": "/orgs/5/sec_policy/draft/services/32"}
+                ],
+                "unscoped_consumers": true,
+                "resolve_labels_as": {"providers": ["workloads"], "consumers": ["workloads"]}
+            })
+        );
+        for p in [
+            "/orgs/5/sec_policy/draft/rule_sets",
+            "/orgs/5/labels",
+            "/orgs/5/sec_policy/draft/label_groups",
+            "/orgs/5/sec_policy/draft/ip_lists",
+            "/orgs/5/sec_policy/draft/services",
+        ] {
+            assert_eq!(gets(&server, p).await, 1, "{p}");
+        }
+        assert_eq!(server.received_requests().await.unwrap().len(), 5);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rules_add_workload_actor_uses_find_workload() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/workloads"))
+            .and(query_param("max_results", "500"))
+            .and(query_param("hostname", "HOST-1.example"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(fixture_workloads()))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "policy",
+                    "rules",
+                    "add",
+                    RS_100,
+                    "--provider",
+                    "workload:HOST-1.example",
+                    "--consumer",
+                    "all",
+                    "--service",
+                    "icmp",
+                    "--dry-run",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(
+            out["data"]["body"],
+            json!({
+                "enabled": true,
+                "providers": [{"workload": {"href": "/orgs/5/workloads/aaaa-1"}}],
+                "consumers": [{"actors": "ams"}],
+                "ingress_services": [{"proto": 1}],
+                "unscoped_consumers": false
+            })
+        );
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rules_add_errors_before_any_request() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        let a = writer(&server, state.path())
+            .args([
+                "policy",
+                "rules",
+                "add",
+                "shop-prod",
+                "--consumer",
+                "all",
+                "--service",
+                "443/tcp",
+                "--dry-run",
+            ])
+            .assert()
+            .code(2);
+        assert_eq!(stderr_json(&a)["error"]["kind"], "invalid");
+        assert_eq!(
+            stderr_json(&a)["error"]["message"],
+            "a rule needs at least one provider"
+        );
+        for (args, msg) in [
+            (["--provider", "!all"], "all cannot be excluded"),
+            (["--provider", "web"], "is not an actor"),
+            (["--provider", "!workload:x"], "can be excluded"),
+        ] {
+            let a = writer(&server, state.path())
+                .args(["policy", "rules", "add", RS_100])
+                .args(args)
+                .args(["--consumer", "all", "--service", "443/tcp", "--dry-run"])
+                .assert()
+                .code(2);
+            let m = stderr_json(&a)["error"]["message"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            assert!(m.contains(msg), "{args:?}: {m}");
+        }
+        let a = writer(&server, state.path())
+            .args([
+                "policy",
+                "rules",
+                "add",
+                RS_100,
+                "--provider",
+                "all",
+                "--consumer",
+                "all",
+                "--service",
+                "443",
+                "--dry-run",
+            ])
+            .assert()
+            .code(2);
+        assert!(
+            stderr_json(&a)["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("bare number is ambiguous")
+        );
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rules_add_unknown_names_list_known_values_and_similar() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_lists(&server).await;
+        let a = writer(&server, state.path())
+            .args([
+                "policy",
+                "rules",
+                "add",
+                RS_100,
+                "--provider",
+                "role=we",
+                "--consumer",
+                "all",
+                "--service",
+                "443/tcp",
+                "--dry-run",
+            ])
+            .assert()
+            .code(2);
+        assert_eq!(
+            stderr_json(&a)["error"]["message"],
+            "unknown label role=we; known values for role: db, web; similar: web"
+        );
+        let a = writer(&server, state.path())
+            .args([
+                "policy",
+                "rules",
+                "add",
+                RS_100,
+                "--provider",
+                "all",
+                "--consumer",
+                "iplist:corp",
+                "--service",
+                "443/tcp",
+                "--dry-run",
+            ])
+            .assert()
+            .code(2);
+        assert_eq!(
+            stderr_json(&a)["error"]["message"],
+            r#"no IP list named "corp"; similar: Corp"#
+        );
+        assert!(
+            server
+                .received_requests()
+                .await
+                .unwrap()
+                .iter()
+                .all(|r| r.method.as_str() == "GET")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rules_add_sends_once_and_reports_the_nested_href() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        let body = json!({
+            "enabled": true,
+            "providers": [{"actors": "ams"}],
+            "consumers": [{"actors": "ams"}],
+            "ingress_services": [{"port": 443, "proto": 6}],
+            "unscoped_consumers": false
+        });
+        let mut created = body.clone();
+        created["href"] = json!(format!("{RS_100}/sec_rules/9"));
+        Mock::given(method("POST"))
+            .and(path(format!("/api/v2{RS_100}/sec_rules")))
+            .and(body_json(body))
+            .respond_with(ResponseTemplate::new(201).set_body_json(created))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let a = writer(&server, state.path())
+            .args([
+                "policy",
+                "rules",
+                "add",
+                RS_100,
+                "--provider",
+                "all",
+                "--consumer",
+                "all",
+                "--service",
+                "443/tcp",
+                "--yes",
+            ])
+            .assert()
+            .success();
+        assert_no_secret(&a);
+        let out = stdout_json(a);
+        assert_eq!(out["data"]["href"], format!("{RS_100}/sec_rules/9"));
+        assert_eq!(out["data"]["pending"], true);
+        assert_eq!(out["meta"]["write"]["method"], "POST");
+        assert_eq!(out["meta"]["write"]["status"], 201);
+        let lines = audit_lines(state.path());
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0]["path"], format!("{RS_100}/sec_rules"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rules_update_by_href_adds_and_removes() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_get(&server, RULE_2, fixture_rule_sets()[0]["rules"][1].clone()).await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "policy",
+                    "rules",
+                    "update",
+                    "/orgs/5/sec_policy/active/rule_sets/100/sec_rules/2",
+                    "--add-consumer",
+                    "all",
+                    "--remove-service",
+                    "8000-8099/tcp",
+                    "--scoped-consumers",
+                    "--dry-run",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["method"], "PUT");
+        assert_eq!(out["data"]["path"], RULE_2);
+        assert_eq!(
+            out["data"]["body"],
+            json!({
+                "consumers": [
+                    {"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/21"}},
+                    {"actors": "ams"}
+                ],
+                "ingress_services": [{"port": 443, "proto": 6}],
+                "unscoped_consumers": false
+            })
+        );
+        assert_eq!(
+            server.received_requests().await.unwrap().len(),
+            1,
+            "the rule GET only"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rules_update_refuses_the_wrong_href_shape_before_any_request() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        for href in [
+            RS_100,
+            DENY_8,
+            "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/../2",
+        ] {
+            let a = writer(&server, state.path())
+                .args([
+                    "policy",
+                    "rules",
+                    "update",
+                    href,
+                    "--description",
+                    "x",
+                    "--dry-run",
+                ])
+                .assert()
+                .code(2);
+            let e = stderr_json(&a);
+            assert_eq!(e["error"]["kind"], "invalid", "{href}");
+            assert!(
+                e["error"]["message"].as_str().unwrap().contains(
+                    "expected /orgs/<org>/sec_policy/draft/rule_sets/<id>/sec_rules/<id>"
+                ),
+                "{href}: {e}"
+            );
+        }
+        let a = writer(&server, state.path())
+            .args(["policy", "rules", "update", RULE_2, "--dry-run"])
+            .assert()
+            .code(2);
+        assert!(
+            stderr_json(&a)["error"]["message"]
+                .as_str()
+                .unwrap()
+                .starts_with("nothing to change")
+        );
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rules_update_removing_an_absent_consumer_is_exit_2() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_get(&server, RULE_2, fixture_rule_sets()[0]["rules"][1].clone()).await;
+        let a = writer(&server, state.path())
+            .args([
+                "policy",
+                "rules",
+                "update",
+                RULE_2,
+                "--remove-consumer",
+                "all",
+                "--yes",
+            ])
+            .assert()
+            .code(2);
+        assert_eq!(
+            stderr_json(&a)["error"]["message"],
+            "all is not among the consumers"
+        );
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+        assert!(audit_lines(state.path()).is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn deny_rules_add_update_delete_and_rule_delete() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_lists(&server).await;
+        let deny: Value =
+            serde_json::from_str(include_str!("../../../fixtures/deny_rules.json")).unwrap();
+        mount_get(&server, DENY_8, deny[1].clone()).await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "policy",
+                    "deny-rules",
+                    "add",
+                    RS_100,
+                    "--provider",
+                    "all",
+                    "--consumer",
+                    "iplist:Corp",
+                    "--service",
+                    "22/tcp",
+                    "--override",
+                    "--dry-run",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["path"], format!("{RS_100}/deny_rules"));
+        assert_eq!(
+            out["data"]["body"],
+            json!({
+                "enabled": true,
+                "providers": [{"actors": "ams"}],
+                "consumers": [{"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/21"}}],
+                "ingress_services": [{"port": 22, "proto": 6}],
+                "override": true
+            })
+        );
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "policy",
+                    "deny-rules",
+                    "update",
+                    DENY_8,
+                    "--no-override",
+                    "--dry-run",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["body"], json!({"override": false}));
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args(["policy", "deny-rules", "delete", DENY_8, "--dry-run"])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["method"], "DELETE");
+        assert_eq!(out["data"]["path"], DENY_8);
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args(["policy", "rules", "delete", RULE_2, "--dry-run"])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["method"], "DELETE");
+        assert_eq!(out["data"]["path"], RULE_2);
+        writer(&server, state.path())
+            .args(["policy", "deny-rules", "delete", RULE_2, "--dry-run"])
+            .assert()
+            .code(2);
+        writer(&server, state.path())
+            .args([
+                "policy",
+                "deny-rules",
+                "update",
+                DENY_8,
+                "--override",
+                "--no-override",
+                "--dry-run",
+            ])
+            .assert()
+            .code(2);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rules_listing_still_needs_a_ruleset() {
+        let server = MockServer::start().await;
+        let a = cmd(&server)
+            .args(["--json", "policy", "rules"])
+            .assert()
+            .code(2);
+        assert!(
+            stderr_json(&a)["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("needs a ruleset name or href")
+        );
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn iplist_only_tokens_read_neither_services_nor_labels() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_lists(&server).await;
+        writer(&server, state.path())
+            .args([
+                "policy",
+                "rules",
+                "add",
+                RS_100,
+                "--provider",
+                "iplist:Corp",
+                "--consumer",
+                "!iplist:Corp",
+                "--service",
+                "443/tcp",
+                "--dry-run",
+            ])
+            .assert()
+            .success();
+        assert_eq!(gets(&server, "/orgs/5/sec_policy/draft/ip_lists").await, 1);
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn port_href_and_all_tokens_cost_no_list_get() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_lists(&server).await;
+        writer(&server, state.path())
+            .args([
+                "policy",
+                "rules",
+                "add",
+                RS_100,
+                "--provider",
+                "all",
+                "--provider",
+                "/orgs/5/labels/1",
+                "--consumer",
+                "all",
+                "--service",
+                "443/tcp",
+                "--service",
+                "8000-8099/udp",
+                "--service",
+                "/orgs/5/sec_policy/active/services/32",
+                "--dry-run",
+            ])
+            .assert()
+            .success();
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_parse_failure_after_a_valid_token_sends_nothing() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_lists(&server).await;
+        writer(&server, state.path())
+            .args([
+                "policy",
+                "rules",
+                "add",
+                "shop-prod",
+                "--provider",
+                "role=web",
+                "--provider",
+                "web",
+                "--consumer",
+                "all",
+                "--service",
+                "443/tcp",
+                "--dry-run",
+            ])
+            .assert()
+            .code(2);
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn group_token_reads_only_label_groups() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_lists(&server).await;
+        writer(&server, state.path())
+            .args([
+                "policy",
+                "rules",
+                "add",
+                RS_100,
+                "--provider",
+                "group:All prod envs",
+                "--consumer",
+                "all",
+                "--service",
+                "443/tcp",
+                "--dry-run",
+            ])
+            .assert()
+            .success();
+        assert_eq!(
+            gets(&server, "/orgs/5/sec_policy/draft/label_groups").await,
+            1
+        );
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn two_label_tokens_make_one_labels_get() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_lists(&server).await;
+        writer(&server, state.path())
+            .args([
+                "policy",
+                "rules",
+                "add",
+                RS_100,
+                "--provider",
+                "role=web",
+                "--consumer",
+                "app=shop",
+                "--service",
+                "443/tcp",
+                "--dry-run",
+            ])
+            .assert()
+            .success();
+        assert_eq!(gets(&server, "/orgs/5/labels").await, 1);
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_noop_ruleset_update_is_skipped() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_get(&server, RS_100, fixture_rule_sets()[0].clone()).await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "policy",
+                    "rulesets",
+                    "update",
+                    RS_100,
+                    "--enabled",
+                    "--dry-run",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["skipped"], true);
+    }
+}
