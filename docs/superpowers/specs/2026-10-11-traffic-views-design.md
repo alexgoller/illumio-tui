@@ -2,7 +2,7 @@
 
 Date: 2026-10-11. Status: approved in chat by Alex ("looks right, go ahead").
 Issue: https://github.com/alexgoller/illumio-tui/issues/6. Also folds in issue #5
-(screen order) because both touch the tab row.
+(IP lists under Objects) because both touch the tab row.
 
 ## 1. Intent
 
@@ -47,14 +47,19 @@ What Alex said, verbatim where it matters:
 - Commit trailer: `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
 - Smokes against demo100 are read-only and never press `y`.
 
-## 3. Screen order (issue #5)
+## 3. IP lists under Objects (issue #5)
 
-`Screen::ALL` and the number keys become: `1` Traffic, `2` Policy,
-`3` Objects, `4` IP lists, `5` Workloads, `6` Events. `:` aliases are
-unchanged. Tab row, help overlay, status hints, README, architecture doc and
-index.html follow. Every screen snapshot re-records; the diff must be the
-tab row only. Workloads was not named by Alex; it sits after IP lists so the
-policy objects stay together. Pure reorder.
+Alex, after the first reorder ask: "we should move IP lists under Services".
+`Screen::IpLists` goes away; IP lists become the fourth tab of the Objects
+screen after Services (Labels, Label groups, Services, IP lists), keeping the
+Plan 7 table (name, size, ranges, FQDNs, used by), the detail (size, used
+by, ranges, FQDNs, capped), the editing keys and the cache-aware load on
+first visit. Screens are five again: `1` Traffic, `2` Policy, `3` Objects,
+`4` Workloads, `5` Events. `:iplists` / `:ip` open Objects on that tab. Tab
+row, help overlay, status hints, README, architecture doc and index.html
+follow; every screen snapshot re-records with the tab row as the only
+change, and the IP lists snapshots move to Objects. No behaviour change in
+the IP lists table, detail, sizes or writes.
 
 ## 4. Display label keys
 
