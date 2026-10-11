@@ -1383,11 +1383,11 @@ async fn pending_diff_fetches_the_active_list_once() {
         Overlay::Diff { diff, scroll } => {
             assert_eq!(diff.name, "Corp");
             assert_eq!(diff.change, DiffKind::Created);
-            // Every line is added, except the note that its deny rules were not fetched.
+            // Every line is added, except a note that deny rules were not compared.
             assert!(
                 diff.lines
                     .iter()
-                    .all(|l| l.sign == Sign::Added || l.text.starts_with("deny rules: not fetched")),
+                    .all(|l| l.sign == Sign::Added || l.text.starts_with("deny rules not compared")),
                 "{diff:?}"
             );
             assert_eq!(*scroll, 0);
@@ -1799,11 +1799,11 @@ async fn ruleset_diff_fetches_the_active_rulesets_once() {
         Overlay::Diff { diff, scroll } => {
             assert_eq!(diff.name, "Global-Infra");
             assert_eq!(diff.change, DiffKind::Created);
-            // Every line is added, except the note that its deny rules were not fetched.
+            // Every line is added, except a note that deny rules were not compared.
             assert!(
                 diff.lines
                     .iter()
-                    .all(|l| l.sign == Sign::Added || l.text.starts_with("deny rules: not fetched")),
+                    .all(|l| l.sign == Sign::Added || l.text.starts_with("deny rules not compared")),
                 "{diff:?}"
             );
             assert!(

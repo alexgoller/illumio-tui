@@ -349,26 +349,62 @@ fn rules(out: &mut Vec<DiffLine>, active: &[(String, String)], draft: &[(String,
     }
 }
 
+/// The deny rules one side of a ruleset diff has.
+#[derive(Debug, Clone, Copy)]
+pub enum DenySide<'a> {
+    /// These, possibly none.
+    Known(&'a [DenyRule]),
+    /// Not in the payload and not fetched: nothing to compare.
+    Unfetched,
+}
+
+impl<'a> DenySide<'a> {
+    /// `rs`'s inline deny rules when it has some; else `fallback` (fetched
+    /// separately); else none when its list inlines deny rules elsewhere (the
+    /// PCE then inlines them for every ruleset, so empty means zero); else
+    /// unfetched.
+    pub fn of(rs: &'a RuleSet, list_inlines: bool, fallback: Option<&'a [DenyRule]>) -> Self {
+        if !rs.deny_rules.is_empty() {
+            DenySide::Known(&rs.deny_rules)
+        } else if let Some(f) = fallback {
+            DenySide::Known(f)
+        } else if list_inlines {
+            DenySide::Known(&[])
+        } else {
+            DenySide::Unfetched
+        }
+    }
+}
+
+/// Whether any ruleset of a list payload carries inline deny rules.
+pub fn inlines_deny(list: &[RuleSet]) -> bool {
+    list.iter().any(|r| !r.deny_rules.is_empty())
+}
+
 /// A ruleset's name, description, state and scopes (`-`/`+` when they
-/// differ), then one line per rule, matched by href. A side whose inline
-/// deny rules are empty has no deny rules to compare (a list payload often
-/// omits them): a note says so, and the other side's deny rules show as
-/// unchanged rather than added or removed.
+/// differ), then one line per rule, matched by href. Each side's deny rules
+/// are its inline list, or unfetched when that list is empty.
 pub fn diff_rule_set(
     active: Option<&RuleSet>,
     draft: Option<&RuleSet>,
     idx: &NameIndex,
 ) -> Vec<DiffLine> {
-    diff_rule_set_with(active, draft, idx, None)
+    diff_rule_set_with(active, draft, idx, inline_side(active), inline_side(draft))
 }
 
-/// [`diff_rule_set`] with the draft deny rules fetched separately, used when
-/// the draft ruleset's inline list is empty.
+fn inline_side(r: Option<&RuleSet>) -> DenySide<'_> {
+    r.map_or(DenySide::Unfetched, |r| DenySide::of(r, false, None))
+}
+
+/// [`diff_rule_set`] with each side's deny rules given. When a present side's
+/// deny rules are unfetched they are not compared: the other side's show as
+/// unchanged under one note, never as added or removed.
 pub fn diff_rule_set_with(
     active: Option<&RuleSet>,
     draft: Option<&RuleSet>,
     idx: &NameIndex,
-    draft_fallback_deny: Option<&[DenyRule]>,
+    active_deny: DenySide,
+    draft_deny: DenySide,
 ) -> Vec<DiffLine> {
     let mut out = Vec::new();
     field(
@@ -393,46 +429,52 @@ pub fn diff_rule_set_with(
     let (a, d) = (active.map(scopes), draft.map(scopes));
     field(&mut out, "scopes", a.as_deref(), d.as_deref());
 
-    let mut a_rules = active.map(|r| allow_lines(r, idx)).unwrap_or_default();
-    let mut d_rules = draft.map(|r| allow_lines(r, idx)).unwrap_or_default();
-    // The deny rules each side really has; `None` when it was not fetched.
-    let a_deny = active
-        .filter(|r| !r.deny_rules.is_empty())
-        .map(|r| deny_lines(&r.deny_rules, idx));
-    let d_deny = draft.and_then(|r| {
-        if !r.deny_rules.is_empty() {
-            Some(deny_lines(&r.deny_rules, idx))
-        } else {
-            draft_fallback_deny.map(|f| deny_lines(f, idx))
-        }
-    });
-    let mut notes = Vec::new();
-    for (side, present, deny) in [
-        ("active", active.is_some(), &a_deny),
-        ("draft", draft.is_some(), &d_deny),
-    ] {
-        if present && deny.is_none() {
-            notes.push(format!(
-                "deny rules: not fetched for {side} (Enter on the ruleset in the Policy screen loads them)"
-            ));
+    let a_rules = active.map(|r| allow_lines(r, idx)).unwrap_or_default();
+    let d_rules = draft.map(|r| allow_lines(r, idx)).unwrap_or_default();
+    rules(&mut out, &a_rules, &d_rules);
+
+    // A missing side (create, delete) has no deny rules; a present side's
+    // are known or unfetched.
+    let known = |present: bool, side: DenySide| match (present, side) {
+        (false, _) => Some(Vec::new()),
+        (true, DenySide::Known(d)) => Some(deny_lines(d, idx)),
+        (true, DenySide::Unfetched) => None,
+    };
+    let a_deny = known(active.is_some(), active_deny);
+    let d_deny = known(draft.is_some(), draft_deny);
+    match (a_deny, d_deny) {
+        (Some(a), Some(d)) => rules(&mut out, &a, &d),
+        (a, d) => {
+            let unfetched: Vec<&str> = [("active", a.is_none()), ("draft", d.is_none())]
+                .into_iter()
+                .filter_map(|(side, missing)| missing.then_some(side))
+                .collect();
+            // Only the draft deny rules can be loaded from the Policy screen.
+            let advice = if d.is_none() {
+                "; Enter on the ruleset in the Policy screen loads them"
+            } else {
+                ""
+            };
+            let shown = d.or(a).unwrap_or_default();
+            out.extend(shown.into_iter().map(|(_, text)| DiffLine {
+                sign: Sign::Same,
+                text,
+            }));
+            out.push(DiffLine {
+                sign: Sign::Same,
+                text: format!(
+                    "deny rules not compared ({} not fetched{advice})",
+                    unfetched.join(" and ")
+                ),
+            });
         }
     }
-    // An unfetched side mirrors the other side's deny rules: all unchanged.
-    let (a_deny, d_deny) = match (a_deny, d_deny, active.is_some(), draft.is_some()) {
-        (None, d, true, true) => (d.clone(), d),
-        (a, None, true, true) => (a.clone(), a),
-        (a, d, _, _) => (a, d),
-    };
-    a_rules.extend(a_deny.unwrap_or_default());
-    d_rules.extend(d_deny.unwrap_or_default());
-    rules(&mut out, &a_rules, &d_rules);
-    out.extend(notes.into_iter().map(|text| DiffLine {
-        sign: Sign::Same,
-        text,
-    }));
     out
 }
 
+/// The diff of one pending ruleset. Whether each list payload inlines deny
+/// rules decides what an empty inline list means (see [`DenySide::of`]);
+/// `draft_fallback_deny` is the draft ruleset's deny rules fetched separately.
 pub fn rule_set_diff_for(
     change: &PendingChange,
     draft: &[RuleSet],
@@ -440,8 +482,13 @@ pub fn rule_set_diff_for(
     idx: &NameIndex,
     draft_fallback_deny: Option<&[DenyRule]>,
 ) -> ObjectDiff {
+    let (a_inl, d_inl) = (inlines_deny(active), inlines_deny(draft));
     diff_for(change, draft, active, |a, d| {
-        diff_rule_set_with(a, d, idx, draft_fallback_deny)
+        let a_deny = a.map_or(DenySide::Unfetched, |r| DenySide::of(r, a_inl, None));
+        let d_deny = d.map_or(DenySide::Unfetched, |r| {
+            DenySide::of(r, d_inl, draft_fallback_deny)
+        });
+        diff_rule_set_with(a, d, idx, a_deny, d_deny)
     })
 }
 
@@ -636,15 +683,13 @@ mod tests {
                 line(Sign::Added, "enabled: no"),
                 line(Sign::Added, "scopes: All"),
                 line(Sign::Added, "allow all ← group:All prod envs All Services"),
-                line(
-                    Sign::Same,
-                    "deny rules: not fetched for draft (Enter on the ruleset in the Policy screen loads them)"
-                ),
             ]
         );
+        // Shop-Prod inlines its deny rules, so Global-Infra's empty list
+        // means it has none: nothing to note.
     }
 
-    const NOT_FETCHED: &str = "deny rules: not fetched for ";
+    const NOT_COMPARED: &str = "deny rules not compared";
 
     fn deny(href: &str, port: u16) -> DenyRule {
         serde_json::from_value(json!({
@@ -664,18 +709,21 @@ mod tests {
             "/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/9",
             23,
         )];
-        let lines = diff_rule_set_with(
-            Some(&active),
-            Some(&draft),
+        // The draft list inlines no deny rules: only the fallback knows them.
+        let lines = rule_set_diff_for(
+            &update_of(&draft.href),
+            std::slice::from_ref(&draft),
+            std::slice::from_ref(&active),
             &fixture_index(),
             Some(&fetched),
-        );
+        )
+        .lines;
         assert!(
             lines.contains(&line(Sign::Added, "deny all ← all 23/tcp")),
             "{lines:?}"
         );
         assert!(
-            !lines.iter().any(|l| l.text.starts_with(NOT_FETCHED)),
+            !lines.iter().any(|l| l.text.starts_with(NOT_COMPARED)),
             "{lines:?}"
         );
         // The active deny rules the draft no longer has still show as removed.
@@ -683,6 +731,155 @@ mod tests {
             lines
                 .iter()
                 .any(|l| l.sign == Sign::Removed && l.text.starts_with("deny"))
+        );
+    }
+
+    fn update_of(href: &str) -> PendingChange {
+        PendingChange {
+            href: href.into(),
+            change_type: "update".into(),
+            name: Some("Shop-Prod".into()),
+            object_type: "rule_sets".into(),
+        }
+    }
+
+    /// Another ruleset of the same list with one inline deny rule: the list
+    /// payload inlines deny rules, so an empty inline list means none.
+    fn inlining(scope: &str) -> RuleSet {
+        let mut o = crate::tui::test_support::rule_set_diff_fixture().0;
+        o.href = format!("/orgs/5/sec_policy/{scope}/rule_sets/999");
+        o.deny_rules = vec![deny(
+            &format!("/orgs/5/sec_policy/{scope}/rule_sets/999/deny_rules/1"),
+            25,
+        )];
+        o
+    }
+
+    #[test]
+    fn a_first_deny_rule_is_added_when_the_active_list_inlines_deny_rules() {
+        use crate::tui::test_support::{fixture_index, rule_set_diff_fixture};
+        let (mut active, mut draft) = rule_set_diff_fixture();
+        active.href = "/orgs/5/sec_policy/active/rule_sets/100".into();
+        active.deny_rules.clear();
+        draft.deny_rules = vec![deny(
+            "/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/9",
+            23,
+        )];
+        let d = rule_set_diff_for(
+            &update_of(&draft.href),
+            std::slice::from_ref(&draft),
+            &[active, inlining("active")],
+            &fixture_index(),
+            None,
+        );
+        assert!(
+            d.lines
+                .contains(&line(Sign::Added, "deny all ← all 23/tcp")),
+            "{:?}",
+            d.lines
+        );
+        assert!(
+            !d.lines.iter().any(|l| l.text.starts_with("deny rules")),
+            "{:?}",
+            d.lines
+        );
+    }
+
+    #[test]
+    fn deleting_the_last_deny_rule_is_removed_when_the_draft_list_inlines_deny_rules() {
+        use crate::tui::test_support::{fixture_index, rule_set_diff_fixture};
+        let (mut active, mut draft) = rule_set_diff_fixture();
+        active.href = "/orgs/5/sec_policy/active/rule_sets/100".into();
+        draft.deny_rules.clear();
+        let d = rule_set_diff_for(
+            &update_of(&draft.href),
+            &[draft.clone(), inlining("draft")],
+            &[active],
+            &fixture_index(),
+            None,
+        );
+        for text in [
+            "deny all ← iplist:Any (0.0.0.0/0 and ::/0) 23/tcp",
+            "override_deny role=db ← all 22/tcp",
+        ] {
+            assert!(
+                d.lines.contains(&line(Sign::Removed, text)),
+                "{text}: {:?}",
+                d.lines
+            );
+        }
+        assert!(
+            !d.lines.iter().any(|l| l.text.starts_with("deny rules")),
+            "{:?}",
+            d.lines
+        );
+    }
+
+    #[test]
+    fn a_side_that_inlines_no_deny_rules_is_not_compared() {
+        use crate::tui::test_support::{fixture_index, rule_set_diff_fixture};
+        let (mut active, mut draft) = rule_set_diff_fixture();
+        active.href = "/orgs/5/sec_policy/active/rule_sets/100".into();
+        draft.deny_rules.clear();
+        // The draft list inlines no deny rules anywhere and none were fetched:
+        // the active deny rules show unchanged, under one note.
+        let d = rule_set_diff_for(
+            &update_of(&draft.href),
+            std::slice::from_ref(&draft),
+            std::slice::from_ref(&active),
+            &fixture_index(),
+            None,
+        );
+        assert!(
+            d.lines
+                .contains(&line(Sign::Same, "override_deny role=db ← all 22/tcp")),
+            "{:?}",
+            d.lines
+        );
+        assert!(
+            !d.lines
+                .iter()
+                .any(|l| l.sign != Sign::Same && l.text.starts_with("deny")
+                    || l.sign != Sign::Same && l.text.starts_with("override_deny")),
+            "{:?}",
+            d.lines
+        );
+        let notes: Vec<_> = d
+            .lines
+            .iter()
+            .filter(|l| l.text.starts_with("deny rules"))
+            .collect();
+        assert_eq!(
+            notes,
+            vec![&line(
+                Sign::Same,
+                "deny rules not compared (draft not fetched; Enter on the ruleset in the Policy screen loads them)"
+            )]
+        );
+        // The active side unfetched: no advice, the Policy screen loads draft only.
+        let (mut active, draft) = rule_set_diff_fixture();
+        active.href = "/orgs/5/sec_policy/active/rule_sets/100".into();
+        active.deny_rules.clear();
+        let d = rule_set_diff_for(
+            &update_of(&draft.href),
+            std::slice::from_ref(&draft),
+            std::slice::from_ref(&active),
+            &fixture_index(),
+            None,
+        );
+        assert!(
+            d.lines
+                .contains(&line(Sign::Same, "override_deny role=db ← all 22/tcp")),
+            "{:?}",
+            d.lines
+        );
+        assert!(
+            d.lines.contains(&line(
+                Sign::Same,
+                "deny rules not compared (active not fetched)"
+            )),
+            "{:?}",
+            d.lines
         );
     }
 
@@ -695,10 +892,15 @@ mod tests {
         let lines = diff_rule_set(Some(&active), Some(&draft), &fixture_index());
         let notes: Vec<_> = lines
             .iter()
-            .filter(|l| l.text.starts_with(NOT_FETCHED))
+            .filter(|l| l.text.starts_with(NOT_COMPARED))
             .collect();
-        assert_eq!(notes.len(), 2, "{lines:?}");
-        assert!(notes.iter().all(|l| l.sign == Sign::Same));
+        assert_eq!(
+            notes,
+            vec![&line(
+                Sign::Same,
+                "deny rules not compared (active and draft not fetched; Enter on the ruleset in the Policy screen loads them)"
+            )]
+        );
         assert!(
             !lines
                 .iter()
@@ -714,17 +916,16 @@ mod tests {
             Some(&active),
             Some(&draft),
             &fixture_index(),
-            Some(&fetched),
+            DenySide::Unfetched,
+            DenySide::Known(&fetched),
         );
+        assert!(lines.contains(&line(Sign::Same, "deny all ← all 23/tcp")));
         assert!(
-            lines
-                .iter()
-                .any(|l| l.text.starts_with("deny all ← all 23/tcp") && l.sign == Sign::Same)
-        );
-        assert!(
-            lines
-                .iter()
-                .any(|l| l.text.starts_with("deny rules: not fetched for active"))
+            lines.contains(&line(
+                Sign::Same,
+                "deny rules not compared (active not fetched)"
+            )),
+            "{lines:?}"
         );
     }
 }
