@@ -1,11 +1,13 @@
 //! Rule impact as the TUI shows it: the rules pane's `P/C` cells and the
 //! rule detail's impact rows. Computed from the loaded rulesets, the name
-//! index and the cached workloads; never a request (`i` asks for the
-//! workloads, in `update.rs`).
+//! index and the cached workloads when the rules pane is built (once per
+//! row, never per draw); never a request (`i` asks for the workloads, in
+//! `update.rs`).
 use crate::tui::model::{Model, PolicyState, WorkloadsState};
 use pce::NameIndex;
-use pce::impact::{Impact, ImpactInputs, RuleActors, rule_impact};
+use pce::impact::{Impact, ImpactInputs, RuleActors, rule_impact_with};
 use pce::models::{Actor, Workload};
+use std::collections::HashSet;
 
 /// What the impact says while the workloads are not cached.
 pub const PRESS_I: &str = "press i to load workloads (1 request)";
@@ -41,38 +43,29 @@ pub fn source(w: &WorkloadsState) -> Source<'_> {
 }
 
 /// The impact of a rule with these scopes and actors over `workloads`.
-pub fn compute(
+/// `labels` is `pce::workload_labels(workloads)`, built once by a caller
+/// that evaluates many rules over the same list.
+pub fn compute_with(
     scopes: &[Vec<Actor>],
     actors: &RuleActors,
     idx: &NameIndex,
     workloads: &[Workload],
     truncated: bool,
+    labels: &[HashSet<&str>],
 ) -> Impact {
     let inputs = ImpactInputs {
         workloads,
         index: idx,
         truncated,
     };
-    rule_impact(
+    rule_impact_with(
         scopes,
         &actors.providers,
         &actors.consumers,
         actors.unscoped_consumers,
         &inputs,
+        labels,
     )
-}
-
-/// A rules-pane `P/C` cell: `12/3`, or `-` without cached workloads.
-pub fn pc_cell(
-    scopes: &[Vec<Actor>],
-    actors: &RuleActors,
-    idx: &NameIndex,
-    workloads: Option<(&[Workload], bool)>,
-) -> String {
-    match workloads {
-        Some((w, truncated)) => compute(scopes, actors, idx, w, truncated).pc(),
-        None => "-".to_string(),
-    }
 }
 
 /// The same ruleset in either scope (an active href folds to draft).
@@ -127,23 +120,26 @@ pub(crate) fn waiting_text(s: Source<'_>) -> String {
 }
 
 /// The rule detail's impact rows, `(label, text)`: the counts and one row
-/// per IP list, or what it takes to get them.
+/// per IP list, or what it takes to get them. Reads the impact stored on the
+/// rules-pane row (rebuilt when the workloads or rulesets load): no
+/// evaluation here, so drawing the overlay stays cheap.
 pub fn rule_detail_rows(model: &Model, href: &str) -> Vec<(&'static str, String)> {
-    let (workloads, truncated) = match source(&model.workloads) {
-        Source::Ready {
-            workloads,
-            truncated,
-        } => (workloads, truncated),
-        waiting => return vec![("impact", waiting_text(waiting))],
-    };
-    let (Some(idx), Some((scopes, actors))) = (model.index(), loaded_rule(&model.policy, href))
+    if !matches!(source(&model.workloads), Source::Ready { .. }) {
+        return vec![("impact", waiting_text(source(&model.workloads)))];
+    }
+    let Some(impact) = model
+        .policy
+        .rules
+        .rows()
+        .iter()
+        .find(|r| r.view.href == href)
+        .and_then(|r| r.impact.as_ref())
     else {
         return vec![("impact", "rule not loaded".to_string())];
     };
-    let impact = compute(scopes, &actors, idx, workloads, truncated);
     let mut rows = vec![("impact", impact.summary())];
     rows.extend(
-        ip_list_lines(&impact)
+        ip_list_lines(impact)
             .into_iter()
             .enumerate()
             .map(|(i, l)| (if i == 0 { "ip lists" } else { "" }, l)),
@@ -194,6 +190,34 @@ mod tests {
             rule_detail_rows(&m, "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/99"),
             vec![row("impact", "rule not loaded")]
         );
+    }
+
+    #[test]
+    fn the_detail_reads_the_stored_impact_until_the_rules_are_rebuilt() {
+        let mut m = with_workloads(model_with_policy());
+        let warm = rule_detail_rows(&m, RULE_2);
+        assert_eq!(warm[0].1, "1 provider · 0 consumers");
+        m.workloads.raw.clear();
+        assert_eq!(rule_detail_rows(&m, RULE_2), warm, "no evaluation on draw");
+        m.rebuild_rules();
+        assert_eq!(
+            rule_detail_rows(&m, RULE_2),
+            vec![
+                row("impact", "0 providers · 0 consumers"),
+                row("ip lists", "Corp: 65.5K addresses")
+            ]
+        );
+    }
+
+    #[test]
+    fn the_p_c_column_sorts_numerically_with_dashes_last() {
+        let m = with_workloads(model_with_policy());
+        let rows = m.policy.rules.rows();
+        let key = |i: usize| rows[i].pc_key();
+        // 1/2, 1/1, 1/0, 2/0
+        assert!(key(2) < key(1) && key(1) < key(0) && key(0) < key(3));
+        let cold = model_with_policy();
+        assert!(cold.policy.rules.rows()[0].pc_key() > key(3));
     }
 
     #[test]

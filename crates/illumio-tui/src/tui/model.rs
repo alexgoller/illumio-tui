@@ -891,13 +891,26 @@ pub fn ruleset_columns() -> Vec<Column<RuleSetView>> {
     ]
 }
 
-/// A rules-pane row: the resolved rule and its `P/C` cell (`12/3`, `-`
-/// until the workloads are cached). The cell is computed when the rows are
-/// built: a column's `fn` pointer cannot see the workload cache.
+/// A rules-pane row: the resolved rule, its impact over the cached workloads
+/// (`None` until they are cached) and the `P/C` cell made from it (`12/3`,
+/// `-`). Both are computed once, when the rows are built: a column's `fn`
+/// pointer cannot see the workload cache, and the rule detail reads the
+/// stored impact instead of evaluating it on every draw.
 #[derive(Debug, Clone)]
 pub struct RuleRow {
     pub view: RuleView,
+    pub impact: Option<pce::Impact>,
     pub pc: String,
+}
+
+impl RuleRow {
+    /// Sort key of the `P/C` column: providers, then consumers (`≥` sorts by
+    /// its number); rows without an impact last.
+    pub(crate) fn pc_key(&self) -> u64 {
+        self.impact.as_ref().map_or(u64::MAX, |i| {
+            ((i.providers as u64) << 32) | (i.consumers as u64 & 0xFFFF_FFFF)
+        })
+    }
 }
 
 impl std::ops::Deref for RuleRow {
@@ -964,7 +977,7 @@ pub fn rule_columns() -> Vec<Column<RuleRow>> {
             title: "P/C",
             width: 7,
             cell: |r| r.pc.clone(),
-            key: |r| SortKey::Text(r.pc.clone()),
+            key: |r| SortKey::Num(r.pc_key()),
             right: true,
             hide_below: 0,
             narrow: None,
@@ -1110,13 +1123,29 @@ impl PolicyState {
             self.rules.set_rows(Vec::new());
             return;
         };
-        let pc = |a: &RuleActors| crate::tui::impact::pc_cell(&rs.scopes, a, idx, workloads);
+        // The workloads' label sets are built once for all the rules.
+        let warm = workloads.map(|(w, truncated)| (w, truncated, pce::workload_labels(w)));
+        let cells = |a: &RuleActors| {
+            let impact = warm.as_ref().map(|(w, truncated, labels)| {
+                crate::tui::impact::compute_with(&rs.scopes, a, idx, w, *truncated, labels)
+            });
+            (
+                impact
+                    .as_ref()
+                    .map_or_else(|| "-".to_string(), pce::Impact::pc),
+                impact,
+            )
+        };
         let mut rows: Vec<RuleRow> = rs
             .rules
             .iter()
-            .map(|r| RuleRow {
-                view: RuleView::from_rule(r, idx),
-                pc: pc(&RuleActors::of_rule(r)),
+            .map(|r| {
+                let (pc, impact) = cells(&RuleActors::of_rule(r));
+                RuleRow {
+                    view: RuleView::from_rule(r, idx),
+                    impact,
+                    pc,
+                }
             })
             .collect();
         let deny: &[DenyRule] = if rs.deny_rules.is_empty() {
@@ -1124,9 +1153,13 @@ impl PolicyState {
         } else {
             &rs.deny_rules
         };
-        rows.extend(deny.iter().map(|d| RuleRow {
-            view: RuleView::from_deny(d, idx),
-            pc: pc(&RuleActors::of_deny(d)),
+        rows.extend(deny.iter().map(|d| {
+            let (pc, impact) = cells(&RuleActors::of_deny(d));
+            RuleRow {
+                view: RuleView::from_deny(d, idx),
+                impact,
+                pc,
+            }
         }));
         rows.sort_by_key(|r| rule_rank(r.kind));
         self.rules.set_rows(rows);

@@ -366,9 +366,9 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     w.show_detail &= w.table.selected_item().is_some();
                     model.status =
                         StatusLine::info(format!("{} workloads", model.workloads.table.len()));
-                    // The rules pane's P/C follows; an open rule detail or
-                    // confirm reads the cache when it is drawn, so no overlay
-                    // is touched here.
+                    // The rules pane's P/C and impact follow; an open rule
+                    // detail reads them from the rows, so no overlay is
+                    // touched here.
                     model.rebuild_rules();
                 }
                 Err(e) => {
@@ -1542,8 +1542,8 @@ fn load_workloads(model: &mut Model, mode: CacheMode) -> Vec<Cmd> {
     vec![Cmd::LoadWorkloads(mode)]
 }
 
-/// `i` on Policy, in a rule detail or a rule's confirm: the workload list
-/// behind the impact, read once. A list already cached or on its way costs
+/// `i` on Policy and in a rule detail (and, from Task 6, the confirm
+/// overlay): the workload list behind the impact, read once. A list already cached or on its way costs
 /// nothing.
 fn impact_key(model: &mut Model) -> Vec<Cmd> {
     if !model.is_connected() {

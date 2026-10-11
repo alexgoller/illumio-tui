@@ -677,7 +677,7 @@ pub fn screen_hint(screen: Screen, writes: bool) -> &'static str {
         (Screen::Policy, true) => "n/N:new e:edit x:del  d scope  p pending",
         (Screen::Traffic, true) => "w:rule  f filter  r run  v view  / search",
         (Screen::Traffic, _) => "f filter  r run  a auto  v view  s sort  / search",
-        (Screen::Policy, _) => "d scope  p pending  Enter detail  Tab pane  a auto",
+        (Screen::Policy, _) => "d scope  p pending  Enter detail  Tab pane  i impact",
         (Screen::Objects, false) => "Tab type  Enter detail  r refresh  a auto  / search",
         (Screen::Workloads, false) => "t/T traffic  h/H health  Enter detail  r refresh",
         (Screen::IpLists, true) => "n:new e:edit x:del  Enter detail  r refresh",

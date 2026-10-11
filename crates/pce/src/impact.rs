@@ -299,6 +299,37 @@ pub fn rule_impact(
     unscoped_consumers: bool,
     inputs: &ImpactInputs,
 ) -> Impact {
+    let labels = workload_labels(inputs.workloads);
+    rule_impact_with(
+        scopes,
+        providers,
+        consumers,
+        unscoped_consumers,
+        inputs,
+        &labels,
+    )
+}
+
+/// Each workload's label hrefs, in list order. Built once and shared by
+/// `rule_impact_with` when many rules are evaluated over one workload list.
+pub fn workload_labels(workloads: &[Workload]) -> Vec<HashSet<&str>> {
+    workloads
+        .iter()
+        .map(|w| w.labels.iter().map(|l| l.href.as_str()).collect())
+        .collect()
+}
+
+/// `rule_impact` with the workloads' label sets (`workload_labels` of
+/// `inputs.workloads`) brought by the caller.
+pub fn rule_impact_with(
+    scopes: &[Vec<Actor>],
+    providers: &[Actor],
+    consumers: &[Actor],
+    unscoped_consumers: bool,
+    inputs: &ImpactInputs,
+    labels: &[HashSet<&str>],
+) -> Impact {
+    debug_assert_eq!(labels.len(), inputs.workloads.len());
     let idx = inputs.index;
     let everywhere = [Vec::new()];
     let scopes = if scopes.is_empty() {
@@ -308,21 +339,16 @@ pub fn rule_impact(
     };
     let p = Matcher::new(providers, idx);
     let c = Matcher::new(consumers, idx);
-    let labels: Vec<HashSet<&str>> = inputs
-        .workloads
-        .iter()
-        .map(|w| w.labels.iter().map(|l| l.href.as_str()).collect())
-        .collect();
     let is_p: Vec<bool> = inputs
         .workloads
         .iter()
-        .zip(&labels)
+        .zip(labels)
         .map(|(w, l)| p.matches(&w.href, l))
         .collect();
     let is_c: Vec<bool> = inputs
         .workloads
         .iter()
-        .zip(&labels)
+        .zip(labels)
         .map(|(w, l)| c.matches(&w.href, l))
         .collect();
     let mut all_p = HashSet::new();
@@ -696,6 +722,35 @@ mod tests {
                 for s in &i.per_scope {
                     assert!(s.providers <= i.providers && s.consumers <= i.consumers);
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn shared_label_sets_give_the_same_impact_as_rule_impact() {
+        let idx = index();
+        let w = workloads();
+        let inputs = ImpactInputs {
+            workloads: &w,
+            index: &idx,
+            truncated: false,
+        };
+        let labels = workload_labels(&w);
+        assert_eq!(labels.len(), w.len());
+        for rs in rule_sets() {
+            for a in rs.rules.iter().map(RuleActors::of_rule) {
+                let args = (&rs.scopes[..], &a.providers[..], &a.consumers[..]);
+                assert_eq!(
+                    rule_impact(args.0, args.1, args.2, a.unscoped_consumers, &inputs),
+                    rule_impact_with(
+                        args.0,
+                        args.1,
+                        args.2,
+                        a.unscoped_consumers,
+                        &inputs,
+                        &labels
+                    )
+                );
             }
         }
     }
