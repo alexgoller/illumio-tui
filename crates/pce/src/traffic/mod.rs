@@ -6,6 +6,7 @@ pub mod mesh;
 pub mod poll;
 pub mod query;
 pub mod resolved;
+pub mod treemap;
 
 pub use aggregate::{
     BLOCKED_NAMES, BlockedGroup, Dominant, FlowGroup, blocked_summary, compact_count, dominant,
