@@ -1,12 +1,16 @@
-//! Rule impact as the TUI shows it: the rules pane's `P/C` cells and the
-//! rule detail's impact rows. Computed from the loaded rulesets, the name
+//! Rule impact as the TUI shows it: the rules pane's `P/C` cells, the
+//! rule detail's impact rows and the confirm overlay's impact line. Computed from the loaded rulesets, the name
 //! index and the cached workloads when the rules pane is built (once per
 //! row, never per draw); never a request (`i` asks for the workloads, in
 //! `update.rs`).
 use crate::tui::model::{Model, PolicyState, WorkloadsState};
 use pce::NameIndex;
-use pce::impact::{Impact, ImpactInputs, RuleActors, rule_impact_with};
+use pce::WriteMethod;
+use pce::impact::{
+    Impact, ImpactInputs, RuleActors, is_rule_href, rule_impact_with, rule_set_href_of,
+};
 use pce::models::{Actor, Workload};
+use pce::write::{Plan, WriteRequest};
 use std::collections::HashSet;
 
 /// What the impact says while the workloads are not cached.
@@ -147,6 +151,57 @@ pub fn rule_detail_rows(model: &Model, href: &str) -> Vec<(&'static str, String)
     rows
 }
 
+/// A rule or deny-rule create or update: the request the confirm overlay
+/// adds an impact line to.
+fn rule_request(plan: &Plan) -> Option<&WriteRequest> {
+    match plan {
+        Plan::Send {
+            request,
+            kind: pce::write::ObjectKind::Rule | pce::write::ObjectKind::DenyRule,
+        } if request.method != WriteMethod::Delete => Some(request),
+        _ => None,
+    }
+}
+
+/// Rows the confirm overlay adds for `plan`: one for a rule or deny-rule
+/// create or update, none otherwise.
+pub fn confirm_rows(plan: &Plan) -> u16 {
+    u16::from(rule_request(plan).is_some())
+}
+
+/// The confirm overlay's impact line for a rule plan: the planned body's
+/// providers and consumers (an update's untouched sides from the loaded
+/// rule) in the target ruleset's scopes over the cached workloads; or
+/// what it takes to get there. `None` for any other plan. An evaluation:
+/// the caller stores it (`Model::refresh_confirm_impact`), the overlay
+/// never calls this per draw.
+pub fn confirm_line(model: &Model, plan: &Plan) -> Option<String> {
+    let request = rule_request(plan)?;
+    let (workloads, truncated) = match source(&model.workloads) {
+        Source::Ready {
+            workloads,
+            truncated,
+        } => (workloads, truncated),
+        waiting => return Some(format!("impact: {}", waiting_text(waiting))),
+    };
+    let p = &model.policy;
+    let scopes = rule_set_href_of(&request.path).and_then(|rs| scopes_of(p, rs));
+    let (Some(idx), Some(scopes)) = (model.index(), scopes) else {
+        return Some("impact: ruleset not loaded; open Policy (2) first".to_string());
+    };
+    let base = if is_rule_href(&request.path) {
+        loaded_rule(p, &request.path).map(|(_, a)| a)
+    } else {
+        None
+    };
+    let actors = RuleActors::planned(request.body.as_ref(), base.as_ref());
+    let labels = pce::workload_labels(workloads);
+    Some(format!(
+        "impact: {}",
+        compute_with(scopes, &actors, idx, workloads, truncated, &labels).summary()
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -277,5 +332,82 @@ mod tests {
                 "pending"
             ]
         );
+    }
+
+    #[test]
+    fn the_confirm_line_reads_the_planned_body() {
+        use crate::tui::test_support::{label_post_plan, model_fixture, rule_post_plan};
+        use pce::WriteMethod;
+        use pce::write::{Plan, WriteRequest};
+        let m = model_with_policy();
+        assert_eq!(confirm_line(&m, &label_post_plan()), None);
+        assert_eq!(confirm_rows(&label_post_plan()), 0);
+        assert_eq!(confirm_rows(&rule_post_plan()), 1);
+        assert_eq!(
+            confirm_line(&m, &rule_post_plan()).as_deref(),
+            Some("impact: press i to load workloads (1 request)")
+        );
+        let m = with_workloads(model_with_policy());
+        assert_eq!(
+            confirm_line(&m, &rule_post_plan()).as_deref(),
+            Some("impact: 1 provider · 0 consumers")
+        );
+        // An update sends only what changes; the rest is the loaded rule's.
+        let update = Plan::Send {
+            request: WriteRequest {
+                method: WriteMethod::Put,
+                path: RULE_2.into(),
+                body: Some(serde_json::json!({"consumers": [
+                    {"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/21"}},
+                    {"actors": "ams"}
+                ]})),
+                summary: "update rule".into(),
+            },
+            kind: pce::write::ObjectKind::Rule,
+        };
+        assert_eq!(confirm_rows(&update), 1);
+        assert_eq!(
+            confirm_line(&m, &update).as_deref(),
+            Some("impact: 1 provider · 4 consumers"),
+            "unscoped, as loaded"
+        );
+        let delete = Plan::Send {
+            request: WriteRequest {
+                method: WriteMethod::Delete,
+                path: RULE_2.into(),
+                body: None,
+                summary: "delete rule".into(),
+            },
+            kind: pce::write::ObjectKind::Rule,
+        };
+        assert_eq!(confirm_rows(&delete), 0);
+        assert_eq!(confirm_line(&m, &delete), None);
+        let lone = with_workloads(model_fixture());
+        assert_eq!(
+            confirm_line(&lone, &rule_post_plan()).as_deref(),
+            Some("impact: ruleset not loaded; open Policy (2) first")
+        );
+    }
+
+    #[test]
+    fn the_stored_confirm_impact_follows_the_open_confirm() {
+        use crate::tui::model::Overlay;
+        use crate::tui::test_support::rule_post_plan;
+        let mut m = model_with_policy();
+        m.refresh_confirm_impact();
+        assert_eq!(m.policy.confirm_impact, None, "no confirm open");
+        m.overlay = Overlay::ConfirmWrite {
+            plan: rule_post_plan(),
+            kind: pce::write::ObjectKind::Rule,
+            scroll: 0,
+        };
+        m.refresh_confirm_impact();
+        assert_eq!(
+            m.policy.confirm_impact.as_deref(),
+            Some("impact: press i to load workloads (1 request)")
+        );
+        m.overlay = Overlay::None;
+        m.refresh_confirm_impact();
+        assert_eq!(m.policy.confirm_impact, None);
     }
 }

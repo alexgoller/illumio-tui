@@ -959,3 +959,38 @@ fn rule_detail_and_rules_pane_show_the_impact_80x24() {
         render_styled(&l, 80, 24)
     );
 }
+
+#[test]
+fn confirm_rule_overlay_shows_the_impact_80x24() {
+    use illumio_tui::tui::model::{Overlay, WritesState};
+    use illumio_tui::tui::test_support::{model_with_policy, rule_post_plan, with_workloads};
+    let mut m = with_workloads(model_with_policy());
+    m.writes = WritesState::on();
+    m.screen = Screen::Policy;
+    m.overlay = Overlay::ConfirmWrite {
+        plan: rule_post_plan(),
+        kind: pce::write::ObjectKind::Rule,
+        scroll: 0,
+    };
+    m.refresh_confirm_impact();
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("impact: 1 provider · 0 consumers"), "{out}");
+    assert!(
+        out.contains("POST /orgs/5/sec_policy/draft/rule_sets/100/sec_rules"),
+        "{out}"
+    );
+    insta::assert_snapshot!("confirm_rule_impact_80x24", out);
+    let mut cold = model_with_policy();
+    cold.writes = WritesState::on();
+    cold.screen = Screen::Policy;
+    cold.overlay = m.overlay.clone();
+    cold.refresh_confirm_impact();
+    assert!(
+        render_to_string(&cold, 80, 24).contains("impact: press i to load workloads (1 request)")
+    );
+    m.set_theme("light");
+    insta::assert_snapshot!(
+        "confirm_rule_impact_light_styled_80x24",
+        render_styled(&m, 80, 24)
+    );
+}

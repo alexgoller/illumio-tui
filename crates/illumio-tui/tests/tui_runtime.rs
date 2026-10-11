@@ -2187,3 +2187,76 @@ async fn i_on_a_rule_detail_loads_workloads_once_and_a_second_i_is_free() {
     );
     assert_eq!(model.busy, 0);
 }
+
+#[tokio::test]
+async fn w_confirm_shows_the_impact_after_i_and_y_still_posts_once() {
+    use illumio_tui::tui::model::Overlay;
+    use illumio_tui::tui::test_support::{fixture_index, model_with_flows};
+    let server = MockServer::start().await;
+    mount_rule_sets(&server, 2).await; // the name lookup + the reload
+    mount_workloads(&server, 1).await;
+    let body = json!({
+        "enabled": true,
+        "providers": [{"label": {"href": "/orgs/5/labels/1"}}],
+        "consumers": [{"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/21"}}],
+        "ingress_services": [{"port": 8443, "proto": 6}],
+        "unscoped_consumers": true,
+        "description": "allow 10.1.4.9 to host-1.example on 8443/tcp",
+        "resolve_labels_as": {"providers": ["workloads"], "consumers": ["workloads"]}
+    });
+    let mut created = body.clone();
+    created["href"] = json!("/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/9");
+    Mock::given(method("POST"))
+        .and(path(
+            "/api/v2/orgs/5/sec_policy/draft/rule_sets/100/sec_rules",
+        ))
+        .and(body_json(body))
+        .respond_with(ResponseTemplate::new(201).set_body_json(created))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let audit = MemoryAudit::new();
+    // The fixture flows on screen and the draft rulesets loaded: the w form
+    // pre-fills Shop-Prod, and the confirm finds its scope.
+    let mut m = model_with_flows();
+    m.writes = WritesState::on();
+    let raw = serde_json::from_str(include_str!("../../../fixtures/rule_sets.json")).unwrap();
+    m.policy.set_rule_sets(raw, &fixture_index(), None);
+    let (mut rt, _tx) = Runtime::with_writer(pce_for(&server), m, tui_guard(audit.clone()));
+    let keys = vec![
+        (100, ch('j')), // the potentially blocked flow
+        (50, ch('w')),
+        (50, KeyCode::Enter),
+        (300, ch('i')),
+        (300, ch('y')),
+        (400, KeyCode::F(12)),
+    ];
+    let mut lines: Vec<String> = Vec::new();
+    let model = run_loop(&mut rt, Box::pin(press(keys)), &mut |m| {
+        if let (Overlay::ConfirmWrite { .. }, Some(l)) = (&m.overlay, &m.policy.confirm_impact)
+            && lines.last() != Some(l)
+        {
+            lines.push(l.clone());
+        }
+    })
+    .await;
+    assert_eq!(
+        lines.first().map(String::as_str),
+        Some("impact: press i to load workloads (1 request)")
+    );
+    assert_eq!(
+        lines.last().map(String::as_str),
+        Some("impact: 1 provider · 0 consumers")
+    );
+    assert_eq!(
+        model.status.text,
+        "created /orgs/5/sec_policy/draft/rule_sets/100/sec_rules/9 (pending)"
+    );
+    assert_eq!(
+        model.stats.calls, 4,
+        "the rulesets GET for the name, one workloads read, the POST, one rulesets reload"
+    );
+    assert_eq!(writes_seen(&server).await, vec!["POST"]);
+    assert_eq!(audit.entries().len(), 1);
+    assert_eq!(model.busy, 0);
+}

@@ -305,6 +305,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         None => model.policy.raw = raw, // built when the index arrives
                     }
                     model.ip_lists.recount(&model.policy);
+                    model.refresh_confirm_impact();
                     if !quiet {
                         model.status = StatusLine::info(format!(
                             "{} rulesets ({})",
@@ -370,6 +371,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     // detail reads them from the rows, so no overlay is
                     // touched here.
                     model.rebuild_rules();
+                    model.refresh_confirm_impact();
                 }
                 Err(e) => {
                     model.workloads.error = Some(e.clone());
@@ -625,6 +627,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         kind,
                         scroll: 0,
                     };
+                    model.refresh_confirm_impact();
                 }
                 // Nothing to send is an answer, not a failure: provisioning
                 // with nothing pending, an update whose fields already match
@@ -975,9 +978,10 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         },
         Overlay::ConfirmWrite { plan, kind, scroll } => {
             let area = ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1);
+            let extra = crate::tui::impact::confirm_rows(&plan);
             let last = plan
                 .request()
-                .map_or(0, |r| confirm_write_last_scroll(r, area));
+                .map_or(0, |r| confirm_write_last_scroll(r, area, extra));
             let last = u16::try_from(last).unwrap_or(u16::MAX);
             match k.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
@@ -1013,6 +1017,11 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                         scroll: scroll.saturating_sub(1),
                     };
                     Vec::new()
+                }
+                KeyCode::Char('i') if extra > 0 => {
+                    let cmds = impact_key(model);
+                    model.refresh_confirm_impact();
+                    cmds
                 }
                 _ => Vec::new(),
             }
@@ -7076,5 +7085,52 @@ mod tests {
         m.screen = Screen::Policy;
         assert_eq!(update(&mut m, key('i')).len(), 1, "i tries again");
         assert_eq!(m.workloads.error, None);
+    }
+
+    #[test]
+    fn i_in_a_rule_confirm_loads_workloads_and_keeps_the_request_on_screen() {
+        use crate::tui::test_support::{label_post_plan, model_with_policy, rule_post_plan};
+        let mut m = writes_on(model_with_policy());
+        update(
+            &mut m,
+            Msg::Planned(Ok((rule_post_plan(), pce::write::ObjectKind::Rule))),
+        );
+        let shown = m.overlay.clone();
+        assert!(matches!(shown, Overlay::ConfirmWrite { .. }));
+        assert_eq!(
+            m.policy.confirm_impact.as_deref(),
+            Some("impact: press i to load workloads (1 request)"),
+            "computed when the confirm opens"
+        );
+        assert_eq!(
+            update(&mut m, key('i')),
+            vec![Cmd::LoadWorkloads(pce::CacheMode::Use)]
+        );
+        assert_eq!(m.overlay, shown, "the confirm stays");
+        assert_eq!(
+            m.policy.confirm_impact.as_deref(),
+            Some("impact: loading workloads…")
+        );
+        let wl = serde_json::from_str(include_str!("../../../../fixtures/workloads.json")).unwrap();
+        update(&mut m, Msg::WorkloadsLoaded(Ok((wl, 0, false))));
+        assert_eq!(m.overlay, shown, "the answer never replaces the confirm");
+        assert_eq!(
+            m.policy.confirm_impact.as_deref(),
+            Some("impact: 1 provider · 0 consumers")
+        );
+        let cmds = update(&mut m, key('y'));
+        assert!(
+            matches!(cmds.as_slice(), [Cmd::ExecuteWrite { .. }]),
+            "{cmds:?}"
+        );
+        // A label's confirm has no impact: `i` does nothing there.
+        let mut m = writes_on(model_with_policy());
+        update(
+            &mut m,
+            Msg::Planned(Ok((label_post_plan(), pce::write::ObjectKind::Label))),
+        );
+        assert_eq!(m.policy.confirm_impact, None);
+        assert!(update(&mut m, key('i')).is_empty());
+        assert!(!m.workloads.loading);
     }
 }

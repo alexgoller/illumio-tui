@@ -1022,6 +1022,9 @@ pub struct PolicyState {
     /// The next rulesets result was asked for by a write: it keeps the
     /// write's report in the status line instead of `N rulesets`.
     pub quiet_reload: bool,
+    /// The open rule confirm's impact line, evaluated when the confirm
+    /// opens and when the workloads or rulesets load (never per draw).
+    pub confirm_impact: Option<String>,
     /// Pending entries marked with `Space` for `P` (hrefs); cleared when the
     /// list is loaded again.
     pub pending_marked: BTreeSet<String>,
@@ -1066,6 +1069,7 @@ impl PolicyState {
             pending_selected: 0,
             diff_loading: false,
             quiet_reload: false,
+            confirm_impact: None,
             pending_marked: BTreeSet::new(),
             provision_counts: None,
             provisioned: None,
@@ -2207,6 +2211,15 @@ impl Model {
         };
         let workloads = self.workloads.impact_source();
         self.policy.rebuild_rules(&idx, workloads);
+    }
+
+    /// Evaluates the open confirm's impact line into `policy.confirm_impact`
+    /// (`None` unless a rule write is on screen). No request.
+    pub fn refresh_confirm_impact(&mut self) {
+        self.policy.confirm_impact = match &self.overlay {
+            Overlay::ConfirmWrite { plan, .. } => crate::tui::impact::confirm_line(self, plan),
+            _ => None,
+        };
     }
 
     /// Whether any screen has opted in to auto-refresh (drives the idle tick).

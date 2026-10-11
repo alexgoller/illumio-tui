@@ -220,6 +220,26 @@ pub fn label_post_plan() -> pce::write::Plan {
     }
 }
 
+/// The plan for a new allow rule in Shop-Prod: role=web provides 443/tcp
+/// to the Corp IP list, consumers unscoped.
+pub fn rule_post_plan() -> pce::write::Plan {
+    pce::write::Plan::Send {
+        request: pce::write::WriteRequest {
+            method: pce::WriteMethod::Post,
+            path: "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules".into(),
+            body: Some(serde_json::json!({
+                "enabled": true,
+                "providers": [{"label": {"href": "/orgs/5/labels/1"}}],
+                "consumers": [{"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/21"}}],
+                "ingress_services": [{"port": 443, "proto": 6}],
+                "unscoped_consumers": true
+            })),
+            summary: "create rule in ruleset 100".into(),
+        },
+        kind: pce::write::ObjectKind::Rule,
+    }
+}
+
 /// The plan for `x` on the Corp IP list, with the TUI's named summary.
 pub fn ip_list_delete_plan() -> pce::write::Plan {
     pce::write::Plan::Send {

@@ -404,24 +404,26 @@ const CONFIRM_CHROME: u16 = 5;
 
 /// The confirm box in `area`, the request body wrapped to its inner width
 /// (the box is the dry run: nothing may be clipped), and how many body rows
-/// fit. Shared by the renderer and the scroll keys so they cannot drift.
-fn confirm_write_layout(req: &WriteRequest, area: Rect) -> (Rect, Vec<String>, usize) {
+/// fit. `extra` rows sit above the body (the impact line of a rule plan).
+/// Shared by the renderer and the scroll keys so they cannot drift.
+fn confirm_write_layout(req: &WriteRequest, area: Rect, extra: u16) -> (Rect, Vec<String>, usize) {
     let width = usize::from(CONFIRM_WIDTH.min(area.width).saturating_sub(2));
     let body: Vec<String> = crate::tui::edit::request_body_lines(req)
         .iter()
         .flat_map(|l| wrap_chars(&plain(l), width))
         .collect();
+    let chrome = CONFIRM_CHROME + extra;
     let height = u16::try_from(body.len())
         .unwrap_or(u16::MAX)
-        .saturating_add(CONFIRM_CHROME);
+        .saturating_add(chrome);
     let r = centered(area, CONFIRM_WIDTH, height);
-    let rows = usize::from(r.height.saturating_sub(CONFIRM_CHROME));
+    let rows = usize::from(r.height.saturating_sub(chrome));
     (r, body, rows)
 }
 
 /// The first wrapped body line shown when scrolled to the end.
-pub fn confirm_write_last_scroll(req: &WriteRequest, area: Rect) -> usize {
-    let (_, body, rows) = confirm_write_layout(req, area);
+pub fn confirm_write_last_scroll(req: &WriteRequest, area: Rect, extra: u16) -> usize {
+    let (_, body, rows) = confirm_write_layout(req, area, extra);
     body.len().saturating_sub(rows)
 }
 
@@ -439,7 +441,8 @@ pub fn render_confirm_write(model: &Model, plan: &Plan, scroll: u16, f: &mut Fra
     let Some(req) = plan.request() else {
         return;
     };
-    let (r, body, rows) = confirm_write_layout(req, area);
+    let extra = crate::tui::impact::confirm_rows(plan);
+    let (r, body, rows) = confirm_write_layout(req, area, extra);
     f.render_widget(Clear, r);
     let first = (scroll as usize).min(body.len().saturating_sub(rows));
     let meta = if body.len() > rows {
@@ -447,14 +450,20 @@ pub fn render_confirm_write(model: &Model, plan: &Plan, scroll: u16, f: &mut Fra
     } else {
         "y send · n cancel"
     };
-    let mut lines = vec![
-        Line::from(Span::styled(plain(&req.summary), Style::new().fg(t.warn))),
-        Line::from(Span::styled(
-            format!("{} {}", req.method.as_str(), plain(&req.path)),
-            t.header_style(),
-        )),
-        Line::from(""),
-    ];
+    let mut lines = vec![Line::from(Span::styled(
+        plain(&req.summary),
+        Style::new().fg(t.warn),
+    ))];
+    if extra > 0 {
+        // Stored when the confirm opened or the workloads loaded.
+        let impact = model.policy.confirm_impact.clone().unwrap_or_default();
+        lines.push(Line::from(Span::styled(impact, Style::new().fg(t.accent))));
+    }
+    lines.push(Line::from(Span::styled(
+        format!("{} {}", req.method.as_str(), plain(&req.path)),
+        t.header_style(),
+    )));
+    lines.push(Line::from(""));
     lines.extend(
         body.into_iter()
             .skip(first)
