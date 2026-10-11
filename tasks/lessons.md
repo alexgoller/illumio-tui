@@ -71,3 +71,13 @@ Captured after corrections and review findings, so the same mistake is not repea
 - The name index must be rebuilt when any object it covers reloads (labels, IP lists); a stale index silently zeros a side or drops a note.
 - Honour `resolve_labels_as` per side; the virtual-services case counts nothing from labels and says so in a note.
 - Unknown scope groups are skipped with a note rather than zeroing the side: over-stating blast radius is the safer direction for an allow rule.
+
+## Plan 8 (traffic views: label grouping, mesh, treemap), 2026-10-12
+
+- A plan writer that replays its own edits on a scratch worktree before publishing turns implementation into transcription: nine tasks, two one-round fix loops, no interface mismatch. Worth the planning cost on a 9-task plan.
+- Fold rules need the dominant case stated: "smallest named tile joins other" inverted the treemap's purpose when one source dwarfed the tail. Give the remainder tile a floor instead of taking from the named ones.
+- A model that only learns its size from resize events is wrong until the first resize; read the terminal size once at startup through the normal update path and test it with the test backend.
+- A per-side field needs a per-side rule: the PCE reports user_name and process_name from the same VEN, so both follow flow_direction. Placing one and copying the other showed an IP list with a user.
+- Aggregations that change their grouping must change every renderer of that group: the CLI blocked table kept printing the first host after the TUI grouped by destination group.
+- Subagents in this harness carry an Opus attribution reminder; state the trailer in every dispatch and verify with git log before each review; rewrite once with filter-branch before the final review, not per task.
+- Store resolved keys at rebuild time, never derive them per draw; the `quiet()` test helper makes "no request from this key" a one-liner.
