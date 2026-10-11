@@ -23,7 +23,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { target: x86_64-unknown-linux-gnu, os: ubuntu-latest, cross: false }
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04, cross: false }
           # Fully static binary for old distros; cross ships a musl C toolchain for aws-lc-sys.
           - { target: x86_64-unknown-linux-musl, os: ubuntu-latest, cross: true }
           # Cross image provides the aarch64 gcc toolchain and an older glibc baseline.
