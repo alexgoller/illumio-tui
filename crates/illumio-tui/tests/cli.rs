@@ -1410,10 +1410,9 @@ async fn traffic_mesh_places_processes_by_direction_and_drops_hidden_columns() {
         assert!(header.contains(h), "{header}");
     }
     assert_eq!(header.split_whitespace().next(), Some("user"), "{header}");
-    assert!(
-        header.find(" process ") < header.find(" src "),
-        "process comes before src: {header}"
-    );
+    let (process, src) = (header.find(" process "), header.find(" src "));
+    assert!(process.is_some() && src.is_some(), "{header}");
+    assert!(process < src, "process comes before src: {header}");
     assert!(text.contains("potentially_blocked"), "{text}");
 }
 
