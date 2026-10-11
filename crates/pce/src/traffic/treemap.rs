@@ -76,8 +76,11 @@ impl Tile {
 
 /// Squarified treemap of `groups` (from `group_by_labels`) into `area`:
 /// outer tiles per src, inner per dst. Tiles narrower than 1 cell are
-/// dropped and their weight is folded into an `other (N)` tile. Zero total
-/// weight gives no tiles.
+/// dropped and their weight is folded into an `other (N)` tile. `other` is
+/// placed with a weight floored at one cell's worth of the total, so a
+/// dominant source cannot squeeze it out (its `Tile.weight` stays the true
+/// folded sum); a named tile joins `other` only when it gets no cell itself.
+/// Zero total weight gives no tiles.
 pub fn layout(groups: &[FlowGroup], area: Rect, weight: Weight) -> Vec<Tile> {
     let mut sources: Vec<(String, Vec<&FlowGroup>)> = Vec::new();
     for g in groups {
@@ -95,7 +98,7 @@ pub fn layout(groups: &[FlowGroup], area: Rect, weight: Weight) -> Vec<Tile> {
             });
             Item {
                 label,
-                weight: gs.iter().map(|g| weight.of(g)).sum(),
+                weight: sum(gs.iter().map(|g| weight.of(g))),
                 decision: dominant(a, p, b),
                 children: gs.iter().map(|g| dst_item(g, weight)).collect(),
             }
@@ -169,11 +172,16 @@ fn leaf(item: Item, rect: Rect) -> Tile {
     }
 }
 
+fn sum(weights: impl Iterator<Item = u64>) -> u64 {
+    weights.fold(0, u64::saturating_add)
+}
+
 /// Lays `items` out in `area`: zero weights dropped, heaviest first (then
 /// by label; equal keys keep their order), and the tail that does not get
 /// a whole cell folded into `other (N)`, last. When `other` itself gets no
-/// cell, the smallest named item joins it, until everything fits (in the
-/// end `other` alone fills the area).
+/// cell even with its floored weight, the floor doubles; a named item that
+/// gets no cell folds into `other` with all after it (in the end `other`
+/// alone fills the area).
 fn place(items: Vec<Item>, area: Rect) -> Vec<(Item, Rect)> {
     if area.is_empty() {
         return Vec::new();
@@ -184,11 +192,17 @@ fn place(items: Vec<Item>, area: Rect) -> Vec<(Item, Rect)> {
     }
     items.sort_by(|a, b| b.weight.cmp(&a.weight).then_with(|| a.label.cmp(&b.label)));
     let n = items.len();
+    let total = sum(items.iter().map(|i| i.weight));
+    let cells_in_area = u128::from(area.area());
+    // One cell's worth of weight; doubled should `other` still get no cell.
+    let mut floor = u64::try_from(u128::from(total).div_ceil(cells_in_area))
+        .unwrap_or(u64::MAX)
+        .max(1);
     let mut kept = n;
     let rects = loop {
         let mut weights: Vec<u64> = items[..kept].iter().map(|i| i.weight).collect();
         if kept < n {
-            weights.push(items[kept..].iter().map(|i| i.weight).sum());
+            weights.push(sum(items[kept..].iter().map(|i| i.weight)).max(floor));
         }
         if kept == 0 {
             break vec![area];
@@ -200,7 +214,7 @@ fn place(items: Vec<Item>, area: Rect) -> Vec<(Item, Rect)> {
         match rects.iter().position(|r| r.is_empty()) {
             None => break rects,
             Some(i) if i < kept => kept = i,
-            Some(_) => kept -= 1,
+            Some(_) => floor = floor.saturating_mul(2),
         }
     };
     let rest: Vec<Item> = items.split_off(kept);
@@ -208,7 +222,7 @@ fn place(items: Vec<Item>, area: Rect) -> Vec<(Item, Rect)> {
     if !rest.is_empty() {
         let other = Item {
             label: format!("other ({})", rest.len()),
-            weight: rest.iter().map(|i| i.weight).sum(),
+            weight: sum(rest.iter().map(|i| i.weight)),
             decision: PolicyDecision::Unknown,
             children: Vec::new(),
         };
@@ -226,8 +240,8 @@ type Edges = [f64; 4];
 /// worse. `weights` are positive and sorted descending; the last row takes
 /// exactly what is left, and neighbouring tiles share their edge values.
 fn squarify(weights: &[u64], w: f64, h: f64) -> Vec<Edges> {
-    let total: u64 = weights.iter().sum();
-    let scale = w * h / total as f64;
+    let total: f64 = weights.iter().map(|&x| x as f64).sum();
+    let scale = w * h / total;
     let areas: Vec<f64> = weights.iter().map(|&x| x as f64 * scale).collect();
     let mut out = Vec::with_capacity(areas.len());
     let (mut rx0, mut ry0, rx1, ry1) = (0.0f64, 0.0f64, w, h);
@@ -405,7 +419,7 @@ mod tests {
         );
         let small = layout(&g, rect(0, 0, 10, 2), Weight::Connections);
         assert_partition(&small, rect(0, 0, 10, 2));
-        assert_eq!(small.last().unwrap().label, "other (4)", "other comes last");
+        assert_eq!(small.last().unwrap().label, "other (5)", "other comes last");
         assert!(!small[..small.len() - 1].iter().any(Tile::is_other));
     }
 
@@ -432,9 +446,10 @@ mod tests {
                 "crm/prod",
                 "erp/prod",
                 "shop/prod",
-                "other (2)"
+                "shop/dev",
+                "other (1)"
             ],
-            "sources without bytes drop out; shop/dev and hr/prod are too small"
+            "sources without bytes drop out; hr/prod is too small and folds into other"
         );
         assert_partition(&by_bytes, rect(0, 0, 78, 13));
     }
@@ -456,6 +471,48 @@ mod tests {
         let ties = [group("b", "y", 2), group("a", "x", 2)];
         let tiles = layout(&ties, rect(0, 0, 10, 4), Weight::Connections);
         assert_eq!(tiles[0].label, "a", "equal weights sort by label");
+    }
+
+    #[test]
+    fn a_dominant_source_stays_visible_beside_a_tiny_other() {
+        let area = rect(0, 0, 78, 13);
+        let g = [group("big", "x", 100_000), group("small", "y", 1)];
+        let tiles = layout(&g, area, Weight::Connections);
+        assert_eq!(tiles.len(), 2);
+        assert_eq!(tiles[0].label, "big");
+        assert_eq!(tiles[0].weight, 100_000);
+        assert_eq!(tiles[1].label, "other (1)");
+        assert_eq!(tiles[1].weight, 1);
+        assert!(tiles[1].rect.area() >= 1);
+        assert_partition(&tiles, area);
+    }
+
+    #[test]
+    fn three_sources_with_a_huge_weight_do_not_collapse_into_other() {
+        let area = rect(0, 0, 158, 40);
+        let g = [
+            group("a", "x", u64::MAX / 4),
+            group("b", "y", 1),
+            group("c", "z", 1),
+        ];
+        let tiles = layout(&g, area, Weight::Connections);
+        assert_eq!(tiles[0].label, "a");
+        assert_eq!(tiles[0].weight, u64::MAX / 4);
+        assert!(!tiles[0].is_other());
+        assert_partition(&tiles, area);
+    }
+
+    #[test]
+    fn weight_sums_saturate_instead_of_overflowing() {
+        let area = rect(0, 0, 20, 6);
+        let g = [group("a", "x", u64::MAX), group("b", "y", u64::MAX)];
+        let tiles = layout(&g, area, Weight::Connections);
+        assert_eq!(tiles.len(), 2);
+        assert_partition(&tiles, area);
+        assert_eq!(sum(tiles.iter().map(|t| t.weight)), u64::MAX);
+        let same_src = [group("a", "x", u64::MAX), group("a", "y", u64::MAX)];
+        let tiles = layout(&same_src, area, Weight::Connections);
+        assert_eq!(tiles[0].weight, u64::MAX);
     }
 
     #[test]
