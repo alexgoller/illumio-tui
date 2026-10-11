@@ -1,4 +1,5 @@
 //! Every event the TUI reacts to, and every side effect it may request.
+use crate::tui::edit::WriteIntent;
 use crate::tui::filter::TrafficFilter;
 use crate::tui::model::{Limits, ObjectKind, ProfileInfo, Screen};
 use crossterm::event::{KeyEvent, MouseEvent};
@@ -121,6 +122,9 @@ pub enum Cmd {
     },
     /// Rebuild the client for another profile from the config (no request).
     SwitchProfile(String),
+    /// Plan a write (one GET for IP lists, services and workloads; none for
+    /// labels) and show it in the confirm overlay. Never sends a write.
+    PlanWrite(WriteIntent),
     Quit,
 }
 
@@ -173,6 +177,7 @@ impl PartialEq for Cmd {
                 },
             ) => fa == fb && ma == mb,
             (Cmd::SwitchProfile(a), Cmd::SwitchProfile(b)) => a == b,
+            (Cmd::PlanWrite(a), Cmd::PlanWrite(b)) => a == b,
             _ => false,
         }
     }

@@ -124,6 +124,12 @@ impl Runtime {
     pub fn execute(&mut self, cmd: Cmd) {
         match cmd {
             Cmd::Quit => self.model.quit = true,
+            // Planning is wired in Task 6; until then nothing is planned or sent.
+            Cmd::PlanWrite(_) => {
+                self.model.status = crate::tui::model::StatusLine::warn(
+                    "planning is not available yet; nothing sent",
+                );
+            }
             Cmd::SwitchProfile(name) => {
                 self.model.busy += 1;
                 // Only the profile name carries over: a startup `--host`, `--port`

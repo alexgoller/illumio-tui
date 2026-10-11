@@ -52,16 +52,48 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "Events   f / Enter / S",
         "filter · event as JSON · sort by severity",
     ),
+    (
+        "n / e / x",
+        "new / edit / delete (Objects, Workloads; needs writes)",
+    ),
+    (
+        "Pending  j/k Enter",
+        "select · diff of a pending IP list or service",
+    ),
+    ("y / n", "send / cancel a shown request"),
     ("Esc", "close overlay / cancel"),
 ];
 
+/// The first help line shown when scrolled to the end, for a terminal
+/// `height` rows tall (the box is as tall as the lines allow, borders included).
+pub fn help_last_scroll(height: u16) -> usize {
+    let rows = (HELP_LINES.len() + 2)
+        .min(height as usize)
+        .saturating_sub(2);
+    HELP_LINES.len().saturating_sub(rows)
+}
+
 pub fn render_help(model: &Model, f: &mut Frame, area: Rect) {
     let t = &model.theme;
-    let r = centered(area, area.width.min(84), (HELP_LINES.len() as u16) + 2);
+    let total = HELP_LINES.len();
+    let r = centered(area, area.width.min(84), (total as u16) + 2);
     f.render_widget(Clear, r);
-    let block = panel("Keys", "Esc closes", t, true);
+    let rows = r.height.saturating_sub(2) as usize;
+    let first = model.help_scroll.min(help_last_scroll(area.height));
+    let meta = if total > rows {
+        format!(
+            "{}-{} of {total} · j/k scroll · Esc closes",
+            first + 1,
+            (first + rows).min(total)
+        )
+    } else {
+        "Esc closes".to_string()
+    };
+    let block = panel("Keys", &meta, t, true);
     let lines: Vec<Line> = HELP_LINES
         .iter()
+        .skip(first)
+        .take(rows)
         .map(|(k, d)| {
             Line::from(vec![
                 Span::styled(format!("{k:<24}"), t.header_style()),
@@ -437,12 +469,17 @@ pub fn render_pending(model: &Model, f: &mut Frame, area: Rect) {
     );
 }
 
-pub fn screen_hint(screen: Screen) -> &'static str {
-    match screen {
-        Screen::Traffic => "f filter  r run  a auto  v view  s sort  / search",
-        Screen::Policy => "d scope  p pending  Enter detail  Tab pane  a auto",
-        Screen::Objects => "Tab type  Enter detail  r refresh  a auto  / search",
-        Screen::Workloads => "t/T traffic  h/H health  Enter detail  r refresh",
-        Screen::Events => "f filter  r refresh  a auto  S severity  Enter detail",
+/// Key hints for the status line. With writes on, Objects and Workloads lead
+/// with the edit keys and drop their least used hints so the status text
+/// keeps room at 80 columns.
+pub fn screen_hint(screen: Screen, writes: bool) -> &'static str {
+    match (screen, writes) {
+        (Screen::Objects, true) => "n:new e:edit x:del  Tab type  Enter detail",
+        (Screen::Workloads, true) => "n:new e:edit x:del  t/T traffic  Enter detail",
+        (Screen::Traffic, _) => "f filter  r run  a auto  v view  s sort  / search",
+        (Screen::Policy, _) => "d scope  p pending  Enter detail  Tab pane  a auto",
+        (Screen::Objects, false) => "Tab type  Enter detail  r refresh  a auto  / search",
+        (Screen::Workloads, false) => "t/T traffic  h/H health  Enter detail  r refresh",
+        (Screen::Events, _) => "f filter  r refresh  a auto  S severity  Enter detail",
     }
 }

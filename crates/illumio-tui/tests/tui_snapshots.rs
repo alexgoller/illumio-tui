@@ -117,12 +117,46 @@ fn table_widget_renders_header_sort_and_selection() {
 #[test]
 fn help_overlay_80x24() {
     use illumio_tui::tui::model::Overlay;
+    use illumio_tui::tui::ui::widgets::overlay::help_last_scroll;
     let mut m = model_fixture();
     m.overlay = Overlay::Help;
     let out = render_to_string(&m, 80, 24);
-    assert!(out.contains("close overlay"), "last line visible: {out}");
+    assert!(out.contains("1 2 3 4 5"), "first page: {out}");
     assert!(out.contains("move in the current table"), "{out}");
+    assert!(out.contains("j/k scroll"), "{out}");
     insta::assert_snapshot!("help_overlay_80x24", out);
+    m.help_scroll = help_last_scroll(24);
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("close overlay"), "last line visible: {out}");
+    assert!(out.contains("send / cancel a shown request"), "{out}");
+    insta::assert_snapshot!("help_overlay_end_80x24", out);
+    m.set_theme("light");
+    insta::assert_snapshot!(
+        "help_overlay_end_light_styled_80x24",
+        render_styled(&m, 80, 24)
+    );
+}
+
+#[test]
+fn status_hint_lists_the_edit_keys_only_with_writes() {
+    use illumio_tui::tui::model::WritesState;
+    use illumio_tui::tui::test_support::model_with_objects;
+    let mut m = model_with_objects();
+    m.screen = Screen::Objects;
+    let last = |m: &illumio_tui::tui::Model| {
+        render_to_string(m, 80, 24)
+            .lines()
+            .last()
+            .unwrap_or("")
+            .to_string()
+    };
+    assert!(!last(&m).contains("n:new"), "{}", last(&m));
+    m.writes = WritesState::on();
+    assert!(last(&m).contains("n:new e:edit x:del"), "{}", last(&m));
+    m.screen = Screen::Workloads;
+    assert!(last(&m).contains("n:new e:edit x:del"), "{}", last(&m));
+    m.screen = Screen::Traffic;
+    assert!(!last(&m).contains("n:new"), "{}", last(&m));
 }
 
 #[test]

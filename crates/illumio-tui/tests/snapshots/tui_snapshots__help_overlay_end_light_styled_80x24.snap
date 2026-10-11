@@ -1,0 +1,52 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: "render_styled(&m, 80, 24)"
+---
+╭ Keys ────────────────────────────────── 4-25 of 25 · j/k scroll · Esc closes ╮
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @2:Rgb(150, 50, 180)/Rgb(250, 250, 247) @6:Rgb(0, 102, 204)/Rgb(250, 250, 247) @42:Rgb(120, 124, 136)/Rgb(250, 250, 247) @78:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│                        :profile <name>  :draft  :active  :help  :q           │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @25:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│?                       this help                                             │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @25:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│q / Ctrl-C              quit                                                  │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @25:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│↑ ↓ PgUp PgDn Home End  move in the current table                             │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @25:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│s                       cycle sort column and direction                       │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @25:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│/                       search in the current table (Enter keep, Esc clear)   │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @25:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│r                       refresh the current screen (bypasses the cache)       │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @25:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│a                       toggle auto-refresh for the current screen            │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @25:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│Traffic  v              cycle Flows · App-to-app · Blocked                    │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @25:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│Traffic  f              edit filter: window src dst service decisions         │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @25:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│Traffic  g              change the aggregate label keys                       │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @25:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│Traffic  Enter          detail (flows) · drill into a pair (aggregate)        │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @25:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│Policy   d              toggle draft / active                                 │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @25:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│Policy   p              pending changes                                       │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @25:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│Policy   Tab / Enter    pane · rule detail · on a ruleset: load deny rules    │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @25:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│Objects  Tab / Enter    next object type · detail                             │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @25:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│Workloads t/T h H Enter Traffic as src/dst · unhealthy · health sort · detail │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @25:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│Events   f / Enter / S  filter · event as JSON · sort by severity             │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @25:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│n / e / x               new / edit / delete (Objects, Workloads; needs writes)│
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @25:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│Pending  j/k Enter      select · diff of a pending IP list or service         │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @25:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│y / n                   send / cancel a shown request                         │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @25:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│Esc                     close overlay / cancel                                │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @25:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+╰──────────────────────────────────────────────────────────────────────────────╯
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247)

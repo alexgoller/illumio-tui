@@ -1,5 +1,6 @@
 //! Pure state transitions. Never performs I/O; returns `Cmd`s instead.
 use crate::tui::commands::{self, Command};
+use crate::tui::edit::{self, EditIntent, Start};
 use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::form::FormEvent;
 use crate::tui::model::{
@@ -7,6 +8,7 @@ use crate::tui::model::{
     QueryState, Screen, StatusLine, TrafficData, TrafficView,
 };
 use crate::tui::msg::{Cmd, Msg, ObjectsPayload, QueryOutcome};
+use crate::tui::ui::widgets::overlay::help_last_scroll;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use pce::CacheMode;
 use pce::models::{EventFilter, PolicyScope};
@@ -490,11 +492,20 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     }
     match model.overlay.clone() {
         Overlay::Help => {
-            if matches!(
-                k.code,
-                KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q')
-            ) {
-                model.overlay = Overlay::None;
+            let last = help_last_scroll(model.size.1);
+            match k.code {
+                KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q') => {
+                    model.overlay = Overlay::None;
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    model.help_scroll = (model.help_scroll + 1).min(last);
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    model.help_scroll = model.help_scroll.saturating_sub(1);
+                }
+                KeyCode::End | KeyCode::Char('G') => model.help_scroll = last,
+                KeyCode::Home | KeyCode::Char('g') => model.help_scroll = 0,
+                _ => {}
             }
             Vec::new()
         }
@@ -681,17 +692,36 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             };
             Vec::new()
         }
-        Overlay::Form(mut form) => {
-            match form.on_key(k) {
-                FormEvent::Continue => model.overlay = Overlay::Form(form),
-                // Submit is wired to planning in Task 5; until then it sends nothing.
-                FormEvent::Cancel | FormEvent::Submit => {
-                    model.overlay = Overlay::None;
-                    model.status = StatusLine::info("cancelled, nothing sent");
+        Overlay::Form(mut form) => match form.on_key(k) {
+            FormEvent::Continue => {
+                model.overlay = Overlay::Form(form);
+                Vec::new()
+            }
+            FormEvent::Cancel => {
+                model.overlay = Overlay::None;
+                model.status = StatusLine::info("cancelled, nothing sent");
+                Vec::new()
+            }
+            FormEvent::Submit => {
+                match edit::build_intent(&form, model.index().map(|i| i.as_ref())) {
+                    Ok(Some(intent)) => {
+                        model.overlay = Overlay::None;
+                        model.status = StatusLine::info("planning…");
+                        vec![Cmd::PlanWrite(intent)]
+                    }
+                    Ok(None) => {
+                        model.overlay = Overlay::None;
+                        model.status = StatusLine::info("no changes");
+                        Vec::new()
+                    }
+                    Err(e) => {
+                        form.error = Some(e);
+                        model.overlay = Overlay::Form(form);
+                        Vec::new()
+                    }
                 }
             }
-            Vec::new()
-        }
+        },
         Overlay::RuleDetail(_) | Overlay::Pending | Overlay::Error(_) => {
             if matches!(k.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) {
                 model.overlay = Overlay::None;
@@ -740,6 +770,7 @@ fn on_screen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             Vec::new()
         }
         (KeyCode::Char('?'), _) => {
+            model.help_scroll = 0;
             model.overlay = Overlay::Help;
             Vec::new()
         }
@@ -1231,6 +1262,7 @@ fn workloads_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 // so declining the cost guard leaves the user on Workloads.
                 return request_query(model, f);
             }
+            KeyCode::Char(c @ ('n' | 'e' | 'x')) => return workloads_edit_key(model, c),
             _ => {}
         }
     }
@@ -1377,6 +1409,7 @@ fn objects_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 model.status = model.objects.auto.toggle();
                 return Vec::new();
             }
+            KeyCode::Char(c @ ('n' | 'e' | 'x')) => return objects_edit_key(model, c),
             _ => {}
         }
     }
@@ -1388,6 +1421,111 @@ fn objects_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         ObjectKind::Services => drive_table(&mut o.services, k, page),
     }
     Vec::new()
+}
+
+/// Writes off: the reason goes to the status line and the key does nothing else.
+fn writes_refused(model: &mut Model) -> bool {
+    if model.writes.enabled {
+        return false;
+    }
+    model.status = StatusLine::warn(model.writes.refusal());
+    true
+}
+
+/// A create or update opens its form; a delete goes straight to planning.
+fn begin_edit(model: &mut Model, intent: EditIntent) -> Vec<Cmd> {
+    match edit::start(intent, model.index().map(|i| i.as_ref())) {
+        Start::Form(f) => {
+            model.overlay = Overlay::Form(f);
+            Vec::new()
+        }
+        Start::Plan(w) => {
+            model.status = StatusLine::info("planning…");
+            vec![Cmd::PlanWrite(w)]
+        }
+    }
+}
+
+/// `n` / `e` / `x` on Objects: labels, IP lists, services; label groups are read-only.
+fn objects_edit_key(model: &mut Model, c: char) -> Vec<Cmd> {
+    if writes_refused(model) {
+        return Vec::new();
+    }
+    let o = &model.objects;
+    let intent = match (o.kind, c) {
+        (ObjectKind::LabelGroups, _) => {
+            model.status = StatusLine::warn("label groups are read-only in this version");
+            return Vec::new();
+        }
+        (ObjectKind::Labels, 'n') => Some(EditIntent::CreateLabel),
+        (ObjectKind::IpLists, 'n') => Some(EditIntent::CreateIpList),
+        (ObjectKind::Services, 'n') => Some(EditIntent::CreateService),
+        (ObjectKind::Labels, 'e') => o
+            .labels
+            .selected_item()
+            .cloned()
+            .map(EditIntent::UpdateLabel),
+        (ObjectKind::Labels, _) => o
+            .labels
+            .selected_item()
+            .cloned()
+            .map(EditIntent::DeleteLabel),
+        (ObjectKind::IpLists, 'e') => o
+            .ip_lists
+            .selected_item()
+            .cloned()
+            .map(EditIntent::UpdateIpList),
+        (ObjectKind::IpLists, _) => o
+            .ip_lists
+            .selected_item()
+            .cloned()
+            .map(EditIntent::DeleteIpList),
+        (ObjectKind::Services, 'e') => o
+            .services
+            .selected_item()
+            .cloned()
+            .map(EditIntent::UpdateService),
+        (ObjectKind::Services, _) => o
+            .services
+            .selected_item()
+            .cloned()
+            .map(EditIntent::DeleteService),
+    };
+    let Some(intent) = intent else {
+        model.status = StatusLine::warn("no row selected");
+        return Vec::new();
+    };
+    begin_edit(model, intent)
+}
+
+/// `n` / `e` / `x` on Workloads. Edit and delete only for workloads the PCE
+/// reports as unmanaged with no VEN (the library's rule, checked again there).
+fn workloads_edit_key(model: &mut Model, c: char) -> Vec<Cmd> {
+    if writes_refused(model) {
+        return Vec::new();
+    }
+    if c == 'n' {
+        return begin_edit(model, EditIntent::CreateWorkload);
+    }
+    let Some(w) = model
+        .workloads
+        .table
+        .selected_item()
+        .map(|r| r.workload.clone())
+    else {
+        model.status = StatusLine::warn("no row selected");
+        return Vec::new();
+    };
+    if w.managed != Some(false) || w.ven.is_some() {
+        model.status = StatusLine::warn("only unmanaged workloads can be edited here");
+        return Vec::new();
+    }
+    let intent = if c == 'e' {
+        EditIntent::UpdateWorkload(w)
+    } else {
+        EditIntent::DeleteWorkload(w)
+    };
+    begin_edit(model, intent)
 }
 
 /// `:draft` / `:active`: like `d` on the Policy screen, but explicit. The scope
@@ -1417,6 +1555,7 @@ pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
             vec![Cmd::Quit]
         }
         Command::Help => {
+            model.help_scroll = 0;
             model.overlay = Overlay::Help;
             Vec::new()
         }
@@ -4312,5 +4451,173 @@ mod tests {
         assert!(update(&mut m, kc(KeyCode::Esc)).is_empty());
         assert_eq!(m.overlay, Overlay::None);
         assert_eq!(m.status.text, "cancelled, nothing sent");
+    }
+
+    // ---- Editing keys (Plan 4) ----
+
+    fn writes_on(mut m: Model) -> Model {
+        m.writes = crate::tui::model::WritesState::on();
+        m
+    }
+
+    #[test]
+    fn editing_keys_with_writes_off_only_say_why() {
+        use crate::tui::test_support::{model_with_objects, model_with_workloads};
+        let mut m = model_with_objects();
+        m.screen = Screen::Objects;
+        for c in ['n', 'e', 'x'] {
+            assert!(update(&mut m, key(c)).is_empty(), "{c}");
+            assert_eq!(m.status.kind, StatusKind::Warn);
+            assert_eq!(m.status.text, "started without --allow-writes");
+            assert_eq!(m.overlay, Overlay::None);
+        }
+        let mut m = model_with_workloads();
+        m.screen = Screen::Workloads;
+        for c in ['n', 'e', 'x'] {
+            assert!(update(&mut m, key(c)).is_empty(), "{c}");
+            assert_eq!(m.status.text, "started without --allow-writes");
+            assert_eq!(m.overlay, Overlay::None);
+        }
+    }
+
+    #[test]
+    fn label_groups_and_managed_workloads_are_refused_before_any_form() {
+        use crate::tui::edit::WriteIntent;
+        use crate::tui::model::ObjectKind;
+        use crate::tui::test_support::{model_with_objects, model_with_workloads};
+        let mut m = writes_on(model_with_objects());
+        m.screen = Screen::Objects;
+        m.objects.kind = ObjectKind::LabelGroups;
+        for c in ['n', 'e', 'x'] {
+            assert!(update(&mut m, key(c)).is_empty(), "{c}");
+            assert_eq!(m.status.text, "label groups are read-only in this version");
+            assert_eq!(m.overlay, Overlay::None);
+        }
+        let mut m = writes_on(model_with_workloads());
+        m.screen = Screen::Workloads;
+        // Row 0 is host-1.example, VEN-managed.
+        for c in ['e', 'x'] {
+            assert!(update(&mut m, key(c)).is_empty(), "{c}");
+            assert_eq!(m.status.text, "only unmanaged workloads can be edited here");
+            assert_eq!(m.overlay, Overlay::None);
+        }
+        update(&mut m, key('j'));
+        update(&mut m, key('j')); // unmanaged-nas
+        assert_eq!(
+            update(&mut m, key('x')),
+            vec![Cmd::PlanWrite(WriteIntent::DeleteWorkload {
+                href: "/orgs/5/workloads/aaaa-3".into(),
+                name: "unmanaged-nas".into(),
+            })],
+            "a delete plans at once, the confirm overlay comes next"
+        );
+        assert!(update(&mut m, key('e')).is_empty());
+        assert!(
+            matches!(&m.overlay, Overlay::Form(f) if f.title == "Edit workload unmanaged-nas"),
+            "{:?}",
+            m.overlay
+        );
+    }
+
+    #[test]
+    fn e_opens_a_prefilled_form_and_enter_plans_only_the_change() {
+        use crate::tui::edit::WriteIntent;
+        use crate::tui::model::ObjectKind;
+        use crate::tui::test_support::model_with_objects;
+        let mut m = writes_on(model_with_objects());
+        m.screen = Screen::Objects;
+        m.objects.kind = ObjectKind::IpLists;
+        update(&mut m, key('j')); // Corp
+        assert!(update(&mut m, key('e')).is_empty());
+        let Overlay::Form(f) = &m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        assert_eq!(f.value("Ranges"), "10.1.0.0-10.1.255.255");
+        // Unchanged: the form closes, nothing is planned.
+        assert!(update(&mut m, enter()).is_empty());
+        assert_eq!(m.status.text, "no changes");
+        assert_eq!(m.overlay, Overlay::None);
+        update(&mut m, key('e'));
+        update(&mut m, kc(KeyCode::Tab));
+        update(&mut m, kc(KeyCode::Tab));
+        for c in ", 10.2.0.0/16".chars() {
+            update(&mut m, key(c));
+        }
+        let cmds = update(&mut m, enter());
+        assert_eq!(
+            cmds,
+            vec![Cmd::PlanWrite(WriteIntent::UpdateIpList {
+                href: "/orgs/5/sec_policy/draft/ip_lists/21".into(),
+                patch: pce::write::IpListPatch {
+                    add_ranges: vec![pce::write::IpRangeSpec::parse("10.2.0.0/16", false).unwrap()],
+                    ..Default::default()
+                },
+            })]
+        );
+        assert_eq!(m.overlay, Overlay::None);
+        assert_eq!(m.status.text, "planning…");
+    }
+
+    #[test]
+    fn n_opens_an_empty_form_that_validates_and_esc_cancels() {
+        use crate::tui::model::ObjectKind;
+        use crate::tui::test_support::model_with_objects;
+        let mut m = writes_on(model_with_objects());
+        m.screen = Screen::Objects;
+        m.objects.kind = ObjectKind::Services;
+        assert!(update(&mut m, key('n')).is_empty());
+        assert!(update(&mut m, enter()).is_empty());
+        let Overlay::Form(f) = &m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        assert_eq!(f.error.as_deref(), Some("Name is required"));
+        assert_eq!(f.active, 0);
+        for c in "SSH".chars() {
+            update(&mut m, key(c));
+        }
+        update(&mut m, kc(KeyCode::Tab));
+        update(&mut m, kc(KeyCode::Tab));
+        for c in "22".chars() {
+            update(&mut m, key(c));
+        }
+        assert!(
+            update(&mut m, enter()).is_empty(),
+            "a bare port is refused locally"
+        );
+        let Overlay::Form(f) = &m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        assert!(
+            f.error.as_deref().unwrap().contains("22/tcp"),
+            "{:?}",
+            f.error
+        );
+        assert!(update(&mut m, kc(KeyCode::Esc)).is_empty());
+        assert_eq!(m.overlay, Overlay::None);
+        assert_eq!(m.status.text, "cancelled, nothing sent");
+    }
+
+    #[test]
+    fn help_scrolls_to_its_last_line_and_reopens_at_the_top() {
+        use crate::tui::ui::widgets::overlay::{HELP_LINES, help_last_scroll};
+        let mut m = model_fixture(); // 80x24
+        assert_eq!(HELP_LINES.len(), 25);
+        update(&mut m, key('?'));
+        let last = help_last_scroll(24);
+        assert_eq!(last, 3, "25 lines, 22 rows inside the box");
+        for _ in 0..40 {
+            update(&mut m, key('j'));
+        }
+        assert_eq!(m.help_scroll, last);
+        update(&mut m, key('k'));
+        assert_eq!(m.help_scroll, last - 1);
+        update(&mut m, key('G'));
+        assert_eq!(m.help_scroll, last);
+        update(&mut m, key('g'));
+        assert_eq!(m.help_scroll, 0);
+        update(&mut m, key('G'));
+        update(&mut m, kc(KeyCode::Esc));
+        update(&mut m, key('?'));
+        assert_eq!(m.help_scroll, 0, "the help reopens at the top");
     }
 }

@@ -1727,6 +1727,8 @@ pub struct Model {
     pub status: StatusLine,
     /// Set at startup and on every profile switch from the runtime's guard.
     pub writes: WritesState,
+    /// First help line shown; `Overlay::Help` is reopened at the top.
+    pub help_scroll: usize,
     /// Number of background tasks in flight; the runtime ticks at 250 ms while > 0.
     pub busy: usize,
     /// A `:profile` switch is being built off the event loop; a second one
@@ -1777,6 +1779,7 @@ impl Model {
             focused: true,
             status: StatusLine::info("connecting…"),
             writes,
+            help_scroll: 0,
             busy: 0,
             switching: false,
             quit: false,

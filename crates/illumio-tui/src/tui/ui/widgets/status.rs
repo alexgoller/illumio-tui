@@ -14,7 +14,10 @@ pub fn render(model: &Model, f: &mut Frame, area: Rect) {
         StatusKind::Warn => t.warn,
         StatusKind::Error => t.bad,
     };
-    let hints = format!(" {}  : cmd  ? help ", screen_hint(model.screen));
+    let hints = format!(
+        " {}  : cmd  ? help ",
+        screen_hint(model.screen, model.writes.enabled)
+    );
     let left_width = area.width.saturating_sub(hints.len() as u16) as usize;
     let text: String = model.status.text.chars().take(left_width).collect();
     let pad = left_width.saturating_sub(text.chars().count());
