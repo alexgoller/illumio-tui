@@ -34,7 +34,7 @@ pub enum PolicyCmd {
     DenyRules(DenyRulesAction),
     /// List changes waiting to be provisioned
     Pending,
-    /// Provision pending changes (needs writes enabled and --allow-writes)
+    /// Provision pending changes (needs writes = true in the profile)
     Provision(ProvisionArgs),
 }
 
@@ -50,7 +50,7 @@ pub struct RulesetsCmd {
 
 #[derive(Subcommand, Debug)]
 pub enum RulesetsAction {
-    /// Create a ruleset (needs writes enabled and --allow-writes)
+    /// Create a ruleset (needs writes = true in the profile)
     Add(RulesetAddArgs),
     /// Change a ruleset's name, description, state or scopes
     Update(RulesetUpdateArgs),
@@ -124,7 +124,7 @@ pub struct RulesCmd {
 
 #[derive(Subcommand, Debug)]
 pub enum RulesAction {
-    /// Create an allow rule in a ruleset (needs writes enabled and --allow-writes)
+    /// Create an allow rule in a ruleset (needs writes = true in the profile)
     Add(RuleAddArgs),
     /// Change an allow rule, addressed by href
     Update(RuleUpdateArgs),
@@ -136,7 +136,7 @@ pub enum RulesAction {
 
 #[derive(Subcommand, Debug)]
 pub enum DenyRulesAction {
-    /// Create a deny rule in a ruleset (needs writes enabled and --allow-writes)
+    /// Create a deny rule in a ruleset (needs writes = true in the profile)
     Add(DenyRuleAddArgs),
     /// Change a deny rule, addressed by href
     Update(DenyRuleUpdateArgs),

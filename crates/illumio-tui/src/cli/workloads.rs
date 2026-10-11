@@ -58,7 +58,7 @@ pub struct WorkloadsCmd {
 
 #[derive(Subcommand, Debug)]
 pub enum WorkloadsAction {
-    /// Create an unmanaged workload (needs writes enabled and --allow-writes)
+    /// Create an unmanaged workload (needs writes = true in the profile)
     Add(WorkloadAddArgs),
     /// Change an unmanaged workload's name, hostname, interfaces or labels; with --managed-labels, a VEN-managed workload's labels
     Update(WorkloadUpdateArgs),

@@ -6,7 +6,7 @@ use crate::cli::{Context, GlobalArgs};
 use crate::tui::diff::{self, ObjectDiff};
 use crate::tui::edit::{self, RulesetTarget, WriteIntent};
 use crate::tui::model::ObjectKind;
-use crate::tui::model::{Limits, Model, ProfileInfo, WritesState};
+use crate::tui::model::{Limits, Model, ProfileInfo, WRITES_OFF, WritesState};
 use crate::tui::msg::{Cmd, Msg, ObjectsPayload, QueryOutcome};
 use crate::tui::{update, view};
 use crossterm::event::{
@@ -15,7 +15,7 @@ use crossterm::event::{
 };
 use futures::{Stream, StreamExt};
 use pce::models::{DenyRule, PendingChange, PolicyScope, WorkloadFilter};
-use pce::write::{IfMissing, JsonlAudit, Plan, WriteContext, WriteError, WriteGuard, WriteRefused};
+use pce::write::{IfMissing, JsonlAudit, Plan, WriteContext, WriteError, WriteGuard};
 use pce::{CacheMode, NameIndex, Pce};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -150,7 +150,7 @@ impl Runtime {
                     // `execute` sends once, audits, and invalidates the kind's cache prefix.
                     let result = match &guard {
                         Some(guard) => pce.writer(guard).execute(plan).await,
-                        None => Err(WriteError::Refused(WriteRefused::FlagMissing)),
+                        None => Err(WriteError::Invalid(vec![WRITES_OFF.into()])),
                     };
                     // Pending changes are not under the kind's prefix.
                     pce.invalidate("policy:pending");
@@ -213,7 +213,8 @@ impl Runtime {
                                 scope_keys: ctx.config.scope_keys.clone(),
                                 tier_key: ctx.config.tier_key.clone(),
                             };
-                            let (writer, writes) = build_writer(&ctx);
+                            let (writer, writes) =
+                                build_writer(&WriteInputs::from_context(&ctx), global.allow_writes);
                             (ctx.pce, info, limits, writer, writes)
                         })
                         .map_err(|e| e.to_string());
@@ -458,42 +459,51 @@ impl Runtime {
 
 const AUDIT_PATH_UNKNOWN: &str = "audit log path unknown: no $XDG_STATE_HOME and no home directory";
 
-/// The TUI's write guard for one profile, from the same inputs as the CLI's
-/// (`cli/write.rs`, `write_guard`): the profile's `writes`, the
-/// `--allow-writes` the TUI was started with, and the JSONL audit log, with
-/// `source: "tui"`. Any refusal leaves writes off with its reason.
-fn build_writer(ctx: &Context) -> (Option<WriteGuard>, WritesState) {
-    writer_from(
-        ctx.config.writes,
-        ctx.allow_writes,
-        JsonlAudit::default_path(),
-        WriteContext {
-            profile: ctx.config.profile_name.clone(),
-            host: ctx.config.host.clone(),
-            org_id: ctx.config.org_id,
-            source: "tui".into(),
-        },
-    )
+/// What the current profile's write guard is built from, the same inputs as
+/// the CLI's (`cli/write.rs`, `write_guard`): the profile's `writes`, the
+/// JSONL audit log, and the context its entries carry (`source: "tui"`).
+#[derive(Debug, Clone)]
+pub struct WriteInputs {
+    pub profile_allows: bool,
+    /// `None` without `$XDG_STATE_HOME` and a home directory.
+    pub audit_path: Option<PathBuf>,
+    pub ctx: WriteContext,
 }
 
-fn writer_from(
-    profile_allows: bool,
-    flag_allows: bool,
-    audit_path: Option<PathBuf>,
-    ctx: WriteContext,
-) -> (Option<WriteGuard>, WritesState) {
-    // Profile and flag first: a run without them never touches the audit path.
-    if let Err(refused) = WriteGuard::check(profile_allows, flag_allows) {
+impl WriteInputs {
+    fn from_context(ctx: &Context) -> Self {
+        Self {
+            profile_allows: ctx.config.writes,
+            audit_path: JsonlAudit::default_path(),
+            ctx: WriteContext {
+                profile: ctx.config.profile_name.clone(),
+                host: ctx.config.host.clone(),
+                org_id: ctx.config.org_id,
+                source: "tui".into(),
+            },
+        }
+    }
+}
+
+/// The TUI's write guard for one profile. `enabled` is the session toggle
+/// (`--allow-writes` at startup, `:writes on|off` later); with it off, or on
+/// any refusal, writes stay off with the reason. Startup, `:profile` and
+/// `:writes` all build through here.
+fn build_writer(inputs: &WriteInputs, enabled: bool) -> (Option<WriteGuard>, WritesState) {
+    if !enabled {
+        return (None, WritesState::off(WRITES_OFF));
+    }
+    // The profile first: a profile that denies writes never touches the audit path.
+    if let Err(refused) = WriteGuard::check(inputs.profile_allows) {
         return (None, WritesState::off(refused.to_string()));
     }
-    let Some(path) = audit_path else {
+    let Some(path) = &inputs.audit_path else {
         return (None, WritesState::off(AUDIT_PATH_UNKNOWN));
     };
     match WriteGuard::new(
-        profile_allows,
-        flag_allows,
-        Box::new(JsonlAudit::new(path)),
-        ctx,
+        inputs.profile_allows,
+        Box::new(JsonlAudit::new(path.clone())),
+        inputs.ctx.clone(),
     ) {
         Ok(guard) => (Some(guard), WritesState::on()),
         Err(refused) => (None, WritesState::off(refused.to_string())),
@@ -714,7 +724,7 @@ fn install_panic_hook() {
 /// CLI, takes over the terminal, and restores it on every exit path.
 pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
     let ctx = Context::new(&global)?;
-    let (writer, writes) = build_writer(&ctx);
+    let (writer, writes) = build_writer(&WriteInputs::from_context(&ctx), global.allow_writes);
     let cfg = &ctx.config;
     let profile = ProfileInfo {
         name: cfg.profile_name.clone(),
@@ -813,10 +823,18 @@ mod tests {
     }
 
     #[test]
-    fn writer_needs_both_switches_and_a_writable_audit_log() {
+    fn writer_needs_the_toggle_the_profile_and_a_writable_audit_log() {
         let dir = tempfile::tempdir().unwrap();
+        let inputs = |profile_allows, audit_path| WriteInputs {
+            profile_allows,
+            audit_path,
+            ctx: write_ctx(),
+        };
         let path = || Some(dir.path().join("illumio-tui").join("writes.jsonl"));
-        let (g, w) = writer_from(false, true, path(), write_ctx());
+        let (g, w) = build_writer(&inputs(true, path()), false);
+        assert!(g.is_none());
+        assert_eq!(w, WritesState::off(WRITES_OFF));
+        let (g, w) = build_writer(&inputs(false, path()), true);
         assert!(g.is_none());
         assert!(!w.enabled);
         assert!(
@@ -826,15 +844,12 @@ mod tests {
                 .contains("not enabled for this profile"),
             "{w:?}"
         );
-        let (g, w) = writer_from(true, false, path(), write_ctx());
-        assert!(g.is_none());
-        assert_eq!(w.reason.as_deref(), Some("writes need --allow-writes"));
-        let (g, w) = writer_from(true, true, None, write_ctx());
+        let (g, w) = build_writer(&inputs(true, None), true);
         assert!(g.is_none());
         assert_eq!(w.reason.as_deref(), Some(AUDIT_PATH_UNKNOWN));
         let blocker = dir.path().join("a-file");
         std::fs::write(&blocker, "x").unwrap();
-        let (g, w) = writer_from(true, true, Some(blocker.join("writes.jsonl")), write_ctx());
+        let (g, w) = build_writer(&inputs(true, Some(blocker.join("writes.jsonl"))), true);
         assert!(g.is_none());
         assert!(
             w.reason
@@ -843,7 +858,7 @@ mod tests {
                 .starts_with("audit log is not writable"),
             "{w:?}"
         );
-        let (g, w) = writer_from(true, true, path(), write_ctx());
+        let (g, w) = build_writer(&inputs(true, path()), true);
         assert_eq!(w, WritesState::on());
         assert_eq!(g.unwrap().context().source, "tui");
     }
@@ -861,7 +876,7 @@ mod tests {
                 .unwrap(),
             )
         };
-        let guard = WriteGuard::new(true, true, Box::new(MemoryAudit::new()), write_ctx()).unwrap();
+        let guard = WriteGuard::new(true, Box::new(MemoryAudit::new()), write_ctx()).unwrap();
         let mut model = crate::tui::test_support::model_fixture();
         model.writes = WritesState::on();
         let (mut rt, _tx) = Runtime::with_writer(Arc::new(pce()), model, guard);
@@ -885,14 +900,11 @@ mod tests {
                 tier_key: "role".into(),
             },
             None,
-            WritesState::off("writes need --allow-writes"),
+            WritesState::off(WRITES_OFF),
         )));
         assert!(rt.writer.is_none());
         assert!(!rt.model.writes.enabled);
-        assert_eq!(
-            rt.model.writes.reason.as_deref(),
-            Some("writes need --allow-writes")
-        );
+        assert_eq!(rt.model.writes.reason.as_deref(), Some(WRITES_OFF));
     }
 
     #[test]
@@ -925,7 +937,7 @@ mod tests {
             ))
             .unwrap(),
         );
-        let guard = WriteGuard::new(true, true, Box::new(MemoryAudit::new()), write_ctx()).unwrap();
+        let guard = WriteGuard::new(true, Box::new(MemoryAudit::new()), write_ctx()).unwrap();
         for (intent, want) in [
             (
                 WriteIntent::DeleteRule {

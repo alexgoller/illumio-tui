@@ -36,7 +36,7 @@ pub fn ctx() -> WriteContext {
 }
 
 pub fn guard_with(audit: Arc<MemoryAudit>) -> WriteGuard {
-    WriteGuard::new(true, true, Box::new(audit), ctx()).unwrap()
+    WriteGuard::new(true, Box::new(audit), ctx()).unwrap()
 }
 
 fn send_plan(method: WriteMethod, path: &str, body: Option<Value>, kind: ObjectKind) -> Plan {
@@ -52,17 +52,13 @@ fn send_plan(method: WriteMethod, path: &str, body: Option<Value>, kind: ObjectK
 }
 
 #[test]
-fn guard_refuses_without_profile_or_flag() {
+fn guard_refuses_without_the_profile_switch() {
     let a = MemoryAudit::new();
     assert!(matches!(
-        WriteGuard::new(false, true, Box::new(a.clone()), ctx()).unwrap_err(),
+        WriteGuard::new(false, Box::new(a.clone()), ctx()).unwrap_err(),
         WriteRefused::ProfileDenies
     ));
-    assert!(matches!(
-        WriteGuard::new(true, false, Box::new(a.clone()), ctx()).unwrap_err(),
-        WriteRefused::FlagMissing
-    ));
-    assert!(WriteGuard::new(true, true, Box::new(a), ctx()).is_ok());
+    assert!(WriteGuard::new(true, Box::new(a), ctx()).is_ok());
 }
 
 #[tokio::test]
@@ -356,7 +352,7 @@ async fn unwritable_audit_refuses_before_sending() {
     }
     let server = MockServer::start().await;
     let pce = pce_for(&server);
-    let err = WriteGuard::new(true, true, Box::new(Broken), ctx()).unwrap_err();
+    let err = WriteGuard::new(true, Box::new(Broken), ctx()).unwrap_err();
     assert!(matches!(err, WriteRefused::AuditUnwritable(_)), "{err:?}");
     assert!(server.received_requests().await.unwrap().is_empty());
     let _ = IfMissing::SkipExisting; // used by later tasks; keeps the import honest
@@ -548,7 +544,7 @@ async fn audit_append_failure_is_a_warning_on_success_and_audit_failed_on_error(
         .mount(&server)
         .await;
     let pce = pce_for(&server);
-    let guard = WriteGuard::new(true, true, Box::new(FailingAppend), ctx()).unwrap();
+    let guard = WriteGuard::new(true, Box::new(FailingAppend), ctx()).unwrap();
     let out = pce
         .writer(&guard)
         .execute(send_plan(

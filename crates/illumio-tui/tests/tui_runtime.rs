@@ -876,7 +876,6 @@ fn writes_model() -> Model {
 fn tui_guard(audit: Arc<MemoryAudit>) -> WriteGuard {
     WriteGuard::new(
         true,
-        true,
         Box::new(audit),
         WriteContext {
             profile: "t".into(),

@@ -27,12 +27,11 @@ pub fn cmd(server: &MockServer) -> Command {
     c
 }
 
-/// Writes enabled by env, allowed by flag, audit log in `state`.
+/// Writes enabled by env (no `--allow-writes`), audit log in `state`.
 pub fn writer(server: &MockServer, state: &std::path::Path) -> Command {
     let mut c = cmd(server);
     c.env("ILLUMIO_WRITES", "1")
         .env("XDG_STATE_HOME", state)
-        .arg("--allow-writes")
         .arg("--json");
     c
 }
@@ -119,7 +118,7 @@ async fn health_reports_the_writes_setting() {
 }
 
 #[test]
-fn allow_writes_is_a_global_flag_with_help() {
+fn allow_writes_is_hidden_from_help() {
     let out = Command::cargo_bin("illumio-tui")
         .unwrap()
         .env_clear()
@@ -127,7 +126,81 @@ fn allow_writes_is_a_global_flag_with_help() {
         .output()
         .unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains("--allow-writes"), "{text}");
+    assert!(text.contains("--no-cache"), "{text}");
+    assert!(!text.contains("--allow-writes"), "{text}");
+}
+
+/// The label POST, answered once.
+async fn mount_label_post(server: &MockServer) {
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/labels"))
+        .and(body_json(json!({"key": "app", "value": "web"})))
+        .respond_with(
+            ResponseTemplate::new(201)
+                .set_body_json(json!({"href": "/orgs/5/labels/9", "key": "app", "value": "web"})),
+        )
+        .expect(1)
+        .mount(server)
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_writes_enabled_profile_needs_no_allow_writes() {
+    let server = MockServer::start().await;
+    mount_label_post(&server).await;
+    let state = tempfile::tempdir().unwrap();
+    let run = |mode: &str| {
+        cmd(&server)
+            .env("ILLUMIO_WRITES", "1")
+            .env("XDG_STATE_HOME", state.path())
+            .args(["--json", "labels", "add", "app=web", mode])
+            .assert()
+            .success()
+    };
+    let dry = stdout_json(run("--dry-run"));
+    assert_eq!(dry["data"]["method"], "POST");
+    assert_eq!(count(&server, "POST", "/api/v2/orgs/5/labels").await, 0);
+    let sent = stdout_json(run("--yes"));
+    assert_eq!(sent["data"]["href"], "/orgs/5/labels/9");
+    assert_eq!(count(&server, "POST", "/api/v2/orgs/5/labels").await, 1);
+    assert_eq!(audit_lines(state.path()).len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn allow_writes_is_still_accepted_and_changes_nothing() {
+    let server = MockServer::start().await;
+    mount_label_post(&server).await;
+    let state = tempfile::tempdir().unwrap();
+    let dry = |flag: Option<&str>| {
+        let mut c = writer(&server, state.path());
+        c.args(flag).args(["labels", "add", "app=web", "--dry-run"]);
+        stdout_json(c.assert().success())["data"].clone()
+    };
+    assert_eq!(dry(Some("--allow-writes")), dry(None));
+    // A profile without writes still refuses, flag or not.
+    for flag in [Some("--allow-writes"), None] {
+        let a = cmd(&server)
+            .env("XDG_STATE_HOME", state.path())
+            .args(flag)
+            .args(["--json", "labels", "add", "app=web", "--yes"])
+            .assert()
+            .code(6);
+        assert!(
+            stderr_json(&a)["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("set writes = true in the profile or ILLUMIO_WRITES=1"),
+            "{flag:?}"
+        );
+    }
+    let out = stdout_json(
+        writer(&server, state.path())
+            .args(["--allow-writes", "labels", "add", "app=web", "--yes"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"]["href"], "/orgs/5/labels/9");
+    assert_eq!(count(&server, "POST", "/api/v2/orgs/5/labels").await, 1);
 }
 
 /// Every write subcommand, with arguments that would otherwise be valid.
@@ -287,40 +360,27 @@ async fn every_write_command_is_guarded_and_needs_yes() {
     let server = MockServer::start().await;
     let state = tempfile::tempdir().unwrap();
     for args in ALL_WRITES {
-        // Writes enabled in the profile, but no --allow-writes: exit 6.
-        let a = cmd(&server)
-            .env("ILLUMIO_WRITES", "1")
-            .env("XDG_STATE_HOME", state.path())
-            .arg("--json")
-            .args(args)
-            .arg("--yes")
-            .assert()
-            .code(6);
-        assert_eq!(
-            stderr_json(&a)["error"]["kind"],
-            "write_refused",
-            "{args:?}"
-        );
-        assert_no_secret(&a);
-        // Flag present, profile writes off (ILLUMIO_WRITES unset): exit 6 for
-        // both --yes and --dry-run, before any request.
-        for mode in ["--yes", "--dry-run"] {
-            let a = cmd(&server)
-                .env("XDG_STATE_HOME", state.path())
-                .arg("--allow-writes")
-                .arg("--json")
-                .args(args)
-                .arg(mode)
-                .assert()
-                .code(6);
-            assert_eq!(
-                stderr_json(&a)["error"]["kind"],
-                "write_refused",
-                "{args:?} {mode}"
-            );
-            assert_no_secret(&a);
+        // Profile writes off (ILLUMIO_WRITES unset): exit 6 for both --yes
+        // and --dry-run, with or without --allow-writes, before any request.
+        for flag in [None, Some("--allow-writes")] {
+            for mode in ["--yes", "--dry-run"] {
+                let a = cmd(&server)
+                    .env("XDG_STATE_HOME", state.path())
+                    .args(flag)
+                    .arg("--json")
+                    .args(args)
+                    .arg(mode)
+                    .assert()
+                    .code(6);
+                assert_eq!(
+                    stderr_json(&a)["error"]["kind"],
+                    "write_refused",
+                    "{args:?} {flag:?} {mode}"
+                );
+                assert_no_secret(&a);
+            }
         }
-        // --allow-writes without --yes (or --dry-run): exit 2.
+        // Writes enabled, without --yes (or --dry-run): exit 2.
         let a = writer(&server, state.path()).args(args).assert().code(2);
         assert_eq!(stderr_json(&a)["error"]["kind"], "args", "{args:?}");
         assert!(
@@ -348,7 +408,7 @@ async fn no_state_home_and_no_home_refuses_writes() {
     // cmd() clears the environment: neither HOME nor XDG_STATE_HOME is set.
     let a = cmd(&server)
         .env("ILLUMIO_WRITES", "1")
-        .args(["--allow-writes", "--json", "labels", "add", "a=b", "--yes"])
+        .args(["--json", "labels", "add", "a=b", "--yes"])
         .assert()
         .code(6);
     let err = stderr_json(&a);
@@ -367,20 +427,12 @@ mod labels {
     use super::*;
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn add_is_refused_without_allow_writes_or_profile_setting() {
+    async fn add_is_refused_without_the_profile_setting() {
         let server = MockServer::start().await;
         let state = tempfile::tempdir().unwrap();
-        // Flag present, profile denies.
         let a = cmd(&server)
             .env("XDG_STATE_HOME", state.path())
-            .args([
-                "--allow-writes",
-                "--json",
-                "labels",
-                "add",
-                "app=web",
-                "--yes",
-            ])
+            .args(["--json", "labels", "add", "app=web", "--yes"])
             .assert()
             .code(6);
         let err = stderr_json(&a);
@@ -391,19 +443,6 @@ mod labels {
                 .as_str()
                 .unwrap()
                 .contains("writes = true")
-        );
-        // Profile allows, flag missing.
-        let a = cmd(&server)
-            .env("ILLUMIO_WRITES", "1")
-            .env("XDG_STATE_HOME", state.path())
-            .args(["--json", "labels", "add", "app=web", "--yes"])
-            .assert()
-            .code(6);
-        assert!(
-            stderr_json(&a)["error"]["message"]
-                .as_str()
-                .unwrap()
-                .contains("--allow-writes")
         );
         // Even a dry run needs the guard.
         cmd(&server)
@@ -638,7 +677,6 @@ mod labels {
         t.env("ILLUMIO_WRITES", "1")
             .env("XDG_STATE_HOME", state.path());
         t.args([
-            "--allow-writes",
             "--table",
             "labels",
             "delete",
@@ -1833,7 +1871,6 @@ mod policy {
         t.env("ILLUMIO_WRITES", "1")
             .env("XDG_STATE_HOME", state.path());
         t.args([
-            "--allow-writes",
             "--table",
             "policy",
             "rulesets",
@@ -3117,21 +3154,14 @@ mod provision {
         let mut t = cmd(&server);
         t.env("ILLUMIO_WRITES", "1")
             .env("XDG_STATE_HOME", state.path());
-        t.args([
-            "--allow-writes",
-            "--table",
-            "policy",
-            "provision",
-            "--all",
-            "--yes",
-        ])
-        .assert()
-        .success()
-        .stdout(
-            predicate::str::contains("provisioned")
-                .and(predicate::str::contains("/orgs/5/sec_policy/12"))
-                .and(predicate::str::contains("ip_lists=1, rule_sets=1")),
-        );
+        t.args(["--table", "policy", "provision", "--all", "--yes"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("provisioned")
+                    .and(predicate::str::contains("/orgs/5/sec_policy/12"))
+                    .and(predicate::str::contains("ip_lists=1, rule_sets=1")),
+            );
         let lines = audit_lines(state.path());
         assert_eq!(lines.len(), 2, "one audit line per send");
         assert_eq!(lines[0]["body"], all_body());

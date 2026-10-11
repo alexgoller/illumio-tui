@@ -1,5 +1,5 @@
-//! What every write command shares: the guard (profile + --allow-writes +
-//! audit log), the --dry-run / --yes contract, exact name resolution, and
+//! What every write command shares: the guard (profile `writes` + audit
+//! log), the --dry-run / --yes contract, exact name resolution, and
 //! the envelope data. Commands build a `Plan` with the library and hand it
 //! to `run_plan`.
 use super::context::Context;
@@ -41,7 +41,7 @@ pub fn check_flags(flags: &WriteFlags) -> Result<(), CliError> {
 }
 
 fn write_guard(ctx: &Context) -> Result<WriteGuard, CliError> {
-    WriteGuard::check(ctx.config.writes, ctx.allow_writes).map_err(WriteError::from)?;
+    WriteGuard::check(ctx.config.writes).map_err(WriteError::from)?;
     let path = JsonlAudit::default_path().ok_or_else(|| {
         WriteError::from(WriteRefused::AuditUnwritable(
             "no $XDG_STATE_HOME or $HOME to place the audit log".into(),
@@ -50,7 +50,6 @@ fn write_guard(ctx: &Context) -> Result<WriteGuard, CliError> {
     let audit = JsonlAudit::new(path);
     let guard = WriteGuard::new(
         ctx.config.writes,
-        ctx.allow_writes,
         Box::new(audit),
         WriteContext {
             profile: ctx.config.profile_name.clone(),
@@ -64,7 +63,8 @@ fn write_guard(ctx: &Context) -> Result<WriteGuard, CliError> {
 }
 
 /// Guard first, then the flag check, before any request: an agent learns
-/// about a missing `--allow-writes` (exit 6) before a missing `--yes` (exit 2).
+/// about a profile without `writes = true` (exit 6) before a missing `--yes`
+/// (exit 2).
 pub fn prepare(ctx: &Context, flags: &WriteFlags) -> Result<WriteGuard, CliError> {
     let guard = write_guard(ctx)?;
     check_flags(flags)?;

@@ -1,8 +1,9 @@
 //! Where connection settings come from, in order: command-line flag, then
 //! environment variable (same names as illumio-mcp-server), then the
 //! selected profile in `~/.config/illumio-tui/config.toml`, then defaults.
-//! `writes` (profile) or `ILLUMIO_WRITES` (env) enables write commands;
-//! nothing is written unless `--allow-writes` is also given.
+//! `writes` (profile) or `ILLUMIO_WRITES` (env) enables write commands; the
+//! CLI still sends nothing without `--yes`, the TUI nothing before `:writes on`
+//! and a confirmed request.
 //! `[profiles.<name>.labels]` (or `ILLUMIO_SCOPE_KEYS`, `ILLUMIO_TIER_KEY`)
 //! names the label model the TUI writes rules in.
 //! The tool never writes secrets anywhere.
@@ -32,7 +33,7 @@ pub struct Profile {
     pub api_secret: Option<String>,
     /// Shell command whose stdout is the API secret (e.g. `op read ...`).
     pub api_secret_cmd: Option<String>,
-    /// Allow write commands against this PCE (the CLI also needs --allow-writes).
+    /// Allow write commands against this PCE (the CLI still needs --yes to send).
     pub writes: Option<bool>,
     #[serde(default, skip_serializing_if = "Limits::is_empty")]
     pub limits: Limits,

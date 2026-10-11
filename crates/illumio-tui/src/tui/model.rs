@@ -119,11 +119,15 @@ impl StatusLine {
     }
 }
 
+/// Why writes are off when the session toggle is: at startup without
+/// `--allow-writes`, and after `:writes off`.
+pub const WRITES_OFF: &str = "writes off; :writes on to enable";
+
 /// Whether editing keys may start a write flow. The guard itself lives in
 /// the runtime (`Runtime::writer`); the model never holds it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WritesState {
-    /// Both switches on and the audit sink writable.
+    /// The session toggle on, the profile allowing writes and the audit sink writable.
     pub enabled: bool,
     /// Why not, for the status line.
     pub reason: Option<String>,

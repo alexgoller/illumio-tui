@@ -63,8 +63,8 @@ pub struct GlobalArgs {
     /// Ignore cached responses
     #[arg(long, global = true)]
     pub no_cache: bool,
-    /// Allow write commands; the profile must also set writes = true (or ILLUMIO_WRITES=1)
-    #[arg(long, global = true)]
+    /// Accepted for compatibility; writes are gated by the profile's writes = true
+    #[arg(long, global = true, hide = true)]
     pub allow_writes: bool,
     /// TUI colour theme: dark (default) or light (env: ILLUMIO_TUI_THEME)
     #[arg(long, global = true, env = "ILLUMIO_TUI_THEME")]

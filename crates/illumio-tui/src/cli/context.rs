@@ -16,7 +16,6 @@ pub struct Context {
     pub pce: Pce,
     pub format: OutputFormat,
     pub cache_mode: CacheMode,
-    pub allow_writes: bool,
     started: Instant,
 }
 
@@ -52,7 +51,6 @@ impl Context {
             pce,
             format,
             cache_mode,
-            allow_writes: global.allow_writes,
             started: Instant::now(),
         })
     }

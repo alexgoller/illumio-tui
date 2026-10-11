@@ -42,7 +42,6 @@ fn live() -> Option<(Pce, Arc<MemoryAudit>, WriteGuard)> {
     let audit = MemoryAudit::new();
     let guard = WriteGuard::new(
         true,
-        true,
         Box::new(audit.clone()),
         WriteContext {
             profile: "live".into(),

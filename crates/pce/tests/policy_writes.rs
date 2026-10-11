@@ -40,7 +40,7 @@ fn ctx() -> WriteContext {
 }
 
 fn guard_with(audit: Arc<MemoryAudit>) -> WriteGuard {
-    WriteGuard::new(true, true, Box::new(audit), ctx()).unwrap()
+    WriteGuard::new(true, Box::new(audit), ctx()).unwrap()
 }
 
 fn send_plan(method: WriteMethod, path: &str, body: Option<Value>, kind: ObjectKind) -> Plan {

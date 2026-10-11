@@ -73,11 +73,11 @@ mod tests {
     #[test]
     fn write_errors_map_to_exit_codes() {
         assert_eq!(
-            CliError::Write(WriteError::Refused(WriteRefused::FlagMissing)).exit_code(),
+            CliError::Write(WriteError::Refused(WriteRefused::ProfileDenies)).exit_code(),
             6
         );
         assert_eq!(
-            CliError::Write(WriteError::Refused(WriteRefused::FlagMissing)).kind(),
+            CliError::Write(WriteError::Refused(WriteRefused::ProfileDenies)).kind(),
             "write_refused"
         );
         assert_eq!(
@@ -101,7 +101,7 @@ mod tests {
             4
         );
         let wrapped = CliError::Write(WriteError::AuditFailed {
-            write: Box::new(WriteError::Refused(WriteRefused::FlagMissing)),
+            write: Box::new(WriteError::Refused(WriteRefused::ProfileDenies)),
             error: "disk full".into(),
         });
         assert_eq!(wrapped.exit_code(), 6);

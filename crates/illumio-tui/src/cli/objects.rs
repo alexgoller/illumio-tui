@@ -39,7 +39,7 @@ pub struct LabelsCmd {
 
 #[derive(Subcommand, Debug)]
 pub enum LabelsAction {
-    /// Create a label (needs writes enabled and --allow-writes)
+    /// Create a label (needs writes = true in the profile)
     Add(LabelAddArgs),
     /// Change a label's value
     Update(LabelUpdateArgs),
@@ -239,7 +239,7 @@ pub struct IplistsCmd {
 
 #[derive(Subcommand, Debug)]
 pub enum IplistsAction {
-    /// Create an IP list in draft (needs writes enabled and --allow-writes)
+    /// Create an IP list in draft (needs writes = true in the profile)
     Add(IpListAddArgs),
     /// Change an IP list's name, description, ranges or FQDNs; a changed list is re-sent whole
     Update(IpListUpdateArgs),
@@ -405,7 +405,7 @@ pub struct ServicesCmd {
 
 #[derive(Subcommand, Debug)]
 pub enum ServicesAction {
-    /// Create a service in draft (needs writes enabled and --allow-writes)
+    /// Create a service in draft (needs writes = true in the profile)
     Add(ServiceAddArgs),
     /// Change a service's name, description or ports; a changed port list is re-sent whole
     Update(ServiceUpdateArgs),
