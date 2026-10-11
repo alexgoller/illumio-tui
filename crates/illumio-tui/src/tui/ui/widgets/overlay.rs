@@ -16,8 +16,8 @@ use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
 
 pub const HELP_LINES: &[(&str, &str)] = &[
     (
-        "1 2 3 4 5 6",
-        "Traffic · Policy · Objects · Workloads · Events · IPs",
+        "1 2 3 4 5",
+        "Traffic · Policy · Objects · Workloads · Events",
     ),
     (":", "command prompt: :traffic :policy :objects :workloads"),
     ("", ":events  :iplists  :filter <expr>  :window <dur>"),
@@ -59,7 +59,10 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "Policy   i",
         "rule impact: load the workloads once (1 request)",
     ),
-    ("Objects  Tab / Enter", "next object type · detail"),
+    (
+        "Objects  Tab / Enter",
+        "next tab: labels, groups, services, IP lists · detail",
+    ),
     (
         "IP lists Enter",
         "detail: ranges · FQDNs · size · rules using it",
@@ -690,8 +693,6 @@ pub fn screen_hint(screen: Screen, writes: bool) -> &'static str {
         (Screen::Policy, _) => "d scope  p pending  Enter detail  Tab pane  i impact",
         (Screen::Objects, false) => "Tab type  Enter detail  r refresh  a auto  / search",
         (Screen::Workloads, false) => "t/T traffic  h/H health  Enter detail  r refresh",
-        (Screen::IpLists, true) => "n:new e:edit x:del  Enter detail  r refresh",
-        (Screen::IpLists, false) => "Enter detail  r refresh  a auto  s sort  / search",
         (Screen::Events, _) => "f filter  r refresh  a auto  S severity  Enter detail",
     }
 }

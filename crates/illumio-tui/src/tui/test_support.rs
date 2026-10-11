@@ -1,6 +1,8 @@
 //! Fixture-backed models and off-screen rendering for tests and snapshots.
 //! Compiled always (it is tiny) so integration tests can use it.
-use crate::tui::model::{Connection, Model, ProfileInfo, QueryState, TrafficData};
+use crate::tui::model::{
+    Connection, Model, ObjectKind, ProfileInfo, QueryState, Screen, TrafficData,
+};
 use crate::tui::ui::view;
 use pce::NameIndex;
 use pce::models::{Flow, IpList, Label, LabelGroup, Service};
@@ -130,9 +132,15 @@ pub fn model_with_ip_lists() -> Model {
     let lists: Vec<IpList> =
         serde_json::from_str(include_str!("../../../../fixtures/ip_lists.json"))
             .expect("ip lists fixture");
-    m.ip_lists.set_lists(lists, &m.policy);
-    m.ip_lists.loaded_at = Some(Instant::now() - Duration::from_secs(3));
+    m.objects.ip_lists.set_lists(lists, &m.policy);
+    m.objects.ip_lists.loaded_at = Some(Instant::now() - Duration::from_secs(3));
     m
+}
+
+/// Puts `m` on the Objects screen with the IP lists tab current.
+pub fn on_ip_lists_tab(m: &mut Model) {
+    m.screen = Screen::Objects;
+    m.objects.kind = ObjectKind::IpLists;
 }
 
 /// A connected model with the three fixture workloads loaded (age 5 s).

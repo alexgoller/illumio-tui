@@ -221,10 +221,6 @@ fn render_body(model: &Model, f: &mut Frame, area: Rect) {
         screens::events::render_screen(model, f, area);
         return;
     }
-    if model.screen == Screen::IpLists && model.is_connected() {
-        screens::iplists::render_screen(model, f, area);
-        return;
-    }
     let block = widgets::panel::panel(model.screen.title(), "", t, true);
     let text = match &model.connection {
         Connection::Connecting => "connecting…",
@@ -249,9 +245,9 @@ mod tests {
         let x = tab_x(Screen::Workloads, 80);
         assert_eq!(tab_at(x, x), None, "clipped by a narrow terminal");
         // The rendered row puts each label exactly where tab_at expects it,
-        // with the short titles at 80 columns and the full ones at 160.
+        // with the short titles at 64 columns and the full ones from 80.
         let m = crate::tui::test_support::model_fixture();
-        for (w, h) in [(80u16, 24u16), (160, 48)] {
+        for (w, h) in [(64u16, 24u16), (80, 24), (160, 48)] {
             let out = crate::tui::test_support::render_to_string(&m, w, h);
             let row: Vec<char> = out.lines().nth(1).unwrap().chars().collect();
             for s in Screen::ALL {
@@ -266,12 +262,14 @@ mod tests {
     #[test]
     fn the_tab_row_shortens_only_when_the_full_row_does_not_fit() {
         let full = tab_labels(160);
-        assert_eq!(row_width(&full), 84, "six full titles and five dividers");
+        assert_eq!(full.len(), 5);
+        assert_eq!(row_width(&full), 69, "five full titles and four dividers");
         assert_eq!(full[2], " 3 Objects ");
-        assert_eq!(full[5], " 6 IP lists ");
-        assert_eq!(tab_labels(84)[5], " 6 IP lists ");
-        assert_eq!(tab_labels(83)[5], " 6 IPs ");
-        assert_eq!(tab_labels(83)[0], " 1 Traf ");
-        assert_eq!(row_width(&tab_labels(80)), 58);
+        assert_eq!(full[4], " 5 Events ");
+        assert_eq!(tab_labels(80), full, "the full row fits at 80 columns");
+        assert_eq!(tab_labels(69)[4], " 5 Events ");
+        assert_eq!(tab_labels(68)[4], " 5 Ev ");
+        assert_eq!(tab_labels(68)[0], " 1 Traf ");
+        assert_eq!(row_width(&tab_labels(60)), 48);
     }
 }

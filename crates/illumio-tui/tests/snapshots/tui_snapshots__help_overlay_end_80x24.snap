@@ -16,7 +16,7 @@ expression: out
 │Policy   Tab / Enter     pane · rule detail · on a ruleset: load deny rules   │
 │Policy   N               new deny rule in the selected ruleset (rules pane)   │
 │Policy   i               rule impact: load the workloads once (1 request)     │
-│Objects  Tab / Enter     next object type · detail                            │
+│Objects  Tab / Enter     next tab: labels, groups, services, IP lists · detail│
 │IP lists Enter           detail: ranges · FQDNs · size · rules using it       │
 │Workloads t/T h H Enter  Traffic as src/dst · unhealthy · health sort · detail│
 │Events   f / Enter / S   filter · event as JSON · sort by severity            │

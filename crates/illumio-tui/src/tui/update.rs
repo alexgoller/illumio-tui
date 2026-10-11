@@ -59,6 +59,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             let o = &model.objects;
             let kind = o.kind;
             if model.screen == Screen::Objects
+                && kind != ObjectKind::IpLists
                 && model.focused
                 && model.overlay == Overlay::None
                 && o.ages[kind.index()].is_some()
@@ -70,15 +71,17 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 model.objects.auto.from_tick = true;
                 return cmds;
             }
-            if model.screen == Screen::IpLists
+            let ipl = &model.objects.ip_lists;
+            if model.screen == Screen::Objects
+                && kind == ObjectKind::IpLists
                 && model.focused
                 && model.overlay == Overlay::None
-                && model.ip_lists.loaded_at.is_some()
-                && !model.ip_lists.loading
-                && model.ip_lists.auto.due(now)
+                && ipl.loaded_at.is_some()
+                && !ipl.loading
+                && ipl.auto.due(now)
             {
                 let cmds = load_ip_lists(model, CacheMode::Bypass);
-                model.ip_lists.auto.from_tick = true;
+                model.objects.ip_lists.auto.from_tick = true;
                 return cmds;
             }
             if model.screen == Screen::Workloads
@@ -149,15 +152,13 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     .set_rule_sets(raw, &idx, model.workloads.impact_source());
                 cmds.extend(deny_fallback(model, CacheMode::Use));
             }
-            // The Objects screen was opened while the startup load was still running.
+            // The Objects screen (IP lists tab included) was opened while the
+            // startup load was still running.
             if model.screen == Screen::Objects {
                 cmds.extend(load_missing_objects(model));
             }
             if model.screen == Screen::Workloads {
                 cmds.extend(load_missing_workloads(model));
-            }
-            if model.screen == Screen::IpLists {
-                cmds.extend(load_missing_ip_lists(model));
             }
             // After a reconnect or profile switch nothing else would load Policy.
             if model.screen == Screen::Policy
@@ -304,7 +305,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         }
                         None => model.policy.raw = raw, // built when the index arrives
                     }
-                    model.ip_lists.recount(&model.policy);
+                    model.objects.ip_lists.recount(&model.policy);
                     model.refresh_confirm_impact();
                     if !quiet {
                         model.status = StatusLine::info(format!(
@@ -340,7 +341,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                             .policy
                             .rebuild_rules(&idx, model.workloads.impact_source());
                     }
-                    model.ip_lists.recount(&model.policy);
+                    model.objects.ip_lists.recount(&model.policy);
                 }
                 Err(e) if e.contains("not found") => {
                     model.policy.fallback_deny.insert(href, Vec::new());
@@ -451,7 +452,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             Vec::new()
         }
         Msg::IpListsLoaded(result) => {
-            model.ip_lists.loading = false;
+            model.objects.ip_lists.loading = false;
             match result {
                 // No status text: a write's report survives the reload it caused.
                 Ok((lists, age)) => {
@@ -462,17 +463,17 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     {
                         *idx = std::sync::Arc::new(idx.with_ip_lists(&lists));
                     }
-                    model.ip_lists.set_lists(lists, &model.policy);
+                    model.objects.ip_lists.set_lists(lists, &model.policy);
                     model.rebuild_rules();
                     model.refresh_confirm_impact();
-                    let s = &mut model.ip_lists;
+                    let s = &mut model.objects.ip_lists;
                     s.loaded_at = Some(Instant::now());
                     s.auto.from_tick = false;
                     s.age_secs = age;
                     s.show_detail &= s.table.selected_item().is_some();
                 }
                 Err(e) => {
-                    let tripped = model.ip_lists.auto.take_tick_failure();
+                    let tripped = model.objects.ip_lists.auto.take_tick_failure();
                     fail(model, "IP lists", &e, tripped);
                 }
             }
@@ -1141,9 +1142,6 @@ fn on_screen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         if model.screen == Screen::Events && model.events.table.is_searching() {
             return events_key(model, k);
         }
-        if model.screen == Screen::IpLists && model.ip_lists.table.is_searching() {
-            return ip_lists_key(model, k);
-        }
     }
     if k.code == KeyCode::Char('r')
         && k.modifiers == KeyModifiers::NONE
@@ -1172,13 +1170,11 @@ fn on_screen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         (KeyCode::Char('3'), _) => switch(model, Screen::Objects),
         (KeyCode::Char('4'), _) => switch(model, Screen::Workloads),
         (KeyCode::Char('5'), _) => switch(model, Screen::Events),
-        (KeyCode::Char('6'), _) => switch(model, Screen::IpLists),
         _ if model.screen == Screen::Traffic => traffic_key(model, k),
         _ if model.screen == Screen::Policy => policy_key(model, k),
         _ if model.screen == Screen::Objects => objects_key(model, k),
         _ if model.screen == Screen::Workloads => workloads_key(model, k),
         _ if model.screen == Screen::Events => events_key(model, k),
-        _ if model.screen == Screen::IpLists => ip_lists_key(model, k),
         _ => Vec::new(),
     }
 }
@@ -1373,12 +1369,17 @@ fn scroll_focused(model: &mut Model, down: bool) {
             }
         }
         Screen::Objects => {
-            let page = objects_page(model);
+            let page = if model.objects.kind == ObjectKind::IpLists {
+                ip_lists_page(model)
+            } else {
+                objects_page(model)
+            };
             let o = &mut model.objects;
             match o.kind {
                 ObjectKind::Labels => step(&mut o.labels, down, page),
                 ObjectKind::LabelGroups => step(&mut o.groups, down, page),
                 ObjectKind::Services => step(&mut o.services, down, page),
+                ObjectKind::IpLists => step(&mut o.ip_lists.table, down, page),
             }
         }
         Screen::Workloads => {
@@ -1388,10 +1389,6 @@ fn scroll_focused(model: &mut Model, down: bool) {
         Screen::Events => {
             let page = events_page(model);
             step(&mut model.events.table, down, page);
-        }
-        Screen::IpLists => {
-            let page = ip_lists_page(model);
-            step(&mut model.ip_lists.table, down, page);
         }
     }
 }
@@ -1410,7 +1407,6 @@ fn switch(model: &mut Model, s: Screen) -> Vec<Cmd> {
         Screen::Objects => load_missing_objects(model),
         Screen::Workloads => load_missing_workloads(model),
         Screen::Events => load_missing_events(model),
-        Screen::IpLists => load_missing_ip_lists(model),
         _ => Vec::new(),
     }
 }
@@ -1456,7 +1452,7 @@ fn policy_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     PolicyScope::Active => PolicyScope::Draft,
                 };
                 model.policy.clear();
-                model.ip_lists.recount(&model.policy);
+                model.objects.ip_lists.recount(&model.policy);
                 return load_rule_sets(model, CacheMode::Use);
             }
             KeyCode::Char('r') => {
@@ -1539,24 +1535,32 @@ fn policy_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     Vec::new()
 }
 
-/// Loads every kind that has neither arrived nor is in flight. Needs the name
-/// index: it is built from the same four lists, so these are cache hits and
-/// the screen costs no request.
+/// Loads every fetched kind that has neither arrived nor is in flight, and
+/// the IP lists when their tab is the current one. Needs the name index: it
+/// is built from the same four lists, so these are cache hits and the screen
+/// costs no request.
 fn load_missing_objects(model: &mut Model) -> Vec<Cmd> {
     if model.index().is_none() {
         return Vec::new();
     }
-    let missing: Vec<ObjectKind> = ObjectKind::ALL
+    let missing: Vec<ObjectKind> = ObjectKind::FETCHED
         .into_iter()
         .filter(|k| model.objects.ages[k.index()].is_none() && !model.objects.loading[k.index()])
         .collect();
-    missing
+    let mut cmds: Vec<Cmd> = missing
         .into_iter()
         .flat_map(|k| load_objects(model, k, CacheMode::Use))
-        .collect()
+        .collect();
+    if model.objects.kind == ObjectKind::IpLists {
+        cmds.extend(load_missing_ip_lists(model));
+    }
+    cmds
 }
 
 fn load_objects(model: &mut Model, kind: ObjectKind, mode: CacheMode) -> Vec<Cmd> {
+    if kind == ObjectKind::IpLists {
+        return load_ip_lists(model, mode);
+    }
     model.objects.loading[kind.index()] = true;
     model.objects.auto.last_run = Some(Instant::now());
     model.objects.auto.from_tick = false;
@@ -1603,32 +1607,42 @@ fn impact_key(model: &mut Model) -> Vec<Cmd> {
 }
 
 fn ip_lists_page(model: &Model) -> usize {
+    use crate::tui::ui::screens::{iplists, objects};
     let area = ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1);
     crate::tui::ui::layout::chrome(area)
-        .map(|c| crate::tui::ui::screens::iplists::table_rows(c.body, model.ip_lists.show_detail))
+        .map(|c| {
+            iplists::table_rows(
+                objects::strip_split(c.body).1,
+                model.objects.ip_lists.show_detail,
+            )
+        })
         .unwrap_or(10)
         .max(1)
 }
 
-/// Loads the IP lists once. Waits for the name index like Objects does: the
-/// index reads the same list, so after it the load is a cache hit.
+/// Loads the IP lists once (the Objects screen's IP lists tab). Waits for the
+/// name index like the other kinds: the index reads the same list, so after
+/// it the load is a cache hit.
 fn load_missing_ip_lists(model: &mut Model) -> Vec<Cmd> {
-    if model.index().is_none() || model.ip_lists.loaded_at.is_some() || model.ip_lists.loading {
+    if model.index().is_none()
+        || model.objects.ip_lists.loaded_at.is_some()
+        || model.objects.ip_lists.loading
+    {
         return Vec::new();
     }
     load_ip_lists(model, CacheMode::Use)
 }
 
 fn load_ip_lists(model: &mut Model, mode: CacheMode) -> Vec<Cmd> {
-    model.ip_lists.loading = true;
-    model.ip_lists.auto.last_run = Some(Instant::now());
-    model.ip_lists.auto.from_tick = false;
+    model.objects.ip_lists.loading = true;
+    model.objects.ip_lists.auto.last_run = Some(Instant::now());
+    model.objects.ip_lists.auto.from_tick = false;
     vec![Cmd::LoadIpLists(mode)]
 }
 
 fn ip_lists_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     let page = ip_lists_page(model);
-    if !model.ip_lists.table.is_searching() {
+    if !model.objects.ip_lists.table.is_searching() {
         match k.code {
             KeyCode::Char('r') => {
                 if model.index().is_none() {
@@ -1641,27 +1655,27 @@ fn ip_lists_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     model.status = StatusLine::info("objects are still loading");
                     return Vec::new();
                 }
-                if model.ip_lists.loading {
+                if model.objects.ip_lists.loading {
                     model.status = StatusLine::info("IP lists already loading");
                     return Vec::new();
                 }
-                model.ip_lists.auto.rearm();
+                model.objects.ip_lists.auto.rearm();
                 return load_ip_lists(model, CacheMode::Bypass);
             }
             KeyCode::Enter => {
-                let s = &mut model.ip_lists;
+                let s = &mut model.objects.ip_lists;
                 s.show_detail = !s.show_detail && s.table.selected_item().is_some();
                 return Vec::new();
             }
             KeyCode::Char('a') => {
-                model.status = model.ip_lists.auto.toggle();
+                model.status = model.objects.ip_lists.auto.toggle();
                 return Vec::new();
             }
             KeyCode::Char(c @ ('n' | 'e' | 'x')) => return ip_lists_edit_key(model, c),
             _ => {}
         }
     }
-    drive_table(&mut model.ip_lists.table, k, page);
+    drive_table(&mut model.objects.ip_lists.table, k, page);
     Vec::new()
 }
 
@@ -1670,7 +1684,12 @@ fn ip_lists_edit_key(model: &mut Model, c: char) -> Vec<Cmd> {
     if writes_refused(model) {
         return Vec::new();
     }
-    let selected = model.ip_lists.table.selected_item().map(|r| r.list.clone());
+    let selected = model
+        .objects
+        .ip_lists
+        .table
+        .selected_item()
+        .map(|r| r.list.clone());
     let intent = match c {
         'n' => Some(EditIntent::CreateIpList),
         'e' => selected.map(EditIntent::UpdateIpList),
@@ -2017,14 +2036,22 @@ fn objects_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         let kind = model.objects.kind;
         match k.code {
             KeyCode::Tab | KeyCode::BackTab => {
-                model.objects.kind = if k.code == KeyCode::Tab {
+                let o = &mut model.objects;
+                o.kind = if k.code == KeyCode::Tab {
                     kind.next()
                 } else {
                     kind.prev()
                 };
-                model.objects.show_detail = false;
-                return Vec::new();
+                o.show_detail = false;
+                o.ip_lists.show_detail = false;
+                // The first visit to the IP lists tab loads them (a cache hit).
+                return if o.kind == ObjectKind::IpLists {
+                    load_missing_ip_lists(model)
+                } else {
+                    Vec::new()
+                };
             }
+            _ if kind == ObjectKind::IpLists => return ip_lists_key(model, k),
             KeyCode::Char('r') => {
                 if model.index().is_none() {
                     if model.objects.index_failed {
@@ -2060,6 +2087,8 @@ fn objects_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         ObjectKind::Labels => drive_table(&mut o.labels, k, page),
         ObjectKind::LabelGroups => drive_table(&mut o.groups, k, page),
         ObjectKind::Services => drive_table(&mut o.services, k, page),
+        // A search on the IP lists tab: its own keys and page size.
+        ObjectKind::IpLists => return ip_lists_key(model, k),
     }
     Vec::new()
 }
@@ -2119,6 +2148,7 @@ fn objects_edit_key(model: &mut Model, c: char) -> Vec<Cmd> {
     }
     let o = &model.objects;
     let intent = match (o.kind, c) {
+        (ObjectKind::IpLists, _) => return ip_lists_edit_key(model, c),
         (ObjectKind::LabelGroups, _) => {
             model.status = StatusLine::warn("label groups are read-only in this version");
             return Vec::new();
@@ -2297,6 +2327,12 @@ fn show_policy(model: &mut Model, scope: PolicyScope) -> Vec<Cmd> {
 pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
     match cmd {
         Command::Screen(s) => switch(model, s),
+        Command::IpLists => {
+            model.objects.kind = ObjectKind::IpLists;
+            model.objects.show_detail = false;
+            model.objects.ip_lists.show_detail = false;
+            switch(model, Screen::Objects)
+        }
         Command::Quit => {
             model.quit = true;
             vec![Cmd::Quit]
@@ -2370,6 +2406,13 @@ mod tests {
 
     fn key(c: char) -> Msg {
         Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))
+    }
+
+    /// Sends `msg` and asserts it asked for nothing: a key, a tab or a screen
+    /// change must not reach the PCE.
+    #[track_caller]
+    fn quiet(m: &mut Model, msg: Msg) {
+        assert_eq!(update(m, msg), Vec::<Cmd>::new());
     }
 
     #[test]
@@ -2733,12 +2776,9 @@ mod tests {
             vec![Cmd::LoadWorkloads(pce::CacheMode::Use)]
         );
         assert_eq!(m.screen, Screen::Workloads);
-        // entering IP lists for the first time loads them once (a cache hit)
-        assert_eq!(
-            update(&mut m, key('6')),
-            vec![Cmd::LoadIpLists(pce::CacheMode::Use)]
-        );
-        assert_eq!(m.screen, Screen::IpLists);
+        // there is no sixth screen: 6 does nothing
+        assert!(update(&mut m, key('6')).is_empty());
+        assert_eq!(m.screen, Screen::Workloads);
         assert!(update(&mut m, key('1')).is_empty());
         assert_eq!(m.screen, Screen::Traffic);
     }
@@ -5255,7 +5295,7 @@ mod tests {
             assert_eq!(m.overlay, Overlay::None);
         }
         let mut m = crate::tui::test_support::model_with_ip_lists();
-        m.screen = Screen::IpLists;
+        crate::tui::test_support::on_ip_lists_tab(&mut m);
         for c in ['n', 'e', 'x'] {
             m.status = StatusLine::info("ready");
             assert!(update(&mut m, key(c)).is_empty(), "{c}");
@@ -5268,8 +5308,8 @@ mod tests {
     #[test]
     fn ip_list_edit_keys_without_a_selected_row_say_so() {
         let mut m = writes_on(model_fixture());
-        m.screen = Screen::IpLists;
-        assert!(m.ip_lists.table.is_empty());
+        crate::tui::test_support::on_ip_lists_tab(&mut m);
+        assert!(m.objects.ip_lists.table.is_empty());
         for c in ['e', 'x'] {
             m.status = StatusLine::info("ready");
             assert!(update(&mut m, key(c)).is_empty(), "{c}");
@@ -5325,15 +5365,15 @@ mod tests {
         use crate::tui::edit::WriteIntent;
         use crate::tui::test_support::model_with_ip_lists;
         let mut m = writes_on(model_with_ip_lists());
-        m.screen = Screen::IpLists;
+        crate::tui::test_support::on_ip_lists_tab(&mut m);
         assert!(update(&mut m, key('n')).is_empty());
         let Overlay::Form(f) = &m.overlay else {
             panic!("{:?}", m.overlay)
         };
         assert_eq!(f.title, "New IP list");
-        update(&mut m, kc(KeyCode::Esc));
+        quiet(&mut m, kc(KeyCode::Esc));
         assert_eq!(m.overlay, Overlay::None);
-        update(&mut m, key('j'));
+        quiet(&mut m, key('j'));
         assert_eq!(
             update(&mut m, key('x')),
             vec![Cmd::PlanWrite(WriteIntent::DeleteIpList {
@@ -5347,12 +5387,13 @@ mod tests {
     #[test]
     fn used_by_follows_the_rulesets_as_they_load_and_switch_scope() {
         let mut m = model_fixture();
-        m.screen = Screen::IpLists;
+        crate::tui::test_support::on_ip_lists_tab(&mut m);
         let lists =
             serde_json::from_str(include_str!("../../../../fixtures/ip_lists.json")).unwrap();
         update(&mut m, Msg::IpListsLoaded(Ok((lists, 0))));
         let used = |m: &Model| {
-            m.ip_lists
+            m.objects
+                .ip_lists
                 .table
                 .rows()
                 .iter()
@@ -5387,7 +5428,14 @@ mod tests {
         );
         assert_eq!(used(&m), vec![Some(1), Some(2)]);
         m.screen = Screen::Policy;
-        update(&mut m, key('d'));
+        assert_eq!(
+            update(&mut m, key('d')),
+            vec![Cmd::LoadRuleSets {
+                scope: PolicyScope::Active,
+                mode: pce::CacheMode::Use,
+            }],
+            "the first switch to active loads it"
+        );
         assert_eq!(
             used(&m),
             vec![None, None],
@@ -5400,8 +5448,8 @@ mod tests {
         use crate::tui::edit::WriteIntent;
         use crate::tui::test_support::model_with_ip_lists;
         let mut m = writes_on(model_with_ip_lists());
-        m.screen = Screen::IpLists;
-        update(&mut m, key('j')); // Corp
+        crate::tui::test_support::on_ip_lists_tab(&mut m);
+        quiet(&mut m, key('j')); // Corp
         assert!(update(&mut m, key('e')).is_empty());
         let Overlay::Form(f) = &m.overlay else {
             panic!("{:?}", m.overlay)
@@ -5411,11 +5459,11 @@ mod tests {
         assert!(update(&mut m, enter()).is_empty());
         assert_eq!(m.status.text, "no changes");
         assert_eq!(m.overlay, Overlay::None);
-        update(&mut m, key('e'));
-        update(&mut m, kc(KeyCode::Tab));
-        update(&mut m, kc(KeyCode::Tab));
+        quiet(&mut m, key('e'));
+        quiet(&mut m, kc(KeyCode::Tab));
+        quiet(&mut m, kc(KeyCode::Tab));
         for c in ", 10.2.0.0/16".chars() {
-            update(&mut m, key(c));
+            quiet(&mut m, key(c));
         }
         let cmds = update(&mut m, enter());
         assert_eq!(
@@ -6979,26 +7027,35 @@ mod tests {
     }
 
     #[test]
-    fn six_opens_ip_lists_once_and_r_bypasses_the_cache_once() {
+    fn the_ip_lists_tab_loads_once_and_r_bypasses_the_cache_once() {
+        use crate::tui::model::ObjectKind;
         let mut m = model_fixture();
+        assert_eq!(update(&mut m, key('3')).len(), 3, "the three other kinds");
         assert_eq!(
-            update(&mut m, key('6')),
-            vec![Cmd::LoadIpLists(pce::CacheMode::Use)]
+            update(&mut m, kc(KeyCode::BackTab)),
+            vec![Cmd::LoadIpLists(pce::CacheMode::Use)],
+            "Labels back to IP lists: the first visit loads them"
         );
-        assert_eq!(m.screen, Screen::IpLists);
-        assert!(update(&mut m, key('6')).is_empty(), "already loading");
+        assert_eq!(m.objects.kind, ObjectKind::IpLists);
+        assert_eq!(m.screen, Screen::Objects);
+        quiet(&mut m, kc(KeyCode::Tab));
+        assert!(
+            update(&mut m, kc(KeyCode::BackTab)).is_empty(),
+            "already loading"
+        );
         let lists =
             serde_json::from_str(include_str!("../../../../fixtures/ip_lists.json")).unwrap();
         assert!(update(&mut m, Msg::IpListsLoaded(Ok((lists, 120)))).is_empty());
-        assert_eq!(m.ip_lists.table.len(), 2);
-        assert_eq!(m.ip_lists.table.rows()[1].size.display(), "65.5K");
-        assert_eq!(m.ip_lists.age_secs, 120);
+        assert_eq!(m.objects.ip_lists.table.len(), 2);
+        assert_eq!(m.objects.ip_lists.table.rows()[1].size.display(), "65.5K");
+        assert_eq!(m.objects.ip_lists.age_secs, 120);
         assert_eq!(m.status.text, "ready", "the status line is left alone");
-        update(&mut m, key('1'));
+        quiet(&mut m, key('1'));
         assert!(
-            update(&mut m, key('6')).is_empty(),
-            "coming back costs nothing"
+            update(&mut m, key('3')).is_empty(),
+            "coming back to the tab costs nothing"
         );
+        assert_eq!(m.objects.kind, ObjectKind::IpLists, "the tab is kept");
         assert_eq!(
             update(&mut m, key('r')),
             vec![Cmd::LoadIpLists(pce::CacheMode::Bypass)]
@@ -7007,20 +7064,29 @@ mod tests {
         assert_eq!(m.status.text, "IP lists already loading");
         update(&mut m, Msg::IpListsLoaded(Err("boom".into())));
         assert_eq!(m.status.text, "IP lists: boom");
-        assert!(!m.ip_lists.loading);
-        assert_eq!(m.ip_lists.table.len(), 2, "a failed reload keeps the rows");
+        assert!(!m.objects.ip_lists.loading);
+        assert_eq!(
+            m.objects.ip_lists.table.len(),
+            2,
+            "a failed reload keeps the rows"
+        );
     }
 
     #[test]
-    fn ip_lists_wait_for_the_name_index_and_the_command_opens_them() {
+    fn ip_lists_wait_for_the_name_index_and_the_command_opens_their_tab() {
+        use crate::tui::model::ObjectKind;
         let mut m = model_fixture();
         let Connection::Connected { index, .. } = &mut m.connection else {
             unreachable!()
         };
         let idx = index.take();
         assert!(
-            update(&mut m, key('6')).is_empty(),
+            on_command(&mut m, Command::IpLists).is_empty(),
             "the startup load reads the same list"
+        );
+        assert_eq!(
+            (m.screen, m.objects.kind),
+            (Screen::Objects, ObjectKind::IpLists)
         );
         let cmds = update(
             &mut m,
@@ -7029,34 +7095,36 @@ mod tests {
                 age_secs: 0,
             },
         );
-        assert_eq!(cmds, vec![Cmd::LoadIpLists(pce::CacheMode::Use)]);
+        assert_eq!(cmds.len(), 4, "the three other kinds and the IP lists");
+        assert!(cmds.contains(&Cmd::LoadIpLists(pce::CacheMode::Use)));
         let mut m = model_fixture();
-        assert_eq!(
-            on_command(&mut m, Command::Screen(Screen::IpLists)),
-            vec![Cmd::LoadIpLists(pce::CacheMode::Use)]
-        );
+        let cmds = on_command(&mut m, Command::IpLists);
+        assert_eq!(cmds.len(), 4);
+        assert_eq!(cmds[3], Cmd::LoadIpLists(pce::CacheMode::Use));
+        assert_eq!(m.objects.kind, ObjectKind::IpLists);
     }
 
     #[test]
     fn enter_toggles_the_ip_list_detail_and_search_captures_keys() {
         use crate::tui::test_support::model_with_ip_lists;
         let mut m = model_with_ip_lists();
-        m.screen = Screen::IpLists;
-        update(&mut m, enter());
-        assert!(m.ip_lists.show_detail);
-        update(&mut m, enter());
-        assert!(!m.ip_lists.show_detail);
-        update(&mut m, key('/'));
+        crate::tui::test_support::on_ip_lists_tab(&mut m);
+        quiet(&mut m, enter());
+        assert!(m.objects.ip_lists.show_detail);
+        quiet(&mut m, enter());
+        assert!(!m.objects.ip_lists.show_detail);
+        quiet(&mut m, key('/'));
         for c in "corp6".chars() {
             assert!(update(&mut m, key(c)).is_empty());
         }
-        assert_eq!(m.screen, Screen::IpLists, "6 is typed into the search");
-        assert!(m.ip_lists.table.is_empty());
-        update(&mut m, kc(KeyCode::Esc));
-        assert_eq!(m.ip_lists.table.len(), 2);
-        update(&mut m, key('j'));
+        assert_eq!(m.screen, Screen::Objects, "6 is typed into the search");
+        assert!(m.objects.ip_lists.table.is_empty());
+        quiet(&mut m, kc(KeyCode::Esc));
+        assert_eq!(m.objects.ip_lists.table.len(), 2);
+        quiet(&mut m, key('j'));
         assert_eq!(
-            m.ip_lists
+            m.objects
+                .ip_lists
                 .table
                 .selected_item()
                 .map(|r| r.list.name.as_str()),
@@ -7065,23 +7133,69 @@ mod tests {
     }
 
     #[test]
+    fn every_key_and_the_wheel_on_the_ip_lists_tab_stay_on_its_own_state() {
+        use crate::tui::model::ObjectKind;
+        use crate::tui::test_support::{model_with_ip_lists, on_ip_lists_tab};
+        use crossterm::event::MouseEventKind;
+        let mut m = model_with_ip_lists();
+        on_ip_lists_tab(&mut m);
+        update(&mut m, Msg::Resize(80, 24));
+        let keys = [
+            key('j'),
+            key('k'),
+            key('s'),
+            key('s'),
+            enter(),
+            enter(),
+            key('a'),
+            key('a'),
+            kc(KeyCode::End),
+            kc(KeyCode::Home),
+            mouse(MouseEventKind::ScrollDown, 10, 10),
+            mouse(MouseEventKind::ScrollUp, 10, 10),
+            key('/'),
+            key('c'),
+            kc(KeyCode::Esc),
+        ];
+        for msg in keys {
+            assert!(update(&mut m, msg).is_empty());
+        }
+        assert_eq!(m.objects.kind, ObjectKind::IpLists);
+        assert_eq!(
+            m.objects.ages, [None; 3],
+            "the other kinds' slots are untouched"
+        );
+        assert_eq!(m.objects.loading, [false; 3]);
+        assert_eq!(
+            update(&mut m, key('r')),
+            vec![Cmd::LoadIpLists(pce::CacheMode::Bypass)]
+        );
+        assert_eq!(m.objects.loading, [false; 3], "r reloads only the IP lists");
+        let later = std::time::Instant::now() + std::time::Duration::from_secs(3600);
+        assert!(
+            update(&mut m, Msg::Tick(later)).is_empty(),
+            "a reload in flight and auto-refresh off: the tick does nothing"
+        );
+    }
+
+    #[test]
     fn ip_lists_auto_refresh_is_opt_in_and_bypasses_when_due() {
         use crate::tui::test_support::model_with_ip_lists;
         let mut m = model_with_ip_lists();
-        m.screen = Screen::IpLists;
+        crate::tui::test_support::on_ip_lists_tab(&mut m);
         let later = std::time::Instant::now() + std::time::Duration::from_secs(61);
         assert!(
             update(&mut m, Msg::Tick(later)).is_empty(),
             "off by default"
         );
-        update(&mut m, key('a'));
-        assert!(m.ip_lists.auto.enabled);
+        quiet(&mut m, key('a'));
+        assert!(m.objects.ip_lists.auto.enabled);
         assert!(m.any_auto_enabled());
         assert_eq!(
             update(&mut m, Msg::Tick(later)),
             vec![Cmd::LoadIpLists(pce::CacheMode::Bypass)]
         );
-        assert!(m.ip_lists.auto.from_tick);
+        assert!(m.objects.ip_lists.auto.from_tick);
     }
 
     #[test]

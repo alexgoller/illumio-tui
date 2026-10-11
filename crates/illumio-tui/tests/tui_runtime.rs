@@ -1042,18 +1042,22 @@ async fn writes_disabled_editing_keys_send_nothing() {
         (50, KeyCode::Tab),
         (50, KeyCode::Tab),
         (50, ch('e')),
-        (50, ch('6')),
+        (50, KeyCode::Tab),
         (300, ch('e')),
         (50, ch('x')),
         (200, KeyCode::F(12)),
     ];
     let model = key_session(&server, model(), None, keys).await;
-    assert_eq!(model.screen, illumio_tui::tui::model::Screen::IpLists);
+    assert_eq!(model.screen, illumio_tui::tui::model::Screen::Objects);
+    assert_eq!(
+        model.objects.kind,
+        illumio_tui::tui::model::ObjectKind::IpLists
+    );
     assert_eq!(model.stats.calls, 5, "health + four lists");
     assert_eq!(
         server.received_requests().await.unwrap().len() as u64,
         model.stats.calls,
-        "6 reads the cache; the refused e and x send nothing"
+        "the IP lists tab reads the cache; the refused e and x send nothing"
     );
     assert!(writes_seen(&server).await.is_empty());
     assert_eq!(model.status.text, "writes are not enabled");
@@ -1131,7 +1135,8 @@ async fn update_ip_list_puts_only_the_changed_ranges() {
         .await;
     let audit = MemoryAudit::new();
     let mut keys = vec![
-        (500, ch('6')),
+        (500, ch('3')),
+        (100, KeyCode::BackTab),
         (200, ch('j')),
         (50, ch('e')),
         (20, KeyCode::Tab),
@@ -2092,22 +2097,26 @@ async fn writes_disabled_policy_and_traffic_keys_send_nothing() {
 }
 
 #[tokio::test]
-async fn opening_ip_lists_costs_nothing_after_startup_and_r_bypasses_once() {
+async fn opening_the_ip_lists_tab_costs_nothing_after_startup_and_r_bypasses_once() {
     let server = MockServer::start().await;
     mount_lists(&server, 1, 2, 1).await; // IP lists: the startup load and the r
-    let model = objects_session(
-        &server,
-        &[(500, '6'), (300, '1'), (100, '6'), (300, 'r'), (400, 'q')],
-    )
-    .await;
+    let keys = vec![
+        (500, ch('3')),
+        (100, KeyCode::BackTab),
+        (300, ch('1')),
+        (100, ch('3')),
+        (300, ch('r')),
+        (400, KeyCode::F(12)),
+    ];
+    let model = key_session(&server, model(), None, keys).await;
     assert_eq!(model.stats.calls, 6, "health + four lists + the r refresh");
-    assert_eq!(model.ip_lists.table.len(), 2);
-    assert!(!model.ip_lists.loading);
+    assert_eq!(model.objects.ip_lists.table.len(), 2);
+    assert!(!model.objects.ip_lists.loading);
     assert_eq!(model.busy, 0);
 }
 
 #[tokio::test]
-async fn create_ip_list_on_the_ip_lists_screen_posts_once_and_reloads_once() {
+async fn create_ip_list_on_the_objects_ip_lists_tab_posts_once_and_reloads_once() {
     let server = MockServer::start().await;
     mount_lists(&server, 1, 2, 1).await; // IP lists: startup + the reload
     let body = json!({"name": "Lab", "ip_ranges": [{"from_ip": "10.9.0.0/16"}], "fqdns": []});
@@ -2121,7 +2130,7 @@ async fn create_ip_list_on_the_ip_lists_screen_posts_once_and_reloads_once() {
         .mount(&server)
         .await;
     let audit = MemoryAudit::new();
-    let mut keys = vec![(500, ch('6')), (200, ch('n'))];
+    let mut keys = vec![(500, ch('3')), (100, KeyCode::BackTab), (200, ch('n'))];
     keys.extend(typed("Lab"));
     keys.extend([(20, KeyCode::Tab), (20, KeyCode::Tab)]);
     keys.extend(typed("10.9.0.0/16"));
@@ -2144,7 +2153,7 @@ async fn create_ip_list_on_the_ip_lists_screen_posts_once_and_reloads_once() {
     assert_eq!(writes_seen(&server).await, vec!["POST"]);
     assert_eq!(audit.entries().len(), 1);
     assert_eq!(
-        model.ip_lists.table.len(),
+        model.objects.ip_lists.table.len(),
         2,
         "the mock list did not change"
     );

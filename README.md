@@ -77,13 +77,13 @@ has its own `--port` service-port filter).
     illumio-tui --profile prod
     illumio-tui --theme light        # dark is the default
 
-Six screens: `1` Traffic, `2` Policy, `3` Objects, `4` Workloads, `5` Events, `6` IP lists. The
-`:` prompt takes `:traffic`, `:policy`, `:objects`, `:workloads`, `:events`, `:iplists`,
-`:filter <expr>`, `:window <dur>`, `:profile <name>`, `:writes [on|off]`, `:draft`, `:active`,
-`:help` and `:q`.
+Five screens: `1` Traffic, `2` Policy, `3` Objects, `4` Workloads, `5` Events. The `:` prompt
+takes `:traffic`, `:policy`, `:objects`, `:workloads`, `:events`, `:iplists` (Objects on its
+IP lists tab), `:filter <expr>`, `:window <dur>`, `:profile <name>`, `:writes [on|off]`,
+`:draft`, `:active`, `:help` and `:q`.
 `?` shows the full key map, `Esc` closes overlays, `q` or `Ctrl-C` quits. The mouse wheel
 scrolls the current table and a click on a tab switches screen; on a terminal narrower than
-the full tab row the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`, `IPs`.
+the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
 
 - **Traffic**: `f` edit the filter, `r` run (bypasses the cache), `v` cycle Flows / App-to-app /
   Blocked, `g` change the group keys, `s` sort, `/` search, `Enter` detail (flows) or drill into
@@ -100,12 +100,13 @@ the full tab row the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`, `IPs`.
   counted (virtual services, a side resolved as `virtual_services`), and a rule's confirm
   overlay shows the same for the rule about to be written. Impact uses the ruleset's scopes, unscoped consumers, label groups (with
   their sub-groups), exclusions, `all` and workload actors; IP lists are sized, never expanded.
-- **Objects**: labels, label groups and services; `Tab` next type, `Enter` detail.
-- **IP lists**: name, size (addresses after exclusions: `65.5K`, `16.8M` for a /8; `any` only
-  for an included `0.0.0.0/0` or `::/0`; `5 FQDNs` for a list of names only), ranges, FQDNs,
-  `used by` (rules of the loaded draft rulesets that name the list; `-` until Policy is loaded)
-  and pending; `Enter` shows the size, those rules, then the first ranges and FQDNs. With
-  writes on, `n` / `e` / `x` create, edit and delete.
+- **Objects**: four tabs, labels, label groups, services and IP lists; `Tab` / `Shift-Tab`
+  next / previous tab, `Enter` detail. The IP lists tab shows name, size (addresses after
+  exclusions: `65.5K`, `16.8M` for a /8; `any` only for an included `0.0.0.0/0` or `::/0`;
+  `5 FQDNs` for a list of names only), ranges, FQDNs, `used by` (rules of the loaded draft
+  rulesets that name the list; `-` until Policy is loaded) and pending; `Enter` shows the size,
+  those rules, then the first ranges and FQDNs. With writes on, `n` / `e` / `x` create, edit
+  and delete labels, services and IP lists.
 - **Workloads**: VEN health columns and a summary line, `h` unhealthy only, `H` sort by
   severity, `t` / `T` jump to Traffic with the workload as source / destination.
 - **Events**: severity-coloured audit events, `f` edit severity / type / window, `S` sort by
@@ -122,8 +123,8 @@ actually in use. `:writes on` stays on across a switch, and the new profile's ow
 decides whether it may write.
 
 Startup makes exactly five requests (health plus the four object lists). The first visit to
-Workloads and to Events costs one request each; going back to them costs none. IP lists (`6`)
-cost none within the cache TTL (15 minutes): the startup load already read them. Rule impact
+Workloads and to Events costs one request each; going back to them costs none. The IP lists
+tab costs none within the cache TTL (15 minutes): the startup load already read them. Rule impact
 costs one workloads read on `i`, none when the list is cached. Everything else is caused by a key you press. The header shows
 the API call and byte counters at all times.
 
@@ -297,8 +298,8 @@ request. Without it, managed workloads stay refused.
 The TUI starts with writes off. With writes enabled for the profile, `:writes on` arms
 them for the session (not persisted; `:writes off` disarms them, `:writes` shows the state,
 and `illumio-tui --allow-writes` starts with them on). Then the
-header shows `✎ writes` before the host and three screens take three keys: on Objects (labels,
-services), IP lists and Workloads (unmanaged workloads only)
+header shows `✎ writes` before the host and two screens take three keys: on Objects (labels,
+services, IP lists) and Workloads (unmanaged workloads only)
 `n` creates, `e` edits the selected row and `x` deletes it, and every request is shown in a
 confirm overlay before `y` sends it once. With writes off the keys print the reason in the
 status line and send nothing. Label

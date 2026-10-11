@@ -258,8 +258,9 @@ nothing when it is cached or on its way). `tui/impact.rs` computes from
 line (`PolicyState.confirm_impact`) when the confirm opens, on `i` and on a
 workloads or rulesets load. Drawing only reads what is stored, and a late
 `WorkloadsLoaded` rebuilds the rules pane and the stored line without
-opening or closing an overlay. IP lists are their own screen
-(`Screen::IpLists`, `IpListsState`): the list is the index's own (a cache
+opening or closing an overlay. IP lists are the Objects screen's fourth tab
+(`ObjectKind::IpLists`, `ObjectsState.ip_lists: IpListsState`, loaded by
+`Cmd::LoadIpLists` on the tab's first visit): the list is the index's own (a cache
 hit after startup), sizes are computed once per load, and `used_by` counts
 the loaded draft rules that name the list, recomputed when the rulesets or
 their fetched deny rules arrive.

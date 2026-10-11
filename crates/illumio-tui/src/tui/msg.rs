@@ -133,7 +133,7 @@ pub enum Cmd {
         kind: ObjectKind,
         mode: CacheMode,
     },
-    /// The draft IP lists for the IP lists screen (the index's own list, cached).
+    /// The draft IP lists for the Objects IP lists tab (the index's own list, cached).
     LoadIpLists(CacheMode),
     LoadWorkloads(CacheMode),
     LoadEvents {

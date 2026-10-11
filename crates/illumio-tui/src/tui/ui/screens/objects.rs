@@ -1,6 +1,7 @@
-//! Objects screen: a tab strip of the three object kinds (labels, label groups,
-//! services), the current kind's table, and an optional detail pane for the
-//! selected object.
+//! Objects screen: a tab strip of the four object kinds (labels, label
+//! groups, services, IP lists), the current kind's table, and an optional
+//! detail pane for the selected object. The IP lists tab is drawn by
+//! `screens::iplists` below the strip.
 use crate::tui::model::{Model, ObjectKind};
 use crate::tui::ui::widgets::bars::age_text;
 use crate::tui::ui::widgets::panel::panel;
@@ -14,6 +15,13 @@ use ratatui::widgets::{Paragraph, Tabs};
 use std::time::{Duration, Instant};
 
 const DETAIL_HEIGHT: u16 = 6;
+
+/// `(tab strip, everything below it)`: the IP lists tab lays out the rest
+/// itself (`iplists::layout`).
+pub fn strip_split(body: Rect) -> (Rect, Rect) {
+    let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(body);
+    (rows[0], rows[1])
+}
 
 /// `(tab strip, table, detail)` areas. Shared by `view` and `update` (page sizes).
 /// The detail pane is dropped when the terminal is too short to keep a usable table.
@@ -49,6 +57,12 @@ pub fn render_screen(model: &Model, f: &mut Frame, body: Rect) {
             Paragraph::new(Span::styled(note, t.dim_style())).block(panel("Objects", "", t, true)),
             body,
         );
+        return;
+    }
+    if model.objects.kind == ObjectKind::IpLists {
+        let (strip, rest) = strip_split(body);
+        render_strip(model, f, strip);
+        super::iplists::render_tab(model, f, rest);
         return;
     }
     let (strip, table, detail) = layout(body, model.objects.show_detail);
@@ -93,6 +107,8 @@ fn render_table(model: &Model, f: &mut Frame, area: Rect) {
             o.services.rows().len(),
             header_meta(&o.services),
         ),
+        // Drawn by `iplists::render_tab`; `render_screen` never gets here.
+        ObjectKind::IpLists => return,
     };
     let freshness = if o.loading[kind.index()] {
         "loading…".to_string()
@@ -134,6 +150,7 @@ fn render_table(model: &Model, f: &mut Frame, area: Rect) {
         ObjectKind::Services => render(f, area, &o.services, t, block, &|_: &Service| {
             Style::default()
         }),
+        ObjectKind::IpLists => {}
     }
 }
 
@@ -146,6 +163,7 @@ fn render_detail(model: &Model, f: &mut Frame, area: Rect) {
         ObjectKind::Labels => o.labels.selected_item().map(|l| label_lines(l)),
         ObjectKind::LabelGroups => o.groups.selected_item().map(|g| group_lines(model, g)),
         ObjectKind::Services => o.services.selected_item().map(|s| service_lines(s)),
+        ObjectKind::IpLists => None,
     };
     let Some(lines) = lines else {
         f.render_widget(

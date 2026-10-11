@@ -4,6 +4,8 @@ use crate::tui::model::Screen;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Screen(Screen),
+    /// `:iplists` / `:ip`: the Objects screen on its IP lists tab.
+    IpLists,
     Filter(String),
     Window(String),
     Profile(String),
@@ -44,7 +46,7 @@ pub fn parse(input: &str) -> Result<Command, String> {
         "objects" | "o" | "labels" => no_arg(Command::Screen(Screen::Objects)),
         "workloads" | "w" => no_arg(Command::Screen(Screen::Workloads)),
         "events" | "e" => no_arg(Command::Screen(Screen::Events)),
-        "iplists" | "ip" => no_arg(Command::Screen(Screen::IpLists)),
+        "iplists" | "ip" => no_arg(Command::IpLists),
         "filter" | "f" => with_arg(
             Command::Filter,
             "filter <src expr>  (e.g. app=web,env=prod)",
@@ -81,8 +83,8 @@ mod tests {
         );
         assert_eq!(parse("events").unwrap(), Command::Screen(Screen::Events));
         assert_eq!(parse("e").unwrap(), Command::Screen(Screen::Events));
-        assert_eq!(parse("iplists").unwrap(), Command::Screen(Screen::IpLists));
-        assert_eq!(parse("ip").unwrap(), Command::Screen(Screen::IpLists));
+        assert_eq!(parse("iplists").unwrap(), Command::IpLists);
+        assert_eq!(parse("ip").unwrap(), Command::IpLists);
         assert_eq!(
             parse("filter app=web,env=prod").unwrap(),
             Command::Filter("app=web,env=prod".into())

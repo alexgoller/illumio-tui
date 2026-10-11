@@ -1,6 +1,7 @@
-//! IP lists screen: every draft IP list with its size, entry counts and how
-//! many loaded rules use it, and a detail pane for the selected one (size,
-//! the rules by name, the first ranges and FQDNs). No request beyond the list itself.
+//! The Objects screen's IP lists tab: every draft IP list with its size,
+//! entry counts and how many loaded rules use it, and a detail pane for the
+//! selected one (size, the rules by name, the first ranges and FQDNs). No
+//! request beyond the list itself.
 use crate::tui::model::{IpListRow, Model, rule_kind_name};
 use crate::tui::ui::screens::objects::{DetailLine, clip, items};
 use crate::tui::ui::widgets::bars::age_text;
@@ -18,8 +19,9 @@ use std::time::{Duration, Instant};
 /// Rows of the detail pane, borders included.
 const DETAIL_HEIGHT: u16 = 10;
 
-/// `(table, detail)` areas. Shared by the view and `update` (page sizes); the
-/// detail is dropped when the terminal is too short to keep a usable table.
+/// `(table, detail)` areas below the Objects tab strip. Shared by the view
+/// and `update` (page sizes); the detail is dropped when the terminal is too
+/// short to keep a usable table.
 pub fn layout(body: Rect, show_detail: bool) -> (Rect, Rect) {
     let detail_h = if show_detail && body.height >= 18 {
         DETAIL_HEIGHT
@@ -35,21 +37,11 @@ pub fn table_rows(body: Rect, show_detail: bool) -> usize {
     layout(body, show_detail).0.height.saturating_sub(3) as usize
 }
 
-pub fn render_screen(model: &Model, f: &mut Frame, body: Rect) {
+/// The tab's table and detail in `body` (the area below the strip); the
+/// Objects screen has already handled a missing name index.
+pub fn render_tab(model: &Model, f: &mut Frame, body: Rect) {
     let t = &model.theme;
-    if model.index().is_none() {
-        let note = if model.objects.index_failed {
-            "no objects loaded · r retries"
-        } else {
-            "loading objects…"
-        };
-        f.render_widget(
-            Paragraph::new(Span::styled(note, t.dim_style())).block(panel("IP lists", "", t, true)),
-            body,
-        );
-        return;
-    }
-    let s = &model.ip_lists;
+    let s = &model.objects.ip_lists;
     let (table, detail) = layout(body, s.show_detail);
     let freshness = if s.loading {
         "loading…".to_string()
@@ -97,7 +89,7 @@ fn render_detail(model: &Model, f: &mut Frame, area: Rect) {
     let t = &model.theme;
     let block = panel("Detail", "Enter hides", t, false);
     let capacity = block.inner(area).height as usize;
-    let Some(row) = model.ip_lists.table.selected_item() else {
+    let Some(row) = model.objects.ip_lists.table.selected_item() else {
         f.render_widget(
             Paragraph::new(Span::styled("no IP list selected", t.dim_style())).block(block),
             area,
@@ -232,7 +224,7 @@ mod tests {
     #[test]
     fn the_detail_names_size_ranges_fqdns_and_the_rules_using_the_list() {
         let m = model_with_ip_lists();
-        let corp = &m.ip_lists.table.rows()[1];
+        let corp = &m.objects.ip_lists.table.rows()[1];
         assert_eq!(
             text(&detail_lines(&m, corp)),
             vec![
@@ -243,7 +235,7 @@ mod tests {
                 "fqdns   *.corp.example",
             ]
         );
-        let any = text(&detail_lines(&m, &m.ip_lists.table.rows()[0]));
+        let any = text(&detail_lines(&m, &m.objects.ip_lists.table.rows()[0]));
         assert_eq!(any[1], "size    any (0.0.0.0/0)");
         assert_eq!(
             any[2],
@@ -267,9 +259,9 @@ mod tests {
             "ip_ranges": ranges, "fqdns": fqdns
         }))
         .unwrap();
-        m.ip_lists.set_lists(vec![many], &m.policy);
+        m.objects.ip_lists.set_lists(vec![many], &m.policy);
         assert_eq!(
-            text(&detail_lines(&m, &m.ip_lists.table.rows()[0])),
+            text(&detail_lines(&m, &m.objects.ip_lists.table.rows()[0])),
             vec![
                 "list    Corp",
                 "size    2.6K addresses (2560 IPv4, 0 IPv6)",
@@ -291,8 +283,8 @@ mod tests {
         let mut m = model_fixture();
         let lists =
             serde_json::from_str(include_str!("../../../../../../fixtures/ip_lists.json")).unwrap();
-        m.ip_lists.set_lists(lists, &m.policy);
-        let lines = text(&detail_lines(&m, &m.ip_lists.table.rows()[1]));
+        m.objects.ip_lists.set_lists(lists, &m.policy);
+        let lines = text(&detail_lines(&m, &m.objects.ip_lists.table.rows()[1]));
         assert_eq!(lines[2], "used by load Policy (2) to see rules");
         let excluded: pce::models::IpList = serde_json::from_value(serde_json::json!({
             "href": "/orgs/5/sec_policy/draft/ip_lists/30", "name": "Lab",
@@ -302,8 +294,8 @@ mod tests {
             ]
         }))
         .unwrap();
-        m.ip_lists.set_lists(vec![excluded], &m.policy);
-        let lines = text(&detail_lines(&m, &m.ip_lists.table.rows()[0]));
+        m.objects.ip_lists.set_lists(vec![excluded], &m.policy);
+        let lines = text(&detail_lines(&m, &m.objects.ip_lists.table.rows()[0]));
         assert_eq!(lines[1], "size    128 addresses (128 IPv4, 0 IPv6)");
         assert_eq!(lines[2], "used by load Policy (2) to see rules");
         assert_eq!(lines[3], "ranges  10.0.0.0/24  lab net");

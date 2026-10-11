@@ -155,7 +155,7 @@ fn status_hint_lists_the_edit_keys_only_with_writes() {
     assert!(last(&m).contains("n:new e:edit x:del"), "{}", last(&m));
     m.screen = Screen::Workloads;
     assert!(last(&m).contains("n:new e:edit x:del"), "{}", last(&m));
-    m.screen = Screen::IpLists;
+    illumio_tui::tui::test_support::on_ip_lists_tab(&mut m);
     assert!(last(&m).contains("n:new e:edit x:del"), "{}", last(&m));
     m.screen = Screen::Traffic;
     assert!(!last(&m).contains("n:new"), "{}", last(&m));
@@ -495,10 +495,10 @@ fn header_shows_the_writes_marker_only_when_enabled() {
 fn ip_list_form_80x24_scrolls_the_active_field() {
     use illumio_tui::tui::edit::EditIntent;
     use illumio_tui::tui::form::{Field, Form};
-    use illumio_tui::tui::model::{Overlay, Screen};
+    use illumio_tui::tui::model::Overlay;
     use illumio_tui::tui::test_support::model_with_ip_lists;
     let mut m = model_with_ip_lists();
-    m.screen = Screen::IpLists;
+    illumio_tui::tui::test_support::on_ip_lists_tab(&mut m);
     let mut form = Form::new(
         "New IP list",
         vec![
@@ -567,7 +567,7 @@ fn confirm_write_overlay_shows_method_path_and_body() {
     );
     let mut m = illumio_tui::tui::test_support::model_with_ip_lists();
     m.writes = WritesState::on();
-    m.screen = Screen::IpLists;
+    illumio_tui::tui::test_support::on_ip_lists_tab(&mut m);
     m.overlay = Overlay::ConfirmWrite {
         plan: ip_list_delete_plan(),
         kind: pce::write::ObjectKind::IpList,
@@ -583,7 +583,7 @@ fn confirm_write_overlay_shows_method_path_and_body() {
     insta::assert_snapshot!("confirm_ip_list_delete_80x24", out);
     let mut l = illumio_tui::tui::test_support::model_with_ip_lists();
     l.writes = WritesState::on();
-    l.screen = Screen::IpLists;
+    illumio_tui::tui::test_support::on_ip_lists_tab(&mut l);
     l.set_theme("light");
     l.overlay = m.overlay.clone();
     insta::assert_snapshot!(
@@ -895,23 +895,30 @@ fn rule_from_flow_form_offering_ctrl_n_80x24() {
 }
 
 #[test]
-fn ip_lists_screen_80x24_and_160x48_with_detail() {
+fn objects_ip_lists_tab_80x24_and_160x48_with_detail() {
     use illumio_tui::tui::test_support::model_with_ip_lists;
     let mut m = model_with_ip_lists();
-    m.screen = Screen::IpLists;
-    m.ip_lists.table.select_next(); // Corp
-    m.ip_lists.show_detail = true;
+    illumio_tui::tui::test_support::on_ip_lists_tab(&mut m);
+    m.objects.ip_lists.table.select_next(); // Corp
+    m.objects.ip_lists.show_detail = true;
     let out = render_to_string(&m, 80, 24);
-    assert!(out.contains("6 IPs"), "{out}");
+    let strip = out.lines().nth(2).unwrap();
+    assert!(
+        strip.contains("Services") && strip.contains("IP lists"),
+        "the fourth Objects tab: {strip}"
+    );
+    assert!(out.contains("3 Objects") && !out.contains(" 6 "), "{out}");
     assert!(out.contains("65.5K"), "{out}");
     assert!(out.contains("used by Shop-Prod · allow"), "{out}");
-    insta::assert_snapshot!("ip_lists_80x24", out);
+    insta::assert_snapshot!("objects_ip_lists_80x24", out);
     let out = render_to_string(&m, 160, 48);
-    assert!(out.contains("6 IP lists"), "{out}");
     assert!(out.contains("65536 IPv4"), "{out}");
-    insta::assert_snapshot!("ip_lists_160x48", out);
+    insta::assert_snapshot!("objects_ip_lists_160x48", out);
     m.set_theme("light");
-    insta::assert_snapshot!("ip_lists_light_styled_80x24", render_styled(&m, 80, 24));
+    insta::assert_snapshot!(
+        "objects_ip_lists_light_styled_80x24",
+        render_styled(&m, 80, 24)
+    );
 }
 
 #[test]
@@ -926,16 +933,16 @@ fn ip_list_detail_with_many_ranges_keeps_used_by_visible_80x24() {
         "ip_ranges": ranges
     }))
     .unwrap();
-    m.ip_lists.set_lists(vec![many], &m.policy);
-    m.screen = Screen::IpLists;
-    m.ip_lists.show_detail = true;
+    m.objects.ip_lists.set_lists(vec![many], &m.policy);
+    illumio_tui::tui::test_support::on_ip_lists_tab(&mut m);
+    m.objects.ip_lists.show_detail = true;
     let out = render_to_string(&m, 80, 24);
     assert!(out.contains("used by Shop-Prod · deny"), "{out}");
     assert!(out.contains("+7 more ranges"), "{out}");
-    insta::assert_snapshot!("ip_list_detail_many_ranges_80x24", out);
+    insta::assert_snapshot!("objects_ip_list_detail_many_ranges_80x24", out);
     m.set_theme("light");
     insta::assert_snapshot!(
-        "ip_list_detail_many_ranges_light_styled_80x24",
+        "objects_ip_list_detail_many_ranges_light_styled_80x24",
         render_styled(&m, 80, 24)
     );
 }
@@ -943,18 +950,20 @@ fn ip_list_detail_with_many_ranges_keeps_used_by_visible_80x24() {
 #[test]
 fn the_tab_row_uses_short_titles_only_when_the_full_row_does_not_fit() {
     let m = model_fixture();
-    let narrow = render_to_string(&m, 80, 24);
+    let narrow = render_to_string(&m, 64, 24);
     let row = narrow.lines().nth(1).unwrap();
     assert!(
-        row.contains("1 Traf") && row.contains("3 Obj") && row.contains("6 IPs"),
+        row.contains("1 Traf") && row.contains("3 Obj") && row.contains("5 Ev"),
         "{row}"
     );
-    let wide = render_to_string(&m, 160, 48);
-    let row = wide.lines().nth(1).unwrap();
-    assert!(
-        row.contains("3 Objects") && row.contains("6 IP lists"),
-        "{row}"
-    );
+    for w in [80, 160] {
+        let out = render_to_string(&m, w, 24);
+        let row = out.lines().nth(1).unwrap();
+        assert!(
+            row.contains("1 Traffic") && row.contains("5 Events") && !row.contains('6'),
+            "{row}"
+        );
+    }
 }
 
 #[test]

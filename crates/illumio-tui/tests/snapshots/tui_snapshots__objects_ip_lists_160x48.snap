@@ -3,12 +3,12 @@ source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
  illumio-tui pce.example · org 5 ●                                                                                                        api 5 calls · 20.8 KB
-  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events  │  6 IP lists
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+  Labels  │  Label groups  │  Services  │  IP lists
 ╭ IP lists ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── cached 3s ago · 2 rows ╮
 │  name                         size       ranges fqdns used by pending                                                                                        │
 │  Any (0.0.0.0/0 and ::/0)            any      2     0       1                                                                                                │
 │▸ Corp                              65.5K      1     1       1 create                                                                                         │
-│                                                                                                                                                              │
 │                                                                                                                                                              │
 │                                                                                                                                                              │
 │                                                                                                                                                              │
@@ -49,4 +49,4 @@ expression: out
 │                                                                                                                                                              │
 │                                                                                                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-ready                                                                                          Enter detail  r refresh  a auto  s sort  / search  : cmd  ? help
+ready                                                                                        Tab type  Enter detail  r refresh  a auto  / search  : cmd  ? help

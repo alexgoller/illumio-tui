@@ -23,18 +23,16 @@ pub enum Screen {
     Objects,
     Workloads,
     Events,
-    IpLists,
 }
 
 impl Screen {
     /// In tab order; a screen's key is its position plus one.
-    pub const ALL: [Screen; 6] = [
+    pub const ALL: [Screen; 5] = [
         Screen::Traffic,
         Screen::Policy,
         Screen::Objects,
         Screen::Workloads,
         Screen::Events,
-        Screen::IpLists,
     ];
 
     pub fn title(self) -> &'static str {
@@ -44,7 +42,6 @@ impl Screen {
             Screen::Objects => "Objects",
             Screen::Workloads => "Workloads",
             Screen::Events => "Events",
-            Screen::IpLists => "IP lists",
         }
     }
 
@@ -56,7 +53,6 @@ impl Screen {
             Screen::Objects => "Obj",
             Screen::Workloads => "Wl",
             Screen::Events => "Ev",
-            Screen::IpLists => "IPs",
         }
     }
 
@@ -1046,7 +1042,7 @@ pub struct PolicyState {
     pub auto: AutoRefresh,
 }
 
-/// One loaded rule that names an IP list, for the IP lists screen.
+/// One loaded rule that names an IP list, for the IP lists tab.
 #[derive(Debug, Clone)]
 pub struct IpListUse {
     pub ruleset: String,
@@ -1292,15 +1288,30 @@ pub enum ObjectKind {
     Labels,
     LabelGroups,
     Services,
+    /// The IP lists tab: its table, detail and load live in `IpListsState`
+    /// (`ObjectsState::ip_lists`) and go through `Cmd::LoadIpLists`.
+    IpLists,
 }
 
 impl ObjectKind {
-    pub const ALL: [ObjectKind; 3] = [
+    /// The tabs, in order.
+    pub const ALL: [ObjectKind; 4] = [
+        ObjectKind::Labels,
+        ObjectKind::LabelGroups,
+        ObjectKind::Services,
+        ObjectKind::IpLists,
+    ];
+
+    /// The kinds `Cmd::LoadObjects` reads into `ObjectsState`'s own tables;
+    /// `ObjectsState::{ages, loaded_at, loading}` are indexed by these.
+    pub const FETCHED: [ObjectKind; 3] = [
         ObjectKind::Labels,
         ObjectKind::LabelGroups,
         ObjectKind::Services,
     ];
 
+    /// Position in `ALL` (the tab strip). For the `FETCHED` kinds it is also
+    /// the slot in `ObjectsState`'s arrays; IP lists have no slot there.
     pub fn index(self) -> usize {
         Self::ALL.iter().position(|k| *k == self).unwrap_or(0)
     }
@@ -1318,6 +1329,7 @@ impl ObjectKind {
             ObjectKind::Labels => "Labels",
             ObjectKind::LabelGroups => "Label groups",
             ObjectKind::Services => "Services",
+            ObjectKind::IpLists => "IP lists",
         }
     }
 }
@@ -1469,7 +1481,10 @@ pub struct ObjectsState {
     pub labels: TableView<Label>,
     pub groups: TableView<LabelGroup>,
     pub services: TableView<Service>,
-    /// Cache age in seconds when each kind (indexed by `ObjectKind::index`) was loaded.
+    /// The IP lists tab.
+    pub ip_lists: IpListsState,
+    /// Cache age in seconds when each kind (indexed by `ObjectKind::index`,
+    /// `FETCHED` kinds only) was loaded.
     pub ages: [Option<u64>; 3],
     /// When each kind arrived, so the shown age keeps growing.
     pub loaded_at: [Option<Instant>; 3],
@@ -1487,6 +1502,7 @@ impl ObjectsState {
             labels: TableView::new(label_columns()),
             groups: TableView::new(group_columns_objects()),
             services: TableView::new(service_columns()),
+            ip_lists: IpListsState::new(min_refresh),
             ages: [None; 3],
             loaded_at: [None; 3],
             loading: [false; 3],
@@ -1496,6 +1512,7 @@ impl ObjectsState {
         }
     }
 
+    /// Whether the three `FETCHED` kinds have arrived.
     pub fn loaded(&self) -> bool {
         self.ages.iter().all(Option::is_some)
     }
@@ -1506,6 +1523,7 @@ impl ObjectsState {
             ObjectKind::Labels => self.labels.is_searching(),
             ObjectKind::LabelGroups => self.groups.is_searching(),
             ObjectKind::Services => self.services.is_searching(),
+            ObjectKind::IpLists => self.ip_lists.table.is_searching(),
         }
     }
 
@@ -1515,11 +1533,16 @@ impl ObjectsState {
             ObjectKind::Labels => self.labels.selected_item().is_some(),
             ObjectKind::LabelGroups => self.groups.selected_item().is_some(),
             ObjectKind::Services => self.services.selected_item().is_some(),
+            ObjectKind::IpLists => self.ip_lists.table.selected_item().is_some(),
         }
     }
 
     /// Age of the current kind in seconds, growing since it was loaded.
     pub fn age_secs(&self, kind: ObjectKind) -> Option<u64> {
+        if kind == ObjectKind::IpLists {
+            let s = &self.ip_lists;
+            return s.loaded_at.map(|t| s.age_secs + t.elapsed().as_secs());
+        }
         let i = kind.index();
         self.ages[i].map(|a| a + self.loaded_at[i].map_or(0, |t| t.elapsed().as_secs()))
     }
@@ -2107,7 +2130,6 @@ pub struct Model {
     pub traffic: TrafficState,
     pub policy: PolicyState,
     pub objects: ObjectsState,
-    pub ip_lists: IpListsState,
     pub workloads: WorkloadsState,
     pub events: EventsState,
     pub connection: Connection,
@@ -2146,7 +2168,6 @@ impl Model {
         );
         let policy = PolicyState::new(auto_refresh_min_seconds);
         let objects = ObjectsState::new(auto_refresh_min_seconds);
-        let ip_lists = IpListsState::new(auto_refresh_min_seconds);
         let workloads = WorkloadsState::new(auto_refresh_min_seconds);
         let events = EventsState::new(auto_refresh_min_seconds);
         Self {
@@ -2166,7 +2187,6 @@ impl Model {
             traffic,
             policy,
             objects,
-            ip_lists,
             workloads,
             events,
             connection: Connection::Connecting,
@@ -2233,7 +2253,7 @@ impl Model {
         self.traffic.auto.enabled
             || self.policy.auto.enabled
             || self.objects.auto.enabled
-            || self.ip_lists.auto.enabled
+            || self.objects.ip_lists.auto.enabled
             || self.workloads.auto.enabled
             || self.events.auto.enabled
     }
@@ -2259,7 +2279,6 @@ impl Model {
         self.traffic = traffic;
         self.policy = PolicyState::new(min);
         self.objects = ObjectsState::new(min);
-        self.ip_lists = IpListsState::new(min);
         self.workloads = WorkloadsState::new(min);
         self.events = EventsState::new(min);
         self.stats = StatsSnapshot { calls: 0, bytes: 0 };
@@ -2404,13 +2423,16 @@ mod tests {
             (cols[1].key)(&rows[0]) > (cols[1].key)(&rows[1]),
             "any sorts last"
         );
-        assert_eq!(Screen::ALL.len(), 6);
-        assert_eq!(Screen::IpLists.title(), "IP lists");
-        assert_eq!(Screen::IpLists.short_title(), "IPs");
+        assert_eq!(Screen::ALL.len(), 5);
+        assert_eq!(Screen::Events.index(), 4);
         assert_eq!(Screen::Objects.title(), "Objects");
-        assert_eq!(ObjectKind::ALL.len(), 3);
-        assert_eq!(ObjectKind::Labels.prev(), ObjectKind::Services);
-        assert_eq!(ObjectKind::Services.next(), ObjectKind::Labels);
+        assert_eq!(ObjectKind::ALL.len(), 4);
+        assert_eq!(ObjectKind::IpLists.title(), "IP lists");
+        assert_eq!(ObjectKind::IpLists.index(), 3);
+        assert_eq!(ObjectKind::Labels.prev(), ObjectKind::IpLists);
+        assert_eq!(ObjectKind::Services.next(), ObjectKind::IpLists);
+        assert_eq!(ObjectKind::IpLists.next(), ObjectKind::Labels);
+        assert!(!ObjectKind::FETCHED.contains(&ObjectKind::IpLists));
     }
 
     #[test]

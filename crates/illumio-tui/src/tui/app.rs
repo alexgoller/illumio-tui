@@ -332,6 +332,11 @@ impl Runtime {
                     let _ = tx.send(Msg::Stats(pce.stats()));
                 });
             }
+            // The IP lists tab loads through its own command.
+            Cmd::LoadObjects {
+                kind: ObjectKind::IpLists,
+                mode,
+            } => self.execute(Cmd::LoadIpLists(mode)),
             Cmd::LoadObjects { kind, mode } => {
                 self.model.busy += 1;
                 let (pce, tx) = self.task_ctx();
@@ -349,6 +354,7 @@ impl Runtime {
                             .services(mode)
                             .await
                             .map(|c| ObjectsPayload::Services(c.value, c.age.as_secs())),
+                        ObjectKind::IpLists => unreachable!("forwarded to Cmd::LoadIpLists above"),
                     }
                     .map_err(|e| e.to_string());
                     let _ = tx.send(Msg::ObjectsLoaded { kind, result });

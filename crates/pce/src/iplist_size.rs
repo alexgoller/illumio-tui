@@ -392,7 +392,7 @@ mod tests {
 
     #[test]
     fn ipv6_list_sizes_fit_the_size_column() {
-        // The IP lists screen's size column is 10 cells wide.
+        // The IP lists tab's size column is 10 cells wide.
         for (cidr, want) in [
             ("2001:db8::/64", "18.4E"),
             ("2001:db8::/48", "1.2Y"),

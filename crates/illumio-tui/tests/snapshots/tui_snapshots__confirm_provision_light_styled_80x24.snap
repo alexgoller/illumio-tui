@@ -4,8 +4,8 @@ expression: "render_styled(&c, 80, 24)"
 ---
  illumio-tui ✎ writes · pce.example · org 5 ●             api 5 calls · 20.8 KB
     @0:Rgb(150, 50, 180)/Rgb(250, 250, 247) @13:Rgb(176, 120, 0)/Rgb(250, 250, 247) @21:Rgb(40, 42, 48)/Rgb(250, 250, 247) @44:Rgb(40, 140, 60)/Rgb(250, 250, 247) @45:Rgb(40, 42, 48)/Rgb(250, 250, 247) @58:Rgb(120, 124, 136)/Rgb(250, 250, 247)
-  1 Traf  │  2 Pol  │  3 Obj  │  4 Wl  │  5 Ev  │  6 IPs
-    @0:Rgb(120, 124, 136)/Rgb(250, 250, 247) @12:Rgb(0, 102, 204)/Rgb(250, 250, 247) @19:Rgb(120, 124, 136)/Rgb(250, 250, 247)
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+    @0:Rgb(120, 124, 136)/Rgb(250, 250, 247) @15:Rgb(0, 102, 204)/Rgb(250, 250, 247) @25:Rgb(120, 124, 136)/Rgb(250, 250, 247)
 ╭ ╭ Send this request? ─────────────────────────────────── y send · n cancel ╮ ╮
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @4:Rgb(150, 50, 180)/Rgb(250, 250, 247) @22:Rgb(0, 102, 204)/Rgb(250, 250, 247) @59:Rgb(120, 124, 136)/Rgb(250, 250, 247) @76:Rgb(0, 102, 204)/Rgb(250, 250, 247)
 │ │provision 1 ip_list, 1 rule_set                                           │g│
