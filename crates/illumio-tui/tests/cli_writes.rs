@@ -1928,6 +1928,77 @@ mod policy {
         assert_eq!(server.received_requests().await.unwrap().len(), 5);
     }
 
+    fn add_icmp(
+        server: &MockServer,
+        state: &std::path::Path,
+        service: &str,
+    ) -> assert_cmd::assert::Assert {
+        writer(server, state)
+            .args([
+                "policy",
+                "rules",
+                "add",
+                RS_100,
+                "--provider",
+                "all",
+                "--consumer",
+                "all",
+                "--service",
+                service,
+                "--dry-run",
+            ])
+            .assert()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rules_add_icmp_resolves_to_the_icmp_service_object() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        let mut services = fixture_services();
+        services.as_array_mut().unwrap().push(json!({
+            "href": "/orgs/5/sec_policy/draft/services/40", "name": "S-ICMP",
+            "service_ports": [{"proto": 1}, {"proto": 58}],
+            "external_data_set": "com.illumio.ilo_defaults", "external_data_reference": "ICMP"
+        }));
+        mount_get(&server, "/orgs/5/sec_policy/draft/services", services).await;
+        for token in ["icmp", "icmpv6"] {
+            let out = stdout_json(add_icmp(&server, state.path(), token).success());
+            assert_eq!(
+                out["data"]["body"]["ingress_services"],
+                json!([{"href": "/orgs/5/sec_policy/draft/services/40"}]),
+                "{token}"
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rules_add_icmp_without_an_icmp_service_is_invalid() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_get(
+            &server,
+            "/orgs/5/sec_policy/draft/services",
+            fixture_services(),
+        )
+        .await;
+        let a = add_icmp(&server, state.path(), "icmp").code(2);
+        let err = &stderr_json(&a)["error"];
+        assert_eq!(err["kind"], "invalid");
+        assert_eq!(
+            err["message"],
+            "inline rule services take tcp or udp (optionally with a port, for example 443/tcp or tcp); for icmp and other protocols use a service object (service:<name> or an href); no ICMP service object found"
+        );
+        assert_eq!(
+            count(
+                &server,
+                "POST",
+                "/api/v2/orgs/5/sec_policy/draft/rule_sets/100/sec_rules"
+            )
+            .await,
+            0
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn rules_add_workload_actor_uses_find_workload() {
         let server = MockServer::start().await;
@@ -1952,7 +2023,7 @@ mod policy {
                     "--consumer",
                     "all",
                     "--service",
-                    "icmp",
+                    "443/tcp",
                     "--dry-run",
                 ])
                 .assert()
@@ -1964,7 +2035,7 @@ mod policy {
                 "enabled": true,
                 "providers": [{"workload": {"href": "/orgs/5/workloads/aaaa-1"}}],
                 "consumers": [{"actors": "ams"}],
-                "ingress_services": [{"proto": 1}],
+                "ingress_services": [{"port": 443, "proto": 6}],
                 "unscoped_consumers": false,
                 "resolve_labels_as": {"providers": ["workloads"], "consumers": ["workloads"]}
             })

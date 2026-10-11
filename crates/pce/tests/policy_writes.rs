@@ -567,6 +567,88 @@ mod rules {
         assert_eq!(audit.entries().len(), 1);
     }
 
+    const INLINE_REFUSAL: &str = "inline rule services take tcp or udp (optionally with a port, for example 443/tcp or tcp); for icmp and other protocols use a service object (service:<name> or an href)";
+
+    #[tokio::test]
+    async fn create_refuses_inline_icmp_before_any_request() {
+        let server = MockServer::start().await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let w = pce.writer(&guard);
+        let rs = "/orgs/5/sec_policy/draft/rule_sets/100";
+        for bad in ["icmp", "icmpv6"] {
+            let draft = RuleDraft {
+                services: vec![port(bad)],
+                ..mixed()
+            };
+            assert_eq!(
+                invalid(w.plan_create_rule(rs, &draft).unwrap_err()),
+                INLINE_REFUSAL,
+                "{bad}"
+            );
+        }
+        let deny = DenyRuleDraft {
+            description: None,
+            enabled: true,
+            providers: vec![ActorRef::all()],
+            consumers: vec![ActorRef::all()],
+            services: vec![port("icmp")],
+            override_: false,
+        };
+        assert_eq!(
+            invalid(w.plan_create_deny_rule(rs, &deny).unwrap_err()),
+            INLINE_REFUSAL
+        );
+        assert_eq!(request_count(&server).await, 0);
+    }
+
+    #[tokio::test]
+    async fn create_still_accepts_tcp_udp_ports_and_icmp_service_objects() {
+        let server = MockServer::start().await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let w = pce.writer(&guard);
+        let draft = RuleDraft {
+            services: vec![
+                port("443/tcp"),
+                port("8000-8100/udp"),
+                port("tcp"),
+                ServiceRef::Href("/orgs/5/sec_policy/draft/services/77".into()),
+            ],
+            ..mixed()
+        };
+        let plan = w
+            .plan_create_rule("/orgs/5/sec_policy/draft/rule_sets/100", &draft)
+            .unwrap();
+        assert_eq!(
+            plan.request().unwrap().body.as_ref().unwrap()["ingress_services"],
+            json!([
+                {"port": 443, "proto": 6},
+                {"port": 8000, "to_port": 8100, "proto": 17},
+                {"proto": 6},
+                {"href": "/orgs/5/sec_policy/draft/services/77"}
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn update_refuses_adding_inline_icmp_before_any_request() {
+        let server = MockServer::start().await;
+        mount_rule_1(&server).await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let w = pce.writer(&guard);
+        let patch = RulePatch {
+            add_services: vec![port("icmp")],
+            ..RulePatch::default()
+        };
+        assert_eq!(
+            invalid(w.plan_update_rule(RULE_1, &patch).await.unwrap_err()),
+            INLINE_REFUSAL
+        );
+        assert_eq!(request_count(&server).await, 0);
+    }
+
     #[tokio::test]
     async fn create_validation_errors_send_nothing() {
         let server = MockServer::start().await;

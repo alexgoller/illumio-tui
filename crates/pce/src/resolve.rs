@@ -172,6 +172,45 @@ impl NameIndex {
         self.service(href).map(|s| s.name.as_str())
     }
 
+    /// The live services (pending deletions excluded), by name,
+    /// case-insensitively, then href.
+    pub fn services(&self) -> Vec<&Service> {
+        let mut all: Vec<&Service> = self
+            .services
+            .values()
+            .filter(|s| s.update_type.as_deref() != Some("delete"))
+            .collect();
+        all.sort_by_cached_key(|s| (s.name.to_ascii_lowercase(), s.href.clone()));
+        all
+    }
+
+    /// The service object a rule uses for icmp and icmpv6 (a rule's inline
+    /// services take tcp and udp only): the built-in ICMP service
+    /// (`ilo_defaults`/`ICMP`, whatever its name), else the first service
+    /// whose ports are all proto 1 or 58 without a port, else one named
+    /// `ICMP`.
+    pub fn icmp_service(&self) -> Option<&Service> {
+        let all = self.services();
+        let by = |f: &dyn Fn(&Service) -> bool| all.iter().copied().find(|s| f(s));
+        by(&|s| {
+            s.external_data_set.as_deref() == Some("com.illumio.ilo_defaults")
+                && s.external_data_reference.as_deref() == Some("ICMP")
+        })
+        .or_else(|| {
+            by(&|s| {
+                !s.service_ports.is_empty()
+                    && s.service_ports
+                        .iter()
+                        .all(|p| matches!(p.proto, Some(1 | 58)) && p.port.is_none())
+            })
+        })
+        .or_else(|| by(&|s| s.name.eq_ignore_ascii_case("ICMP")))
+    }
+
+    pub fn icmp_service_href(&self) -> Option<&str> {
+        self.icmp_service().map(|s| s.href.as_str())
+    }
+
     /// The one live service named exactly `name` (like the CLI's lookup:
     /// case-sensitive, pending deletions excluded). `None` when there is no
     /// such service, or several.
@@ -445,6 +484,59 @@ mod tests {
         let services: Vec<Service> =
             serde_json::from_str(include_str!("../../../fixtures/services.json")).unwrap();
         NameIndex::new(&labels, &groups, &lists, &services)
+    }
+
+    #[test]
+    fn icmp_service_prefers_the_builtin_then_all_icmp_ports_then_the_name() {
+        let svc = |n: u32, name: &str, extra: serde_json::Value| -> Service {
+            let mut v = serde_json::json!({
+                "href": format!("/orgs/5/sec_policy/draft/services/{n}"), "name": name,
+                "service_ports": [{"proto": 1}]
+            });
+            v.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            serde_json::from_value(v).unwrap()
+        };
+        let builtin = serde_json::json!({
+            "external_data_set": "com.illumio.ilo_defaults", "external_data_reference": "ICMP"
+        });
+        let none = serde_json::json!({});
+        // The fixture services hold no ICMP service at all.
+        assert_eq!(index().icmp_service_href(), None);
+        let named = svc(1, "icmp", none.clone());
+        let ports = svc(2, "Ping", none.clone());
+        let tcp = Service {
+            service_ports: vec![],
+            ..svc(3, "ICMP-ish", none.clone())
+        };
+        let ilo = svc(4, "S-ICMP", builtin);
+        let idx = |v: &[&Service]| {
+            NameIndex::new(
+                &[],
+                &[],
+                &[],
+                &v.iter().map(|s| (*s).clone()).collect::<Vec<_>>(),
+            )
+        };
+        assert_eq!(
+            idx(&[&named, &ports, &tcp, &ilo])
+                .icmp_service()
+                .unwrap()
+                .name,
+            "S-ICMP"
+        );
+        assert_eq!(
+            idx(&[&named, &ports, &tcp]).icmp_service().unwrap().name,
+            "icmp"
+        );
+        assert_eq!(idx(&[&ports, &tcp]).icmp_service().unwrap().name, "Ping");
+        let by_name = Service {
+            service_ports: vec![],
+            ..named
+        };
+        assert_eq!(idx(&[&by_name, &tcp]).icmp_service().unwrap().name, "icmp");
+        assert_eq!(idx(&[&tcp]).icmp_service(), None);
     }
 
     #[test]

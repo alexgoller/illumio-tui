@@ -10,6 +10,7 @@ pub use crate::tokens::{ActorToken, ServiceToken, is_href};
 pub(crate) use crate::tokens::{similar, with_similar};
 use clap::Args;
 use pce::Impact;
+use pce::NameIndex;
 use pce::models::{IpList, Label, LabelGroup, Service};
 use pce::write::provision_counts;
 use pce::write::{
@@ -646,6 +647,12 @@ pub async fn resolve_service_ref(
     }
     match token {
         ServiceToken::Href(h) => Ok(ServiceRef::from_href(h, ctx.config.org_id)?),
+        ServiceToken::Port(p) if matches!(p.proto, 1 | 58) => {
+            let idx = NameIndex::new(&[], &[], &[], lists.services(ctx).await?);
+            crate::tokens::icmp_service_ref(p, &idx)
+                .expect("icmp is 1 or 58")
+                .map_err(|e| CliError::from(WriteError::Invalid(vec![e])))
+        }
         ServiceToken::Port(p) => Ok(ServiceRef::Port(p.clone())),
         ServiceToken::Name(n) => Ok(ServiceRef::Href(service_in(lists.services(ctx).await?, n)?)),
     }
