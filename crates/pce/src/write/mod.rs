@@ -9,6 +9,7 @@ pub mod guard;
 pub mod ip_lists;
 pub mod labels;
 pub mod rule_sets;
+pub mod rules;
 pub mod services;
 pub mod specs;
 pub mod workloads;
@@ -25,6 +26,9 @@ pub use guard::{WriteContext, WriteGuard, WriteRefused};
 pub use ip_lists::{IpListDraft, IpListPatch};
 pub use labels::LabelDraft;
 pub use rule_sets::{RuleSetDraft, RuleSetPatch};
+pub use rules::{
+    DenyRuleDraft, DenyRulePatch, RuleDraft, RulePatch, apply_deny_rule_patch, apply_rule_patch,
+};
 pub use services::{ServiceDraft, ServicePatch};
 pub use specs::{InterfaceSpec, IpRangeSpec, PortSpec};
 pub use workloads::{LabelRemoval, WorkloadDraft, WorkloadPatch};

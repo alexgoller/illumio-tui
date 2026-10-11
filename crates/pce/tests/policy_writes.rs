@@ -434,3 +434,438 @@ mod rule_sets {
         assert_eq!(request_count(&server).await, 0);
     }
 }
+mod rules {
+    use super::*;
+    use pce::models::ResolveLabelsAs;
+    use pce::write::{
+        ActorKind, ActorRef, DenyRuleDraft, DenyRulePatch, PortSpec, RuleDraft, RulePatch,
+        ServiceRef,
+    };
+    use wiremock::matchers::body_json;
+
+    const RULE_1: &str = "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1";
+
+    fn label(id: u32) -> ActorRef {
+        ActorRef::new(ActorKind::Label, format!("/orgs/5/labels/{id}"))
+    }
+
+    fn port(s: &str) -> ServiceRef {
+        ServiceRef::Port(PortSpec::parse(s).unwrap())
+    }
+
+    fn mixed() -> RuleDraft {
+        RuleDraft {
+            description: Some("web tier".into()),
+            enabled: true,
+            providers: vec![
+                label(1),
+                ActorRef::new(
+                    ActorKind::LabelGroup,
+                    "/orgs/5/sec_policy/draft/label_groups/10",
+                ),
+            ],
+            consumers: vec![
+                ActorRef::all(),
+                ActorRef::new(ActorKind::IpList, "/orgs/5/sec_policy/draft/ip_lists/20").excluded(),
+            ],
+            services: vec![
+                ServiceRef::Href("/orgs/5/sec_policy/draft/services/31".into()),
+                port("443/tcp"),
+                port("8000-8099/tcp"),
+            ],
+            unscoped_consumers: false,
+            resolve_labels_as: Some(ResolveLabelsAs {
+                providers: vec!["workloads".into()],
+                consumers: vec!["workloads".into()],
+            }),
+        }
+    }
+
+    fn mixed_body() -> Value {
+        json!({
+            "enabled": true, "description": "web tier",
+            "providers": [
+                {"label": {"href": "/orgs/5/labels/1"}},
+                {"label_group": {"href": "/orgs/5/sec_policy/draft/label_groups/10"}}
+            ],
+            "consumers": [
+                {"actors": "ams"},
+                {"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/20"}, "exclusion": true}
+            ],
+            "ingress_services": [
+                {"href": "/orgs/5/sec_policy/draft/services/31"},
+                {"port": 443, "proto": 6},
+                {"port": 8000, "to_port": 8099, "proto": 6}
+            ],
+            "unscoped_consumers": false,
+            "resolve_labels_as": {"providers": ["workloads"], "consumers": ["workloads"]}
+        })
+    }
+
+    /// Rule 1 with fields the models do not name, an extra key on a
+    /// provider and an inline ICMP service the typed model cannot hold.
+    fn rule_1() -> Value {
+        json!({
+            "href": RULE_1, "enabled": true, "description": "web to db",
+            "providers": [{"label": {"href": "/orgs/5/labels/2"}, "exclusion": false, "future_flag": "x"}],
+            "consumers": [{"label": {"href": "/orgs/5/labels/1"}}],
+            "ingress_services": [
+                {"href": "/orgs/5/sec_policy/draft/services/31"},
+                {"proto": 1, "icmp_type": 8, "icmp_code": 0}
+            ],
+            "sec_connect": false, "egress_services": [], "use_workload_subnets": ["providers"]
+        })
+    }
+
+    async fn mount_rule_1(server: &MockServer) {
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v2{RULE_1}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(rule_1()))
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn create_posts_under_the_ruleset_with_mixed_actors_and_sends_once() {
+        let server = MockServer::start().await;
+        let mut created = mixed_body();
+        created["href"] = json!("/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/9");
+        Mock::given(method("POST"))
+            .and(path(
+                "/api/v2/orgs/5/sec_policy/draft/rule_sets/100/sec_rules",
+            ))
+            .and(body_json(mixed_body()))
+            .respond_with(ResponseTemplate::new(201).set_body_json(created))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let pce = pce_for(&server);
+        let audit = MemoryAudit::new();
+        let guard = guard_with(audit.clone());
+        let w = pce.writer(&guard);
+        let plan = w
+            .plan_create_rule("/orgs/5/sec_policy/active/rule_sets/100", &mixed())
+            .unwrap();
+        let req = plan.request().unwrap();
+        assert_eq!(req.method, WriteMethod::Post);
+        assert_eq!(req.path, "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules");
+        assert_eq!(req.body, Some(mixed_body()));
+        assert_eq!(
+            req.summary,
+            "create rule in rule_set /orgs/5/sec_policy/draft/rule_sets/100"
+        );
+        assert_eq!(request_count(&server).await, 0, "planning sends nothing");
+        let Outcome::Written(out) = w.execute(plan).await.unwrap() else {
+            panic!("expected Written")
+        };
+        assert_eq!(
+            out.href,
+            "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/9"
+        );
+        assert!(out.pending);
+        assert!(out.dropped_fields.is_empty());
+        assert_eq!(audit.entries().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn create_validation_errors_send_nothing() {
+        let server = MockServer::start().await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let w = pce.writer(&guard);
+        let empty = RuleDraft {
+            providers: vec![],
+            consumers: vec![],
+            services: vec![],
+            resolve_labels_as: None,
+            ..mixed()
+        };
+        let rs = "/orgs/5/sec_policy/draft/rule_sets/100";
+        assert_eq!(
+            invalid(w.plan_create_rule(rs, &empty).unwrap_err()),
+            "a rule needs at least one provider; a rule needs at least one consumer; a rule needs at least one service"
+        );
+        let excluded_all = RuleDraft {
+            consumers: vec![ActorRef::all().excluded()],
+            ..mixed()
+        };
+        assert_eq!(
+            invalid(w.plan_create_rule(rs, &excluded_all).unwrap_err()),
+            "all cannot be excluded"
+        );
+        let m = invalid(w.plan_create_rule(RULE_1, &mixed()).unwrap_err());
+        assert!(m.contains("is not a rule_sets href"), "{m}");
+        let deny = DenyRuleDraft {
+            description: None,
+            enabled: true,
+            providers: vec![ActorRef::all()],
+            consumers: vec![],
+            services: vec![port("22/tcp")],
+            override_: false,
+        };
+        assert_eq!(
+            invalid(w.plan_create_deny_rule(rs, &deny).unwrap_err()),
+            "a rule needs at least one consumer"
+        );
+        assert_eq!(request_count(&server).await, 0);
+    }
+
+    #[tokio::test]
+    async fn update_add_provider_keeps_extras_and_sends_providers_whole() {
+        let server = MockServer::start().await;
+        mount_rule_1(&server).await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let patch = RulePatch {
+            add_providers: vec![label(4)],
+            ..RulePatch::default()
+        };
+        let plan = pce
+            .writer(&guard)
+            .plan_update_rule(
+                "/orgs/5/sec_policy/active/rule_sets/100/sec_rules/1",
+                &patch,
+            )
+            .await
+            .unwrap();
+        let req = plan.request().unwrap();
+        assert_eq!(req.method, WriteMethod::Put);
+        assert_eq!(req.path, RULE_1);
+        assert_eq!(
+            req.body,
+            Some(json!({"providers": [
+                {"label": {"href": "/orgs/5/labels/2"}, "exclusion": false, "future_flag": "x"},
+                {"label": {"href": "/orgs/5/labels/4"}}
+            ]}))
+        );
+        assert_eq!(req.summary, format!("update rule {RULE_1}"));
+        assert_eq!(request_count(&server).await, 1, "one GET of the rule");
+    }
+
+    #[tokio::test]
+    async fn description_only_patch_sends_only_the_description() {
+        let server = MockServer::start().await;
+        mount_rule_1(&server).await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let patch = RulePatch {
+            description: Some("web to db, v2".into()),
+            ..RulePatch::default()
+        };
+        let plan = pce
+            .writer(&guard)
+            .plan_update_rule(RULE_1, &patch)
+            .await
+            .unwrap();
+        assert_eq!(
+            plan.request().unwrap().body,
+            Some(json!({"description": "web to db, v2"}))
+        );
+    }
+
+    #[tokio::test]
+    async fn removing_an_absent_consumer_is_invalid_and_nothing_is_sent() {
+        let server = MockServer::start().await;
+        mount_rule_1(&server).await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let patch = RulePatch {
+            remove_consumers: vec![ActorRef::new(
+                ActorKind::IpList,
+                "/orgs/5/sec_policy/draft/ip_lists/99",
+            )],
+            ..RulePatch::default()
+        };
+        let m = invalid(
+            pce.writer(&guard)
+                .plan_update_rule(RULE_1, &patch)
+                .await
+                .unwrap_err(),
+        );
+        assert_eq!(
+            m,
+            "ip_list /orgs/5/sec_policy/draft/ip_lists/99 is not among the consumers"
+        );
+        assert!(
+            server
+                .received_requests()
+                .await
+                .unwrap()
+                .iter()
+                .all(|r| r.method.as_str() == "GET")
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_patches_and_wrong_href_shapes_are_refused_before_any_request() {
+        let server = MockServer::start().await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let w = pce.writer(&guard);
+        assert_eq!(
+            invalid(
+                w.plan_update_rule(RULE_1, &RulePatch::default())
+                    .await
+                    .unwrap_err()
+            ),
+            "nothing to change"
+        );
+        let patch = RulePatch {
+            description: Some("x".into()),
+            ..RulePatch::default()
+        };
+        for bad in [
+            "/orgs/5/sec_policy/draft/rule_sets/100",
+            "/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/7",
+            "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/../1",
+            "/orgs/7/sec_policy/draft/rule_sets/100/sec_rules/1",
+        ] {
+            invalid(w.plan_update_rule(bad, &patch).await.unwrap_err());
+            invalid(w.plan_delete_rule(bad).unwrap_err());
+        }
+        let deny_patch = DenyRulePatch {
+            override_: Some(true),
+            ..DenyRulePatch::default()
+        };
+        let m = invalid(
+            w.plan_update_deny_rule(RULE_1, &deny_patch)
+                .await
+                .unwrap_err(),
+        );
+        assert!(
+            m.contains("expected /orgs/<org>/sec_policy/draft/rule_sets/<id>/deny_rules/<id>"),
+            "{m}"
+        );
+        assert_eq!(request_count(&server).await, 0);
+    }
+
+    #[tokio::test]
+    async fn deny_rule_with_override_create_update_and_delete() {
+        let server = MockServer::start().await;
+        let deny_rules: Value =
+            serde_json::from_str(include_str!("../../../fixtures/deny_rules.json")).unwrap();
+        Mock::given(method("GET"))
+            .and(path(
+                "/api/v2/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(deny_rules[1].clone()))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let w = pce.writer(&guard);
+        let draft = DenyRuleDraft {
+            description: Some("no telnet".into()),
+            enabled: true,
+            providers: vec![ActorRef::all()],
+            consumers: vec![ActorRef::new(
+                ActorKind::IpList,
+                "/orgs/5/sec_policy/draft/ip_lists/20",
+            )],
+            services: vec![port("23/tcp")],
+            override_: true,
+        };
+        let plan = w
+            .plan_create_deny_rule("/orgs/5/sec_policy/draft/rule_sets/100", &draft)
+            .unwrap();
+        let req = plan.request().unwrap();
+        assert_eq!(
+            req.path,
+            "/orgs/5/sec_policy/draft/rule_sets/100/deny_rules"
+        );
+        assert_eq!(
+            req.body,
+            Some(json!({
+                "enabled": true, "description": "no telnet",
+                "providers": [{"actors": "ams"}],
+                "consumers": [{"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/20"}}],
+                "ingress_services": [{"port": 23, "proto": 6}],
+                "override": true
+            }))
+        );
+        let patch = DenyRulePatch {
+            override_: Some(false),
+            ..DenyRulePatch::default()
+        };
+        let plan = w
+            .plan_update_deny_rule(
+                "/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8",
+                &patch,
+            )
+            .await
+            .unwrap();
+        let req = plan.request().unwrap();
+        assert_eq!(req.body, Some(json!({"override": false})));
+        assert_eq!(
+            req.summary,
+            "update deny_rule /orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8"
+        );
+        let plan = w
+            .plan_delete_deny_rule("/orgs/5/sec_policy/active/rule_sets/100/deny_rules/8")
+            .unwrap();
+        let req = plan.request().unwrap();
+        assert_eq!(req.method, WriteMethod::Delete);
+        assert_eq!(
+            req.path,
+            "/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8"
+        );
+        assert!(matches!(
+            plan,
+            Plan::Send {
+                kind: ObjectKind::DenyRule,
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn delete_of_a_nested_rule_href() {
+        let server = MockServer::start().await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let plan = pce
+            .writer(&guard)
+            .plan_delete_rule("/orgs/5/sec_policy/active/rule_sets/100/sec_rules/1")
+            .unwrap();
+        let req = plan.request().unwrap();
+        assert_eq!(req.method, WriteMethod::Delete);
+        assert_eq!(req.path, RULE_1);
+        assert!(req.body.is_none());
+        assert_eq!(req.summary, format!("delete rule {RULE_1}"));
+        assert!(matches!(
+            plan,
+            Plan::Send {
+                kind: ObjectKind::Rule,
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_rule_that_already_matches_is_a_noop() {
+        let server = MockServer::start().await;
+        mount_rule_1(&server).await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let patch = RulePatch {
+            enabled: Some(true),
+            add_consumers: vec![label(1)],
+            ..RulePatch::default()
+        };
+        let plan = pce
+            .writer(&guard)
+            .plan_update_rule(RULE_1, &patch)
+            .await
+            .unwrap();
+        let Plan::Noop {
+            existing_href,
+            reason,
+        } = plan
+        else {
+            panic!("expected Noop")
+        };
+        assert_eq!(existing_href, RULE_1);
+        assert_eq!(reason, "rule already matches");
+    }
+}
