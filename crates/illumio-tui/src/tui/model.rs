@@ -10,6 +10,7 @@ use pce::models::{
     Actor, DenyRule, Event, EventFilter, IpList, Label, LabelGroup, PendingChange, PolicyScope,
     Rule, RuleSet, Service, VenHealth, Workload,
 };
+use pce::traffic::treemap::{Rect as TreemapRect, Tile, Weight, layout, layout_zoomed};
 use pce::traffic::{
     BlockedGroup, FlowGroup, MeshColumns, MeshKey, MeshRow, ResolvedFlow, blocked_summary,
     group_by_labels, group_key, group_text, keys_or_default, keys_seen, mesh, mesh_key,
@@ -458,16 +459,18 @@ pub enum TrafficView {
     Aggregate,
     Mesh,
     Blocked,
+    Treemap,
 }
 
 impl TrafficView {
-    /// `v`: Flows, App-to-app, Mesh, Blocked, then Flows again.
+    /// `v`: Flows, App-to-app, Mesh, Blocked, Treemap, then Flows again.
     pub fn next(self) -> Self {
         match self {
             TrafficView::Flows => TrafficView::Aggregate,
             TrafficView::Aggregate => TrafficView::Mesh,
             TrafficView::Mesh => TrafficView::Blocked,
-            TrafficView::Blocked => TrafficView::Flows,
+            TrafficView::Blocked => TrafficView::Treemap,
+            TrafficView::Treemap => TrafficView::Flows,
         }
     }
 
@@ -477,6 +480,118 @@ impl TrafficView {
             TrafficView::Aggregate => "App-to-app",
             TrafficView::Mesh => "Mesh",
             TrafficView::Blocked => "Blocked",
+            TrafficView::Treemap => "Treemap",
+        }
+    }
+}
+
+/// A treemap tile the cursor can stand on: an outer (source) tile, or one
+/// of its destinations (`inner`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TreemapTarget {
+    pub outer: usize,
+    pub inner: Option<usize>,
+    pub rect: TreemapRect,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Dir {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+/// The Treemap view: what the renderer draws, computed when the groups,
+/// the zoom, the weight or the terminal size change, never while drawing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TreemapState {
+    pub weight: Weight,
+    /// The source group zoomed into; its destinations fill the area.
+    pub zoom: Option<Vec<String>>,
+    /// Index into `targets()`.
+    pub cursor: usize,
+    pub tiles: Vec<Tile>,
+    /// Some loaded flow carried byte counts: `b` may weigh by bytes, and
+    /// the meta draws `b bytes` dim when not.
+    pub has_bytes: bool,
+    /// Where the tiles go: the Traffic table area minus its border for the
+    /// terminal size (`ui::screens::traffic::treemap_area`).
+    pub area: TreemapRect,
+}
+
+impl TreemapState {
+    pub fn new(area: TreemapRect) -> Self {
+        Self {
+            weight: Weight::Connections,
+            zoom: None,
+            cursor: 0,
+            tiles: Vec::new(),
+            has_bytes: false,
+            area,
+        }
+    }
+
+    /// Every tile in drawing order: each outer tile, then its destinations.
+    pub fn targets(&self) -> Vec<TreemapTarget> {
+        let mut out = Vec::new();
+        for (i, t) in self.tiles.iter().enumerate() {
+            out.push(TreemapTarget {
+                outer: i,
+                inner: None,
+                rect: t.rect,
+            });
+            out.extend(t.children.iter().enumerate().map(|(j, c)| TreemapTarget {
+                outer: i,
+                inner: Some(j),
+                rect: c.rect,
+            }));
+        }
+        out
+    }
+
+    pub fn current(&self) -> Option<TreemapTarget> {
+        self.targets().get(self.cursor).copied()
+    }
+
+    pub fn tile(&self, t: TreemapTarget) -> &Tile {
+        let outer = &self.tiles[t.outer];
+        t.inner.map_or(outer, |j| &outer.children[j])
+    }
+
+    /// Moves to the nearest tile whose centre lies in `dir`: distance along
+    /// `dir` plus twice the distance across it, a row counting as two
+    /// columns. Nothing in that direction: the cursor stays.
+    pub fn move_cursor(&mut self, dir: Dir) {
+        let targets = self.targets();
+        let Some(cur) = targets.get(self.cursor) else {
+            return;
+        };
+        let centre = |r: TreemapRect| {
+            (
+                2 * i32::from(r.x) + i32::from(r.w),
+                2 * (2 * i32::from(r.y) + i32::from(r.h)),
+            )
+        };
+        let (cx, cy) = centre(cur.rect);
+        let best = targets
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != self.cursor)
+            .filter_map(|(i, t)| {
+                let (x, y) = centre(t.rect);
+                let (dx, dy) = (x - cx, y - cy);
+                let (ahead, side) = match dir {
+                    Dir::Right => (dx, dy),
+                    Dir::Left => (-dx, dy),
+                    Dir::Down => (dy, dx),
+                    Dir::Up => (-dy, dx),
+                };
+                (ahead > 0).then_some((ahead + 2 * side.abs(), i))
+            })
+            .min();
+        if let Some((_, i)) = best {
+            self.cursor = i;
         }
     }
 }
@@ -870,6 +985,7 @@ pub struct TrafficState {
     /// The Mesh view's optional columns (`u`, `p`); both shown at first.
     pub mesh_cols: MeshColumns,
     pub blocked: TableView<BlockedGroup>,
+    pub treemap: TreemapState,
     /// What the Flows view is narrowed to.
     pub drill: Option<Drill>,
     pub auto: AutoRefresh,
@@ -938,6 +1054,7 @@ impl TrafficState {
             mesh: TableView::new(mesh_columns(MESH_ALL)),
             mesh_cols: MESH_ALL,
             blocked: TableView::new(blocked_columns()),
+            treemap: TreemapState::new(TreemapRect::default()),
             drill: None,
             auto: AutoRefresh::new(auto_min_seconds),
             rule_form: None,
@@ -1012,6 +1129,31 @@ impl TrafficState {
         self.groups.set_rows(groups);
         self.mesh.set_rows(mesh_rows);
         self.blocked.set_rows(blocked);
+        self.relayout_treemap();
+    }
+
+    /// The treemap's tiles again from the current groups, zoom, weight and
+    /// area. A zoom whose source is gone is dropped; byte weight falls back
+    /// to connections when no flow carries bytes; the cursor is clamped.
+    pub fn relayout_treemap(&mut self) {
+        self.treemap.has_bytes = self.has_bytes();
+        if !self.treemap.has_bytes {
+            self.treemap.weight = Weight::Connections;
+        }
+        let groups = self.groups.rows();
+        let tm = &mut self.treemap;
+        if tm
+            .zoom
+            .as_ref()
+            .is_some_and(|z| !groups.iter().any(|g| &g.src == z))
+        {
+            tm.zoom = None;
+        }
+        tm.tiles = match &tm.zoom {
+            Some(z) => layout_zoomed(groups, z, tm.area, tm.weight),
+            None => layout(groups, tm.area, tm.weight),
+        };
+        tm.cursor = tm.cursor.min(tm.targets().len().saturating_sub(1));
     }
 
     /// `u` / `p` on the Mesh view: show or hide a column, regroup, and start
@@ -1033,6 +1175,7 @@ impl TrafficState {
             TrafficView::Aggregate => self.groups.is_searching(),
             TrafficView::Mesh => self.mesh.is_searching(),
             TrafficView::Blocked => self.blocked.is_searching(),
+            TrafficView::Treemap => false,
         }
     }
 
@@ -2441,12 +2584,14 @@ impl Model {
     ) -> Self {
         let theme = Theme::from_name(&theme_name);
         let scope_keys: Vec<String> = crate::config::DEFAULT_SCOPE_KEYS.map(String::from).to_vec();
-        let traffic = TrafficState::new(
+        let size = (80, 24);
+        let mut traffic = TrafficState::new(
             &traffic_default_window,
             traffic_max_results,
             auto_refresh_min_seconds,
             &scope_keys,
         );
+        traffic.treemap.area = crate::tui::ui::screens::traffic::treemap_area(size);
         let policy = PolicyState::new(auto_refresh_min_seconds);
         let objects = ObjectsState::new(auto_refresh_min_seconds);
         let workloads = WorkloadsState::new(auto_refresh_min_seconds);
@@ -2472,7 +2617,7 @@ impl Model {
             events,
             connection: Connection::Connecting,
             stats: StatsSnapshot { calls: 0, bytes: 0 },
-            size: (80, 24),
+            size,
             focused: true,
             status: StatusLine::info("connecting…"),
             writes,
@@ -2568,6 +2713,7 @@ impl Model {
             &self.limits.scope_keys,
         );
         traffic.seq = self.traffic.seq + 1; // a late result of the old query is stale
+        traffic.treemap.area = crate::tui::ui::screens::traffic::treemap_area(self.size);
         self.traffic = traffic;
         self.policy = PolicyState::new(min);
         self.objects = ObjectsState::new(min);

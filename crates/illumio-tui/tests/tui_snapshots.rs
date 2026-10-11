@@ -1109,3 +1109,64 @@ fn traffic_mesh_80x24_160x48_and_light() {
     m.set_theme("light");
     insta::assert_snapshot!("light_traffic_mesh_160x48", render_styled(&m, 160, 48));
 }
+
+#[test]
+fn traffic_treemap_80x24_160x48_zoomed_and_light() {
+    use illumio_tui::tui::model::TrafficView;
+    use illumio_tui::tui::msg::Msg;
+    use illumio_tui::tui::test_support::model_with_rich_flows;
+    use illumio_tui::tui::update;
+    let mut m = model_with_rich_flows();
+    m.traffic.view = TrafficView::Treemap;
+    assert!(update(&mut m, Msg::Resize(80, 24)).is_empty());
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("Treemap"), "{out}");
+    assert!(
+        out.contains("by conns · b bytes · Enter zoom · Esc out"),
+        "{out}"
+    );
+    assert!(out.contains("ipl:Corp/-") && out.contains("▒"), "{out}");
+    insta::assert_snapshot!("traffic_treemap_80x24", out);
+    assert!(update(&mut m, Msg::Resize(160, 48)).is_empty());
+    let out = render_to_string(&m, 160, 48);
+    assert!(
+        out.contains("702") && out.contains("821"),
+        "destination weights: {out}"
+    );
+    insta::assert_snapshot!("traffic_treemap_160x48", out);
+    m.set_theme("light");
+    insta::assert_snapshot!("light_traffic_treemap_160x48", render_styled(&m, 160, 48));
+    m.set_theme("dark");
+    assert!(update(&mut m, Msg::Resize(80, 24)).is_empty());
+    m.traffic.treemap.zoom = Some(vec!["shop".into(), "prod".into()]);
+    m.traffic.relayout_treemap();
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("Treemap ▸ shop/prod"), "{out}");
+    assert!(
+        out.contains("▒crm/prod▒") && out.contains("▒33▒"),
+        "the destinations: {out}"
+    );
+    insta::assert_snapshot!("traffic_treemap_zoomed_80x24", out);
+}
+
+#[test]
+fn an_empty_result_draws_the_treemap_like_an_empty_table() {
+    use illumio_tui::tui::model::TrafficView;
+    let mut m = model_fixture();
+    m.traffic.view = TrafficView::Treemap;
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("Treemap") && out.contains("no rows"), "{out}");
+}
+
+#[test]
+fn mesh_and_treemap_keep_the_truncated_marker() {
+    use illumio_tui::tui::model::TrafficView;
+    use illumio_tui::tui::test_support::model_with_rich_flows;
+    let mut m = model_with_rich_flows();
+    m.traffic.data.as_mut().unwrap().truncated = true;
+    for view in [TrafficView::Mesh, TrafficView::Treemap] {
+        m.traffic.view = view;
+        let out = render_to_string(&m, 160, 48);
+        assert!(out.contains("⚠ truncated"), "{view:?}: {out}");
+    }
+}

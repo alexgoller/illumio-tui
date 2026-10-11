@@ -1,14 +1,16 @@
 //! The Traffic screen: filter bar, result stats, flow table and detail pane.
-use crate::tui::model::{Model, QueryState, TrafficView};
+use crate::tui::model::{Model, QueryState, TrafficView, TreemapState};
+use crate::tui::ui::theme::Theme;
 use crate::tui::ui::widgets::bars;
-use crate::tui::ui::widgets::panel::panel;
+use crate::tui::ui::widgets::panel::{panel, panel_spans};
 use pce::models::PolicyDecision;
+use pce::traffic::treemap::{Rect as TreemapRect, Tile, Weight};
 use pce::traffic::{ResolvedEndpoint, ResolvedFlow, compact_count};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Wrap};
+use ratatui::widgets::{Block, Paragraph, Wrap};
 use std::time::Instant;
 
 #[derive(Debug, Clone, Copy)]
@@ -38,6 +40,23 @@ pub fn layout(body: Rect) -> TrafficLayout {
     }
 }
 
+/// The cells the treemap fills on a terminal of `size`: the table and
+/// detail area of `layout` minus the panel border, exactly where
+/// `render_treemap` draws.
+pub fn treemap_area(size: (u16, u16)) -> TreemapRect {
+    let Some(c) = crate::tui::ui::layout::chrome(Rect::new(0, 0, size.0, size.1)) else {
+        return TreemapRect::default();
+    };
+    let l = layout(c.body);
+    let r = l.table.union(l.detail);
+    TreemapRect {
+        x: r.x + 1,
+        y: r.y + 1,
+        w: r.width.saturating_sub(2),
+        h: r.height.saturating_sub(2),
+    }
+}
+
 /// Rows of data visible in the flow table (minus border and header).
 pub fn table_rows(body: Rect) -> usize {
     layout(body).table.height.saturating_sub(3) as usize
@@ -57,6 +76,7 @@ pub fn render(model: &Model, f: &mut Frame, body: Rect) {
         // The detail pane belongs to the Flows view; the others use its space.
         TrafficView::Aggregate => render_groups(model, f, l.table.union(l.detail)),
         TrafficView::Mesh => render_mesh(model, f, l.table.union(l.detail)),
+        TrafficView::Treemap => render_treemap(model, f, l.table.union(l.detail)),
         TrafficView::Blocked => render_blocked(model, f, l.table.union(l.detail)),
     }
 }
@@ -199,6 +219,123 @@ fn render_mesh(model: &Model, f: &mut Frame, area: Rect) {
     });
 }
 
+/// The tiles the model holds: each source a plain-bordered block titled
+/// with its group, its destinations filled with `▒` in their decision's
+/// colour, label and weight written over the fill where they fit; the
+/// cursor tile reversed.
+fn render_treemap(model: &Model, f: &mut Frame, area: Rect) {
+    let t = &model.theme;
+    let tm = &model.traffic.treemap;
+    let title = match &tm.zoom {
+        Some(z) => format!("{} ▸ {}", TrafficView::Treemap.title(), z.join("/")),
+        None => TrafficView::Treemap.title().to_string(),
+    };
+    let block = panel_spans(&title, treemap_meta(tm, t), t, true);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    if tm.tiles.is_empty() {
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled("no rows", t.dim_style()))),
+            inner,
+        );
+        return;
+    }
+    let cur = tm.current();
+    let is_cur = |outer: usize, inner_i: Option<usize>| {
+        cur.is_some_and(|c| c.outer == outer && c.inner == inner_i)
+    };
+    for (i, tile) in tm.tiles.iter().enumerate() {
+        if tile.children.is_empty() {
+            draw_fill(f, inner, tile, t, is_cur(i, None));
+            continue;
+        }
+        let r = cells(tile.rect).intersection(inner);
+        if r.is_empty() {
+            continue;
+        }
+        let mut style = t.dim_style();
+        if is_cur(i, None) {
+            style = style.add_modifier(Modifier::REVERSED);
+        }
+        let label = clip_text(&tile.label, r.width.saturating_sub(2) as usize);
+        f.render_widget(
+            Block::bordered()
+                .border_style(style)
+                .title(Span::styled(label, style)),
+            r,
+        );
+        for (j, c) in tile.children.iter().enumerate() {
+            draw_fill(f, inner, c, t, is_cur(i, Some(j)));
+        }
+    }
+}
+
+/// `by conns · b bytes · Enter zoom · Esc out` (or `by bytes · b conns ·
+/// …`), dim like every panel meta; the `b` hint fainter still when no flow
+/// in the result carried bytes, since `b` then refuses.
+fn treemap_meta(tm: &TreemapState, t: &Theme) -> Vec<Span<'static>> {
+    let (by, toggle) = match tm.weight {
+        Weight::Connections => ("by conns · ", "b bytes"),
+        Weight::Bytes => ("by bytes · ", "b conns"),
+    };
+    let dim = t.dim_style();
+    let toggle_style = if tm.has_bytes {
+        dim
+    } else {
+        dim.add_modifier(Modifier::DIM)
+    };
+    vec![
+        Span::styled(by, dim),
+        Span::styled(toggle, toggle_style),
+        Span::styled(" · Enter zoom · Esc out", dim),
+    ]
+}
+
+fn cells(r: TreemapRect) -> Rect {
+    Rect::new(r.x, r.y, r.w, r.h)
+}
+
+fn clip_text(s: &str, n: usize) -> String {
+    s.chars().take(n).collect()
+}
+
+/// A filled tile: `▒` in the decision colour, the label on the first row
+/// when it fits with a cell either side, the weight on the second.
+fn draw_fill(f: &mut Frame, clip: Rect, tile: &Tile, t: &Theme, cursor: bool) {
+    let r = cells(tile.rect).intersection(clip);
+    if r.is_empty() {
+        return;
+    }
+    let mut fill = t.decision_style(tile.decision);
+    let mut text = Style::new().fg(t.fg).add_modifier(Modifier::BOLD);
+    if cursor {
+        fill = fill.add_modifier(Modifier::REVERSED);
+        text = text.add_modifier(Modifier::REVERSED);
+    }
+    let w = r.width as usize;
+    let row = |label: Option<String>| -> Line<'static> {
+        match label {
+            Some(l) if l.chars().count() + 2 <= w => {
+                let n = l.chars().count();
+                Line::from(vec![
+                    Span::styled("▒", fill),
+                    Span::styled(l, text),
+                    Span::styled("▒".repeat(w - 1 - n), fill),
+                ])
+            }
+            _ => Line::from(Span::styled("▒".repeat(w), fill)),
+        }
+    };
+    let mut lines = vec![row(Some(tile.label.clone()))];
+    if r.height >= 2 {
+        lines.push(row(Some(compact_count(tile.weight))));
+    }
+    while lines.len() < r.height as usize {
+        lines.push(row(None));
+    }
+    f.render_widget(Paragraph::new(lines), r);
+}
+
 /// Every row here is blocked or potentially blocked; both read as `bad`.
 fn render_blocked(model: &Model, f: &mut Frame, area: Rect) {
     let t = &model.theme;
@@ -335,4 +472,38 @@ pub fn render_filter_bar(model: &Model, f: &mut Frame, area: Rect) {
         Span::styled(decision, t.base()),
     ]);
     f.render_widget(Paragraph::new(line).block(block).style(t.base()), area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn meta_text(spans: &[Span]) -> String {
+        spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn the_treemap_meta_dims_b_bytes_when_no_flow_has_bytes() {
+        let t = Theme::dark();
+        let mut tm = TreemapState::new(TreemapRect::default());
+        tm.has_bytes = true;
+        let with = treemap_meta(&tm, &t);
+        assert_eq!(
+            meta_text(&with),
+            "by conns · b bytes · Enter zoom · Esc out"
+        );
+        assert_eq!(with[1].content, "b bytes");
+        assert_eq!(with[1].style, t.dim_style());
+        tm.has_bytes = false;
+        let without = treemap_meta(&tm, &t);
+        assert_eq!(meta_text(&without), meta_text(&with));
+        assert_eq!(without[1].style, t.dim_style().add_modifier(Modifier::DIM));
+        assert_eq!(without[0].style, t.dim_style(), "only the b hint greys");
+        tm.has_bytes = true;
+        tm.weight = Weight::Bytes;
+        assert_eq!(
+            meta_text(&treemap_meta(&tm, &t)),
+            "by bytes · b conns · Enter zoom · Esc out"
+        );
+    }
 }

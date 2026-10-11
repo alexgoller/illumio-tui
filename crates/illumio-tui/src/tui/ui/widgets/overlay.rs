@@ -31,7 +31,10 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ("/", "search in the current table (Enter keep, Esc clear)"),
     ("r", "refresh the current screen (bypasses the cache)"),
     ("a", "toggle auto-refresh for the current screen"),
-    ("Traffic  v", "cycle Flows · App-to-app · Mesh · Blocked"),
+    (
+        "Traffic  v",
+        "cycle Flows · App-to-app · Mesh · Blocked · Treemap",
+    ),
     (
         "Traffic  f",
         "edit filter: window src dst service decisions",
@@ -42,6 +45,10 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "detail (flows) · drill into a row (app-to-app, mesh)",
     ),
     ("Mesh     u / p", "show or hide the user · process columns"),
+    (
+        "Treemap  hjkl Enter b",
+        "move · zoom, then drill · conns/bytes · Esc out",
+    ),
     (
         "Traffic  w",
         "draft allow rule from a blocked flow or row (writes)",

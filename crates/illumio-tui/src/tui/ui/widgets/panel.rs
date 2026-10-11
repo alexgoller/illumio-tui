@@ -6,6 +6,22 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType};
 
 pub fn panel<'a>(title: &'a str, meta: &'a str, theme: &Theme, focused: bool) -> Block<'a> {
+    let meta = if meta.is_empty() {
+        Vec::new()
+    } else {
+        vec![Span::styled(meta, theme.dim_style())]
+    };
+    panel_spans(title, meta, theme, focused)
+}
+
+/// `panel` with the meta given as styled spans, for a meta part of which
+/// reads differently (the Treemap's `b bytes` when no flow has bytes).
+pub fn panel_spans<'a>(
+    title: &'a str,
+    meta: Vec<Span<'a>>,
+    theme: &Theme,
+    focused: bool,
+) -> Block<'a> {
     let border = if focused {
         theme.border_focus
     } else {
@@ -20,14 +36,10 @@ pub fn panel<'a>(title: &'a str, meta: &'a str, theme: &Theme, focused: bool) ->
             Span::raw(" "),
         ]));
     if !meta.is_empty() {
-        b = b.title_top(
-            Line::from(vec![
-                Span::raw(" "),
-                Span::styled(meta, theme.dim_style()),
-                Span::raw(" "),
-            ])
-            .right_aligned(),
-        );
+        let mut spans = vec![Span::raw(" ")];
+        spans.extend(meta);
+        spans.push(Span::raw(" "));
+        b = b.title_top(Line::from(spans).right_aligned());
     }
     b
 }

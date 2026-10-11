@@ -4,8 +4,9 @@ use crate::tui::edit::{self, EditIntent, RulesetTarget, Start, WriteIntent};
 use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::form::FormEvent;
 use crate::tui::model::{
-    Connection, Drill, EventsFilterEdit, Model, ObjectKind, Overlay, PendingAction, PolicyPane,
-    PolicyState, QueryState, Screen, StatusLine, TrafficData, TrafficView, WritesState, rule_line,
+    Connection, Dir, Drill, EventsFilterEdit, Model, ObjectKind, Overlay, PendingAction,
+    PolicyPane, PolicyState, QueryState, Screen, StatusLine, TrafficData, TrafficView, WritesState,
+    rule_line,
 };
 use crate::tui::msg::{Cmd, Msg, ObjectsPayload, QueryOutcome};
 use crate::tui::picker::{KeyPicker, PickerOutcome};
@@ -13,6 +14,7 @@ use crate::tui::ui::widgets::overlay::{confirm_write_last_scroll, help_last_scro
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use pce::models::{EventFilter, PolicyDecision, PolicyScope};
 use pce::traffic::QueryProgress;
+use pce::traffic::treemap::Weight;
 use pce::write::{Outcome, Plan, ProvisionRequest, ProvisionSubset, WriteError, provision_counts};
 use pce::{CacheMode, RuleKind, WriteMethod};
 use std::time::Instant;
@@ -23,6 +25,11 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::Mouse(me) => on_mouse(model, me),
         Msg::Resize(w, h) => {
             model.size = (w, h);
+            let area = crate::tui::ui::screens::traffic::treemap_area(model.size);
+            if area != model.traffic.treemap.area {
+                model.traffic.treemap.area = area;
+                model.traffic.relayout_treemap();
+            }
             Vec::new()
         }
         Msg::Tick(now) => {
@@ -251,6 +258,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         filter,
                     });
                     model.traffic.drill = None;
+                    model.traffic.treemap.zoom = None;
                     model.traffic.rebuild_views();
                     model.traffic.show_detail = false;
                     model.traffic.query = QueryState::Idle;
@@ -1223,6 +1231,8 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 search_key(&mut t.blocked, k);
                 t.blocked.ensure_visible(page);
             }
+            // `is_searching` is false on the treemap: it has no table.
+            TrafficView::Treemap => {}
         }
         return Vec::new();
     }
@@ -1265,12 +1275,26 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             }
             TrafficView::Flows => model.traffic.show_detail = !model.traffic.show_detail,
             TrafficView::Blocked => {}
+            TrafficView::Treemap => treemap_enter(model),
         },
         KeyCode::Esc | KeyCode::Backspace
             if model.traffic.view == TrafficView::Flows && model.traffic.drill.is_some() =>
         {
             model.traffic.drill = None;
             model.traffic.rebuild_views();
+        }
+        KeyCode::Esc if model.traffic.view == TrafficView::Treemap => treemap_out(model),
+        KeyCode::Char('b') if model.traffic.view == TrafficView::Treemap => {
+            let t = &mut model.traffic;
+            if !t.treemap.has_bytes {
+                model.status = StatusLine::info("no byte counts in this result");
+            } else {
+                t.treemap.weight = match t.treemap.weight {
+                    Weight::Connections => Weight::Bytes,
+                    Weight::Bytes => Weight::Connections,
+                };
+                t.relayout_treemap();
+            }
         }
         _ => {
             let t = &mut model.traffic;
@@ -1279,6 +1303,18 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 TrafficView::Aggregate => table_key(&mut t.groups, k, page),
                 TrafficView::Mesh => table_key(&mut t.mesh, k, page),
                 TrafficView::Blocked => table_key(&mut t.blocked, k, page),
+                TrafficView::Treemap => {
+                    let dir = match k.code {
+                        KeyCode::Left | KeyCode::Char('h') => Some(Dir::Left),
+                        KeyCode::Right | KeyCode::Char('l') => Some(Dir::Right),
+                        KeyCode::Up | KeyCode::Char('k') => Some(Dir::Up),
+                        KeyCode::Down | KeyCode::Char('j') => Some(Dir::Down),
+                        _ => None,
+                    };
+                    if let Some(d) = dir {
+                        t.treemap.move_cursor(d);
+                    }
+                }
             }
         }
     }
@@ -1288,8 +1324,71 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         TrafficView::Aggregate => t.groups.ensure_visible(page),
         TrafficView::Mesh => t.mesh.ensure_visible(page),
         TrafficView::Blocked => t.blocked.ensure_visible(page),
+        TrafficView::Treemap => {}
     }
     Vec::new()
+}
+
+/// Enter on the Treemap: an outer tile zooms into its source; a
+/// destination (or any tile while zoomed) opens the Flows view drilled to
+/// that pair. An `other (N)` tile only explains itself.
+fn treemap_enter(model: &mut Model) {
+    let t = &mut model.traffic;
+    let Some(target) = t.treemap.current() else {
+        return;
+    };
+    let tile = t.treemap.tile(target).clone();
+    if tile.is_other() {
+        model.status = StatusLine::info(format!(
+            "{}: too small to draw one by one; zoom in or widen the terminal",
+            tile.label
+        ));
+        return;
+    }
+    let groups = t.groups.rows();
+    let src_text = match (&t.treemap.zoom, target.inner) {
+        (None, None) => {
+            let src = groups
+                .iter()
+                .find(|g| g.src.join("/") == tile.label)
+                .map(|g| g.src.clone());
+            if let Some(src) = src {
+                t.treemap.zoom = Some(src);
+                t.treemap.cursor = 0;
+                t.relayout_treemap();
+            }
+            return;
+        }
+        (Some(z), _) => z.join("/"),
+        (None, Some(_)) => t.treemap.tiles[target.outer].label.clone(),
+    };
+    let pair = groups
+        .iter()
+        .find(|g| g.src.join("/") == src_text && g.dst.join("/") == tile.label)
+        .map(|g| (g.src.clone(), g.dst.clone()));
+    if let Some((src, dst)) = pair {
+        t.drill = Some(Drill::Pair(src, dst));
+        t.view = TrafficView::Flows;
+        t.rebuild_views();
+    }
+}
+
+/// Esc on the Treemap: out of a zoom, the cursor back on that source.
+fn treemap_out(model: &mut Model) {
+    let tm = &mut model.traffic.treemap;
+    let Some(z) = tm.zoom.take() else {
+        return;
+    };
+    model.traffic.relayout_treemap();
+    let tm = &mut model.traffic.treemap;
+    let label = z.join("/");
+    if let Some(i) = tm
+        .targets()
+        .iter()
+        .position(|t| t.inner.is_none() && tm.tiles[t.outer].label == label)
+    {
+        tm.cursor = i;
+    }
 }
 
 /// The `g` picker over the profile's label model and the keys the loaded
@@ -1322,6 +1421,7 @@ fn apply_group_keys(model: &mut Model, keys: Vec<String>, all: bool) {
         };
     }
     t.drill = None;
+    t.treemap.zoom = None;
     t.rebuild_views();
     model.status = StatusLine::info(format!("grouped by {}", t.effective_keys().join(",")));
 }
@@ -1379,6 +1479,8 @@ fn scroll_focused(model: &mut Model, down: bool) {
                 TrafficView::Aggregate => step(&mut t.groups, down, page),
                 TrafficView::Mesh => step(&mut t.mesh, down, page),
                 TrafficView::Blocked => step(&mut t.blocked, down, page),
+                // The wheel moves table rows; the treemap has none.
+                TrafficView::Treemap => {}
             }
         }
         Screen::Policy => {
@@ -2326,7 +2428,7 @@ fn flow_rule_key(model: &mut Model) -> Vec<Cmd> {
             let keys = t.effective_keys();
             t.first_flow(|f| r.contains(f, &keys, t.mesh_cols))
         }),
-        TrafficView::Aggregate => {
+        TrafficView::Aggregate | TrafficView::Treemap => {
             model.status = StatusLine::warn("select a flow in the Flows view (Enter on a pair)");
             return Vec::new();
         }
@@ -2507,6 +2609,8 @@ mod tests {
         assert_eq!(m.traffic.view, TrafficView::Blocked);
         assert_eq!(m.traffic.blocked.len(), 2);
         assert!(update(&mut m, key('v')).is_empty());
+        assert_eq!(m.traffic.view, TrafficView::Treemap);
+        assert!(update(&mut m, key('v')).is_empty());
         assert_eq!(m.traffic.view, TrafficView::Flows);
     }
 
@@ -2664,7 +2768,7 @@ mod tests {
         use crate::tui::test_support::model_with_rich_flows;
         let mut m = model_with_rich_flows();
         let mut seen = Vec::new();
-        for _ in 0..4 {
+        for _ in 0..5 {
             assert!(update(&mut m, key('v')).is_empty());
             seen.push(m.traffic.view);
         }
@@ -2674,6 +2778,7 @@ mod tests {
                 TrafficView::Aggregate,
                 TrafficView::Mesh,
                 TrafficView::Blocked,
+                TrafficView::Treemap,
                 TrafficView::Flows
             ]
         );
@@ -2757,6 +2862,242 @@ mod tests {
             panic!("{:?}", m.overlay)
         };
         assert_eq!(f.title, "Allow rule from flow");
+    }
+
+    fn on_treemap(w: u16, h: u16) -> Model {
+        let mut m = crate::tui::test_support::model_with_rich_flows();
+        quiet(&mut m, Msg::Resize(w, h));
+        for _ in 0..4 {
+            quiet(&mut m, key('v'));
+        }
+        assert_eq!(m.traffic.view, TrafficView::Treemap);
+        m
+    }
+
+    #[test]
+    fn the_treemap_follows_the_terminal_size_and_v_comes_back_to_flows() {
+        use pce::traffic::treemap::Rect;
+        let mut m = on_treemap(80, 24);
+        let tm = &m.traffic.treemap;
+        assert_eq!(
+            tm.area,
+            Rect {
+                x: 1,
+                y: 9,
+                w: 78,
+                h: 13
+            }
+        );
+        assert_eq!(tm.tiles.len(), 9);
+        assert_eq!(tm.tiles[0].label, "ipl:Corp/-");
+        assert_eq!(tm.cursor, 0);
+        quiet(&mut m, Msg::Resize(160, 48));
+        assert_eq!(
+            m.traffic.treemap.area,
+            Rect {
+                x: 1,
+                y: 9,
+                w: 158,
+                h: 37
+            }
+        );
+        let covered: u32 = m.traffic.treemap.tiles.iter().map(|t| t.rect.area()).sum();
+        assert_eq!(covered, 158 * 37);
+        quiet(&mut m, key('v'));
+        assert_eq!(m.traffic.view, TrafficView::Flows);
+        // No flows: no tiles, and the keys still cost nothing.
+        let mut empty = model_fixture();
+        empty.traffic.view = TrafficView::Treemap;
+        for msg in [key('l'), enter(), kc(KeyCode::Esc), key('b')] {
+            quiet(&mut empty, msg);
+        }
+        assert!(empty.traffic.treemap.tiles.is_empty());
+    }
+
+    #[test]
+    fn the_treemap_cursor_moves_towards_the_key_and_stays_at_an_edge() {
+        let mut m = on_treemap(80, 24);
+        let centre_x = |m: &Model| {
+            let r = m.traffic.treemap.current().unwrap().rect;
+            2 * u32::from(r.x) + u32::from(r.w)
+        };
+        let start = centre_x(&m);
+        quiet(&mut m, key('l'));
+        let right = centre_x(&m);
+        assert!(right > start, "{start} -> {right}");
+        quiet(&mut m, kc(KeyCode::Left));
+        assert!(centre_x(&m) < right);
+        for _ in 0..40 {
+            quiet(&mut m, key('h'));
+        }
+        let leftmost = m.traffic.treemap.cursor;
+        quiet(&mut m, key('h'));
+        assert_eq!(m.traffic.treemap.cursor, leftmost, "nothing further left");
+        for _ in 0..40 {
+            quiet(&mut m, key('j'));
+        }
+        let r = m.traffic.treemap.current().unwrap().rect;
+        assert_eq!(r.y + r.h, 22, "the bottom row of the area");
+    }
+
+    #[test]
+    fn enter_zooms_into_a_source_then_drills_and_esc_zooms_out() {
+        let mut m = on_treemap(80, 24);
+        let shop = m
+            .traffic
+            .treemap
+            .targets()
+            .iter()
+            .position(|t| {
+                t.inner.is_none() && m.traffic.treemap.tiles[t.outer].label == "shop/prod"
+            })
+            .unwrap();
+        m.traffic.treemap.cursor = shop;
+        quiet(&mut m, enter());
+        assert_eq!(
+            m.traffic.treemap.zoom,
+            Some(vec!["shop".to_string(), "prod".to_string()])
+        );
+        let labels: Vec<&str> = m
+            .traffic
+            .treemap
+            .tiles
+            .iter()
+            .map(|t| t.label.as_str())
+            .collect();
+        assert_eq!(
+            labels,
+            vec!["shop/prod", "crm/prod", "api.partner.example/-"]
+        );
+        quiet(&mut m, kc(KeyCode::Esc));
+        assert_eq!(m.traffic.treemap.zoom, None);
+        assert_eq!(m.traffic.treemap.cursor, shop, "back on the source");
+        quiet(&mut m, enter());
+        quiet(&mut m, enter()); // the largest destination
+        assert_eq!(m.traffic.view, TrafficView::Flows);
+        assert_eq!(
+            m.traffic.drill,
+            Some(Drill::Pair(
+                vec!["shop".into(), "prod".into()],
+                vec!["shop".into(), "prod".into()]
+            ))
+        );
+        assert_eq!(m.traffic.flows.len(), 4);
+        // An inner tile drills straight away; an `other` tile only explains.
+        let mut m = on_treemap(80, 24);
+        let tm = &m.traffic.treemap;
+        let crm = tm
+            .targets()
+            .iter()
+            .position(|t| {
+                t.inner.is_some()
+                    && tm.tiles[t.outer].label == "ipl:Corp/-"
+                    && tm.tile(*t).label == "crm/prod"
+            })
+            .unwrap();
+        let other = tm
+            .targets()
+            .iter()
+            .position(|t| t.inner.is_some() && tm.tile(*t).is_other())
+            .unwrap();
+        m.traffic.treemap.cursor = other;
+        quiet(&mut m, enter());
+        assert!(
+            m.status.text.starts_with("other (1): too small"),
+            "{}",
+            m.status.text
+        );
+        assert_eq!(m.traffic.view, TrafficView::Treemap);
+        m.traffic.treemap.cursor = crm;
+        quiet(&mut m, enter());
+        assert_eq!(m.traffic.view, TrafficView::Flows);
+        assert_eq!(m.traffic.flows.len(), 1, "Corp to crm/prod");
+    }
+
+    #[test]
+    fn b_weighs_by_bytes_or_says_there_are_none() {
+        use pce::traffic::treemap::Weight;
+        let mut m = on_treemap(80, 24);
+        quiet(&mut m, key('b'));
+        assert_eq!(m.traffic.treemap.weight, Weight::Bytes);
+        assert_eq!(m.traffic.treemap.tiles[0].weight, 8_350_000);
+        quiet(&mut m, key('b'));
+        assert_eq!(m.traffic.treemap.weight, Weight::Connections);
+        if let Some(d) = m.traffic.data.as_mut() {
+            for f in &mut d.flows {
+                f.bytes_in = None;
+                f.bytes_out = None;
+            }
+        }
+        assert!(m.traffic.treemap.has_bytes);
+        m.traffic.rebuild_views();
+        assert!(!m.traffic.treemap.has_bytes, "the meta greys `b bytes`");
+        quiet(&mut m, key('b'));
+        assert_eq!(m.status.text, "no byte counts in this result");
+        assert_eq!(m.traffic.treemap.weight, Weight::Connections);
+    }
+
+    #[test]
+    fn the_picked_keys_reach_the_mesh_and_the_treemap() {
+        let mut m = on_treemap(80, 24);
+        for msg in [key('g'), key('j'), key('j'), key(' '), enter()] {
+            quiet(&mut m, msg);
+        }
+        assert_eq!(m.traffic.group_keys, vec!["app", "env", "role"]);
+        assert!(m.traffic.mesh.rows().iter().all(|r| r.src.len() == 3));
+        assert_eq!(m.traffic.treemap.tiles[0].label, "ipl:Corp/-/-");
+        assert!(
+            m.traffic
+                .treemap
+                .tiles
+                .iter()
+                .any(|t| t.label == "shop/prod/web"),
+            "sources by app, env and role"
+        );
+    }
+
+    #[test]
+    fn new_keys_and_a_new_result_drop_the_zoom() {
+        let mut m = on_treemap(80, 24);
+        quiet(&mut m, enter());
+        assert!(m.traffic.treemap.zoom.is_some());
+        quiet(&mut m, key('g'));
+        quiet(&mut m, enter());
+        assert_eq!(m.traffic.treemap.zoom, None, "applying keys zooms out");
+        quiet(&mut m, enter());
+        assert!(m.traffic.treemap.zoom.is_some());
+        let mut keys_role = m.traffic.group_keys.clone();
+        keys_role.push("role".into());
+        m.traffic.group_keys = keys_role;
+        m.traffic.rebuild_views();
+        assert_eq!(
+            m.traffic.treemap.zoom, None,
+            "the zoomed source no longer exists"
+        );
+        // A new result drops the zoom and the drill under the user.
+        quiet(&mut m, enter());
+        quiet(&mut m, enter());
+        assert_eq!(m.traffic.view, TrafficView::Flows);
+        assert!(m.traffic.drill.is_some());
+        assert!(m.traffic.treemap.zoom.is_some());
+        let outcome = crate::tui::msg::QueryOutcome {
+            flows: crate::tui::test_support::fixture_flows_rich(),
+            truncated: false,
+            matches_count: None,
+            elapsed: std::time::Duration::from_secs(1),
+            hit: false,
+            filter: m.traffic.filter.clone(),
+        };
+        let seq = m.traffic.seq;
+        quiet(
+            &mut m,
+            Msg::QueryDone {
+                seq,
+                result: Ok(outcome),
+            },
+        );
+        assert_eq!(m.traffic.treemap.zoom, None, "a new result zooms out");
+        assert_eq!(m.traffic.drill, None, "and drops the drill");
     }
 
     #[test]
@@ -2924,7 +3265,7 @@ mod tests {
                 TrafficView::Aggregate => m.traffic.groups.search_text().to_string(),
                 TrafficView::Mesh => m.traffic.mesh.search_text().to_string(),
                 TrafficView::Blocked => m.traffic.blocked.search_text().to_string(),
-                TrafficView::Flows => unreachable!("v moved off Flows"),
+                TrafficView::Flows | TrafficView::Treemap => unreachable!("v moved off Flows"),
             };
             assert_eq!(table_search(&m), "q:?");
             quiet(
@@ -5863,7 +6204,12 @@ mod tests {
     fn help_scrolls_to_its_last_line_and_reopens_at_the_top() {
         use crate::tui::ui::widgets::overlay::{HELP_LINES, help_last_scroll};
         let mut m = model_fixture(); // 80x24
-        assert_eq!(HELP_LINES.len(), 33);
+        assert_eq!(HELP_LINES.len(), 34);
+        assert!(
+            HELP_LINES
+                .iter()
+                .any(|(k, _)| *k == "Treemap  hjkl Enter b")
+        );
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Mesh     u / p"));
         assert!(HELP_LINES.iter().any(|(_, d)| *d == ":writes [on|off]"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "IP lists Enter"));
@@ -5874,7 +6220,7 @@ mod tests {
         );
         update(&mut m, key('?'));
         let last = help_last_scroll(24);
-        assert_eq!(last, 11, "33 lines, 22 rows inside the box");
+        assert_eq!(last, 12, "34 lines, 22 rows inside the box");
 
         for _ in 0..40 {
             update(&mut m, key('j'));
@@ -7016,13 +7362,15 @@ mod tests {
             m.overlay
         );
         update(&mut m, kc(KeyCode::Esc));
-        m.traffic.view = TrafficView::Aggregate;
-        assert!(update(&mut m, key('w')).is_empty());
-        assert_eq!(
-            m.status.text,
-            "select a flow in the Flows view (Enter on a pair)"
-        );
-        assert_eq!(m.overlay, Overlay::None);
+        for view in [TrafficView::Aggregate, TrafficView::Treemap] {
+            m.traffic.view = view;
+            assert!(update(&mut m, key('w')).is_empty());
+            assert_eq!(
+                m.status.text,
+                "select a flow in the Flows view (Enter on a pair)"
+            );
+            assert_eq!(m.overlay, Overlay::None);
+        }
     }
 
     #[test]
