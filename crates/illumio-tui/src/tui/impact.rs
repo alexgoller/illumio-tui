@@ -141,7 +141,17 @@ pub fn rule_detail_rows(model: &Model, href: &str) -> Vec<(&'static str, String)
             .enumerate()
             .map(|(i, l)| (if i == 0 { "ip lists" } else { "" }, l)),
     );
+    rows.extend(note(impact).map(|n| ("note", n)));
     rows
+}
+
+/// The first `unsupported` note, with `(+N more)`; `None` without notes.
+pub fn note(i: &Impact) -> Option<String> {
+    let first = i.unsupported.first()?;
+    Some(match i.unsupported.len() - 1 {
+        0 => first.clone(),
+        more => format!("{first} (+{more} more)"),
+    })
 }
 
 /// A rule or deny-rule create or update: the request the confirm overlay
@@ -189,10 +199,11 @@ pub fn confirm_line(model: &Model, plan: &Plan) -> Option<String> {
     };
     let actors = RuleActors::planned(request.body.as_ref(), base.as_ref());
     let labels = pce::workload_labels(workloads);
-    Some(format!(
-        "impact: {}",
-        compute_with(scopes, &actors, idx, workloads, truncated, &labels).summary()
-    ))
+    let impact = compute_with(scopes, &actors, idx, workloads, truncated, &labels);
+    Some(match note(&impact) {
+        Some(n) => format!("impact: {} · note: {n}", impact.summary()),
+        None => format!("impact: {}", impact.summary()),
+    })
 }
 
 #[cfg(test)]
@@ -266,6 +277,150 @@ mod tests {
         assert!(key(2) < key(1) && key(1) < key(0) && key(0) < key(3));
         let cold = model_with_policy();
         assert!(cold.policy.rules.rows()[0].pc_key() > key(3));
+    }
+
+    #[test]
+    fn the_p_c_cell_is_compact_and_its_widest_form_fits_the_column() {
+        let mut m = with_workloads(model_with_policy());
+        for r in m.policy.rules.rows() {
+            assert_eq!(r.pc, r.impact.as_ref().unwrap().pc_compact());
+        }
+        let big = |providers, consumers, truncated| Impact {
+            providers,
+            consumers,
+            per_scope: vec![],
+            ip_lists: vec![],
+            unsupported: vec![],
+            truncated,
+        };
+        let width = crate::tui::model::rule_columns()
+            .iter()
+            .find(|c| c.title == "P/C")
+            .unwrap()
+            .width as usize;
+        for i in [
+            big(1234, 5678, false),
+            big(12_345, 67_890, false),
+            big(10_000, 10_000, true),
+            big(123_456, 456_789, true),
+        ] {
+            let cell = i.pc_compact();
+            assert!(cell.chars().count() <= width, "{cell} in {width}");
+        }
+        // Many workloads through the real path: 1234 copies of the fixture.
+        let one = m.workloads.raw.clone();
+        m.workloads.raw = (0..1234).flat_map(|_| one.clone()).collect();
+        m.rebuild_rules();
+        let pcs: Vec<&str> = m
+            .policy
+            .rules
+            .rows()
+            .iter()
+            .map(|r| r.pc.as_str())
+            .collect();
+        assert_eq!(pcs, vec!["1.2K/2.5K", "1.2K/1.2K", "1.2K/0", "2.5K/0"]);
+    }
+
+    #[test]
+    fn an_ip_list_reload_updates_the_sizes_in_the_rule_detail() {
+        use crate::tui::msg::Msg;
+        use crate::tui::update::update;
+        let mut m = with_workloads(model_with_policy());
+        assert_eq!(
+            rule_detail_rows(&m, RULE_2)[1],
+            row("ip lists", "Corp: 65.5K addresses")
+        );
+        // Corp edited on screen 6 down to a /24; the reload brings it back.
+        let mut lists: Vec<pce::models::IpList> =
+            serde_json::from_str(include_str!("../../../../fixtures/ip_lists.json")).unwrap();
+        lists[1].ip_ranges =
+            serde_json::from_value(serde_json::json!([{"from_ip": "10.1.0.0/24"}])).unwrap();
+        update(&mut m, Msg::IpListsLoaded(Ok((lists, 0))));
+        assert_eq!(
+            rule_detail_rows(&m, RULE_2)[1],
+            row("ip lists", "Corp: 256 addresses")
+        );
+    }
+
+    #[test]
+    fn a_labels_reload_rebuilds_the_rules_pane() {
+        use crate::tui::model::ObjectKind;
+        use crate::tui::msg::{Msg, ObjectsPayload};
+        use crate::tui::update::update;
+        let mut m = with_workloads(model_with_policy());
+        let consumers = |m: &Model| m.policy.rules.rows()[1].consumers[0].name.clone();
+        assert_eq!(consumers(&m), "role=web");
+        let mut labels: Vec<pce::models::Label> =
+            serde_json::from_str(include_str!("../../../../fixtures/labels.json")).unwrap();
+        labels[0].value = "frontend".into();
+        update(
+            &mut m,
+            Msg::ObjectsLoaded {
+                kind: ObjectKind::Labels,
+                result: Ok(ObjectsPayload::Labels(labels, 0)),
+            },
+        );
+        assert_eq!(consumers(&m), "role=frontend");
+    }
+
+    #[test]
+    fn unsupported_notes_show_in_the_rule_detail_and_the_confirm_line() {
+        use pce::write::{Plan, WriteRequest};
+        let mut m = with_workloads(model_with_policy());
+        let rule = m.policy.raw[0]
+            .rules
+            .iter_mut()
+            .find(|r| r.href == RULE_2)
+            .unwrap();
+        rule.resolve_labels_as = Some(pce::models::ResolveLabelsAs {
+            providers: vec!["virtual_services".into()],
+            consumers: vec!["workloads".into()],
+        });
+        m.rebuild_rules();
+        assert_eq!(
+            rule_detail_rows(&m, RULE_2),
+            vec![
+                row("impact", "0 providers · 0 consumers"),
+                row("ip lists", "Corp: 65.5K addresses"),
+                row("note", "providers resolve as virtual_services only"),
+            ]
+        );
+        let rule = m.policy.raw[0]
+            .rules
+            .iter_mut()
+            .find(|r| r.href == RULE_2)
+            .unwrap();
+        rule.consumers.push(
+            serde_json::from_value(serde_json::json!(
+                {"virtual_service": {"href": "/orgs/5/sec_policy/draft/virtual_services/v1"}}
+            ))
+            .unwrap(),
+        );
+        m.rebuild_rules();
+        assert_eq!(
+            rule_detail_rows(&m, RULE_2).last().unwrap(),
+            &row(
+                "note",
+                "providers resolve as virtual_services only (+1 more)"
+            )
+        );
+        let update = Plan::Send {
+            request: WriteRequest {
+                method: pce::WriteMethod::Put,
+                path: RULE_2.into(),
+                body: Some(serde_json::json!({"resolve_labels_as":
+                    {"providers": ["workloads"], "consumers": ["virtual_services"]}})),
+                summary: "update rule".into(),
+            },
+            kind: pce::write::ObjectKind::Rule,
+        };
+        assert_eq!(
+            confirm_line(&m, &update).as_deref(),
+            Some(
+                "impact: 1 provider · 0 consumers · note: consumers resolve as \
+                 virtual_services only (+1 more)"
+            )
+        );
     }
 
     #[test]

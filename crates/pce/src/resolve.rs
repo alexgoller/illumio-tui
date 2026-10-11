@@ -51,11 +51,7 @@ impl NameIndex {
             idx.label_groups
                 .insert(canon(&g.href).into_owned(), g.clone());
         }
-        for i in ip_lists {
-            idx.ip_list_by_name
-                .insert(i.name.to_ascii_lowercase(), i.href.clone());
-            idx.ip_lists.insert(canon(&i.href).into_owned(), i.clone());
-        }
+        idx.insert_ip_lists(ip_lists);
         for s in services {
             idx.services.insert(canon(&s.href).into_owned(), s.clone());
         }
@@ -77,6 +73,31 @@ impl NameIndex {
         };
         idx.insert_labels(labels);
         idx
+    }
+
+    /// This index with its IP lists replaced by `lists`; labels, label
+    /// groups and services are kept. For the TUI after an IP list reload
+    /// (screen 6, a write), so rule impact sizes follow at no extra request.
+    pub fn with_ip_lists(&self, lists: &[IpList]) -> Self {
+        let mut idx = Self {
+            labels: self.labels.clone(),
+            label_by_kv: self.label_by_kv.clone(),
+            keys: self.keys.clone(),
+            label_groups: self.label_groups.clone(),
+            label_group_by_name: self.label_group_by_name.clone(),
+            services: self.services.clone(),
+            ..Self::default()
+        };
+        idx.insert_ip_lists(lists);
+        idx
+    }
+
+    fn insert_ip_lists(&mut self, lists: &[IpList]) {
+        for i in lists {
+            self.ip_list_by_name
+                .insert(i.name.to_ascii_lowercase(), i.href.clone());
+            self.ip_lists.insert(canon(&i.href).into_owned(), i.clone());
+        }
     }
 
     fn insert_labels(&mut self, labels: &[Label]) {
@@ -594,6 +615,42 @@ mod tests {
         let only_new = idx.with_labels(&labels[labels.len() - 1..]);
         assert_eq!(only_new.label_href("app", "shop"), None);
         assert_eq!(only_new.label_keys(), vec!["app"]);
+    }
+
+    #[test]
+    fn with_ip_lists_replaces_the_lists_and_keeps_the_rest() {
+        let idx = index();
+        let edited: IpList = serde_json::from_value(serde_json::json!({
+            "href": "/orgs/5/sec_policy/active/ip_lists/21", "name": "Corp HQ",
+            "ip_ranges": [{"from_ip": "10.1.0.0/24"}]
+        }))
+        .unwrap();
+        let next = idx.with_ip_lists(std::slice::from_ref(&edited));
+        let corp = next
+            .ip_list("/orgs/5/sec_policy/draft/ip_lists/21")
+            .unwrap();
+        assert_eq!(corp.ip_ranges.len(), 1);
+        assert_eq!(corp.ip_ranges[0].from_ip, "10.1.0.0/24");
+        assert_eq!(
+            next.ip_list_href("corp hq"),
+            Some("/orgs/5/sec_policy/active/ip_lists/21")
+        );
+        assert_eq!(next.ip_list_href("corp"), None, "the old name is gone");
+        assert_eq!(
+            next.ip_lists.len(),
+            1,
+            "lists gone from the reload are gone"
+        );
+        assert_eq!(next.labels.len(), idx.labels.len());
+        assert_eq!(next.label_by_kv, idx.label_by_kv);
+        assert_eq!(next.keys, idx.keys);
+        assert_eq!(next.label_groups.len(), idx.label_groups.len());
+        assert_eq!(next.label_group_by_name, idx.label_group_by_name);
+        assert_eq!(next.services.len(), idx.services.len());
+        assert!(
+            idx.ip_list_href("corp").is_some(),
+            "the original is unchanged"
+        );
     }
 
     #[test]

@@ -404,6 +404,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::ObjectsLoaded { kind, result } => {
             let i = kind.index();
             model.objects.loading[i] = false;
+            let mut relabelled = false;
             match result {
                 Ok(payload) => {
                     // New labels reach the name index (and so the forms and
@@ -416,6 +417,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     ) = (&payload, &mut model.connection)
                     {
                         *idx = std::sync::Arc::new(idx.with_labels(v));
+                        relabelled = true;
                     }
                     let o = &mut model.objects;
                     let age = match payload {
@@ -435,6 +437,11 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     o.ages[i] = Some(age);
                     o.loaded_at[i] = Some(Instant::now());
                     o.auto.from_tick = false;
+                    if relabelled {
+                        // The rules pane's names and stored impacts follow.
+                        model.rebuild_rules();
+                        model.refresh_confirm_impact();
+                    }
                 }
                 Err(e) => {
                     let tripped = model.objects.auto.take_tick_failure();
@@ -448,7 +455,16 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             match result {
                 // No status text: a write's report survives the reload it caused.
                 Ok((lists, age)) => {
+                    // The index (and so the rule impact's list sizes) follows.
+                    if let Connection::Connected {
+                        index: Some(idx), ..
+                    } = &mut model.connection
+                    {
+                        *idx = std::sync::Arc::new(idx.with_ip_lists(&lists));
+                    }
                     model.ip_lists.set_lists(lists, &model.policy);
+                    model.rebuild_rules();
+                    model.refresh_confirm_impact();
                     let s = &mut model.ip_lists;
                     s.loaded_at = Some(Instant::now());
                     s.auto.from_tick = false;

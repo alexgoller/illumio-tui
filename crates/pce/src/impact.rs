@@ -92,6 +92,19 @@ impl Impact {
         format!("{ge}{}/{ge}{}", self.providers, self.consumers)
     }
 
+    /// `pc` for a narrow cell: counts from 1000 on in units (`1.2K`, `12K`,
+    /// `1.0M`), so a side never takes more than four cells, five with `≥`:
+    /// `≥123K/≥456K` is the widest. The exact counts stay in `pc` and
+    /// `summary`.
+    pub fn pc_compact(&self) -> String {
+        let ge = if self.truncated { "≥" } else { "" };
+        format!(
+            "{ge}{}/{ge}{}",
+            short(self.providers),
+            short(self.consumers)
+        )
+    }
+
     /// `12 providers · 3 consumers`; with a truncated list
     /// `≥12 providers · ≥3 consumers (workload list truncated)`.
     pub fn summary(&self) -> String {
@@ -106,6 +119,34 @@ impl Impact {
         }
         s
     }
+}
+
+/// `999`, `1.2K`, `12K`, `123K`, `1.0M`: at most four characters for any
+/// `usize`, rounded before the unit is picked.
+fn short(n: usize) -> String {
+    if n < 1_000 {
+        return n.to_string();
+    }
+    let f = n as f64;
+    for (unit, scale) in [
+        ('K', 1e3),
+        ('M', 1e6),
+        ('G', 1e9),
+        ('T', 1e12),
+        ('P', 1e15),
+        ('E', 1e18),
+    ] {
+        let v = f / scale;
+        let tenths = (v * 10.0).round();
+        if tenths < 100.0 {
+            return format!("{:.1}{unit}", tenths / 10.0);
+        }
+        if v.round() < 1_000.0 {
+            return format!("{:.0}{unit}", v.round());
+        }
+    }
+    // Past usize (18E): unreachable, kept total.
+    format!("{:.0}E", f / 1e18)
 }
 
 /// The sides of a rule the evaluator needs.
@@ -980,6 +1021,38 @@ mod tests {
             (d.providers_as_workloads, d.consumers_as_workloads),
             (true, true)
         );
+    }
+
+    #[test]
+    fn the_compact_p_c_cell_uses_units_and_never_exceeds_eleven_cells() {
+        let at = |providers, consumers, truncated| Impact {
+            providers,
+            consumers,
+            per_scope: vec![],
+            ip_lists: vec![],
+            unsupported: vec![],
+            truncated,
+        };
+        assert_eq!(at(12, 3, false).pc_compact(), "12/3");
+        assert_eq!(at(999, 0, false).pc_compact(), "999/0");
+        assert_eq!(at(1234, 5678, false).pc_compact(), "1.2K/5.7K");
+        assert_eq!(at(12_345, 67_890, false).pc_compact(), "12K/68K");
+        assert_eq!(at(9_960, 999_600, false).pc_compact(), "10K/1.0M");
+        assert_eq!(at(10_000, 10_000, true).pc_compact(), "≥10K/≥10K");
+        assert_eq!(
+            at(1234, 5678, true).pc().as_str(),
+            "≥1234/≥5678",
+            "pc stays exact"
+        );
+        let widest = [
+            at(123_456, 456_789, true),
+            at(9_949, 99_499, true),
+            at(999_499, 999_499, true),
+            at(usize::MAX, usize::MAX, true),
+        ];
+        for i in widest {
+            assert!(i.pc_compact().chars().count() <= 11, "{}", i.pc_compact());
+        }
     }
 
     #[test]

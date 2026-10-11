@@ -893,7 +893,7 @@ pub fn ruleset_columns() -> Vec<Column<RuleSetView>> {
 
 /// A rules-pane row: the resolved rule, its impact over the cached workloads
 /// (`None` until they are cached) and the `P/C` cell made from it (`12/3`,
-/// `-`). Both are computed once, when the rows are built: a column's `fn`
+/// `1.2K/5.7K` from 1000 on, `-`). Both are computed once, when the rows are built: a column's `fn`
 /// pointer cannot see the workload cache, and the rule detail reads the
 /// stored impact instead of evaluating it on every draw.
 #[derive(Debug, Clone)]
@@ -975,7 +975,8 @@ pub fn rule_columns() -> Vec<Column<RuleRow>> {
         },
         Column {
             title: "P/C",
-            width: 7,
+            // `Impact::pc_compact`'s widest form, `≥123K/≥456K`.
+            width: 11,
             cell: |r| r.pc.clone(),
             key: |r| SortKey::Num(r.pc_key()),
             right: true,
@@ -1136,7 +1137,7 @@ impl PolicyState {
             (
                 impact
                     .as_ref()
-                    .map_or_else(|| "-".to_string(), pce::Impact::pc),
+                    .map_or_else(|| "-".to_string(), pce::Impact::pc_compact),
                 impact,
             )
         };
