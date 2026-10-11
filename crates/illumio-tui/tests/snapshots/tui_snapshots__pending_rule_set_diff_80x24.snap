@@ -13,10 +13,10 @@ expression: out
 ╰─│+ description: Ringfence shop                                             │─╯
 ╭ │  enabled: yes                                                            │─╮
 │ │  scopes: app=shop & env=prod                                             │ │
-│▸│  allow role=db ← role=web PostgreSQL                                     │ │
-│ │- allow role=web ← iplist:Corp 443/tcp, 8000-8099/tcp                     │ │
-│ │+ allow role=web ← iplist:Corp 443/tcp                                    │/│
-│ │+ allow role=web ← iplist:Any (0.0.0.0/0 and ::/0) 22/tcp                 │ │
+│▸│  allow role=db ← role=web PostgreSQL                                     │-│
+│ │- allow role=web ← iplist:Corp 443/tcp, 8000-8099/tcp                     │-│
+│ │+ allow role=web ← iplist:Corp 443/tcp                                    │-│
+│ │+ allow role=web ← iplist:Any (0.0.0.0/0 and ::/0) 22/tcp                 │-│
 │ │  deny all ← iplist:Any (0.0.0.0/0 and ::/0) 23/tcp                       │ │
 │ │  override_deny role=db ← all 22/tcp                                      │ │
 │ ╰──────────────────────────────────────────────────────────────────────────╯ │

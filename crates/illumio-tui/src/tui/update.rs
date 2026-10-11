@@ -144,7 +144,9 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 && let Some(idx) = model.index().cloned()
             {
                 let raw = std::mem::take(&mut model.policy.raw);
-                model.policy.set_rule_sets(raw, &idx);
+                model
+                    .policy
+                    .set_rule_sets(raw, &idx, model.workloads.impact_source());
                 cmds.extend(deny_fallback(model, CacheMode::Use));
             }
             // The Objects screen was opened while the startup load was still running.
@@ -295,7 +297,11 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         .retain(|h, _| raw.iter().any(|r| &r.href == h));
                     model.policy.deny_requested.clear();
                     match model.index().cloned() {
-                        Some(idx) => model.policy.set_rule_sets(raw, &idx),
+                        Some(idx) => {
+                            model
+                                .policy
+                                .set_rule_sets(raw, &idx, model.workloads.impact_source())
+                        }
                         None => model.policy.raw = raw, // built when the index arrives
                     }
                     model.ip_lists.recount(&model.policy);
@@ -329,7 +335,9 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 Ok(d) => {
                     model.policy.fallback_deny.insert(href, d);
                     if let Some(idx) = model.index().cloned() {
-                        model.policy.rebuild_rules(&idx);
+                        model
+                            .policy
+                            .rebuild_rules(&idx, model.workloads.impact_source());
                     }
                     model.ip_lists.recount(&model.policy);
                 }
@@ -346,9 +354,11 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::WorkloadsLoaded(result) => {
             model.workloads.loading = false;
             match result {
-                Ok((rows, age)) => {
+                Ok((rows, age, truncated)) => {
                     let w = &mut model.workloads;
                     w.raw = rows;
+                    w.truncated = truncated;
+                    w.error = None;
                     w.rebuild();
                     w.loaded_at = Some(Instant::now());
                     w.auto.from_tick = false;
@@ -356,8 +366,13 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     w.show_detail &= w.table.selected_item().is_some();
                     model.status =
                         StatusLine::info(format!("{} workloads", model.workloads.table.len()));
+                    // The rules pane's P/C follows; an open rule detail or
+                    // confirm reads the cache when it is drawn, so no overlay
+                    // is touched here.
+                    model.rebuild_rules();
                 }
                 Err(e) => {
+                    model.workloads.error = Some(e.clone());
                     let tripped = model.workloads.auto.take_tick_failure();
                     fail(model, "could not load workloads", &e, tripped);
                 }
@@ -1052,7 +1067,15 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             }
             Vec::new()
         }
-        Overlay::RuleDetail(_) | Overlay::Error(_) => {
+        Overlay::RuleDetail(_) => match k.code {
+            KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => {
+                model.overlay = Overlay::None;
+                Vec::new()
+            }
+            KeyCode::Char('i') => impact_key(model),
+            _ => Vec::new(),
+        },
+        Overlay::Error(_) => {
             if matches!(k.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) {
                 model.overlay = Overlay::None;
             }
@@ -1304,7 +1327,9 @@ fn scroll_focused(model: &mut Model, down: bool) {
                     if model.policy.selected_href() != before
                         && let Some(idx) = model.index().cloned()
                     {
-                        model.policy.rebuild_rules(&idx);
+                        model
+                            .policy
+                            .rebuild_rules(&idx, model.workloads.impact_source());
                     }
                 }
                 PolicyPane::Rules => step(&mut model.policy.rules, down, page),
@@ -1420,6 +1445,7 @@ fn policy_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 model.status = model.policy.auto.toggle();
                 return Vec::new();
             }
+            KeyCode::Char('i') => return impact_key(model),
             KeyCode::Char(c @ ('n' | 'e' | 'x')) => return policy_edit_key(model, c),
             // `N` (a deny rule) is bound on the rules pane only.
             KeyCode::Char('N') if model.policy.pane == PolicyPane::Rules => {
@@ -1437,7 +1463,7 @@ fn policy_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             }
             KeyCode::Enter if model.policy.pane == PolicyPane::Rules => {
                 if let Some(r) = model.policy.rules.selected_item() {
-                    model.overlay = Overlay::RuleDetail(r.clone());
+                    model.overlay = Overlay::RuleDetail(r.view.clone());
                 }
                 return Vec::new();
             }
@@ -1468,7 +1494,9 @@ fn policy_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     if model.policy.selected_href() != before
         && let Some(idx) = model.index().cloned()
     {
-        model.policy.rebuild_rules(&idx);
+        model
+            .policy
+            .rebuild_rules(&idx, model.workloads.impact_source());
         return deny_fallback(model, CacheMode::Use);
     }
     Vec::new()
@@ -1512,6 +1540,29 @@ fn load_workloads(model: &mut Model, mode: CacheMode) -> Vec<Cmd> {
     model.workloads.auto.last_run = Some(Instant::now());
     model.workloads.auto.from_tick = false;
     vec![Cmd::LoadWorkloads(mode)]
+}
+
+/// `i` on Policy, in a rule detail or a rule's confirm: the workload list
+/// behind the impact, read once. A list already cached or on its way costs
+/// nothing.
+fn impact_key(model: &mut Model) -> Vec<Cmd> {
+    if !model.is_connected() {
+        return Vec::new();
+    }
+    if model.workloads.loading {
+        model.status = StatusLine::info("workloads already loading");
+        return Vec::new();
+    }
+    if model.workloads.loaded_at.is_some() {
+        model.status = StatusLine::info(format!(
+            "{} workloads already loaded; r on Workloads (4) refreshes them",
+            model.workloads.raw.len()
+        ));
+        return Vec::new();
+    }
+    model.workloads.error = None;
+    model.status = StatusLine::info("loading workloads for impact (1 request)");
+    load_workloads(model, CacheMode::Use)
 }
 
 fn ip_lists_page(model: &Model) -> usize {
@@ -3710,7 +3761,7 @@ mod tests {
         assert_eq!(cmds, vec![Cmd::LoadWorkloads(pce::CacheMode::Use)]);
         let wl: Vec<pce::models::Workload> =
             serde_json::from_str(include_str!("../../../../fixtures/workloads.json")).unwrap();
-        update(&mut m, Msg::WorkloadsLoaded(Ok((wl, 0))));
+        update(&mut m, Msg::WorkloadsLoaded(Ok((wl, 0, false))));
         assert_eq!(m.workloads.table.len(), 4);
         assert!(update(&mut m, key('4')).is_empty());
 
@@ -5401,7 +5452,7 @@ mod tests {
     fn help_scrolls_to_its_last_line_and_reopens_at_the_top() {
         use crate::tui::ui::widgets::overlay::{HELP_LINES, help_last_scroll};
         let mut m = model_fixture(); // 80x24
-        assert_eq!(HELP_LINES.len(), 30);
+        assert_eq!(HELP_LINES.len(), 31);
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "IP lists Enter"));
         assert!(
             HELP_LINES
@@ -5410,7 +5461,7 @@ mod tests {
         );
         update(&mut m, key('?'));
         let last = help_last_scroll(24);
-        assert_eq!(last, 8, "30 lines, 22 rows inside the box");
+        assert_eq!(last, 9, "31 lines, 22 rows inside the box");
 
         for _ in 0..40 {
             update(&mut m, key('j'));
@@ -6569,7 +6620,7 @@ mod tests {
         let mut m = writes_on(model_with_flows());
         let raw: Vec<pce::models::RuleSet> =
             serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
-        m.policy.set_rule_sets(raw, &fixture_index());
+        m.policy.set_rule_sets(raw, &fixture_index(), None);
         update(&mut m, key('j'));
         assert!(update(&mut m, key('w')).is_empty(), "no request");
         match &m.overlay {
@@ -6964,5 +7015,66 @@ mod tests {
             vec![Cmd::LoadIpLists(pce::CacheMode::Bypass)]
         );
         assert!(m.ip_lists.auto.from_tick);
+    }
+
+    #[test]
+    fn i_loads_the_workloads_once_for_the_impact_from_policy_and_the_rule_detail() {
+        use crate::tui::test_support::model_with_policy;
+        let mut m = model_with_policy();
+        m.screen = Screen::Policy;
+        assert_eq!(
+            update(&mut m, key('i')),
+            vec![Cmd::LoadWorkloads(pce::CacheMode::Use)]
+        );
+        assert_eq!(m.status.text, "loading workloads for impact (1 request)");
+        assert!(update(&mut m, key('i')).is_empty());
+        assert_eq!(m.status.text, "workloads already loading");
+        let wl = serde_json::from_str(include_str!("../../../../fixtures/workloads.json")).unwrap();
+        update(&mut m, Msg::WorkloadsLoaded(Ok((wl, 0, false))));
+        assert_eq!(m.policy.rules.rows()[1].pc, "1/1", "the rules pane follows");
+        assert!(update(&mut m, key('i')).is_empty());
+        assert_eq!(
+            m.status.text,
+            "4 workloads already loaded; r on Workloads (4) refreshes them"
+        );
+        // In the rule detail: `i` loads, the detail stays, Esc still closes.
+        let mut m = model_with_policy();
+        m.screen = Screen::Policy;
+        update(&mut m, kc(KeyCode::Tab));
+        update(&mut m, enter());
+        assert!(matches!(m.overlay, Overlay::RuleDetail(_)));
+        assert_eq!(
+            update(&mut m, key('i')),
+            vec![Cmd::LoadWorkloads(pce::CacheMode::Use)]
+        );
+        assert!(
+            matches!(m.overlay, Overlay::RuleDetail(_)),
+            "the detail stays open"
+        );
+        update(&mut m, kc(KeyCode::Esc));
+        assert_eq!(m.overlay, Overlay::None);
+    }
+
+    #[test]
+    fn a_truncated_or_failed_workload_read_shows_in_the_impact() {
+        use crate::tui::impact::rule_detail_rows;
+        use crate::tui::test_support::model_with_policy;
+        let rule = "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1";
+        let mut m = model_with_policy();
+        let wl = serde_json::from_str(include_str!("../../../../fixtures/workloads.json")).unwrap();
+        update(&mut m, Msg::WorkloadsLoaded(Ok((wl, 0, true))));
+        assert!(m.workloads.truncated);
+        assert_eq!(m.policy.rules.rows()[1].pc, "≥1/≥1");
+        assert_eq!(
+            rule_detail_rows(&m, rule)[0].1,
+            "≥1 provider · ≥1 consumer (workload list truncated)"
+        );
+        let mut m = model_with_policy();
+        update(&mut m, Msg::WorkloadsLoaded(Err("boom".into())));
+        assert_eq!(m.workloads.error.as_deref(), Some("boom"));
+        assert_eq!(rule_detail_rows(&m, rule)[0].1, "unavailable (boom)");
+        m.screen = Screen::Policy;
+        assert_eq!(update(&mut m, key('i')).len(), 1, "i tries again");
+        assert_eq!(m.workloads.error, None);
     }
 }

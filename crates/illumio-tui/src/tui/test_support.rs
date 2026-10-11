@@ -85,9 +85,21 @@ pub fn model_with_policy() -> Model {
         serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json"))
             .expect("rule sets fixture");
     let idx = fixture_index();
-    m.policy.set_rule_sets(raw, &idx);
+    m.policy.set_rule_sets(raw, &idx, None);
     // The first ruleset has inline deny rules; the second is left to the fallback.
     m.policy.loaded_at = Some(Instant::now() - Duration::from_secs(5));
+    m
+}
+
+/// `m` with the four fixture workloads cached (loaded 5 s ago, fixed clock)
+/// and the rules pane rebuilt, so the impact is warm.
+pub fn with_workloads(mut m: Model) -> Model {
+    m.workloads.raw = serde_json::from_str(include_str!("../../../../fixtures/workloads.json"))
+        .expect("workloads fixture");
+    m.workloads.now = Some("2026-10-10T08:00:00Z".parse().expect("fixed test clock"));
+    m.workloads.rebuild();
+    m.workloads.loaded_at = Some(Instant::now() - Duration::from_secs(5));
+    m.rebuild_rules();
     m
 }
 

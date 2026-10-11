@@ -54,6 +54,10 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "Policy   N",
         "new deny rule in the selected ruleset (rules pane)",
     ),
+    (
+        "Policy   i",
+        "rule impact: load the workloads once (1 request)",
+    ),
     ("Objects  Tab / Enter", "next object type · detail"),
     (
         "IP lists Enter",
@@ -506,7 +510,7 @@ fn labelled<'a>(model: &Model, label: &str, value: String) -> Line<'a> {
 
 pub fn render_rule_detail(model: &Model, rule: &RuleView, f: &mut Frame, area: Rect) {
     let t = &model.theme;
-    let r = centered(area, 76, 14);
+    let r = centered(area, 76, 16);
     f.render_widget(Clear, r);
     let names = |v: &[pce::ResolvedActor]| {
         v.iter()
@@ -529,7 +533,7 @@ pub fn render_rule_detail(model: &Model, rule: &RuleView, f: &mut Frame, area: R
             "scoped consumers"
         }
     );
-    let lines = vec![
+    let mut lines = vec![
         labelled(
             model,
             "description",
@@ -546,6 +550,11 @@ pub fn render_rule_detail(model: &Model, rule: &RuleView, f: &mut Frame, area: R
         ),
         labelled(model, "href", rule.href.clone()),
     ];
+    lines.extend(
+        crate::tui::impact::rule_detail_rows(model, &rule.href)
+            .into_iter()
+            .map(|(label, text)| labelled(model, label, text)),
+    );
     let block = panel(rule_kind_name(rule.kind), "Esc closes", t, true);
     f.render_widget(
         Paragraph::new(lines)

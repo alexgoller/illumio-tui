@@ -6,22 +6,22 @@ expression: out
   1 Traf  │  2 Pol  │  3 Obj  │  4 Wl  │  5 Ev  │  6 IPs
 ╭ Rulesets ──────────────────────────────────────────────────── draft · 5s ago ╮
 │  ruleset                on  scopes                              rules pending│
-│▸ Shop-Prod              ✓   app=shop & env=prod                     4        │
-│ ╭ override_deny ─────────────────────────────────────────────── Esc closes ╮ │
+│▸╭ override_deny ─────────────────────────────────────────────── Esc closes ╮ │
 │ │description (none)                                                        │ │
 │ │consumers   All workloads                                                 │ │
-╰─│providers   role=db                                                       │─╯
-╭ │services    22/tcp                                                        │─╮
-│ │flags       enabled · scoped consumers                                    │ │
-│▸│pending     none                                                          │ │
-│ │href        /orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8           │ │
-│ │                                                                          │/│
+│ │providers   role=db                                                       │ │
+╰─│services    22/tcp                                                        │─╯
+╭ │flags       enabled · scoped consumers                                    │─╮
+│ │pending     none                                                          │ │
+│▸│href        /orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8           │-│
+│ │impact      press i to load workloads (1 request)                         │-│
+│ │                                                                          │-│
+│ │                                                                          │-│
 │ │                                                                          │ │
 │ │                                                                          │ │
 │ │                                                                          │ │
 │ │                                                                          │ │
 │ ╰──────────────────────────────────────────────────────────────────────────╯ │
-│                                                                              │
 │                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯

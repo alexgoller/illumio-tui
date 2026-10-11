@@ -4,6 +4,7 @@ use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::form::Form;
 use crate::tui::table::{Column, SortKey, TableView};
 use crate::tui::ui::theme::Theme;
+use pce::impact::RuleActors;
 use pce::models::{
     Actor, DenyRule, Event, EventFilter, IpList, Label, LabelGroup, PendingChange, PolicyScope,
     Rule, RuleSet, Service, VenHealth, Workload,
@@ -890,7 +891,24 @@ pub fn ruleset_columns() -> Vec<Column<RuleSetView>> {
     ]
 }
 
-pub fn rule_columns() -> Vec<Column<RuleView>> {
+/// A rules-pane row: the resolved rule and its `P/C` cell (`12/3`, `-`
+/// until the workloads are cached). The cell is computed when the rows are
+/// built: a column's `fn` pointer cannot see the workload cache.
+#[derive(Debug, Clone)]
+pub struct RuleRow {
+    pub view: RuleView,
+    pub pc: String,
+}
+
+impl std::ops::Deref for RuleRow {
+    type Target = RuleView;
+
+    fn deref(&self) -> &RuleView {
+        &self.view
+    }
+}
+
+pub fn rule_columns() -> Vec<Column<RuleRow>> {
     vec![
         Column {
             title: "kind",
@@ -943,6 +961,16 @@ pub fn rule_columns() -> Vec<Column<RuleView>> {
             narrow_width: 0,
         },
         Column {
+            title: "P/C",
+            width: 7,
+            cell: |r| r.pc.clone(),
+            key: |r| SortKey::Text(r.pc.clone()),
+            right: true,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
             title: "pending",
             width: 7,
             cell: |r| r.update_type.clone().unwrap_or_default(),
@@ -960,7 +988,7 @@ pub struct PolicyState {
     pub scope: PolicyScope,
     pub pane: PolicyPane,
     pub rulesets: TableView<RuleSetView>,
-    pub rules: TableView<RuleView>,
+    pub rules: TableView<RuleRow>,
     pub raw: Vec<RuleSet>,
     /// Deny rules fetched from the endpoint for rulesets whose inline list is empty.
     pub fallback_deny: HashMap<String, Vec<DenyRule>>,
@@ -1041,14 +1069,19 @@ impl PolicyState {
         }
     }
 
-    pub fn set_rule_sets(&mut self, raw: Vec<RuleSet>, idx: &NameIndex) {
+    pub fn set_rule_sets(
+        &mut self,
+        raw: Vec<RuleSet>,
+        idx: &NameIndex,
+        workloads: Option<(&[Workload], bool)>,
+    ) {
         self.rulesets.set_rows(
             raw.iter()
                 .map(|rs| RuleSetView::from_rule_set(rs, idx))
                 .collect(),
         );
         self.raw = raw;
-        self.rebuild_rules(idx);
+        self.rebuild_rules(idx, workloads);
     }
 
     /// Forgets everything loaded (a scope switch shows nothing of the old scope).
@@ -1066,8 +1099,9 @@ impl PolicyState {
 
     /// Rules of the selected ruleset in evaluation order: override deny rules,
     /// then allow rules, then deny rules (inline or fetched fallback). The
-    /// order within each group is the PCE's.
-    pub fn rebuild_rules(&mut self, idx: &NameIndex) {
+    /// order within each group is the PCE's. `workloads` (the cache, when
+    /// loaded) fills the `P/C` column.
+    pub fn rebuild_rules(&mut self, idx: &NameIndex, workloads: Option<(&[Workload], bool)>) {
         let Some(href) = self.selected_href() else {
             self.rules.set_rows(Vec::new());
             return;
@@ -1076,17 +1110,24 @@ impl PolicyState {
             self.rules.set_rows(Vec::new());
             return;
         };
-        let mut rows: Vec<RuleView> = rs
+        let pc = |a: &RuleActors| crate::tui::impact::pc_cell(&rs.scopes, a, idx, workloads);
+        let mut rows: Vec<RuleRow> = rs
             .rules
             .iter()
-            .map(|r| RuleView::from_rule(r, idx))
+            .map(|r| RuleRow {
+                view: RuleView::from_rule(r, idx),
+                pc: pc(&RuleActors::of_rule(r)),
+            })
             .collect();
         let deny: &[DenyRule] = if rs.deny_rules.is_empty() {
             self.fallback_deny.get(&href).map_or(&[], Vec::as_slice)
         } else {
             &rs.deny_rules
         };
-        rows.extend(deny.iter().map(|d| RuleView::from_deny(d, idx)));
+        rows.extend(deny.iter().map(|d| RuleRow {
+            view: RuleView::from_deny(d, idx),
+            pc: pc(&RuleActors::of_deny(d)),
+        }));
         rows.sort_by_key(|r| rule_rank(r.kind));
         self.rules.set_rows(rows);
     }
@@ -1748,6 +1789,10 @@ pub struct WorkloadsState {
     pub table: TableView<WorkloadRowView>,
     /// The workloads as fetched; `table` is a projection of these.
     pub raw: Vec<Workload>,
+    /// The last read was cut short: impact counts are lower bounds.
+    pub truncated: bool,
+    /// Why the last read failed, until one succeeds (`impact: unavailable`).
+    pub error: Option<String>,
     pub unhealthy_only: bool,
     /// Test-only fixed clock so ages in snapshots are deterministic.
     pub now: Option<jiff::Timestamp>,
@@ -1767,6 +1812,8 @@ impl WorkloadsState {
         Self {
             table: TableView::new(workload_columns()),
             raw: Vec::new(),
+            truncated: false,
+            error: None,
             unhealthy_only: false,
             now: None,
             counts: [0; 5],
@@ -1777,6 +1824,13 @@ impl WorkloadsState {
             index_failed: false,
             auto: AutoRefresh::new(min_refresh),
         }
+    }
+
+    /// The cached workloads and their `truncated` flag, once loaded.
+    pub fn impact_source(&self) -> Option<(&[Workload], bool)> {
+        self.loaded_at
+            .is_some()
+            .then_some((self.raw.as_slice(), self.truncated))
     }
 
     /// Recomputes the table rows (and health counts) from `raw`.
@@ -2110,6 +2164,16 @@ impl Model {
             Connection::Connected { index, .. } => index.as_ref(),
             _ => None,
         }
+    }
+
+    /// Rebuilds the rules pane from what is loaded, its `P/C` column from
+    /// the cached workloads (`-` without them). No request.
+    pub fn rebuild_rules(&mut self) {
+        let Some(idx) = self.index().cloned() else {
+            return;
+        };
+        let workloads = self.workloads.impact_source();
+        self.policy.rebuild_rules(&idx, workloads);
     }
 
     /// Whether any screen has opted in to auto-refresh (drives the idle tick).

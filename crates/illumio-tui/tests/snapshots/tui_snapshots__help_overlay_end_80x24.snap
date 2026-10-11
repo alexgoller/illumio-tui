@@ -2,8 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ Keys ────────────────────────────────── 9-30 of 30 · j/k scroll · Esc closes ╮
-│/                        search in the current table (Enter keep, Esc clear)  │
+╭ Keys ───────────────────────────────── 10-31 of 31 · j/k scroll · Esc closes ╮
 │r                        refresh the current screen (bypasses the cache)      │
 │a                        toggle auto-refresh for the current screen           │
 │Traffic  v               cycle Flows · App-to-app · Blocked                   │
@@ -16,6 +15,7 @@ expression: out
 │Policy   p               pending changes                                      │
 │Policy   Tab / Enter     pane · rule detail · on a ruleset: load deny rules   │
 │Policy   N               new deny rule in the selected ruleset (rules pane)   │
+│Policy   i               rule impact: load the workloads once (1 request)     │
 │Objects  Tab / Enter     next object type · detail                            │
 │IP lists Enter           detail: ranges · FQDNs · size · rules using it       │
 │Workloads t/T h H Enter  Traffic as src/dst · unhealthy · health sort · detail│

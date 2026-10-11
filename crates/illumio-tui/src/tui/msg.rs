@@ -84,7 +84,9 @@ pub enum Msg {
     /// The draft IP lists with the cache age in seconds.
     IpListsLoaded(Result<(Vec<IpList>, u64), String>),
     /// Workloads with the cache age in seconds.
-    WorkloadsLoaded(Result<(Vec<Workload>, u64), String>),
+    /// Workloads, the cache age in seconds and whether the PCE holds more
+    /// than were returned.
+    WorkloadsLoaded(Result<(Vec<Workload>, u64, bool), String>),
     /// Events, the cache age in seconds and the `(since, until)` the request used.
     EventsLoaded(Result<EventsPayload, String>),
     /// The runtime rebuilt the connection for `:profile <name>` (or could not);

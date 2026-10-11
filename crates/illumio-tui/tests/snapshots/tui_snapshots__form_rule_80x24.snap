@@ -13,10 +13,10 @@ expression: out
 ╰────│                app=web, group:Name, iplist:Corp, all, !env=dev     │────╯
 ╭ Rul│  Services*     443/tcp, 8000-8099/tcp                              │────╮
 │  ki│                443/tcp, 8000-8100/udp, icmp, HTTPS                 │    │
-│▸ ov│  Description   corp to web                                         │    │
-│  al│                optional                                            │    │
-│  al│  Enabled*      y                                                   │099/│
-│  de│                y or n                                              │    │
+│▸ ov│  Description   corp to web                                         │   -│
+│  al│                optional                                            │   -│
+│  al│  Enabled*      y                                                   │   -│
+│  de│                y or n                                              │   -│
 │    │  Unscoped*     y                                                   │    │
 │    │                y: consumers outside the ruleset's scope            │    │
 │    │* required                                                          │    │

@@ -352,7 +352,7 @@ impl Runtime {
                     let result = pce
                         .workloads(&WorkloadFilter::default(), mode)
                         .await
-                        .map(|c| (c.value, c.age.as_secs()))
+                        .map(|c| (c.value, c.age.as_secs(), c.truncated))
                         .map_err(|e| e.to_string());
                     let _ = tx.send(Msg::WorkloadsLoaded(result));
                     let _ = tx.send(Msg::Stats(pce.stats()));

@@ -272,10 +272,14 @@ fn policy_rule_detail_overlay_80x24() {
     use illumio_tui::tui::test_support::model_with_policy;
     let mut m = model_with_policy();
     m.screen = Screen::Policy;
-    let rule = m.policy.rules.rows()[0].clone(); // the override_deny rule sorts first
+    let rule = m.policy.rules.rows()[0].view.clone(); // the override_deny rule sorts first
     m.overlay = Overlay::RuleDetail(rule);
     let out = render_to_string(&m, 80, 24);
     assert!(out.contains("override_deny"), "{out}");
+    assert!(
+        out.contains("press i to load workloads (1 request)"),
+        "{out}"
+    );
     insta::assert_snapshot!("policy_rule_detail_80x24", out);
 }
 
@@ -924,5 +928,34 @@ fn the_tab_row_uses_short_titles_only_when_the_full_row_does_not_fit() {
     assert!(
         row.contains("3 Objects") && row.contains("6 IP lists"),
         "{row}"
+    );
+}
+
+#[test]
+fn rule_detail_and_rules_pane_show_the_impact_80x24() {
+    use illumio_tui::tui::model::Overlay;
+    use illumio_tui::tui::test_support::{model_with_policy, with_workloads};
+    let mut m = with_workloads(model_with_policy());
+    m.screen = Screen::Policy;
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("P/C") && out.contains("1/2"), "{out}");
+    insta::assert_snapshot!("policy_impact_80x24", out);
+    let mut l = with_workloads(model_with_policy());
+    l.screen = Screen::Policy;
+    l.set_theme("light");
+    insta::assert_snapshot!(
+        "policy_impact_light_styled_80x24",
+        render_styled(&l, 80, 24)
+    );
+    let rule = m.policy.rules.rows()[2].view.clone(); // corp to web
+    m.overlay = Overlay::RuleDetail(rule.clone());
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("1 provider · 0 consumers"), "{out}");
+    assert!(out.contains("Corp: 65.5K addresses"), "{out}");
+    insta::assert_snapshot!("rule_detail_impact_80x24", out);
+    l.overlay = Overlay::RuleDetail(rule);
+    insta::assert_snapshot!(
+        "rule_detail_impact_light_styled_80x24",
+        render_styled(&l, 80, 24)
     );
 }

@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traf  │  2 Pol  │  3 Obj  │  4 Wl  │  5 Ev  │  6 IPs
+╭ Rulesets ──────────────────────────────────────────────────── draft · 5s ago ╮
+│  ruleset                on  scopes                              rules pending│
+│▸╭ allow ─────────────────────────────────────────────────────── Esc closes ╮ │
+│ │description corp to web                                                   │ │
+│ │consumers   ipl:Corp                                                      │ │
+│ │providers   role=web                                                      │ │
+╰─│services    443/tcp, 8000-8099/tcp                                        │─╯
+╭ │flags       enabled · unscoped consumers                                  │─╮
+│ │pending     update                                                        │ │
+│▸│href        /orgs/5/sec_policy/draft/rule_sets/100/sec_rules/2            │2│
+│ │impact      1 provider · 0 consumers                                      │1│
+│ │ip lists    Corp: 65.5K addresses                                         │0│
+│ │                                                                          │0│
+│ │                                                                          │ │
+│ │                                                                          │ │
+│ │                                                                          │ │
+│ │                                                                          │ │
+│ ╰──────────────────────────────────────────────────────────────────────────╯ │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ready         d scope  p pending  Enter detail  Tab pane  a auto  : cmd  ? help

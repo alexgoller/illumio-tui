@@ -2151,3 +2151,39 @@ async fn create_ip_list_on_the_ip_lists_screen_posts_once_and_reloads_once() {
     );
     assert_eq!(model.busy, 0);
 }
+
+#[tokio::test]
+async fn i_on_a_rule_detail_loads_workloads_once_and_a_second_i_is_free() {
+    use illumio_tui::tui::impact::rule_detail_rows;
+    use illumio_tui::tui::model::Overlay;
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    mount_rule_sets(&server, 1).await;
+    mount_workloads(&server, 1).await;
+    let keys = vec![
+        (500, ch('2')),
+        (300, KeyCode::Tab),
+        (50, KeyCode::Enter), // the override deny rule sorts first
+        (50, ch('i')),
+        (400, ch('i')),
+        (200, KeyCode::F(12)),
+    ];
+    let model = key_session(&server, model(), None, keys).await;
+    assert_eq!(
+        model.stats.calls, 7,
+        "health + four lists + rulesets + one workloads read"
+    );
+    let Overlay::RuleDetail(rule) = &model.overlay else {
+        panic!("{:?}", model.overlay)
+    };
+    assert_eq!(
+        rule_detail_rows(&model, &rule.href)[0],
+        ("impact", "1 provider · 2 consumers".to_string())
+    );
+    assert_eq!(model.policy.rules.rows()[0].pc, "1/2");
+    assert_eq!(
+        model.status.text,
+        "4 workloads already loaded; r on Workloads (4) refreshes them"
+    );
+    assert_eq!(model.busy, 0);
+}

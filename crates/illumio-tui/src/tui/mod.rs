@@ -7,6 +7,7 @@ pub mod diff;
 pub mod edit;
 pub mod filter;
 pub mod form;
+pub mod impact;
 pub mod model;
 pub mod msg;
 pub mod table;

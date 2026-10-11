@@ -13,10 +13,10 @@ expression: out
 ╰─│    "ip_lists": [                                                         │─╯
 ╭ │      {                                                                   │─╮
 │ │        "href": "/orgs/5/sec_policy/draft/ip_lists/21"                    │ │
-│▸│      }                                                                   │ │
-│ │    ],                                                                    │ │
-│ │    "rule_sets": [                                                        │/│
-│ │      {                                                                   │ │
+│▸│      }                                                                   │-│
+│ │    ],                                                                    │-│
+│ │    "rule_sets": [                                                        │-│
+│ │      {                                                                   │-│
 │ │        "href": "/orgs/5/sec_policy/draft/rule_sets/101"                  │ │
 │ │      }                                                                   │ │
 │ │    ]                                                                     │ │

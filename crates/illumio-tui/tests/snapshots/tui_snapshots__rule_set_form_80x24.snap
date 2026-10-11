@@ -13,10 +13,10 @@ expression: out
 ╰────│                Shop-Prod                                           │────╯
 ╭ Rul│  Description   Ringfence                                           │────╮
 │  ki│                optional                                            │    │
-│▸ ov│  Enabled*      y                                                   │    │
-│  al│                y or n                                              │    │
-│  al│  Scopes        app=shop, env=prod                                  │099/│
-│  de│                app=web, env=prod | app=db; empty = everywhere      │    │
+│▸ ov│  Enabled*      y                                                   │   -│
+│  al│                y or n                                              │   -│
+│  al│  Scopes        app=shop, env=prod                                  │   -│
+│  de│                app=web, env=prod | app=db; empty = everywhere      │   -│
 │    │* required                                                          │    │
 │    ╰────────────────────────────────────────────────────────────────────╯    │
 │                                                                              │
