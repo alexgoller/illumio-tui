@@ -40,3 +40,13 @@ Captured after corrections and review findings, so the same mistake is not repea
 - When a screen is the safety gate (the dry-run overlay), clipping its content is not polish: treat it as Important in task reviews, not as a deferred minor.
 - Task reviewers rate per task; the whole-branch review is where "minor" findings on safety paths get promoted. Keep the deferred-minor list in the ledger and hand it to the final reviewer explicitly.
 - In zsh, backticks inside `echo "…"` run as commands; write ledger lines with a quoted heredoc.
+
+## Plan 5 (policy writes), 2026-10-11
+
+- Check real recorded data before encoding an "empty" shape: the spec said `scopes: []` for an unscoped ruleset; every unscoped ruleset the PCE returns is `[[]]`. The plan writer caught it by reading `fixtures/recorded/`.
+- Fixed allow-lists for what can be provisioned fail closed on the first PCE that has something else pending (virtual services, firewall settings). Group by the href's type segment and let the PCE refuse what it will not accept.
+- Id-less singleton hrefs (`sec_policy/draft/firewall_settings`) are a real PCE shape; a strict `<type>/<id>` parser must have a sibling for them or `--all` can never run.
+- Apply list patches to the fetched JSON, not to the typed model: that is what keeps unknown actor and service keys alive through a round trip, independent of how the typed conversion treats `extra`.
+- A grammar with prefixes and hrefs needs the "prefix + href" case decided up front; otherwise the prefix wins and the href is treated as a name.
+- A field the PCE always returns (`resolve_labels_as`) is probably one it wants on create; default it explicitly rather than hoping the server does.
+- Name lookups used for provisioning must include objects pending deletion; the pending list is the real guard.
