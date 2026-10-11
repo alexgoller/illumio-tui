@@ -1232,3 +1232,148 @@ mod provision {
         );
     }
 }
+
+mod managed_labels {
+    use super::*;
+    use pce::NameIndex;
+    use pce::models::Label;
+    use pce::write::{LabelRemoval, LabelsPatch, WorkloadPatch};
+
+    /// `web01` / `host-1.example`: `managed: true`, a VEN, labels 1, 3, 4.
+    fn web01() -> Value {
+        let all: Value =
+            serde_json::from_str(include_str!("../../../fixtures/workloads.json")).unwrap();
+        all[0].clone()
+    }
+
+    fn idx() -> NameIndex {
+        let labels: Vec<Label> =
+            serde_json::from_str(include_str!("../../../fixtures/labels.json")).unwrap();
+        NameIndex::new(&labels, &[], &[], &[])
+    }
+
+    async fn mount_web01(server: &MockServer) {
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/workloads/aaaa-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(web01()))
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn relabel_of_a_managed_workload_sends_only_labels() {
+        let server = MockServer::start().await;
+        mount_web01(&server).await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let w = pce.writer(&guard);
+        let add = LabelsPatch {
+            add_labels: vec!["/orgs/5/labels/5".into()],
+            ..LabelsPatch::default()
+        };
+        let plan = w
+            .plan_relabel_workload("/orgs/5/workloads/aaaa-1", &add, &idx())
+            .await
+            .unwrap();
+        let req = plan.request().unwrap();
+        assert_eq!(req.method, WriteMethod::Put);
+        assert_eq!(req.path, "/orgs/5/workloads/aaaa-1");
+        assert_eq!(
+            req.body,
+            Some(json!({"labels": [
+                {"href": "/orgs/5/labels/1"}, {"href": "/orgs/5/labels/3"},
+                {"href": "/orgs/5/labels/4"}, {"href": "/orgs/5/labels/5"}
+            ]}))
+        );
+        assert_eq!(req.summary, "relabel workload host-1.example");
+        assert!(matches!(
+            plan,
+            Plan::Send {
+                kind: ObjectKind::Workload,
+                ..
+            }
+        ));
+        let remove = LabelsPatch {
+            remove_labels: vec![LabelRemoval {
+                key: "role".into(),
+                value: None,
+            }],
+            ..LabelsPatch::default()
+        };
+        let plan = w
+            .plan_relabel_workload("/orgs/5/workloads/aaaa-1", &remove, &idx())
+            .await
+            .unwrap();
+        assert_eq!(
+            plan.request().unwrap().body,
+            Some(json!({"labels": [{"href": "/orgs/5/labels/3"}, {"href": "/orgs/5/labels/4"}]}))
+        );
+        assert_eq!(
+            request_count(&server).await,
+            2,
+            "one GET per plan, nothing sent"
+        );
+    }
+
+    #[tokio::test]
+    async fn managed_non_label_update_is_still_refused() {
+        let server = MockServer::start().await;
+        mount_web01(&server).await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let patch = WorkloadPatch {
+            description: Some("x".into()),
+            ..WorkloadPatch::default()
+        };
+        let m = invalid(
+            pce.writer(&guard)
+                .plan_update_workload("/orgs/5/workloads/aaaa-1", &patch, &idx())
+                .await
+                .unwrap_err(),
+        );
+        assert!(m.contains("VEN-managed"), "{m}");
+    }
+
+    #[tokio::test]
+    async fn empty_or_conflicting_label_patches_are_refused_before_any_request() {
+        let server = MockServer::start().await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let w = pce.writer(&guard);
+        assert_eq!(
+            invalid(
+                w.plan_relabel_workload(
+                    "/orgs/5/workloads/aaaa-1",
+                    &LabelsPatch::default(),
+                    &idx()
+                )
+                .await
+                .unwrap_err()
+            ),
+            "nothing to change"
+        );
+        let both = LabelsPatch {
+            set_labels: Some(vec![]),
+            add_labels: vec!["/orgs/5/labels/5".into()],
+            remove_labels: vec![],
+        };
+        assert_eq!(
+            invalid(
+                w.plan_relabel_workload("/orgs/5/workloads/aaaa-1", &both, &idx())
+                    .await
+                    .unwrap_err()
+            ),
+            "set the labels or add and remove them, not both"
+        );
+        let add = LabelsPatch {
+            add_labels: vec!["/orgs/5/labels/5".into()],
+            ..LabelsPatch::default()
+        };
+        invalid(
+            w.plan_relabel_workload("/orgs/5/labels/1", &add, &idx())
+                .await
+                .unwrap_err(),
+        );
+        assert_eq!(request_count(&server).await, 0);
+    }
+}

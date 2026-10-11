@@ -1,7 +1,7 @@
 //! Unmanaged workloads: `POST /orgs/{org}/workloads`, `PUT|DELETE
 //! /orgs/{org}/workloads/{id}`. A VEN-managed workload is refused locally:
-//! the VEN owns its hostname and interfaces, and label changes on managed
-//! workloads are a later plan. `labels` and `interfaces` are replaced
+//! the VEN owns its hostname and interfaces; only its labels can change,
+//! through `plan_relabel_workload`. `labels` and `interfaces` are replaced
 //! wholesale by the PCE, so a patch sends the full list it computed.
 use super::specs::InterfaceSpec;
 use super::{IfMissing, ObjectKind, Plan, WriteError, WriteRequest, Writer, checked_href};
@@ -244,6 +244,31 @@ impl WorkloadPatch {
     }
 }
 
+/// A label change on any workload, VEN-managed included: the PCE lets the
+/// label set change while the VEN owns everything else.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LabelsPatch {
+    /// Replace the whole label set (hrefs). Conflicts with add/remove.
+    pub set_labels: Option<Vec<String>>,
+    pub add_labels: Vec<String>,
+    pub remove_labels: Vec<LabelRemoval>,
+}
+
+impl LabelsPatch {
+    pub fn is_empty(&self) -> bool {
+        self.set_labels.is_none() && self.add_labels.is_empty() && self.remove_labels.is_empty()
+    }
+
+    fn as_workload_patch(&self) -> WorkloadPatch {
+        WorkloadPatch {
+            set_labels: self.set_labels.clone(),
+            add_labels: self.add_labels.clone(),
+            remove_labels: self.remove_labels.clone(),
+            ..WorkloadPatch::default()
+        }
+    }
+}
+
 fn ambiguous(needle: &str, hits: &[Workload]) -> WriteError {
     WriteError::invalid(format!(
         "{needle:?} matches several workloads: {}; use the href",
@@ -388,6 +413,47 @@ impl Writer<'_> {
                 path: href,
                 body: Some(body),
                 summary: format!("update workload {who}"),
+            },
+            kind: ObjectKind::Workload,
+        })
+    }
+
+    /// `PUT` with only `labels`. No managed check: this is the one change
+    /// allowed on a VEN-managed workload. `plan_update_workload` keeps
+    /// refusing managed workloads for every other change.
+    pub async fn plan_relabel_workload(
+        &self,
+        href: &str,
+        patch: &LabelsPatch,
+        idx: &NameIndex,
+    ) -> Result<Plan, WriteError> {
+        let href = checked_href(href, "workloads", self.pce().client().org_id())?;
+        if patch.is_empty() {
+            return Err(WriteError::invalid("nothing to change"));
+        }
+        if patch.set_labels.is_some()
+            && (!patch.add_labels.is_empty() || !patch.remove_labels.is_empty())
+        {
+            return Err(WriteError::invalid(
+                "set the labels or add and remove them, not both",
+            ));
+        }
+        let current = self.fetch_workload(&href).await?;
+        let body = patch
+            .as_workload_patch()
+            .apply(&current, idx)
+            .map_err(WriteError::Invalid)?;
+        let who = current
+            .hostname
+            .clone()
+            .or(current.name.clone())
+            .unwrap_or(href.clone());
+        Ok(Plan::Send {
+            request: WriteRequest {
+                method: WriteMethod::Put,
+                path: href,
+                body: Some(body),
+                summary: format!("relabel workload {who}"),
             },
             kind: ObjectKind::Workload,
         })

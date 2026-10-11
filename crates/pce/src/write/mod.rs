@@ -33,7 +33,7 @@ pub use rules::{
 };
 pub use services::{ServiceDraft, ServicePatch};
 pub use specs::{InterfaceSpec, IpRangeSpec, PortSpec};
-pub use workloads::{LabelRemoval, WorkloadDraft, WorkloadPatch};
+pub use workloads::{LabelRemoval, LabelsPatch, WorkloadDraft, WorkloadPatch};
 
 /// What kind of object a plan touches; decides the cache prefixes and
 /// whether the result waits for provisioning.

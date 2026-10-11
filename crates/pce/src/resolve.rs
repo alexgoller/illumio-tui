@@ -30,6 +30,7 @@ pub struct NameIndex {
     label_by_kv: HashMap<(String, String), String>,
     keys: BTreeMap<String, BTreeSet<String>>,
     label_groups: HashMap<String, LabelGroup>,
+    label_group_by_name: HashMap<String, String>,
     ip_lists: HashMap<String, IpList>,
     ip_list_by_name: HashMap<String, String>,
     services: HashMap<String, Service>,
@@ -45,6 +46,8 @@ impl NameIndex {
         let mut idx = Self::default();
         idx.insert_labels(labels);
         for g in groups {
+            idx.label_group_by_name
+                .insert(g.name.to_ascii_lowercase(), g.href.clone());
             idx.label_groups
                 .insert(canon(&g.href).into_owned(), g.clone());
         }
@@ -66,6 +69,7 @@ impl NameIndex {
     pub fn with_labels(&self, labels: &[Label]) -> Self {
         let mut idx = Self {
             label_groups: self.label_groups.clone(),
+            label_group_by_name: self.label_group_by_name.clone(),
             ip_lists: self.ip_lists.clone(),
             ip_list_by_name: self.ip_list_by_name.clone(),
             services: self.services.clone(),
@@ -116,6 +120,13 @@ impl NameIndex {
             .get(key)
             .map(|v| v.iter().cloned().collect())
             .unwrap_or_default()
+    }
+
+    /// A label group's href by name, case-insensitively (like `ip_list_href`).
+    pub fn label_group_href(&self, name: &str) -> Option<&str> {
+        self.label_group_by_name
+            .get(&name.to_ascii_lowercase())
+            .map(String::as_str)
     }
 
     pub fn label_group_name(&self, href: &str) -> Option<&str> {
@@ -644,5 +655,20 @@ mod tests {
         let infra = RuleSetView::from_rule_set(&rs[1], &idx);
         assert_eq!(infra.scopes, vec!["All"]);
         assert_eq!((infra.rule_count, infra.deny_count), (1, 0));
+    }
+
+    #[test]
+    fn label_group_href_is_case_insensitive_and_survives_with_labels() {
+        let idx = index();
+        assert_eq!(
+            idx.label_group_href("all PROD envs"),
+            Some("/orgs/5/sec_policy/draft/label_groups/10")
+        );
+        assert_eq!(idx.label_group_href("All prod env"), None);
+        let relabelled = idx.with_labels(&[]);
+        assert_eq!(
+            relabelled.label_group_href("All prod envs"),
+            Some("/orgs/5/sec_policy/draft/label_groups/10")
+        );
     }
 }
