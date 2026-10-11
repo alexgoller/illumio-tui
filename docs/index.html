@@ -80,6 +80,8 @@
 <span class="p">$ </span>illumio-tui traffic query --window 24h --src app=web --dst app=db --json
 <span class="p">$ </span>illumio-tui traffic query --window 1h --group app,env
 <span class="p">$ </span>illumio-tui traffic query --window 1h --blocked
+<span class="p">$ </span>illumio-tui traffic groups --window 1h --keys app,env,role
+<span class="p">$ </span>illumio-tui traffic mesh --window 1h --json
 <span class="p">$ </span>illumio-tui traffic query --window 30d --dry-run
 
 <span class="c"># connection profiles</span>
@@ -103,7 +105,7 @@
       <h3>Explorer, without the clicking</h3>
       <p><code>traffic query</code> runs the PCE's asynchronous Explorer query for you: it submits, polls with backoff, downloads, flags truncation, and resolves every label href to <code>key=value</code>.</p>
       <p>Filters read like you think: <code>app=web</code>, <code>ip:10.0.0.5</code>, <code>ipl:NAME</code>, <code>wl:HOST</code>, <code>fqdn:NAME</code>. A comma means AND, repeating the flag means OR. Add <code>--exclude-src</code>, <code>--exclude-dst</code>, <code>--port</code>, <code>--proto</code>, <code>--process</code> and <code>--decision</code> as needed. An unknown label value fails locally, before the PCE sees anything.</p>
-      <p><code>--group app,env</code> folds flows into app-to-app pairs with allowed, potentially blocked and blocked counts. <code>--blocked</code> keeps only blocked and potentially blocked flows, grouped by destination and port. Both run on the downloaded result, with zero extra requests.</p>
+      <p><code>--group app,env</code> folds flows into app-to-app pairs with allowed, potentially blocked and blocked counts. <code>--blocked</code> keeps only blocked and potentially blocked flows, grouped by destination and port. <code>traffic groups</code> and <code>traffic mesh</code> print the label pairs and the mesh (user, process, source, destination, service, destination process) for agents, with <code>--keys</code> for your label model. All of them run on the downloaded result, with zero extra requests.</p>
     </div>
     <div>
       <h3>Built for agents</h3>
@@ -194,7 +196,7 @@
     <div>
       <h3>Screens</h3>
       <ul class="screens">
-        <li><kbd>1</kbd><strong>Traffic.</strong> One filter, one query, three views on <code>v</code>: the flow table, the app-to-app aggregate with a drill-down on <code>enter</code>, and a blocked focus grouped by destination and port.</li>
+        <li><kbd>1</kbd><strong>Traffic.</strong> One filter, one query, five views on <code>v</code>, all grouped by the label keys you pick with <code>g</code>: the flow table, app-to-app pairs with a drill-down on <code>enter</code>, a mesh of user, process, source, destination and service, a blocked focus grouped by destination group and port, and a treemap of sources and their destinations.</li>
         <li><kbd>2</kbd><strong>Policy.</strong> Rulesets on the left, resolved rules on the right, deny rules in their own section, draft and active on <code>d</code>, pending changes on <code>p</code>.</li>
         <li><kbd>3</kbd><strong>Objects.</strong> Labels, label groups, services and IP lists (each list with its size in addresses, exclusions taken out, its ranges and FQDNs, and the rules that use it), with cache age shown and per-type refresh.</li>
         <li><kbd>4</kbd><strong>Workloads.</strong> Enforcement, visibility, online state, VEN status. <code>t</code> jumps to Traffic with that workload as source.</li>

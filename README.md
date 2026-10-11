@@ -85,10 +85,21 @@ IP lists tab), `:filter <expr>`, `:window <dur>`, `:profile <name>`, `:writes [o
 scrolls the current table and a click on a tab switches screen; on a terminal narrower than
 the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
 
-- **Traffic**: `f` edit the filter, `r` run (bypasses the cache), `v` cycle Flows / App-to-app /
-  Blocked, `g` change the group keys, `s` sort, `/` search, `Enter` detail (flows) or drill into
-  a pair (app-to-app), `a` auto-refresh. A filter that would be expensive asks for
-  confirmation first. With writes on, `w` turns a blocked flow into a draft allow rule.
+- **Traffic**: `f` edit the filter, `r` run (bypasses the cache), `a` auto-refresh, `s` sort,
+  `/` search; a filter that would be expensive asks for confirmation first. `v` cycles five
+  views of the one result, all grouped by the same label keys: the profile's scope keys
+  (`app,env` by default) until `g` opens the picker (`Space` toggles a key, `all labels` takes
+  every key the flows carry, typing edits the list as text, `Enter` applies, for this session).
+  **Flows** shows each side's group (`shop/prod`; `-` for an IP list or FQDN, whose name is in
+  the name column) and, on `Enter`, a detail with both label sets and the bytes. **App-to-app**
+  pairs the groups; `Enter` drills into a pair's flows. **Mesh** lists user, process, source,
+  destination, service and destination process like the Illumio UI's mesh (`u` / `p` hide the
+  user / process column and merge rows, `Enter` drills). **Blocked** groups blocked and
+  potentially blocked flows by destination group and service. **Treemap** draws each source as
+  a box and its destinations as tiles sized by connections (`b` bytes) and coloured by
+  decision: `h` / `j` / `k` / `l` move, `Enter` zooms into a source and then drills into a
+  destination, `Esc` zooms out. None of this sends a request. With writes on, `w` turns a
+  blocked flow (or the first one behind a Blocked or Mesh row) into a draft allow rule.
 - **Policy**: `d` toggle draft / active, `p` pending changes, `Tab` switch panes, `Enter` rule
   detail, or on a ruleset load its deny rules. Rules are listed in evaluation order: override
   deny, allow, deny. With writes on, `n` / `e` / `x` create, edit and delete rulesets and rules
@@ -142,6 +153,8 @@ the API call and byte counters at all times.
     illumio-tui traffic query --window 24h --src app=web --dst app=db --json
     illumio-tui traffic query --window 1h --group app,env
     illumio-tui traffic query --window 1h --blocked
+    illumio-tui traffic groups --window 1h --keys app,env,role
+    illumio-tui traffic mesh --window 1h --no-user --json
     illumio-tui traffic query --window 30d --dry-run
     illumio-tui profile list
     illumio-tui profile use prod
@@ -150,6 +163,17 @@ JSON output (default when piped) is `{"data": ..., "meta": {...}}` where
 `meta` reports API calls, bytes, cache status, truncation, and the query
 window. Errors go to stderr as JSON. Exit codes: 1 generic, 2 arguments or
 config, 3 auth, 4 PCE error, 5 rate limited, 6 write refused by the guard.
+
+`traffic groups` and `traffic mesh` take the `traffic query` filter flags (and its dry run,
+cost guard and cache) and print the same envelope. `groups` gives one row per source and
+destination group (`src`, `dst`, `flows`, `connections`, `bytes`, `allowed`,
+`potentially_blocked`, `blocked`); `mesh` one row per user, source process, source group,
+destination group, port, protocol and destination process. The PCE reports one process per
+flow, seen where the flow was reported: an inbound flow's process is the destination's,
+anything else the source's. `--keys` picks the label keys (default: the profile's scope keys),
+`--no-user` / `--no-process` merge rows across users or processes. An endpoint that is not a
+labelled workload is grouped under its name or `ipl:<list>`. `bytes` is `0` in JSON and `-`
+in tables when the PCE reported none.
 
 `--impact` on `policy rules <ruleset>` adds each rule's `impact` (JSON) or a `P/C` column
 (table): `providers` and `consumers` (workloads matched, unions over the ruleset's scopes),
@@ -370,7 +394,7 @@ neither in its list payload nor loaded, the diff shows them unchanged under
 `deny rules not compared (<side> not fetched)` rather than guessing.
 
 On Traffic, `w` on a blocked or potentially blocked flow (Flows view or a
-drilled pair) opens an allow-rule form pre-filled from the flow in the label
+drilled pair; on a Blocked or Mesh row, the first such flow behind it) opens an allow-rule form pre-filled from the flow in the label
 model below: the destination's tier (`role=db`) as providers; as consumers
 the source's tier when it is in the destination's scope, else its scope and
 tier (`app=crm, env=prod, role=web`) with Unscoped `y`; an endpoint without
@@ -400,7 +424,9 @@ names, per profile:
 or `ILLUMIO_SCOPE_KEYS=app,env` and `ILLUMIO_TIER_KEY=role`, which outrank
 the profile. An empty `ILLUMIO_SCOPE_KEYS` counts as unset; a list of only
 empty entries (`,`) is refused, as is an empty `scope_keys` in the profile.
-Only the TUI's `w` form (pre-fill and `Ctrl-N`) uses them.
+The TUI's `w` form (pre-fill and `Ctrl-N`) uses them, the traffic views group by the scope keys
+until `g` picks others (for the session), and `traffic groups`, `traffic mesh` and
+`traffic query --blocked` default to them.
 
 ## PCE protection
 

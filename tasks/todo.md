@@ -195,3 +195,23 @@ Spec: docs/superpowers/specs/2026-10-11-iplists-impact-design.md · Plan: docs/s
   - Hotfix: main (a97b3ca, inline rule services must be TCP/UDP, `icmp` resolves to the ICMP service object) was merged into the branch (2e44198) with one import conflict in `cli/write.rs` resolved by keeping both imports.
 - Parked (per-task minor lists in `.superpowers/sdd/2026-10-11-iplists-impact/progress.md`): `iplists.rs` duplicates part of the Objects meta/detail code; `used_by` compares hrefs exactly; no `--yes` impact tests for update / deny; a recount keeps the selection by index; `-` first on a descending P/C sort; the confirm check order; CLI impact with `--active`; the index-keyed union; per-keypress re-evaluation.
 - Final whole-branch review: 1 Critical (P/C clipping), 4 Important fixed in one wave (stale-index fallback and notes, resolve_labels_as, used-by placement, any only for /0); the Minor items in the same wave (notes in the rule detail and confirm line, CLI `--impact` builds label sets once, `human()` rounds before the unit, README cache TTL, this review). Report: `.superpowers/sdd/2026-10-11-iplists-impact/final-fix-report.md`.
+
+## Traffic views (issue #6; folds in issue #5)
+Spec: docs/superpowers/specs/2026-10-11-traffic-views-design.md · Plan: docs/superpowers/plans/2026-10-11-traffic-views.md
+- [x] Task 1 IP lists as the fourth Objects tab
+- [x] Task 2 pce::traffic grouping primitives and the rich fixture
+- [x] Task 3 pce::traffic::mesh
+- [x] Task 4 pce::traffic::treemap
+- [x] Task 5 TUI display keys and the g picker
+- [x] Task 6 TUI Mesh view
+- [x] Task 7 TUI Treemap view
+- [x] Task 8 CLI traffic groups and traffic mesh
+- [x] Task 9 Docs, tracking, reads-only smoke, final gate
+
+## Review (Traffic views)
+- Shipped: the IP lists tab (fourth on Objects) and five screens (`1` Traffic, `2` Policy, `3` Objects, `4` Workloads, `5` Events; `:iplists` / `:ip` open the tab); the display keys (profile scope keys, session-wide) and the `g` picker; Flows with `src group` / `dst group` columns and a detail with both label sets and bytes; Blocked by destination group and service, with `w` on its rows; Mesh (user, process, source, destination, service, destination process) with `u` / `p`, drill and `w`; Treemap with cursor, zoom, drill and bytes weight, laid out in `update` and re-laid on resize; CLI `traffic groups` and `traffic mesh` with `--keys`, `--no-user`, `--no-process`.
+- Gate: `cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` green, 783 tests passed, 0 failed (the plan expected 776).
+- `crates/pce` diff vs `34b4fa9`: `traffic/{aggregate,resolved,mod}.rs` changed, `traffic/mesh.rs` and `traffic/treemap.rs` new, plus one comment in `iplist_size.rs` (Task 1: "screen" became "tab"); no request path changed. `git diff 34b4fa9 HEAD -- Cargo.toml crates/*/Cargo.toml Cargo.lock` is empty: no new dependency.
+- Smoke against demo100: not run (described only: one Explorer query in the TUI, then every view, the picker, the zoom and the bytes weight with the API call counter asserted unchanged, then the two CLI reads; no `--allow-writes`, never `y`). Nothing in the views, keys, zoom or columns emits a `Cmd`: every TUI key test asserts an empty `Vec<Cmd>`.
+- No write was sent to any PCE.
+- Deviations reported by tasks: see `.superpowers/sdd/2026-10-11-traffic-views/` (per-task reports).

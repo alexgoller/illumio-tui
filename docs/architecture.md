@@ -52,6 +52,7 @@ Module map under `crates/illumio-tui/src/tui/`:
 | `edit` | edit intents, pre-filled forms, form to library draft or patch |
 | `diff` | draft against active for a pending IP list, service or ruleset |
 | `impact` | rule impact as the TUI shows it: `P/C` cells, the rule detail's rows, the confirm line |
+| `picker` | the `g` overlay: which label keys the traffic views group by |
 | `ui/` | theme, layout, per-screen drawing and widgets (panels, overlays) |
 
 One message, top to bottom: pressing `r` on Traffic.
@@ -61,7 +62,8 @@ One message, top to bottom: pressing `r` on Traffic.
 3. `app` spawns a task that runs `filter.to_query` and `pce.traffic`,
    sending `Msg::QueryProgress` while it polls and `Msg::QueryDone` at the end.
 4. `update` stores the result and calls `rebuild_views`, which derives the
-   Flows, App-to-app and Blocked tables from the one result.
+   Flows, App-to-app, Mesh and Blocked tables and the treemap's tiles from the
+   one result, grouped by the label keys in force.
 5. `app` draws the model once, after draining whatever else is queued.
 
 Tick policy: no timer at all while idle; 250 ms while a request is in
@@ -268,6 +270,31 @@ their fetched deny rules arrive.
 The CLI's `--impact` costs one workloads read through the cache; on a write
 it runs after the guard and the plan and before the send, and its
 `truncated` flag is OR'd into `meta.truncated`.
+
+### Traffic views
+
+Every view is a projection of the flows the last query returned; none
+requests anything. `TrafficState.group_keys` starts as the profile's
+`scope_keys` (`Model::set_label_model`, at startup and after `:profile`);
+`g` opens `tui/picker.rs` (`KeyPicker`), and `all_keys` stands for every key
+the flows carry (`pce::traffic::keys_seen`, `app`, `env`, `role`, `loc`
+first). `rebuild_views` resolves the keys once (`effective_keys`) and
+rebuilds every view with them. Grouping lives in `pce::traffic`: `group_text`
+(`-` in every slot of a non-workload) labels the Flows rows, which are
+`FlowRow`s because a column cell is a plain `fn` that cannot see the keys;
+the aggregations (`group_by_labels`, `blocked_summary`, `mesh`) group by
+`group_key`, which keeps IP lists, FQDNs and unlabelled hosts apart under
+their name. `pce::traffic::mesh` places the one process the PCE reports per
+flow on the destination for inbound flows and on the source otherwise.
+`pce::traffic::treemap::layout` is a squarified treemap in terminal cells (a
+row counts as two columns), rounded edge by edge so tiles neither overlap
+nor leave gaps, with the tail that gets no cell folded into `other (N)`.
+The TUI stores the tiles in `TreemapState` and recomputes them when the
+groups, the keys, the zoom, the weight or the terminal size change
+(`Msg::Resize`, `treemap_area`), never while drawing. `Drill` narrows the
+Flows view to an App-to-app or treemap pair or a Mesh row; new keys and a
+new result drop it and the zoom. The CLI's `traffic groups` and
+`traffic mesh` run the same functions over one `fetch`.
 
 ## Testing
 
