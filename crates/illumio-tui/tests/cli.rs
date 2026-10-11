@@ -57,6 +57,7 @@ fn every_flag_has_help_text() {
         vec!["policy", "rules", "add", "--help"],
         vec!["policy", "rules", "update", "--help"],
         vec!["policy", "rules", "delete", "--help"],
+        vec!["policy", "rules", "impact", "--help"],
         vec!["policy", "deny-rules", "add", "--help"],
         vec!["policy", "deny-rules", "update", "--help"],
         vec!["policy", "deny-rules", "delete", "--help"],
@@ -1043,4 +1044,184 @@ async fn events_command_filters_and_renders() {
         .args(["events", "--severity", "err", "--since", "soon"])
         .assert()
         .code(2);
+}
+
+/// The fixture workloads behind `--impact`, read `n` times (once per command
+/// that needs them); `total` makes the PCE report more than it returned.
+async fn mount_workloads(server: &MockServer, n: u64, total: Option<u64>) {
+    use wiremock::matchers::query_param;
+    let mut response = ResponseTemplate::new(200)
+        .set_body_string(include_str!("../../../fixtures/workloads.json"))
+        .insert_header("Content-Type", "application/json");
+    if let Some(t) = total {
+        response = response.insert_header("X-Total-Count", t.to_string());
+    }
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .and(query_param("max_results", "10000"))
+        .respond_with(response)
+        .expect(n)
+        .mount(server)
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn policy_rules_impact_reads_the_workloads_once_per_command() {
+    let server = MockServer::start().await;
+    mount_policy(&server).await;
+    mount_workloads(&server, 2, None).await; // the JSON and the table command
+    let out = stdout_json(
+        cmd(&server)
+            .args(["policy", "rules", "shop-prod", "--impact"])
+            .assert()
+            .success(),
+    );
+    let rules = out["data"]["rules"].as_array().unwrap();
+    let pc = |i: usize| {
+        (
+            rules[i]["impact"]["providers"].clone(),
+            rules[i]["impact"]["consumers"].clone(),
+        )
+    };
+    assert_eq!(pc(0), (json!(1), json!(1)), "db ← web");
+    assert_eq!(
+        pc(1),
+        (json!(1), json!(0)),
+        "an IP list consumer matches no workload"
+    );
+    assert_eq!(pc(2), (json!(2), json!(0)));
+    assert_eq!(pc(3), (json!(1), json!(2)));
+    assert_eq!(
+        rules[0]["impact"]["per_scope"],
+        json!([{"scope": ["app=shop", "env=prod"], "providers": 1, "consumers": 1}])
+    );
+    assert_eq!(
+        rules[1]["impact"]["ip_lists"],
+        json!([{
+            "name": "Corp", "href": "/orgs/5/sec_policy/draft/ip_lists/21",
+            "size": {"v4": "65536", "v6": "0", "unbounded": null, "ranges": 1, "fqdns": 1},
+            "side": "consumer"
+        }])
+    );
+    assert_eq!(
+        rules[2]["impact"]["ip_lists"][0]["size"]["unbounded"],
+        "0.0.0.0/0"
+    );
+    assert_eq!(rules[0]["impact"]["unsupported"], json!([]));
+    assert_eq!(rules[0]["impact"]["truncated"], false);
+    assert_eq!(
+        rules[1]["consumers"][0]["name"], "ipl:Corp",
+        "the rule's own fields stay"
+    );
+    assert_eq!(out["meta"]["truncated"], false);
+    assert_eq!(
+        out["meta"]["api_calls"], 6,
+        "four object lists + rulesets + one workloads read"
+    );
+    cmd(&server)
+        .args(["policy", "rules", "shop-prod", "--impact", "--table"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("P/C").and(predicate::str::contains("1/2")));
+    let out = stdout_json(
+        cmd(&server)
+            .args(["policy", "rules", "shop-prod"])
+            .assert()
+            .success(),
+    );
+    assert!(
+        out["data"]["rules"][0].get("impact").is_none(),
+        "no --impact, no field and no workloads read"
+    );
+    assert_eq!(out["meta"]["api_calls"], 5);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn policy_rules_impact_reports_one_rule_by_href() {
+    let server = MockServer::start().await;
+    // A ruleset href where a rule href belongs: exit 2 before any request.
+    let a = cmd(&server)
+        .args([
+            "policy",
+            "rules",
+            "impact",
+            "/orgs/5/sec_policy/draft/rule_sets/100",
+        ])
+        .assert()
+        .code(2);
+    assert!(
+        String::from_utf8_lossy(&a.get_output().stderr).contains("sec_rules"),
+        "names the expected shape"
+    );
+    assert!(server.received_requests().await.unwrap().is_empty());
+    mount_policy(&server).await;
+    mount_workloads(&server, 3, Some(40)).await; // the three rules found below
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "policy",
+                "rules",
+                "impact",
+                "/orgs/5/sec_policy/active/rule_sets/100/sec_rules/2",
+            ])
+            .assert()
+            .success(),
+    );
+    assert_eq!(
+        out["data"]["href"],
+        "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/2"
+    );
+    assert_eq!(out["data"]["impact"]["providers"], 1);
+    assert_eq!(out["data"]["impact"]["ip_lists"][0]["name"], "Corp");
+    assert_eq!(out["data"]["impact"]["truncated"], true);
+    assert_eq!(
+        out["meta"]["truncated"], true,
+        "the workload read was cut short"
+    );
+    assert_eq!(out["meta"]["api_calls"], 6);
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "policy",
+                "rules",
+                "impact",
+                "/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8",
+            ])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"]["kind"], "override_deny");
+    assert_eq!(
+        (
+            out["data"]["impact"]["providers"].clone(),
+            out["data"]["impact"]["consumers"].clone()
+        ),
+        (json!(1), json!(2))
+    );
+    let a = cmd(&server)
+        .args([
+            "policy",
+            "rules",
+            "impact",
+            "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/99",
+        ])
+        .assert()
+        .code(4);
+    let err: Value = serde_json::from_slice(&a.get_output().stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "not_found");
+    cmd(&server)
+        .args([
+            "policy",
+            "rules",
+            "impact",
+            "/orgs/5/sec_policy/draft/rule_sets/101/sec_rules/3",
+            "--table",
+        ])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("impact")
+                .and(predicate::str::contains("scope All"))
+                .and(predicate::str::contains("4/2")),
+        );
 }

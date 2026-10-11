@@ -9,12 +9,15 @@ use super::write::{
     parse_services, resolve_actors, resolve_scopes, resolve_services, run_plan,
 };
 use clap::{Args, Subcommand};
-use pce::models::{PendingChange, PolicyScope, ResolveLabelsAs, RuleSet};
+use pce::impact::{Impact, ImpactInputs, RuleActors, rule_impact, rule_set_href_of};
+use pce::models::{
+    DenyRule, PendingChange, PolicyScope, ResolveLabelsAs, RuleSet, Workload, WorkloadFilter,
+};
 use pce::write::{
     ActorRef, DenyRuleDraft, DenyRulePatch, IfMissing, ProvisionRequest, ProvisionSubset,
     RuleDraft, RulePatch, RuleSetDraft, RuleSetPatch, ServiceRef, WriteError, checked_nested_href,
 };
-use pce::{PceError, RuleSetView, RuleView};
+use pce::{Cached, PceError, RuleKind, RuleSetView, RuleView};
 use serde::Serialize;
 
 #[derive(Subcommand, Debug)]
@@ -106,7 +109,7 @@ pub struct RulesetDeleteArgs {
     pub write: WriteFlags,
 }
 
-/// `policy rules <ruleset>` lists; `add`, `update` and `delete` write.
+/// `policy rules <ruleset>` lists; `add`, `update` and `delete` write; `impact` reports one rule.
 #[derive(Args, Debug)]
 #[command(args_conflicts_with_subcommands = true)]
 pub struct RulesCmd {
@@ -124,6 +127,8 @@ pub enum RulesAction {
     Update(RuleUpdateArgs),
     /// Delete an allow rule, addressed by href
     Delete(RuleDeleteArgs),
+    /// Report one rule's impact (workloads matched as providers and consumers), addressed by href
+    Impact(RuleImpactArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -232,6 +237,12 @@ pub struct RuleDeleteArgs {
 }
 
 #[derive(Args, Debug)]
+pub struct RuleImpactArgs {
+    /// Rule or deny rule href: /orgs/N/sec_policy/draft/rule_sets/ID/sec_rules/ID (or deny_rules/ID)
+    pub rule: String,
+}
+
+#[derive(Args, Debug)]
 pub struct DenyRuleAddArgs {
     /// Ruleset name (case-insensitive) or href
     pub ruleset: String,
@@ -320,12 +331,27 @@ pub struct RulesArgs {
     /// Read draft policy (the default; explicit for scripts)
     #[arg(long)]
     pub draft: bool,
+    /// Add each rule's impact: workloads matched as providers and consumers (one workloads read, cached)
+    #[arg(long)]
+    pub impact: bool,
+}
+
+/// One rule as `policy rules` prints it; `impact` with `--impact`.
+#[derive(Debug, Serialize)]
+pub struct RuleOut {
+    #[serde(flatten)]
+    pub rule: RuleView,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub impact: Option<Impact>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct RulesOutput {
     pub ruleset: RuleSetView,
-    pub rules: Vec<RuleView>,
+    pub rules: Vec<RuleOut>,
+    /// `--impact` was given: the table gains a `P/C` column.
+    #[serde(skip)]
+    pub with_impact: bool,
 }
 
 fn scope(active: bool) -> PolicyScope {
@@ -360,36 +386,99 @@ fn names<'a>(it: impl Iterator<Item = &'a str>) -> String {
     it.collect::<Vec<_>>().join(", ")
 }
 
+/// `allow`, `deny`, `override_deny`, as in JSON.
+fn kind_text(kind: RuleKind) -> String {
+    serde_json::to_value(kind)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_default()
+}
+
 impl TableRows for RulesOutput {
     fn headers(&self) -> Vec<&'static str> {
-        vec![
-            "kind",
-            "enabled",
-            "consumers",
-            "providers",
-            "services",
-            "description",
-            "pending",
-        ]
+        let mut h = vec!["kind", "enabled", "consumers", "providers", "services"];
+        if self.with_impact {
+            h.push("P/C");
+        }
+        h.extend(["description", "pending"]);
+        h
     }
     fn rows(&self) -> Vec<Vec<String>> {
         self.rules
             .iter()
-            .map(|r| {
-                vec![
-                    serde_json::to_value(r.kind)
-                        .ok()
-                        .and_then(|v| v.as_str().map(str::to_string))
-                        .unwrap_or_default(),
+            .map(|o| {
+                let r = &o.rule;
+                let mut row = vec![
+                    kind_text(r.kind),
                     r.enabled.to_string(),
                     names(r.consumers.iter().map(|a| a.name.as_str())),
                     names(r.providers.iter().map(|a| a.name.as_str())),
                     names(r.services.iter().map(|s| s.name.as_str())),
+                ];
+                if self.with_impact {
+                    row.push(
+                        o.impact
+                            .as_ref()
+                            .map_or_else(|| "-".to_string(), Impact::pc),
+                    );
+                }
+                row.extend([
                     r.description.clone().unwrap_or_default(),
                     r.update_type.clone().unwrap_or_default(),
-                ]
+                ]);
+                row
             })
             .collect()
+    }
+}
+
+impl TableRows for RuleOut {
+    fn headers(&self) -> Vec<&'static str> {
+        vec!["field", "value"]
+    }
+    fn rows(&self) -> Vec<Vec<String>> {
+        let r = &self.rule;
+        let mut rows = vec![
+            vec!["href".to_string(), r.href.clone()],
+            vec!["kind".to_string(), kind_text(r.kind)],
+            vec![
+                "providers".to_string(),
+                names(r.providers.iter().map(|a| a.name.as_str())),
+            ],
+            vec![
+                "consumers".to_string(),
+                names(r.consumers.iter().map(|a| a.name.as_str())),
+            ],
+            vec![
+                "services".to_string(),
+                names(r.services.iter().map(|s| s.name.as_str())),
+            ],
+        ];
+        if let Some(i) = &self.impact {
+            rows.push(vec!["impact".to_string(), i.summary()]);
+            for s in &i.per_scope {
+                let scope = if s.scope.is_empty() {
+                    "All".to_string()
+                } else {
+                    s.scope.join(" & ")
+                };
+                rows.push(vec![
+                    format!("scope {scope}"),
+                    format!("{}/{}", s.providers, s.consumers),
+                ]);
+            }
+            rows.extend(
+                i.ip_lists
+                    .iter()
+                    .map(|l| vec!["ip list".to_string(), l.line()]),
+            );
+            rows.extend(
+                i.unsupported
+                    .iter()
+                    .map(|u| vec!["unsupported".to_string(), u.clone()]),
+            );
+        }
+        rows
     }
 }
 
@@ -424,6 +513,7 @@ pub async fn run(ctx: &Context, cmd: &PolicyCmd) -> Result<(), CliError> {
             Some(RulesAction::Add(a)) => rule_add(ctx, a).await,
             Some(RulesAction::Update(a)) => rule_update(ctx, a).await,
             Some(RulesAction::Delete(a)) => rule_delete(ctx, a).await,
+            Some(RulesAction::Impact(a)) => rule_impact_one(ctx, a).await,
         },
         PolicyCmd::DenyRules(action) => match action {
             DenyRulesAction::Add(a) => deny_rule_add(ctx, a).await,
@@ -465,7 +555,8 @@ fn find_ruleset<'a>(sets: &'a [RuleSet], needle: &str) -> Option<&'a RuleSet> {
 async fn rules(ctx: &Context, args: &RulesArgs) -> Result<(), CliError> {
     let Some(needle) = args.ruleset.as_deref() else {
         return Err(CliError::Args(
-            "policy rules needs a ruleset name or href (or one of add, update, delete)".into(),
+            "policy rules needs a ruleset name or href (or one of add, update, delete, impact)"
+                .into(),
         ));
     };
     let idx = ctx.pce.name_index(ctx.cache_mode).await?;
@@ -480,27 +571,127 @@ async fn rules(ctx: &Context, args: &RulesArgs) -> Result<(), CliError> {
             names.join(", ")
         ))
     })?;
-    let mut views: Vec<RuleView> = rs
+    let deny = deny_rules_of(ctx, rs).await?;
+    let views: Vec<RuleView> = rs
         .rules
         .iter()
         .map(|r| RuleView::from_rule(r, &idx))
+        .chain(deny.iter().map(|d| RuleView::from_deny(d, &idx)))
         .collect();
-    if rs.deny_rules.is_empty() {
-        // Older PCEs leave the inline list empty and serve deny rules from
-        // a per-ruleset endpoint; others have no such endpoint at all.
-        match ctx.pce.deny_rules(&rs.href, ctx.cache_mode).await {
-            Ok(d) => views.extend(d.value.iter().map(|r| RuleView::from_deny(r, &idx))),
-            Err(PceError::NotFound { .. }) => {}
-            Err(e) => return Err(e.into()),
-        }
+    let mut truncated = c.truncated;
+    let impacts: Vec<Option<Impact>> = if args.impact {
+        let w = impact_workloads(ctx).await?;
+        truncated |= w.truncated;
+        let inputs = ImpactInputs {
+            workloads: &w.value,
+            index: idx.as_ref(),
+            truncated: w.truncated,
+        };
+        rs.rules
+            .iter()
+            .map(RuleActors::of_rule)
+            .chain(deny.iter().map(RuleActors::of_deny))
+            .map(|a| {
+                Some(rule_impact(
+                    &rs.scopes,
+                    &a.providers,
+                    &a.consumers,
+                    a.unscoped_consumers,
+                    &inputs,
+                ))
+            })
+            .collect()
     } else {
-        views.extend(rs.deny_rules.iter().map(|r| RuleView::from_deny(r, &idx)));
-    }
+        vec![None; views.len()]
+    };
     let out = RulesOutput {
         ruleset: RuleSetView::from_rule_set(rs, &idx),
-        rules: views,
+        rules: views
+            .into_iter()
+            .zip(impacts)
+            .map(|(rule, impact)| RuleOut { rule, impact })
+            .collect(),
+        with_impact: args.impact,
     };
-    ctx.emit(&out, cache_label(c.hit, ctx.cache_mode), c.truncated, None)
+    ctx.emit(&out, cache_label(c.hit, ctx.cache_mode), truncated, None)
+}
+
+/// A ruleset's deny rules: inline, or from the per-ruleset endpoint when the
+/// inline list is empty (older PCEs; others have no such endpoint, a 404
+/// there means none).
+async fn deny_rules_of(ctx: &Context, rs: &RuleSet) -> Result<Vec<DenyRule>, CliError> {
+    if !rs.deny_rules.is_empty() {
+        return Ok(rs.deny_rules.clone());
+    }
+    match ctx.pce.deny_rules(&rs.href, ctx.cache_mode).await {
+        Ok(d) => Ok(d.value),
+        Err(PceError::NotFound { .. }) => Ok(Vec::new()),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// The workload list behind `--impact`: one read, through the cache.
+async fn impact_workloads(ctx: &Context) -> Result<Cached<Vec<Workload>>, CliError> {
+    Ok(ctx
+        .pce
+        .workloads(&WorkloadFilter::default(), ctx.cache_mode)
+        .await?)
+}
+
+/// `policy rules impact <href>`: one rule or deny rule of the draft
+/// rulesets (an active href folds to draft) with its impact; exit 2 for an
+/// href of the wrong shape, 4 when no such rule is loaded.
+async fn rule_impact_one(ctx: &Context, a: &RuleImpactArgs) -> Result<(), CliError> {
+    let child = if a.rule.contains("/deny_rules/") {
+        "deny_rules"
+    } else {
+        "sec_rules"
+    };
+    let href = checked_nested_href(&a.rule, "rule_sets", child, ctx.config.org_id)?;
+    let not_found = || CliError::Pce(PceError::NotFound { path: href.clone() });
+    let idx = ctx.pce.name_index(ctx.cache_mode).await?;
+    let c = ctx
+        .pce
+        .rule_sets(PolicyScope::Draft, ctx.cache_mode)
+        .await?;
+    let rs = rule_set_href_of(&href)
+        .and_then(|h| c.value.iter().find(|r| r.href == h))
+        .ok_or_else(not_found)?;
+    let (rule, actors) = if child == "sec_rules" {
+        let r = rs
+            .rules
+            .iter()
+            .find(|r| r.href == href)
+            .ok_or_else(not_found)?;
+        (RuleView::from_rule(r, &idx), RuleActors::of_rule(r))
+    } else {
+        let deny = deny_rules_of(ctx, rs).await?;
+        let d = deny.iter().find(|d| d.href == href).ok_or_else(not_found)?;
+        (RuleView::from_deny(d, &idx), RuleActors::of_deny(d))
+    };
+    let w = impact_workloads(ctx).await?;
+    let inputs = ImpactInputs {
+        workloads: &w.value,
+        index: idx.as_ref(),
+        truncated: w.truncated,
+    };
+    let impact = rule_impact(
+        &rs.scopes,
+        &actors.providers,
+        &actors.consumers,
+        actors.unscoped_consumers,
+        &inputs,
+    );
+    let out = RuleOut {
+        rule,
+        impact: Some(impact),
+    };
+    ctx.emit(
+        &out,
+        cache_label(c.hit, ctx.cache_mode),
+        c.truncated || w.truncated,
+        None,
+    )
 }
 
 async fn pending(ctx: &Context) -> Result<(), CliError> {
