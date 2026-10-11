@@ -1499,7 +1499,16 @@ fn pending_diff(model: &mut Model) -> Vec<Cmd> {
         "loading the active version of {}",
         change.name.as_deref().unwrap_or(&change.href)
     ));
-    vec![Cmd::LoadDiff { change, kind }]
+    // The deny rules the Policy screen fetched for a ruleset whose list
+    // payload had none: the diff reads them from the model, not the PCE.
+    let fallback_deny = (kind == pce::write::ObjectKind::RuleSet)
+        .then(|| model.policy.fallback_deny.get(&change.href).cloned())
+        .flatten();
+    vec![Cmd::LoadDiff {
+        change,
+        kind,
+        fallback_deny,
+    }]
 }
 
 const PROVISION_DESCRIPTION: &str = "illumio-tui provision";
@@ -5384,7 +5393,8 @@ mod tests {
             update(&mut m, enter()),
             vec![Cmd::LoadDiff {
                 change: pending[0].clone(),
-                kind: pce::write::ObjectKind::RuleSet
+                kind: pce::write::ObjectKind::RuleSet,
+                fallback_deny: None,
             }],
             "entry 0 is a ruleset"
         );
@@ -5396,7 +5406,8 @@ mod tests {
             cmds,
             vec![Cmd::LoadDiff {
                 change: pending[1].clone(),
-                kind: pce::write::ObjectKind::IpList
+                kind: pce::write::ObjectKind::IpList,
+                fallback_deny: None,
             }]
         );
         assert!(m.policy.diff_loading);
@@ -6088,5 +6099,37 @@ mod tests {
         assert!(update(&mut m, enter()).is_empty());
         assert_eq!(m.status.text, "rule changes show in their ruleset's diff");
         assert!(!m.policy.diff_loading);
+    }
+
+    #[test]
+    fn a_ruleset_diff_carries_the_deny_rules_the_screen_fetched() {
+        use crate::tui::test_support::model_with_policy;
+        let mut m = model_with_policy();
+        m.screen = Screen::Policy;
+        let href = "/orgs/5/sec_policy/draft/rule_sets/101";
+        let fetched: pce::models::DenyRule = serde_json::from_value(serde_json::json!({
+            "href": format!("{href}/deny_rules/9"),
+            "providers": [{"actors": "ams"}], "consumers": [{"actors": "ams"}],
+            "ingress_services": [{"port": 23, "proto": 6}]
+        }))
+        .unwrap();
+        m.policy
+            .fallback_deny
+            .insert(href.into(), vec![fetched.clone()]);
+        let change = pce::models::PendingChange {
+            href: href.into(),
+            change_type: "update".into(),
+            name: None,
+            object_type: "rule_sets".into(),
+        };
+        update(&mut m, Msg::PendingLoaded(Ok(vec![change.clone()])));
+        assert_eq!(
+            update(&mut m, enter()),
+            vec![Cmd::LoadDiff {
+                change,
+                kind: pce::write::ObjectKind::RuleSet,
+                fallback_deny: Some(vec![fetched]),
+            }]
+        );
     }
 }

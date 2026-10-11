@@ -14,7 +14,7 @@ use crossterm::event::{
     EventStream,
 };
 use futures::{Stream, StreamExt};
-use pce::models::{PendingChange, PolicyScope, WorkloadFilter};
+use pce::models::{DenyRule, PendingChange, PolicyScope, WorkloadFilter};
 use pce::write::{IfMissing, JsonlAudit, Plan, WriteContext, WriteError, WriteGuard, WriteRefused};
 use pce::{CacheMode, NameIndex, Pce};
 use std::path::PathBuf;
@@ -162,15 +162,25 @@ impl Runtime {
                     let _ = tx.send(Msg::Stats(pce.stats()));
                 });
             }
-            Cmd::LoadDiff { change, kind } => {
+            Cmd::LoadDiff {
+                change,
+                kind,
+                fallback_deny,
+            } => {
                 self.model.busy += 1;
                 let (pce, tx) = self.task_ctx();
                 // A ruleset diff names labels and lists through the loaded index.
                 let index = self.model.index().cloned();
                 tokio::spawn(async move {
-                    let result = load_diff(&pce, &change, kind, index.as_deref())
-                        .await
-                        .map_err(|e| e.to_string());
+                    let result = load_diff(
+                        &pce,
+                        &change,
+                        kind,
+                        index.as_deref(),
+                        fallback_deny.as_deref(),
+                    )
+                    .await
+                    .map_err(|e| e.to_string());
                     let _ = tx.send(Msg::DiffLoaded(result));
                     let _ = tx.send(Msg::Stats(pce.stats()));
                 });
@@ -567,6 +577,7 @@ async fn load_diff(
     change: &PendingChange,
     kind: pce::write::ObjectKind,
     index: Option<&NameIndex>,
+    fallback_deny: Option<&[DenyRule]>,
 ) -> pce::Result<ObjectDiff> {
     match kind {
         pce::write::ObjectKind::IpList => {
@@ -594,6 +605,7 @@ async fn load_diff(
                 &draft,
                 &active,
                 index.unwrap_or(&empty),
+                fallback_deny,
             ))
         }
         other => Err(pce::PceError::Invalid(format!(

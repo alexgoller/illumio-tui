@@ -146,6 +146,9 @@ pub enum Cmd {
     LoadDiff {
         change: PendingChange,
         kind: pce::write::ObjectKind,
+        /// A ruleset's draft deny rules already fetched on the Policy screen
+        /// (`None`: not fetched), for rulesets whose list payload had none.
+        fallback_deny: Option<Vec<pce::models::DenyRule>>,
     },
     Quit,
 }
@@ -208,12 +211,14 @@ impl PartialEq for Cmd {
                 Cmd::LoadDiff {
                     change: ca,
                     kind: ka,
+                    fallback_deny: fa,
                 },
                 Cmd::LoadDiff {
                     change: cb,
                     kind: kb,
+                    fallback_deny: fb,
                 },
-            ) => ca == cb && ka == kb,
+            ) => ca == cb && ka == kb && fa == fb,
             _ => false,
         }
     }

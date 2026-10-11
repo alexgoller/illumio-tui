@@ -213,8 +213,6 @@ pub fn ip_list_delete_plan() -> pce::write::Plan {
     }
 }
 
-/// The plan `P` shows for the two fixture pending entries (a ruleset and an
-/// IP list), as `Writer::plan_provision` builds it.
 /// Shop-Prod as active, and a draft of it with a new description, rule 2
 /// without its 8000-8099/tcp service and a new rule 4: the ruleset diff the
 /// tests and the snapshot draw.
@@ -238,6 +236,8 @@ pub fn rule_set_diff_fixture() -> (pce::models::RuleSet, pce::models::RuleSet) {
     (active, draft)
 }
 
+/// The plan `P` shows for the two fixture pending entries (a ruleset and an
+/// IP list), as `Writer::plan_provision` builds it.
 pub fn provision_plan() -> pce::write::Plan {
     pce::write::Plan::Send {
         request: pce::write::WriteRequest {
