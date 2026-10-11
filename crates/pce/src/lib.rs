@@ -14,6 +14,7 @@ pub mod auth;
 pub mod cache;
 pub mod client;
 pub mod error;
+pub mod impact;
 pub mod iplist_size;
 pub mod limiter;
 pub mod models;
@@ -24,6 +25,7 @@ pub mod write;
 use std::sync::Arc;
 use std::time::Duration;
 
+pub use impact::{Impact, ImpactInputs, IpListRef, RuleActors, ScopeImpact, Side, rule_impact};
 pub use iplist_size::{IpListSize, ip_list_size};
 pub use resolve::{
     NameIndex, ResolvedActor, ResolvedLabel, ResolvedService, RuleKind, RuleSetView, RuleView,

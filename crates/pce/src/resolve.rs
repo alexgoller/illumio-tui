@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 /// Active policy references `/sec_policy/active/<type>/<id>`; the index is
 /// built from draft lists and ids are the same in both, so every policy
 /// href is keyed by its draft form.
-fn canon(href: &str) -> Cow<'_, str> {
+pub(crate) fn canon(href: &str) -> Cow<'_, str> {
     const ACTIVE: &str = "/sec_policy/active/";
     if href.contains(ACTIVE) {
         Cow::Owned(href.replacen(ACTIVE, "/sec_policy/draft/", 1))
@@ -139,6 +139,16 @@ impl NameIndex {
         self.ip_lists
             .get(canon(href).as_ref())
             .map(|l| l.name.as_str())
+    }
+
+    /// The label group with this href; an active href finds its draft.
+    pub fn label_group(&self, href: &str) -> Option<&LabelGroup> {
+        self.label_groups.get(canon(href).as_ref())
+    }
+
+    /// The IP list with this href; an active href finds its draft.
+    pub fn ip_list(&self, href: &str) -> Option<&IpList> {
+        self.ip_lists.get(canon(href).as_ref())
     }
 
     pub fn ip_list_href(&self, name: &str) -> Option<&str> {
@@ -706,5 +716,30 @@ mod tests {
             "ambiguous: the href is needed"
         );
         assert_eq!(idx.service_href("Gone"), None, "pending deletion");
+    }
+
+    #[test]
+    fn label_groups_and_ip_lists_are_found_by_href_in_either_scope() {
+        let idx = index();
+        assert_eq!(
+            idx.label_group("/orgs/5/sec_policy/active/label_groups/10")
+                .map(|g| g.key.as_str()),
+            Some("env")
+        );
+        assert_eq!(
+            idx.ip_list("/orgs/5/sec_policy/draft/ip_lists/21")
+                .map(|l| l.name.as_str()),
+            Some("Corp")
+        );
+        assert_eq!(
+            idx.ip_list("/orgs/5/sec_policy/active/ip_lists/20")
+                .map(|l| l.ip_ranges.len()),
+            Some(2)
+        );
+        assert!(
+            idx.label_group("/orgs/5/sec_policy/draft/label_groups/99")
+                .is_none()
+        );
+        assert!(idx.ip_list("/orgs/5/labels/1").is_none());
     }
 }
