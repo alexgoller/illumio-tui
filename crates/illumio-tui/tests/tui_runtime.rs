@@ -1230,6 +1230,53 @@ async fn cancelled_confirm_sends_nothing() {
 }
 
 #[tokio::test]
+async fn a_y_typed_ahead_into_the_prompt_never_confirms_a_late_plan() {
+    use illumio_tui::tui::model::{Overlay, StatusKind};
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/health"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "normal"})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let audit = MemoryAudit::new();
+    let (mut rt, _tx) =
+        Runtime::with_writer(pce_for(&server), writes_model(), tui_guard(audit.clone()));
+    rt.execute(Cmd::Connect);
+    let key = |c: KeyCode| Event::Key(KeyEvent::new(c, KeyModifiers::NONE));
+    // Services, then `x`, `:` and `y` in one burst: a ready stream never
+    // yields, so all three keys land before the spawned plan can answer.
+    let keys = press(vec![
+        (500, ch('3')),
+        (50, KeyCode::Tab),
+        (50, KeyCode::Tab),
+        (50, KeyCode::Tab),
+    ])
+    .chain(stream::iter([key(ch('x')), key(ch(':')), key(ch('y'))]))
+    .chain(wait(300)) // the plan lands here, on the open prompt
+    .chain(press(vec![(0, ch('y')), (200, KeyCode::F(12))]));
+    let model = run_loop(&mut rt, Box::pin(keys), &mut |_| {}).await;
+    assert_eq!(
+        model.overlay,
+        Overlay::Prompt { input: "yy".into() },
+        "both y went to the prompt"
+    );
+    assert_eq!(model.status.kind, StatusKind::Warn);
+    assert_eq!(model.status.text, "request discarded, nothing sent");
+    assert!(writes_seen(&server).await.is_empty(), "nothing sent");
+    assert!(audit.entries().is_empty(), "nothing audited");
+    assert_eq!(model.stats.calls, 5, "health + four lists");
+    assert!(!model.writes.in_flight);
+    assert_eq!(model.busy, 0);
+}
+
+#[tokio::test]
 async fn switching_to_a_profile_without_writes_drops_the_guard_and_the_marker() {
     use illumio_tui::cli::GlobalArgs;
     use illumio_tui::tui::model::{Overlay, StatusKind};

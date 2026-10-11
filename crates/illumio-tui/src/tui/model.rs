@@ -110,6 +110,10 @@ pub struct WritesState {
     pub enabled: bool,
     /// Why not, for the status line.
     pub reason: Option<String>,
+    /// A plan or a send is on its way: set when `Cmd::PlanWrite` or
+    /// `Cmd::ExecuteWrite` is emitted, cleared when its answer lands (and by
+    /// `Model::reset_data`). Editing keys and `:profile` wait for it.
+    pub in_flight: bool,
 }
 
 impl WritesState {
@@ -117,6 +121,7 @@ impl WritesState {
         Self {
             enabled: true,
             reason: None,
+            in_flight: false,
         }
     }
 
@@ -124,6 +129,7 @@ impl WritesState {
         Self {
             enabled: false,
             reason: Some(reason.into()),
+            in_flight: false,
         }
     }
 
@@ -1876,6 +1882,7 @@ impl Model {
         self.stats = StatsSnapshot { calls: 0, bytes: 0 };
         self.busy = 0;
         self.overlay = Overlay::None;
+        self.writes.in_flight = false;
     }
 }
 

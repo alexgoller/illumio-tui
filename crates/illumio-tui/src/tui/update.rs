@@ -441,6 +441,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             method,
             result,
         } => {
+            model.writes.in_flight = false;
             // The runtime dropped `policy:pending`; the next `p` fetches again.
             model.policy.pending = None;
             match result {
@@ -491,7 +492,13 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             }
         }
         Msg::Planned(result) => {
+            model.writes.in_flight = false;
             match result {
+                // Keys typed while the plan was on its way belong to the
+                // overlay they went to; a `y` there must not confirm this.
+                Ok((plan, _)) if plan.request().is_some() && model.overlay != Overlay::None => {
+                    model.status = StatusLine::warn("request discarded, nothing sent");
+                }
                 Ok((plan, kind)) if plan.request().is_some() => {
                     model.status = StatusLine::info("review the request: y sends it, n cancels");
                     model.overlay = Overlay::ConfirmWrite {
@@ -798,6 +805,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     Ok(Some(intent)) => {
                         model.overlay = Overlay::None;
                         model.status = StatusLine::info("planning…");
+                        model.writes.in_flight = true;
                         vec![Cmd::PlanWrite(intent)]
                     }
                     Ok(None) => {
@@ -822,6 +830,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
                     model.overlay = Overlay::None;
                     model.status = StatusLine::info("sending …");
+                    model.writes.in_flight = true;
                     vec![Cmd::ExecuteWrite { plan, kind }]
                 }
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
@@ -1637,13 +1646,18 @@ fn objects_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     Vec::new()
 }
 
-/// Writes off: the reason goes to the status line and the key does nothing else.
+/// Writes off, or a write already on its way: the reason goes to the status
+/// line and the key does nothing else.
 fn writes_refused(model: &mut Model) -> bool {
-    if model.writes.enabled {
-        return false;
+    if !model.writes.enabled {
+        model.status = StatusLine::warn(model.writes.refusal());
+        return true;
     }
-    model.status = StatusLine::warn(model.writes.refusal());
-    true
+    if model.writes.in_flight {
+        model.status = StatusLine::warn("a write is already in progress");
+        return true;
+    }
+    false
 }
 
 /// A create or update opens its form; a delete goes straight to planning.
@@ -1655,6 +1669,7 @@ fn begin_edit(model: &mut Model, intent: EditIntent) -> Vec<Cmd> {
         }
         Start::Plan(w) => {
             model.status = StatusLine::info("planning…");
+            model.writes.in_flight = true;
             vec![Cmd::PlanWrite(w)]
         }
     }
@@ -1796,6 +1811,10 @@ pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
             }
         }
         Command::Profile(name) => {
+            if model.writes.in_flight {
+                model.status = StatusLine::warn("finish or cancel the write first");
+                return Vec::new();
+            }
             if model.switching {
                 model.status = StatusLine::info("profile switch in progress");
                 return Vec::new();
@@ -4725,6 +4744,8 @@ mod tests {
             })],
             "a delete plans at once, the confirm overlay comes next"
         );
+        // Editing waits for the plan's answer.
+        update(&mut m, Msg::Planned(Err("not found".into())));
         assert!(update(&mut m, key('e')).is_empty());
         assert!(
             matches!(&m.overlay, Overlay::Form(f) if f.title == "Edit workload unmanaged-nas"),
@@ -5181,5 +5202,82 @@ mod tests {
         );
         assert_eq!(m.status.kind, StatusKind::Error);
         assert_eq!(m.overlay, Overlay::Pending);
+    }
+
+    #[test]
+    fn a_write_in_flight_refuses_edit_keys_and_profile_switches() {
+        use crate::tui::model::ObjectKind;
+        use crate::tui::test_support::{ip_list_delete_plan, model_with_objects};
+        let mut m = writes_on(model_with_objects());
+        m.screen = Screen::Objects;
+        m.objects.kind = ObjectKind::Services;
+        let cmds = update(&mut m, key('x'));
+        assert!(matches!(cmds.as_slice(), [Cmd::PlanWrite(_)]), "{cmds:?}");
+        assert!(m.writes.in_flight, "a plan is in flight");
+        let refused = |m: &mut Model, msg: Msg, what: &str| {
+            assert!(update(m, msg).is_empty(), "{what}");
+            assert_eq!(m.status.kind, StatusKind::Warn, "{what}");
+            assert_eq!(m.status.text, "a write is already in progress", "{what}");
+            assert_eq!(m.overlay, Overlay::None, "{what}");
+        };
+        for c in ['n', 'e', 'x'] {
+            refused(&mut m, key(c), "objects");
+        }
+        m.screen = Screen::Workloads;
+        for c in ['n', 'e', 'x'] {
+            refused(&mut m, key(c), "workloads");
+        }
+        m.screen = Screen::Objects;
+        assert!(update(&mut m, Msg::Command(Command::Profile("b".into()))).is_empty());
+        assert_eq!(m.status.kind, StatusKind::Warn);
+        assert_eq!(m.status.text, "finish or cancel the write first");
+        assert!(!m.switching);
+        // The plan lands: the confirm opens and nothing is in flight.
+        let planned = Msg::Planned(Ok((ip_list_delete_plan(), pce::write::ObjectKind::IpList)));
+        update(&mut m, planned);
+        assert!(matches!(m.overlay, Overlay::ConfirmWrite { .. }));
+        assert!(!m.writes.in_flight);
+        // `y` sends: in flight again until the write is done.
+        let cmds = update(&mut m, key('y'));
+        assert!(
+            matches!(cmds.as_slice(), [Cmd::ExecuteWrite { .. }]),
+            "{cmds:?}"
+        );
+        assert!(m.writes.in_flight);
+        refused(&mut m, key('x'), "while sending");
+        update(
+            &mut m,
+            Msg::WriteDone {
+                kind: pce::write::ObjectKind::IpList,
+                method: None,
+                result: Ok(pce::write::Outcome::Skipped {
+                    existing_href: "/orgs/5/sec_policy/draft/ip_lists/21".into(),
+                    reason: "gone".into(),
+                }),
+            },
+        );
+        assert!(!m.writes.in_flight);
+        assert_eq!(
+            update(&mut m, Msg::Command(Command::Profile("b".into()))),
+            vec![Cmd::SwitchProfile("b".into())]
+        );
+        m.writes.in_flight = true;
+        m.reset_data();
+        assert!(!m.writes.in_flight, "a profile switch forgets the write");
+    }
+
+    #[test]
+    fn a_plan_landing_on_another_overlay_is_discarded() {
+        use crate::tui::test_support::label_post_plan;
+        let mut m = writes_on(model_fixture());
+        m.writes.in_flight = true;
+        // The user opened the prompt and typed `y` while the plan was on its way.
+        m.overlay = Overlay::Prompt { input: "y".into() };
+        let planned = Msg::Planned(Ok((label_post_plan(), pce::write::ObjectKind::Label)));
+        assert!(update(&mut m, planned).is_empty());
+        assert_eq!(m.overlay, Overlay::Prompt { input: "y".into() });
+        assert_eq!(m.status.kind, StatusKind::Warn);
+        assert_eq!(m.status.text, "request discarded, nothing sent");
+        assert!(!m.writes.in_flight);
     }
 }
