@@ -869,3 +869,315 @@ mod rules {
         assert_eq!(reason, "rule already matches");
     }
 }
+
+mod provision {
+    use super::*;
+    use pce::write::{ProvisionRequest, ProvisionSubset, provision_counts};
+    use std::collections::BTreeMap;
+    use wiremock::matchers::body_json;
+
+    fn all() -> ProvisionRequest {
+        ProvisionRequest {
+            description: None,
+            subset: ProvisionSubset::All,
+        }
+    }
+
+    fn hrefs(h: &[&str]) -> ProvisionRequest {
+        ProvisionRequest {
+            description: None,
+            subset: ProvisionSubset::Hrefs(h.iter().map(|s| s.to_string()).collect()),
+        }
+    }
+
+    async fn mount_pending(server: &MockServer, body: Value) {
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/sec_policy/pending"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(server)
+            .await;
+    }
+
+    fn fixture_body() -> Value {
+        json!({
+            "update_description": "illumio-tui provision",
+            "change_subset": {
+                "ip_lists": [{"href": "/orgs/5/sec_policy/draft/ip_lists/21"}],
+                "rule_sets": [{"href": "/orgs/5/sec_policy/draft/rule_sets/101"}]
+            }
+        })
+    }
+
+    #[tokio::test]
+    async fn all_groups_every_pending_href_by_type_from_both_shapes() {
+        for fixture in [
+            include_str!("../../../fixtures/pending_dict.json"),
+            include_str!("../../../fixtures/pending_list.json"),
+        ] {
+            let server = MockServer::start().await;
+            mount_pending(&server, serde_json::from_str(fixture).unwrap()).await;
+            let pce = pce_for(&server);
+            let guard = guard_with(MemoryAudit::new());
+            let plan = pce.writer(&guard).plan_provision(&all()).await.unwrap();
+            let req = plan.request().unwrap();
+            assert_eq!(req.method, WriteMethod::Post);
+            assert_eq!(req.path, "/orgs/5/sec_policy");
+            assert_eq!(req.body, Some(fixture_body()));
+            assert_eq!(req.summary, "provision 1 ip_list, 1 rule_set");
+            assert_eq!(
+                provision_counts(req.body.as_ref().unwrap()),
+                BTreeMap::from([("ip_lists".to_string(), 1), ("rule_sets".to_string(), 1)])
+            );
+            assert!(matches!(
+                plan,
+                Plan::Send {
+                    kind: ObjectKind::Provision,
+                    ..
+                }
+            ));
+            assert_eq!(request_count(&server).await, 1, "one pending GET");
+        }
+    }
+
+    #[tokio::test]
+    async fn rule_hrefs_map_to_their_ruleset_once() {
+        let server = MockServer::start().await;
+        mount_pending(
+            &server,
+            json!([
+                {"href": "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1", "change_type": "update"},
+                {"href": "/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8", "change_type": "create"},
+                {"href": "/orgs/5/sec_policy/draft/rule_sets/100", "change_type": "update", "name": "Shop-Prod"},
+                {"href": "/orgs/5/sec_policy/draft/services/31", "change_type": "update", "name": "PostgreSQL"}
+            ]),
+        )
+        .await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let req_all = ProvisionRequest {
+            description: Some("change 42".into()),
+            subset: ProvisionSubset::All,
+        };
+        let plan = pce.writer(&guard).plan_provision(&req_all).await.unwrap();
+        let body = plan.request().unwrap().body.clone().unwrap();
+        assert_eq!(
+            body,
+            json!({
+                "update_description": "change 42",
+                "change_subset": {
+                    "rule_sets": [{"href": "/orgs/5/sec_policy/draft/rule_sets/100"}],
+                    "services": [{"href": "/orgs/5/sec_policy/draft/services/31"}]
+                }
+            })
+        );
+        let text = body.to_string();
+        assert!(
+            !text.contains("sec_rules") && !text.contains("deny_rules"),
+            "{text}"
+        );
+        // A requested rule href provisions its ruleset.
+        let plan = pce
+            .writer(&guard)
+            .plan_provision(&hrefs(&[
+                "/orgs/5/sec_policy/active/rule_sets/100/sec_rules/1",
+            ]))
+            .await
+            .unwrap();
+        assert_eq!(
+            plan.request().unwrap().body.as_ref().unwrap()["change_subset"],
+            json!({"rule_sets": [{"href": "/orgs/5/sec_policy/draft/rule_sets/100"}]})
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_hrefs_must_be_pending() {
+        let server = MockServer::start().await;
+        mount_pending(
+            &server,
+            serde_json::from_str(include_str!("../../../fixtures/pending_list.json")).unwrap(),
+        )
+        .await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let w = pce.writer(&guard);
+        let plan = w
+            .plan_provision(&hrefs(&["/orgs/5/sec_policy/active/ip_lists/21"]))
+            .await
+            .unwrap();
+        assert_eq!(
+            plan.request().unwrap().body,
+            Some(json!({
+                "update_description": "illumio-tui provision",
+                "change_subset": {"ip_lists": [{"href": "/orgs/5/sec_policy/draft/ip_lists/21"}]}
+            }))
+        );
+        assert_eq!(plan.request().unwrap().summary, "provision 1 ip_list");
+        let m = invalid(
+            w.plan_provision(&hrefs(&["/orgs/5/sec_policy/draft/services/31"]))
+                .await
+                .unwrap_err(),
+        );
+        assert_eq!(
+            m,
+            "/orgs/5/sec_policy/draft/services/31 has no pending changes"
+        );
+    }
+
+    #[tokio::test]
+    async fn bad_hrefs_are_refused_before_any_request() {
+        let server = MockServer::start().await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let w = pce.writer(&guard);
+        for bad in [
+            "/orgs/5/labels/1",
+            "/orgs/5/rule_sets/100",
+            "/orgs/5/sec_policy/draft/rule_sets/../ip_lists/21",
+            "/orgs/5/sec_policy/draft/workloads/1",
+            "/orgs/7/sec_policy/draft/ip_lists/21",
+        ] {
+            invalid(w.plan_provision(&hrefs(&[bad])).await.unwrap_err());
+        }
+        assert_eq!(
+            invalid(w.plan_provision(&hrefs(&[])).await.unwrap_err()),
+            "nothing to provision: name at least one href, or provision all"
+        );
+        assert_eq!(request_count(&server).await, 0);
+    }
+
+    #[tokio::test]
+    async fn nothing_pending_is_a_noop_and_sends_nothing() {
+        for empty in [json!([]), json!({"rule_sets": [], "ip_lists": []})] {
+            let server = MockServer::start().await;
+            mount_pending(&server, empty).await;
+            let pce = pce_for(&server);
+            let audit = MemoryAudit::new();
+            let guard = guard_with(audit.clone());
+            let w = pce.writer(&guard);
+            let plan = w.plan_provision(&all()).await.unwrap();
+            let Plan::Noop {
+                existing_href,
+                reason,
+            } = &plan
+            else {
+                panic!("expected Noop")
+            };
+            assert_eq!(existing_href, "/orgs/5/sec_policy/pending");
+            assert_eq!(reason, "nothing pending");
+            assert!(matches!(
+                w.execute(plan).await.unwrap(),
+                Outcome::Skipped { .. }
+            ));
+            assert!(audit.entries().is_empty());
+            assert_eq!(request_count(&server).await, 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn every_pending_type_is_grouped_by_its_object_type() {
+        let server = MockServer::start().await;
+        mount_pending(
+            &server,
+            json!([
+                {"href": "/orgs/5/sec_policy/draft/virtual_services/7", "change_type": "update"},
+                {"href": "/orgs/5/sec_policy/draft/ip_lists/21", "change_type": "create"}
+            ]),
+        )
+        .await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let w = pce.writer(&guard);
+        let plan = w.plan_provision(&all()).await.unwrap();
+        let body = plan.request().unwrap().body.clone().unwrap();
+        assert_eq!(
+            body["change_subset"],
+            json!({
+                "ip_lists": [{"href": "/orgs/5/sec_policy/draft/ip_lists/21"}],
+                "virtual_services": [{"href": "/orgs/5/sec_policy/draft/virtual_services/7"}]
+            }),
+            "--all means all: every pending type is listed under its own key"
+        );
+        let plan = w
+            .plan_provision(&hrefs(&["/orgs/5/sec_policy/draft/ip_lists/21"]))
+            .await
+            .unwrap();
+        let body = plan.request().unwrap().body.clone().unwrap();
+        assert_eq!(
+            body["change_subset"],
+            json!({"ip_lists": [{"href": "/orgs/5/sec_policy/draft/ip_lists/21"}]}),
+            "explicit hrefs ignore unrelated pending entries"
+        );
+        let m = invalid(
+            w.plan_provision(&hrefs(&["/orgs/5/sec_policy/draft/rule_sets/..//1"]))
+                .await
+                .unwrap_err(),
+        );
+        assert!(m.contains("rule_sets"), "{m}");
+    }
+
+    #[tokio::test]
+    async fn execute_provision_posts_once_and_invalidates_policy_and_objects() {
+        let server = MockServer::start().await;
+        mount_pending(
+            &server,
+            serde_json::from_str(include_str!("../../../fixtures/pending_dict.json")).unwrap(),
+        )
+        .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/sec_policy/draft/rule_sets"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(rule_sets()))
+            .expect(2)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/sec_policy/draft/ip_lists"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+            .expect(2)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/v2/orgs/5/sec_policy"))
+            .and(body_json(fixture_body()))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+                "href": "/orgs/5/sec_policy/12", "version": 12,
+                "commit_message": "illumio-tui provision"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let pce = pce_for(&server);
+        pce.rule_sets(PolicyScope::Draft, CacheMode::Use)
+            .await
+            .unwrap();
+        pce.ip_lists(CacheMode::Use).await.unwrap();
+        let audit = MemoryAudit::new();
+        let guard = guard_with(audit.clone());
+        let w = pce.writer(&guard);
+        let plan = w.plan_provision(&all()).await.unwrap();
+        let Outcome::Written(out) = w.execute(plan).await.unwrap() else {
+            panic!("expected Written")
+        };
+        assert_eq!(out.href, "/orgs/5/sec_policy/12");
+        assert!(!out.pending, "a provision is not pending");
+        assert_eq!(out.status, 201);
+        assert_eq!(out.object["version"], 12);
+        assert!(out.dropped_fields.is_empty(), "{:?}", out.dropped_fields);
+        let entries = audit.entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].method, WriteMethod::Post);
+        assert_eq!(entries[0].path, "/orgs/5/sec_policy");
+        assert_eq!(entries[0].body, Some(fixture_body()));
+        assert_eq!(entries[0].href.as_deref(), Some("/orgs/5/sec_policy/12"));
+        assert!(
+            !pce.rule_sets(PolicyScope::Draft, CacheMode::Use)
+                .await
+                .unwrap()
+                .hit,
+            "policy: invalidated"
+        );
+        assert!(
+            !pce.ip_lists(CacheMode::Use).await.unwrap().hit,
+            "objects: invalidated"
+        );
+    }
+}

@@ -8,6 +8,7 @@ pub mod audit;
 pub mod guard;
 pub mod ip_lists;
 pub mod labels;
+pub mod provision;
 pub mod rule_sets;
 pub mod rules;
 pub mod services;
@@ -25,6 +26,7 @@ pub use audit::{AuditEntry, AuditSink, JsonlAudit, MemoryAudit, NullAudit};
 pub use guard::{WriteContext, WriteGuard, WriteRefused};
 pub use ip_lists::{IpListDraft, IpListPatch};
 pub use labels::LabelDraft;
+pub use provision::{ProvisionRequest, ProvisionSubset, provision_counts};
 pub use rule_sets::{RuleSetDraft, RuleSetPatch};
 pub use rules::{
     DenyRuleDraft, DenyRulePatch, RuleDraft, RulePatch, apply_deny_rule_patch, apply_rule_patch,
@@ -470,7 +472,9 @@ impl<'a> Writer<'a> {
         } else {
             resp.body
         };
-        let dropped = if request.method == WriteMethod::Delete {
+        // A provision answers with the new policy version, which echoes
+        // none of the request's keys: nothing was dropped.
+        let dropped = if request.method == WriteMethod::Delete || kind == ObjectKind::Provision {
             Vec::new()
         } else {
             dropped_fields(request.body.as_ref(), &object)
