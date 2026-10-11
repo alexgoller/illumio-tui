@@ -54,7 +54,9 @@ pub fn view(model: &Model, f: &mut Frame) {
             active,
             error,
         } => widgets::overlay::render_events_editor(model, values, *active, error, f, area),
-        Overlay::EventDetail(event) => widgets::overlay::render_event_detail(model, event, f, area),
+        Overlay::EventDetail { event, scroll } => {
+            widgets::overlay::render_event_detail(model, event, *scroll, f, area)
+        }
     }
 }
 

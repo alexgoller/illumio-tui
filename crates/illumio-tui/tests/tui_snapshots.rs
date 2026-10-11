@@ -236,7 +236,7 @@ fn policy_rule_detail_overlay_80x24() {
     use illumio_tui::tui::test_support::model_with_policy;
     let mut m = model_with_policy();
     m.screen = Screen::Policy;
-    let rule = m.policy.rules.rows()[3].clone(); // the override_deny rule
+    let rule = m.policy.rules.rows()[0].clone(); // the override_deny rule sorts first
     m.overlay = Overlay::RuleDetail(rule);
     let out = render_to_string(&m, 80, 24);
     assert!(out.contains("override_deny"), "{out}");
@@ -379,13 +379,30 @@ fn events_screen_80x24_and_detail_160x48() {
     assert!(out.contains("agent.tampering"), "{out}");
     assert!(out.contains("user:user-1"), "{out}");
     insta::assert_snapshot!("events_80x24", out);
-    m.overlay = Overlay::EventDetail(m.events.table.rows()[2].clone());
+    m.overlay = Overlay::EventDetail {
+        event: m.events.table.rows()[2].clone(),
+        scroll: 0,
+    };
     let out = render_to_string(&m, 160, 48);
     assert!(out.contains("\"event_type\": \"agent.tampering\""), "{out}");
     insta::assert_snapshot!("events_detail_160x48", out);
     // At 80x24 the box holds 22 JSON lines and its note says so.
     let small = render_to_string(&m, 80, 24);
-    assert!(small.contains("first 22 of"), "{small}");
+    assert!(small.contains("lines 1-22 of"), "{small}");
+    assert!(small.contains("j/k scroll"), "{small}");
+    // Scrolled past the end: the view clamps so the box stays full and the
+    // last line is visible.
+    if let Overlay::EventDetail { scroll, .. } = &mut m.overlay {
+        *scroll = 1000;
+    }
+    let end = render_to_string(&m, 80, 24);
+    assert!(end.contains("of"), "{end}");
+    assert!(!end.contains("lines 1-22"), "{end}");
+    assert!(
+        end.contains("\n│}"),
+        "last line (closing brace) visible: {end}"
+    );
+    insta::assert_snapshot!("events_detail_end_80x24", end);
 }
 
 #[test]

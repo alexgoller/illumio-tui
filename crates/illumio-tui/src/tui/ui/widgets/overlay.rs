@@ -198,20 +198,33 @@ pub fn render_events_editor(
 /// terminal shows fewer: the cut follows the box height.
 const EVENT_DETAIL_LINES: usize = 30;
 
-pub fn render_event_detail(model: &Model, event: &pce::models::Event, f: &mut Frame, area: Rect) {
+pub fn render_event_detail(
+    model: &Model,
+    event: &pce::models::Event,
+    scroll: usize,
+    f: &mut Frame,
+    area: Rect,
+) {
     let t = &model.theme;
     let r = centered(area, 100, EVENT_DETAIL_LINES as u16 + 2);
     f.render_widget(Clear, r);
     let shown = (r.height.saturating_sub(2) as usize).min(EVENT_DETAIL_LINES);
     let json = serde_json::to_string_pretty(event).unwrap_or_default();
     let total = json.lines().count();
+    // The model only stops at the last line; the view keeps the box full.
+    let first = scroll.min(total.saturating_sub(shown));
     let lines: Vec<Line> = json
         .lines()
+        .skip(first)
         .take(shown)
         .map(|l| Line::from(crate::tui::ui::screens::workloads::plain(l)))
         .collect();
     let meta = if total > shown {
-        format!("first {shown} of {total} lines · Esc closes")
+        let last = (first + shown).min(total);
+        format!(
+            "lines {}-{last} of {total} · j/k scroll · Esc closes",
+            first + 1
+        )
     } else {
         "Esc closes".to_string()
     };

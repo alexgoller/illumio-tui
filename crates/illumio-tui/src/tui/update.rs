@@ -429,6 +429,13 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
 /// A failed request: the status line says what failed (or that a failing
 /// auto-refresh switched itself off); long or authentication errors also open
 /// the error overlay unless another overlay is in use.
+/// Lines of the pretty-printed event, the unit the detail overlay scrolls in.
+pub fn event_detail_lines(event: &pce::models::Event) -> usize {
+    serde_json::to_string_pretty(event)
+        .map(|s| s.lines().count())
+        .unwrap_or(0)
+}
+
 fn fail(model: &mut Model, context: &str, e: &str, auto_off: bool) {
     model.status = StatusLine::error(if auto_off {
         format!("auto-refresh off: {e}")
@@ -651,7 +658,29 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             }
             Vec::new()
         }
-        Overlay::RuleDetail(_) | Overlay::EventDetail(_) | Overlay::Pending | Overlay::Error(_) => {
+        Overlay::EventDetail { event, scroll } => {
+            // The renderer clamps to the last page; here only the top is a hard stop.
+            let last = event_detail_lines(&event).saturating_sub(1);
+            let next = match k.code {
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => {
+                    model.overlay = Overlay::None;
+                    return Vec::new();
+                }
+                KeyCode::Down | KeyCode::Char('j') => (scroll + 1).min(last),
+                KeyCode::Up | KeyCode::Char('k') => scroll.saturating_sub(1),
+                KeyCode::PageDown | KeyCode::Char(' ') => (scroll + 10).min(last),
+                KeyCode::PageUp => scroll.saturating_sub(10),
+                KeyCode::Home | KeyCode::Char('g') => 0,
+                KeyCode::End | KeyCode::Char('G') => last,
+                _ => scroll,
+            };
+            model.overlay = Overlay::EventDetail {
+                event,
+                scroll: next,
+            };
+            Vec::new()
+        }
+        Overlay::RuleDetail(_) | Overlay::Pending | Overlay::Error(_) => {
             if matches!(k.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) {
                 model.overlay = Overlay::None;
             }
@@ -1256,7 +1285,10 @@ fn events_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             }
             KeyCode::Enter => {
                 if let Some(e) = model.events.table.selected_item() {
-                    model.overlay = Overlay::EventDetail(e.clone());
+                    model.overlay = Overlay::EventDetail {
+                        event: e.clone(),
+                        scroll: 0,
+                    };
                 }
                 return Vec::new();
             }
@@ -2210,6 +2242,17 @@ mod tests {
             m.policy.rules.len(),
             4,
             "allow + inline deny rules of the first ruleset"
+        );
+        let kinds: Vec<_> = m.policy.rules.rows().iter().map(|r| r.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                pce::RuleKind::OverrideDeny,
+                pce::RuleKind::Allow,
+                pce::RuleKind::Allow,
+                pce::RuleKind::Deny
+            ],
+            "evaluation order: override deny, allow, deny"
         );
         assert!(update(&mut m, key('1')).is_empty());
         assert!(
@@ -3855,7 +3898,19 @@ mod tests {
             "worst severity first"
         );
         assert!(update(&mut m, enter()).is_empty());
-        assert!(matches!(m.overlay, Overlay::EventDetail(_)));
+        assert!(matches!(m.overlay, Overlay::EventDetail { scroll: 0, .. }));
+        // The detail scrolls line by line and stops at the top and the last line.
+        let total = event_detail_lines(m.events.table.selected_item().unwrap());
+        assert!(total > 2, "{total}");
+        assert!(update(&mut m, key('j')).is_empty());
+        assert!(matches!(m.overlay, Overlay::EventDetail { scroll: 1, .. }));
+        assert!(update(&mut m, kc(KeyCode::End)).is_empty());
+        assert!(matches!(&m.overlay, Overlay::EventDetail { scroll, .. } if *scroll == total - 1));
+        assert!(update(&mut m, key('j')).is_empty());
+        assert!(matches!(&m.overlay, Overlay::EventDetail { scroll, .. } if *scroll == total - 1));
+        assert!(update(&mut m, key('g')).is_empty());
+        assert!(update(&mut m, key('k')).is_empty());
+        assert!(matches!(m.overlay, Overlay::EventDetail { scroll: 0, .. }));
         assert!(
             update(
                 &mut m,

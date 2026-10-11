@@ -128,8 +128,11 @@ pub enum Overlay {
         active: usize,
         error: Option<String>,
     },
-    /// The selected audit event as pretty JSON.
-    EventDetail(Event),
+    /// The selected audit event as pretty JSON; `scroll` is the first shown line.
+    EventDetail {
+        event: Event,
+        scroll: usize,
+    },
 }
 
 impl PartialEq for Overlay {
@@ -166,7 +169,16 @@ impl PartialEq for Overlay {
                     error: eb,
                 },
             ) => va == vb && aa == ab && ea == eb,
-            (Overlay::EventDetail(a), Overlay::EventDetail(b)) => a.href == b.href,
+            (
+                Overlay::EventDetail {
+                    event: a,
+                    scroll: sa,
+                },
+                Overlay::EventDetail {
+                    event: b,
+                    scroll: sb,
+                },
+            ) => a.href == b.href && sa == sb,
             _ => false,
         }
     }
@@ -686,6 +698,16 @@ fn service_names(v: &[pce::ResolvedService]) -> String {
     plain_names(v.iter().map(|s| s.name.as_str()))
 }
 
+/// Evaluation order of the rule kinds: an override deny beats an allow,
+/// which beats a plain deny.
+fn rule_rank(kind: RuleKind) -> u8 {
+    match kind {
+        RuleKind::OverrideDeny => 0,
+        RuleKind::Allow => 1,
+        RuleKind::Deny => 2,
+    }
+}
+
 pub fn rule_kind_name(kind: RuleKind) -> &'static str {
     match kind {
         RuleKind::Allow => "allow",
@@ -891,7 +913,9 @@ impl PolicyState {
         self.pending_loading = false;
     }
 
-    /// Rules of the selected ruleset: allow rules, then deny rules (inline or fetched fallback).
+    /// Rules of the selected ruleset in evaluation order: override deny rules,
+    /// then allow rules, then deny rules (inline or fetched fallback). The
+    /// order within each group is the PCE's.
     pub fn rebuild_rules(&mut self, idx: &NameIndex) {
         let Some(href) = self.selected_href() else {
             self.rules.set_rows(Vec::new());
@@ -912,6 +936,7 @@ impl PolicyState {
             &rs.deny_rules
         };
         rows.extend(deny.iter().map(|d| RuleView::from_deny(d, idx)));
+        rows.sort_by_key(|r| rule_rank(r.kind));
         self.rules.set_rows(rows);
     }
 

@@ -14,8 +14,8 @@ expression: out
 ╭ │services    22/tcp                                                        │─╮
 │ │flags       enabled · scoped consumers                                    │ │
 │▸│pending     none                                                          │ │
-│ │href        /orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8           │/│
-│ │                                                                          │ │
+│ │href        /orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8           │ │
+│ │                                                                          │/│
 │ │                                                                          │ │
 │ │                                                                          │ │
 │ │                                                                          │ │

@@ -13,10 +13,10 @@ expression: out
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭ Rules · Shop-Prod ───────────────────────────────────────────────────────────╮
 │  kind          on  consumers           providers          services           │
-│▸ allow         ✓   role=web            role=db            PostgreSQL         │
+│▸ override_deny ✓   All workloads       role=db            22/tcp             │
+│  allow         ✓   role=web            role=db            PostgreSQL         │
 │  allow         ✓   ipl:Corp            role=web           443/tcp, 8000-8099/│
 │  deny          ✓   ipl:Any (0.0.0.0/0  All workloads      23/tcp             │
-│  override_deny ✓   All workloads       role=db            22/tcp             │
 │                                                                              │
 │                                                                              │
 │                                                                              │

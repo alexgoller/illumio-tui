@@ -88,12 +88,13 @@ table and a click on a tab switches screen.
   a pair (app-to-app), `a` auto-refresh. A filter that would be expensive asks for
   confirmation first.
 - **Policy**: `d` toggle draft / active, `p` pending changes, `Tab` switch panes, `Enter` rule
-  detail, or on a ruleset load its deny rules.
+  detail, or on a ruleset load its deny rules. Rules are listed in evaluation order: override
+  deny, allow, deny.
 - **Labels & objects**: `Tab` next object type, `Enter` detail.
 - **Workloads**: VEN health columns and a summary line, `h` unhealthy only, `H` sort by
   severity, `t` / `T` jump to Traffic with the workload as source / destination.
 - **Events**: severity-coloured audit events, `f` edit severity / type / window, `S` sort by
-  severity, `Enter` the event as JSON.
+  severity, `Enter` the event as JSON (`j` / `k` scroll a long one).
 
 Auto-refresh (`a`) is opt-in per screen, has a 60 s minimum, shows a countdown in the panel
 title, and switches itself off after a failed refresh.
