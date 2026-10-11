@@ -2,6 +2,7 @@
 use crate::tui::diff::ObjectDiff;
 use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::form::Form;
+use crate::tui::picker::KeyPicker;
 use crate::tui::table::{Column, SortKey, TableView};
 use crate::tui::ui::theme::Theme;
 use pce::impact::RuleActors;
@@ -9,7 +10,10 @@ use pce::models::{
     Actor, DenyRule, Event, EventFilter, IpList, Label, LabelGroup, PendingChange, PolicyScope,
     Rule, RuleSet, Service, VenHealth, Workload,
 };
-use pce::traffic::{BlockedGroup, FlowGroup, ResolvedFlow, blocked_summary, group_by_labels};
+use pce::traffic::{
+    BlockedGroup, FlowGroup, ResolvedFlow, blocked_summary, group_by_labels, group_key, group_text,
+    keys_or_default, keys_seen,
+};
 use pce::write::Plan;
 use pce::{IpListSize, NameIndex, RuleKind, RuleSetView, RuleView, StatsSnapshot, ip_list_size};
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -171,10 +175,8 @@ pub enum Overlay {
         reason: String,
         action: PendingAction,
     },
-    /// Comma-separated label keys for the app-to-app view.
-    GroupKeys {
-        input: String,
-    },
+    /// `g`: the label keys every traffic view groups by.
+    GroupKeys(KeyPicker),
     /// The selected policy rule in full.
     RuleDetail(RuleView),
     /// Pending (unprovisioned) changes; the list lives in `PolicyState::pending`.
@@ -215,8 +217,8 @@ impl PartialEq for Overlay {
             | (Overlay::Help, Overlay::Help)
             | (Overlay::Pending, Overlay::Pending) => true,
             (Overlay::Prompt { input: a }, Overlay::Prompt { input: b })
-            | (Overlay::GroupKeys { input: a }, Overlay::GroupKeys { input: b })
             | (Overlay::Error(a), Overlay::Error(b)) => a == b,
+            (Overlay::GroupKeys(a), Overlay::GroupKeys(b)) => a == b,
             (Overlay::FilterEditor(a), Overlay::FilterEditor(b)) => a == b,
             (Overlay::Form(a), Overlay::Form(b)) => a == b,
             (
@@ -313,7 +315,37 @@ pub struct TrafficData {
     pub filter: TrafficFilter,
 }
 
-pub fn flow_columns() -> Vec<Column<ResolvedFlow>> {
+/// A flow with its grouping text for the keys in force (`shop/prod`): a
+/// `Column`'s `fn` cannot see the keys, so the cells are computed when the
+/// rows are built.
+#[derive(Debug, Clone)]
+pub struct FlowRow {
+    pub flow: ResolvedFlow,
+    pub src_group: String,
+    pub dst_group: String,
+}
+
+impl FlowRow {
+    pub fn new(flow: ResolvedFlow, keys: &[String]) -> Self {
+        Self {
+            src_group: group_text(&flow.src, keys),
+            dst_group: group_text(&flow.dst, keys),
+            flow,
+        }
+    }
+}
+
+impl std::ops::Deref for FlowRow {
+    type Target = ResolvedFlow;
+
+    fn deref(&self) -> &ResolvedFlow {
+        &self.flow
+    }
+}
+
+/// Last seen (from 140 columns), src, src group, dst, dst group, service,
+/// conns, decision: the group columns fit at 80.
+pub fn flow_columns() -> Vec<Column<FlowRow>> {
     vec![
         Column {
             title: "last seen",
@@ -326,44 +358,49 @@ pub fn flow_columns() -> Vec<Column<ResolvedFlow>> {
             },
             key: |f| SortKey::Text(f.last_detected.clone().unwrap_or_default()),
             right: false,
-            hide_below: 0,
-            narrow: Some(|f| {
-                f.last_detected
-                    .as_deref()
-                    .map(short_time_narrow)
-                    .unwrap_or_default()
-            }),
-            narrow_width: 11,
+            hide_below: 140,
+            narrow: None,
+            narrow_width: 0,
         },
         Column {
             title: "src",
-            width: 22,
+            width: 19,
             cell: |f| f.src.display_name(),
             key: |f| SortKey::Text(f.src.display_name()),
             right: false,
             hide_below: 0,
             narrow: None,
-            narrow_width: 16,
+            narrow_width: 14,
         },
         Column {
-            title: "src labels",
-            width: 0,
-            cell: |f| f.src.label_text(),
-            key: |f| SortKey::Text(f.src.label_text()),
+            title: "src group",
+            width: 18,
+            cell: |f| f.src_group.clone(),
+            key: |f| SortKey::Text(f.src_group.clone()),
             right: false,
-            hide_below: 120,
+            hide_below: 0,
             narrow: None,
-            narrow_width: 0,
+            narrow_width: 10,
         },
         Column {
             title: "dst",
-            width: 22,
+            width: 19,
             cell: |f| f.dst.display_name(),
             key: |f| SortKey::Text(f.dst.display_name()),
             right: false,
             hide_below: 0,
             narrow: None,
-            narrow_width: 16,
+            narrow_width: 14,
+        },
+        Column {
+            title: "dst group",
+            width: 18,
+            cell: |f| f.dst_group.clone(),
+            key: |f| SortKey::Text(f.dst_group.clone()),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 10,
         },
         Column {
             title: "service",
@@ -539,23 +576,23 @@ pub fn blocked_columns() -> Vec<Column<BlockedGroup>> {
         },
         Column {
             title: "dst",
-            width: 22,
-            cell: |b| b.dst.clone(),
-            key: |b| SortKey::Text(b.dst.clone()),
+            width: 18,
+            cell: |b| b.dst_group.join("/"),
+            key: |b| SortKey::Text(b.dst_group.join("/")),
             right: false,
             hide_below: 0,
             narrow: None,
-            narrow_width: 16,
+            narrow_width: 12,
         },
         Column {
-            title: "dst labels",
-            width: 0,
-            cell: |b| b.dst_labels.clone(),
-            key: |b| SortKey::Text(b.dst_labels.clone()),
+            title: "dst name",
+            width: 22,
+            cell: blocked_dst_name,
+            key: |b| SortKey::Text(blocked_dst_name(b)),
             right: false,
-            hide_below: 120,
+            hide_below: 0,
             narrow: None,
-            narrow_width: 0,
+            narrow_width: 14,
         },
         Column {
             title: "service",
@@ -592,15 +629,33 @@ pub fn blocked_columns() -> Vec<Column<BlockedGroup>> {
         },
         Column {
             title: "sources",
-            width: 30,
-            cell: |b| b.sources.join(", "),
-            key: |b| SortKey::Text(b.sources.join(", ")),
+            width: 0,
+            cell: blocked_sources,
+            key: |b| SortKey::Text(blocked_sources(b)),
             right: false,
             hide_below: 0,
             narrow: None,
-            narrow_width: 20,
+            narrow_width: 0,
         },
     ]
+}
+
+/// The destination's name when the row has one, else `N hosts`.
+fn blocked_dst_name(b: &BlockedGroup) -> String {
+    match b.dst_names.as_slice() {
+        [one] if b.dst_hosts <= 1 => one.clone(),
+        _ => format!("{} hosts", b.dst_hosts),
+    }
+}
+
+/// `shop/dev, hr/prod +3`: the first source groups, then how many more.
+fn blocked_sources(b: &BlockedGroup) -> String {
+    let mut s = b.sources.join(", ");
+    let more = b.source_count.saturating_sub(b.sources.len() as u64);
+    if more > 0 {
+        s.push_str(&format!(" +{more}"));
+    }
+    s
 }
 
 /// Opt-in periodic refresh. Never below 60 s nor the profile minimum.
@@ -690,22 +745,57 @@ pub struct TrafficState {
     pub query: QueryState,
     pub data: Option<TrafficData>,
     pub seq: u64,
-    pub flows: TableView<ResolvedFlow>,
+    pub flows: TableView<FlowRow>,
     pub show_detail: bool,
     pub view: TrafficView,
+    /// The label keys every view groups by: the profile's scope keys at
+    /// startup and after `:profile`, then whatever `g` chose. Not persisted.
     pub group_keys: Vec<String>,
+    /// `g` chose `all labels`: every key seen in the loaded flows.
+    pub all_keys: bool,
+    /// The keys in force, resolved by `rebuild_views` (the `all labels` scan
+    /// runs there, never per draw): what every view and column groups by.
+    pub keys: Vec<String>,
     pub groups: TableView<FlowGroup>,
     pub blocked: TableView<BlockedGroup>,
-    /// Aggregate pair (src, dst group keys) the Flows view is narrowed to.
-    pub drill: Option<(Vec<String>, Vec<String>)>,
+    /// What the Flows view is narrowed to.
+    pub drill: Option<Drill>,
     pub auto: AutoRefresh,
     /// A submitted `w` form while its plan is on the way: a planner error
     /// (an unknown ruleset name) brings it back with the error.
     pub rule_form: Option<Form>,
 }
 
+/// The keys `all labels` lists first when the flows carry them.
+pub const PREFERRED_KEYS: [&str; 4] = ["app", "env", "role", "loc"];
+
+/// What `Enter` narrowed the Flows view to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Drill {
+    /// An App-to-app or treemap pair: source and destination group keys.
+    Pair(Vec<String>, Vec<String>),
+}
+
+impl Drill {
+    /// Whether `f` belongs to the drilled row under `keys`.
+    pub fn matches(&self, f: &ResolvedFlow, keys: &[String]) -> bool {
+        match self {
+            Drill::Pair(src, dst) => {
+                &group_key(&f.src, keys) == src && &group_key(&f.dst, keys) == dst
+            }
+        }
+    }
+
+    /// The Flows title after `Flows ▸ `.
+    pub fn title(&self) -> String {
+        match self {
+            Drill::Pair(src, dst) => format!("{} → {}", src.join("/"), dst.join("/")),
+        }
+    }
+}
+
 impl TrafficState {
-    pub fn new(window: &str, max_results: u32, auto_min_seconds: u64) -> Self {
+    pub fn new(window: &str, max_results: u32, auto_min_seconds: u64, keys: &[String]) -> Self {
         Self {
             filter: TrafficFilter::defaults(window, max_results),
             query: QueryState::Idle,
@@ -714,7 +804,9 @@ impl TrafficState {
             flows: TableView::new(flow_columns()),
             show_detail: false,
             view: TrafficView::Flows,
-            group_keys: vec!["app".into(), "env".into()],
+            group_keys: keys_or_default(keys),
+            all_keys: false,
+            keys: keys_or_default(keys),
             groups: TableView::new(group_columns()),
             blocked: TableView::new(blocked_columns()),
             drill: None,
@@ -723,30 +815,72 @@ impl TrafficState {
         }
     }
 
-    /// Recomputes every view from `data`. Pure; never requests.
+    /// The loaded flows (none before the first query).
+    pub fn loaded_flows(&self) -> &[ResolvedFlow] {
+        self.data.as_ref().map_or(&[], |d| d.flows.as_slice())
+    }
+
+    /// The keys in force, as the last `rebuild_views` resolved them.
+    pub fn effective_keys(&self) -> Vec<String> {
+        self.keys.clone()
+    }
+
+    /// Every key seen in the loaded flows when `all_keys` (`app`, `env`,
+    /// `role`, `loc` first), else `group_keys` (`app,env` when empty).
+    fn resolve_keys(&self) -> Vec<String> {
+        if self.all_keys {
+            let preferred = PREFERRED_KEYS.map(String::from);
+            let seen: Vec<String> = keys_seen(self.loaded_flows(), &preferred)
+                .into_iter()
+                .map(|(k, _)| k)
+                .collect();
+            if !seen.is_empty() {
+                return seen;
+            }
+        }
+        keys_or_default(&self.group_keys)
+    }
+
+    /// Whether any loaded flow carries a byte count.
+    pub fn has_bytes(&self) -> bool {
+        self.loaded_flows().iter().any(ResolvedFlow::has_bytes)
+    }
+
+    /// The first loaded flow `pred` accepts that is blocked or potentially
+    /// blocked, else the first it accepts at all: what `w` drafts a rule
+    /// from on an aggregated row.
+    pub fn first_flow(&self, pred: impl Fn(&ResolvedFlow) -> bool) -> Option<ResolvedFlow> {
+        let flows = self.loaded_flows();
+        flows
+            .iter()
+            .filter(|f| pred(f))
+            .find(|f| {
+                matches!(
+                    f.policy_decision,
+                    pce::models::PolicyDecision::Blocked
+                        | pce::models::PolicyDecision::PotentiallyBlocked
+                )
+            })
+            .or_else(|| flows.iter().find(|f| pred(f)))
+            .cloned()
+    }
+
+    /// Recomputes every view from `data` with the keys in force. Pure;
+    /// never requests.
     pub fn rebuild_views(&mut self) {
-        let flows: Vec<ResolvedFlow> = self
-            .data
-            .as_ref()
-            .map(|d| d.flows.clone())
-            .unwrap_or_default();
-        let shown: Vec<ResolvedFlow> = match &self.drill {
-            Some((src, dst)) => flows
-                .iter()
-                .filter(|f| {
-                    group_by_labels(std::slice::from_ref(f), &self.group_keys)
-                        .first()
-                        .is_some_and(|g| &g.src == src && &g.dst == dst)
-                })
-                .cloned()
-                .collect(),
-            None => flows.clone(),
-        };
+        self.keys = self.resolve_keys();
+        let keys = &self.keys;
+        let flows = self.loaded_flows();
+        let shown: Vec<FlowRow> = flows
+            .iter()
+            .filter(|f| self.drill.as_ref().is_none_or(|d| d.matches(f, keys)))
+            .map(|f| FlowRow::new(f.clone(), keys))
+            .collect();
+        let groups = group_by_labels(flows, keys);
+        let blocked = blocked_summary(flows, keys);
         self.flows.set_rows(shown);
-        self.groups
-            .set_rows(group_by_labels(&flows, &self.group_keys));
-        self.blocked
-            .set_rows(blocked_summary(&flows, &self.group_keys));
+        self.groups.set_rows(groups);
+        self.blocked.set_rows(blocked);
     }
 
     /// Whether the active view's table is capturing keys for a search.
@@ -2162,10 +2296,12 @@ impl Model {
         writes: WritesState,
     ) -> Self {
         let theme = Theme::from_name(&theme_name);
+        let scope_keys: Vec<String> = crate::config::DEFAULT_SCOPE_KEYS.map(String::from).to_vec();
         let traffic = TrafficState::new(
             &traffic_default_window,
             traffic_max_results,
             auto_refresh_min_seconds,
+            &scope_keys,
         );
         let policy = PolicyState::new(auto_refresh_min_seconds);
         let objects = ObjectsState::new(auto_refresh_min_seconds);
@@ -2180,7 +2316,7 @@ impl Model {
                 auto_refresh_min_seconds,
                 traffic_max_results,
                 traffic_default_window,
-                scope_keys: crate::config::DEFAULT_SCOPE_KEYS.map(String::from).to_vec(),
+                scope_keys,
                 tier_key: crate::config::DEFAULT_TIER_KEY.into(),
             },
             screen: Screen::Traffic,
@@ -2207,6 +2343,16 @@ impl Model {
     pub fn set_theme(&mut self, name: &str) {
         self.theme_name = name.to_string();
         self.theme = Theme::from_name(name);
+    }
+
+    /// The profile's label model: the `w` form's dimensions, and the keys
+    /// every traffic view groups by until `g` changes them.
+    pub fn set_label_model(&mut self, scope_keys: Vec<String>, tier_key: String) {
+        self.traffic.group_keys = keys_or_default(&scope_keys);
+        self.traffic.all_keys = false;
+        self.traffic.rebuild_views();
+        self.limits.scope_keys = scope_keys;
+        self.limits.tier_key = tier_key;
     }
 
     /// What a `w` form is pre-filled from: the profile's label model and
@@ -2275,6 +2421,7 @@ impl Model {
             &self.limits.traffic_default_window,
             self.limits.traffic_max_results,
             min,
+            &self.limits.scope_keys,
         );
         traffic.seq = self.traffic.seq + 1; // a late result of the old query is stale
         self.traffic = traffic;
@@ -2384,6 +2531,88 @@ mod tests {
             .find_deny_rule("/orgs/5/sec_policy/draft/rule_sets/101/deny_rules/9")
             .unwrap();
         assert_eq!(rs, "/orgs/5/sec_policy/draft/rule_sets/101");
+    }
+
+    #[test]
+    fn the_flow_and_blocked_columns_fit_80_columns_with_the_group_columns() {
+        use crate::tui::ui::widgets::table::visible_columns;
+        let row_width = |cols: &[(usize, u16, bool)]| -> u16 {
+            cols.iter().map(|c| c.1).sum::<u16>() + cols.len() as u16 - 1 + 2
+        };
+        let flows = flow_columns();
+        let at80 = visible_columns(&flows, 80);
+        let titles: Vec<&str> = at80.iter().map(|c| flows[c.0].title).collect();
+        assert_eq!(
+            titles,
+            vec![
+                "src",
+                "src group",
+                "dst",
+                "dst group",
+                "service",
+                "conns",
+                "decision"
+            ]
+        );
+        assert!(
+            row_width(&at80) <= 78,
+            "inside the border at 80: {}",
+            row_width(&at80)
+        );
+        assert!(row_width(&visible_columns(&flows, 120)) <= 118);
+        let at160 = visible_columns(&flows, 160);
+        assert_eq!(flows[at160[0].0].title, "last seen");
+        assert!(row_width(&at160) <= 158);
+        let blocked = blocked_columns();
+        let titles: Vec<&str> = blocked.iter().map(|c| c.title).collect();
+        assert_eq!(
+            titles,
+            vec![
+                "last seen",
+                "dst",
+                "dst name",
+                "service",
+                "flows",
+                "conns",
+                "sources"
+            ]
+        );
+    }
+
+    #[test]
+    fn blocked_cells_name_one_host_or_count_them_and_count_more_sources() {
+        let flows = crate::tui::test_support::fixture_flows_rich();
+        let keys = vec!["app".to_string(), "env".to_string()];
+        let rows = pce::traffic::blocked_summary(&flows, &keys);
+        let cols = blocked_columns();
+        let shop = rows
+            .iter()
+            .find(|r| r.dst_group == vec!["shop", "prod"])
+            .unwrap();
+        assert_eq!((cols[1].cell)(shop), "shop/prod");
+        assert_eq!((cols[2].cell)(shop), "shop-db-p.example");
+        assert_eq!((cols[6].cell)(shop), "hr/prod, shop/dev, ipl:Corp/-");
+        let mut many = shop.clone();
+        many.dst_hosts = 8;
+        many.source_count = 10;
+        many.sources = vec!["a".into(), "b".into(), "c".into(), "d".into(), "e".into()];
+        assert_eq!((cols[2].cell)(&many), "8 hosts");
+        assert_eq!((cols[6].cell)(&many), "a, b, c, d, e +5");
+    }
+
+    #[test]
+    fn the_label_model_sets_the_group_keys_and_empty_falls_back_to_app_env() {
+        let mut m = crate::tui::test_support::model_fixture();
+        assert_eq!(m.traffic.group_keys, vec!["app", "env"]);
+        m.set_label_model(vec!["site".into(), "zone".into()], "tier".into());
+        assert_eq!(m.traffic.group_keys, vec!["site", "zone"]);
+        assert_eq!(m.limits.tier_key, "tier");
+        m.set_label_model(Vec::new(), "role".into());
+        assert_eq!(m.traffic.group_keys, vec!["app", "env"]);
+        assert!(
+            m.limits.scope_keys.is_empty(),
+            "the profile value itself is kept"
+        );
     }
 
     #[test]

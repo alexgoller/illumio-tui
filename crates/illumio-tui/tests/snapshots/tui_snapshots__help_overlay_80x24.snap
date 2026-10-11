@@ -17,7 +17,7 @@ expression: out
 │a                        toggle auto-refresh for the current screen           │
 │Traffic  v               cycle Flows · App-to-app · Blocked                   │
 │Traffic  f               edit filter: window src dst service decisions        │
-│Traffic  g               change the aggregate label keys                      │
+│Traffic  g               pick the label keys every view groups by             │
 │Traffic  Enter           detail (flows) · drill into a pair (aggregate)       │
 │Traffic  w               draft allow rule from a blocked flow (writes)        │
 │w form   Ctrl-A Ctrl-N   all labels · new ruleset                             │

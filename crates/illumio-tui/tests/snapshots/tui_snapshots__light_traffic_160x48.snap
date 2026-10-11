@@ -20,20 +20,16 @@ expression: "render_styled(&m, 160, 48)"
     @0:Rgb(180, 184, 196)/Rgb(250, 250, 247)
 ╭ Flows ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @2:Rgb(150, 50, 180)/Rgb(250, 250, 247) @7:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│  last seen        src                    src labels                                             dst                    service    conns   decision           │
+│  last seen        src                 src group          dst                 dst group          service    conns   decision                                  │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│▸ 10-10 07:31:02   host-1.example         app=shop env=prod role=web                             host-2.example         5432/tcp       310 allowed            │
+│▸ 10-10 07:31:02   host-1.example      shop/prod          host-2.example      shop/prod          5432/tcp       310 allowed                                   │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(40, 140, 60)/Rgb(222, 230, 245) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│  10-10 07:30:58   10.1.4.9                                                                      host-1.example         8443/tcp        12 potentially_blocked│
+│  10-10 07:30:58   10.1.4.9            -/-                host-1.example      shop/prod          8443/tcp        12 potentially_blocked                       │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(176, 120, 0)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│  10-10 06:05:00   unmanaged-nas                                                                 host-2.example         icmp             3 blocked            │
+│  10-10 06:05:00   unmanaged-nas       -/-                host-2.example      shop/prod          icmp             3 blocked                                   │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(200, 40, 50)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│  10-10 07:29:00   host-1.example         app=shop env=prod role=web                             fqdn-1.example         443/tcp          5 allowed            │
+│  10-10 07:29:00   host-1.example      shop/prod          fqdn-1.example      -/-                443/tcp          5 allowed                                   │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(40, 140, 60)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│                                                                                                                                                              │
-    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(40, 42, 48)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│                                                                                                                                                              │
-    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(40, 42, 48)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
 │                                                                                                                                                              │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(40, 42, 48)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
 │                                                                                                                                                              │
@@ -94,7 +90,11 @@ expression: "render_styled(&m, 160, 48)"
     @0:Rgb(180, 184, 196)/Rgb(250, 250, 247) @1:Rgb(40, 42, 48)/Rgb(250, 250, 247) @159:Rgb(180, 184, 196)/Rgb(250, 250, 247)
 │                                                                                                                                                              │
     @0:Rgb(180, 184, 196)/Rgb(250, 250, 247) @1:Rgb(40, 42, 48)/Rgb(250, 250, 247) @159:Rgb(180, 184, 196)/Rgb(250, 250, 247)
+│                                                                                                                                                              │
+    @0:Rgb(180, 184, 196)/Rgb(250, 250, 247) @1:Rgb(40, 42, 48)/Rgb(250, 250, 247) @159:Rgb(180, 184, 196)/Rgb(250, 250, 247)
+│                                                                                                                                                              │
+    @0:Rgb(180, 184, 196)/Rgb(250, 250, 247) @1:Rgb(40, 42, 48)/Rgb(250, 250, 247) @159:Rgb(180, 184, 196)/Rgb(250, 250, 247)
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
     @0:Rgb(180, 184, 196)/Rgb(250, 250, 247)
-ready                                                                                          f filter  r run  a auto  v view  s sort  / search  : cmd  ? help
-    @0:Rgb(40, 42, 48)/Rgb(250, 250, 247) @94:Rgb(120, 124, 136)/Rgb(250, 250, 247)
+ready                                                                                         f filter  r run  a auto  v view  g group  / search  : cmd  ? help
+    @0:Rgb(40, 42, 48)/Rgb(250, 250, 247) @93:Rgb(120, 124, 136)/Rgb(250, 250, 247)

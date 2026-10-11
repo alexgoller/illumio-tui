@@ -4,10 +4,11 @@ use crate::tui::edit::{self, EditIntent, RulesetTarget, Start, WriteIntent};
 use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::form::FormEvent;
 use crate::tui::model::{
-    Connection, EventsFilterEdit, Model, ObjectKind, Overlay, PendingAction, PolicyPane,
+    Connection, Drill, EventsFilterEdit, Model, ObjectKind, Overlay, PendingAction, PolicyPane,
     PolicyState, QueryState, Screen, StatusLine, TrafficData, TrafficView, WritesState, rule_line,
 };
 use crate::tui::msg::{Cmd, Msg, ObjectsPayload, QueryOutcome};
+use crate::tui::picker::{KeyPicker, PickerOutcome};
 use crate::tui::ui::widgets::overlay::{confirm_write_last_scroll, help_last_scroll};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use pce::models::{EventFilter, PolicyDecision, PolicyScope};
@@ -791,39 +792,17 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             }
             _ => Vec::new(),
         },
-        Overlay::GroupKeys { mut input } => match k.code {
-            KeyCode::Esc => {
-                model.overlay = Overlay::None;
-                Vec::new()
-            }
-            KeyCode::Enter => {
-                model.overlay = Overlay::None;
-                let mut keys: Vec<String> = input
-                    .split(',')
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(String::from)
-                    .collect();
-                if keys.is_empty() {
-                    keys = vec!["app".into(), "env".into()];
+        Overlay::GroupKeys(picker) => {
+            match picker.key(k) {
+                PickerOutcome::Open(p) => model.overlay = Overlay::GroupKeys(p),
+                PickerOutcome::Close => model.overlay = Overlay::None,
+                PickerOutcome::Apply { keys, all } => {
+                    model.overlay = Overlay::None;
+                    apply_group_keys(model, keys, all);
                 }
-                model.traffic.group_keys = keys;
-                model.traffic.drill = None;
-                model.traffic.rebuild_views();
-                Vec::new()
             }
-            KeyCode::Backspace => {
-                input.pop();
-                model.overlay = Overlay::GroupKeys { input };
-                Vec::new()
-            }
-            KeyCode::Char(c) => {
-                input.push(c);
-                model.overlay = Overlay::GroupKeys { input };
-                Vec::new()
-            }
-            _ => Vec::new(),
-        },
+            Vec::new()
+        }
         Overlay::FilterEditor(mut e) => {
             match k.code {
                 KeyCode::Esc => model.overlay = Overlay::None,
@@ -1255,15 +1234,13 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         }
         KeyCode::Char('w') => return flow_rule_key(model),
         KeyCode::Char('g') => {
-            model.overlay = Overlay::GroupKeys {
-                input: model.traffic.group_keys.join(","),
-            };
+            model.overlay = Overlay::GroupKeys(open_key_picker(model));
             return Vec::new();
         }
         KeyCode::Enter => match model.traffic.view {
             TrafficView::Aggregate => {
                 if let Some(g) = model.traffic.groups.selected_item() {
-                    model.traffic.drill = Some((g.src.clone(), g.dst.clone()));
+                    model.traffic.drill = Some(Drill::Pair(g.src.clone(), g.dst.clone()));
                     model.traffic.view = TrafficView::Flows;
                     model.traffic.rebuild_views();
                 }
@@ -1293,6 +1270,40 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         TrafficView::Blocked => t.blocked.ensure_visible(page),
     }
     Vec::new()
+}
+
+/// The `g` picker over the profile's label model and the keys the loaded
+/// flows carry.
+fn open_key_picker(model: &Model) -> KeyPicker {
+    let t = &model.traffic;
+    let mut preferred = model.limits.scope_keys.clone();
+    preferred.push(model.limits.tier_key.clone());
+    preferred.push("loc".into());
+    let seen = pce::traffic::keys_seen(t.loaded_flows(), &preferred);
+    KeyPicker::new(
+        &model.limits.scope_keys,
+        &model.limits.tier_key,
+        &seen,
+        &t.group_keys,
+        t.all_keys,
+    )
+}
+
+/// Enter in the picker: the keys (the profile's scope keys when none),
+/// every view rebuilt, the drill-down dropped. No request.
+fn apply_group_keys(model: &mut Model, keys: Vec<String>, all: bool) {
+    let t = &mut model.traffic;
+    t.all_keys = all;
+    if !all {
+        t.group_keys = if keys.is_empty() {
+            pce::traffic::keys_or_default(&model.limits.scope_keys)
+        } else {
+            keys
+        };
+    }
+    t.drill = None;
+    t.rebuild_views();
+    model.status = StatusLine::info(format!("grouped by {}", t.effective_keys().join(",")));
 }
 
 /// Validated filter from the editor or a command: confirm if expensive, else apply.
@@ -2276,17 +2287,26 @@ fn rule_intent(p: &PolicyState, c: char) -> Option<EditIntent> {
 }
 
 /// `w` on Traffic: a draft allow rule from the selected blocked or
-/// potentially blocked flow (Flows view or a drilled pair). The aggregated
-/// views carry names, not label hrefs, so they refuse.
+/// potentially blocked flow (Flows view or a drilled pair), or from the
+/// first such flow behind a Blocked row. App-to-app refuses: a pair holds
+/// flows of every decision.
 fn flow_rule_key(model: &mut Model) -> Vec<Cmd> {
     if writes_refused(model) {
         return Vec::new();
     }
-    if model.traffic.view != TrafficView::Flows {
-        model.status = StatusLine::warn("select a flow in the Flows view (Enter on a pair)");
-        return Vec::new();
-    }
-    let Some(flow) = model.traffic.flows.selected_item().cloned() else {
+    let t = &model.traffic;
+    let flow = match t.view {
+        TrafficView::Flows => t.flows.selected_item().map(|r| r.flow.clone()),
+        TrafficView::Blocked => t.blocked.selected_item().and_then(|b| {
+            let keys = t.effective_keys();
+            t.first_flow(|f| b.contains(f, &keys))
+        }),
+        TrafficView::Aggregate => {
+            model.status = StatusLine::warn("select a flow in the Flows view (Enter on a pair)");
+            return Vec::new();
+        }
+    };
+    let Some(flow) = flow else {
         model.status = StatusLine::warn("no row selected");
         return Vec::new();
     };
@@ -2461,6 +2481,155 @@ mod tests {
         assert_eq!(m.traffic.blocked.len(), 2);
         assert!(update(&mut m, key('v')).is_empty());
         assert_eq!(m.traffic.view, TrafficView::Flows);
+    }
+
+    #[test]
+    fn g_opens_the_picker_and_enter_regroups_every_view_without_requests() {
+        use crate::tui::test_support::model_with_rich_flows;
+        let mut m = model_with_rich_flows();
+        assert_eq!(
+            m.traffic.group_keys,
+            vec!["app", "env"],
+            "the profile's scope keys"
+        );
+        assert_eq!(m.traffic.flows.rows()[0].src_group, "shop/prod");
+        quiet(&mut m, key('g'));
+        let Overlay::GroupKeys(p) = &m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        let listed: Vec<&str> = p.entries.iter().map(|e| e.key.as_str()).collect();
+        assert_eq!(listed, vec!["app", "env", "role", "loc", "datacenter"]);
+        assert_eq!(p.entries[4].seen, Some(11));
+        for msg in [key('j'), key('j'), key(' '), enter()] {
+            assert!(update(&mut m, msg).is_empty(), "the picker never requests");
+        }
+        assert_eq!(m.overlay, Overlay::None);
+        assert_eq!(m.traffic.group_keys, vec!["app", "env", "role"]);
+        assert_eq!(m.status.text, "grouped by app,env,role");
+        assert_eq!(m.traffic.flows.rows()[0].src_group, "shop/prod/web");
+        assert_eq!(m.traffic.flows.rows()[0].dst_group, "shop/prod/db");
+        assert!(m.traffic.groups.rows().iter().all(|g| g.src.len() == 3));
+        assert!(
+            m.traffic
+                .blocked
+                .rows()
+                .iter()
+                .all(|b| b.dst_group.len() == 3)
+        );
+        // A non-workload endpoint shows `-` in every slot.
+        let corp = m
+            .traffic
+            .flows
+            .rows()
+            .iter()
+            .find(|r| r.src.ip_lists == vec!["Corp"])
+            .unwrap();
+        assert_eq!(corp.src_group, "-/-/-");
+    }
+
+    #[test]
+    fn all_labels_groups_by_every_seen_key_until_a_profile_switch() {
+        use crate::tui::model::{Limits, ProfileInfo};
+        use crate::tui::test_support::model_with_rich_flows;
+        let mut m = model_with_rich_flows();
+        quiet(&mut m, key('g'));
+        for _ in 0..5 {
+            quiet(&mut m, key('j'));
+        }
+        quiet(&mut m, key(' '));
+        quiet(&mut m, enter());
+        assert!(m.traffic.all_keys);
+        assert_eq!(
+            m.traffic.effective_keys(),
+            vec!["app", "env", "role", "loc", "datacenter"]
+        );
+        assert!(m.traffic.groups.rows().iter().all(|g| g.src.len() == 5));
+        assert_eq!(m.traffic.flows.rows()[4].src_group, "crm/prod/web/us/fra1");
+        // Reopening shows `all labels` checked and no key.
+        quiet(&mut m, key('g'));
+        let Overlay::GroupKeys(p) = &m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        assert!(p.all && !p.is_checked("app"));
+        quiet(&mut m, kc(KeyCode::Esc));
+        assert_eq!(
+            update(
+                &mut m,
+                Msg::ProfileSwitched(Ok((
+                    ProfileInfo {
+                        name: "prod".into(),
+                        host: "prod.example".into(),
+                        org_id: 9,
+                    },
+                    Limits {
+                        auto_refresh_min_seconds: 60,
+                        traffic_max_results: 500,
+                        traffic_default_window: "1h".into(),
+                        scope_keys: vec!["site".into()],
+                        tier_key: "tier".into(),
+                    },
+                ))),
+            ),
+            vec![Cmd::Connect]
+        );
+        assert_eq!(
+            m.traffic.group_keys,
+            vec!["site"],
+            "the new profile's label model"
+        );
+        assert!(!m.traffic.all_keys);
+    }
+
+    #[test]
+    fn esc_keeps_the_keys_and_the_drill_and_applying_clears_the_drill() {
+        use crate::tui::test_support::model_with_rich_flows;
+        let mut m = model_with_rich_flows();
+        quiet(&mut m, key('v'));
+        update(&mut m, enter()); // crm/prod -> crm/prod
+        assert_eq!(m.traffic.view, TrafficView::Flows);
+        assert_eq!(m.traffic.flows.len(), 2);
+        quiet(&mut m, key('g'));
+        update(&mut m, key(' ')); // app off
+        quiet(&mut m, kc(KeyCode::Esc));
+        assert_eq!(m.traffic.group_keys, vec!["app", "env"]);
+        assert!(m.traffic.drill.is_some());
+        quiet(&mut m, key('g'));
+        quiet(&mut m, enter());
+        assert!(m.traffic.drill.is_none(), "applying drops the drill-down");
+        assert_eq!(m.traffic.flows.len(), 30);
+        // An empty text falls back to the profile's scope keys.
+        quiet(&mut m, key('g'));
+        for _ in 0..7 {
+            quiet(&mut m, kc(KeyCode::Backspace));
+        }
+        quiet(&mut m, enter());
+        assert_eq!(m.traffic.group_keys, vec!["app", "env"]);
+        // Unknown keys are allowed and show `-`.
+        quiet(&mut m, key('g'));
+        for c in ",nope".chars() {
+            quiet(&mut m, key(c));
+        }
+        quiet(&mut m, enter());
+        assert_eq!(m.traffic.flows.rows()[0].src_group, "shop/prod/-");
+    }
+
+    #[test]
+    fn w_on_a_blocked_row_drafts_from_the_first_flow_behind_it() {
+        use crate::tui::test_support::model_with_rich_flows;
+        let mut m = writes_on(model_with_rich_flows());
+        m.traffic.view = TrafficView::Blocked;
+        let row = m.traffic.blocked.selected_item().unwrap().clone();
+        assert_eq!(row.dst_group, vec!["hr", "prod"], "newest first");
+        assert!(update(&mut m, key('w')).is_empty(), "no request");
+        let Overlay::Form(f) = &m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        assert_eq!(f.title, "Allow rule from flow");
+        assert_eq!(f.value("Services"), "443/tcp");
+        quiet(&mut m, kc(KeyCode::Esc));
+        m.traffic.blocked.set_rows(Vec::new());
+        quiet(&mut m, key('w'));
+        assert_eq!(m.status.text, "no row selected");
     }
 
     #[test]
@@ -6718,15 +6887,13 @@ mod tests {
             m.overlay
         );
         update(&mut m, kc(KeyCode::Esc));
-        for view in [TrafficView::Aggregate, TrafficView::Blocked] {
-            m.traffic.view = view;
-            assert!(update(&mut m, key('w')).is_empty());
-            assert_eq!(
-                m.status.text,
-                "select a flow in the Flows view (Enter on a pair)"
-            );
-            assert_eq!(m.overlay, Overlay::None);
-        }
+        m.traffic.view = TrafficView::Aggregate;
+        assert!(update(&mut m, key('w')).is_empty());
+        assert_eq!(
+            m.status.text,
+            "select a flow in the Flows view (Enter on a pair)"
+        );
+        assert_eq!(m.overlay, Overlay::None);
     }
 
     #[test]

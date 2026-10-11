@@ -11,13 +11,11 @@ expression: out
 │4 flows allowed 2 pot.blocked 1 blocked 1  ▄▁▁▁▁▁▁▁▁▁█▄ ██████████████████████████████████████████████████████████████████████████████████████████████████████│
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭ Flows ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│  last seen        src                    src labels                                             dst                    service    conns   decision           │
-│  10-10 07:31:02   host-1.example         app=shop env=prod role=web                             host-2.example         5432/tcp       310 allowed            │
-│▸ 10-10 07:30:58   10.1.4.9                                                                      host-1.example         8443/tcp        12 potentially_blocked│
-│  10-10 06:05:00   unmanaged-nas                                                                 host-2.example         icmp             3 blocked            │
-│  10-10 07:29:00   host-1.example         app=shop env=prod role=web                             fqdn-1.example         443/tcp          5 allowed            │
-│                                                                                                                                                              │
-│                                                                                                                                                              │
+│  last seen        src                 src group          dst                 dst group          service    conns   decision                                  │
+│  10-10 07:31:02   host-1.example      shop/prod          host-2.example      shop/prod          5432/tcp       310 allowed                                   │
+│▸ 10-10 07:30:58   10.1.4.9            -/-                host-1.example      shop/prod          8443/tcp        12 potentially_blocked                       │
+│  10-10 06:05:00   unmanaged-nas       -/-                host-2.example      shop/prod          icmp             3 blocked                                   │
+│  10-10 07:29:00   host-1.example      shop/prod          fqdn-1.example      -/-                443/tcp          5 allowed                                   │
 │                                                                                                                                                              │
 │                                                                                                                                                              │
 │                                                                                                                                                              │
@@ -44,9 +42,11 @@ expression: out
 │                                                                                                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭ Detail ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── Enter hides ╮
-│src  10.1.4.9  10.1.4.9  ip lists: Corp                                                                                                                       │
-│dst  host-1.example  10.0.1.10  app=shop env=prod role=web                                                                                                    │
-│svc  8443/tcp  process -  user -  potentially_blocked                                                                                                         │
-│seen first 2026-10-10T07:00:00Z  last 2026-10-10T07:30:58Z  rules n/a                                                                                         │
+│src        10.1.4.9  10.1.4.9  ip lists: Corp                                                                                                                 │
+│src labels -                                                                                                                                                  │
+│dst        host-1.example  10.0.1.10                                                                                                                          │
+│dst labels app=shop env=prod role=web                                                                                                                         │
+│svc        8443/tcp  process -  user -  potentially_blocked                                                                                                   │
+│seen       first 2026-10-10T07:00:00Z  last 2026-10-10T07:30:58Z  rules n/a                                                                                   │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-ready                                                                                          f filter  r run  a auto  v view  s sort  / search  : cmd  ? help
+ready                                                                                         f filter  r run  a auto  v view  g group  / search  : cmd  ? help

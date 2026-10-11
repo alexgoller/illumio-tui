@@ -1029,3 +1029,60 @@ fn confirm_rule_overlay_shows_the_impact_80x24() {
         render_styled(&m, 80, 24)
     );
 }
+
+#[test]
+fn traffic_group_columns_picker_and_blocked_by_group_80x24() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use illumio_tui::tui::model::{Overlay, TrafficView};
+    use illumio_tui::tui::test_support::model_with_rich_flows;
+    use illumio_tui::tui::{Msg, update};
+    let mut m = model_with_rich_flows();
+    let out = render_to_string(&m, 80, 24);
+    assert!(
+        out.contains("src group") && out.contains("dst group"),
+        "{out}"
+    );
+    assert!(out.contains("shop/prod"), "{out}");
+    assert!(out.contains("g group"), "the status hint names g: {out}");
+    insta::assert_snapshot!("traffic_flows_groups_80x24", out);
+    let g = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE);
+    assert!(update(&mut m, Msg::Key(g)).is_empty(), "g never requests");
+    assert!(
+        matches!(m.overlay, Overlay::GroupKeys(_)),
+        "{:?}",
+        m.overlay
+    );
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("Group by"), "{out}");
+    assert!(out.contains("[x] app") && out.contains("[ ] role"), "{out}");
+    assert!(out.contains("(seen in 11 flows)"), "{out}");
+    assert!(out.contains("keys: app,env"), "{out}");
+    insta::assert_snapshot!("traffic_key_picker_80x24", out);
+    m.overlay = Overlay::None;
+    m.traffic.view = TrafficView::Blocked;
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("dst name") && out.contains("hr/prod"), "{out}");
+    assert!(out.contains("by dst app,env"), "{out}");
+    insta::assert_snapshot!("traffic_blocked_groups_80x24", out);
+}
+
+#[test]
+fn flow_detail_shows_both_label_sets_and_the_bytes() {
+    let mut m = model_with_flows();
+    m.traffic.show_detail = true; // row 0: shop/prod -> shop/prod with bytes
+    let out = render_to_string(&m, 160, 48);
+    assert!(
+        out.contains("src labels app=shop env=prod role=web"),
+        "{out}"
+    );
+    assert!(
+        out.contains("dst labels app=shop env=prod role=db"),
+        "{out}"
+    );
+    assert!(out.contains("bytes in 120.0K out 4.0K"), "{out}");
+    m.traffic.flows.select_next(); // Corp: an IP list, no labels, no bytes
+    let out = render_to_string(&m, 160, 48);
+    assert!(out.contains("src labels -"), "{out}");
+    assert!(out.contains("ip lists: Corp"), "{out}");
+    assert!(!out.contains("bytes in"), "{out}");
+}

@@ -16,13 +16,13 @@ expression: out
 │    │after 30 seconds, retry with a narrower filter or try again later   │    │
 │    │                                                                    │    │
 │    │                                                                    │    │
-│    ╰────────────────────────────────────────────────────────────────────╯    │
-│                                                                              │
-╰──────────────────────────────────────────────────────────────────────────────╯
+╰────╰────────────────────────────────────────────────────────────────────╯────╯
 ╭ Detail ───────────────────────────────────────────────────────── Enter shows ╮
 │select a flow and press Enter                                                 │
 │                                                                              │
 │                                                                              │
 │                                                                              │
+│                                                                              │
+│                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-ready          f filter  r run  a auto  v view  s sort  / search  : cmd  ? help
+ready         f filter  r run  a auto  v view  g group  / search  : cmd  ? help

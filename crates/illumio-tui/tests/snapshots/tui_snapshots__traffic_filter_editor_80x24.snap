@@ -16,13 +16,13 @@ expression: "render_to_string(&m, 80, 24)"
 │    │  decisions   all                                                   │    │
 │    │  max results 1000                                                  │    │
 │    │                                                                    │    │
-│    │window 24h · cap 1000                                               │    │
-│    │                                                                    │    │
-╰────│                                                                    │────╯
-╭ Det╰────────────────────────────────────────────────────────────────────╯ows ╮
-│select a flow and press Enter                                                 │
+╰────│window 24h · cap 1000                                               │────╯
+╭ Det│                                                                    │ows ╮
+│sele│                                                                    │    │
+│    ╰────────────────────────────────────────────────────────────────────╯    │
+│                                                                              │
 │                                                                              │
 │                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-ready          f filter  r run  a auto  v view  s sort  / search  : cmd  ? help
+ready         f filter  r run  a auto  v view  g group  / search  : cmd  ? help

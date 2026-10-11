@@ -3,6 +3,7 @@ use crate::tui::diff::{ObjectDiff, Sign};
 use crate::tui::filter::{FIELD_NAMES, FilterEditor};
 use crate::tui::form::{Form, clip, visible_tail};
 use crate::tui::model::{Model, Screen, rule_kind_name};
+use crate::tui::picker::KeyPicker;
 use crate::tui::ui::layout::centered;
 use crate::tui::ui::screens::workloads::plain;
 use crate::tui::ui::widgets::panel::panel;
@@ -35,7 +36,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "Traffic  f",
         "edit filter: window src dst service decisions",
     ),
-    ("Traffic  g", "change the aggregate label keys"),
+    ("Traffic  g", "pick the label keys every view groups by"),
     (
         "Traffic  Enter",
         "detail (flows) · drill into a pair (aggregate)",
@@ -148,21 +149,68 @@ pub fn render_prompt(model: &Model, input: &str, f: &mut Frame, area: Rect) {
     f.render_widget(Paragraph::new(line).style(t.base()), r);
 }
 
-pub fn render_group_prompt(model: &Model, input: &str, f: &mut Frame, area: Rect) {
+/// The `g` picker: a checkbox per key (the cursor row highlighted), `all
+/// labels`, the editable `keys:` line and the key hints. The rows scroll
+/// when the box is shorter than the list; the last three lines stay.
+pub fn render_key_picker(model: &Model, p: &KeyPicker, f: &mut Frame, area: Rect) {
     let t = &model.theme;
-    let r = Rect::new(
-        area.x,
-        area.y + area.height.saturating_sub(1),
-        area.width,
-        1,
-    );
+    let rows = p.entries.len() as u16 + 1;
+    let r = centered(area, 42, rows + 5);
     f.render_widget(Clear, r);
-    let line = Line::from(vec![
-        Span::styled("group keys: ", t.header_style()),
-        Span::styled(input.to_string(), t.base()),
-        Span::styled("▏", t.dim_style()),
-    ]);
-    f.render_widget(Paragraph::new(line).style(t.base()), r);
+    let block = panel("Group by", "", t, true);
+    let inner = block.inner(r);
+    f.render_widget(block, r);
+    let list_h = inner.height.saturating_sub(3) as usize;
+    let first = p
+        .cursor
+        .min(p.all_row())
+        .saturating_sub(list_h.saturating_sub(1));
+    let row_style = |i: usize| {
+        if i == p.cursor {
+            t.selected_style()
+        } else {
+            t.base()
+        }
+    };
+    let mut lines: Vec<Line> = p
+        .entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let mark = if p.is_checked(&e.key) { "[x]" } else { "[ ]" };
+            let mut spans = vec![Span::styled(format!("{mark} {:<15}", e.key), row_style(i))];
+            if let Some(n) = e.seen {
+                let noun = if n == 1 { "flow" } else { "flows" };
+                spans.push(Span::styled(
+                    format!(" (seen in {n} {noun})"),
+                    t.dim_style(),
+                ));
+            }
+            Line::from(spans)
+        })
+        .collect();
+    let all = if p.all { "[x]" } else { "[ ]" };
+    lines.push(Line::from(Span::styled(
+        format!("{all} all labels"),
+        row_style(p.all_row()),
+    )));
+    let mut out: Vec<Line> = lines.into_iter().skip(first).take(list_h).collect();
+    out.push(Line::from(""));
+    let text = if p.all {
+        "all labels".to_string()
+    } else {
+        p.text.clone()
+    };
+    let cursor = if p.cursor == p.text_row() { "▏" } else { "" };
+    out.push(Line::from(vec![
+        Span::styled("keys: ", t.header_style()),
+        Span::styled(format!("{text}{cursor}"), row_style(p.text_row())),
+    ]));
+    out.push(Line::from(Span::styled(
+        "Space toggle · Enter apply · Esc close",
+        t.dim_style(),
+    )));
+    f.render_widget(Paragraph::new(out).style(t.base()), inner);
 }
 
 pub fn render_filter_editor(model: &Model, e: &FilterEditor, f: &mut Frame, area: Rect) {
@@ -688,8 +736,8 @@ pub fn screen_hint(screen: Screen, writes: bool) -> &'static str {
         (Screen::Objects, true) => "n:new e:edit x:del  Tab type  Enter detail",
         (Screen::Workloads, true) => "n:new e:edit x:del  t/T traffic  Enter detail",
         (Screen::Policy, true) => "n/N:new e:edit x:del  d scope  p pending",
-        (Screen::Traffic, true) => "w:rule  f filter  r run  v view  / search",
-        (Screen::Traffic, _) => "f filter  r run  a auto  v view  s sort  / search",
+        (Screen::Traffic, true) => "w:rule  f filter  r run  v view  g group",
+        (Screen::Traffic, _) => "f filter  r run  a auto  v view  g group  / search",
         (Screen::Policy, _) => "d scope  p pending  Enter detail  Tab pane  i impact",
         (Screen::Objects, false) => "Tab type  Enter detail  r refresh  a auto  / search",
         (Screen::Workloads, false) => "t/T traffic  h/H health  Enter detail  r refresh",

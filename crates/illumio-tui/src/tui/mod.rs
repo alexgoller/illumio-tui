@@ -10,6 +10,7 @@ pub mod form;
 pub mod impact;
 pub mod model;
 pub mod msg;
+pub mod picker;
 pub mod table;
 pub mod test_support;
 pub mod ui;

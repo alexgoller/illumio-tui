@@ -3,7 +3,7 @@ use crate::tui::model::{Model, QueryState, TrafficView};
 use crate::tui::ui::widgets::bars;
 use crate::tui::ui::widgets::panel::panel;
 use pce::models::PolicyDecision;
-use pce::traffic::ResolvedEndpoint;
+use pce::traffic::{ResolvedEndpoint, ResolvedFlow, compact_count};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Style;
@@ -20,9 +20,9 @@ pub struct TrafficLayout {
 }
 
 /// Shared by `view` and `update` (for page sizes): filter bar 3, stats 3,
-/// table takes the rest, detail 6 (0 when the terminal is short).
+/// table takes the rest, detail 8 (0 when the terminal is short).
 pub fn layout(body: Rect) -> TrafficLayout {
-    let detail_h = if body.height >= 20 { 6 } else { 0 };
+    let detail_h = if body.height >= 20 { 8 } else { 0 };
     let rows = Layout::vertical([
         Constraint::Length(3),
         Constraint::Length(3),
@@ -146,14 +146,14 @@ fn render_flows(model: &Model, f: &mut Frame, area: Rect) {
     let t = &model.theme;
     let mut meta = crate::tui::ui::widgets::table::header_meta(&model.traffic.flows);
     let title = match &model.traffic.drill {
-        Some((src, dst)) => {
+        Some(drill) => {
             let badge = "Esc clears";
             meta = if meta.is_empty() {
                 badge.to_string()
             } else {
                 format!("{badge} · {meta}")
             };
-            format!("Flows ▸ {} → {}", src.join("/"), dst.join("/"))
+            format!("Flows ▸ {}", drill.title())
         }
         None => TrafficView::Flows.title().to_string(),
     };
@@ -170,21 +170,14 @@ fn render_groups(model: &Model, f: &mut Frame, area: Rect) {
     let meta = crate::tui::ui::widgets::table::header_meta(&model.traffic.groups);
     let meta = format!(
         "keys {} · Enter drills{}{}",
-        model.traffic.group_keys.join(","),
+        model.traffic.effective_keys().join(","),
         if meta.is_empty() { "" } else { " · " },
         meta
     );
     let block = panel(TrafficView::Aggregate.title(), &meta, t, true);
     let theme = t.clone();
     crate::tui::ui::widgets::table::render(f, area, &model.traffic.groups, t, block, &move |g| {
-        let decision = if g.blocked > 0 {
-            PolicyDecision::Blocked
-        } else if g.potentially_blocked > 0 {
-            PolicyDecision::PotentiallyBlocked
-        } else {
-            PolicyDecision::Allowed
-        };
-        theme.decision_style(decision)
+        theme.decision_style(g.dominant())
     });
 }
 
@@ -192,6 +185,12 @@ fn render_groups(model: &Model, f: &mut Frame, area: Rect) {
 fn render_blocked(model: &Model, f: &mut Frame, area: Rect) {
     let t = &model.theme;
     let meta = crate::tui::ui::widgets::table::header_meta(&model.traffic.blocked);
+    let meta = format!(
+        "by dst {}{}{}",
+        model.traffic.effective_keys().join(","),
+        if meta.is_empty() { "" } else { " · " },
+        meta
+    );
     let block = panel(TrafficView::Blocked.title(), &meta, t, true);
     let bad = Style::new().fg(t.bad);
     crate::tui::ui::widgets::table::render(f, area, &model.traffic.blocked, t, block, &move |_| {
@@ -199,16 +198,28 @@ fn render_blocked(model: &Model, f: &mut Frame, area: Rect) {
     });
 }
 
-/// Labels, then any IP lists the endpoint belongs to (an IP-list-only endpoint has no labels).
-fn endpoint_tags(e: &ResolvedEndpoint) -> String {
-    let mut s = e.label_text();
+/// `name  ip`, then the IP lists the endpoint belongs to.
+fn endpoint_line(e: &ResolvedEndpoint) -> String {
+    let mut s = format!("{}  {}", e.display_name(), e.ip.clone().unwrap_or_default());
     if !e.ip_lists.is_empty() {
-        if !s.is_empty() {
-            s.push_str("  ");
-        }
-        s.push_str(&format!("ip lists: {}", e.ip_lists.join(", ")));
+        s.push_str(&format!("  ip lists: {}", e.ip_lists.join(", ")));
     }
     s
+}
+
+/// `app=shop env=prod role=web`, or `-` without labels.
+fn labels_line(e: &ResolvedEndpoint) -> String {
+    let s = e.label_text();
+    if s.is_empty() { "-".into() } else { s }
+}
+
+/// `  bytes in 117.2K out 3.9K` when the PCE reported either count.
+fn bytes_text(fl: &ResolvedFlow) -> String {
+    if !fl.has_bytes() {
+        return String::new();
+    }
+    let n = |b: Option<u64>| b.map_or_else(|| "-".to_string(), compact_count);
+    format!("  bytes in {} out {}", n(fl.bytes_in), n(fl.bytes_out))
 }
 
 fn render_detail(model: &Model, f: &mut Frame, area: Rect) {
@@ -242,44 +253,37 @@ fn render_detail(model: &Model, f: &mut Frame, area: Rect) {
         fl.rules.join(", ")
     };
     let dash = || "-".to_string();
+    let row = |head: &'static str, body: String| {
+        Line::from(vec![
+            Span::styled(format!("{head:<11}"), t.header_style()),
+            Span::raw(body),
+        ])
+    };
     let lines = vec![
-        Line::from(vec![
-            Span::styled("src  ", t.header_style()),
-            Span::raw(format!(
-                "{}  {}  {}",
-                fl.src.display_name(),
-                fl.src.ip.clone().unwrap_or_default(),
-                endpoint_tags(&fl.src)
-            )),
-        ]),
-        Line::from(vec![
-            Span::styled("dst  ", t.header_style()),
-            Span::raw(format!(
-                "{}  {}  {}",
-                fl.dst.display_name(),
-                fl.dst.ip.clone().unwrap_or_default(),
-                endpoint_tags(&fl.dst)
-            )),
-        ]),
-        Line::from(vec![
-            Span::styled("svc  ", t.header_style()),
-            Span::raw(format!(
+        row("src", endpoint_line(&fl.src)),
+        row("src labels", labels_line(&fl.src)),
+        row("dst", endpoint_line(&fl.dst)),
+        row("dst labels", labels_line(&fl.dst)),
+        row(
+            "svc",
+            format!(
                 "{}  process {}  user {}  {}",
                 fl.service_text(),
                 fl.process_name.clone().unwrap_or_else(dash),
                 fl.user_name.clone().unwrap_or_else(dash),
                 fl.policy_decision.as_str()
-            )),
-        ]),
-        Line::from(vec![
-            Span::styled("seen ", t.header_style()),
-            Span::raw(format!(
-                "first {}  last {}  rules {}",
+            ),
+        ),
+        row(
+            "seen",
+            format!(
+                "first {}  last {}{}  rules {}",
                 fl.first_detected.clone().unwrap_or_default(),
                 fl.last_detected.clone().unwrap_or_default(),
+                bytes_text(fl),
                 rules
-            )),
-        ]),
+            ),
+        ),
     ];
     f.render_widget(
         Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
