@@ -86,10 +86,11 @@ table and a click on a tab switches screen.
 - **Traffic**: `f` edit the filter, `r` run (bypasses the cache), `v` cycle Flows / App-to-app /
   Blocked, `g` change the group keys, `s` sort, `/` search, `Enter` detail (flows) or drill into
   a pair (app-to-app), `a` auto-refresh. A filter that would be expensive asks for
-  confirmation first.
+  confirmation first. With writes on, `w` turns a blocked flow into a draft allow rule.
 - **Policy**: `d` toggle draft / active, `p` pending changes, `Tab` switch panes, `Enter` rule
   detail, or on a ruleset load its deny rules. Rules are listed in evaluation order: override
-  deny, allow, deny.
+  deny, allow, deny. With writes on, `n` / `e` / `x` create, edit and delete rulesets and rules
+  in draft (`N` a deny rule), and the pending overlay marks with `Space` and provisions with `P`.
 - **Labels & objects**: `Tab` next object type, `Enter` detail.
 - **Workloads**: VEN health columns and a summary line, `h` unhealthy only, `H` sort by
   severity, `t` / `T` jump to Traffic with the workload as source / destination.
@@ -280,6 +281,45 @@ On the Policy screen `p` lists pending changes; `j`/`k` select one, and
 `Enter` on a pending IP list or service shows what it changes against the
 active version (`+` added, `-` removed, unchanged entries dimmed). That costs
 one GET for the active list of the kind, cached for five minutes.
+
+### Policy editing in the TUI
+
+On the Policy screen, in the draft scope, the same three keys edit policy:
+on the rulesets pane `n` opens a new ruleset (Name, Description, Enabled
+`y`/`n`, Scopes), `e` edits the selected one and `x` deletes it; on the
+rules pane `n` adds an allow rule and `N` a deny rule to the selected
+ruleset, `e` edits the selected rule (allow or deny) and `x` deletes it. In
+the active scope the keys say `switch to draft to edit policy`.
+
+Rule fields use the CLI's token grammar, comma-separated: Providers and
+Consumers take `app=web`, `group:Name`, `iplist:Corp`, `all`,
+`workload:/orgs/…` (an href; workload names resolve in the CLI only) and
+`!` before a label, label group or IP list; Services take `443/tcp`,
+`8000-8100/udp`, `icmp` or a service name. Scopes are comma-separated
+labels or label groups, alternatives separated by `|`
+(`app=web, env=prod | app=web, env=staging`); an empty field means the
+ruleset applies everywhere. Names resolve through the loaded index, with no
+request. An edit form shows the rule's entries as tokens and sends only
+what changed; an entry the grammar cannot express (a virtual service, an
+`any` port) shows as its href or `?`, and changing that field is refused
+with `use the CLI`.
+
+In the pending overlay (`p`), `Space` marks entries and `P` provisions the
+marked ones, or everything pending when none is marked. The confirm overlay
+shows the exact `POST /orgs/N/sec_policy` body with its `change_subset`;
+`y` sends it once, the status line says `provisioned <version>: <counts>`,
+and the pending list and the rulesets reload. `Enter` on a pending ruleset
+shows its changes against active: name, description, state, scopes and one
+line per rule (`+ allow app=web ← iplist:Corp 443/tcp`), for one GET of the
+active rulesets, cached for five minutes.
+
+On Traffic, `w` on a blocked or potentially blocked flow (Flows view or a
+drilled pair) opens an allow-rule form pre-filled from the flow: the
+destination's labels as providers, the source's as consumers (an unlabeled
+workload as `workload:<href>`, else its IP lists, else `all`), `port/proto`
+as the service, and Unscoped `y` when the source has no labels. Type the
+ruleset's name or href; a name costs one draft ruleset read at submit, and
+an unknown name brings the form back with similar names.
 
 ## PCE protection
 

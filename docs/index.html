@@ -94,6 +94,7 @@
     <li>Writes labels, IP lists, services and unmanaged workloads from the CLI: profile opt-in plus <code>--allow-writes</code>, <code>--dry-run</code> shows the request, <code>--yes</code> sends it once, every write lands in a local audit log.</li>
     <li>Writes policy from the CLI: rulesets, allow and deny rules with a compact actor grammar (<code>app=web</code>, <code>group:Prod</code>, <code>iplist:Corp</code>, <code>!</code> to exclude), provisioning of everything pending or a chosen few, and label changes on VEN-managed workloads, all with the same dry run, single send and audit log.</li>
     <li>Edits the same objects in the TUI: <code>n</code> new, <code>e</code> edit, <code>x</code> delete, a header marker while writes are on, the exact request on screen before <code>y</code> sends it once, and a pending-changes diff of a draft IP list or service against active.</li>
+    <li>Edits policy in the TUI too: rulesets, allow and deny rules on the Policy screen with the same token grammar, marked or complete provisioning from the pending list after the exact <code>change_subset</code> is shown, a ruleset diff against active, and <code>w</code> to turn a blocked flow into a draft allow rule.</li>
   </ul>
 
   <div class="cols">

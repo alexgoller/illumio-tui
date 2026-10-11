@@ -50,7 +50,7 @@ Module map under `crates/illumio-tui/src/tui/`:
 | `table` | sortable, searchable table state shared by every screen |
 | `form` | the generic edit form (fields, keys, horizontal scroll) |
 | `edit` | edit intents, pre-filled forms, form to library draft or patch |
-| `diff` | draft against active for a pending IP list or service |
+| `diff` | draft against active for a pending IP list, service or ruleset |
 | `ui/` | theme, layout, per-screen drawing and widgets (panels, overlays) |
 
 One message, top to bottom: pressing `r` on Traffic.
@@ -124,10 +124,11 @@ as JSON and applies the patch to that JSON, so untouched providers,
 consumers and services go back exactly as the PCE returned them, unknown
 keys included; the policy models carry an `extra` map for the same reason.
 `plan_provision` reads `sec_policy/pending` once (bypassing the cache) and
-sends an explicit `change_subset`; a pending rule maps to its ruleset. The
-CLI parses actor and service tokens (`ActorToken`, `ServiceToken`) before
-any request and resolves names against lists it fetches at most once per
-command (`Lists`).
+sends an explicit `change_subset`; a pending rule maps to its ruleset.
+The token grammar (`ActorToken`, `ServiceToken`, scopes and the strict href
+helpers) lives in `crates/illumio-tui/src/tokens.rs`, shared by the CLI and
+the TUI. The CLI parses tokens before any request and resolves names against
+lists it fetches at most once per command (`Lists`).
 
 ### TUI editing
 
@@ -158,6 +159,34 @@ overlay keeps a selection; `Enter` sends `Cmd::LoadDiff` with the
 `Pce::active_ip_lists`/`active_services` through the cache and
 `tui/diff.rs` computes `+`/`-`/same lines, so a second diff of the same kind
 within five minutes costs nothing.
+
+### TUI policy editing
+
+Policy writes in the TUI reuse the editing path above. `n`/`e`/`x` on the
+Policy panes (and `N` on the rules pane) build `EditIntent`s from the
+selected ruleset or rule, found by href in `PolicyState.raw` or the
+deny-rule fallback; they refuse in the active scope. `tui/edit.rs` renders a
+rule's actors and services back to tokens through the `NameIndex`
+(`actor_tokens`, `service_tokens`) and resolves typed tokens through it
+(`resolve_actor_tokens`, `resolve_service_tokens`) without a request. An
+edit compares the field's tokens with the shown ones first, so untouched
+entries stay exactly as the PCE returned them, and a field holding an entry
+the grammar cannot express may not change.
+
+`app::plan_intent` maps the intents to the policy planners. A `w` form names
+its ruleset: `RulesetTarget::Name` costs one draft ruleset read through the
+cache before `plan_create_rule`; when the plan fails, the form comes back
+with the error (`TrafficState.rule_form`). `P` in the pending overlay plans a
+`ProvisionRequest` (the marked hrefs, or all), which reads the pending list
+once more past the cache. After `WriteDone` a policy write reloads the draft
+rulesets once with `Bypass` (`PolicyState.quiet_reload` keeps the write's
+report in the status line); a provision also reloads the pending list and
+reports `provisioned <version>: <counts>`, the counts taken from the body
+when `y` was pressed.
+
+`Enter` on a pending ruleset reads the draft rulesets (cached) and the active
+ones (one GET, five minutes); `diff::diff_rule_set` lists name, description,
+state, scopes and one line per rule, matched by href.
 
 ## Testing
 

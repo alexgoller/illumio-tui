@@ -128,3 +128,29 @@ Spec: docs/superpowers/specs/2026-10-11-policy-writes-design.md · Plan: docs/su
   - Task 10: README says `--all` groups every pending type generically, and unknown-name errors list up to five similar names.
 - Parked: wrapping/`who` duplication cosmetic items; ASCII-only case folding in name matches; `workload:` lookups are not cached per token; actors with two kind keys parse by precedence (not a PCE shape); an identical relabel sends a redundant PUT; the singleton parser accepts collection hrefs (explicit targets must be pending); `resolve_labels_as` is compared order-sensitively (redundant PUT, no loss).
 - Final whole-branch review: 0 Critical, 3 Important fixed in one wave (guard table profile-off proof, resolve_labels_as default, provisioning a ruleset pending deletion by name).
+
+## Plan 6: TUI policy editing (rulesets, rules, deny rules, provisioning, ruleset diff, blocked flow to rule)
+Spec: docs/superpowers/specs/2026-10-11-tui-policy-editing-design.md · Plan: docs/superpowers/plans/2026-10-11-tui-policy-editing.md
+- [x] Task 1 Shared token module and TUI token resolution
+- [x] Task 2 Ruleset editing
+- [x] Task 3 Rule and deny-rule editing
+- [x] Task 4 Pending marks and provisioning
+- [x] Task 5 Ruleset pending diff
+- [x] Task 6 Blocked flow to rule (w)
+- [x] Task 7 Help lines and writes-off coverage across screens
+- [x] Task 8 Docs, tracking, final gate and request-free smoke
+
+## Review (Plan 6)
+- Shipped: `n` / `e` / `x` on the Policy rulesets pane (draft only; the active scope says `switch to draft to edit policy`); `n` / `N` / `e` / `x` for allow and deny rules with the CLI's token grammar, resolved through the loaded index without a request; `Space` marks and `P` provisions from the pending overlay, with the exact `change_subset` on the confirm and `provisioned <version>: <counts>` afterwards; `Enter` on a pending ruleset shows its changes against active; `w` on Traffic turns a blocked or potentially blocked flow into a draft allow rule; the token grammar moved to `crates/illumio-tui/src/tokens.rs`, shared by CLI and TUI.
+- Gate: `cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` green, 611 tests, 0 failed (illumio-tui lib 216, cli 24, cli_writes 71, tui_runtime 40, tui_snapshots 38; pce lib 95, client 9, facade 10, live 1, live_writes 2 (skipping), policy_writes 29, recorded 2, traffic_poll 8, write_contract 64; xtask 2).
+- CLI diff vs `0e4ebad` (`src/cli`, `tests/cli.rs`, `tests/cli_writes.rs`): one file, `crates/illumio-tui/src/cli/write.rs` (+12 -426: imports, wrappers, the moved items and their tests); no message, exit code or envelope changed. `crates/pce` diff: one file, `crates/pce/src/resolve.rs` (+36, `service_href` and its test).
+- Smoke against demo100 (headless, `--env-file`, scratch `XDG_STATE_HOME`, `PCE_LIVE_WRITES` unset, the script never presses `y`): A (`--allow-writes`, profile off) `n e x N P w` all say `writes are not enabled`, api calls 5, 6, 6, 6, 7, 7, 7 (only the screen loads and the `p` pending GET cost requests, no editing key did). C (writes on): rule form opened and cancelled (`cancelled, nothing sent`, no request), pending overlay with `Space` mark (`1/4 · 1 marked`), `P` planned one pending GET (7 to 8) and showed the provision confirm, cancelled with `n`; Traffic `r` ran one Explorer query (8 to 12, a read), `w` could not be exercised: demo100's 24h window returned 1000 flows (cap), all allowed, 0 blocked, 0 potentially blocked, so `/blocked` matched no row and `w` said `no row selected`. The `w` form is covered by the unit and runtime tests only. A diagnostic rerun of the Traffic query alone (9 calls) confirmed the counts. No write was sent to any PCE; the TUI write path is proven by the wiremock runtime tests in `tests/tui_runtime.rs` only. The audit file `writes.jsonl` in each scratch state dir (`state6/illumio-tui/` and `state6b/illumio-tui/`) is 0 bytes (0 lines).
+- Deviations reported by tasks:
+  - Task 1: `NameIndex::service_href` is an exact-name match (pending deletions excluded, `None` when ambiguous), not case-insensitive.
+  - Task 2 (fix round): `quiet_reload` is taken before the scope check, so a scope switch cannot leak it into a later load; a dead arm and a delete-summary assertion were fixed.
+  - Task 3: `render_form` shortens the footer hint to `Enter review · Esc cancel` when title plus hint exceed the 70-cell box.
+  - Task 4: the rulesets reload after a provision follows the scope shown, not always draft.
+  - Task 5 (fix round): the ruleset diff carries the model's fallback deny rules for the draft side and says `deny rules: not fetched for <side>` when a side has none inline and no fallback.
+  - Task 6: `EditIntent::RuleFromFlow(Box<ResolvedFlow>)` (clippy `large_enum_variant`).
+  - Task 7: the help key column widened from 24 to 25 cells; the writes-off runtime test counts requests server-side per session.
+- Parked: see the per-task minor lists in `.superpowers/sdd/2026-10-11-tui-policy-editing/progress.md` (untested edges, duplicate-token no-op, a late `DiffLoaded` overwriting an unrelated overlay).
