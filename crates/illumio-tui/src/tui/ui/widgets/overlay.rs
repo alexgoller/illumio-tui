@@ -614,7 +614,7 @@ pub fn render_diff(model: &Model, diff: &ObjectDiff, scroll: u16, f: &mut Frame,
     );
 }
 
-/// Key hints for the status line. With writes on, Objects, Workloads and Policy lead
+/// Key hints for the status line. With writes on, Objects, Workloads, Policy and Traffic lead
 /// with the edit keys and drop their least used hints so the status text
 /// keeps room at 80 columns.
 pub fn screen_hint(screen: Screen, writes: bool) -> &'static str {
@@ -622,6 +622,7 @@ pub fn screen_hint(screen: Screen, writes: bool) -> &'static str {
         (Screen::Objects, true) => "n:new e:edit x:del  Tab type  Enter detail",
         (Screen::Workloads, true) => "n:new e:edit x:del  t/T traffic  Enter detail",
         (Screen::Policy, true) => "n/N:new e:edit x:del  d scope  p pending",
+        (Screen::Traffic, true) => "w:rule  f filter  r run  v view  / search",
         (Screen::Traffic, _) => "f filter  r run  a auto  v view  s sort  / search",
         (Screen::Policy, _) => "d scope  p pending  Enter detail  Tab pane  a auto",
         (Screen::Objects, false) => "Tab type  Enter detail  r refresh  a auto  / search",

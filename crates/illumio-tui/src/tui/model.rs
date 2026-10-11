@@ -682,6 +682,9 @@ pub struct TrafficState {
     /// Aggregate pair (src, dst group keys) the Flows view is narrowed to.
     pub drill: Option<(Vec<String>, Vec<String>)>,
     pub auto: AutoRefresh,
+    /// A submitted `w` form while its plan is on the way: a planner error
+    /// (an unknown ruleset name) brings it back with the error.
+    pub rule_form: Option<Form>,
 }
 
 impl TrafficState {
@@ -699,6 +702,7 @@ impl TrafficState {
             blocked: TableView::new(blocked_columns()),
             drill: None,
             auto: AutoRefresh::new(auto_min_seconds),
+            rule_form: None,
         }
     }
 

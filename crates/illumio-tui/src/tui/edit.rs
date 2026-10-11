@@ -3,8 +3,8 @@
 //! [`WriteIntent`] (delete); [`build_intent`] turns a submitted form into the
 //! draft or patch the library plans. Pure: nothing here reaches the PCE.
 use crate::tokens::{
-    ActorToken, ServiceToken, actor_from_href_token, parse_scope_tokens, service_from_href_token,
-    similar, split_kv, with_exclusion, with_similar,
+    ActorToken, ServiceToken, actor_from_href_token, is_href, parse_scope_tokens,
+    service_from_href_token, similar, split_kv, with_exclusion, with_similar,
 };
 use crate::tui::form::{Field, Form};
 use pce::NameIndex;
@@ -12,11 +12,12 @@ use pce::models::{
     Actor, DenyRule, Fqdn, IngressService, Interface, IpList, Label, Rule, RuleSet, Service,
     Workload,
 };
+use pce::traffic::{ResolvedEndpoint, ResolvedFlow};
 use pce::write::{
     ActorKind, ActorRef, DenyRuleDraft, DenyRulePatch, InterfaceSpec, IpListDraft, IpListPatch,
     IpRangeSpec, LabelDraft, PortSpec, ProvisionRequest, RuleDraft, RulePatch, RuleSetDraft,
     RuleSetPatch, ServiceDraft, ServicePatch, ServiceRef, WorkloadDraft, WorkloadPatch,
-    WriteRequest,
+    WriteRequest, checked_policy_href,
 };
 
 /// Where a new allow rule goes: the selected ruleset (Policy) or the name
@@ -61,6 +62,8 @@ pub enum EditIntent {
     DeleteDenyRule {
         href: String,
     },
+    /// `w` on a blocked flow: a draft allow rule pre-filled from it.
+    RuleFromFlow(Box<ResolvedFlow>),
 }
 
 /// What `Cmd::PlanWrite` carries: the library draft or patch, or the href
@@ -293,6 +296,14 @@ pub fn start(intent: EditIntent, index: Option<&NameIndex>) -> Start {
         }
         EditIntent::DeleteRule { href } => Start::Plan(WriteIntent::DeleteRule { href }),
         EditIntent::DeleteDenyRule { href } => Start::Plan(WriteIntent::DeleteDenyRule { href }),
+        EditIntent::RuleFromFlow(f) => {
+            let fields = flow_rule_fields(&f);
+            form(
+                "Allow rule from flow".into(),
+                fields,
+                EditIntent::RuleFromFlow(f),
+            )
+        }
     }
 }
 
@@ -737,6 +748,78 @@ pub fn ruleset_href_named(sets: &[RuleSet], name: &str) -> Result<String, String
             many.join(", ")
         )),
     }
+}
+
+const RULESET_HINT: &str = "ruleset name or href";
+
+/// An endpoint as actor tokens, the narrowest that is known: its labels,
+/// else its workload, else its IP lists, else `all`.
+fn endpoint_tokens(e: &ResolvedEndpoint) -> Vec<String> {
+    if !e.labels.is_empty() {
+        return e
+            .labels
+            .iter()
+            .map(|l| {
+                if l.key == "?" || l.value.contains([',', '|']) {
+                    l.href.clone()
+                } else {
+                    format!("{}={}", l.key, l.value)
+                }
+            })
+            .collect();
+    }
+    if let Some(h) = &e.workload_href {
+        return vec![format!("workload:{h}")];
+    }
+    if !e.ip_lists.is_empty() {
+        return e.ip_lists.iter().map(|n| format!("iplist:{n}")).collect();
+    }
+    vec!["all".into()]
+}
+
+/// The `w` form: the ruleset to type, then an allow rule from the
+/// destination (providers) to the source (consumers) on the flow's port.
+fn flow_rule_fields(f: &ResolvedFlow) -> Vec<Field> {
+    vec![
+        Field::new("Ruleset", "", RULESET_HINT, true),
+        Field::new(
+            "Providers",
+            endpoint_tokens(&f.dst).join(", "),
+            ACTORS_HINT,
+            true,
+        ),
+        Field::new(
+            "Consumers",
+            endpoint_tokens(&f.src).join(", "),
+            ACTORS_HINT,
+            true,
+        ),
+        Field::new("Services", f.service_text(), SERVICES_HINT, true),
+        Field::new(
+            "Description",
+            format!(
+                "allow {} to {} on {}",
+                f.src.display_name(),
+                f.dst.display_name(),
+                f.service_text()
+            ),
+            "optional",
+            false,
+        ),
+        Field::new("Enabled", "y", YES_NO_HINT, true),
+        Field::new("Unscoped", yn(f.src.labels.is_empty()), UNSCOPED_HINT, true),
+    ]
+}
+
+/// The Ruleset field of a `w` form: an href, checked without a request, or
+/// a name, resolved at plan time with one draft ruleset read.
+fn ruleset_target(text: &str, org_id: u64) -> Result<RulesetTarget, String> {
+    if is_href(text) {
+        return checked_policy_href(text, "rule_sets", org_id)
+            .map(RulesetTarget::Href)
+            .map_err(|e| format!("Ruleset: {e}"));
+    }
+    Ok(RulesetTarget::Name(text.to_string()))
 }
 
 fn join(items: impl Iterator<Item = String>) -> String {
@@ -1379,6 +1462,11 @@ pub fn build_intent(
                     patch,
                 }))
             }
+        }
+        EditIntent::RuleFromFlow(_) => {
+            let ruleset = ruleset_target(&v("Ruleset"), org_id)?;
+            let draft = rule_draft(form, need_index(index)?, org_id)?;
+            Ok(Some(WriteIntent::CreateRule { ruleset, draft }))
         }
         // Deletes never open a form (`start`); a form never carries one.
         EditIntent::DeleteLabel(_)
@@ -2204,5 +2292,114 @@ mod tests {
             ruleset_href_named(&sets, "Global-Infra").unwrap_err(),
             r#""Global-Infra" names several rulesets: /orgs/5/sec_policy/draft/rule_sets/101, /orgs/5/sec_policy/draft/rule_sets/102; use the href"#
         );
+    }
+
+    #[test]
+    fn flow_prefill_covers_every_endpoint_shape() {
+        let flows = crate::tui::test_support::fixture_flows();
+        let f = form(EditIntent::RuleFromFlow(Box::new(flows[1].clone()))); // Corp -> host-1, 8443/tcp
+        assert_eq!(f.title, "Allow rule from flow");
+        assert_eq!(
+            f.fields.iter().map(|x| x.label).collect::<Vec<_>>(),
+            vec![
+                "Ruleset",
+                "Providers",
+                "Consumers",
+                "Services",
+                "Description",
+                "Enabled",
+                "Unscoped"
+            ]
+        );
+        assert_eq!(f.value("Ruleset"), "");
+        assert_eq!(f.value("Providers"), "app=shop, env=prod, role=web");
+        assert_eq!(f.value("Consumers"), "iplist:Corp");
+        assert_eq!(f.value("Services"), "8443/tcp");
+        assert_eq!(
+            f.value("Description"),
+            "allow 10.1.4.9 to host-1.example on 8443/tcp"
+        );
+        assert_eq!((f.value("Enabled"), f.value("Unscoped")), ("y", "y"));
+        let g = form(EditIntent::RuleFromFlow(Box::new(flows[2].clone()))); // unmanaged-nas -> host-2, icmp
+        assert_eq!(g.value("Providers"), "app=shop, env=prod, role=db");
+        assert_eq!(g.value("Consumers"), "workload:/orgs/5/workloads/aaaa-3");
+        assert_eq!(g.value("Services"), "icmp");
+        assert_eq!(
+            g.value("Description"),
+            "allow unmanaged-nas to host-2.example on icmp"
+        );
+        let h = form(EditIntent::RuleFromFlow(Box::new(flows[0].clone()))); // a labelled source
+        assert_eq!(h.value("Consumers"), "app=shop, env=prod, role=web");
+        assert_eq!(h.value("Unscoped"), "n");
+        let mut odd = flows[1].clone();
+        odd.src = pce::traffic::ResolvedEndpoint {
+            ip: Some("10.9.9.9".into()),
+            ..pce::traffic::ResolvedEndpoint::default()
+        };
+        odd.dst.labels.push(pce::ResolvedLabel {
+            href: "/orgs/5/labels/99".into(),
+            key: "?".into(),
+            value: "/orgs/5/labels/99".into(),
+        });
+        let o = form(EditIntent::RuleFromFlow(Box::new(odd.clone())));
+        assert_eq!(
+            o.value("Consumers"),
+            "all",
+            "nothing known about the source"
+        );
+        assert_eq!(
+            o.value("Providers"),
+            "app=shop, env=prod, role=web, /orgs/5/labels/99",
+            "an unknown label keeps its href"
+        );
+        odd.src.workload_href = Some("/orgs/5/workloads/aaaa-9".into());
+        odd.src.ip_lists = vec!["Any (0.0.0.0/0 and ::/0)".into()];
+        let w = form(EditIntent::RuleFromFlow(Box::new(odd)));
+        assert_eq!(
+            w.value("Consumers"),
+            "workload:/orgs/5/workloads/aaaa-9",
+            "a workload is narrower than the IP lists of its address"
+        );
+    }
+
+    #[test]
+    fn a_flow_rule_targets_a_ruleset_by_name_or_checked_href() {
+        let flows = crate::tui::test_support::fixture_flows();
+        let mut f = form(EditIntent::RuleFromFlow(Box::new(flows[1].clone())));
+        set(&mut f, "Ruleset", " Shop-Prod ");
+        let want = RuleDraft {
+            description: Some("allow 10.1.4.9 to host-1.example on 8443/tcp".into()),
+            enabled: true,
+            providers: vec![
+                ActorRef::new(ActorKind::Label, "/orgs/5/labels/3"),
+                ActorRef::new(ActorKind::Label, "/orgs/5/labels/4"),
+                ActorRef::new(ActorKind::Label, "/orgs/5/labels/1"),
+            ],
+            consumers: vec![ActorRef::new(
+                ActorKind::IpList,
+                "/orgs/5/sec_policy/draft/ip_lists/21",
+            )],
+            services: vec![ServiceRef::Port(PortSpec::parse("8443/tcp").unwrap())],
+            unscoped_consumers: true,
+            resolve_labels_as: None,
+        };
+        assert_eq!(
+            build(&f).unwrap(),
+            Some(WriteIntent::CreateRule {
+                ruleset: RulesetTarget::Name("Shop-Prod".into()),
+                draft: want.clone(),
+            })
+        );
+        set(&mut f, "Ruleset", SHOP);
+        assert_eq!(
+            build(&f).unwrap(),
+            Some(WriteIntent::CreateRule {
+                ruleset: RulesetTarget::Href(SHOP.into()),
+                draft: want,
+            })
+        );
+        set(&mut f, "Ruleset", "/orgs/9/sec_policy/draft/rule_sets/100");
+        let err = build(&f).unwrap_err();
+        assert!(err.starts_with("Ruleset: "), "{err}");
     }
 }

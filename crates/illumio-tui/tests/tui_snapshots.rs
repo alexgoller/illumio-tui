@@ -811,3 +811,31 @@ fn pending_rule_set_diff_80x24() {
         render_styled(&m, 80, 24)
     );
 }
+
+#[test]
+fn rule_from_flow_form_80x24() {
+    use illumio_tui::tui::edit::{EditIntent, form_for};
+    use illumio_tui::tui::model::Overlay;
+    use illumio_tui::tui::test_support::{fixture_flows, fixture_index};
+    let mut m = model_with_flows();
+    let idx = fixture_index();
+    m.overlay = Overlay::Form(
+        form_for(
+            EditIntent::RuleFromFlow(Box::new(fixture_flows()[1].clone())),
+            Some(idx.as_ref()),
+        )
+        .expect("a form"),
+    );
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("Allow rule from flow"), "{out}");
+    assert!(out.contains("Ruleset*"), "{out}");
+    assert!(out.contains("app=shop, env=prod, role=web"), "{out}");
+    assert!(out.contains("iplist:Corp"), "{out}");
+    assert!(out.contains("8443/tcp"), "{out}");
+    insta::assert_snapshot!("form_rule_from_flow_80x24", out);
+    m.set_theme("light");
+    insta::assert_snapshot!(
+        "form_rule_from_flow_light_styled_80x24",
+        render_styled(&m, 80, 24)
+    );
+}

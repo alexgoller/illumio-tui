@@ -1822,3 +1822,73 @@ async fn ruleset_diff_fetches_the_active_rulesets_once() {
     );
     assert_eq!(model.busy, 0);
 }
+
+#[tokio::test]
+async fn w_creates_a_rule_in_the_named_ruleset() {
+    use illumio_tui::tui::test_support::model_with_flows;
+    let server = MockServer::start().await;
+    mount_rule_sets(&server, 2).await; // the name lookup + the reload
+    let body = json!({
+        "enabled": true,
+        "providers": [
+            {"label": {"href": "/orgs/5/labels/3"}},
+            {"label": {"href": "/orgs/5/labels/4"}},
+            {"label": {"href": "/orgs/5/labels/1"}}
+        ],
+        "consumers": [{"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/21"}}],
+        "ingress_services": [{"port": 8443, "proto": 6}],
+        "unscoped_consumers": true,
+        "description": "allow 10.1.4.9 to host-1.example on 8443/tcp",
+        "resolve_labels_as": {"providers": ["workloads"], "consumers": ["workloads"]}
+    });
+    let mut created = body.clone();
+    created["href"] = json!("/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/9");
+    Mock::given(method("POST"))
+        .and(path(
+            "/api/v2/orgs/5/sec_policy/draft/rule_sets/100/sec_rules",
+        ))
+        .and(body_json(body))
+        .respond_with(ResponseTemplate::new(201).set_body_json(created))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let audit = MemoryAudit::new();
+    // Connected with the fixture index and the fixture flows already shown.
+    let mut m = model_with_flows();
+    m.writes = WritesState::on();
+    let (mut rt, _tx) = Runtime::with_writer(pce_for(&server), m, tui_guard(audit.clone()));
+    let mut keys = vec![(100, ch('j')), (50, ch('w'))]; // the potentially blocked flow
+    keys.extend(typed("Shop-Prod"));
+    keys.extend([(50, KeyCode::Enter), (300, ch('y')), (400, KeyCode::F(12))]);
+    let model = run_loop(&mut rt, Box::pin(press(keys)), &mut |_| {}).await;
+    assert_eq!(
+        model.status.text,
+        "created /orgs/5/sec_policy/draft/rule_sets/100/sec_rules/9 (pending)"
+    );
+    assert_eq!(
+        model.stats.calls, 3,
+        "one rulesets GET for the name, the POST, one rulesets reload"
+    );
+    assert_eq!(writes_seen(&server).await, vec!["POST"]);
+    assert_eq!(audit.entries().len(), 1);
+    assert_eq!(model.busy, 0);
+}
+
+#[tokio::test]
+async fn w_on_an_allowed_flow_sends_nothing() {
+    use illumio_tui::tui::test_support::model_with_flows;
+    let server = MockServer::start().await;
+    let mut m = model_with_flows();
+    m.writes = WritesState::on();
+    let (mut rt, _tx) = Runtime::with_writer(pce_for(&server), m, tui_guard(MemoryAudit::new()));
+    let keys = vec![(100, ch('w')), (200, KeyCode::F(12))]; // row 0 is allowed
+    let model = run_loop(&mut rt, Box::pin(press(keys)), &mut |_| {}).await;
+    assert_eq!(model.status.text, "this flow is allowed; nothing to add");
+    assert!(
+        server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .is_empty()
+    );
+}

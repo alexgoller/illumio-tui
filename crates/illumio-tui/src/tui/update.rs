@@ -10,7 +10,7 @@ use crate::tui::model::{
 use crate::tui::msg::{Cmd, Msg, ObjectsPayload, QueryOutcome};
 use crate::tui::ui::widgets::overlay::{confirm_write_last_scroll, help_last_scroll};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use pce::models::{EventFilter, PolicyScope};
+use pce::models::{EventFilter, PolicyDecision, PolicyScope};
 use pce::traffic::QueryProgress;
 use pce::write::{Outcome, Plan, ProvisionRequest, ProvisionSubset, WriteError, provision_counts};
 use pce::{CacheMode, RuleKind, WriteMethod};
@@ -541,6 +541,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         }
         Msg::Planned(result) => {
             model.writes.in_flight = false;
+            let flow_form = model.traffic.rule_form.take();
             match result {
                 // Keys typed while the plan was on its way belong to the
                 // overlay they went to; a `y` there must not confirm this.
@@ -572,7 +573,17 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         false,
                     );
                 }
-                Err(e) => fail(model, "write", &e, false),
+                Err(e) => {
+                    // A `w` form comes back with the planner's answer (an
+                    // unknown ruleset name lists similar ones), fields as typed.
+                    if let Some(mut f) = flow_form
+                        && model.overlay == Overlay::None
+                    {
+                        f.error = Some(e.clone());
+                        model.overlay = Overlay::Form(f);
+                    }
+                    fail(model, "write", &e, false);
+                }
             }
             Vec::new()
         }
@@ -859,6 +870,9 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     model.profile.org_id,
                 ) {
                     Ok(Some(intent)) => {
+                        if matches!(form.intent, EditIntent::RuleFromFlow(_)) {
+                            model.traffic.rule_form = Some(form);
+                        }
                         model.overlay = Overlay::None;
                         model.status = StatusLine::info("planning…");
                         model.writes.in_flight = true;
@@ -1110,6 +1124,7 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         KeyCode::Char('a') => {
             model.status = model.traffic.auto.toggle();
         }
+        KeyCode::Char('w') => return flow_rule_key(model),
         KeyCode::Char('g') => {
             model.overlay = Overlay::GroupKeys {
                 input: model.traffic.group_keys.join(","),
@@ -1969,6 +1984,36 @@ fn rule_intent(p: &PolicyState, c: char) -> Option<EditIntent> {
         (_, false) => p
             .find_deny_rule(&href)
             .map(|(d, rs)| EditIntent::UpdateDenyRule(d, rs)),
+    }
+}
+
+/// `w` on Traffic: a draft allow rule from the selected blocked or
+/// potentially blocked flow (Flows view or a drilled pair). The aggregated
+/// views carry names, not label hrefs, so they refuse.
+fn flow_rule_key(model: &mut Model) -> Vec<Cmd> {
+    if writes_refused(model) {
+        return Vec::new();
+    }
+    if model.traffic.view != TrafficView::Flows {
+        model.status = StatusLine::warn("select a flow in the Flows view (Enter on a pair)");
+        return Vec::new();
+    }
+    let Some(flow) = model.traffic.flows.selected_item().cloned() else {
+        model.status = StatusLine::warn("no row selected");
+        return Vec::new();
+    };
+    match flow.policy_decision {
+        PolicyDecision::Blocked | PolicyDecision::PotentiallyBlocked => {
+            begin_edit(model, EditIntent::RuleFromFlow(Box::new(flow)))
+        }
+        PolicyDecision::Allowed => {
+            model.status = StatusLine::warn("this flow is allowed; nothing to add");
+            Vec::new()
+        }
+        PolicyDecision::Unknown => {
+            model.status = StatusLine::warn("this flow has no policy decision; nothing to add");
+            Vec::new()
+        }
     }
 }
 
@@ -6130,6 +6175,85 @@ mod tests {
                 kind: pce::write::ObjectKind::RuleSet,
                 fallback_deny: Some(vec![fetched]),
             }]
+        );
+    }
+
+    #[test]
+    fn w_opens_the_flow_form_only_for_a_blocked_flow() {
+        use crate::tui::test_support::model_with_flows;
+        let mut m = model_with_flows();
+        assert!(update(&mut m, key('w')).is_empty());
+        assert_eq!(m.status.text, "started without --allow-writes");
+        let mut m = writes_on(model_with_flows());
+        assert!(update(&mut m, key('w')).is_empty(), "row 0 is allowed");
+        assert_eq!(m.status.kind, StatusKind::Warn);
+        assert_eq!(m.status.text, "this flow is allowed; nothing to add");
+        assert_eq!(m.overlay, Overlay::None);
+        update(&mut m, key('j'));
+        assert!(update(&mut m, key('w')).is_empty());
+        assert!(
+            matches!(&m.overlay, Overlay::Form(f) if f.title == "Allow rule from flow"),
+            "{:?}",
+            m.overlay
+        );
+        update(&mut m, kc(KeyCode::Esc));
+        for view in [TrafficView::Aggregate, TrafficView::Blocked] {
+            m.traffic.view = view;
+            assert!(update(&mut m, key('w')).is_empty());
+            assert_eq!(
+                m.status.text,
+                "select a flow in the Flows view (Enter on a pair)"
+            );
+            assert_eq!(m.overlay, Overlay::None);
+        }
+    }
+
+    #[test]
+    fn an_unknown_ruleset_name_reopens_the_w_form_with_the_error() {
+        use crate::tui::edit::{RulesetTarget, WriteIntent};
+        use crate::tui::test_support::{label_post_plan, model_with_flows};
+        let mut m = writes_on(model_with_flows());
+        update(&mut m, key('j'));
+        update(&mut m, key('w'));
+        for c in "Shop".chars() {
+            update(&mut m, key(c));
+        }
+        let cmds = update(&mut m, enter());
+        assert!(
+            matches!(
+                cmds.as_slice(),
+                [Cmd::PlanWrite(WriteIntent::CreateRule { ruleset: RulesetTarget::Name(n), .. })]
+                    if n == "Shop"
+            ),
+            "{cmds:?}"
+        );
+        assert!(m.traffic.rule_form.is_some());
+        let e = r#"no ruleset named "Shop"; similar: Shop-Prod"#;
+        assert!(update(&mut m, Msg::Planned(Err(e.into()))).is_empty());
+        match &m.overlay {
+            Overlay::Form(f) => {
+                assert_eq!(f.error.as_deref(), Some(e));
+                assert_eq!(f.value("Ruleset"), "Shop");
+                assert_eq!(f.value("Consumers"), "iplist:Corp", "the fields as typed");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(m.status.text, format!("write: {e}"));
+        assert!(m.traffic.rule_form.is_none());
+        // Fixed and submitted again: a plan that arrives leaves nothing behind.
+        for c in "-Prod".chars() {
+            update(&mut m, key(c));
+        }
+        assert_eq!(update(&mut m, enter()).len(), 1);
+        update(
+            &mut m,
+            Msg::Planned(Ok((label_post_plan(), pce::write::ObjectKind::Rule))),
+        );
+        assert!(m.traffic.rule_form.is_none());
+        assert!(
+            matches!(m.overlay, Overlay::ConfirmWrite { .. }),
+            "{:?}",
+            m.overlay
         );
     }
 }

@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Labels & objects  │  4 Workloads  │  5 Events
+╭ Filters ────────────────────────────────── window 24h · cap 1000 · unbounded ╮
+│wind╭ Allow rule from flow ──────── Tab next · Enter review · Esc cancel ╮    │
+╰────│▸ Ruleset*      ▏                                                   │────╯
+╭ Res│                ruleset name or href                                │ago ╮
+│4 fl│  Providers*    app=shop, env=prod, role=web                        │████│
+╰────│                app=web, group:Name, iplist:Corp, all, !env=dev     │────╯
+╭ Flo│  Consumers*    iplist:Corp                                         │────╮
+│  la│                app=web, group:Name, iplist:Corp, all, !env=dev     │    │
+│▸ 10│  Services*     8443/tcp                                            │    │
+│  10│                443/tcp, 8000-8100/udp, icmp, HTTPS                 │    │
+│  10│  Description   allow 10.1.4.9 to host-1.example on 8443/tcp        │    │
+│  10│                optional                                            │    │
+│    │  Enabled*      y                                                   │    │
+│    │                y or n                                              │    │
+╰────│  Unscoped*     y                                                   │────╯
+╭ Det│                y: consumers outside the ruleset's scope            │ows ╮
+│sele│* required                                                          │    │
+│    ╰────────────────────────────────────────────────────────────────────╯    │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ready          f filter  r run  a auto  v view  s sort  / search  : cmd  ? help
