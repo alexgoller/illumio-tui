@@ -745,7 +745,8 @@ impl TrafficState {
         self.flows.set_rows(shown);
         self.groups
             .set_rows(group_by_labels(&flows, &self.group_keys));
-        self.blocked.set_rows(blocked_summary(&flows));
+        self.blocked
+            .set_rows(blocked_summary(&flows, &self.group_keys));
     }
 
     /// Whether the active view's table is capturing keys for a search.

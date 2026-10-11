@@ -61,6 +61,46 @@ pub fn fixture_flows() -> Vec<ResolvedFlow> {
     resolve_flows(&raw, &fixture_index())
 }
 
+/// The 30-flow fixture (4 apps x 2 envs, roles, `loc`, `datacenter` on
+/// some workloads, the Corp IP list, an FQDN, users, processes, both
+/// directions, bytes on 9 flows), resolved with its own extra labels.
+pub fn fixture_flows_rich() -> Vec<ResolvedFlow> {
+    let mut labels: Vec<Label> =
+        serde_json::from_str(include_str!("../../../../fixtures/labels.json"))
+            .expect("labels fixture");
+    let rich: Vec<Label> = serde_json::from_str(include_str!(
+        "../../../../fixtures/traffic_labels_rich.json"
+    ))
+    .expect("rich labels fixture");
+    labels.extend(rich);
+    let groups: Vec<LabelGroup> =
+        serde_json::from_str(include_str!("../../../../fixtures/label_groups.json"))
+            .expect("groups fixture");
+    let lists: Vec<IpList> =
+        serde_json::from_str(include_str!("../../../../fixtures/ip_lists.json"))
+            .expect("ip lists fixture");
+    let services: Vec<Service> =
+        serde_json::from_str(include_str!("../../../../fixtures/services.json"))
+            .expect("services fixture");
+    let idx = NameIndex::new(&labels, &groups, &lists, &services);
+    let raw: Vec<Flow> =
+        serde_json::from_str(include_str!("../../../../fixtures/traffic_flows_rich.json"))
+            .expect("rich flows fixture");
+    resolve_flows(&raw, &idx)
+}
+
+/// A connected model with the rich fixture loaded as a finished query.
+pub fn model_with_rich_flows() -> Model {
+    let mut m = model_with_flows();
+    let flows = fixture_flows_rich();
+    if let Some(d) = m.traffic.data.as_mut() {
+        d.matches_count = Some(flows.len() as u64);
+        d.flows = flows;
+    }
+    m.traffic.rebuild_views();
+    m
+}
+
 /// A connected model with the fixture flows loaded as a finished query.
 pub fn model_with_flows() -> Model {
     let mut m = model_fixture();

@@ -366,7 +366,12 @@ async fn query(ctx: &Context, args: &QueryArgs) -> Result<(), CliError> {
     let cache = cache_label(result.hit, ctx.cache_mode);
     let flows = resolve_flows(&result.value.flows, &idx);
     if args.blocked {
-        ctx.emit(&blocked_summary(&flows), cache, result.truncated, window)
+        ctx.emit(
+            &blocked_summary(&flows, &ctx.config.scope_keys),
+            cache,
+            result.truncated,
+            window,
+        )
     } else if !args.group.is_empty() {
         ctx.emit(
             &group_by_labels(&flows, &args.group),

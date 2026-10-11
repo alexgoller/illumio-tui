@@ -1,0 +1,9 @@
+[
+  {"href":"/orgs/5/labels/101","key":"app","value":"crm","deleted":false},
+  {"href":"/orgs/5/labels/102","key":"app","value":"erp","deleted":false},
+  {"href":"/orgs/5/labels/103","key":"app","value":"hr","deleted":false},
+  {"href":"/orgs/5/labels/104","key":"env","value":"dev","deleted":false},
+  {"href":"/orgs/5/labels/105","key":"role","value":"api","deleted":false},
+  {"href":"/orgs/5/labels/106","key":"loc","value":"us","deleted":false},
+  {"href":"/orgs/5/labels/107","key":"datacenter","value":"fra1","deleted":false}
+]

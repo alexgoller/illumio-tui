@@ -87,9 +87,23 @@ pub struct ResolvedFlow {
     pub first_detected: Option<String>,
     pub last_detected: Option<String>,
     pub rules: Vec<String>,
+    /// Bytes the destination received (`dst_bi`), when the PCE reported it.
+    pub bytes_in: Option<u64>,
+    /// Bytes the destination sent (`dst_bo`), when the PCE reported it.
+    pub bytes_out: Option<u64>,
 }
 
 impl ResolvedFlow {
+    /// `bytes_in + bytes_out`, 0 when the PCE reported neither.
+    pub fn bytes(&self) -> u64 {
+        self.bytes_in.unwrap_or(0) + self.bytes_out.unwrap_or(0)
+    }
+
+    /// Whether the PCE reported a byte count for this flow.
+    pub fn has_bytes(&self) -> bool {
+        self.bytes_in.is_some() || self.bytes_out.is_some()
+    }
+
     /// `5432/tcp`, or just `icmp` when there is no port.
     pub fn service_text(&self) -> String {
         match self.port {
@@ -126,6 +140,8 @@ pub fn resolve_flows(flows: &[Flow], idx: &NameIndex) -> Vec<ResolvedFlow> {
                 .as_ref()
                 .and_then(|t| t.last_detected.clone()),
             rules: f.rules.iter().map(|r| r.href.clone()).collect(),
+            bytes_in: f.dst_bi,
+            bytes_out: f.dst_bo,
         })
         .collect()
 }
@@ -146,6 +162,35 @@ pub(crate) mod tests {
         let services: Vec<Service> =
             serde_json::from_str(include_str!("../../../../fixtures/services.json")).unwrap();
         NameIndex::new(&labels, &groups, &lists, &services)
+    }
+
+    /// `index()` plus the labels only the rich fixture uses (`app=crm`,
+    /// `env=dev`, `role=api`, `loc=us`, `datacenter=fra1`, ...).
+    pub(crate) fn rich_index() -> NameIndex {
+        let mut labels: Vec<Label> =
+            serde_json::from_str(include_str!("../../../../fixtures/labels.json")).unwrap();
+        let rich: Vec<Label> = serde_json::from_str(include_str!(
+            "../../../../fixtures/traffic_labels_rich.json"
+        ))
+        .unwrap();
+        labels.extend(rich);
+        let groups: Vec<LabelGroup> =
+            serde_json::from_str(include_str!("../../../../fixtures/label_groups.json")).unwrap();
+        let lists: Vec<IpList> =
+            serde_json::from_str(include_str!("../../../../fixtures/ip_lists.json")).unwrap();
+        let services: Vec<Service> =
+            serde_json::from_str(include_str!("../../../../fixtures/services.json")).unwrap();
+        NameIndex::new(&labels, &groups, &lists, &services)
+    }
+
+    /// The 30-flow fixture: 4 apps x 2 envs, roles, `loc`, `datacenter` on
+    /// some workloads, the Corp IP list and an FQDN, users, processes, both
+    /// directions, bytes on 9 flows.
+    pub(crate) fn rich_flows() -> Vec<ResolvedFlow> {
+        let raw: Vec<Flow> =
+            serde_json::from_str(include_str!("../../../../fixtures/traffic_flows_rich.json"))
+                .unwrap();
+        resolve_flows(&raw, &rich_index())
     }
 
     pub(crate) fn flows() -> Vec<ResolvedFlow> {
@@ -172,6 +217,29 @@ pub(crate) mod tests {
             f[3].rules,
             vec!["/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/2"]
         );
+    }
+
+    #[test]
+    fn bytes_are_copied_from_dst_bi_and_dst_bo() {
+        let f = flows();
+        assert_eq!(
+            (f[0].bytes_in, f[0].bytes_out),
+            (Some(120_000), Some(4_000))
+        );
+        assert_eq!(f[0].bytes(), 124_000);
+        assert!(f[0].has_bytes());
+        assert_eq!((f[1].bytes_in, f[1].bytes_out), (None, None));
+        assert_eq!(f[1].bytes(), 0);
+        assert!(!f[1].has_bytes());
+        let rich = rich_flows();
+        assert_eq!(rich.len(), 30);
+        assert_eq!(rich.iter().filter(|f| f.has_bytes()).count(), 9);
+        assert_eq!(
+            rich.iter().map(ResolvedFlow::bytes).sum::<u64>(),
+            13_625_100
+        );
+        assert_eq!(rich[4].src.label_value("app"), Some("crm"));
+        assert_eq!(rich[4].src.label_value("datacenter"), Some("fra1"));
     }
 
     #[test]

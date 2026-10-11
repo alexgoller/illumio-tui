@@ -6,7 +6,10 @@ pub mod poll;
 pub mod query;
 pub mod resolved;
 
-pub use aggregate::{BlockedGroup, FlowGroup, blocked_summary, group_by_labels};
+pub use aggregate::{
+    BLOCKED_NAMES, BlockedGroup, Dominant, FlowGroup, blocked_summary, compact_count, dominant,
+    group_by_labels, group_key, group_text, group_values, keys_or_default, keys_seen,
+};
 pub use filter::{FilterExpr, resolve_actor};
 pub use poll::{PollConfig, QueryProgress, TrafficResult, run_traffic_query};
 pub use query::{
