@@ -95,8 +95,9 @@ the full tab row the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`, `IPs`.
   `i` reads the workload list once (unless the Workloads screen already did) for rule impact:
   the rule detail says how many workloads the rule matches (`impact      12 providers · 3
   consumers`, `≥` when the list was truncated) and the size of each IP list it names, the
-  rules pane's `P/C` column fills in, and a rule's confirm overlay shows the same for the rule
-  about to be written. Impact uses the ruleset's scopes, unscoped consumers, label groups (with
+  rules pane's `P/C` column fills in (`1.2K/5.7K` from 1000 on), a note names what was not
+  counted (virtual services, a side resolved as `virtual_services`), and a rule's confirm
+  overlay shows the same for the rule about to be written. Impact uses the ruleset's scopes, unscoped consumers, label groups (with
   their sub-groups), exclusions, `all` and workload actors; IP lists are sized, never expanded.
 - **Objects**: labels, label groups and services; `Tab` next type, `Enter` detail.
 - **IP lists**: name, size (addresses after exclusions: `65.5K`, `16.8M` for a /8; `any` only
@@ -120,8 +121,8 @@ actually in use.
 
 Startup makes exactly five requests (health plus the four object lists). The first visit to
 Workloads and to Events costs one request each; going back to them costs none. IP lists (`6`)
-cost none: the startup load already read them. Rule impact costs one workloads read on `i`,
-none when the list is cached. Everything else is caused by a key you press. The header shows
+cost none within the cache TTL (15 minutes): the startup load already read them. Rule impact
+costs one workloads read on `i`, none when the list is cached. Everything else is caused by a key you press. The header shows
 the API call and byte counters at all times.
 
 ## CLI

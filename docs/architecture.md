@@ -248,7 +248,7 @@ TUI evaluate exactly what would be sent.
 The TUI reads the workload list only on `i` (`Cmd::LoadWorkloads(Use)`,
 nothing when it is cached or on its way). `tui/impact.rs` computes from
 `PolicyState.raw`, the index and `WorkloadsState.raw`: the rules pane's
-`P/C` cells and each rule's stored `Impact` when the rows are built
+`P/C` cells (`Impact::pc_compact`, at most 11 cells) and each rule's stored `Impact` when the rows are built
 (`RuleRow`; a column's `fn` cannot see the cache), and the confirm overlay's
 line (`PolicyState.confirm_impact`) when the confirm opens, on `i` and on a
 workloads or rulesets load. Drawing only reads what is stored, and a late
