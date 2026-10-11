@@ -5,7 +5,7 @@ use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::form::FormEvent;
 use crate::tui::model::{
     Connection, EventsFilterEdit, Model, ObjectKind, Overlay, PendingAction, PolicyPane,
-    QueryState, Screen, StatusLine, TrafficData, TrafficView,
+    PolicyState, QueryState, Screen, StatusLine, TrafficData, TrafficView,
 };
 use crate::tui::msg::{Cmd, Msg, ObjectsPayload, QueryOutcome};
 use crate::tui::ui::widgets::overlay::{confirm_write_last_scroll, help_last_scroll};
@@ -265,6 +265,8 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 return Vec::new(); // the user toggled draft/active meanwhile
             }
             model.policy.loading = false;
+            // A reload a write asked for keeps the write's report.
+            let quiet = std::mem::take(&mut model.policy.quiet_reload);
             match result {
                 Ok((raw, age)) => {
                     model.policy.loaded_at = Some(Instant::now());
@@ -281,11 +283,13 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         Some(idx) => model.policy.set_rule_sets(raw, &idx),
                         None => model.policy.raw = raw, // built when the index arrives
                     }
-                    model.status = StatusLine::info(format!(
-                        "{} rulesets ({})",
-                        model.policy.rulesets.len(),
-                        model.policy.scope.segment()
-                    ));
+                    if !quiet {
+                        model.status = StatusLine::info(format!(
+                            "{} rulesets ({})",
+                            model.policy.rulesets.len(),
+                            model.policy.scope.segment()
+                        ));
+                    }
                     // Only the selected ruleset's deny rules are fetched on demand;
                     // an explicit `r` bypasses the cache for them as well.
                     let mode = if std::mem::take(&mut model.policy.bypass_deny) {
@@ -822,7 +826,11 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 Vec::new()
             }
             FormEvent::Submit => {
-                match edit::build_intent(&form, model.index().map(|i| i.as_ref())) {
+                match edit::build_intent(
+                    &form,
+                    model.index().map(|i| i.as_ref()),
+                    model.profile.org_id,
+                ) {
                     Ok(Some(intent)) => {
                         model.overlay = Overlay::None;
                         model.status = StatusLine::info("planning…");
@@ -1273,6 +1281,9 @@ fn policy_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 model.status = model.policy.auto.toggle();
                 return Vec::new();
             }
+            KeyCode::Char(c @ ('n' | 'e' | 'x')) if model.policy.pane == PolicyPane::RuleSets => {
+                return policy_edit_key(model, c);
+            }
             KeyCode::Tab | KeyCode::BackTab => {
                 model.policy.pane = match model.policy.pane {
                     PolicyPane::RuleSets => PolicyPane::Rules,
@@ -1383,11 +1394,19 @@ fn reload_after_write(model: &mut Model, kind: pce::write::ObjectKind) -> Vec<Cm
             load_objects(model, ObjectKind::Services, CacheMode::Bypass)
         }
         pce::write::ObjectKind::Workload => load_workloads(model, CacheMode::Bypass),
-        // Policy kinds are written by the CLI only (Plan 6 brings them here).
+        // A draft write changes the draft view only; the reload keeps the
+        // write's report in the status line.
         pce::write::ObjectKind::RuleSet
         | pce::write::ObjectKind::Rule
-        | pce::write::ObjectKind::DenyRule
-        | pce::write::ObjectKind::Provision => Vec::new(),
+        | pce::write::ObjectKind::DenyRule => {
+            if model.policy.scope != PolicyScope::Draft {
+                return Vec::new();
+            }
+            model.policy.quiet_reload = true;
+            load_rule_sets(model, CacheMode::Bypass)
+        }
+        // Not started from the TUI yet.
+        pce::write::ObjectKind::Provision => Vec::new(),
     }
 }
 
@@ -1791,6 +1810,39 @@ fn workloads_edit_key(model: &mut Model, c: char) -> Vec<Cmd> {
         EditIntent::DeleteWorkload(w)
     };
     begin_edit(model, intent)
+}
+
+/// `n` / `e` / `x` on Policy (and `N` on the rules pane): draft only.
+fn policy_edit_key(model: &mut Model, c: char) -> Vec<Cmd> {
+    if writes_refused(model) {
+        return Vec::new();
+    }
+    if model.policy.scope == PolicyScope::Active {
+        model.status = StatusLine::warn("switch to draft to edit policy");
+        return Vec::new();
+    }
+    let intent = match model.policy.pane {
+        PolicyPane::RuleSets => ruleset_intent(&model.policy, c),
+        PolicyPane::Rules => None,
+    };
+    let Some(intent) = intent else {
+        model.status = StatusLine::warn("no row selected");
+        return Vec::new();
+    };
+    begin_edit(model, intent)
+}
+
+/// `n` a new ruleset; `e` / `x` the selected one.
+fn ruleset_intent(p: &PolicyState, c: char) -> Option<EditIntent> {
+    if c == 'n' {
+        return Some(EditIntent::CreateRuleSet);
+    }
+    let rs = p.selected_rule_set()?.clone();
+    Some(if c == 'e' {
+        EditIntent::UpdateRuleSet(rs)
+    } else {
+        EditIntent::DeleteRuleSet(rs)
+    })
 }
 
 /// `:draft` / `:active`: like `d` on the Policy screen, but explicit. The scope
@@ -5447,7 +5499,8 @@ mod tests {
                     f.fields[4].value = "app=web2".into();
                     f
                 },
-                Some(idx.as_ref())
+                Some(idx.as_ref()),
+                5
             )
             .is_ok_and(|i| i.is_some())
         );
@@ -5480,6 +5533,131 @@ mod tests {
             matches!(&m.overlay, Overlay::ConfirmWrite { scroll: 2, .. }),
             "{:?}",
             m.overlay
+        );
+    }
+
+    #[test]
+    fn ruleset_keys_open_forms_and_x_plans_the_delete() {
+        use crate::tui::edit::WriteIntent;
+        use crate::tui::test_support::model_with_policy;
+        let mut m = writes_on(model_with_policy());
+        m.screen = Screen::Policy;
+        assert!(update(&mut m, key('n')).is_empty());
+        assert!(
+            matches!(&m.overlay, Overlay::Form(f) if f.title == "New ruleset"),
+            "{:?}",
+            m.overlay
+        );
+        update(&mut m, kc(KeyCode::Esc));
+        assert!(update(&mut m, key('e')).is_empty());
+        assert!(
+            matches!(&m.overlay, Overlay::Form(f) if f.title == "Edit ruleset Shop-Prod"),
+            "{:?}",
+            m.overlay
+        );
+        update(&mut m, kc(KeyCode::Esc));
+        assert_eq!(
+            update(&mut m, key('x')),
+            vec![Cmd::PlanWrite(WriteIntent::DeleteRuleSet {
+                href: "/orgs/5/sec_policy/draft/rule_sets/100".into(),
+                name: "Shop-Prod".into(),
+            })]
+        );
+        assert!(m.writes.in_flight);
+        assert!(update(&mut m, key('e')).is_empty(), "one write at a time");
+        assert_eq!(m.status.text, "a write is already in progress");
+    }
+
+    #[test]
+    fn policy_keys_refuse_in_the_active_scope_and_without_a_selection() {
+        use crate::tui::test_support::model_with_policy;
+        let mut m = model_with_policy();
+        m.screen = Screen::Policy;
+        for c in ['n', 'e', 'x'] {
+            assert!(update(&mut m, key(c)).is_empty(), "{c}");
+            assert_eq!(m.status.kind, StatusKind::Warn);
+            assert_eq!(m.status.text, "started without --allow-writes");
+            assert_eq!(m.overlay, Overlay::None);
+        }
+        let mut m = writes_on(model_with_policy());
+        m.screen = Screen::Policy;
+        m.policy.scope = PolicyScope::Active;
+        for c in ['n', 'e', 'x'] {
+            assert!(update(&mut m, key(c)).is_empty(), "{c}");
+            assert_eq!(m.status.kind, StatusKind::Warn);
+            assert_eq!(m.status.text, "switch to draft to edit policy");
+            assert_eq!(m.overlay, Overlay::None);
+        }
+        let mut m = writes_on(model_fixture());
+        m.screen = Screen::Policy;
+        for c in ['e', 'x'] {
+            assert!(update(&mut m, key(c)).is_empty(), "{c}");
+            assert_eq!(m.status.text, "no row selected");
+            assert_eq!(m.overlay, Overlay::None);
+        }
+    }
+
+    #[test]
+    fn a_policy_write_reloads_the_draft_rulesets_and_keeps_the_report() {
+        use crate::tui::test_support::model_with_policy;
+        use pce::write::Outcome;
+        let mut m = model_with_policy();
+        m.screen = Screen::Policy;
+        let cmds = update(
+            &mut m,
+            Msg::WriteDone {
+                kind: pce::write::ObjectKind::RuleSet,
+                method: Some(pce::WriteMethod::Post),
+                result: Ok(Outcome::Written(written(
+                    "/orgs/5/sec_policy/draft/rule_sets/102",
+                    true,
+                ))),
+            },
+        );
+        assert_eq!(
+            cmds,
+            vec![Cmd::LoadRuleSets {
+                scope: PolicyScope::Draft,
+                mode: pce::CacheMode::Bypass
+            }]
+        );
+        let report = "created /orgs/5/sec_policy/draft/rule_sets/102 (pending)";
+        assert_eq!(m.status.text, report);
+        let sets = m.policy.raw.clone();
+        update(
+            &mut m,
+            Msg::RuleSetsLoaded {
+                scope: PolicyScope::Draft,
+                result: Ok((sets.clone(), 0)),
+            },
+        );
+        assert_eq!(m.status.text, report, "the reload keeps the write's report");
+        update(
+            &mut m,
+            Msg::RuleSetsLoaded {
+                scope: PolicyScope::Draft,
+                result: Ok((sets, 0)),
+            },
+        );
+        assert_eq!(
+            m.status.text, "2 rulesets (draft)",
+            "only that one reload is quiet"
+        );
+        m.policy.scope = PolicyScope::Active;
+        let cmds = update(
+            &mut m,
+            Msg::WriteDone {
+                kind: pce::write::ObjectKind::Rule,
+                method: Some(pce::WriteMethod::Delete),
+                result: Ok(Outcome::Written(written(
+                    "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1",
+                    true,
+                ))),
+            },
+        );
+        assert!(
+            cmds.is_empty(),
+            "a draft write does not change the active view"
         );
     }
 }

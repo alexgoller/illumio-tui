@@ -3,15 +3,18 @@
 //! [`WriteIntent`] (delete); [`build_intent`] turns a submitted form into the
 //! draft or patch the library plans. Pure: nothing here reaches the PCE.
 use crate::tokens::{
-    ActorToken, ServiceToken, actor_from_href_token, service_from_href_token, similar, split_kv,
-    with_exclusion, with_similar,
+    ActorToken, ServiceToken, actor_from_href_token, parse_scope_tokens, service_from_href_token,
+    similar, split_kv, with_exclusion, with_similar,
 };
 use crate::tui::form::{Field, Form};
 use pce::NameIndex;
-use pce::models::{Actor, Fqdn, IngressService, Interface, IpList, Label, Service, Workload};
+use pce::models::{
+    Actor, Fqdn, IngressService, Interface, IpList, Label, RuleSet, Service, Workload,
+};
 use pce::write::{
     ActorKind, ActorRef, InterfaceSpec, IpListDraft, IpListPatch, IpRangeSpec, LabelDraft,
-    PortSpec, ServiceDraft, ServicePatch, ServiceRef, WorkloadDraft, WorkloadPatch, WriteRequest,
+    PortSpec, RuleSetDraft, RuleSetPatch, ServiceDraft, ServicePatch, ServiceRef, WorkloadDraft,
+    WorkloadPatch, WriteRequest,
 };
 
 /// What `n`, `e` or `x` on Objects or Workloads asks for.
@@ -29,6 +32,9 @@ pub enum EditIntent {
     CreateWorkload,
     UpdateWorkload(Workload),
     DeleteWorkload(Workload),
+    CreateRuleSet,
+    UpdateRuleSet(RuleSet),
+    DeleteRuleSet(RuleSet),
 }
 
 /// What `Cmd::PlanWrite` carries: the library draft or patch, or the href
@@ -47,6 +53,9 @@ pub enum WriteIntent {
     CreateWorkload(WorkloadDraft),
     UpdateWorkload { href: String, patch: WorkloadPatch },
     DeleteWorkload { href: String, name: String },
+    CreateRuleSet(RuleSetDraft),
+    UpdateRuleSet { href: String, patch: RuleSetPatch },
+    DeleteRuleSet { href: String, name: String },
 }
 
 impl WriteIntent {
@@ -64,6 +73,9 @@ impl WriteIntent {
             WriteIntent::CreateWorkload(_)
             | WriteIntent::UpdateWorkload { .. }
             | WriteIntent::DeleteWorkload { .. } => pce::write::ObjectKind::Workload,
+            WriteIntent::CreateRuleSet(_)
+            | WriteIntent::UpdateRuleSet { .. }
+            | WriteIntent::DeleteRuleSet { .. } => pce::write::ObjectKind::RuleSet,
         }
     }
 }
@@ -84,6 +96,9 @@ const LABELS_HINT: &str = "app=web, env=prod";
 /// The form for a create or update (pre-filled from the object; the key of a
 /// label and the href of anything are never editable), or the delete intent.
 pub fn start(intent: EditIntent, index: Option<&NameIndex>) -> Start {
+    // Policy forms render actors through the index; without one they show hrefs.
+    let empty = NameIndex::default();
+    let idx = index.unwrap_or(&empty);
     let form = |title: String, fields: Vec<Field>, intent: EditIntent| {
         Start::Form(Form::new(title, fields, intent))
     };
@@ -146,6 +161,20 @@ pub fn start(intent: EditIntent, index: Option<&NameIndex>) -> Start {
         EditIntent::DeleteWorkload(w) => Start::Plan(WriteIntent::DeleteWorkload {
             name: w.display_name(),
             href: w.href,
+        }),
+        EditIntent::CreateRuleSet => form(
+            "New ruleset".into(),
+            rule_set_fields(None, idx),
+            EditIntent::CreateRuleSet,
+        ),
+        EditIntent::UpdateRuleSet(rs) => {
+            let title = format!("Edit ruleset {}", rs.name);
+            let fields = rule_set_fields(Some(&rs), idx);
+            form(title, fields, EditIntent::UpdateRuleSet(rs))
+        }
+        EditIntent::DeleteRuleSet(rs) => Start::Plan(WriteIntent::DeleteRuleSet {
+            name: rs.name,
+            href: rs.href,
         }),
     }
 }
@@ -240,6 +269,96 @@ fn workload_fields(w: Option<&Workload>, index: Option<&NameIndex>) -> Vec<Field
             false,
         ),
     ]
+}
+
+const SCOPES_HINT: &str = "app=web, env=prod | app=db; empty = everywhere";
+const YES_NO_HINT: &str = "y or n";
+const NO_INDEX: &str = "the name index is not loaded; press r on Objects";
+const CANNOT_EDIT_RULESET: &str = "this ruleset has entries the form cannot edit; use the CLI";
+
+fn yn(on: bool) -> &'static str {
+    if on { "y" } else { "n" }
+}
+
+/// `y`/`yes` or `n`/`no`, any case.
+fn yes_no(form: &Form, label: &str) -> Result<bool, String> {
+    match form.value(label).trim().to_ascii_lowercase().as_str() {
+        "y" | "yes" => Ok(true),
+        "n" | "no" => Ok(false),
+        other => Err(format!("{label}: {other:?} is not y or n")),
+    }
+}
+
+fn need_index(index: Option<&NameIndex>) -> Result<&NameIndex, String> {
+    index.ok_or_else(|| NO_INDEX.to_string())
+}
+
+fn rule_set_fields(rs: Option<&RuleSet>, idx: &NameIndex) -> Vec<Field> {
+    vec![
+        Field::new(
+            "Name",
+            rs.map(|r| r.name.clone()).unwrap_or_default(),
+            "Shop-Prod",
+            true,
+        ),
+        Field::new(
+            "Description",
+            rs.and_then(|r| r.description.clone()).unwrap_or_default(),
+            "optional",
+            false,
+        ),
+        Field::new(
+            "Enabled",
+            yn(rs.is_none_or(|r| r.enabled)),
+            YES_NO_HINT,
+            true,
+        ),
+        Field::new(
+            "Scopes",
+            rs.map(|r| scopes_text(&r.scopes, idx)).unwrap_or_default(),
+            SCOPES_HINT,
+            false,
+        ),
+    ]
+}
+
+/// Scopes as the Scopes field shows them, `app=web, env=prod | group:G`;
+/// empty for a ruleset that applies everywhere (`[[]]` or `[]`).
+fn scopes_text(scopes: &[Vec<Actor>], idx: &NameIndex) -> String {
+    scopes
+        .iter()
+        .filter(|s| !s.is_empty())
+        .map(|s| actor_tokens(s, idx).join(", "))
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
+
+/// The Scopes text as tokens per scope, for the "did it change" test.
+fn scope_items(text: &str) -> Vec<Vec<String>> {
+    text.split('|')
+        .map(items)
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// The Scopes field to scopes: empty means everywhere; each `|`-separated
+/// part is one scope of labels and label groups, resolved through the index.
+fn resolve_scopes(text: &str, idx: &NameIndex, org_id: u64) -> Result<Vec<Vec<ActorRef>>, String> {
+    if text.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let specs: Vec<String> = text.split('|').map(str::to_string).collect();
+    let scopes = parse_scope_tokens(&specs).map_err(|e| format!("Scopes: {e}"))?;
+    if scopes.iter().any(Vec::is_empty) {
+        return Err(
+            "Scopes: an empty scope between |; leave Scopes empty for a ruleset that applies everywhere"
+                .into(),
+        );
+    }
+    scopes
+        .iter()
+        .map(|s| resolve_actor_tokens(s, idx, org_id).map_err(|e| format!("Scopes: {e}")))
+        .collect()
 }
 
 fn join(items: impl Iterator<Item = String>) -> String {
@@ -611,7 +730,13 @@ fn port_token(p: &PortSpec) -> Option<String> {
 
 /// The submitted form as a write: `Ok(None)` when an edit changes nothing,
 /// `Err` (shown in the form) when a field does not parse or validate.
-pub fn build_intent(form: &Form, index: Option<&NameIndex>) -> Result<Option<WriteIntent>, String> {
+///
+/// `org_id` is the profile's org, for the href checkers.
+pub fn build_intent(
+    form: &Form,
+    index: Option<&NameIndex>,
+    org_id: u64,
+) -> Result<Option<WriteIntent>, String> {
     let v = |label: &str| form.value(label).trim().to_string();
     let invalid = |e: Vec<String>| e.join("; ");
     match &form.intent {
@@ -757,11 +882,56 @@ pub fn build_intent(form: &Form, index: Option<&NameIndex>) -> Result<Option<Wri
                 }))
             }
         }
+        EditIntent::CreateRuleSet => {
+            let idx = need_index(index)?;
+            let d = RuleSetDraft {
+                name: v("Name"),
+                description: non_empty(v("Description")),
+                enabled: yes_no(form, "Enabled")?,
+                scopes: resolve_scopes(&v("Scopes"), idx, org_id)?,
+            };
+            d.validate().map_err(invalid)?;
+            Ok(Some(WriteIntent::CreateRuleSet(d)))
+        }
+        EditIntent::UpdateRuleSet(rs) => {
+            let idx = need_index(index)?;
+            let enabled = yes_no(form, "Enabled")?;
+            let scopes = v("Scopes");
+            // The field shows every scope, so a changed field replaces them all.
+            let set_scopes = if scope_items(&scopes) == scope_items(&scopes_text(&rs.scopes, idx)) {
+                None
+            } else if rs
+                .scopes
+                .iter()
+                .flatten()
+                .any(|a| ActorRef::from_actor(a).is_err())
+            {
+                return Err(format!("Scopes: {CANNOT_EDIT_RULESET}"));
+            } else {
+                Some(resolve_scopes(&scopes, idx, org_id)?)
+            };
+            let patch = RuleSetPatch {
+                name: changed(&rs.name, v("Name")),
+                description: changed(rs.description.as_deref().unwrap_or(""), v("Description")),
+                enabled: (enabled != rs.enabled).then_some(enabled),
+                set_scopes,
+            };
+            patch.validate().map_err(invalid)?;
+            if patch.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(WriteIntent::UpdateRuleSet {
+                    href: rs.href.clone(),
+                    patch,
+                }))
+            }
+        }
         // Deletes never open a form (`start`); a form never carries one.
         EditIntent::DeleteLabel(_)
         | EditIntent::DeleteIpList(_)
         | EditIntent::DeleteService(_)
-        | EditIntent::DeleteWorkload(_) => Err("a delete has no form".into()),
+        | EditIntent::DeleteWorkload(_)
+        | EditIntent::DeleteRuleSet(_) => Err("a delete has no form".into()),
     }
 }
 
@@ -810,7 +980,7 @@ mod tests {
     }
 
     fn build(f: &Form) -> Result<Option<WriteIntent>, String> {
-        build_intent(f, Some(&*fixture_index()))
+        build_intent(f, Some(&*fixture_index()), 5)
     }
 
     #[test]
@@ -969,14 +1139,14 @@ mod tests {
         let err = build(&f).unwrap_err();
         assert!(err.contains("no labels have key tier"), "{err}");
         set(&mut f, "Labels", "app=shop");
-        let err = build_intent(&f, None).unwrap_err();
+        let err = build_intent(&f, None, 5).unwrap_err();
         assert!(
             err.contains("label index not loaded, press r on Objects"),
             "{err}"
         );
         set(&mut f, "Labels", "");
         assert!(
-            build_intent(&f, None).unwrap().is_some(),
+            build_intent(&f, None, 5).unwrap().is_some(),
             "no labels need no index"
         );
     }
@@ -1231,5 +1401,102 @@ mod tests {
             svc("443/tcp").unwrap(),
             vec![ServiceRef::Port(PortSpec::parse("443/tcp").unwrap())]
         );
+    }
+
+    #[test]
+    fn rule_set_form_prefills_scopes_as_tokens() {
+        let sets = rule_sets();
+        let f = form(EditIntent::UpdateRuleSet(sets[0].clone()));
+        assert_eq!(f.title, "Edit ruleset Shop-Prod");
+        assert_eq!(
+            f.fields.iter().map(|x| x.label).collect::<Vec<_>>(),
+            vec!["Name", "Description", "Enabled", "Scopes"]
+        );
+        assert_eq!(f.value("Description"), "Ringfence");
+        assert_eq!(f.value("Enabled"), "y");
+        assert_eq!(f.value("Scopes"), "app=shop, env=prod");
+        assert_eq!(
+            build(&f).unwrap(),
+            None,
+            "a pre-filled form changes nothing"
+        );
+        let g = form(EditIntent::UpdateRuleSet(sets[1].clone()));
+        assert_eq!(g.value("Enabled"), "n");
+        assert_eq!(g.value("Scopes"), "", "[[]] applies everywhere");
+        assert_eq!(build(&g).unwrap(), None);
+        let n = form(EditIntent::CreateRuleSet);
+        assert_eq!(n.title, "New ruleset");
+        assert_eq!((n.value("Enabled"), n.value("Scopes")), ("y", ""));
+    }
+
+    #[test]
+    fn rule_set_create_and_edit_build_drafts_and_patches() {
+        let mut f = form(EditIntent::CreateRuleSet);
+        set(&mut f, "Name", "Lab");
+        set(&mut f, "Scopes", "role=web, env=prod | group:All prod envs");
+        assert_eq!(
+            build(&f).unwrap(),
+            Some(WriteIntent::CreateRuleSet(RuleSetDraft {
+                name: "Lab".into(),
+                description: None,
+                enabled: true,
+                scopes: vec![
+                    vec![
+                        ActorRef::new(ActorKind::Label, "/orgs/5/labels/1"),
+                        ActorRef::new(ActorKind::Label, "/orgs/5/labels/4"),
+                    ],
+                    vec![ActorRef::new(
+                        ActorKind::LabelGroup,
+                        "/orgs/5/sec_policy/draft/label_groups/10"
+                    )],
+                ],
+            }))
+        );
+        set(&mut f, "Scopes", "iplist:Corp");
+        assert_eq!(
+            build(&f).unwrap_err(),
+            "Scopes: scopes take labels and label groups only"
+        );
+        set(&mut f, "Scopes", "role=web |");
+        let err = build(&f).unwrap_err();
+        assert!(err.contains("an empty scope"), "{err}");
+        set(&mut f, "Scopes", "");
+        set(&mut f, "Enabled", "maybe");
+        assert_eq!(build(&f).unwrap_err(), r#"Enabled: "maybe" is not y or n"#);
+        // An edit sends what changed; the scopes only when their text changed.
+        let mut e = form(EditIntent::UpdateRuleSet(rule_sets()[0].clone()));
+        set(&mut e, "Description", "Ringfence shop");
+        set(&mut e, "Enabled", "N");
+        assert_eq!(
+            build(&e).unwrap(),
+            Some(WriteIntent::UpdateRuleSet {
+                href: "/orgs/5/sec_policy/draft/rule_sets/100".into(),
+                patch: RuleSetPatch {
+                    description: Some("Ringfence shop".into()),
+                    enabled: Some(false),
+                    ..RuleSetPatch::default()
+                },
+            })
+        );
+        set(&mut e, "Scopes", "");
+        let Some(WriteIntent::UpdateRuleSet { patch, .. }) = build(&e).unwrap() else {
+            panic!("not an update")
+        };
+        assert_eq!(
+            patch.set_scopes,
+            Some(vec![]),
+            "an emptied Scopes field means everywhere"
+        );
+        let Start::Plan(w) = start(EditIntent::DeleteRuleSet(rule_sets()[0].clone()), None) else {
+            panic!("a delete opens no form")
+        };
+        assert_eq!(
+            w,
+            WriteIntent::DeleteRuleSet {
+                href: "/orgs/5/sec_policy/draft/rule_sets/100".into(),
+                name: "Shop-Prod".into()
+            }
+        );
+        assert_eq!(w.kind(), pce::write::ObjectKind::RuleSet);
     }
 }

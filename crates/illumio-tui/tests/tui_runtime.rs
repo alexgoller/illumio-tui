@@ -1394,3 +1394,73 @@ async fn pending_diff_fetches_the_active_list_once() {
     );
     assert_eq!(model.busy, 0);
 }
+
+/// The draft rulesets, expected `n` times (the Policy screen plus reloads);
+/// the first ruleset has inline deny rules, so no fallback is asked for.
+async fn mount_rule_sets(server: &MockServer, n: u64) {
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/sec_policy/draft/rule_sets"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/rule_sets.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(n)
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/api/v2/orgs/5/sec_policy/draft/rule_sets/100/deny_rules",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_string("[]"))
+        .expect(0)
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn create_ruleset_posts_once_and_reloads_the_rulesets_once() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    mount_rule_sets(&server, 2).await;
+    let body = json!({
+        "name": "Lab",
+        "enabled": true,
+        "scopes": [[{"label": {"href": "/orgs/5/labels/1"}}]]
+    });
+    let mut created = body.clone();
+    created["href"] = json!("/orgs/5/sec_policy/draft/rule_sets/102");
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/sec_policy/draft/rule_sets"))
+        .and(body_json(body))
+        .respond_with(ResponseTemplate::new(201).set_body_json(created))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let audit = MemoryAudit::new();
+    let mut keys = vec![(500, ch('2')), (300, ch('n'))];
+    keys.extend(typed("Lab"));
+    keys.extend([(20, KeyCode::Tab), (20, KeyCode::Tab), (20, KeyCode::Tab)]);
+    keys.extend(typed("role=web"));
+    keys.extend([(50, KeyCode::Enter), (300, ch('y')), (400, KeyCode::F(12))]);
+    let model = key_session(
+        &server,
+        writes_model(),
+        Some(tui_guard(audit.clone())),
+        keys,
+    )
+    .await;
+    assert_eq!(
+        model.status.text,
+        "created /orgs/5/sec_policy/draft/rule_sets/102 (pending)"
+    );
+    assert_eq!(
+        model.stats.calls, 8,
+        "health + four lists + rulesets + POST + one rulesets reload"
+    );
+    assert_eq!(writes_seen(&server).await, vec!["POST"]);
+    let entries = audit.entries();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].source, "tui");
+    assert_eq!(model.busy, 0);
+}

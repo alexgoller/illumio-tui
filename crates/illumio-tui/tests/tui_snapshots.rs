@@ -662,3 +662,27 @@ fn pending_diff_overlay_80x24() {
     m.set_theme("light");
     insta::assert_snapshot!("pending_diff_light_styled_80x24", render_styled(&m, 80, 24));
 }
+
+#[test]
+fn rule_set_form_80x24() {
+    use illumio_tui::tui::edit::{EditIntent, form_for};
+    use illumio_tui::tui::model::{Overlay, Screen};
+    use illumio_tui::tui::test_support::fixture_index;
+    let mut m = model_with_policy();
+    m.screen = Screen::Policy;
+    let shop = m.policy.raw[0].clone();
+    let idx = fixture_index();
+    m.overlay = Overlay::Form(
+        form_for(EditIntent::UpdateRuleSet(shop), Some(idx.as_ref())).expect("a form"),
+    );
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("Edit ruleset Shop-Prod"), "{out}");
+    assert!(out.contains("app=shop, env=prod"), "{out}");
+    assert!(out.contains("Enabled*"), "{out}");
+    insta::assert_snapshot!("rule_set_form_80x24", out);
+    m.set_theme("light");
+    insta::assert_snapshot!(
+        "rule_set_form_light_styled_80x24",
+        render_styled(&m, 80, 24)
+    );
+}

@@ -942,6 +942,9 @@ pub struct PolicyState {
     pub pending_selected: usize,
     /// A diff request is in flight (`Enter` does not send another).
     pub diff_loading: bool,
+    /// The next rulesets result was asked for by a write: it keeps the
+    /// write's report in the status line instead of `N rulesets`.
+    pub quiet_reload: bool,
     pub auto: AutoRefresh,
 }
 
@@ -963,6 +966,7 @@ impl PolicyState {
             pending_loading: false,
             pending_selected: 0,
             diff_loading: false,
+            quiet_reload: false,
             auto: AutoRefresh::new(min_refresh),
         }
     }
@@ -1027,6 +1031,12 @@ impl PolicyState {
 
     pub fn selected_href(&self) -> Option<String> {
         self.rulesets.selected_item().map(|r| r.href.clone())
+    }
+
+    /// The selected ruleset as loaded, for an edit form.
+    pub fn selected_rule_set(&self) -> Option<&RuleSet> {
+        let href = self.selected_href()?;
+        self.raw.iter().find(|r| r.href == href)
     }
 
     /// The selected ruleset has no inline deny rules and its endpoint list was
