@@ -31,3 +31,12 @@ Captured after corrections and review findings, so the same mistake is not repea
 - An audit line must go out in a single `write` syscall, so concurrent appends cannot interleave.
 - hrefs are parsed strictly by component, never by substring; writes disable redirects. A substring check let `/orgs/5/labels/../workloads/x` pass as a label href, and URL normalisation then sent the write to another object; a followed 302 turned a PUT into a GET reported as success.
 - An update sends only the keys it changes. Re-sending unchanged lists is how fields get lost.
+
+## Plan 4 (TUI editing), 2026-10-11
+
+- A confirm overlay that opens asynchronously needs an in-flight guard: keys typed while the planner's GET runs land on whatever opens next, so a `y` meant for a prompt can confirm a write. Refuse new edits while one is in flight and discard a plan that lands over another overlay.
+- Pre-filled list fields must match the shown text first for every field type, not only the one the previous plan burned us on (ranges). The address field compared a parsed token with the raw PCE string, which turned an untouched form into an interface rewrite.
+- A doc sentence about refresh behaviour ("press `r`") is a claim about a code path; check which path the key actually runs before writing it.
+- When a screen is the safety gate (the dry-run overlay), clipping its content is not polish: treat it as Important in task reviews, not as a deferred minor.
+- Task reviewers rate per task; the whole-branch review is where "minor" findings on safety paths get promoted. Keep the deferred-minor list in the ledger and hand it to the final reviewer explicitly.
+- In zsh, backticks inside `echo "…"` run as commands; write ledger lines with a quoted heredoc.
