@@ -14,6 +14,7 @@ pub mod auth;
 pub mod cache;
 pub mod client;
 pub mod error;
+pub mod iplist_size;
 pub mod limiter;
 pub mod models;
 pub mod resolve;
@@ -23,6 +24,7 @@ pub mod write;
 use std::sync::Arc;
 use std::time::Duration;
 
+pub use iplist_size::{IpListSize, ip_list_size};
 pub use resolve::{
     NameIndex, ResolvedActor, ResolvedLabel, ResolvedService, RuleKind, RuleSetView, RuleView,
     describe_actor, describe_ingress_service,
