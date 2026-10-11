@@ -2,8 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ Keys ────────────────────────────────── 7-28 of 28 · j/k scroll · Esc closes ╮
-│↑ ↓ PgUp PgDn Home End   move in the current table                            │
+╭ Keys ────────────────────────────────── 8-29 of 29 · j/k scroll · Esc closes ╮
 │s                        cycle sort column and direction                      │
 │/                        search in the current table (Enter keep, Esc clear)  │
 │r                        refresh the current screen (bypasses the cache)      │
@@ -13,6 +12,7 @@ expression: out
 │Traffic  g               change the aggregate label keys                      │
 │Traffic  Enter           detail (flows) · drill into a pair (aggregate)       │
 │Traffic  w               draft allow rule from a blocked flow (writes)        │
+│w form   Ctrl-A Ctrl-N   all labels · new ruleset                             │
 │Policy   d               toggle draft / active                                │
 │Policy   p               pending changes                                      │
 │Policy   Tab / Enter     pane · rule detail · on a ruleset: load deny rules   │

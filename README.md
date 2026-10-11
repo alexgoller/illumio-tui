@@ -332,9 +332,11 @@ one loaded draft ruleset is scoped like the destination; otherwise the hint
 names that scope (`scope app=shop, env=prod`). Type the ruleset's name or
 href; a name costs one draft ruleset read at submit, and an unknown name
 brings the form back with similar names. When the destination has a scope,
-`Ctrl-N` on that form creates the ruleset under that name scoped like the
-destination (its own confirm and POST), then plans the rule into it for a
-second confirm; cancelling either sends nothing more.
+the form offers `Ctrl-N` (the Ruleset hint says `Ctrl-N: create it, scoped
+…`): it creates the ruleset under that name scoped like the destination (its
+own confirm and POST), then plans the rule into it for a second confirm;
+cancelling either sends nothing more. Editing the name withdraws the offer
+(press Enter to check the new name first).
 
 ### Label model
 
@@ -346,8 +348,9 @@ names, per profile:
     tier_key = "role"             # the label a rule selects a tier by
 
 or `ILLUMIO_SCOPE_KEYS=app,env` and `ILLUMIO_TIER_KEY=role`, which outrank
-the profile. An empty key list is refused. Only the TUI's `w` pre-fill uses
-them.
+the profile. An empty `ILLUMIO_SCOPE_KEYS` counts as unset; a list of only
+empty entries (`,`) is refused, as is an empty `scope_keys` in the profile.
+Only the TUI's `w` form (pre-fill and `Ctrl-N`) uses them.
 
 ## PCE protection
 

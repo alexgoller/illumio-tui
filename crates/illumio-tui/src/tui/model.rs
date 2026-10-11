@@ -976,7 +976,8 @@ pub struct PolicyState {
     pub provisioned: Option<String>,
     /// A `w` rule waiting for the ruleset `Ctrl-N` creates: planned into
     /// it once that write is done, dropped by any failure or cancel.
-    pub rule_after_ruleset: Option<pce::write::RuleDraft>,
+    /// The form comes along so a failed rule plan can reopen it.
+    pub rule_after_ruleset: Option<(pce::write::RuleDraft, crate::tui::form::Form)>,
     pub auto: AutoRefresh,
 }
 

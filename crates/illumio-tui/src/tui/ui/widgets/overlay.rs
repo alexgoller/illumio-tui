@@ -1,7 +1,7 @@
 //! Modal overlays drawn on top of the current screen: help and the `:` prompt.
 use crate::tui::diff::{ObjectDiff, Sign};
 use crate::tui::filter::{FIELD_NAMES, FilterEditor};
-use crate::tui::form::{Form, visible_tail};
+use crate::tui::form::{Form, clip, visible_tail};
 use crate::tui::model::{Model, Screen, rule_kind_name};
 use crate::tui::ui::layout::centered;
 use crate::tui::ui::screens::workloads::plain;
@@ -43,6 +43,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "Traffic  w",
         "draft allow rule from a blocked flow (writes)",
     ),
+    ("w form   Ctrl-A Ctrl-N", "all labels · new ruleset"),
     ("Policy   d", "toggle draft / active"),
     ("Policy   p", "pending changes"),
     (
@@ -199,11 +200,19 @@ pub fn render_form(model: &Model, form: &Form, f: &mut Frame, area: Rect) {
     // Two rows per field (value, hint), the error row and the borders.
     let r = centered(area, 70, (form.fields.len() as u16) * 2 + 3);
     f.render_widget(Clear, r);
+    let offer = form.ruleset_offer_armed();
     // A long title (a rule in a ruleset) would be cut by the full hint.
-    let meta = if form.title.chars().count() + 36 + 6 <= r.width as usize - 2 {
-        "Tab next · Enter review · Esc cancel"
-    } else {
-        "Enter review · Esc cancel"
+    let fits =
+        |meta: &str| form.title.chars().count() + meta.chars().count() + 6 <= r.width as usize - 2;
+    let meta = match offer {
+        Some(_) if fits("Ctrl-N new ruleset · Enter review · Esc cancel") => {
+            "Ctrl-N new ruleset · Enter review · Esc cancel"
+        }
+        Some(_) => "Ctrl-N new ruleset · Esc cancel",
+        None if fits("Tab next · Enter review · Esc cancel") => {
+            "Tab next · Enter review · Esc cancel"
+        }
+        None => "Enter review · Esc cancel",
     };
     let block = panel(&form.title, meta, t, true);
     // Borders (2), the focus marker (2), the label column and the cursor (1).
@@ -232,8 +241,20 @@ pub fn render_form(model: &Model, form: &Form, f: &mut Frame, area: Rect) {
                 },
             ),
         ]));
+        // While Ctrl-N is armed the Ruleset hint says what it creates.
+        let hint = match offer {
+            Some(o) if field.label == "Ruleset" => {
+                format!("Ctrl-N: create it, scoped {}", o.scope).into()
+            }
+            _ => field.hint.clone(),
+        };
         lines.push(Line::from(Span::styled(
-            format!("{:w$}{}", "", field.hint, w = 2 + FORM_LABEL_WIDTH),
+            format!(
+                "{:w$}{}",
+                "",
+                clip(&hint, width + 1),
+                w = 2 + FORM_LABEL_WIDTH
+            ),
             t.dim_style(),
         )));
     }

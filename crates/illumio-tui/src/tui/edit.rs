@@ -6,7 +6,7 @@ use crate::tokens::{
     ActorToken, ServiceToken, actor_from_href_token, is_href, parse_scope_tokens,
     service_from_href_token, similar, split_kv, with_exclusion, with_similar,
 };
-use crate::tui::form::{Field, Form};
+use crate::tui::form::{Field, Form, RulesetOffer};
 use pce::models::{
     Actor, DenyRule, Fqdn, IngressService, Interface, IpList, Label, Rule, RuleSet, Service,
     Workload,
@@ -798,15 +798,18 @@ fn unknown_ruleset_scope<'f>(
     (!is_href(name) && names_it && !scope.is_empty()).then_some(scope)
 }
 
-/// The error a `w` form comes back with when its ruleset name is unknown
-/// and the destination has a scope: the planner's answer (similar names
-/// included) and that `Ctrl-N` creates the ruleset.
-pub fn new_ruleset_offer(form: &Form, error: &str, scope_keys: &[String]) -> Option<String> {
+/// What `Ctrl-N` offers when a `w` form's ruleset name is unknown and the
+/// destination has a scope: that name, scoped like the destination.
+pub fn new_ruleset_offer(
+    form: &Form,
+    error: &str,
+    scope_keys: &[String],
+) -> Option<Box<RulesetOffer>> {
     unknown_ruleset_scope(form, error, scope_keys).map(|scope| {
-        format!(
-            "{error}; press Ctrl-N to create it scoped {}",
-            labels_tokens(&scope)
-        )
+        Box::new(RulesetOffer {
+            name: form.value("Ruleset").trim().to_string(),
+            scope: labels_tokens(&scope),
+        })
     })
 }
 

@@ -196,10 +196,13 @@ scope and tier (unscoped), and the ruleset with the one loaded draft ruleset
 whose scope is the destination's (by label href); nothing is requested.
 `Form.alt` holds every attached label for `Ctrl-A`. When the plan says the
 typed name is unknown and the destination has a scope, the form offers
-`Ctrl-N` (`Form.offers_ruleset`): it plans `CreateRuleSet` scoped like the
-destination and keeps the rule in `PolicyState.rule_after_ruleset`; the
+`Ctrl-N` (`Form.offers_ruleset`, a `RulesetOffer` of the checked name and the
+scope, shown in the Ruleset hint row and the panel keys while the field still
+holds that name): it plans `CreateRuleSet` scoped like the destination and
+keeps the rule and the form in `PolicyState.rule_after_ruleset`; the
 ruleset's `WriteDone(Ok)` plans `CreateRule` into the new href (a second
-confirm), and any failure, cancel or profile switch drops it. Both writes
+confirm, the form back in `TrafficState.rule_form` so a failed plan reopens
+it), and any failure, cancel or profile switch drops it. Both writes
 reload the draft rulesets.
 
 `Enter` on a pending ruleset reads the draft rulesets (cached) and the active

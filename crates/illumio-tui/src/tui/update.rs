@@ -520,10 +520,12 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         model.policy.provisioned = Some(model.status.text.clone());
                     }
                     let mut cmds = reload_after_write(model, kind);
-                    if let Some(draft) = rule_after
+                    if let Some((draft, form)) = rule_after
                         && kind == pce::write::ObjectKind::RuleSet
                     {
-                        // The second confirmation: the rule in the new ruleset.
+                        // The second confirmation: the rule in the new ruleset;
+                        // a failed plan brings the form back.
+                        model.traffic.rule_form = Some(form);
                         model.writes.in_flight = true;
                         cmds.push(Cmd::PlanWrite(WriteIntent::CreateRule {
                             ruleset: RulesetTarget::Href(w.href.clone()),
@@ -591,9 +593,9 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         && model.overlay == Overlay::None
                     {
                         // An unknown name with a scoped destination offers Ctrl-N.
-                        let offer = edit::new_ruleset_offer(&f, &e, &model.limits.scope_keys);
-                        f.offers_ruleset = offer.is_some();
-                        f.error = Some(offer.unwrap_or_else(|| e.clone()));
+                        f.offers_ruleset =
+                            edit::new_ruleset_offer(&f, &e, &model.limits.scope_keys);
+                        f.error = Some(e.clone());
                         model.overlay = Overlay::Form(f);
                     }
                     fail(model, "write", &e, false);
@@ -885,7 +887,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 &model.limits.scope_keys,
             ) {
                 Ok((intent, draft)) => {
-                    model.policy.rule_after_ruleset = Some(draft);
+                    model.policy.rule_after_ruleset = Some((draft, form));
                     model.overlay = Overlay::None;
                     model.status = StatusLine::info("planning…");
                     model.writes.in_flight = true;
@@ -5182,6 +5184,7 @@ mod tests {
         let keys: Vec<&str> = HELP_LINES.iter().map(|(k, _)| *k).collect();
         for k in [
             "Traffic  w",
+            "w form   Ctrl-A Ctrl-N",
             "Policy   N",
             "Pending  j/k Space Enter",
             "Pending  P",
@@ -5194,10 +5197,10 @@ mod tests {
     fn help_scrolls_to_its_last_line_and_reopens_at_the_top() {
         use crate::tui::ui::widgets::overlay::{HELP_LINES, help_last_scroll};
         let mut m = model_fixture(); // 80x24
-        assert_eq!(HELP_LINES.len(), 28);
+        assert_eq!(HELP_LINES.len(), 29);
         update(&mut m, key('?'));
         let last = help_last_scroll(24);
-        assert_eq!(last, 6, "28 lines, 22 rows inside the box");
+        assert_eq!(last, 7, "29 lines, 22 rows inside the box");
         for _ in 0..40 {
             update(&mut m, key('j'));
         }
@@ -6414,13 +6417,11 @@ mod tests {
         assert!(update(&mut m, Msg::Planned(Err(e.into()))).is_empty());
         match &m.overlay {
             Overlay::Form(f) => {
+                assert_eq!(f.error.as_deref(), Some(e), "the planner's text only");
+                let offer = f.offers_ruleset.as_ref().expect("Ctrl-N is offered");
                 assert_eq!(
-                    f.error.as_deref(),
-                    Some(
-                        format!("{e}; press Ctrl-N to create it scoped app=shop, env=prod")
-                            .as_str()
-                    ),
-                    "similar names first, then the offer"
+                    (offer.name.as_str(), offer.scope.as_str()),
+                    ("Shop", "app=shop, env=prod")
                 );
                 assert_eq!(f.value("Ruleset"), "Shop");
                 assert_eq!(f.value("Consumers"), "iplist:Corp", "the fields as typed");
@@ -6470,12 +6471,10 @@ mod tests {
         let mut m = writes_on(model_with_flows());
         unknown_ruleset_form(&mut m);
         match &m.overlay {
-            Overlay::Form(f) => assert_eq!(
-                f.error.as_deref(),
-                Some(
-                    r#"no ruleset named "New-App"; press Ctrl-N to create it scoped app=shop, env=prod"#
-                )
-            ),
+            Overlay::Form(f) => {
+                assert_eq!(f.error.as_deref(), Some(r#"no ruleset named "New-App""#));
+                assert!(f.ruleset_offer_armed().is_some());
+            }
             other => panic!("{other:?}"),
         }
         let cmds = update(&mut m, ctrl_key('n'));
@@ -6494,7 +6493,7 @@ mod tests {
         );
         assert_eq!(m.overlay, Overlay::None);
         assert!(m.writes.in_flight);
-        let draft = m.policy.rule_after_ruleset.clone().expect("the rule waits");
+        let (draft, _) = m.policy.rule_after_ruleset.clone().expect("the rule waits");
         assert_eq!(
             draft.providers,
             vec![ActorRef::new(ActorKind::Label, "/orgs/5/labels/1")]
@@ -6525,6 +6524,59 @@ mod tests {
         assert!(m.policy.rule_after_ruleset.is_none());
         assert!(m.writes.in_flight);
         assert_eq!(m.status.text, format!("created {new} (pending)"));
+        // The rule's plan fails: the form comes back, the name now checked.
+        assert!(m.traffic.rule_form.is_some());
+        update(&mut m, Msg::Planned(Err("rule refused".into())));
+        match &m.overlay {
+            Overlay::Form(f) => {
+                assert_eq!(f.error.as_deref(), Some("rule refused"));
+                assert_eq!(f.value("Ruleset"), "New-App");
+                assert!(f.offers_ruleset.is_none(), "no offer for another error");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_ruleset_created_with_n_plans_no_rule() {
+        let mut m = writes_on(model_fixture());
+        let cmds = update(
+            &mut m,
+            Msg::WriteDone {
+                kind: pce::write::ObjectKind::RuleSet,
+                method: Some(pce::WriteMethod::Post),
+                result: Ok(Outcome::Written(written(
+                    "/orgs/5/sec_policy/draft/rule_sets/102",
+                    true,
+                ))),
+            },
+        );
+        assert!(
+            !cmds.iter().any(|c| matches!(c, Cmd::PlanWrite(_))),
+            "{cmds:?}"
+        );
+        assert!(!m.writes.in_flight);
+    }
+
+    #[test]
+    fn editing_the_ruleset_name_disarms_ctrl_n() {
+        use crate::tui::test_support::model_with_flows;
+        let mut m = writes_on(model_with_flows());
+        unknown_ruleset_form(&mut m);
+        update(&mut m, key('X'));
+        match &m.overlay {
+            Overlay::Form(f) => assert!(f.ruleset_offer_armed().is_none(), "the hint reverts"),
+            other => panic!("{other:?}"),
+        }
+        assert!(update(&mut m, ctrl_key('n')).is_empty(), "nothing planned");
+        match &m.overlay {
+            Overlay::Form(f) => assert_eq!(
+                f.error.as_deref(),
+                Some("the ruleset name changed; press Enter to check it first")
+            ),
+            other => panic!("{other:?}"),
+        }
+        assert!(m.policy.rule_after_ruleset.is_none());
     }
 
     #[test]

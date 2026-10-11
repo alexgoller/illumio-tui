@@ -47,9 +47,21 @@ pub struct Form {
     pub alt: Option<Vec<(usize, String)>>,
     /// The alternates are shown (`Ctrl-A` was pressed an odd number of times).
     pub expanded: bool,
-    /// The error offers `Ctrl-N` (a `w` form naming an unknown ruleset).
-    pub offers_ruleset: bool,
+    /// `Ctrl-N` creates this ruleset (a `w` form whose name the planner did
+    /// not know); armed while the Ruleset field still holds that name.
+    /// Boxed: `Overlay::Form` stays within clippy's variant-size budget.
+    pub offers_ruleset: Option<Box<RulesetOffer>>,
 }
+
+/// The ruleset `Ctrl-N` would create: the name the planner checked and the
+/// destination scope as tokens (`app=shop, env=prod`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RulesetOffer {
+    pub name: String,
+    pub scope: String,
+}
+
+const NAME_CHANGED: &str = "the ruleset name changed; press Enter to check it first";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormEvent {
@@ -72,8 +84,18 @@ impl Form {
             intent,
             alt: None,
             expanded: false,
-            offers_ruleset: false,
+            offers_ruleset: None,
         }
+    }
+
+    /// The offer, while the Ruleset field holds the offered name (trimmed,
+    /// any case); an edit to another name disarms it.
+    pub fn ruleset_offer_armed(&self) -> Option<&RulesetOffer> {
+        self.offers_ruleset.as_deref().filter(|o| {
+            self.value("Ruleset")
+                .trim()
+                .eq_ignore_ascii_case(o.name.trim())
+        })
     }
 
     /// `Ctrl-A`: the listed fields and their alternates trade places, so the
@@ -124,7 +146,12 @@ impl Form {
                 }
             }
             KeyCode::Char('a') if ctrl => self.swap_alternates(),
-            KeyCode::Char('n') if ctrl && self.offers_ruleset => return FormEvent::NewRuleset,
+            KeyCode::Char('n') if ctrl && self.offers_ruleset.is_some() => {
+                if self.ruleset_offer_armed().is_some() {
+                    return FormEvent::NewRuleset;
+                }
+                self.error = Some(NAME_CHANGED.into());
+            }
             KeyCode::Char('u') if ctrl => {
                 if let Some(f) = self.fields.get_mut(self.active) {
                     f.value.clear();
@@ -139,6 +166,19 @@ impl Form {
         }
         FormEvent::Continue
     }
+}
+
+/// The start of `text` that fits in `width` cells, with `…` at the end
+/// when the rest is cut.
+pub fn clip(text: &str, width: usize) -> String {
+    if text.chars().count() <= width {
+        return text.to_string();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    let head: String = text.chars().take(width - 1).collect();
+    format!("{head}…")
 }
 
 /// The end of `value` that fits in `width` cells, with `…` in front when the
@@ -286,6 +326,35 @@ mod tests {
         f.on_key(ctrl('a'));
         assert_eq!(f.value("Providers"), "role=db", "the edit comes back");
         assert!(!f.expanded);
+    }
+
+    #[test]
+    fn ctrl_n_fires_only_for_the_offered_name() {
+        let mut f = flow_like();
+        assert_eq!(f.on_key(ctrl('n')), FormEvent::Continue, "no offer");
+        assert_eq!(f.error, None);
+        f.fields[0].value = " new-app ".into();
+        f.offers_ruleset = Some(Box::new(RulesetOffer {
+            name: "New-App".into(),
+            scope: "app=shop, env=prod".into(),
+        }));
+        assert!(f.ruleset_offer_armed().is_some(), "trimmed, any case");
+        assert_eq!(f.on_key(ctrl('n')), FormEvent::NewRuleset);
+        f.active = 0;
+        f.on_key(k(KeyCode::Char('2')));
+        assert!(f.ruleset_offer_armed().is_none(), "an edit disarms it");
+        assert_eq!(f.on_key(ctrl('n')), FormEvent::Continue);
+        assert_eq!(
+            f.error.as_deref(),
+            Some("the ruleset name changed; press Enter to check it first")
+        );
+    }
+
+    #[test]
+    fn clip_cuts_the_end_with_an_ellipsis() {
+        assert_eq!(clip("scope app=shop", 20), "scope app=shop");
+        assert_eq!(clip("abcdefghij", 5), "abcd…");
+        assert_eq!(clip("ab", 0), "");
     }
 
     #[test]

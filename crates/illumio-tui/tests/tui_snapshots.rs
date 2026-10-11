@@ -850,3 +850,37 @@ fn rule_from_flow_form_80x24() {
         render_styled(&m, 80, 24)
     );
 }
+
+#[test]
+fn rule_from_flow_form_offering_ctrl_n_80x24() {
+    use illumio_tui::tui::edit::{EditIntent, form_for, new_ruleset_offer};
+    use illumio_tui::tui::model::Overlay;
+    use illumio_tui::tui::test_support::{fixture_flows, fixture_index};
+    let mut m = model_with_flows();
+    let idx = fixture_index();
+    let mut form = form_for(
+        EditIntent::RuleFromFlow(Box::new(fixture_flows()[1].clone())),
+        Some(idx.as_ref()),
+        m.flow_prefill(),
+    )
+    .expect("a form");
+    // The planner's answer to `New-App`, as the reopened form shows it.
+    form.fields[0].value = "New-App".into();
+    let e = r#"no ruleset named "New-App"; similar: Shop-Prod"#;
+    form.offers_ruleset = new_ruleset_offer(&form, e, &m.limits.scope_keys);
+    form.error = Some(e.into());
+    m.overlay = Overlay::Form(form);
+    let out = render_to_string(&m, 80, 24);
+    assert!(
+        out.contains("Ctrl-N: create it, scoped app=shop, env=prod"),
+        "{out}"
+    );
+    assert!(out.contains("Ctrl-N new ruleset"), "{out}");
+    assert!(out.contains("similar: Shop-Prod"), "{out}");
+    insta::assert_snapshot!("form_rule_from_flow_ctrl_n_80x24", out);
+    m.set_theme("light");
+    insta::assert_snapshot!(
+        "form_rule_from_flow_ctrl_n_light_styled_80x24",
+        render_styled(&m, 80, 24)
+    );
+}

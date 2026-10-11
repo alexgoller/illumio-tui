@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ Keys ────────────────────────────────── 1-22 of 28 · j/k scroll · Esc closes ╮
+╭ Keys ────────────────────────────────── 1-22 of 29 · j/k scroll · Esc closes ╮
 │1 2 3 4 5                Traffic · Policy · Objects · Workloads · Events      │
 │:                        command prompt: :traffic :policy :objects :workloads │
 │                         :events  :filter <expr>  :window <dur>               │
@@ -19,10 +19,10 @@ expression: out
 │Traffic  g               change the aggregate label keys                      │
 │Traffic  Enter           detail (flows) · drill into a pair (aggregate)       │
 │Traffic  w               draft allow rule from a blocked flow (writes)        │
+│w form   Ctrl-A Ctrl-N   all labels · new ruleset                             │
 │Policy   d               toggle draft / active                                │
 │Policy   p               pending changes                                      │
 │Policy   Tab / Enter     pane · rule detail · on a ruleset: load deny rules   │
 │Policy   N               new deny rule in the selected ruleset (rules pane)   │
 │Objects  Tab / Enter     next object type · detail                            │
-│Workloads t/T h H Enter  Traffic as src/dst · unhealthy · health sort · detail│
 ╰──────────────────────────────────────────────────────────────────────────────╯
