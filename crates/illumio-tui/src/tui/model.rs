@@ -801,8 +801,8 @@ pub fn blocked_columns() -> Vec<Column<BlockedGroup>> {
         Column {
             title: "dst",
             width: 18,
-            cell: |b| b.dst_group.join("/"),
-            key: |b| SortKey::Text(b.dst_group.join("/")),
+            cell: |b| b.dst_group_text(),
+            key: |b| SortKey::Text(b.dst_group_text()),
             right: false,
             hide_below: 0,
             narrow: None,
@@ -811,8 +811,8 @@ pub fn blocked_columns() -> Vec<Column<BlockedGroup>> {
         Column {
             title: "dst name",
             width: 22,
-            cell: blocked_dst_name,
-            key: |b| SortKey::Text(blocked_dst_name(b)),
+            cell: |b| b.dst_name_text(),
+            key: |b| SortKey::Text(b.dst_name_text()),
             right: false,
             hide_below: 0,
             narrow: None,
@@ -821,10 +821,7 @@ pub fn blocked_columns() -> Vec<Column<BlockedGroup>> {
         Column {
             title: "service",
             width: 10,
-            cell: |b| match b.port {
-                Some(p) => format!("{p}/{}", b.proto),
-                None => b.proto.clone(),
-            },
+            cell: |b| b.service_text(),
             key: |b| SortKey::Num(u64::from(b.port.unwrap_or(0))),
             right: false,
             hide_below: 0,
@@ -854,32 +851,14 @@ pub fn blocked_columns() -> Vec<Column<BlockedGroup>> {
         Column {
             title: "sources",
             width: 0,
-            cell: blocked_sources,
-            key: |b| SortKey::Text(blocked_sources(b)),
+            cell: |b| b.sources_text(),
+            key: |b| SortKey::Text(b.sources_text()),
             right: false,
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
         },
     ]
-}
-
-/// The destination's name when the row has one, else `N hosts`.
-fn blocked_dst_name(b: &BlockedGroup) -> String {
-    match b.dst_names.as_slice() {
-        [one] if b.dst_hosts <= 1 => one.clone(),
-        _ => format!("{} hosts", b.dst_hosts),
-    }
-}
-
-/// `shop/dev, hr/prod +3`: the first source groups, then how many more.
-fn blocked_sources(b: &BlockedGroup) -> String {
-    let mut s = b.sources.join(", ");
-    let more = b.source_count.saturating_sub(b.sources.len() as u64);
-    if more > 0 {
-        s.push_str(&format!(" +{more}"));
-    }
-    s
 }
 
 /// Opt-in periodic refresh. Never below 60 s nor the profile minimum.

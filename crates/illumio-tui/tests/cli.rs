@@ -675,6 +675,16 @@ async fn policy_pending_lists_changes() {
 const QHREF: &str = "/orgs/5/traffic_flows/async_queries/q-1";
 
 async fn mount_traffic(server: &MockServer, expect_post: u64) {
+    mount_traffic_body(
+        server,
+        expect_post,
+        include_str!("../../../fixtures/traffic_flows.json").to_string(),
+    )
+    .await;
+}
+
+/// `mount_traffic` with another download body.
+async fn mount_traffic_body(server: &MockServer, expect_post: u64, body: String) {
     mount_objects(server).await;
     Mock::given(method("POST"))
         .and(path("/api/v2/orgs/5/traffic_flows/async_queries"))
@@ -689,11 +699,66 @@ async fn mount_traffic(server: &MockServer, expect_post: u64) {
         .and(path(format!("/api/v2{QHREF}/download")))
         .respond_with(
             ResponseTemplate::new(200)
-                .set_body_string(include_str!("../../../fixtures/traffic_flows.json"))
+                .set_body_string(body)
                 .insert_header("Content-Type", "application/json"),
         )
         .mount(server)
         .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn traffic_query_blocked_table_shows_the_destination_group_and_counts_its_hosts() {
+    let server = MockServer::start().await;
+    // The fixture plus the Corp 8443/tcp flow to a second shop/prod host.
+    let mut flows: Vec<serde_json::Value> =
+        serde_json::from_str(include_str!("../../../fixtures/traffic_flows.json")).unwrap();
+    let mut second = flows[1].clone();
+    second["dst"] = flows[2]["dst"].clone();
+    flows.push(second);
+    mount_traffic_body(&server, 2, serde_json::to_string(&flows).unwrap()).await;
+    let out = stdout_json(
+        cmd(&server)
+            .args(["traffic", "query", "--window", "1h", "--blocked"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"][0]["dst"], "host-1.example", "JSON unchanged");
+    assert_eq!(out["data"][0]["dst_hosts"], 2);
+    let table = cmd(&server)
+        .args(["traffic", "query", "--window", "1h", "--blocked", "--table"])
+        .assert()
+        .success();
+    let text = String::from_utf8_lossy(&table.get_output().stdout).to_string();
+    let header = text.lines().next().unwrap();
+    let cols: Vec<&str> = header
+        .split("  ")
+        .map(str::trim)
+        .filter(|h| !h.is_empty())
+        .collect();
+    assert_eq!(
+        cols,
+        vec![
+            "last seen",
+            "dst",
+            "dst name",
+            "service",
+            "flows",
+            "conns",
+            "sources"
+        ],
+        "{header}"
+    );
+    let row = text
+        .lines()
+        .find(|l| l.contains("8443/tcp"))
+        .unwrap_or_else(|| panic!("{text}"));
+    assert!(
+        row.contains("shop/prod") && row.contains("2 hosts"),
+        "{row}"
+    );
+    assert!(!row.contains("host-1.example"), "{row}");
+    assert!(row.contains("ipl:Corp/-"), "{row}");
+    assert!(!text.contains("dst labels"), "{text}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

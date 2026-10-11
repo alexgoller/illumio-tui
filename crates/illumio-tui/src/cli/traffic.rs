@@ -393,28 +393,26 @@ impl TableRows for Vec<BlockedGroup> {
         vec![
             "last seen",
             "dst",
-            "dst labels",
+            "dst name",
             "service",
             "flows",
             "conns",
             "sources",
         ]
     }
+    /// The TUI's Blocked cells: the row stands for a destination group, so
+    /// `dst` is the group and `dst name` the one host or `N hosts`.
     fn rows(&self) -> Vec<Vec<String>> {
         self.iter()
             .map(|g| {
-                let service = match g.port {
-                    Some(p) => format!("{p}/{}", g.proto),
-                    None => g.proto.clone(),
-                };
                 vec![
                     g.last_detected.clone().unwrap_or_default(),
-                    g.dst.clone(),
-                    g.dst_labels.clone(),
-                    service,
+                    g.dst_group_text(),
+                    g.dst_name_text(),
+                    g.service_text(),
                     g.flows.to_string(),
                     g.connections.to_string(),
-                    g.sources.join(", "),
+                    g.sources_text(),
                 ]
             })
             .collect()

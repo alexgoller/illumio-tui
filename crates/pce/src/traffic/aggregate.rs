@@ -1,6 +1,6 @@
 //! Pure aggregations over resolved flows. The TUI's views and the CLI's
 //! `--group` / `--blocked` / `groups` use these; no requests.
-use super::resolved::{ResolvedEndpoint, ResolvedFlow};
+use super::resolved::{ResolvedEndpoint, ResolvedFlow, service_text};
 use crate::models::PolicyDecision;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -210,6 +210,34 @@ impl BlockedGroup {
 
     fn key(&self) -> BlockedKey {
         (self.dst_group.clone(), self.port, self.proto.clone())
+    }
+
+    /// The destination group as text, `shop/prod`.
+    pub fn dst_group_text(&self) -> String {
+        self.dst_group.join("/")
+    }
+
+    /// The destination's name when the row has one host, else `N hosts`.
+    pub fn dst_name_text(&self) -> String {
+        match self.dst_names.as_slice() {
+            [one] if self.dst_hosts <= 1 => one.clone(),
+            _ => format!("{} hosts", self.dst_hosts),
+        }
+    }
+
+    /// `5432/tcp`, or just `icmp` when there is no port.
+    pub fn service_text(&self) -> String {
+        service_text(self.port, &self.proto)
+    }
+
+    /// `shop/dev, hr/prod +3`: the first source groups, then how many more.
+    pub fn sources_text(&self) -> String {
+        let mut s = self.sources.join(", ");
+        let more = self.source_count.saturating_sub(self.sources.len() as u64);
+        if more > 0 {
+            s.push_str(&format!(" +{more}"));
+        }
+        s
     }
 }
 
@@ -436,6 +464,28 @@ mod tests {
         assert_eq!(b[1].proto, "icmp");
         assert_eq!(b[1].connections, 3);
         assert_eq!(b[1].sources, vec!["unmanaged-nas/-"]);
+    }
+
+    #[test]
+    fn a_blocked_row_names_one_host_or_counts_them_and_counts_more_sources() {
+        let b = blocked_summary(&rich_flows(), &keys(&["app", "env"]));
+        let shop = b
+            .iter()
+            .find(|r| r.dst_group == vec!["shop", "prod"])
+            .unwrap();
+        assert_eq!(shop.dst_group_text(), "shop/prod");
+        assert_eq!(shop.dst_name_text(), "shop-db-p.example");
+        assert_eq!(shop.service_text(), "5432/tcp");
+        assert_eq!(shop.sources_text(), "hr/prod, shop/dev, ipl:Corp/-");
+        let mut many = shop.clone();
+        many.dst_hosts = 8;
+        many.source_count = 10;
+        many.sources = vec!["a".into(), "b".into(), "c".into(), "d".into(), "e".into()];
+        assert_eq!(many.dst_name_text(), "8 hosts");
+        assert_eq!(many.sources_text(), "a, b, c, d, e +5");
+        many.port = None;
+        many.proto = "icmp".into();
+        assert_eq!(many.service_text(), "icmp");
     }
 
     #[test]
