@@ -2,4 +2,5 @@
 //! modules. `main.rs` is a thin wrapper.
 pub mod cli;
 pub mod config;
+pub mod tokens;
 pub mod tui;

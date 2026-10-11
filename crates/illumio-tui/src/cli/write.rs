@@ -5,11 +5,14 @@
 use super::context::Context;
 use super::error::CliError;
 use super::output::{TableRows, WriteMeta};
+use crate::tokens::with_exclusion;
+pub use crate::tokens::{ActorToken, ServiceToken, is_href};
+pub(crate) use crate::tokens::{similar, with_similar};
 use clap::Args;
 use pce::models::{IpList, Label, LabelGroup, Service};
 use pce::write::provision_counts;
 use pce::write::{
-    ActorKind, ActorRef, JsonlAudit, Outcome, Plan, PortSpec, ServiceRef, WriteContext, WriteError,
+    ActorKind, ActorRef, JsonlAudit, Outcome, Plan, ServiceRef, WriteContext, WriteError,
     WriteGuard, WriteRefused, WriteRequest, Written, checked_href, checked_policy_href,
 };
 use serde::Serialize;
@@ -253,42 +256,7 @@ async fn send(
 
 /// `key=value`, split on the first `=`; both sides trimmed and non-empty.
 pub fn parse_kv(spec: &str) -> Result<(String, String), CliError> {
-    let (k, v) = spec
-        .split_once('=')
-        .ok_or_else(|| CliError::Args(format!("expected key=value, got {spec:?}")))?;
-    let (k, v) = (k.trim(), v.trim());
-    if k.is_empty() || v.is_empty() {
-        return Err(CliError::Args(format!(
-            "expected key=value with both sides non-empty, got {spec:?}"
-        )));
-    }
-    Ok((k.to_string(), v.to_string()))
-}
-
-pub fn is_href(s: &str) -> bool {
-    s.trim_start().starts_with("/orgs/")
-}
-
-/// Up to five names that contain `needle` case-insensitively, for an
-/// error that found no exact match.
-pub(crate) fn similar<'a>(needle: &str, names: impl Iterator<Item = &'a str>) -> Vec<String> {
-    let needle = needle.to_lowercase();
-    let mut out: Vec<String> = names
-        .filter(|n| n.to_lowercase().contains(&needle))
-        .map(str::to_string)
-        .collect();
-    out.sort();
-    out.dedup();
-    out.truncate(5);
-    out
-}
-
-pub(crate) fn with_similar(msg: String, similar: &[String]) -> String {
-    if similar.is_empty() {
-        msg
-    } else {
-        format!("{msg}; similar: {}", similar.join(", "))
-    }
+    crate::tokens::split_kv(spec).map_err(CliError::Args)
 }
 
 /// An href as given, or `key=value` matched exactly against `labels`
@@ -430,152 +398,6 @@ pub async fn resolve_workload(
     Ok(ctx.pce.writer(guard).find_workload(target).await?.href)
 }
 
-const ACTOR_GRAMMAR: &str = "use key=value, label:key=value, group:NAME, iplist:NAME, workload:HOST, all, an href, or ! before a label, label group or IP list";
-
-/// One `--provider`, `--consumer` or `--scope` token, parsed without any
-/// request (grammar in the README's Writes section).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ActorToken {
-    All,
-    /// `key=value`, already split and re-joined on the first `=`.
-    Label {
-        spec: String,
-        exclusion: bool,
-    },
-    LabelGroup {
-        name: String,
-        exclusion: bool,
-    },
-    IpList {
-        name: String,
-        exclusion: bool,
-    },
-    Workload {
-        name: String,
-    },
-    Href {
-        href: String,
-        exclusion: bool,
-    },
-}
-
-impl ActorToken {
-    pub fn parse(s: &str) -> Result<Self, String> {
-        let t = s.trim();
-        let (exclusion, rest) = match t.strip_prefix('!') {
-            Some(r) => (true, r.trim()),
-            None => (false, t),
-        };
-        if rest.is_empty() {
-            return Err(format!("{s:?} is empty; {ACTOR_GRAMMAR}"));
-        }
-        let named = |prefix: &str| -> Option<Result<String, String>> {
-            rest.strip_prefix(prefix).map(|n| {
-                let n = n.trim();
-                if n.is_empty() {
-                    Err(format!("{s:?}: missing name after {prefix}"))
-                } else {
-                    Ok(n.to_string())
-                }
-            })
-        };
-        if rest.eq_ignore_ascii_case("all") {
-            return if exclusion {
-                Err(format!("{s:?}: all cannot be excluded"))
-            } else {
-                Ok(Self::All)
-            };
-        }
-        if is_href(rest) {
-            return Ok(Self::Href {
-                href: rest.to_string(),
-                exclusion,
-            });
-        }
-        if let Some(name) = named("group:") {
-            return Ok(Self::LabelGroup {
-                name: name?,
-                exclusion,
-            });
-        }
-        if let Some(name) = named("iplist:") {
-            return Ok(Self::IpList {
-                name: name?,
-                exclusion,
-            });
-        }
-        if let Some(name) = named("workload:") {
-            if exclusion {
-                return Err(format!(
-                    "{s:?}: only labels, label groups and IP lists can be excluded"
-                ));
-            }
-            return Ok(Self::Workload { name: name? });
-        }
-        let spec = rest.strip_prefix("label:").unwrap_or(rest);
-        if spec != rest && is_href(spec) {
-            // `label:<href>` is checked as a label href at resolution.
-            return Ok(Self::Label {
-                spec: spec.to_string(),
-                exclusion,
-            });
-        }
-        if spec.contains('=') {
-            let (k, v) = parse_kv(spec).map_err(|e| e.to_string())?;
-            return Ok(Self::Label {
-                spec: format!("{k}={v}"),
-                exclusion,
-            });
-        }
-        Err(format!("{s:?} is not an actor; {ACTOR_GRAMMAR}"))
-    }
-
-    /// Scopes take labels and label groups; an href's kind is checked by
-    /// the library without a request.
-    fn scope_member(&self) -> bool {
-        matches!(
-            self,
-            Self::Label { .. } | Self::LabelGroup { .. } | Self::Href { .. }
-        )
-    }
-}
-
-/// One `--service` token: an href, an inline port, or a service name.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ServiceToken {
-    Href(String),
-    Port(PortSpec),
-    Name(String),
-}
-
-impl ServiceToken {
-    pub fn parse(s: &str) -> Result<Self, String> {
-        let t = s.trim();
-        if t.is_empty() {
-            return Err("empty service".into());
-        }
-        if is_href(t) {
-            return Ok(Self::Href(t.to_string()));
-        }
-        if let Some(n) = t.strip_prefix("service:") {
-            let n = n.trim();
-            return if n.is_empty() {
-                Err(format!("{s:?}: missing service name"))
-            } else {
-                Ok(Self::Name(n.to_string()))
-            };
-        }
-        // A slash or a bare number can only mean a port: report the port
-        // error, not "no service named".
-        if t.contains('/') || t.bytes().all(|b| b.is_ascii_digit()) {
-            return PortSpec::parse(t).map(Self::Port);
-        }
-        Ok(PortSpec::parse(t)
-            .map(Self::Port)
-            .unwrap_or_else(|_| Self::Name(t.to_string())))
-    }
-}
-
 pub fn parse_actors(specs: &[String]) -> Result<Vec<ActorToken>, CliError> {
     specs
         .iter()
@@ -595,25 +417,14 @@ pub fn parse_scopes(specs: &[String]) -> Result<Vec<Vec<ActorToken>>, CliError> 
     specs
         .iter()
         .map(|spec| {
-            let tokens: Vec<String> = spec
-                .split(',')
-                .map(str::trim)
-                .filter(|t| !t.is_empty())
-                .map(str::to_string)
-                .collect();
-            if tokens.is_empty() {
+            let scope = crate::tokens::parse_scope(spec).map_err(CliError::Args)?;
+            if scope.is_empty() {
                 return Err(CliError::Args(
                     "--scope needs at least one label or label group; leave --scope out for a ruleset that applies everywhere"
                         .into(),
                 ));
             }
-            let parsed = parse_actors(&tokens)?;
-            if parsed.iter().any(|t| !t.scope_member()) {
-                return Err(CliError::Args(
-                    "scopes take labels and label groups only".into(),
-                ));
-            }
-            Ok(parsed)
+            Ok(scope)
         })
         .collect()
 }
@@ -686,64 +497,17 @@ pub async fn resolve_label_group(
     label_group_in(lists.label_groups(ctx).await?, name)
 }
 
-fn with_exclusion(mut a: ActorRef, exclusion: bool) -> ActorRef {
-    a.exclusion = exclusion;
-    a
-}
-
-/// Tokens that carry an href are checked by the library's strict checkers
-/// for the kind their prefix names, with no list consulted. `None` for
-/// tokens that name an object (or `all`).
+/// [`crate::tokens::actor_from_href_token`] with the CLI's error type.
 fn actor_from_href_token(token: &ActorToken, org_id: u64) -> Option<Result<ActorRef, CliError>> {
-    let (kind, href, segment, policy, exclusion) = match token {
-        ActorToken::Href { href, exclusion } => {
-            return Some(
-                ActorRef::from_href(href, org_id)
-                    .map(|a| with_exclusion(a, *exclusion))
-                    .map_err(CliError::from),
-            );
-        }
-        ActorToken::Label { spec, exclusion } if is_href(spec) => {
-            (ActorKind::Label, spec, "labels", false, *exclusion)
-        }
-        ActorToken::LabelGroup { name, exclusion } if is_href(name) => (
-            ActorKind::LabelGroup,
-            name,
-            "label_groups",
-            true,
-            *exclusion,
-        ),
-        ActorToken::IpList { name, exclusion } if is_href(name) => {
-            (ActorKind::IpList, name, "ip_lists", true, *exclusion)
-        }
-        ActorToken::Workload { name } if is_href(name) => {
-            (ActorKind::Workload, name, "workloads", false, false)
-        }
-        _ => return None,
-    };
-    let checked = if policy {
-        checked_policy_href(href, segment, org_id)
-    } else {
-        checked_href(href, segment, org_id)
-    };
-    Some(
-        checked
-            .map(|h| with_exclusion(ActorRef::new(kind, h), exclusion))
-            .map_err(CliError::from),
-    )
+    crate::tokens::actor_from_href_token(token, org_id).map(|r| r.map_err(CliError::from))
 }
 
+/// [`crate::tokens::service_from_href_token`] with the CLI's error type.
 fn service_from_href_token(
     token: &ServiceToken,
     org_id: u64,
 ) -> Option<Result<ServiceRef, CliError>> {
-    match token {
-        ServiceToken::Href(h) => Some(ServiceRef::from_href(h, org_id).map_err(CliError::from)),
-        ServiceToken::Name(n) if is_href(n) => {
-            Some(ServiceRef::from_href(n, org_id).map_err(CliError::from))
-        }
-        _ => None,
-    }
+    crate::tokens::service_from_href_token(token, org_id).map(|r| r.map_err(CliError::from))
 }
 
 pub async fn resolve_actor(
@@ -967,123 +731,6 @@ mod tests {
     }
 
     #[test]
-    fn actor_tokens_parse_every_form() {
-        let label = |spec: &str, exclusion| ActorToken::Label {
-            spec: spec.into(),
-            exclusion,
-        };
-        assert_eq!(
-            ActorToken::parse("app=web").unwrap(),
-            label("app=web", false)
-        );
-        assert_eq!(
-            ActorToken::parse(" label:app = a=b ").unwrap(),
-            label("app=a=b", false)
-        );
-        assert_eq!(
-            ActorToken::parse("!env=prod").unwrap(),
-            label("env=prod", true)
-        );
-        assert_eq!(
-            ActorToken::parse("group:All prod envs").unwrap(),
-            ActorToken::LabelGroup {
-                name: "All prod envs".into(),
-                exclusion: false
-            }
-        );
-        assert_eq!(
-            ActorToken::parse("!iplist:Corp").unwrap(),
-            ActorToken::IpList {
-                name: "Corp".into(),
-                exclusion: true
-            }
-        );
-        assert_eq!(
-            ActorToken::parse("workload:web-1.lab").unwrap(),
-            ActorToken::Workload {
-                name: "web-1.lab".into()
-            }
-        );
-        assert_eq!(ActorToken::parse("ALL").unwrap(), ActorToken::All);
-        assert_eq!(
-            ActorToken::parse("!/orgs/5/labels/1").unwrap(),
-            ActorToken::Href {
-                href: "/orgs/5/labels/1".into(),
-                exclusion: true
-            }
-        );
-    }
-
-    #[test]
-    fn actor_tokens_refuse_bad_input() {
-        assert_eq!(
-            ActorToken::parse("!all").unwrap_err(),
-            r#""!all": all cannot be excluded"#
-        );
-        assert!(
-            ActorToken::parse("!workload:x")
-                .unwrap_err()
-                .contains("only labels, label groups and IP lists can be excluded")
-        );
-        assert!(
-            ActorToken::parse("group:")
-                .unwrap_err()
-                .contains("missing name")
-        );
-        assert!(
-            ActorToken::parse("web")
-                .unwrap_err()
-                .contains("is not an actor")
-        );
-        assert!(
-            ActorToken::parse("app=")
-                .unwrap_err()
-                .contains("expected key=value")
-        );
-        assert!(ActorToken::parse("!").unwrap_err().contains("is empty"));
-    }
-
-    #[test]
-    fn service_tokens_split_ports_names_and_hrefs() {
-        use pce::write::PortSpec;
-        assert_eq!(
-            ServiceToken::parse("/orgs/5/sec_policy/draft/services/31").unwrap(),
-            ServiceToken::Href("/orgs/5/sec_policy/draft/services/31".into())
-        );
-        assert_eq!(
-            ServiceToken::parse("443/tcp").unwrap(),
-            ServiceToken::Port(PortSpec::parse("443/tcp").unwrap())
-        );
-        assert_eq!(
-            ServiceToken::parse("8000-8100/udp").unwrap(),
-            ServiceToken::Port(PortSpec::parse("8000-8100/udp").unwrap())
-        );
-        assert_eq!(
-            ServiceToken::parse("icmp").unwrap(),
-            ServiceToken::Port(PortSpec::parse("icmp").unwrap())
-        );
-        assert_eq!(
-            ServiceToken::parse("HTTPS").unwrap(),
-            ServiceToken::Name("HTTPS".into())
-        );
-        assert_eq!(
-            ServiceToken::parse("service:tcp").unwrap(),
-            ServiceToken::Name("tcp".into())
-        );
-        assert!(
-            ServiceToken::parse("443")
-                .unwrap_err()
-                .contains("bare number is ambiguous")
-        );
-        assert!(
-            ServiceToken::parse("443/tpc")
-                .unwrap_err()
-                .contains("unknown protocol")
-        );
-        assert!(ServiceToken::parse("service: ").is_err());
-    }
-
-    #[test]
     fn scopes_take_labels_and_groups_only() {
         let scopes = parse_scopes(&["app=web, group:G".into(), "env=prod".into()]).unwrap();
         assert_eq!(scopes.len(), 2);
@@ -1107,66 +754,5 @@ mod tests {
                 .len(),
             2
         );
-    }
-
-    #[test]
-    fn prefixed_hrefs_resolve_through_the_strict_checkers_without_lists() {
-        // The href paths are pure (no Context, no Lists, no request), so
-        // these tests cannot fetch anything.
-        let org = 5;
-        let actor = |s: &str| {
-            let tok = ActorToken::parse(s).unwrap();
-            actor_from_href_token(&tok, org).expect("href token")
-        };
-        let a = actor("label:/orgs/5/labels/1").unwrap();
-        assert_eq!(
-            (a.kind, a.href.as_deref()),
-            (ActorKind::Label, Some("/orgs/5/labels/1"))
-        );
-        assert!(actor("!label:/orgs/5/labels/1").unwrap().exclusion);
-        let a = actor("group:/orgs/5/sec_policy/active/label_groups/2").unwrap();
-        assert_eq!(a.kind, ActorKind::LabelGroup);
-        assert_eq!(
-            a.href.as_deref(),
-            Some("/orgs/5/sec_policy/draft/label_groups/2")
-        );
-        let a = actor("!iplist:/orgs/5/sec_policy/draft/ip_lists/3").unwrap();
-        assert_eq!(a.kind, ActorKind::IpList);
-        assert!(a.exclusion);
-        let a = actor("workload:/orgs/5/workloads/abc").unwrap();
-        assert_eq!(a.kind, ActorKind::Workload);
-        assert_eq!(a.href.as_deref(), Some("/orgs/5/workloads/abc"));
-        assert!(
-            actor("iplist:/orgs/5/labels/1")
-                .unwrap_err()
-                .to_string()
-                .contains("ip_lists")
-        );
-        assert!(
-            actor("group:/orgs/5/labels/1")
-                .unwrap_err()
-                .to_string()
-                .contains("label_groups")
-        );
-        assert!(
-            actor("workload:/orgs/5/labels/1")
-                .unwrap_err()
-                .to_string()
-                .contains("workloads")
-        );
-        assert!(actor("label:/orgs/9/labels/1").is_err(), "wrong org");
-        assert!(actor_from_href_token(&ActorToken::parse("app=web").unwrap(), org).is_none());
-        assert!(actor_from_href_token(&ActorToken::parse("iplist:Corp").unwrap(), org).is_none());
-
-        let svc = |s: &str| service_from_href_token(&ServiceToken::parse(s).unwrap(), org);
-        assert_eq!(
-            svc("service:/orgs/5/sec_policy/active/services/31")
-                .unwrap()
-                .unwrap(),
-            ServiceRef::Href("/orgs/5/sec_policy/draft/services/31".into())
-        );
-        assert!(svc("service:/orgs/5/labels/1").unwrap().is_err());
-        assert!(svc("HTTPS").is_none());
-        assert!(svc("443/tcp").is_none());
     }
 }
