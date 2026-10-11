@@ -95,6 +95,7 @@
     <li>Writes policy from the CLI: rulesets, allow and deny rules with a compact actor grammar (<code>app=web</code>, <code>group:Prod</code>, <code>iplist:Corp</code>, <code>!</code> to exclude), provisioning of everything pending or a chosen few, and label changes on VEN-managed workloads, all with the same dry run, single send and audit log.</li>
     <li>Edits the same objects in the TUI: <code>n</code> new, <code>e</code> edit, <code>x</code> delete, a header marker while writes are on, the exact request on screen before <code>y</code> sends it once, and a pending-changes diff of a draft IP list or service against active.</li>
     <li>Edits policy in the TUI too: rulesets, allow and deny rules on the Policy screen with the same token grammar, marked or complete provisioning from the pending list after the exact <code>change_subset</code> is shown, a ruleset diff against active, and <code>w</code> to turn a blocked flow into a draft allow rule.</li>
+    <li>Shows what a rule touches: <code>i</code> in the TUI and <code>--impact</code> in the CLI count the workloads a rule matches as providers and consumers, with ruleset scopes, label groups and exclusions, from one cached workload read, before and after you write it.</li>
   </ul>
 
   <div class="cols">
@@ -191,12 +192,13 @@
 
   <div class="cols">
     <div>
-      <h3>Four screens</h3>
+      <h3>Screens</h3>
       <ul class="screens">
         <li><kbd>1</kbd><strong>Traffic.</strong> One filter, one query, three views on <code>v</code>: the flow table, the app-to-app aggregate with a drill-down on <code>enter</code>, and a blocked focus grouped by destination and port.</li>
         <li><kbd>2</kbd><strong>Policy.</strong> Rulesets on the left, resolved rules on the right, deny rules in their own section, draft and active on <code>d</code>, pending changes on <code>p</code>.</li>
-        <li><kbd>3</kbd><strong>Labels &amp; objects.</strong> Labels, label groups, IP lists and services, with cache age shown and per-type refresh.</li>
+        <li><kbd>3</kbd><strong>Objects.</strong> Labels, label groups and services, with cache age shown and per-type refresh.</li>
         <li><kbd>4</kbd><strong>Workloads.</strong> Enforcement, visibility, online state, VEN status. <code>t</code> jumps to Traffic with that workload as source.</li>
+        <li><kbd>6</kbd><strong>IP lists.</strong> Every IP list with its size in addresses (exclusions taken out), its ranges and FQDNs, and the rules that use it.</li>
       </ul>
     </div>
     <div>

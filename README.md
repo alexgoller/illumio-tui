@@ -77,11 +77,12 @@ has its own `--port` service-port filter).
     illumio-tui --profile prod
     illumio-tui --theme light        # dark is the default
 
-Five screens: `1` Traffic, `2` Policy, `3` Labels & objects, `4` Workloads, `5` Events. The
-`:` prompt takes `:traffic`, `:policy`, `:objects`, `:workloads`, `:events`, `:filter <expr>`,
-`:window <dur>`, `:profile <name>`, `:draft`, `:active`, `:help` and `:q`. `?` shows the full
-key map, `Esc` closes overlays, `q` or `Ctrl-C` quits. The mouse wheel scrolls the current
-table and a click on a tab switches screen.
+Six screens: `1` Traffic, `2` Policy, `3` Objects, `4` Workloads, `5` Events, `6` IP lists. The
+`:` prompt takes `:traffic`, `:policy`, `:objects`, `:workloads`, `:events`, `:iplists`,
+`:filter <expr>`, `:window <dur>`, `:profile <name>`, `:draft`, `:active`, `:help` and `:q`.
+`?` shows the full key map, `Esc` closes overlays, `q` or `Ctrl-C` quits. The mouse wheel
+scrolls the current table and a click on a tab switches screen; on a terminal narrower than
+the full tab row the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`, `IPs`.
 
 - **Traffic**: `f` edit the filter, `r` run (bypasses the cache), `v` cycle Flows / App-to-app /
   Blocked, `g` change the group keys, `s` sort, `/` search, `Enter` detail (flows) or drill into
@@ -91,7 +92,17 @@ table and a click on a tab switches screen.
   detail, or on a ruleset load its deny rules. Rules are listed in evaluation order: override
   deny, allow, deny. With writes on, `n` / `e` / `x` create, edit and delete rulesets and rules
   in draft (`N` a deny rule), and the pending overlay marks with `Space` and provisions with `P`.
-- **Labels & objects**: `Tab` next object type, `Enter` detail.
+  `i` reads the workload list once (unless the Workloads screen already did) for rule impact:
+  the rule detail says how many workloads the rule matches (`impact      12 providers · 3
+  consumers`, `≥` when the list was truncated) and the size of each IP list it names, the
+  rules pane's `P/C` column fills in, and a rule's confirm overlay shows the same for the rule
+  about to be written. Impact uses the ruleset's scopes, unscoped consumers, label groups (with
+  their sub-groups), exclusions, `all` and workload actors; IP lists are sized, never expanded.
+- **Objects**: labels, label groups and services; `Tab` next type, `Enter` detail.
+- **IP lists**: name, size (addresses after exclusions: `65.5K`; `any` for `0.0.0.0/0`, `::/0`
+  or 16M addresses and more; `5 FQDNs` for a list of names only), ranges, FQDNs, `used by` (rules of the loaded draft rulesets that
+  name the list; `-` until Policy is loaded) and pending; `Enter` shows the ranges, FQDNs, the
+  size and those rules. With writes on, `n` / `e` / `x` create, edit and delete.
 - **Workloads**: VEN health columns and a summary line, `h` unhealthy only, `H` sort by
   severity, `t` / `T` jump to Traffic with the workload as source / destination.
 - **Events**: severity-coloured audit events, `f` edit severity / type / window, `S` sort by
@@ -107,9 +118,10 @@ outrank the target profile on a switch, as they do at startup; the header shows 
 actually in use.
 
 Startup makes exactly five requests (health plus the four object lists). The first visit to
-Workloads and to Events costs one request each; going back to them costs none. Everything
-else is caused by a key you press. The header shows the API call and byte counters at all
-times.
+Workloads and to Events costs one request each; going back to them costs none. IP lists (`6`)
+cost none: the startup load already read them. Rule impact costs one workloads read on `i`,
+none when the list is cached. Everything else is caused by a key you press. The header shows
+the API call and byte counters at all times.
 
 ## CLI
 
@@ -118,6 +130,9 @@ times.
     illumio-tui workloads --label app=web --online true
     illumio-tui policy rulesets
     illumio-tui policy rules "Web-DB"
+    illumio-tui policy rules "Web-DB" --impact --json
+    illumio-tui policy rules impact /orgs/1/sec_policy/draft/rule_sets/7/sec_rules/3
+    illumio-tui iplists --table
     illumio-tui policy pending
     illumio-tui traffic query --window 24h --src app=web --dst app=db --json
     illumio-tui traffic query --window 1h --group app,env
@@ -130,6 +145,15 @@ JSON output (default when piped) is `{"data": ..., "meta": {...}}` where
 `meta` reports API calls, bytes, cache status, truncation, and the query
 window. Errors go to stderr as JSON. Exit codes: 1 generic, 2 arguments or
 config, 3 auth, 4 PCE error, 5 rate limited, 6 write refused by the guard.
+
+`--impact` on `policy rules <ruleset>` adds each rule's `impact` (JSON) or a `P/C` column
+(table): `providers` and `consumers` (workloads matched, unions over the ruleset's scopes),
+`per_scope`, `ip_lists` (name, href, `size`, side), `unsupported` (virtual services, not
+counted) and `truncated`. `policy rules impact <rule-href>` prints one rule the same way (exit
+2 for an href of the wrong shape, 4 when the rule is not found). It costs one workloads read,
+through the cache; `meta.truncated` includes it. `iplists` gives every list a `size`: `v4` and
+`v6` address counts as strings, `unbounded` (`0.0.0.0/0`, `::/0` or `≥16M addresses`), `ranges`
+and `fqdns`.
 
 ## Writes
 
@@ -235,6 +259,15 @@ with the untouched entries exactly as the PCE returned them, and a
 `--remove-*` that matches nothing is exit 2. Virtual service and virtual
 server actors are not supported. A ruleset `PUT` never carries its rules.
 
+`--impact` on `policy rules add|update` and `policy deny-rules add|update` reports what the
+rule will touch, before anything is sent: with `--dry-run`, `data` is the request plus
+`impact`; with `--yes`, the result plus `impact`. The rule's sides come from the planned body
+(an update's untouched sides from the loaded rule), the scopes from the draft ruleset, and the
+workloads from one cached read made after the guard and the plan, so a refused write costs
+nothing.
+
+    illumio-tui --allow-writes policy rules add Shop-Prod --provider role=web --consumer iplist:Corp --service 443/tcp --dry-run --impact --json
+
 `policy provision --all` reads the pending list once and provisions every
 pending object by explicit href, grouped by type (rulesets, IP lists,
 services, label groups, virtual services, firewall settings, and so on); a
@@ -254,8 +287,8 @@ request. Without it, managed workloads stay refused.
 ### Editing in the TUI
 
 With writes enabled for the profile and `illumio-tui --allow-writes`, the
-header shows `✎ writes` before the host and two screens take three keys: on Labels &
-objects (labels, IP lists, services) and Workloads (unmanaged workloads only)
+header shows `✎ writes` before the host and three screens take three keys: on Objects (labels,
+services), IP lists and Workloads (unmanaged workloads only)
 `n` creates, `e` edits the selected row and `x` deletes it. Without either
 switch the keys print the reason in the status line and send nothing. Label
 groups are read-only.

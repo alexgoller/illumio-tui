@@ -169,3 +169,28 @@ Brief: .superpowers/sdd/issue-3/brief.md · Report: .superpowers/sdd/issue-3/rep
 - Gate: `cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` green, 631 tests, 0 failed (illumio-tui lib 234, cli 24, cli_writes 71, tui_runtime 42, tui_snapshots 38; pce unchanged).
 - Unchanged: `crates/pce`, `src/cli`, the CLI tests, dependencies. Snapshots changed: `form_rule_from_flow_80x24`, `form_rule_from_flow_light_styled_80x24`.
 - Fix round 1 (a1cae19): the Ctrl-N offer moved to the Ruleset hint row and the panel keys (the error row keeps the planner's text), disarms when the name changes, a failed chained rule plan reopens the form, `w form Ctrl-A Ctrl-N` is in the help; 636 tests. Not smoke-tested against a PCE.
+
+## Plan 7: IP lists screen and rule impact
+Spec: docs/superpowers/specs/2026-10-11-iplists-impact-design.md · Plan: docs/superpowers/plans/2026-10-11-iplists-impact.md
+- [x] Task 1 pce::iplist_size
+- [x] Task 2 pce::impact
+- [x] Task 3 IP lists screen (read side)
+- [x] Task 4 IP lists screen (write side, used-by recompute, CLI size)
+- [x] Task 5 Workload cache plumbing and rule detail impact
+- [x] Task 6 Confirm overlay impact line
+- [x] Task 7 CLI --impact for existing rules
+- [x] Task 8 CLI --impact on rule writes
+- [x] Task 9 Docs, tracking, reads-only smoke, final gate
+
+## Review (Plan 7)
+- Shipped: the IP lists screen (`6`, `:iplists` / `:ip`) with size, ranges, FQDNs, used-by and pending, a detail with the size and the rules that use the list, and `n` / `e` / `x` with writes on; sizes in the CLI (`iplists` carries `size`; table column); `i` on Policy reads the workloads once and fills the rule detail's `impact` and `ip lists` rows and the rules pane's `P/C` column; the same impact line on a rule's confirm overlay; `policy rules <ruleset> --impact`; `policy rules impact <href>`; `--impact` on `policy rules|deny-rules add|update` in dry runs and results.
+- Gate: `cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` green, 704 tests, 0 failed (illumio-tui lib 264, cli 26, cli_writes 78, tui_runtime 46, tui_snapshots 43; pce lib 117, client 9, facade 10, live 1, live_writes 2 (skipping), policy_writes 32, recorded 2, traffic_poll 8, write_contract 64; xtask 2).
+- `crates/pce` diff vs `c0aa870`: new `iplist_size.rs` and `impact.rs`, `resolve.rs` (`canon` visibility, accessors, tests), `lib.rs` (modules, re-exports), plus the merged hotfix (`write/mod.rs`, `write/rules.rs`, `models/labels.rs`, `tests/policy_writes.rs`: inline rule services are TCP/UDP, `icmp` resolves to the ICMP service object). The brief expected an empty `crates/pce/src/write` diff; it is not empty only because of the hotfix. No Cargo.toml or Cargo.lock change (empty diff, no new dependency).
+- Smoke against demo100 (headless TUI without `--allow-writes`, `--env-file`, scratch `XDG_STATE_HOME`, `PCE_LIVE_WRITES` unset, the script never presses `y`): api calls per step 5 (startup), 5 after `6` (no request), 5 after Enter on the first list (detail: `size any (0.0.0.0/0)`, `used by load Policy (2) to see rules`), 6 after `2` (the draft rulesets), 6 after Tab, 6 after Enter on a rule (detail with `impact      press i to load workloads (1 request)`), 7 after `i` (one workloads read, 206 workloads; detail `impact      0 providers · 0 consumers`, `P/C` column `0/0`), 7 after a second `i` (no request). CLI: `policy rules 'Quarantine Policy: Strict' --impact --json` 3 rules, api_calls 6, truncated false, all `(0, 0)`; `iplists --json` api_calls 1, 12 lists, each with `size`. A rule detail was exercised (the first ruleset has rules); the zero counts are real (its quarantine labels match no workload). No write was sent to any PCE. The audit file `state7/illumio-tui/writes.jsonl` in the scratch directory was never created (absent).
+- Deviations reported by tasks:
+  - Task 3: Objects has three tabs now that IP lists left it, so editing keys moved: one unit test asserts 3 commands instead of 4, two runtime key streams lost one `Tab`, the writes-off runtime test now lands on Services (sends nothing). 61 existing snapshots re-recorded for the one reason that every tab row changed (six screens, short titles on a narrow terminal). Fix round: four overlay snapshots re-recorded on the IP lists background.
+  - Task 5: `a auto` was replaced by `i impact` in the writes-off Policy hint (80 columns were full; `a` stays in the help). The impact is stored on `RuleRow.impact` (computed once per `rebuild_rules`), never per draw; `pce::{workload_labels, rule_impact_with}` added so label sets are built once per load; P/C sorts numerically with `-` rows last; 21 snapshots re-recorded (the status-line hint).
+  - Task 6: the confirm overlay's impact line is stored in `PolicyState.confirm_impact` (refreshed on `Planned`, `i`, `WorkloadsLoaded`, `RuleSetsLoaded`), not computed while drawing; two new snapshots, none changed.
+  - Task 8 (fix round): an update whose rule is missing from the cached rulesets is exit 4 before the workloads read, rather than computing on empty sides.
+  - Hotfix: main (a97b3ca, inline rule services must be TCP/UDP, `icmp` resolves to the ICMP service object) was merged into the branch (2e44198) with one import conflict in `cli/write.rs` resolved by keeping both imports.
+- Parked (per-task minor lists in `.superpowers/sdd/2026-10-11-iplists-impact/progress.md`): `iplists.rs` duplicates part of the Objects meta/detail code; `used_by` compares hrefs exactly; descending P/C sort puts `-` rows first; no `--yes` impact tests for update / deny; a label unknown to a stale index gets its own bucket.

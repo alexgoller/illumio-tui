@@ -51,6 +51,7 @@ Module map under `crates/illumio-tui/src/tui/`:
 | `form` | the generic edit form (fields, keys, horizontal scroll) |
 | `edit` | edit intents, pre-filled forms, form to library draft or patch |
 | `diff` | draft against active for a pending IP list, service or ruleset |
+| `impact` | rule impact as the TUI shows it: `P/C` cells, the rule detail's rows, the confirm line |
 | `ui/` | theme, layout, per-screen drawing and widgets (panels, overlays) |
 
 One message, top to bottom: pressing `r` on Traffic.
@@ -214,6 +215,47 @@ deny rules for any ruleset (the PCE then inlines them for all, so empty
 means zero); else unfetched, in which case deny rules are not compared and a
 note says which side was not fetched. A diff that arrives while another
 overlay than the pending list is open does not replace it.
+
+### IP lists and rule impact
+
+`pce::iplist_size` counts an IP list's addresses per family with std
+integers (`Ipv4Addr` as `u32`, `Ipv6Addr` as `u128`): included ranges are
+merged, exclusions subtract only their overlap, a CIDR's host bits are
+ignored, and an included `0.0.0.0/0` or `::/0`, or 2^24 addresses and more,
+makes the list `unbounded`. JSON carries `v4`/`v6` as strings.
+
+`pce::impact::rule_impact` evaluates a rule over a workload list: for each
+ruleset scope (none means one empty scope, everywhere) the providers are the
+workloads inside the scope that match the provider actors, the consumers
+those that match the consumer actors, inside the scope unless
+`unscoped_consumers`; the totals are unions over the scopes. Labels and
+label groups are grouped by key (AND across keys, OR within one; a group
+counts under its own `key`, its sub-groups expanded once, cycles ended);
+`all` matches everything, a workload actor its href, IP lists and virtual
+services nothing (lists are reported with their size, virtual services as
+`unsupported`); exclusions remove last. Label groups and IP lists are looked
+up in the `NameIndex` (`label_group`, `ip_list`). `RuleActors` carries a
+rule's sides from a loaded rule or deny rule, or from a planned request body
+merged over the loaded rule, so the CLI and the TUI evaluate exactly what
+would be sent.
+
+The TUI reads the workload list only on `i` (`Cmd::LoadWorkloads(Use)`,
+nothing when it is cached or on its way). `tui/impact.rs` computes from
+`PolicyState.raw`, the index and `WorkloadsState.raw`: the rules pane's
+`P/C` cells and each rule's stored `Impact` when the rows are built
+(`RuleRow`; a column's `fn` cannot see the cache), and the confirm overlay's
+line (`PolicyState.confirm_impact`) when the confirm opens, on `i` and on a
+workloads or rulesets load. Drawing only reads what is stored, and a late
+`WorkloadsLoaded` rebuilds the rules pane and the stored line without
+opening or closing an overlay. IP lists are their own screen
+(`Screen::IpLists`, `IpListsState`): the list is the index's own (a cache
+hit after startup), sizes are computed once per load, and `used_by` counts
+the loaded draft rules that name the list, recomputed when the rulesets or
+their fetched deny rules arrive.
+
+The CLI's `--impact` costs one workloads read through the cache; on a write
+it runs after the guard and the plan and before the send, and its
+`truncated` flag is OR'd into `meta.truncated`.
 
 ## Testing
 
