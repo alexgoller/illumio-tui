@@ -62,3 +62,12 @@ Captured after corrections and review findings, so the same mistake is not repea
 ## Hotfix 2026-10-11
 
 - The first live rule write found that the PCE refuses inline ICMP: the `sec_rule_ingress_services` schema takes `proto` in [6, 17] only (port optional, meaning all ports), and ICMP is the `ilo_defaults`/`ICMP` service object. The opt-in live test had never run; a schema assumption needs one real write per shape.
+
+## Plan 7 (IP lists and rule impact), 2026-10-11
+
+- A fix that widens a value's range needs the formatter re-checked: removing the `≥16M → any` cap exposed `human()` topping out at G, so IPv6 lists clipped in the column. When a ruling changes a bound, grep for every place that assumed the old bound and add a width test against the real column.
+- Compact cells need a width test against the real column width, not a prose budget: the 7-cell P/C cell clipped `≥1234/≥5678` until the test read `rule_columns()`.
+- Impact computed per draw is a hidden hot loop; store it on the row and recompute only when the inputs (workloads, index) change.
+- The name index must be rebuilt when any object it covers reloads (labels, IP lists); a stale index silently zeros a side or drops a note.
+- Honour `resolve_labels_as` per side; the virtual-services case counts nothing from labels and says so in a note.
+- Unknown scope groups are skipped with a note rather than zeroing the side: over-stating blast radius is the safer direction for an allow rule.
