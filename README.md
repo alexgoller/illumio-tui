@@ -167,7 +167,8 @@ Writes are off unless the profile says yes (`writes = true`, or
 (`write_refused`), even for a dry run. Every write command prints the exact
 request with `--dry-run` and needs `--yes` to send it (the two flags
 conflict; with neither, it is exit 2 and nothing is sent). `--allow-writes`
-is still accepted but no longer needed and changes nothing. A dry run's `data` is
+is still accepted but no longer needed; in the CLI it changes nothing (the TUI
+starts with writes armed when it is given). A dry run's `data` is
 `{method, path, body, summary}`: the method, the API path, the JSON body that
 would be sent (absent for a delete) and a one-line summary. Each sent request
 is appended to `~/.local/state/illumio-tui/writes.jsonl` (or

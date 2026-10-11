@@ -2064,8 +2064,6 @@ fn objects_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     Vec::new()
 }
 
-/// Writes off, or a write already on its way: the reason goes to the status
-/// line and the key does nothing else.
 /// `writes on`, or `writes off: <reason>` (just the reason when it already
 /// says so, as `WRITES_OFF` does).
 fn writes_status(writes: &WritesState) -> String {
@@ -2080,6 +2078,8 @@ fn writes_status(writes: &WritesState) -> String {
     }
 }
 
+/// Writes off, or a write already on its way: the reason goes to the status
+/// line and the key does nothing else.
 fn writes_refused(model: &mut Model) -> bool {
     if !model.writes.enabled {
         model.status = StatusLine::warn(model.writes.refusal());

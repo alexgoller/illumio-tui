@@ -177,6 +177,13 @@ async fn allow_writes_is_still_accepted_and_changes_nothing() {
         stdout_json(c.assert().success())["data"].clone()
     };
     assert_eq!(dry(Some("--allow-writes")), dry(None));
+    // The global flag also parses after the subcommand, and still does nothing.
+    let trailing = {
+        let mut c = writer(&server, state.path());
+        c.args(["labels", "add", "app=web", "--dry-run", "--allow-writes"]);
+        stdout_json(c.assert().success())["data"].clone()
+    };
+    assert_eq!(trailing, dry(None));
     // A profile without writes still refuses, flag or not.
     for flag in [Some("--allow-writes"), None] {
         let a = cmd(&server)
