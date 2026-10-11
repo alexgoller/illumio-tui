@@ -47,6 +47,8 @@ pub struct Form {
     pub alt: Option<Vec<(usize, String)>>,
     /// The alternates are shown (`Ctrl-A` was pressed an odd number of times).
     pub expanded: bool,
+    /// The error offers `Ctrl-N` (a `w` form naming an unknown ruleset).
+    pub offers_ruleset: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +58,8 @@ pub enum FormEvent {
     Submit,
     /// Esc: close without a request.
     Cancel,
+    /// Ctrl-N where the form offers it: create the ruleset it names.
+    NewRuleset,
 }
 
 impl Form {
@@ -68,6 +72,7 @@ impl Form {
             intent,
             alt: None,
             expanded: false,
+            offers_ruleset: false,
         }
     }
 
@@ -119,6 +124,7 @@ impl Form {
                 }
             }
             KeyCode::Char('a') if ctrl => self.swap_alternates(),
+            KeyCode::Char('n') if ctrl && self.offers_ruleset => return FormEvent::NewRuleset,
             KeyCode::Char('u') if ctrl => {
                 if let Some(f) = self.fields.get_mut(self.active) {
                     f.value.clear();

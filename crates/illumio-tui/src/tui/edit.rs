@@ -766,7 +766,7 @@ pub fn ruleset_href_named(sets: &[RuleSet], name: &str) -> Result<String, String
     match hits.as_slice() {
         [one] => Ok(one.to_string()),
         [] => Err(with_similar(
-            format!("no ruleset named {name:?}"),
+            unknown_ruleset(name),
             &similar(name, live().map(|rs| rs.name.as_str())),
         )),
         many => Err(format!(
@@ -774,6 +774,74 @@ pub fn ruleset_href_named(sets: &[RuleSet], name: &str) -> Result<String, String
             many.join(", ")
         )),
     }
+}
+
+/// The planner's answer for a ruleset name no draft ruleset has.
+fn unknown_ruleset(name: &str) -> String {
+    format!("no ruleset named {name:?}")
+}
+
+/// The scope of a `w` form's destination, when the form names a ruleset
+/// (not an href) that `error` says does not exist.
+fn unknown_ruleset_scope<'f>(
+    form: &'f Form,
+    error: &str,
+    scope_keys: &[String],
+) -> Option<Vec<&'f ResolvedLabel>> {
+    let EditIntent::RuleFromFlow(f) = &form.intent else {
+        return None;
+    };
+    let name = form.value("Ruleset").trim();
+    let unknown = unknown_ruleset(name);
+    let names_it = error == unknown || error.starts_with(&format!("{unknown};"));
+    let scope = scope_of(&f.dst, scope_keys);
+    (!is_href(name) && names_it && !scope.is_empty()).then_some(scope)
+}
+
+/// The error a `w` form comes back with when its ruleset name is unknown
+/// and the destination has a scope: the planner's answer (similar names
+/// included) and that `Ctrl-N` creates the ruleset.
+pub fn new_ruleset_offer(form: &Form, error: &str, scope_keys: &[String]) -> Option<String> {
+    unknown_ruleset_scope(form, error, scope_keys).map(|scope| {
+        format!(
+            "{error}; press Ctrl-N to create it scoped {}",
+            labels_tokens(&scope)
+        )
+    })
+}
+
+/// `Ctrl-N`: the ruleset the form names, scoped like the destination, and
+/// the rule to create in it once it exists.
+pub fn new_ruleset_intent(
+    form: &Form,
+    index: Option<&NameIndex>,
+    org_id: u64,
+    scope_keys: &[String],
+) -> Result<(WriteIntent, RuleDraft), String> {
+    let EditIntent::RuleFromFlow(f) = &form.intent else {
+        return Err("Ctrl-N creates a ruleset from a w form only".into());
+    };
+    let Some(WriteIntent::CreateRule {
+        ruleset: RulesetTarget::Name(name),
+        draft,
+    }) = build_intent(form, index, org_id)?
+    else {
+        return Err("Ctrl-N creates a ruleset by name; type one".into());
+    };
+    let scope: Vec<ActorRef> = scope_of(&f.dst, scope_keys)
+        .iter()
+        .map(|l| ActorRef::new(ActorKind::Label, l.href.clone()))
+        .collect();
+    if scope.is_empty() {
+        return Err("the destination has no scope labels to scope a ruleset by".into());
+    }
+    let ruleset = RuleSetDraft {
+        name,
+        description: None,
+        enabled: true,
+        scopes: vec![scope],
+    };
+    Ok((WriteIntent::CreateRuleSet(ruleset), draft))
 }
 
 const RULESET_HINT: &str = "ruleset name or href";

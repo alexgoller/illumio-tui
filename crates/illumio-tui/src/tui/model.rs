@@ -974,6 +974,9 @@ pub struct PolicyState {
     /// The report of the provision just done; the pending reload it caused
     /// shows it in front of the new count.
     pub provisioned: Option<String>,
+    /// A `w` rule waiting for the ruleset `Ctrl-N` creates: planned into
+    /// it once that write is done, dropped by any failure or cancel.
+    pub rule_after_ruleset: Option<pce::write::RuleDraft>,
     pub auto: AutoRefresh,
 }
 
@@ -999,6 +1002,7 @@ impl PolicyState {
             pending_marked: BTreeSet::new(),
             provision_counts: None,
             provisioned: None,
+            rule_after_ruleset: None,
             auto: AutoRefresh::new(min_refresh),
         }
     }

@@ -1,6 +1,6 @@
 //! Pure state transitions. Never performs I/O; returns `Cmd`s instead.
 use crate::tui::commands::{self, Command};
-use crate::tui::edit::{self, EditIntent, Start, WriteIntent};
+use crate::tui::edit::{self, EditIntent, RulesetTarget, Start, WriteIntent};
 use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::form::FormEvent;
 use crate::tui::model::{
@@ -482,6 +482,8 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             model.policy.pending = None;
             model.policy.pending_marked.clear();
             let counts = model.policy.provision_counts.take();
+            // Only a written ruleset sends the rule waiting for it.
+            let rule_after = model.policy.rule_after_ruleset.take();
             match result {
                 Ok(Outcome::Written(w)) => {
                     let mut text = if kind == pce::write::ObjectKind::Provision {
@@ -517,7 +519,18 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     if kind == pce::write::ObjectKind::Provision {
                         model.policy.provisioned = Some(model.status.text.clone());
                     }
-                    reload_after_write(model, kind)
+                    let mut cmds = reload_after_write(model, kind);
+                    if let Some(draft) = rule_after
+                        && kind == pce::write::ObjectKind::RuleSet
+                    {
+                        // The second confirmation: the rule in the new ruleset.
+                        model.writes.in_flight = true;
+                        cmds.push(Cmd::PlanWrite(WriteIntent::CreateRule {
+                            ruleset: RulesetTarget::Href(w.href.clone()),
+                            draft,
+                        }));
+                    }
+                    cmds
                 }
                 Ok(Outcome::Skipped { reason, .. }) => {
                     model.status = StatusLine::info(format!("skipped: {reason}"));
@@ -547,6 +560,10 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::Planned(result) => {
             model.writes.in_flight = false;
             let flow_form = model.traffic.rule_form.take();
+            // A ruleset `Ctrl-N` asked for keeps its rule only up to its confirm.
+            if !matches!(&result, Ok((Plan::Send { .. }, _))) || model.overlay != Overlay::None {
+                model.policy.rule_after_ruleset = None;
+            }
             match result {
                 // Keys typed while the plan was on its way belong to the
                 // overlay they went to; a `y` there must not confirm this.
@@ -573,7 +590,10 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     if let Some(mut f) = flow_form
                         && model.overlay == Overlay::None
                     {
-                        f.error = Some(e.clone());
+                        // An unknown name with a scoped destination offers Ctrl-N.
+                        let offer = edit::new_ruleset_offer(&f, &e, &model.limits.scope_keys);
+                        f.offers_ruleset = offer.is_some();
+                        f.error = Some(offer.unwrap_or_else(|| e.clone()));
                         model.overlay = Overlay::Form(f);
                     }
                     fail(model, "write", &e, false);
@@ -857,6 +877,26 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 model.status = StatusLine::info("cancelled, nothing sent");
                 Vec::new()
             }
+            // The ruleset is planned now; the rule waits for its href.
+            FormEvent::NewRuleset => match edit::new_ruleset_intent(
+                &form,
+                model.index().map(|i| i.as_ref()),
+                model.profile.org_id,
+                &model.limits.scope_keys,
+            ) {
+                Ok((intent, draft)) => {
+                    model.policy.rule_after_ruleset = Some(draft);
+                    model.overlay = Overlay::None;
+                    model.status = StatusLine::info("planning…");
+                    model.writes.in_flight = true;
+                    vec![Cmd::PlanWrite(intent)]
+                }
+                Err(e) => {
+                    form.error = Some(e);
+                    model.overlay = Overlay::Form(form);
+                    Vec::new()
+                }
+            },
             FormEvent::Submit => {
                 match edit::build_intent(
                     &form,
@@ -907,6 +947,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                     model.overlay = Overlay::None;
                     model.status = StatusLine::info("cancelled, nothing sent");
+                    model.policy.rule_after_ruleset = None;
                     Vec::new()
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
@@ -6373,7 +6414,14 @@ mod tests {
         assert!(update(&mut m, Msg::Planned(Err(e.into()))).is_empty());
         match &m.overlay {
             Overlay::Form(f) => {
-                assert_eq!(f.error.as_deref(), Some(e));
+                assert_eq!(
+                    f.error.as_deref(),
+                    Some(
+                        format!("{e}; press Ctrl-N to create it scoped app=shop, env=prod")
+                            .as_str()
+                    ),
+                    "similar names first, then the offer"
+                );
                 assert_eq!(f.value("Ruleset"), "Shop");
                 assert_eq!(f.value("Consumers"), "iplist:Corp", "the fields as typed");
             }
@@ -6396,5 +6444,166 @@ mod tests {
             "{:?}",
             m.overlay
         );
+    }
+
+    fn ctrl_key(c: char) -> Msg {
+        Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL))
+    }
+
+    /// `w` on the potentially blocked flow (Corp -> host-1 in app=shop,
+    /// env=prod), `New-App` typed, submitted, and the planner's answer.
+    fn unknown_ruleset_form(m: &mut Model) {
+        update(m, key('j'));
+        update(m, key('w'));
+        for c in "New-App".chars() {
+            update(m, key(c));
+        }
+        assert_eq!(update(m, enter()).len(), 1);
+        update(m, Msg::Planned(Err(r#"no ruleset named "New-App""#.into())));
+    }
+
+    #[test]
+    fn ctrl_n_creates_the_scoped_ruleset_then_plans_the_rule_in_it() {
+        use crate::tui::edit::{RulesetTarget, WriteIntent};
+        use crate::tui::test_support::model_with_flows;
+        use pce::write::{ActorKind, ActorRef};
+        let mut m = writes_on(model_with_flows());
+        unknown_ruleset_form(&mut m);
+        match &m.overlay {
+            Overlay::Form(f) => assert_eq!(
+                f.error.as_deref(),
+                Some(
+                    r#"no ruleset named "New-App"; press Ctrl-N to create it scoped app=shop, env=prod"#
+                )
+            ),
+            other => panic!("{other:?}"),
+        }
+        let cmds = update(&mut m, ctrl_key('n'));
+        let [Cmd::PlanWrite(WriteIntent::CreateRuleSet(d))] = cmds.as_slice() else {
+            panic!("{cmds:?}")
+        };
+        assert_eq!(d.name, "New-App");
+        assert_eq!(d.description, None);
+        assert!(d.enabled);
+        assert_eq!(
+            d.scopes,
+            vec![vec![
+                ActorRef::new(ActorKind::Label, "/orgs/5/labels/3"),
+                ActorRef::new(ActorKind::Label, "/orgs/5/labels/4"),
+            ]]
+        );
+        assert_eq!(m.overlay, Overlay::None);
+        assert!(m.writes.in_flight);
+        let draft = m.policy.rule_after_ruleset.clone().expect("the rule waits");
+        assert_eq!(
+            draft.providers,
+            vec![ActorRef::new(ActorKind::Label, "/orgs/5/labels/1")]
+        );
+        // The ruleset is written: its reload, and the rule planned into it.
+        let new = "/orgs/5/sec_policy/draft/rule_sets/102";
+        let cmds = update(
+            &mut m,
+            Msg::WriteDone {
+                kind: pce::write::ObjectKind::RuleSet,
+                method: Some(pce::WriteMethod::Post),
+                result: Ok(Outcome::Written(written(new, true))),
+            },
+        );
+        assert_eq!(
+            cmds,
+            vec![
+                Cmd::LoadRuleSets {
+                    scope: PolicyScope::Draft,
+                    mode: CacheMode::Bypass
+                },
+                Cmd::PlanWrite(WriteIntent::CreateRule {
+                    ruleset: RulesetTarget::Href(new.into()),
+                    draft,
+                }),
+            ]
+        );
+        assert!(m.policy.rule_after_ruleset.is_none());
+        assert!(m.writes.in_flight);
+        assert_eq!(m.status.text, format!("created {new} (pending)"));
+    }
+
+    #[test]
+    fn the_waiting_rule_is_dropped_by_any_failure_or_cancel() {
+        use crate::tui::test_support::{label_post_plan, model_with_flows};
+        let pending = |m: &mut Model| {
+            unknown_ruleset_form(m);
+            assert_eq!(update(m, ctrl_key('n')).len(), 1);
+            assert!(m.policy.rule_after_ruleset.is_some());
+        };
+        // A failed plan.
+        let mut m = writes_on(model_with_flows());
+        pending(&mut m);
+        update(&mut m, Msg::Planned(Err("refused".into())));
+        assert!(m.policy.rule_after_ruleset.is_none());
+        // `n` on the ruleset's confirm.
+        let mut m = writes_on(model_with_flows());
+        pending(&mut m);
+        update(
+            &mut m,
+            Msg::Planned(Ok((label_post_plan(), pce::write::ObjectKind::RuleSet))),
+        );
+        assert!(matches!(m.overlay, Overlay::ConfirmWrite { .. }));
+        update(&mut m, key('n'));
+        assert!(m.policy.rule_after_ruleset.is_none());
+        // A failed ruleset write sends no rule.
+        let mut m = writes_on(model_with_flows());
+        pending(&mut m);
+        let cmds = update(
+            &mut m,
+            Msg::WriteDone {
+                kind: pce::write::ObjectKind::RuleSet,
+                method: Some(pce::WriteMethod::Post),
+                result: Err(WriteError::invalid("refused")),
+            },
+        );
+        assert!(cmds.is_empty());
+        assert!(m.policy.rule_after_ruleset.is_none());
+        // A profile switch forgets it.
+        let mut m = writes_on(model_with_flows());
+        pending(&mut m);
+        m.reset_data();
+        assert!(m.policy.rule_after_ruleset.is_none());
+    }
+
+    #[test]
+    fn ctrl_n_is_offered_only_for_an_unknown_name_and_a_scoped_destination() {
+        use crate::tui::test_support::model_with_flows;
+        // Ctrl-N on a fresh form does nothing.
+        let mut m = writes_on(model_with_flows());
+        update(&mut m, key('j'));
+        update(&mut m, key('w'));
+        assert!(update(&mut m, ctrl_key('n')).is_empty());
+        assert!(matches!(m.overlay, Overlay::Form(_)));
+        // Another planner error is shown as it is, without the offer.
+        let mut m = writes_on(model_with_flows());
+        update(&mut m, key('j'));
+        update(&mut m, key('w'));
+        for c in "New-App".chars() {
+            update(&mut m, key(c));
+        }
+        update(&mut m, enter());
+        update(&mut m, Msg::Planned(Err("authentication failed".into())));
+        match &m.overlay {
+            Overlay::Form(f) => assert_eq!(f.error.as_deref(), Some("authentication failed")),
+            other => panic!("{other:?}"),
+        }
+        assert!(update(&mut m, ctrl_key('n')).is_empty());
+        assert!(m.policy.rule_after_ruleset.is_none());
+        // A destination without scope labels: the plain unknown-name error.
+        let mut m = writes_on(model_with_flows());
+        m.limits.scope_keys = vec!["site".into()];
+        unknown_ruleset_form(&mut m);
+        match &m.overlay {
+            Overlay::Form(f) => {
+                assert_eq!(f.error.as_deref(), Some(r#"no ruleset named "New-App""#))
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(update(&mut m, ctrl_key('n')).is_empty());
     }
 }

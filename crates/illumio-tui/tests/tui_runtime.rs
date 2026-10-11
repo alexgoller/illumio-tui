@@ -1870,6 +1870,137 @@ async fn w_creates_a_rule_in_the_named_ruleset() {
     assert_eq!(model.busy, 0);
 }
 
+/// `w` on the potentially blocked flow, `New-App` typed (unknown), `Ctrl-N`,
+/// `y` on the ruleset's confirm, then `last` on the rule's. Returns the
+/// model, the requests of the confirms shown (method, path, body) and the
+/// audit entries.
+async fn new_ruleset_session(
+    server: &MockServer,
+    rule_sets_gets: u64,
+    last: char,
+) -> (Model, Vec<(String, String, serde_json::Value)>, usize) {
+    use illumio_tui::tui::model::Overlay;
+    use illumio_tui::tui::test_support::model_with_flows;
+    mount_rule_sets(server, rule_sets_gets).await; // the name lookup + one reload per write
+    let ruleset = json!({
+        "name": "New-App",
+        "enabled": true,
+        "scopes": [[
+            {"label": {"href": "/orgs/5/labels/3"}},
+            {"label": {"href": "/orgs/5/labels/4"}}
+        ]]
+    });
+    let mut created = ruleset.clone();
+    created["href"] = json!("/orgs/5/sec_policy/draft/rule_sets/102");
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/sec_policy/draft/rule_sets"))
+        .and(body_json(ruleset))
+        .respond_with(ResponseTemplate::new(201).set_body_json(created))
+        .expect(1)
+        .mount(server)
+        .await;
+    let rule = json!({
+        "enabled": true,
+        "providers": [{"label": {"href": "/orgs/5/labels/1"}}],
+        "consumers": [{"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/21"}}],
+        "ingress_services": [{"port": 8443, "proto": 6}],
+        "unscoped_consumers": true,
+        "description": "allow 10.1.4.9 to host-1.example on 8443/tcp",
+        "resolve_labels_as": {"providers": ["workloads"], "consumers": ["workloads"]}
+    });
+    let mut created = rule.clone();
+    created["href"] = json!("/orgs/5/sec_policy/draft/rule_sets/102/sec_rules/1");
+    Mock::given(method("POST"))
+        .and(path(
+            "/api/v2/orgs/5/sec_policy/draft/rule_sets/102/sec_rules",
+        ))
+        .and(body_json(rule))
+        .respond_with(ResponseTemplate::new(201).set_body_json(created))
+        .expect(if last == 'y' { 1 } else { 0 })
+        .mount(server)
+        .await;
+    let audit = MemoryAudit::new();
+    let mut m = model_with_flows();
+    m.writes = WritesState::on();
+    let (mut rt, _tx) = Runtime::with_writer(pce_for(server), m, tui_guard(audit.clone()));
+    let plain = |ms: u64, code: KeyCode| (ms, KeyEvent::new(code, KeyModifiers::NONE));
+    let mut keys = vec![plain(100, ch('j')), plain(50, ch('w'))];
+    keys.extend(typed("New-App").into_iter().map(|(ms, c)| plain(ms, c)));
+    keys.extend([
+        plain(50, KeyCode::Enter),
+        (300, KeyEvent::new(ch('n'), KeyModifiers::CONTROL)),
+        plain(300, ch('y')),
+        plain(400, ch(last)),
+        plain(400, KeyCode::F(12)),
+    ]);
+    let events = stream::iter(keys).then(|(ms, k)| async move {
+        tokio::time::sleep(Duration::from_millis(ms)).await;
+        Event::Key(k)
+    });
+    let mut confirms = Vec::new();
+    let model = run_loop(&mut rt, Box::pin(events), &mut |m| {
+        if let Overlay::ConfirmWrite { plan, .. } = &m.overlay
+            && let Some(r) = plan.request()
+        {
+            let seen = (
+                format!("{:?}", r.method).to_uppercase(),
+                r.path.clone(),
+                r.body.clone().unwrap_or_default(),
+            );
+            if confirms.last() != Some(&seen) {
+                confirms.push(seen);
+            }
+        }
+    })
+    .await;
+    (model, confirms, audit.entries().len())
+}
+
+#[tokio::test]
+async fn ctrl_n_creates_the_scoped_ruleset_then_the_rule_two_confirms_two_posts() {
+    let server = MockServer::start().await;
+    let (model, confirms, audited) = new_ruleset_session(&server, 3, 'y').await;
+    assert_eq!(
+        confirms
+            .iter()
+            .map(|(m, p, _)| format!("{m} {p}"))
+            .collect::<Vec<_>>(),
+        vec![
+            "POST /orgs/5/sec_policy/draft/rule_sets",
+            "POST /orgs/5/sec_policy/draft/rule_sets/102/sec_rules",
+        ]
+    );
+    assert!(confirms[0].2["scopes"].is_array(), "{:?}", confirms[0].2);
+    assert_eq!(
+        model.status.text,
+        "created /orgs/5/sec_policy/draft/rule_sets/102/sec_rules/1 (pending)"
+    );
+    assert_eq!(
+        model.stats.calls, 5,
+        "one rulesets GET for the name, two POSTs, one rulesets reload after each"
+    );
+    assert_eq!(writes_seen(&server).await, vec!["POST", "POST"]);
+    assert_eq!(audited, 2);
+    assert!(model.policy.rule_after_ruleset.is_none());
+    assert_eq!(model.busy, 0);
+}
+
+#[tokio::test]
+async fn cancelling_the_rule_after_ctrl_n_sends_only_the_ruleset() {
+    let server = MockServer::start().await;
+    let (model, confirms, audited) = new_ruleset_session(&server, 2, 'n').await;
+    assert_eq!(confirms.len(), 2, "the rule's confirm was shown");
+    assert_eq!(model.status.text, "cancelled, nothing sent");
+    assert_eq!(
+        model.stats.calls, 3,
+        "the name lookup, the ruleset POST, its reload"
+    );
+    assert_eq!(writes_seen(&server).await, vec!["POST"]);
+    assert_eq!(audited, 1);
+    assert!(model.policy.rule_after_ruleset.is_none());
+    assert_eq!(model.busy, 0);
+}
+
 #[tokio::test]
 async fn w_on_an_allowed_flow_sends_nothing() {
     use illumio_tui::tui::test_support::model_with_flows;
