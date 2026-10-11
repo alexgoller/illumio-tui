@@ -22,17 +22,17 @@ expression: "render_styled(&m, 160, 48)"
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @2:Rgb(150, 50, 180)/Rgb(250, 250, 247) @6:Rgb(0, 102, 204)/Rgb(250, 250, 247) @110:Rgb(120, 124, 136)/Rgb(250, 250, 247) @158:Rgb(0, 102, 204)/Rgb(250, 250, 247)
 │  user         process        src                dst                service    dst proc     conns    decision                                                 │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│▸ www-data     -              ipl:Corp/-         shop/prod          443/tcp    nginx             700 allowed                                                  │
+│▸ -            -              ipl:Corp/-         shop/prod          443/tcp    nginx             700 allowed                                                  │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(40, 140, 60)/Rgb(222, 230, 245) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│  mysql        -              crm/prod           crm/prod           3306/tcp   mysqld            610 allowed                                                  │
+│  -            -              crm/prod           crm/prod           3306/tcp   mysqld            610 allowed                                                  │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(40, 140, 60)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│  www          -              ipl:Corp/-         crm/prod           443/tcp    node              520 allowed                                                  │
+│  -            -              ipl:Corp/-         crm/prod           443/tcp    node              520 allowed                                                  │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(40, 140, 60)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│  postgres     -              shop/prod          shop/prod          5432/tcp   postgres          420 allowed                                                  │
+│  -            -              shop/prod          shop/prod          5432/tcp   postgres          420 allowed                                                  │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(40, 140, 60)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
 │  app          java           shop/prod          shop/prod          5432/tcp   -                 380 allowed                                                  │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(40, 140, 60)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│  oracle       -              erp/prod           erp/prod           1521/tcp   oracle            300 allowed                                                  │
+│  -            -              erp/prod           erp/prod           1521/tcp   oracle            300 allowed                                                  │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(40, 140, 60)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
 │  erp          java           erp/prod           erp/prod           1521/tcp   -                 290 allowed                                                  │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(40, 140, 60)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
@@ -40,9 +40,9 @@ expression: "render_styled(&m, 160, 48)"
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(40, 140, 60)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
 │  app          java           shop/prod          crm/prod           443/tcp    -                 150 allowed                                                  │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(40, 140, 60)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│  postgres     -              shop/dev           shop/dev           5432/tcp   postgres           90 allowed                                                  │
+│  -            -              shop/dev           shop/dev           5432/tcp   postgres           90 allowed                                                  │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(40, 140, 60)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│  apache       -              ipl:Corp/-         hr/prod            443/tcp    httpd              75 pot.blocked                                              │
+│  -            -              ipl:Corp/-         hr/prod            443/tcp    httpd              75 pot.blocked                                              │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(176, 120, 0)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
 │  root         curl           hr/prod            crm/prod           443/tcp    -                  60 allowed                                                  │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(40, 140, 60)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
@@ -64,9 +64,9 @@ expression: "render_styled(&m, 160, 48)"
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(40, 140, 60)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
 │  svc          python3        crm/dev            crm/prod           3306/tcp   -                  12 blocked                                                  │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(200, 40, 50)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│  oracle       -              crm/prod           erp/prod           1521/tcp   oracle             11 pot.blocked                                              │
+│  -            -              crm/prod           erp/prod           1521/tcp   oracle             11 pot.blocked                                              │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(176, 120, 0)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│  bind         -              erp/prod           crm/prod           53/udp     named               9 unknown                                                  │
+│  -            -              erp/prod           crm/prod           53/udp     named               9 unknown                                                  │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(120, 124, 136)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
 │  www-data     nginx          erp/dev            erp/prod           1521/tcp   -                   8 blocked                                                  │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(200, 40, 50)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
@@ -76,9 +76,9 @@ expression: "render_styled(&m, 160, 48)"
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(200, 40, 50)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
 │  -            -              hr/dev             hr/prod            icmp       -                   5 blocked                                                  │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(200, 40, 50)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│  root         -              ipl:Corp/-         erp/prod           22/tcp     sshd                4 blocked                                                  │
+│  -            -              ipl:Corp/-         erp/prod           22/tcp     sshd                4 blocked                                                  │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(200, 40, 50)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│  root         -              shop/dev           shop/dev           22/tcp     sshd                3 pot.blocked                                              │
+│  -            -              shop/dev           shop/dev           22/tcp     sshd                3 pot.blocked                                              │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(176, 120, 0)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)
 │  -            -              ipl:Corp/-         shop/prod          5432/tcp   -                   2 blocked                                                  │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(200, 40, 50)/Rgb(250, 250, 247) @159:Rgb(0, 102, 204)/Rgb(250, 250, 247)

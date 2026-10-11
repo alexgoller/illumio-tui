@@ -8,7 +8,9 @@ use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct MeshRow {
-    /// None when the column is hidden or the flow carried no user.
+    /// The source's user: None when the column is hidden, the flow carried
+    /// no user, or the flow is inbound (the user, like the process, is the
+    /// one the reporting VEN saw, so on inbound flows it is the destination's).
     pub user: Option<String>,
     /// The source's process (outbound flows), None when hidden or absent.
     pub process: Option<String>,
@@ -66,13 +68,24 @@ pub fn process_sides(f: &ResolvedFlow) -> (Option<String>, Option<String>) {
     }
 }
 
+/// The source's user: the PCE reports `user_name` from the same VEN as
+/// `process_name`, so it sits on the side `process_sides` gives the process.
+/// Inbound flows were seen on the destination and have no source user.
+pub fn source_user(f: &ResolvedFlow) -> Option<String> {
+    if f.flow_direction.as_deref() == Some("inbound") {
+        None
+    } else {
+        f.user_name.clone()
+    }
+}
+
 /// The mesh key of one flow under `keys` (empty means `app,env`) and the
 /// shown columns.
 pub fn mesh_key(f: &ResolvedFlow, keys: &[String], cols: MeshColumns) -> MeshKey {
     let keys = keys_or_default(keys);
     let (process, dst_process) = process_sides(f);
     MeshKey {
-        user: f.user_name.clone().filter(|_| cols.user),
+        user: source_user(f).filter(|_| cols.user),
         process: process.filter(|_| cols.process),
         src: group_key(&f.src, &keys),
         dst: group_key(&f.dst, &keys),
@@ -188,7 +201,7 @@ mod tests {
             .expect("the inbound Corp flow");
         assert_eq!(inbound.process, None, "seen on the destination");
         assert_eq!(inbound.src, vec!["ipl:Corp", "-"]);
-        assert_eq!(inbound.user.as_deref(), Some("www-data"));
+        assert_eq!(inbound.user, None, "www-data is the destination's user");
         let icmp = rich.iter().find(|r| r.proto == "icmp").unwrap();
         assert_eq!(
             (icmp.process.as_deref(), icmp.dst_process.as_deref()),
@@ -196,6 +209,42 @@ mod tests {
             "no direction and no process"
         );
         assert_eq!(icmp.service_text(), "icmp");
+    }
+
+    #[test]
+    fn an_inbound_flows_user_belongs_to_the_destination_and_is_not_shown_as_the_source_user() {
+        let f = rich_flows();
+        let k = keys(&["app", "env"]);
+        let inbound: Vec<&ResolvedFlow> = f
+            .iter()
+            .filter(|fl| fl.flow_direction.as_deref() == Some("inbound"))
+            .collect();
+        assert!(
+            inbound.iter().any(|fl| fl.user_name.is_some()),
+            "the fixture reports users on inbound flows"
+        );
+        for fl in &inbound {
+            assert_eq!(source_user(fl), None);
+            assert_eq!(mesh_key(fl, &k, BOTH).user, None);
+        }
+        let outbound = f
+            .iter()
+            .find(|fl| fl.flow_direction.as_deref() != Some("inbound") && fl.user_name.is_some())
+            .expect("an outbound or undirected flow with a user");
+        assert_eq!(source_user(outbound), outbound.user_name);
+        let rows = mesh(&f, &k, BOTH);
+        assert!(
+            rows.iter()
+                .filter(|r| r.dst_process.is_some())
+                .all(|r| r.user.is_none()),
+            "a row with a destination process came from an inbound flow"
+        );
+        assert!(
+            rows.iter()
+                .filter(|r| r.src.first().is_some_and(|s| s.starts_with("ipl:")))
+                .all(|r| r.user.is_none()),
+            "an IP list has no user"
+        );
     }
 
     #[test]

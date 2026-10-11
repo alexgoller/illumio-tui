@@ -167,13 +167,14 @@ config, 3 auth, 4 PCE error, 5 rate limited, 6 write refused by the guard.
 `traffic groups` and `traffic mesh` take the `traffic query` filter flags (and its dry run,
 cost guard and cache) and print the same envelope. `groups` gives one row per source and
 destination group (`src`, `dst`, `flows`, `connections`, `bytes`, `allowed`,
-`potentially_blocked`, `blocked`); `mesh` one row per user, source process, source group,
+`potentially_blocked`, `blocked`); `mesh` one row per source user, source process, source group,
 destination group, port, protocol and destination process. The PCE reports one process per
 flow, seen where the flow was reported: an inbound flow's process is the destination's,
-anything else the source's. `--keys` picks the label keys (default: the profile's scope keys),
-`--no-user` / `--no-process` merge rows across users or processes. An endpoint that is not a
-labelled workload is grouped under its name or `ipl:<list>`. `bytes` is `0` in JSON and `-`
-in tables when the PCE reported none.
+anything else the source's. The user, like the process, is the one the reporting VEN saw:
+shown as the source's user on outbound flows and left empty on inbound ones. `--keys` picks
+the label keys (default: the profile's scope keys), `--no-user` / `--no-process` merge rows
+across users or processes. An endpoint that is not a labelled workload is grouped under its
+name or `ipl:<list>`. `bytes` is `0` in JSON and `-` in tables when the PCE reported none.
 
 `--impact` on `policy rules <ruleset>` adds each rule's `impact` (JSON) or a `P/C` column
 (table): `providers` and `consumers` (workloads matched, unions over the ruleset's scopes),

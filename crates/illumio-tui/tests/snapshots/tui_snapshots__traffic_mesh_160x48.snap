@@ -12,17 +12,17 @@ expression: out
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭ Mesh ────────────────────────────────────────────────────────────────────────────────────────────────────── keys app,env · u user · p process · Enter drills ╮
 │  user         process        src                dst                service    dst proc     conns    decision                                                 │
-│▸ www-data     -              ipl:Corp/-         shop/prod          443/tcp    nginx             700 allowed                                                  │
-│  mysql        -              crm/prod           crm/prod           3306/tcp   mysqld            610 allowed                                                  │
-│  www          -              ipl:Corp/-         crm/prod           443/tcp    node              520 allowed                                                  │
-│  postgres     -              shop/prod          shop/prod          5432/tcp   postgres          420 allowed                                                  │
+│▸ -            -              ipl:Corp/-         shop/prod          443/tcp    nginx             700 allowed                                                  │
+│  -            -              crm/prod           crm/prod           3306/tcp   mysqld            610 allowed                                                  │
+│  -            -              ipl:Corp/-         crm/prod           443/tcp    node              520 allowed                                                  │
+│  -            -              shop/prod          shop/prod          5432/tcp   postgres          420 allowed                                                  │
 │  app          java           shop/prod          shop/prod          5432/tcp   -                 380 allowed                                                  │
-│  oracle       -              erp/prod           erp/prod           1521/tcp   oracle            300 allowed                                                  │
+│  -            -              erp/prod           erp/prod           1521/tcp   oracle            300 allowed                                                  │
 │  erp          java           erp/prod           erp/prod           1521/tcp   -                 290 allowed                                                  │
 │  www          node           crm/prod           crm/prod           3306/tcp   -                 240 allowed                                                  │
 │  app          java           shop/prod          crm/prod           443/tcp    -                 150 allowed                                                  │
-│  postgres     -              shop/dev           shop/dev           5432/tcp   postgres           90 allowed                                                  │
-│  apache       -              ipl:Corp/-         hr/prod            443/tcp    httpd              75 pot.blocked                                              │
+│  -            -              shop/dev           shop/dev           5432/tcp   postgres           90 allowed                                                  │
+│  -            -              ipl:Corp/-         hr/prod            443/tcp    httpd              75 pot.blocked                                              │
 │  root         curl           hr/prod            crm/prod           443/tcp    -                  60 allowed                                                  │
 │  www-data     nginx          erp/dev            erp/prod           8443/tcp   -                  44 pot.blocked                                              │
 │  www          node           crm/prod           erp/prod           8443/tcp   -                  35 pot.blocked                                              │
@@ -33,14 +33,14 @@ expression: out
 │  www          php-fpm        hr/prod            shop/prod          5432/tcp   -                  16 pot.blocked                                              │
 │  batch        java           shop/prod          shop/prod          5432/tcp   -                  14 allowed                                                  │
 │  svc          python3        crm/dev            crm/prod           3306/tcp   -                  12 blocked                                                  │
-│  oracle       -              crm/prod           erp/prod           1521/tcp   oracle             11 pot.blocked                                              │
-│  bind         -              erp/prod           crm/prod           53/udp     named               9 unknown                                                  │
+│  -            -              crm/prod           erp/prod           1521/tcp   oracle             11 pot.blocked                                              │
+│  -            -              erp/prod           crm/prod           53/udp     named               9 unknown                                                  │
 │  www-data     nginx          erp/dev            erp/prod           1521/tcp   -                   8 blocked                                                  │
 │  app          python3        shop/prod          shop/prod          5432/tcp   -                   7 allowed                                                  │
 │  app          java           shop/dev           shop/prod          5432/tcp   -                   6 blocked                                                  │
 │  -            -              hr/dev             hr/prod            icmp       -                   5 blocked                                                  │
-│  root         -              ipl:Corp/-         erp/prod           22/tcp     sshd                4 blocked                                                  │
-│  root         -              shop/dev           shop/dev           22/tcp     sshd                3 pot.blocked                                              │
+│  -            -              ipl:Corp/-         erp/prod           22/tcp     sshd                4 blocked                                                  │
+│  -            -              shop/dev           shop/dev           22/tcp     sshd                3 pot.blocked                                              │
 │  -            -              ipl:Corp/-         shop/prod          5432/tcp   -                   2 blocked                                                  │
 │                                                                                                                                                              │
 │                                                                                                                                                              │

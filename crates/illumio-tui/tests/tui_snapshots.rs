@@ -1097,9 +1097,10 @@ fn traffic_mesh_80x24_160x48_and_light() {
     assert!(out.contains("Mesh"), "{out}");
     assert!(out.contains("u user · p process · Enter drills"), "{out}");
     assert!(
-        out.contains("www-data") && out.contains("ipl:Corp/-"),
-        "{out}"
+        out.contains("▸ -        -          ipl:Corp/-"),
+        "an inbound flow's user is the destination's, not the IP list's: {out}"
     );
+    assert!(!out.contains("www-data"), "{out}");
     assert!(!out.contains("dst proc"), "from 120 columns: {out}");
     insta::assert_snapshot!("traffic_mesh_80x24", out);
     let out = render_to_string(&m, 160, 48);

@@ -12,17 +12,17 @@ expression: out
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭ Mesh ────────────────────── keys app,env · u user · p process · Enter drills ╮
 │  user     process    src            dst            service   conns  decision │
-│▸ www-data -          ipl:Corp/-     shop/prod      443/tcp      700 allowed  │
-│  mysql    -          crm/prod       crm/prod       3306/tcp     610 allowed  │
-│  www      -          ipl:Corp/-     crm/prod       443/tcp      520 allowed  │
-│  postgres -          shop/prod      shop/prod      5432/tcp     420 allowed  │
+│▸ -        -          ipl:Corp/-     shop/prod      443/tcp      700 allowed  │
+│  -        -          crm/prod       crm/prod       3306/tcp     610 allowed  │
+│  -        -          ipl:Corp/-     crm/prod       443/tcp      520 allowed  │
+│  -        -          shop/prod      shop/prod      5432/tcp     420 allowed  │
 │  app      java       shop/prod      shop/prod      5432/tcp     380 allowed  │
-│  oracle   -          erp/prod       erp/prod       1521/tcp     300 allowed  │
+│  -        -          erp/prod       erp/prod       1521/tcp     300 allowed  │
 │  erp      java       erp/prod       erp/prod       1521/tcp     290 allowed  │
 │  www      node       crm/prod       crm/prod       3306/tcp     240 allowed  │
 │  app      java       shop/prod      crm/prod       443/tcp      150 allowed  │
-│  postgres -          shop/dev       shop/dev       5432/tcp      90 allowed  │
-│  apache   -          ipl:Corp/-     hr/prod        443/tcp       75 pot.blk  │
+│  -        -          shop/dev       shop/dev       5432/tcp      90 allowed  │
+│  -        -          ipl:Corp/-     hr/prod        443/tcp       75 pot.blk  │
 │  root     curl       hr/prod        crm/prod       443/tcp       60 allowed  │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ready         f filter  r run  a auto  v view  g group  / search  : cmd  ? help
