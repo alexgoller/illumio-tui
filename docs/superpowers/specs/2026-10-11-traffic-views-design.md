@@ -49,9 +49,10 @@ What Alex said, verbatim where it matters:
 
 ## 3. IP lists under Objects (issue #5)
 
-Alex, after the first reorder ask: "we should move IP lists under Services".
-`Screen::IpLists` goes away; IP lists become the fourth tab of the Objects
-screen after Services (Labels, Label groups, Services, IP lists), keeping the
+Alex, after the first reorder ask: IP lists belong under Objects, as a tab
+beside Labels, Label groups and Services (not under Services).
+`Screen::IpLists` goes away; IP lists become the fourth Objects tab
+(Labels, Label groups, Services, IP lists), a sibling of the others, keeping the
 Plan 7 table (name, size, ranges, FQDNs, used by), the detail (size, used
 by, ranges, FQDNs, capped), the editing keys and the cache-aware load on
 first visit. Screens are five again: `1` Traffic, `2` Policy, `3` Objects,
