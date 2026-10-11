@@ -6,10 +6,10 @@ use super::context::Context;
 use super::error::CliError;
 use super::output::{TableRows, WriteMeta};
 use clap::Args;
-use pce::models::Label;
+use pce::models::{IpList, Label, LabelGroup, Service};
 use pce::write::{
-    JsonlAudit, Outcome, Plan, WriteContext, WriteError, WriteGuard, WriteRefused, WriteRequest,
-    Written,
+    ActorKind, ActorRef, JsonlAudit, Outcome, Plan, PortSpec, ServiceRef, WriteContext, WriteError,
+    WriteGuard, WriteRefused, WriteRequest, Written, checked_policy_href,
 };
 use serde::Serialize;
 
@@ -193,7 +193,7 @@ pub fn is_href(s: &str) -> bool {
 
 /// Up to five names that contain `needle` case-insensitively, for an
 /// error that found no exact match.
-fn similar<'a>(needle: &str, names: impl Iterator<Item = &'a str>) -> Vec<String> {
+pub(crate) fn similar<'a>(needle: &str, names: impl Iterator<Item = &'a str>) -> Vec<String> {
     let needle = needle.to_lowercase();
     let mut out: Vec<String> = names
         .filter(|n| n.to_lowercase().contains(&needle))
@@ -205,7 +205,7 @@ fn similar<'a>(needle: &str, names: impl Iterator<Item = &'a str>) -> Vec<String
     out
 }
 
-fn with_similar(msg: String, similar: &[String]) -> String {
+pub(crate) fn with_similar(msg: String, similar: &[String]) -> String {
     if similar.is_empty() {
         msg
     } else {
@@ -288,11 +288,7 @@ fn not_pending_delete(update_type: Option<&str>) -> bool {
     update_type != Some("delete")
 }
 
-pub async fn resolve_ip_list(ctx: &Context, name: &str) -> Result<String, CliError> {
-    if is_href(name) {
-        return Ok(name.trim().to_string());
-    }
-    let lists = ctx.pce.ip_lists(ctx.cache_mode).await?.value;
+fn ip_list_in(lists: &[IpList], name: &str) -> Result<String, CliError> {
     pick_one(
         "IP list",
         name.trim(),
@@ -303,11 +299,7 @@ pub async fn resolve_ip_list(ctx: &Context, name: &str) -> Result<String, CliErr
     )
 }
 
-pub async fn resolve_service(ctx: &Context, name: &str) -> Result<String, CliError> {
-    if is_href(name) {
-        return Ok(name.trim().to_string());
-    }
-    let services = ctx.pce.services(ctx.cache_mode).await?.value;
+fn service_in(services: &[Service], name: &str) -> Result<String, CliError> {
     pick_one(
         "service",
         name.trim(),
@@ -316,6 +308,380 @@ pub async fn resolve_service(ctx: &Context, name: &str) -> Result<String, CliErr
             .filter(|s| not_pending_delete(s.update_type.as_deref()))
             .map(|s| (s.name.as_str(), s.href.as_str())),
     )
+}
+
+fn label_group_in(groups: &[LabelGroup], name: &str) -> Result<String, CliError> {
+    pick_one(
+        "label group",
+        name.trim(),
+        groups
+            .iter()
+            .filter(|g| not_pending_delete(g.update_type.as_deref()))
+            .map(|g| (g.name.as_str(), g.href.as_str())),
+    )
+}
+
+pub async fn resolve_ip_list(ctx: &Context, name: &str) -> Result<String, CliError> {
+    if is_href(name) {
+        return Ok(name.trim().to_string());
+    }
+    ip_list_in(&ctx.pce.ip_lists(ctx.cache_mode).await?.value, name)
+}
+
+pub async fn resolve_service(ctx: &Context, name: &str) -> Result<String, CliError> {
+    if is_href(name) {
+        return Ok(name.trim().to_string());
+    }
+    service_in(&ctx.pce.services(ctx.cache_mode).await?.value, name)
+}
+
+/// An href as given, or an exact hostname/name match through
+/// `Writer::find_workload` (one or two reads of at most 500 rows).
+pub async fn resolve_workload(
+    ctx: &Context,
+    guard: &WriteGuard,
+    target: &str,
+) -> Result<String, CliError> {
+    if is_href(target) {
+        return Ok(target.trim().to_string());
+    }
+    Ok(ctx.pce.writer(guard).find_workload(target).await?.href)
+}
+
+const ACTOR_GRAMMAR: &str = "use key=value, label:key=value, group:NAME, iplist:NAME, workload:HOST, all, an href, or ! before a label, label group or IP list";
+
+/// One `--provider`, `--consumer` or `--scope` token, parsed without any
+/// request (grammar in the README's Writes section).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ActorToken {
+    All,
+    /// `key=value`, already split and re-joined on the first `=`.
+    Label {
+        spec: String,
+        exclusion: bool,
+    },
+    LabelGroup {
+        name: String,
+        exclusion: bool,
+    },
+    IpList {
+        name: String,
+        exclusion: bool,
+    },
+    Workload {
+        name: String,
+    },
+    Href {
+        href: String,
+        exclusion: bool,
+    },
+}
+
+impl ActorToken {
+    pub fn parse(s: &str) -> Result<Self, String> {
+        let t = s.trim();
+        let (exclusion, rest) = match t.strip_prefix('!') {
+            Some(r) => (true, r.trim()),
+            None => (false, t),
+        };
+        if rest.is_empty() {
+            return Err(format!("{s:?} is empty; {ACTOR_GRAMMAR}"));
+        }
+        let named = |prefix: &str| -> Option<Result<String, String>> {
+            rest.strip_prefix(prefix).map(|n| {
+                let n = n.trim();
+                if n.is_empty() {
+                    Err(format!("{s:?}: missing name after {prefix}"))
+                } else {
+                    Ok(n.to_string())
+                }
+            })
+        };
+        if rest.eq_ignore_ascii_case("all") {
+            return if exclusion {
+                Err("all cannot be excluded".into())
+            } else {
+                Ok(Self::All)
+            };
+        }
+        if is_href(rest) {
+            return Ok(Self::Href {
+                href: rest.to_string(),
+                exclusion,
+            });
+        }
+        if let Some(name) = named("group:") {
+            return Ok(Self::LabelGroup {
+                name: name?,
+                exclusion,
+            });
+        }
+        if let Some(name) = named("iplist:") {
+            return Ok(Self::IpList {
+                name: name?,
+                exclusion,
+            });
+        }
+        if let Some(name) = named("workload:") {
+            if exclusion {
+                return Err(format!(
+                    "{s:?}: only labels, label groups and IP lists can be excluded"
+                ));
+            }
+            return Ok(Self::Workload { name: name? });
+        }
+        let spec = rest.strip_prefix("label:").unwrap_or(rest);
+        if spec.contains('=') {
+            let (k, v) = parse_kv(spec).map_err(|e| e.to_string())?;
+            return Ok(Self::Label {
+                spec: format!("{k}={v}"),
+                exclusion,
+            });
+        }
+        Err(format!("{s:?} is not an actor; {ACTOR_GRAMMAR}"))
+    }
+
+    /// Scopes take labels and label groups; an href's kind is checked by
+    /// the library without a request.
+    fn scope_member(&self) -> bool {
+        matches!(
+            self,
+            Self::Label { .. } | Self::LabelGroup { .. } | Self::Href { .. }
+        )
+    }
+}
+
+/// One `--service` token: an href, an inline port, or a service name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServiceToken {
+    Href(String),
+    Port(PortSpec),
+    Name(String),
+}
+
+impl ServiceToken {
+    pub fn parse(s: &str) -> Result<Self, String> {
+        let t = s.trim();
+        if t.is_empty() {
+            return Err("empty service".into());
+        }
+        if is_href(t) {
+            return Ok(Self::Href(t.to_string()));
+        }
+        if let Some(n) = t.strip_prefix("service:") {
+            let n = n.trim();
+            return if n.is_empty() {
+                Err(format!("{s:?}: missing service name"))
+            } else {
+                Ok(Self::Name(n.to_string()))
+            };
+        }
+        // A slash or a bare number can only mean a port: report the port
+        // error, not "no service named".
+        if t.contains('/') || t.bytes().all(|b| b.is_ascii_digit()) {
+            return PortSpec::parse(t).map(Self::Port);
+        }
+        Ok(PortSpec::parse(t)
+            .map(Self::Port)
+            .unwrap_or_else(|_| Self::Name(t.to_string())))
+    }
+}
+
+pub fn parse_actors(specs: &[String]) -> Result<Vec<ActorToken>, CliError> {
+    specs
+        .iter()
+        .map(|s| ActorToken::parse(s).map_err(CliError::Args))
+        .collect()
+}
+
+pub fn parse_services(specs: &[String]) -> Result<Vec<ServiceToken>, CliError> {
+    specs
+        .iter()
+        .map(|s| ServiceToken::parse(s).map_err(CliError::Args))
+        .collect()
+}
+
+/// Every `--scope` value: comma-separated labels and label groups.
+pub fn parse_scopes(specs: &[String]) -> Result<Vec<Vec<ActorToken>>, CliError> {
+    specs
+        .iter()
+        .map(|spec| {
+            let tokens: Vec<String> = spec
+                .split(',')
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .map(str::to_string)
+                .collect();
+            if tokens.is_empty() {
+                return Err(CliError::Args(
+                    "--scope needs at least one label or label group; leave --scope out for a ruleset that applies everywhere"
+                        .into(),
+                ));
+            }
+            let parsed = parse_actors(&tokens)?;
+            if parsed.iter().any(|t| !t.scope_member()) {
+                return Err(CliError::Args(
+                    "scopes take labels and label groups only".into(),
+                ));
+            }
+            Ok(parsed)
+        })
+        .collect()
+}
+
+/// The object lists one invocation resolves names against, each fetched
+/// at most once and only when a token needs it. Holds the guard so
+/// `workload:HOST` can use `Writer::find_workload`.
+pub struct Lists<'a> {
+    guard: &'a WriteGuard,
+    labels: Option<Vec<Label>>,
+    label_groups: Option<Vec<LabelGroup>>,
+    ip_lists: Option<Vec<IpList>>,
+    services: Option<Vec<Service>>,
+}
+
+impl<'a> Lists<'a> {
+    pub fn new(guard: &'a WriteGuard) -> Self {
+        Self {
+            guard,
+            labels: None,
+            label_groups: None,
+            ip_lists: None,
+            services: None,
+        }
+    }
+
+    async fn labels(&mut self, ctx: &Context) -> Result<&[Label], CliError> {
+        if self.labels.is_none() {
+            self.labels = Some(ctx.pce.labels(ctx.cache_mode).await?.value);
+        }
+        Ok(self.labels.as_deref().unwrap_or_default())
+    }
+
+    async fn label_groups(&mut self, ctx: &Context) -> Result<&[LabelGroup], CliError> {
+        if self.label_groups.is_none() {
+            self.label_groups = Some(ctx.pce.label_groups(ctx.cache_mode).await?.value);
+        }
+        Ok(self.label_groups.as_deref().unwrap_or_default())
+    }
+
+    async fn ip_lists(&mut self, ctx: &Context) -> Result<&[IpList], CliError> {
+        if self.ip_lists.is_none() {
+            self.ip_lists = Some(ctx.pce.ip_lists(ctx.cache_mode).await?.value);
+        }
+        Ok(self.ip_lists.as_deref().unwrap_or_default())
+    }
+
+    async fn services(&mut self, ctx: &Context) -> Result<&[Service], CliError> {
+        if self.services.is_none() {
+            self.services = Some(ctx.pce.services(ctx.cache_mode).await?.value);
+        }
+        Ok(self.services.as_deref().unwrap_or_default())
+    }
+}
+
+/// A label group's href: an href checked without a request, or an exact
+/// name from the one label-groups list.
+pub async fn resolve_label_group(
+    ctx: &Context,
+    name: &str,
+    lists: &mut Lists<'_>,
+) -> Result<String, CliError> {
+    if is_href(name) {
+        return Ok(checked_policy_href(
+            name,
+            "label_groups",
+            ctx.config.org_id,
+        )?);
+    }
+    label_group_in(lists.label_groups(ctx).await?, name)
+}
+
+fn with_exclusion(mut a: ActorRef, exclusion: bool) -> ActorRef {
+    a.exclusion = exclusion;
+    a
+}
+
+pub async fn resolve_actor(
+    ctx: &Context,
+    token: &ActorToken,
+    lists: &mut Lists<'_>,
+) -> Result<ActorRef, CliError> {
+    let actor = match token {
+        ActorToken::All => ActorRef::all(),
+        ActorToken::Href { href, exclusion } => {
+            with_exclusion(ActorRef::from_href(href, ctx.config.org_id)?, *exclusion)
+        }
+        ActorToken::Label { spec, exclusion } => {
+            let href = label_in(lists.labels(ctx).await?, spec)?;
+            with_exclusion(ActorRef::new(ActorKind::Label, href), *exclusion)
+        }
+        ActorToken::LabelGroup { name, exclusion } => {
+            let href = resolve_label_group(ctx, name, lists).await?;
+            with_exclusion(ActorRef::new(ActorKind::LabelGroup, href), *exclusion)
+        }
+        ActorToken::IpList { name, exclusion } => {
+            let href = ip_list_in(lists.ip_lists(ctx).await?, name)?;
+            with_exclusion(ActorRef::new(ActorKind::IpList, href), *exclusion)
+        }
+        ActorToken::Workload { name } => {
+            let guard = lists.guard;
+            ActorRef::new(
+                ActorKind::Workload,
+                resolve_workload(ctx, guard, name).await?,
+            )
+        }
+    };
+    actor.validate().map_err(CliError::Args)?;
+    Ok(actor)
+}
+
+pub async fn resolve_actors(
+    ctx: &Context,
+    tokens: &[ActorToken],
+    lists: &mut Lists<'_>,
+) -> Result<Vec<ActorRef>, CliError> {
+    let mut out = Vec::with_capacity(tokens.len());
+    for t in tokens {
+        out.push(resolve_actor(ctx, t, lists).await?);
+    }
+    Ok(out)
+}
+
+pub async fn resolve_scopes(
+    ctx: &Context,
+    scopes: &[Vec<ActorToken>],
+    lists: &mut Lists<'_>,
+) -> Result<Vec<Vec<ActorRef>>, CliError> {
+    let mut out = Vec::with_capacity(scopes.len());
+    for scope in scopes {
+        out.push(resolve_actors(ctx, scope, lists).await?);
+    }
+    Ok(out)
+}
+
+pub async fn resolve_service_ref(
+    ctx: &Context,
+    token: &ServiceToken,
+    lists: &mut Lists<'_>,
+) -> Result<ServiceRef, CliError> {
+    match token {
+        ServiceToken::Href(h) => Ok(ServiceRef::from_href(h, ctx.config.org_id)?),
+        ServiceToken::Port(p) => Ok(ServiceRef::Port(p.clone())),
+        ServiceToken::Name(n) => Ok(ServiceRef::Href(service_in(lists.services(ctx).await?, n)?)),
+    }
+}
+
+pub async fn resolve_services(
+    ctx: &Context,
+    tokens: &[ServiceToken],
+    lists: &mut Lists<'_>,
+) -> Result<Vec<ServiceRef>, CliError> {
+    let mut out = Vec::with_capacity(tokens.len());
+    for t in tokens {
+        out.push(resolve_service_ref(ctx, t, lists).await?);
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -445,6 +811,149 @@ mod tests {
                 yes: true
             })
             .is_ok()
+        );
+    }
+
+    #[test]
+    fn actor_tokens_parse_every_form() {
+        let label = |spec: &str, exclusion| ActorToken::Label {
+            spec: spec.into(),
+            exclusion,
+        };
+        assert_eq!(
+            ActorToken::parse("app=web").unwrap(),
+            label("app=web", false)
+        );
+        assert_eq!(
+            ActorToken::parse(" label:app = a=b ").unwrap(),
+            label("app=a=b", false)
+        );
+        assert_eq!(
+            ActorToken::parse("!env=prod").unwrap(),
+            label("env=prod", true)
+        );
+        assert_eq!(
+            ActorToken::parse("group:All prod envs").unwrap(),
+            ActorToken::LabelGroup {
+                name: "All prod envs".into(),
+                exclusion: false
+            }
+        );
+        assert_eq!(
+            ActorToken::parse("!iplist:Corp").unwrap(),
+            ActorToken::IpList {
+                name: "Corp".into(),
+                exclusion: true
+            }
+        );
+        assert_eq!(
+            ActorToken::parse("workload:web-1.lab").unwrap(),
+            ActorToken::Workload {
+                name: "web-1.lab".into()
+            }
+        );
+        assert_eq!(ActorToken::parse("ALL").unwrap(), ActorToken::All);
+        assert_eq!(
+            ActorToken::parse("!/orgs/5/labels/1").unwrap(),
+            ActorToken::Href {
+                href: "/orgs/5/labels/1".into(),
+                exclusion: true
+            }
+        );
+    }
+
+    #[test]
+    fn actor_tokens_refuse_bad_input() {
+        assert_eq!(
+            ActorToken::parse("!all").unwrap_err(),
+            "all cannot be excluded"
+        );
+        assert!(
+            ActorToken::parse("!workload:x")
+                .unwrap_err()
+                .contains("only labels, label groups and IP lists can be excluded")
+        );
+        assert!(
+            ActorToken::parse("group:")
+                .unwrap_err()
+                .contains("missing name")
+        );
+        assert!(
+            ActorToken::parse("web")
+                .unwrap_err()
+                .contains("is not an actor")
+        );
+        assert!(
+            ActorToken::parse("app=")
+                .unwrap_err()
+                .contains("expected key=value")
+        );
+        assert!(ActorToken::parse("!").unwrap_err().contains("is empty"));
+    }
+
+    #[test]
+    fn service_tokens_split_ports_names_and_hrefs() {
+        use pce::write::PortSpec;
+        assert_eq!(
+            ServiceToken::parse("/orgs/5/sec_policy/draft/services/31").unwrap(),
+            ServiceToken::Href("/orgs/5/sec_policy/draft/services/31".into())
+        );
+        assert_eq!(
+            ServiceToken::parse("443/tcp").unwrap(),
+            ServiceToken::Port(PortSpec::parse("443/tcp").unwrap())
+        );
+        assert_eq!(
+            ServiceToken::parse("8000-8100/udp").unwrap(),
+            ServiceToken::Port(PortSpec::parse("8000-8100/udp").unwrap())
+        );
+        assert_eq!(
+            ServiceToken::parse("icmp").unwrap(),
+            ServiceToken::Port(PortSpec::parse("icmp").unwrap())
+        );
+        assert_eq!(
+            ServiceToken::parse("HTTPS").unwrap(),
+            ServiceToken::Name("HTTPS".into())
+        );
+        assert_eq!(
+            ServiceToken::parse("service:tcp").unwrap(),
+            ServiceToken::Name("tcp".into())
+        );
+        assert!(
+            ServiceToken::parse("443")
+                .unwrap_err()
+                .contains("bare number is ambiguous")
+        );
+        assert!(
+            ServiceToken::parse("443/tpc")
+                .unwrap_err()
+                .contains("unknown protocol")
+        );
+        assert!(ServiceToken::parse("service: ").is_err());
+    }
+
+    #[test]
+    fn scopes_take_labels_and_groups_only() {
+        let scopes = parse_scopes(&["app=web, group:G".into(), "env=prod".into()]).unwrap();
+        assert_eq!(scopes.len(), 2);
+        assert_eq!(scopes[0].len(), 2);
+        assert_eq!(
+            parse_scopes(&["iplist:Corp".into()])
+                .unwrap_err()
+                .to_string(),
+            "scopes take labels and label groups only"
+        );
+        assert!(
+            parse_scopes(&[" , ".into()])
+                .unwrap_err()
+                .to_string()
+                .contains("--scope needs at least one label or label group")
+        );
+        assert!(parse_actors(&["all".into(), "web".into()]).is_err());
+        assert_eq!(
+            parse_services(&["443/tcp".into(), "HTTPS".into()])
+                .unwrap()
+                .len(),
+            2
         );
     }
 }
