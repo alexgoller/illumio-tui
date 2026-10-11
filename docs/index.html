@@ -76,7 +76,7 @@
 <span class="p">$ </span>illumio-tui policy rules "Web-DB"
 <span class="p">$ </span>illumio-tui policy pending
 
-<span class="c"># Explorer traffic: flows, app-to-app, blocked</span>
+<span class="c"># Explorer traffic: flows, app-to-app, blocked, traffic groups and traffic mesh</span>
 <span class="p">$ </span>illumio-tui traffic query --window 24h --src app=web --dst app=db --json
 <span class="p">$ </span>illumio-tui traffic query --window 1h --group app,env
 <span class="p">$ </span>illumio-tui traffic query --window 1h --blocked
@@ -105,7 +105,7 @@
       <h3>Explorer, without the clicking</h3>
       <p><code>traffic query</code> runs the PCE's asynchronous Explorer query for you: it submits, polls with backoff, downloads, flags truncation, and resolves every label href to <code>key=value</code>.</p>
       <p>Filters read like you think: <code>app=web</code>, <code>ip:10.0.0.5</code>, <code>ipl:NAME</code>, <code>wl:HOST</code>, <code>fqdn:NAME</code>. A comma means AND, repeating the flag means OR. Add <code>--exclude-src</code>, <code>--exclude-dst</code>, <code>--port</code>, <code>--proto</code>, <code>--process</code> and <code>--decision</code> as needed. An unknown label value fails locally, before the PCE sees anything.</p>
-      <p><code>--group app,env</code> folds flows into app-to-app pairs with allowed, potentially blocked and blocked counts. <code>--blocked</code> keeps only blocked and potentially blocked flows, grouped by destination and port. <code>traffic groups</code> and <code>traffic mesh</code> print the label pairs and the mesh (user, process, source, destination, service, destination process) for agents, with <code>--keys</code> for your label model. All of them run on the downloaded result, with zero extra requests.</p>
+      <p><code>--group app,env</code> folds flows into app-to-app pairs with allowed, potentially blocked and blocked counts. <code>--blocked</code> keeps only blocked and potentially blocked flows, grouped by destination group (your label keys) and port. <code>traffic groups</code> and <code>traffic mesh</code> print the label pairs and the mesh (source user, process, source, destination, service, destination process) for agents, with <code>--keys</code> for your label model. All of them run on the downloaded result, with zero extra requests.</p>
     </div>
     <div>
       <h3>Built for agents</h3>
