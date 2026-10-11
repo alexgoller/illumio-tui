@@ -50,3 +50,11 @@ Captured after corrections and review findings, so the same mistake is not repea
 - A grammar with prefixes and hrefs needs the "prefix + href" case decided up front; otherwise the prefix wins and the href is treated as a name.
 - A field the PCE always returns (`resolve_labels_as`) is probably one it wants on create; default it explicitly rather than hoping the server does.
 - Name lookups used for provisioning must include objects pending deletion; the pending list is the real guard.
+
+## Plan 6 (TUI policy editing), 2026-10-11
+
+- "Empty list" and "not fetched" are different facts; decide which one an empty payload means from the surrounding data (the PCE inlines deny rules everywhere or nowhere) before rendering "unchanged" on a pre-provision screen.
+- A planner's `Noop` is an answer, not a failure; every result path that can carry it needs an info rendering.
+- Any late async result (`DiffLoaded`, `Planned`, `PendingLoaded`) must check which overlay is open before replacing it; the typed-ahead `y` guard from Plan 4 generalises to "never swap a modal under the user".
+- Writes-off runtime tests must count requests at the mock server and assert the status after each key; a client-side counter and a final status can both lie.
+- Form-to-draft adapters get reused by new entry points (`w` from a flow) only if the form shape, not the key handler, is the unit; keep the pre-fill as data.
