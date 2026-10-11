@@ -143,7 +143,13 @@ pub struct RulePatch {
     pub unscoped_consumers: Option<bool>, pub resolve_labels_as: Option<ResolveLabelsAs>,
 }
 pub struct DenyRuleDraft { pub description: Option<String>, pub enabled: bool, pub providers: Vec<ActorRef>, pub consumers: Vec<ActorRef>, pub services: Vec<ServiceRef>, pub override_: bool }
-pub struct DenyRulePatch { pub description: Option<String>, pub enabled: Option<bool>, pub add_providers, remove_providers, add_consumers, remove_consumers: Vec<ActorRef>, pub add_services, remove_services: Vec<ServiceRef>, pub override_: Option<bool> }
+pub struct DenyRulePatch {
+    pub description: Option<String>, pub enabled: Option<bool>,
+    pub add_providers: Vec<ActorRef>, pub remove_providers: Vec<ActorRef>,
+    pub add_consumers: Vec<ActorRef>, pub remove_consumers: Vec<ActorRef>,
+    pub add_services: Vec<ServiceRef>, pub remove_services: Vec<ServiceRef>,
+    pub override_: Option<bool>,
+}
 impl Writer<'_> {
     pub fn plan_create_rule(&self, ruleset_href: &str, draft: &RuleDraft) -> Result<Plan, WriteError>;
     pub async fn plan_update_rule(&self, href: &str, patch: &RulePatch) -> Result<Plan, WriteError>;
@@ -176,7 +182,7 @@ impl Writer<'_> {
 ```rust
 pub enum ProvisionSubset { All, Hrefs(Vec<String>) }
 pub struct ProvisionRequest { pub description: Option<String>, pub subset: ProvisionSubset }
-pub struct ProvisionPlan { pub counts: BTreeMap<String, usize> } // object_type → count, carried in the summary
+pub fn provision_counts(body: &Value) -> BTreeMap<String, usize> // object_type → count, from `change_subset`
 impl Writer<'_> {
     pub async fn plan_provision(&self, req: &ProvisionRequest) -> Result<Plan, WriteError>;
 }
@@ -192,7 +198,8 @@ impl Writer<'_> {
   "services": [..], "label_groups": [..]}}`, only non-empty keys.
   Rule hrefs never appear: a pending rule is provisioned through its
   ruleset, and `All` already lists the ruleset.
-- `POST sec_policy`; kind `Provision`; summary `provision 3 rule_sets, 1 ip_list`.
+- `POST sec_policy`; kind `Provision`; summary `provision 3 rule_sets, 1 ip_list`
+  (built from `provision_counts`).
 - The response body (the new version, `href: /orgs/N/sec_policy/<version>`)
   is `Written.object`; `pending` is false. The audit entry carries the body.
 - Reverting pending changes is out of scope.
@@ -261,8 +268,8 @@ values, `similar:` up to 5) before any write.
 Unchanged envelope: `--dry-run` prints the `WriteRequest`; a send prints
 `Written` with `meta.write`; `Skipped` for `Noop`. Exit codes as Plan 3
 (2 invalid, 4 unanswered, 6 refused). `policy provision` adds a `counts`
-map to the dry-run and written outputs (from the plan summary) and
-prints `provisioned <version href>` in table mode.
+map to the dry-run and written outputs (`provision_counts` over the request
+body's `change_subset`) and prints `provisioned <version href>` in table mode.
 
 ## 5. Errors
 
