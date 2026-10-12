@@ -10,9 +10,12 @@ const UNRESOLVED: &str = "?";
 
 /// The order label keys are shown in: the profile's scope keys, then its
 /// tier key, then every other key alphabetically; `?` (unresolved) last.
+/// Also carries the keys hidden from label text ([`KeyOrder::shows`]); they
+/// still sort like any other key.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct KeyOrder {
     first: Vec<String>,
+    ignored: Vec<String>,
 }
 
 impl KeyOrder {
@@ -26,7 +29,39 @@ impl KeyOrder {
                 first.push(k.to_string());
             }
         }
-        Self { first }
+        Self {
+            first,
+            ignored: Vec::new(),
+        }
+    }
+
+    /// Hides `keys` from label text. Blanks (after trim), `?`, repeats and
+    /// keys in [`KeyOrder::first`] (the label model) are dropped.
+    pub fn with_ignored(mut self, keys: &[String]) -> Self {
+        let mut ignored: Vec<String> = Vec::new();
+        for k in keys {
+            let k = k.trim();
+            if !k.is_empty()
+                && k != UNRESOLVED
+                && !self.first.iter().any(|f| f == k)
+                && !ignored.iter().any(|i| i == k)
+            {
+                ignored.push(k.to_string());
+            }
+        }
+        self.ignored = ignored;
+        self
+    }
+
+    /// The keys hidden from label text, in the order given.
+    pub fn ignored(&self) -> &[String] {
+        &self.ignored
+    }
+
+    /// Whether label text shows `key`: `true` unless it is ignored (exact,
+    /// case-sensitive match); `?` is always shown.
+    pub fn shows(&self, key: &str) -> bool {
+        !self.ignored.iter().any(|i| i == key)
     }
 
     /// `keys` first, in order, and nothing else (a tier key is just the
@@ -144,6 +179,43 @@ mod tests {
             sorted(&order, &["role", "app", "loc", "env"]),
             keys(&["app", "env", "loc", "role"])
         );
+    }
+
+    #[test]
+    fn shows_hides_only_the_ignored_keys_exactly() {
+        let order =
+            KeyOrder::new(&keys(&["app"]), "role").with_ignored(&keys(&["DFIRBubble", "os"]));
+        assert_eq!(order.ignored(), keys(&["DFIRBubble", "os"]));
+        assert!(!order.shows("DFIRBubble"));
+        assert!(!order.shows("os"));
+        assert!(order.shows("dfirbubble"), "case-sensitive");
+        assert!(order.shows("app"));
+        assert!(order.shows("loc"));
+        assert!(order.shows("?"));
+        assert_eq!(
+            sorted(&order, &["os", "app", "bu"]),
+            keys(&["app", "bu", "os"]),
+            "ignored keys still sort"
+        );
+    }
+
+    #[test]
+    fn with_ignored_drops_first_members_unresolved_blanks_and_repeats() {
+        let order = KeyOrder::new(&keys(&["app", "env"]), "role")
+            .with_ignored(&keys(&["app", "?", " ", " os ", "role", "os", "bu"]));
+        assert_eq!(order.ignored(), keys(&["os", "bu"]));
+        assert!(order.shows("app"));
+        assert!(order.shows("role"));
+        assert!(order.shows("?"));
+    }
+
+    #[test]
+    fn default_shows_every_key() {
+        let order = KeyOrder::default();
+        assert!(order.ignored().is_empty());
+        for k in ["app", "os", "DFIRBubble", "?", ""] {
+            assert!(order.shows(k), "{k}");
+        }
     }
 
     #[test]
