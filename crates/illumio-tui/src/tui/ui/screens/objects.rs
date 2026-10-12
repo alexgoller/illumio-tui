@@ -236,9 +236,12 @@ fn group_lines(model: &Model, g: &LabelGroup) -> Vec<DetailLine> {
         Some(i) => i
             .resolve_labels(&g.labels)
             .into_iter()
-            .map(|l| match i.label(&l.href) {
-                Some(_) => format!("{}={}", l.key, l.value),
-                None => unresolved(&l.href),
+            .map(|l| {
+                if l.key == "?" {
+                    unresolved(&l.href)
+                } else {
+                    format!("{}={}", l.key, l.value)
+                }
             })
             .collect(),
         None => g.labels.iter().map(|r| unresolved(&r.href)).collect(),

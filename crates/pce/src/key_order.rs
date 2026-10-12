@@ -29,6 +29,12 @@ impl KeyOrder {
         Self { first }
     }
 
+    /// `keys` first, in order, and nothing else (a tier key is just the
+    /// last of them).
+    pub fn from_keys(keys: &[String]) -> Self {
+        Self::new(keys, "")
+    }
+
     /// The keys that come first, in order.
     pub fn first(&self) -> &[String] {
         &self.first
@@ -52,11 +58,13 @@ impl KeyOrder {
     }
 
     /// By [`KeyOrder::cmp_keys`] on the key, then by value.
+    pub fn cmp_kv(&self, a: (&str, &str), b: (&str, &str)) -> Ordering {
+        self.cmp_keys(a.0, b.0).then_with(|| a.1.cmp(b.1))
+    }
+
+    /// Sorts by [`KeyOrder::cmp_kv`].
     pub fn sort_labels(&self, labels: &mut [ResolvedLabel]) {
-        labels.sort_by(|a, b| {
-            self.cmp_keys(&a.key, &b.key)
-                .then_with(|| a.value.cmp(&b.value))
-        });
+        labels.sort_by(|a, b| self.cmp_kv((&a.key, &a.value), (&b.key, &b.value)));
     }
 }
 

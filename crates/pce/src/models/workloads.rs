@@ -203,7 +203,7 @@ impl Workload {
             .iter()
             .filter_map(|l| Some((l.key.as_deref()?, l.value.as_deref().unwrap_or(""))))
             .collect();
-        parts.sort_by(|a, b| order.cmp_keys(a.0, b.0).then_with(|| a.1.cmp(b.1)));
+        parts.sort_by(|a, b| order.cmp_kv(*a, *b));
         parts
             .iter()
             .map(|(k, v)| format!("{k}={v}"))

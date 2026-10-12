@@ -1,6 +1,7 @@
 //! Pure aggregations over resolved flows. The TUI's views and the CLI's
 //! `--group` / `--blocked` / `groups` use these; no requests.
 use super::resolved::{ResolvedEndpoint, ResolvedFlow, service_text};
+use crate::key_order::KeyOrder;
 use crate::models::PolicyDecision;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -106,14 +107,9 @@ pub fn keys_seen(flows: &[ResolvedFlow], preferred: &[String]) -> Vec<(String, u
             *counts.entry(k.to_string()).or_default() += 1;
         }
     }
-    let rank = |k: &str| {
-        preferred
-            .iter()
-            .position(|p| p == k)
-            .unwrap_or(preferred.len())
-    };
+    let order = KeyOrder::from_keys(preferred);
     let mut out: Vec<(String, usize)> = counts.into_iter().collect();
-    out.sort_by(|(a, _), (b, _)| rank(a).cmp(&rank(b)).then_with(|| a.cmp(b)));
+    out.sort_by(|(a, _), (b, _)| order.cmp_keys(a, b));
     out
 }
 

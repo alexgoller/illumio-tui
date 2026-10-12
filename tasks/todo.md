@@ -215,3 +215,9 @@ Spec: docs/superpowers/specs/2026-10-11-traffic-views-design.md · Plan: docs/su
 - Smoke against demo100: not run (described only: one Explorer query in the TUI, then every view, the picker, the zoom and the bytes weight with the API call counter asserted unchanged, then the two CLI reads; no `--allow-writes`, never `y`). Nothing in the views, keys, zoom or columns emits a `Cmd`: every TUI key test asserts an empty `Vec<Cmd>`.
 - No write was sent to any PCE.
 - Deviations reported by tasks: see `.superpowers/sdd/2026-10-11-traffic-views/` (per-task reports).
+
+## Label order (2026-10-12, bounded)
+- [x] `pce::KeyOrder` (scope keys, tier key, then alphabetical) on `NameIndex`, `Pce`, `Workload::label_text`
+- [x] TUI: traffic detail, workloads table/detail, edit form, label group members, "all labels" and the `g` picker follow the order
+- [x] CLI: workloads and traffic tables follow the order
+- [x] Tests per surface (802 passed), docs, opus review (7 minors, all applied), merge

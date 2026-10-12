@@ -70,7 +70,6 @@ impl KeyPicker {
             add(k, None);
         }
         add(tier_key, None);
-        add("loc", None);
         for (k, n) in seen {
             add(k, Some(*n));
         }
@@ -204,7 +203,7 @@ mod tests {
     }
 
     #[test]
-    fn entries_list_the_profile_keys_then_loc_then_the_seen_keys_with_counts() {
+    fn entries_list_the_profile_keys_then_the_seen_keys_with_counts() {
         let p = picker();
         let listed: Vec<(&str, Option<usize>)> =
             p.entries.iter().map(|e| (e.key.as_str(), e.seen)).collect();
@@ -214,7 +213,7 @@ mod tests {
                 ("app", None),
                 ("env", None),
                 ("role", None),
-                ("loc", None),
+                ("loc", Some(30)),
                 ("datacenter", Some(11)),
             ]
         );
@@ -229,7 +228,7 @@ mod tests {
             false,
         );
         let listed: Vec<&str> = p.entries.iter().map(|e| e.key.as_str()).collect();
-        assert_eq!(listed, vec!["site", "tier", "loc", "zone"]);
+        assert_eq!(listed, vec!["site", "tier", "zone"]);
     }
 
     #[test]

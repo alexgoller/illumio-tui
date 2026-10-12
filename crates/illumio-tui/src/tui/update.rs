@@ -1396,10 +1396,7 @@ fn treemap_out(model: &mut Model) {
 /// flows carry.
 fn open_key_picker(model: &Model) -> KeyPicker {
     let t = &model.traffic;
-    let mut preferred = model.limits.scope_keys.clone();
-    preferred.push(model.limits.tier_key.clone());
-    preferred.push("loc".into());
-    let seen = pce::traffic::keys_seen(t.loaded_flows(), &preferred);
+    let seen = pce::traffic::keys_seen(t.loaded_flows(), &t.preferred_keys);
     KeyPicker::new(
         &model.limits.scope_keys,
         &model.limits.tier_key,
@@ -2631,8 +2628,8 @@ mod tests {
             panic!("{:?}", m.overlay)
         };
         let listed: Vec<&str> = p.entries.iter().map(|e| e.key.as_str()).collect();
-        assert_eq!(listed, vec!["app", "env", "role", "loc", "datacenter"]);
-        assert_eq!(p.entries[4].seen, Some(11));
+        assert_eq!(listed, vec!["app", "env", "role", "datacenter", "loc"]);
+        assert_eq!(p.entries[3].seen, Some(11));
         for msg in [key('j'), key('j'), key(' '), enter()] {
             assert!(update(&mut m, msg).is_empty(), "the picker never requests");
         }

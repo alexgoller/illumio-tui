@@ -280,8 +280,9 @@ requests anything. `TrafficState.group_keys` starts as the profile's
 the flows carry (`pce::traffic::keys_seen`, the profile's scope keys and
 tier key first, `TrafficState.preferred_keys`). Everywhere labels are
 printed they follow the same `pce::KeyOrder` (scope keys, tier key, then
-alphabetical; `NameIndex::resolve_labels`, `Workload::label_text`). `rebuild_views` resolves the keys once (`effective_keys`) and
-rebuilds every view with them. Grouping lives in `pce::traffic`: `group_text`
+alphabetical; `NameIndex::resolve_labels`, `Workload::label_text`).
+`rebuild_views` resolves the keys once (`effective_keys`) and rebuilds
+every view with them. Grouping lives in `pce::traffic`: `group_text`
 (`-` in every slot of a non-workload) labels the Flows rows, which are
 `FlowRow`s because a column cell is a plain `fn` that cannot see the keys;
 the aggregations (`group_by_labels`, `blocked_summary`, `mesh`) group by

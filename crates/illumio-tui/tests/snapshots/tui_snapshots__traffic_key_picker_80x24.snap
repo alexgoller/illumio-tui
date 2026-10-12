@@ -12,8 +12,8 @@ expression: out
 ╰──────────────────│[x] app                                 │──────────────────╯
 ╭ Flows ───────────│[x] env                                 │──────────────────╮
 │  src            s│[ ] role                                │e   conns decision│
-│▸ shop-web-p.exa s│[ ] loc                                 │cp    420 allowed │
-│  shop-web-p.exa s│[ ] datacenter      (seen in 11 flows)  │cp    380 allowed │
+│▸ shop-web-p.exa s│[ ] datacenter      (seen in 11 flows)  │cp    420 allowed │
+│  shop-web-p.exa s│[ ] loc             (seen in 30 flows)  │cp    380 allowed │
 │  shop-web-p.exa s│[ ] all labels                          │p     150 allowed │
 │  crm-web-p.exam c│                                        │cp    610 allowed │
 ╰──────────────────│keys: app,env                           │──────────────────╯

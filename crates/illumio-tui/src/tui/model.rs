@@ -1049,6 +1049,12 @@ impl TrafficState {
         self.data.as_ref().map_or(&[], |d| d.flows.as_slice())
     }
 
+    /// The keys `all labels` and the `g` picker list first: the profile's
+    /// scope keys and tier key.
+    pub fn set_key_order(&mut self, order: &KeyOrder) {
+        self.preferred_keys = order.first().to_vec();
+    }
+
     /// The keys in force, as the last `rebuild_views` resolved them.
     pub fn effective_keys(&self) -> Vec<String> {
         self.keys.clone()
@@ -2586,9 +2592,7 @@ impl Model {
             &scope_keys,
         );
         traffic.treemap.area = crate::tui::ui::screens::traffic::treemap_area(size);
-        traffic.preferred_keys = KeyOrder::new(&scope_keys, crate::config::DEFAULT_TIER_KEY)
-            .first()
-            .to_vec();
+        traffic.set_key_order(&KeyOrder::new(&scope_keys, crate::config::DEFAULT_TIER_KEY));
         let policy = PolicyState::new(auto_refresh_min_seconds);
         let objects = ObjectsState::new(auto_refresh_min_seconds);
         let workloads = WorkloadsState::new(auto_refresh_min_seconds);
@@ -2638,7 +2642,7 @@ impl Model {
         self.traffic.all_keys = false;
         self.limits.scope_keys = scope_keys;
         self.limits.tier_key = tier_key;
-        self.traffic.preferred_keys = self.limits.key_order().first().to_vec();
+        self.traffic.set_key_order(&self.limits.key_order());
         self.traffic.rebuild_views();
     }
 
@@ -2710,7 +2714,7 @@ impl Model {
             min,
             &self.limits.scope_keys,
         );
-        traffic.preferred_keys = self.limits.key_order().first().to_vec();
+        traffic.set_key_order(&self.limits.key_order());
         traffic.seq = self.traffic.seq + 1; // a late result of the old query is stale
         traffic.treemap.area = crate::tui::ui::screens::traffic::treemap_area(self.size);
         self.traffic = traffic;

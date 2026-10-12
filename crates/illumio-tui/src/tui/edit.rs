@@ -1047,7 +1047,7 @@ fn labels_text(w: &Workload, index: Option<&NameIndex>) -> String {
         .collect();
     let default = KeyOrder::default();
     let order = index.map_or(&default, NameIndex::key_order);
-    entries.sort_by(|a, b| order.cmp_keys(&a.0, &b.0).then_with(|| a.1.cmp(&b.1)));
+    entries.sort_by(|a, b| order.cmp_kv((&a.0, &a.1), (&b.0, &b.1)));
     join(entries.into_iter().map(|(_, _, text)| text))
 }
 
