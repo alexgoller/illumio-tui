@@ -2128,6 +2128,8 @@ fn is_unanswered(e: &WriteError) -> bool {
 fn reload_after_write(model: &mut Model, kind: pce::write::ObjectKind) -> Vec<Cmd> {
     match kind {
         pce::write::ObjectKind::Label => load_objects(model, ObjectKind::Labels, CacheMode::Bypass),
+        // Nothing writes label groups yet; the tab has no reload of its own.
+        pce::write::ObjectKind::LabelGroup => Vec::new(),
         pce::write::ObjectKind::IpList => load_ip_lists(model, CacheMode::Bypass),
         pce::write::ObjectKind::Service => {
             load_objects(model, ObjectKind::Services, CacheMode::Bypass)
@@ -2168,6 +2170,7 @@ fn pending_diff(model: &mut Model) -> Vec<Cmd> {
         return Vec::new();
     };
     let kind = match change.object_type.as_str() {
+        "label_groups" => pce::write::ObjectKind::LabelGroup,
         "ip_lists" => pce::write::ObjectKind::IpList,
         "services" => pce::write::ObjectKind::Service,
         "rule_sets" => pce::write::ObjectKind::RuleSet,
@@ -7239,6 +7242,12 @@ mod tests {
             name: Some("G".into()),
             object_type: "label_groups".into(),
         });
+        pending.push(pce::models::PendingChange {
+            href: "/orgs/5/sec_policy/draft/firewall_settings".into(),
+            change_type: "update".into(),
+            name: None,
+            object_type: "firewall_settings".into(),
+        });
         update(&mut m, Msg::PendingLoaded(Ok(pending.clone())));
         assert_eq!(m.policy.pending_selected, 0);
         assert_eq!(
@@ -7269,13 +7278,24 @@ mod tests {
         );
         assert_eq!(m.status.text, "diff already loading");
         m.policy.diff_loading = false;
+        update(&mut m, key('j')); // the label group
+        assert_eq!(
+            update(&mut m, enter()),
+            vec![Cmd::LoadDiff {
+                change: pending[2].clone(),
+                kind: pce::write::ObjectKind::LabelGroup,
+                fallback_deny: None,
+            }],
+            "exactly one diff command for a label group"
+        );
+        m.policy.diff_loading = false;
         update(&mut m, key('j'));
         update(&mut m, key('j'));
-        assert_eq!(m.policy.pending_selected, 2, "stops at the last entry");
+        assert_eq!(m.policy.pending_selected, 3, "stops at the last entry");
         assert!(update(&mut m, enter()).is_empty());
-        assert_eq!(m.status.text, "no diff for label_groups");
+        assert_eq!(m.status.text, "no diff for firewall_settings");
         update(&mut m, key('k'));
-        assert_eq!(m.policy.pending_selected, 1);
+        assert_eq!(m.policy.pending_selected, 2);
         update(&mut m, kc(KeyCode::Esc));
         assert_eq!(m.overlay, Overlay::None);
     }

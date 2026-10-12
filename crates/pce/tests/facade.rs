@@ -513,6 +513,10 @@ async fn active_lists_are_cached_under_objects_and_dropped_by_a_write() {
             "/api/v2/orgs/5/sec_policy/active/services",
             json!([{"href": "/orgs/5/sec_policy/active/services/32", "name": "Web", "service_ports": [{"port": 443, "proto": 6}]}]),
         ),
+        (
+            "/api/v2/orgs/5/sec_policy/active/label_groups",
+            json!([{"href": "/orgs/5/sec_policy/active/label_groups/10", "name": "All prod envs", "key": "env", "labels": [{"href": "/orgs/5/labels/4"}]}]),
+        ),
     ] {
         Mock::given(method("GET"))
             .and(path(p))
@@ -530,7 +534,10 @@ async fn active_lists_are_cached_under_objects_and_dropped_by_a_write() {
     let services = p.active_services(CacheMode::Use).await.unwrap();
     assert_eq!(services.value[0].service_ports[0].port, Some(443));
     assert!(p.active_services(CacheMode::Use).await.unwrap().hit);
-    assert_eq!(p.stats().calls, 2, "one GET per list");
+    let groups = p.active_label_groups(CacheMode::Use).await.unwrap();
+    assert_eq!(groups.value[0].labels.len(), 1);
+    assert!(p.active_label_groups(CacheMode::Use).await.unwrap().hit);
+    assert_eq!(p.stats().calls, 3, "one GET per list");
     // `Writer::execute` invalidates the kind's prefix; for IP lists and
     // services that is `objects:`, which must cover the active lists too.
     for prefix in pce::write::ObjectKind::IpList.cache_prefixes() {
@@ -538,5 +545,6 @@ async fn active_lists_are_cached_under_objects_and_dropped_by_a_write() {
     }
     assert!(!p.active_ip_lists(CacheMode::Use).await.unwrap().hit);
     assert!(!p.active_services(CacheMode::Use).await.unwrap().hit);
-    assert_eq!(p.stats().calls, 4);
+    assert!(!p.active_label_groups(CacheMode::Use).await.unwrap().hit);
+    assert_eq!(p.stats().calls, 6);
 }

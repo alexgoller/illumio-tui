@@ -3,7 +3,7 @@
 //! `Cmd`s by spawning tasks on a shared `Arc<Pce>`.
 use crate::cli::error::CliError;
 use crate::cli::{Context, GlobalArgs};
-use crate::tui::diff::{self, ObjectDiff};
+use crate::tui::diff;
 use crate::tui::edit::{self, RulesetTarget, WriteIntent};
 use crate::tui::filter::TrafficFilter;
 use crate::tui::model::ObjectKind;
@@ -15,7 +15,7 @@ use crossterm::event::{
     EventStream,
 };
 use futures::{Stream, StreamExt};
-use pce::models::{DenyRule, PendingChange, PolicyScope, WorkloadFilter};
+use pce::models::{PolicyScope, WorkloadFilter};
 use pce::write::{IfMissing, JsonlAudit, Plan, WriteContext, WriteError, WriteGuard, WriteRefused};
 use pce::{CacheMode, NameIndex, Pce};
 use std::path::PathBuf;
@@ -258,7 +258,7 @@ impl Runtime {
                 // A ruleset diff names labels and lists through the loaded index.
                 let index = self.model.index().cloned();
                 tokio::spawn(async move {
-                    let result = load_diff(
+                    let result = diff::load_diff(
                         &pce,
                         &change,
                         kind,
@@ -655,52 +655,6 @@ fn named(mut plan: Plan, kind: &str, name: &str) -> Plan {
         request.summary = format!("delete {kind} {name}");
     }
     plan
-}
-
-/// The draft and active list of one kind through the cache, compared
-/// locally. The draft list is usually cached by the name index, so the
-/// common cost is one GET for the active list, and none when both are fresh.
-async fn load_diff(
-    pce: &Pce,
-    change: &PendingChange,
-    kind: pce::write::ObjectKind,
-    index: Option<&NameIndex>,
-    fallback_deny: Option<&[DenyRule]>,
-) -> pce::Result<ObjectDiff> {
-    match kind {
-        pce::write::ObjectKind::IpList => {
-            let draft = pce.ip_lists(CacheMode::Use).await?.value;
-            let active = pce.active_ip_lists(CacheMode::Use).await?.value;
-            Ok(diff::ip_list_diff_for(change, &draft, &active))
-        }
-        pce::write::ObjectKind::Service => {
-            let draft = pce.services(CacheMode::Use).await?.value;
-            let active = pce.active_services(CacheMode::Use).await?.value;
-            Ok(diff::service_diff_for(change, &draft, &active))
-        }
-        pce::write::ObjectKind::RuleSet => {
-            let draft = pce
-                .rule_sets(PolicyScope::Draft, CacheMode::Use)
-                .await?
-                .value;
-            let active = pce
-                .rule_sets(PolicyScope::Active, CacheMode::Use)
-                .await?
-                .value;
-            let empty = NameIndex::default();
-            Ok(diff::rule_set_diff_for(
-                change,
-                &draft,
-                &active,
-                index.unwrap_or(&empty),
-                fallback_deny,
-            ))
-        }
-        other => Err(pce::PceError::Invalid(format!(
-            "no diff for {}",
-            other.as_str()
-        ))),
-    }
 }
 
 fn to_msg(e: Event) -> Option<Msg> {

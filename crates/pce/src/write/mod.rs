@@ -42,6 +42,7 @@ pub use workloads::{LabelRemoval, LabelsPatch, WorkloadDraft, WorkloadPatch};
 #[serde(rename_all = "snake_case")]
 pub enum ObjectKind {
     Label,
+    LabelGroup,
     IpList,
     Service,
     Workload,
@@ -56,7 +57,10 @@ pub enum ObjectKind {
 impl ObjectKind {
     pub fn cache_prefixes(self) -> &'static [&'static str] {
         match self {
-            ObjectKind::Label | ObjectKind::IpList | ObjectKind::Service => &["objects:"],
+            ObjectKind::Label
+            | ObjectKind::LabelGroup
+            | ObjectKind::IpList
+            | ObjectKind::Service => &["objects:"],
             ObjectKind::Workload => &["workloads"],
             ObjectKind::RuleSet | ObjectKind::Rule | ObjectKind::DenyRule => &["policy:"],
             ObjectKind::Provision => &["policy:", "objects:"],
@@ -67,7 +71,8 @@ impl ObjectKind {
     pub fn pending(self) -> bool {
         matches!(
             self,
-            ObjectKind::IpList
+            ObjectKind::LabelGroup
+                | ObjectKind::IpList
                 | ObjectKind::Service
                 | ObjectKind::RuleSet
                 | ObjectKind::Rule
@@ -78,6 +83,7 @@ impl ObjectKind {
     pub fn as_str(self) -> &'static str {
         match self {
             ObjectKind::Label => "label",
+            ObjectKind::LabelGroup => "label_group",
             ObjectKind::IpList => "ip_list",
             ObjectKind::Service => "service",
             ObjectKind::Workload => "workload",

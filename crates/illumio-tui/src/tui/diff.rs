@@ -4,9 +4,12 @@
 //! whole object.
 use crate::tui::edit::{actor_tokens, service_tokens};
 use crate::tui::model::rule_kind_name;
-use pce::models::{Actor, DenyRule, IngressService, IpList, PendingChange, RuleSet, Service};
-use pce::write::IpRangeSpec;
-use pce::{NameIndex, RuleKind, RuleSetView};
+use pce::models::{
+    Actor, DenyRule, IngressService, IpList, LabelGroup, PendingChange, PolicyScope, RuleSet,
+    Service,
+};
+use pce::write::{IpRangeSpec, ObjectKind};
+use pce::{CacheMode, NameIndex, Pce, PceError, RuleKind, RuleSetView};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiffKind {
@@ -143,6 +146,50 @@ pub fn diff_ip_list(active: Option<&IpList>, draft: Option<&IpList>) -> Vec<Diff
     out
 }
 
+/// Member labels as `key=value` and sub-groups by name, both read through the
+/// index (an unknown href stays an href). The model has no description.
+pub fn diff_label_group(
+    active: Option<&LabelGroup>,
+    draft: Option<&LabelGroup>,
+    idx: &NameIndex,
+) -> Vec<DiffLine> {
+    let labels = |g: &LabelGroup| -> Vec<String> {
+        g.labels.iter().map(|r| idx.label_text(&r.href)).collect()
+    };
+    let subs = |g: &LabelGroup| -> Vec<String> {
+        g.sub_groups
+            .iter()
+            .map(|r| idx.label_group_name(&r.href).unwrap_or(&r.href).to_string())
+            .collect()
+    };
+    let mut out = Vec::new();
+    field(
+        &mut out,
+        "name",
+        active.map(|g| g.name.as_str()),
+        draft.map(|g| g.name.as_str()),
+    );
+    field(
+        &mut out,
+        "key",
+        active.map(|g| g.key.as_str()).filter(|k| !k.is_empty()),
+        draft.map(|g| g.key.as_str()).filter(|k| !k.is_empty()),
+    );
+    entries(
+        &mut out,
+        "label",
+        &active.map(labels).unwrap_or_default(),
+        &draft.map(labels).unwrap_or_default(),
+    );
+    entries(
+        &mut out,
+        "sub-group",
+        &active.map(subs).unwrap_or_default(),
+        &draft.map(subs).unwrap_or_default(),
+    );
+    out
+}
+
 pub fn diff_service(active: Option<&Service>, draft: Option<&Service>) -> Vec<DiffLine> {
     let mut out = Vec::new();
     field(
@@ -178,6 +225,15 @@ trait Diffable {
 }
 
 impl Diffable for IpList {
+    fn href(&self) -> &str {
+        &self.href
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl Diffable for LabelGroup {
     fn href(&self) -> &str {
         &self.href
     }
@@ -244,6 +300,15 @@ fn diff_for<T: Diffable>(
 
 pub fn ip_list_diff_for(change: &PendingChange, draft: &[IpList], active: &[IpList]) -> ObjectDiff {
     diff_for(change, draft, active, diff_ip_list)
+}
+
+pub fn label_group_diff_for(
+    change: &PendingChange,
+    draft: &[LabelGroup],
+    active: &[LabelGroup],
+    idx: &NameIndex,
+) -> ObjectDiff {
+    diff_for(change, draft, active, |a, d| diff_label_group(a, d, idx))
 }
 
 pub fn service_diff_for(
@@ -490,6 +555,60 @@ pub fn rule_set_diff_for(
         });
         diff_rule_set_with(a, d, idx, a_deny, d_deny)
     })
+}
+
+/// The draft and active list of one kind through the cache, compared
+/// locally. The draft list is usually cached by the name index, so the
+/// common cost is one GET for the active list, and none when both are fresh.
+pub async fn load_diff(
+    pce: &Pce,
+    change: &PendingChange,
+    kind: ObjectKind,
+    index: Option<&NameIndex>,
+    fallback_deny: Option<&[DenyRule]>,
+) -> pce::Result<ObjectDiff> {
+    match kind {
+        ObjectKind::LabelGroup => {
+            let draft = pce.label_groups(CacheMode::Use).await?.value;
+            let active = pce.active_label_groups(CacheMode::Use).await?.value;
+            let empty = NameIndex::default();
+            Ok(label_group_diff_for(
+                change,
+                &draft,
+                &active,
+                index.unwrap_or(&empty),
+            ))
+        }
+        ObjectKind::IpList => {
+            let draft = pce.ip_lists(CacheMode::Use).await?.value;
+            let active = pce.active_ip_lists(CacheMode::Use).await?.value;
+            Ok(ip_list_diff_for(change, &draft, &active))
+        }
+        ObjectKind::Service => {
+            let draft = pce.services(CacheMode::Use).await?.value;
+            let active = pce.active_services(CacheMode::Use).await?.value;
+            Ok(service_diff_for(change, &draft, &active))
+        }
+        ObjectKind::RuleSet => {
+            let draft = pce
+                .rule_sets(PolicyScope::Draft, CacheMode::Use)
+                .await?
+                .value;
+            let active = pce
+                .rule_sets(PolicyScope::Active, CacheMode::Use)
+                .await?
+                .value;
+            let empty = NameIndex::default();
+            Ok(rule_set_diff_for(
+                change,
+                &draft,
+                &active,
+                index.unwrap_or(&empty),
+                fallback_deny,
+            ))
+        }
+        other => Err(PceError::Invalid(format!("no diff for {}", other.as_str()))),
+    }
 }
 
 #[cfg(test)]
@@ -927,5 +1046,103 @@ mod tests {
             )),
             "{lines:?}"
         );
+    }
+
+    fn group_idx() -> NameIndex {
+        let labels: Vec<pce::models::Label> = serde_json::from_value(json!([
+            {"href": "/orgs/5/labels/4", "key": "env", "value": "prod"},
+            {"href": "/orgs/5/labels/5", "key": "env", "value": "staging"},
+            {"href": "/orgs/5/labels/6", "key": "env", "value": "dev"}
+        ]))
+        .unwrap();
+        let groups: Vec<LabelGroup> = serde_json::from_value(json!([
+            {"href": "/orgs/5/sec_policy/draft/label_groups/11", "name": "Old sub", "key": "env"},
+            {"href": "/orgs/5/sec_policy/draft/label_groups/12", "name": "New sub", "key": "env"}
+        ]))
+        .unwrap();
+        NameIndex::new(&labels, &groups, &[], &[])
+    }
+
+    fn group(labels: &[&str], subs: &[&str]) -> LabelGroup {
+        let refs = |v: &[&str]| json!(v.iter().map(|h| json!({"href": h})).collect::<Vec<_>>());
+        serde_json::from_value(json!({
+            "href": "/orgs/5/sec_policy/draft/label_groups/10", "name": "All envs", "key": "env",
+            "labels": refs(labels), "sub_groups": refs(subs)
+        }))
+        .unwrap()
+    }
+
+    fn group_change(change_type: &str) -> PendingChange {
+        PendingChange {
+            href: "/orgs/5/sec_policy/draft/label_groups/10".into(),
+            change_type: change_type.into(),
+            name: Some("All envs".into()),
+            object_type: "label_groups".into(),
+        }
+    }
+
+    #[test]
+    fn a_created_or_deleted_label_group_is_all_added_or_all_removed() {
+        let idx = group_idx();
+        let g = group(
+            &["/orgs/5/labels/4"],
+            &["/orgs/5/sec_policy/draft/label_groups/11"],
+        );
+        let want = |sign| {
+            vec![
+                line(sign, "name: All envs"),
+                line(sign, "key: env"),
+                line(sign, "label env=prod"),
+                line(sign, "sub-group Old sub"),
+            ]
+        };
+        assert_eq!(diff_label_group(None, Some(&g), &idx), want(Sign::Added));
+        assert_eq!(diff_label_group(Some(&g), None, &idx), want(Sign::Removed));
+    }
+
+    #[test]
+    fn an_updated_label_group_marks_one_member_added_and_one_removed() {
+        let idx = group_idx();
+        let mut active = group(&["/orgs/5/labels/4", "/orgs/5/labels/5"], &[]);
+        active.href = "/orgs/5/sec_policy/active/label_groups/10".into();
+        let draft = group(&["/orgs/5/labels/4", "/orgs/5/labels/6"], &[]);
+        let d = label_group_diff_for(&group_change("update"), &[draft], &[active], &idx);
+        assert_eq!(d.change, DiffKind::Updated);
+        assert_eq!(
+            d.lines,
+            vec![
+                line(Sign::Same, "name: All envs"),
+                line(Sign::Same, "key: env"),
+                line(Sign::Same, "label env=prod"),
+                line(Sign::Added, "label env=dev"),
+                line(Sign::Removed, "label env=staging"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_replaced_sub_group_and_a_renamed_group_show_both_sides() {
+        let idx = group_idx();
+        let active = group(&[], &["/orgs/5/sec_policy/draft/label_groups/11"]);
+        let mut draft = group(&[], &["/orgs/5/sec_policy/draft/label_groups/12"]);
+        draft.name = "All envs v2".into();
+        let lines = diff_label_group(Some(&active), Some(&draft), &idx);
+        assert_eq!(
+            lines,
+            vec![
+                line(Sign::Removed, "name: All envs"),
+                line(Sign::Added, "name: All envs v2"),
+                line(Sign::Same, "key: env"),
+                line(Sign::Added, "sub-group New sub"),
+                line(Sign::Removed, "sub-group Old sub"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_label_group_missing_from_a_list_says_so() {
+        let d = label_group_diff_for(&group_change("update"), &[], &[], &group_idx());
+        assert_eq!(d.lines.len(), 1);
+        assert!(d.lines[0].text.contains("not in the draft list"));
     }
 }

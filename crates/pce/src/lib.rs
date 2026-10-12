@@ -202,6 +202,22 @@ impl Pce {
         .await
     }
 
+    /// Provisioned label groups, for the pending diff (see `active_ip_lists`).
+    pub async fn active_label_groups(
+        &self,
+        mode: CacheMode,
+    ) -> Result<Cached<Vec<models::LabelGroup>>> {
+        let path = self.client.org_path("sec_policy/active/label_groups");
+        self.cached_list(
+            "objects:active_label_groups",
+            &path,
+            vec![],
+            self.ttls.policy,
+            mode,
+        )
+        .await
+    }
+
     /// Loads (or reuses) the four object lists and builds the name index.
     pub async fn name_index(&self, mode: CacheMode) -> Result<Arc<NameIndex>> {
         if mode == CacheMode::Use
