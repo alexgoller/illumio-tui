@@ -96,7 +96,6 @@ impl Limits {
 pub struct LabelsConfig {
     pub scope_keys: Option<Vec<String>>,
     pub tier_key: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ignore_keys: Option<Vec<String>>,
 }
 

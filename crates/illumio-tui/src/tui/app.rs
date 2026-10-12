@@ -775,8 +775,11 @@ pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
         cfg.traffic_default_window.clone(),
         writes,
     );
-    let limits = Limits::from_config(cfg);
-    model.set_label_model(limits.scope_keys, limits.tier_key, limits.ignore_keys);
+    model.set_label_model(
+        cfg.scope_keys.clone(),
+        cfg.tier_key.clone(),
+        cfg.ignore_keys.clone(),
+    );
     let (mut rt, _tx) = Runtime::with_args(Arc::new(ctx.pce), model, global);
     rt.writer = writer.map(Arc::new);
     rt.write_inputs = Some(inputs);

@@ -2665,8 +2665,10 @@ impl Model {
         self.limits.scope_keys = scope_keys;
         self.limits.tier_key = tier_key;
         self.limits.ignore_keys = ignore_keys;
-        self.traffic.set_key_order(&self.limits.key_order());
+        let order = self.limits.key_order();
+        self.traffic.set_key_order(&order);
         self.traffic.rebuild_views();
+        self.workloads.rebuild(&order);
     }
 
     /// What a `w` form is pre-filled from: the profile's label model and

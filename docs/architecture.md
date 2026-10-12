@@ -281,7 +281,7 @@ the flows carry (`pce::traffic::keys_seen`, the profile's scope keys and
 tier key first, `TrafficState.key_order`). Everywhere labels are
 printed they follow the same `pce::KeyOrder` (scope keys, tier key, then
 alphabetical; `NameIndex::resolve_labels`, `Workload::label_text`), whose
-`ignore_keys` (`KeyOrder::shows`) hide keys from label text, `keys_seen`
+ignored keys (`KeyOrder::shows`, from `ignore_keys`) stay out of label text, `keys_seen`
 and the `g` picker only, never from JSON, the edit form or the Labels tab.
 `rebuild_views` resolves the keys once (`effective_keys`) and rebuilds
 every view with them. Grouping lives in `pce::traffic`: `group_text`
