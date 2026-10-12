@@ -44,9 +44,12 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # The image is part of the key: objects built against one glibc must
+      # never be reused on a runner with an older one (v0.1.0 hit this when
+      # a ubuntu-latest cache was restored on ubuntu-22.04).
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}
+          key: ${{ matrix.target }}-${{ matrix.os }}
 
       - name: Install cross
         if: matrix.cross
