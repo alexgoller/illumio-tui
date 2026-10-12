@@ -73,26 +73,42 @@ pub fn share(covered: Duration, window: Duration) -> f64 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BackfillPlan {
-    /// The time the slices fill: from the oldest covered instant back to
-    /// the window start.
-    pub uncovered: Duration,
+    /// The time the slices fill: the whole window for a truncated result
+    /// (its rows say nothing reliable about any part of it), the rest of
+    /// it for a backfill that stopped.
+    pub span: Duration,
     pub slice: Duration,
-    /// Slices needed; may exceed `MAX_SLICES` (the caller refuses then).
+    /// Slices for the whole span; above `MAX_SLICES` a run fetches the
+    /// newest `MAX_SLICES` of them (`batch`) and the next one continues.
     pub count: u32,
+    /// The cap each slice asks for.
+    pub cap: u32,
 }
 
 impl BackfillPlan {
-    /// `uncovered` in slices of `slice`.
-    pub fn with_slice(uncovered: Duration, slice: Duration) -> Self {
+    /// `span` in slices of `slice` at `cap`.
+    pub fn with_slice(span: Duration, slice: Duration, cap: u32) -> Self {
         Self {
-            uncovered,
+            span,
             slice,
-            count: slices_needed(uncovered, slice),
+            count: slices_needed(span, slice),
+            cap,
         }
     }
 
-    pub fn too_many(&self) -> bool {
+    /// Slices this run fetches: all of them, or the first `MAX_SLICES`.
+    pub fn batch(&self) -> u32 {
+        self.count.min(MAX_SLICES)
+    }
+
+    /// More slices than one run fetches.
+    pub fn partial(&self) -> bool {
         self.count > MAX_SLICES
+    }
+
+    /// The time this run's batch covers.
+    pub fn batch_span(&self) -> Duration {
+        (self.slice * self.batch()).min(self.span)
     }
 }
 
@@ -113,32 +129,39 @@ pub fn slice_for(flows: usize, covered: Duration, cap: u32) -> Duration {
         .unwrap_or(MIN_SLICE)
 }
 
-/// `ceil(uncovered / slice)`.
-pub fn slices_needed(uncovered: Duration, slice: Duration) -> u32 {
+/// `ceil(span / slice)`.
+pub fn slices_needed(span: Duration, slice: Duration) -> u32 {
     if slice.is_zero() {
         return 0;
     }
-    let n = uncovered.as_secs().div_ceil(slice.as_secs().max(1));
+    let n = span.as_secs().div_ceil(slice.as_secs().max(1));
     u32::try_from(n).unwrap_or(u32::MAX)
 }
 
-/// The backfill a truncated result needs: from its oldest flow back to
-/// `window_start`. `None` when the result is complete or nothing is left.
+/// The backfill a truncated result needs to fill `window`: slices sized
+/// from its measured rate at the smallest cap of the ladder (from `cap`
+/// up to `max_cap`, see `next_cap`) that fits the window in `MAX_SLICES`
+/// slices; when even `max_cap` does not, the plan at `max_cap` (a partial
+/// run, `batch`). `None` when the result is complete, carries no
+/// `last_detected` to measure, or the window is empty.
 pub fn plan_backfill(
     cov: &Coverage,
     truncated: bool,
     cap: u32,
-    window_start: Timestamp,
+    max_cap: u32,
+    window: Duration,
 ) -> Option<BackfillPlan> {
-    if !truncated {
+    if !truncated || cov.oldest.is_none() || window.is_zero() {
         return None;
     }
-    let oldest = cov.oldest?;
-    let uncovered = uncovered(window_start, oldest)?;
-    Some(BackfillPlan::with_slice(
-        uncovered,
-        slice_for(cov.flows, cov.covered, cap),
-    ))
+    let mut c = cap;
+    loop {
+        let plan = BackfillPlan::with_slice(window, slice_for(cov.flows, cov.covered, c), c);
+        match super::steps::next_cap(c, max_cap.max(cap)) {
+            Some(next) if plan.partial() => c = next,
+            _ => return Some(plan),
+        }
+    }
 }
 
 /// `oldest − window_start` when positive.
@@ -155,7 +178,8 @@ fn span(d: Duration) -> Span {
 pub enum Step {
     /// Merge it; the walk moved on.
     Merge,
-    /// It truncated: drop it and fetch the same range again in halves.
+    /// It truncated: drop it and fetch the same range again in halves
+    /// (never shorter than `MIN_SLICE`).
     Retry { slice: Duration },
     /// It truncated at `MIN_SLICE`: merge it and stop, the cap is too small.
     TooSmall,
@@ -174,7 +198,8 @@ pub enum Next {
 }
 
 /// A backfill in progress: slices `[end − slice, end)` walking back from
-/// the oldest covered instant to the window start, one at a time.
+/// `from` (the window end, or where a stopped backfill got to) to the
+/// window start, one at a time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackfillRun {
     pub slice: Duration,
@@ -190,6 +215,7 @@ pub struct BackfillRun {
 
 impl BackfillRun {
     pub fn new(slice: Duration, window_start: Timestamp, from: Timestamp, max: u32) -> Self {
+        let max = max.min(MAX_SLICES);
         Self {
             slice: slice.max(MIN_SLICE),
             window_start,
@@ -205,9 +231,16 @@ impl BackfillRun {
         uncovered(self.window_start, self.next_end).map_or(0, |u| slices_needed(u, self.slice))
     }
 
-    /// `m` in `slice n of m`: merged plus remaining.
+    /// Merged plus remaining: every slice to the window start.
     pub fn total(&self) -> u32 {
         self.done + self.remaining()
+    }
+
+    /// `m` in `slice n of m` while a request is in flight: `total`, or
+    /// where the request limit ends this run.
+    pub fn batch_total(&self) -> u32 {
+        let budget = self.max_requests.saturating_sub(self.requests) + 1;
+        self.total().min(self.done + budget)
     }
 
     /// The range the next request fetches, clipped at the window start.
@@ -238,12 +271,12 @@ impl BackfillRun {
 
     /// The answer to the range `next_slice` returned arrived.
     pub fn answered(&mut self, truncated: bool) -> Step {
-        let half = self.slice / 2;
-        if truncated && half < MIN_SLICE {
+        if truncated && self.slice <= MIN_SLICE {
             self.advance();
             return Step::TooSmall;
         }
         if truncated {
+            let half = Duration::from_secs(self.slice.as_secs() / 2).max(MIN_SLICE);
             self.slice = half;
             return Step::Retry { slice: half };
         }
@@ -398,36 +431,53 @@ mod tests {
     }
 
     #[test]
-    fn plan_counts_slices_and_flags_the_limit() {
-        let end = ts("2026-10-10T12:00:00Z");
-        let start = ts("2026-10-09T12:00:00Z");
+    fn plan_fills_the_whole_window_at_the_smallest_cap_that_fits() {
         let mut flows: Vec<ResolvedFlow> = (0..1000)
             .map(|_| flow(Some("2026-10-10T12:00:00Z")))
             .collect();
         flows[999] = flow(Some("2026-10-10T09:30:00Z"));
-        let c = coverage(&flows, end.duration_since(start).unsigned_abs());
-        let p = plan_backfill(&c, true, 1000, start).unwrap();
-        assert_eq!(p.slice, w("2h"));
-        assert_eq!(p.uncovered, w("21h 30m"));
-        assert_eq!(p.count, 11, "ceil(21.5 / 2)");
-        assert!(!p.too_many());
-        assert_eq!(plan_backfill(&c, false, 1000, start), None, "not truncated");
+        let c = coverage(&flows, w("24h"));
+        // 1000 flows in 2h30m: 2h slices fit 24h in 12 at the same cap.
+        let p = plan_backfill(&c, true, 1000, 10_000, w("24h")).unwrap();
+        assert_eq!(p, BackfillPlan::with_slice(w("24h"), w("2h"), 1000));
+        assert_eq!((p.count, p.batch(), p.partial()), (12, 12, false));
         assert_eq!(
-            plan_backfill(&c, true, 1000, ts("2026-10-10T10:00:00Z")),
+            plan_backfill(&c, false, 1000, 10_000, w("24h")),
             None,
-            "nothing older left"
+            "complete"
         );
-        // 1000 flows in 4 minutes of 24h: 1436 one-minute slices.
+        assert_eq!(
+            plan_backfill(
+                &coverage(&[flow(None)], w("24h")),
+                true,
+                1000,
+                10_000,
+                w("24h")
+            ),
+            None,
+            "nothing to measure"
+        );
+        // 1000 flows in 4 minutes: 1440 slices of 1m at 1000, 288 of 5m at
+        // 2000, 96 of 15m at 5000, 48 of 30m at 10000.
         flows[999] = flow(Some("2026-10-10T11:56:00Z"));
         let c = coverage(&flows, w("24h"));
-        let p = plan_backfill(&c, true, 1000, start).unwrap();
-        assert_eq!((p.slice, p.count), (w("1m"), 1436));
-        assert!(p.too_many());
+        let p = plan_backfill(&c, true, 1000, 10_000, w("24h")).unwrap();
+        assert_eq!((p.cap, p.slice, p.count), (10_000, w("30m"), 48));
         assert_eq!(
-            BackfillPlan::with_slice(w("50m"), w("1m")).count,
-            MAX_SLICES
+            plan_backfill(&c, true, 1000, 50_000, w("24h")).unwrap().cap,
+            10_000,
+            "the smallest cap that fits, not the profile maximum"
         );
-        assert!(!BackfillPlan::with_slice(w("50m"), w("1m")).too_many());
+        // The profile stops at 5000: a partial run of the newest 50.
+        let p = plan_backfill(&c, true, 1000, 5000, w("24h")).unwrap();
+        assert_eq!((p.cap, p.slice, p.count), (5000, w("15m"), 96));
+        assert!(p.partial());
+        assert_eq!((p.batch(), p.batch_span()), (MAX_SLICES, w("12h 30m")));
+        // A cap already above the profile maximum is kept.
+        assert_eq!(
+            plan_backfill(&c, true, 20_000, 5000, w("24h")).unwrap().cap,
+            20_000
+        );
     }
 
     #[test]
@@ -474,11 +524,21 @@ mod tests {
     #[test]
     fn a_truncated_1m_slice_is_too_small() {
         let start = ts("2026-10-10T00:00:00Z");
-        let mut r = BackfillRun::new(w("2m"), start, ts("2026-10-10T00:10:00Z"), MAX_SLICES);
+        let mut r = BackfillRun::new(w("3m"), start, ts("2026-10-10T00:10:00Z"), MAX_SLICES);
         r.next_slice();
-        assert_eq!(r.answered(true), Step::Retry { slice: w("1m") });
+        assert_eq!(r.answered(true), Step::Retry { slice: w("90s") });
         r.next_slice();
-        assert_eq!(r.answered(true), Step::TooSmall);
+        assert_eq!(
+            r.answered(true),
+            Step::Retry { slice: w("1m") },
+            "45s is floored at 1m"
+        );
+        r.next_slice();
+        assert_eq!(
+            r.answered(true),
+            Step::TooSmall,
+            "only a 1m slice is too small"
+        );
         assert_eq!(r.done, 1, "merged");
         assert_eq!(r.slice, w("1m"));
         // Never below the floor, even when asked.
@@ -491,10 +551,16 @@ mod tests {
         let mut r = BackfillRun::new(w("1h"), start, ts("2026-10-10T05:00:00Z"), 2);
         for _ in 0..2 {
             assert!(matches!(r.next_slice(), Next::Slice(..)));
+            assert_eq!((r.total(), r.batch_total()), (5, 2), "slice n of 2");
             r.answered(false);
         }
         assert_eq!(r.next_slice(), Next::OverBudget { remaining: 3 });
         assert_eq!(r.requests, 2);
+        // At most `MAX_SLICES` requests, whatever the caller asks.
+        assert_eq!(
+            BackfillRun::new(w("1h"), start, start, 500).max_requests,
+            MAX_SLICES
+        );
     }
 
     #[test]
