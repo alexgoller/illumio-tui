@@ -3,7 +3,7 @@
 //! caller brings the workloads (one cached read) and the name index; IP
 //! lists are reported with their size, never expanded into peers.
 use crate::iplist_size::{IpListSize, ip_list_size};
-use crate::models::{Actor, DenyRule, ResolveLabelsAs, Rule, Workload};
+use crate::models::{Actor, DenyRule, LabelGroup, ResolveLabelsAs, Rule, RuleSet, Workload};
 use crate::resolve::{NameIndex, canon, describe_actor};
 use serde::Serialize;
 use serde_json::Value;
@@ -551,6 +551,74 @@ pub fn rule_impact_with(
     }
 }
 
+/// Where one label is referenced in what is loaded. A label is unused when
+/// every count is zero.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct LabelUsage {
+    /// Workloads carrying the label.
+    pub workloads: usize,
+    /// Rules and deny rules (carried inline by their ruleset) naming the
+    /// label as a provider or consumer.
+    pub rules: usize,
+    /// Rulesets whose scopes name the label.
+    pub scopes: usize,
+    /// Label groups listing the label.
+    pub groups: usize,
+}
+
+impl LabelUsage {
+    pub fn is_used(&self) -> bool {
+        self.workloads + self.rules + self.scopes + self.groups > 0
+    }
+}
+
+/// Usage of every label referenced by `workloads`, `rule_sets` or `groups`,
+/// by label href; a label missing from the map is used by none of them.
+/// One pass over each list; the workload side is `workload_labels`.
+pub fn label_usage(
+    workloads: &[Workload],
+    rule_sets: &[RuleSet],
+    groups: &[LabelGroup],
+) -> HashMap<String, LabelUsage> {
+    let mut out: HashMap<String, LabelUsage> = HashMap::new();
+    for set in workload_labels(workloads) {
+        for href in set {
+            out.entry(href.to_string()).or_default().workloads += 1;
+        }
+    }
+    let named = |actors: &[Actor]| -> HashSet<String> {
+        actors
+            .iter()
+            .filter_map(|a| a.label.as_ref().map(|r| r.href.clone()))
+            .collect()
+    };
+    for rs in rule_sets {
+        let scoped: HashSet<String> = rs.scopes.iter().flat_map(|s| named(s)).collect();
+        for href in scoped {
+            out.entry(href).or_default().scopes += 1;
+        }
+        let sides = rs
+            .rules
+            .iter()
+            .map(|r| (&r.providers, &r.consumers))
+            .chain(rs.deny_rules.iter().map(|d| (&d.providers, &d.consumers)));
+        for (p, c) in sides {
+            let mut hrefs = named(p);
+            hrefs.extend(named(c));
+            for href in hrefs {
+                out.entry(href).or_default().rules += 1;
+            }
+        }
+    }
+    for g in groups {
+        let listed: HashSet<&str> = g.labels.iter().map(|r| r.href.as_str()).collect();
+        for href in listed {
+            out.entry(href.to_string()).or_default().groups += 1;
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -591,6 +659,31 @@ mod tests {
 
     fn rule_sets() -> Vec<RuleSet> {
         serde_json::from_str(include_str!("../../../fixtures/rule_sets.json")).unwrap()
+    }
+
+    #[test]
+    fn label_usage_counts_workloads_rules_scopes_and_groups() {
+        let groups: Vec<LabelGroup> =
+            serde_json::from_str(include_str!("../../../fixtures/label_groups.json")).unwrap();
+        let u = label_usage(&workloads(), &rule_sets(), &groups);
+        let get = |n: u32| u.get(&format!("/orgs/5/labels/{n}")).copied();
+        let usage = |workloads, rules, scopes, groups| LabelUsage {
+            workloads,
+            rules,
+            scopes,
+            groups,
+        };
+        assert_eq!(get(1), Some(usage(1, 2, 0, 0)), "role=web");
+        assert_eq!(
+            get(2),
+            Some(usage(1, 2, 0, 0)),
+            "role=db: a rule and a deny rule"
+        );
+        assert_eq!(get(3), Some(usage(2, 0, 1, 0)), "app=shop");
+        assert_eq!(get(4), Some(usage(2, 0, 1, 1)), "env=prod");
+        assert_eq!(get(5), None, "loc=eu is unused");
+        assert!(get(4).unwrap().is_used() && !LabelUsage::default().is_used());
+        assert!(label_usage(&[], &[], &[]).is_empty());
     }
 
     fn actors(v: Value) -> Vec<Actor> {
