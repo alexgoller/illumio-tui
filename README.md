@@ -421,6 +421,7 @@ names, per profile:
     [profiles.prod.labels]
     scope_keys = ["app", "env"]   # the labels a ruleset scope is made of
     tier_key = "role"             # the label a rule selects a tier by
+    ignore_keys = ["DFIRBubble"]  # keys hidden from label columns and the g picker
 
 or `ILLUMIO_SCOPE_KEYS=app,env` and `ILLUMIO_TIER_KEY=role`, which outrank
 the profile. An empty `ILLUMIO_SCOPE_KEYS` counts as unset; a list of only
@@ -428,6 +429,11 @@ empty entries (`,`) is refused, as is an empty `scope_keys` in the profile.
 The TUI's `w` form (pre-fill and `Ctrl-N`) uses them, the traffic views group by the scope keys
 until `g` picks others (for the session), and `traffic groups`, `traffic mesh` and
 `traffic query --blocked` default to them.
+`ignore_keys` (or `ILLUMIO_IGNORE_KEYS=DFIRBubble,os`, which outranks the
+profile; empty counts as unset) hides housekeeping keys from the label text
+of the traffic and workload tables, the flow detail, `all labels` and the
+`g` picker; JSON output, the workload edit form and the Labels tab keep
+them, and a scope or tier key is never ignored.
 
 ## PCE protection
 
