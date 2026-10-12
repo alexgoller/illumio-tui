@@ -63,7 +63,10 @@ One message, top to bottom: pressing `r` on Traffic.
 3. `app` spawns a task that runs `filter.to_query` and `pce.traffic`,
    sending `Msg::QueryProgress` while it polls and `Msg::QueryDone` at the end
    (`+` sends `Cmd::RunSlice` instead: `filter.to_query_between` for the older
-   slice only, answered with `Msg::SliceDone` and appended to the loaded flows).
+   slice only, answered with `Msg::SliceDone` and appended to the loaded flows;
+   `B` sends the same `Cmd::RunSlice` once per backfill slice, the next only
+   after `SliceDone` for the previous one, walking `pce::traffic::BackfillRun`
+   from the oldest covered instant back to the window start).
 4. `update` stores the result and calls `rebuild_views`, which derives the
    Flows, App-to-app (pairs, or sections per app), Mesh and Blocked tables and
    the treemap's tiles from the one result, grouped by the label keys in force.

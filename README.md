@@ -70,6 +70,11 @@ or a profile in `~/.config/illumio-tui/config.toml`:
     api_secret_cmd = "op read op://vault/pce/secret"
     writes = true    # optional: allow writes (the CLI still needs --yes, the TUI :writes on)
 
+    [profiles.prod.limits]
+    traffic_max_results = 1000      # the traffic row cap (default 1000)
+    traffic_default_window = "24h"
+    traffic_auto_backfill = false   # true: backfill a truncated result without asking (see TUI)
+
 `PCE_TLS_VERIFY=false` skips certificate checks like `--insecure`; `ILLUMIO_PROFILE` picks
 the profile and `ILLUMIO_TUI_THEME` the TUI theme. `--env-file .env` loads a dotenv file for one run. Connection settings can
 also be overridden per run with global flags: `--host`, `--pce-port`,
@@ -97,7 +102,21 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   merges it into what is on screen (a flow seen in both slices stays one row with the
   connections and bytes added up; the header counts the slices), `-` drops the older flows
   without a request. `r` after widening runs one query for the whole window and asks first
-  when that is expensive. `]` / `[` step the result cap (`500` up to `10000`, then the
+  when that is expensive. A truncated result that covers under half its window says how much
+  in the Result header (`1000 flows · covers 4m of 24h · truncated`) and the status line,
+  with what `]` and `B` would do. `B` fills the rest of the window backwards in slices sized to
+  fit the cap (the measured rate, `0.8 × cap`, rounded down to 1m 5m 15m 30m 1h 2h 6h 12h 1d):
+  it asks once (`backfill 23h 56m in 9 slices of 2h (9 requests, cap 1000 each)? y/n`), then
+  sends one slice at a time, newest first, merged like `+` and counted in the header
+  (`slice 3 of 9`). A slice that still truncates is fetched again in halves; one that truncates
+  at 1m stops the backfill (`raise traffic_max_results`). `Esc` stops after the running slice,
+  and `B` again continues. At most 50 slices per `B`; above that `B` says so instead of asking.
+  A backfill keeps auto-refresh off, the header then shows its real coverage and slice count
+  (`24h · 10 slices`), and `+` extends it by one slice of the same length.
+  The profile setting `traffic_auto_backfill = true` (or `ILLUMIO_AUTO_BACKFILL=1`) starts that
+  backfill right after a truncated, low-coverage query without the `y`, with the same limits,
+  progress and `Esc`. It is off by default because every request must be user-caused: setting
+  it is the user saying yes in advance, once, in writing. `]` / `[` step the result cap (`500` up to `10000`, then the
   profile's `traffic_max_results`; never above it) and re-run the query. `v` cycles five
   views of the one result, all grouped by the same label keys: the profile's scope keys
   (`app,env` by default) until `g` opens the picker (`Space` toggles a key, `all labels` takes
@@ -188,12 +207,17 @@ the API call and byte counters at all times.
     illumio-tui traffic groups --window 1h --by in --show blocked --app pos/PCI
     illumio-tui traffic mesh --window 1h --no-user --json
     illumio-tui traffic query --window 30d --dry-run
+    illumio-tui traffic query --window 24h --backfill --json
     illumio-tui profile list
     illumio-tui profile use prod
 
 JSON output (default when piped) is `{"data": ..., "meta": {...}}` where
 `meta` reports API calls, bytes, cache status, truncation, and the query
-window. Errors go to stderr as JSON. Exit codes: 1 generic, 2 arguments or
+window; traffic commands add `meta.covered`, the span the flows' last-seen times cover
+(`"4m"`). With `--backfill` (`query`, `groups` and `mesh`) a truncated result's window is
+filled in slices as the TUI's `B` does, one query at a time; `meta.slices` counts the queries
+merged, `meta.api_calls` every request, and `--max-slices` (default 50) bounds it (a plan
+above it is reported on stderr and nothing more is sent). Errors go to stderr as JSON. Exit codes: 1 generic, 2 arguments or
 config, 3 auth, 4 PCE error, 5 rate limited, 6 write refused by the guard.
 
 `traffic groups` and `traffic mesh` take the `traffic query` filter flags (and its dry run,
@@ -517,7 +541,9 @@ them, and a scope or tier key is never ignored.
 Every request is user-caused, throttled (2/s), cached, and counted.
 Explorer queries default to a 24 h window and 1000 rows; larger windows
 (> 7 d) or caps (> 10 000) need `--yes`. `--dry-run` shows the request
-body without sending it.
+body without sending it. A traffic backfill sends nothing before `B` and `y` (or
+`--backfill`, or the written `traffic_auto_backfill` opt-in), never more than one slice at a
+time and never more than 50 slices per run.
 
 ## Development
 
