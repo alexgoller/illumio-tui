@@ -52,9 +52,13 @@ impl KeyOrder {
             .unwrap_or(self.first.len())
     }
 
-    /// By rank, then alphabetically.
+    /// By rank, then alphabetically ignoring case (`bu` before `DFIRBubble`),
+    /// with the exact bytes as the last tiebreak so the order is total.
     pub fn cmp_keys(&self, a: &str, b: &str) -> Ordering {
-        self.rank(a).cmp(&self.rank(b)).then_with(|| a.cmp(b))
+        self.rank(a)
+            .cmp(&self.rank(b))
+            .then_with(|| a.to_lowercase().cmp(&b.to_lowercase()))
+            .then_with(|| a.cmp(b))
     }
 
     /// By [`KeyOrder::cmp_keys`] on the key, then by value.
@@ -80,6 +84,20 @@ mod tests {
         let mut out = keys(k);
         out.sort_by(|a, b| order.cmp_keys(a, b));
         out
+    }
+
+    #[test]
+    fn the_rest_is_alphabetical_ignoring_case() {
+        let order = KeyOrder::new(&keys(&["app"]), "role");
+        assert_eq!(
+            sorted(&order, &["DFIRBubble", "role", "bu", "Zone", "app", "loc"]),
+            keys(&["app", "role", "bu", "DFIRBubble", "loc", "Zone"])
+        );
+        assert_eq!(
+            order.cmp_keys("bu", "BU"),
+            Ordering::Greater,
+            "a total order"
+        );
     }
 
     #[test]
