@@ -97,7 +97,11 @@ scrolls the current table and a click on a tab switches screen; on a terminal na
 the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
 
 - **Traffic**: `f` edit the filter, `r` run (bypasses the cache), `a` auto-refresh, `s` sort,
-  `/` search; a filter that would be expensive asks for confirmation first. `+` / `-` step
+  `/` search; a filter that would be expensive asks for confirmation first. In the filter
+  editor `Ctrl-N` / `Ctrl-P` complete like a form: labels, `ipl:` IP lists and the grammar's
+  `ip:` `ipl:` `wl:` `fqdn:` in src and dst (`wl:` hostnames only once the Workloads screen
+  has loaded them), protocols and services as `port/proto`, the decision words and the
+  window steps, never with a request. `+` / `-` step
   the window along `1h 6h 12h 1d 2d 3d 1w 2w 4w 90d`: `+` fetches only the older slice and
   merges it into what is on screen (a flow seen in both slices stays one row with the
   connections and bytes added up; the header counts the slices), `-` drops the older flows
