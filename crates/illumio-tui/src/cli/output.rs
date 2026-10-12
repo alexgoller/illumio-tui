@@ -50,11 +50,12 @@ pub struct Meta {
     pub truncated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window: Option<Window>,
-    /// Traffic: how much of `window` the flows cover (`4m`, `1d`).
+    /// Traffic: how much of `window` the flows cover (`4m`; the window
+    /// itself when the result is complete).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub covered: Option<String>,
-    /// Traffic with `--backfill`: the queries merged into the result (the
-    /// first one and each backfill slice).
+    /// Traffic with `--backfill`: the slices merged into the result (the
+    /// truncated first query is replaced, so it does not count).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub slices: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]

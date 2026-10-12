@@ -11,10 +11,10 @@ use pce::models::{
     ActorMatch, PolicyDecision, ServiceMatch, TrafficQuery, WorkloadFilter, proto_number,
 };
 use pce::traffic::{
-    AppSection, BackfillRun, Decisions, Direction, FilterExpr, FlowGroup, MAX_SLICES, MeshColumns,
-    MeshRow, Next, ResolvedFlow, Step, TrafficQueryBuilder, app_header, app_sections,
-    app_sections_both, compact_duration, coverage, format_timestamp, group_by_labels, merge_flows,
-    mesh, parse_window, plan_backfill, resolve_actor, resolve_flows,
+    AppSection, BackfillRun, CONFIRM_MAX_RESULTS, Decisions, Direction, FilterExpr, FlowGroup,
+    MAX_SLICES, MeshColumns, MeshRow, Next, ResolvedFlow, Step, TrafficQueryBuilder, app_header,
+    app_sections, app_sections_both, compact_duration, coverage, format_timestamp, group_by_labels,
+    merge_flows, mesh, parse_window, plan_backfill, resolve_actor, resolve_flows,
 };
 use pce::{KeyOrder, NameIndex};
 use serde::Serialize;
@@ -160,12 +160,13 @@ pub struct FilterArgs {
     /// Confirm an expensive query (window > 7d or max_results > 10000)
     #[arg(long)]
     pub yes: bool,
-    /// When the result is truncated, fill the rest of the window in slices that fit
-    /// the cap, newest first (one more query per slice; meta.slices counts them)
+    /// When the result is truncated, fetch the window again in slices that fit the cap
+    /// (raised up to the profile's if needed), newest first; meta.slices counts them
     #[arg(long)]
     pub backfill: bool,
-    /// With --backfill: at most this many slice queries (default 50)
-    #[arg(long, requires = "backfill")]
+    /// With --backfill: at most this many slice queries per run (1 to 50, default 50);
+    /// stderr names the --to that continues
+    #[arg(long, requires = "backfill", value_parser = clap::value_parser!(u32).range(1..=50))]
     pub max_slices: Option<u32>,
 }
 
@@ -595,25 +596,28 @@ impl Fetched {
     }
 }
 
-/// What a backfill added: the queries merged (the first included), the
-/// covered span, and whether the window is still not fully covered.
+/// What a backfill left: the slices merged, the covered span, and whether
+/// the window is still not fully covered (or a slice was cut).
 struct Backfilled {
     slices: u32,
     covered: Duration,
     truncated: bool,
 }
 
-/// `--backfill`: from the oldest flow of the truncated first result back to
-/// the window start, slices sized to fit the cap, one query at a time,
-/// merged into `flows`. A truncated slice is dropped and its range fetched
-/// again in halves; one that truncates at 1m stops. `None` when there is
-/// nothing to fill.
+/// `--backfill` on a truncated result: the whole window again, newest
+/// first, in slices sized from the result's rate at the smallest cap that
+/// fits it in `MAX_SLICES` (up to the profile's, and past 10000 only with
+/// `--yes`). The first slice replaces the truncated rows (an unordered cut
+/// of the whole window), later ones merge. A truncated slice is dropped and
+/// its range fetched again in halves; one that truncates at 1m stops. At
+/// most `max` queries; the rest is reported on stderr. `None` when there
+/// is nothing to measure the rate on.
 async fn backfill(
     ctx: &Context,
+    args: &FilterArgs,
     q: &TrafficQuery,
     idx: &NameIndex,
     flows: &mut Vec<ResolvedFlow>,
-    max: u32,
 ) -> Result<Option<Backfilled>, CliError> {
     let (Ok(start), Ok(end)) = (
         q.start_date.parse::<Timestamp>(),
@@ -623,73 +627,77 @@ async fn backfill(
     };
     let window = q.window();
     let cov = coverage(flows, window);
-    let (Some(plan), Some(from)) = (plan_backfill(&cov, true, q.max_results, start), cov.oldest)
-    else {
+    let mut max_cap = ctx.config.traffic_max_results.max(q.max_results);
+    if !args.yes {
+        max_cap = max_cap.min(CONFIRM_MAX_RESULTS).max(q.max_results);
+    }
+    let Some(plan) = plan_backfill(&cov, true, q.max_results, max_cap, window) else {
+        eprintln!("cannot measure coverage: no last-seen times");
         return Ok(None);
     };
-    let cap = q.max_results;
-    if plan.count > max {
-        eprintln!(
-            "backfill needs {} slices of {} (--max-slices {max}): shorten the window, raise \
-             --max-results or --max-slices",
-            plan.count,
-            compact_duration(plan.slice)
-        );
-        return Ok(Some(Backfilled {
-            slices: 1,
-            covered: cov.covered,
-            truncated: true,
-        }));
+    if plan.cap > q.max_results {
+        eprintln!("backfill raises the cap to {}", plan.cap);
     }
-    let mut run = BackfillRun::new(plan.slice, start, from, max);
-    let mut slices = 1;
-    let mut truncated = false;
+    let max = args.max_slices.unwrap_or(MAX_SLICES);
+    let mut run = BackfillRun::new(plan.slice, start, end, max);
+    let mut slice_q = q.clone();
+    slice_q.max_results = plan.cap;
+    let mut slices = 0;
+    let mut cut = false;
     loop {
         let (s, e) = match run.next_slice() {
             Next::Done => break,
             Next::OverBudget { remaining } => {
                 eprintln!(
-                    "backfill stopped after {max} queries: {remaining} slices of {} left",
-                    compact_duration(run.slice)
+                    "backfill stopped after {max} queries: {remaining} slices of {} left; \
+                     --to {} continues",
+                    compact_duration(run.slice),
+                    format_timestamp(run.next_end)
                 );
-                truncated = true;
                 break;
             }
             Next::Slice(s, e) => (s, e),
         };
-        let mut slice = q.clone();
-        slice.start_date = format_timestamp(s);
-        slice.end_date = format_timestamp(e);
+        slice_q.start_date = format_timestamp(s);
+        slice_q.end_date = format_timestamp(e);
         let r = ctx
             .pce
-            .traffic(&slice, ctx.cache_mode, &CancellationToken::new(), None)
+            .traffic(&slice_q, ctx.cache_mode, &CancellationToken::new(), None)
             .await?;
-        match run.answered(r.truncated) {
-            Step::Retry { slice } => eprintln!(
-                "slice {} to {} truncated at {cap}: halved to {}",
+        let step = run.answered(r.truncated);
+        if let Step::Retry { slice } = step {
+            eprintln!(
+                "slice {} to {} truncated at {}: halved to {}",
                 format_timestamp(s),
                 format_timestamp(e),
+                plan.cap,
                 compact_duration(slice)
-            ),
-            Step::Merge => {
-                merge_flows(flows, resolve_flows(&r.value.flows, idx));
-                slices += 1;
-            }
-            Step::TooSmall => {
-                merge_flows(flows, resolve_flows(&r.value.flows, idx));
-                slices += 1;
-                truncated = true;
-                eprintln!(
-                    "cap {cap} is too small for this PCE at 1m: raise --max-results or traffic_max_results"
-                );
-                break;
-            }
+            );
+            continue;
         }
+        let more = resolve_flows(&r.value.flows, idx);
+        if slices == 0 {
+            *flows = more;
+        } else {
+            merge_flows(flows, more);
+        }
+        slices += 1;
+        if step == Step::TooSmall {
+            cut = true;
+            eprintln!(
+                "cap {} is too small for this PCE at 1m: raise --max-results or traffic_max_results",
+                plan.cap
+            );
+            break;
+        }
+    }
+    if slices == 0 {
+        return Ok(None); // nothing merged: the truncated result stays
     }
     Ok(Some(Backfilled {
         slices,
         covered: end.duration_since(run.next_end).unsigned_abs().min(window),
-        truncated,
+        truncated: cut || run.next_end > start,
     }))
 }
 
@@ -721,12 +729,16 @@ async fn fetch(ctx: &Context, args: &FilterArgs) -> Result<Option<Fetched>, CliE
         covered: Duration::ZERO,
         slices: None,
     };
-    f.covered = coverage(&f.flows, q.window()).covered;
+    // A complete result covers its window, whatever its rows' times.
+    f.covered = if f.truncated {
+        coverage(&f.flows, q.window()).covered
+    } else {
+        q.window()
+    };
     if args.backfill {
-        f.slices = Some(1);
-        let max = args.max_slices.unwrap_or(MAX_SLICES);
+        f.slices = Some(0);
         if f.truncated
-            && let Some(b) = backfill(ctx, &q, &idx, &mut f.flows, max).await?
+            && let Some(b) = backfill(ctx, args, &q, &idx, &mut f.flows).await?
         {
             f.slices = Some(b.slices);
             f.covered = b.covered;
