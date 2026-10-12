@@ -685,8 +685,8 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     model.status = StatusLine::warn("request discarded, nothing sent");
                 }
                 Ok((plan @ Plan::Send { .. }, kind)) => {
+                    model.policy.revert_typed.clear();
                     model.status = StatusLine::info(if kind == pce::write::ObjectKind::Revert {
-                        model.policy.revert_typed.clear();
                         "review the revert: type revert and Enter to send it, Esc cancels"
                     } else {
                         "review the request: y sends it, n cancels"
