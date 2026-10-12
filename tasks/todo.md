@@ -227,3 +227,8 @@ Spec: docs/superpowers/specs/2026-10-11-traffic-views-design.md · Plan: docs/su
 - [x] Hidden from label columns, traffic detail, blocked dst labels, `all labels` and the `g` picker; kept in JSON, the edit form, the Labels tab
 - [x] 16 tests (819 passed), opus review (5 minors, 4 applied), demo100 read-only check, merge
 - [x] Docs run (README, GitHub Pages site) and enable Pages (live 2026-10-12)
+
+## Issues #10 and #9 (2026-10-12, parallel worktrees, subagent-driven)
+- [x] #10 form completion Ctrl-N/Ctrl-P, Ctrl-R creates the w ruleset (opus impl + opus review, 1 fix wave, 843 tests) merged 4ec02d9
+- [x] #9 Labels tab filters f / =value / i / u and CLI flags (opus impl + opus review, 1 fix wave + rebase, 858 tests) merged 4ab518e
+- [x] demo100 read-only checks: labels --key/--value-contains (1 call), --unused (4 calls; one transient PCE 500 on the first try, fine on the second)

@@ -86,3 +86,8 @@ Captured after corrections and review findings, so the same mistake is not repea
 - A display order that lives in one shared comparator (`pce::KeyOrder::cmp_kv`) is the only way every surface agrees; the picker had grown its own list with a hard-coded `loc` because the order had no home.
 - "Alphabetical" for a human means case-insensitive; byte order put `DFIRBubble` before `bu`. Check sorting against real data once, not only fixtures with lowercase keys.
 - The reviewer's "today's behaviour" claim in a brief must be read from the code, not assumed: `?` sorted first, not last, before this change.
+
+## Issues #9 and #10 in parallel (2026-10-12)
+- Two features in sibling worktrees worked; the only conflicts were the help overlay (line count and its snapshots) and `update.rs`. Merge the first, then make the second branch's fix wave start with `git rebase main` so one agent resolves conflicts with full context.
+- Subagents' Write tool refuses files outside the repo; relay their reports into the scratchpad yourself before dispatching a reviewer.
+- A demo PCE can answer a burst of four reads with a transient 500; retry once before suspecting the code, and never add automatic retries for it.
