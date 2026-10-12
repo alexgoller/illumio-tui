@@ -1827,17 +1827,20 @@ pub fn label_columns() -> Vec<Column<LabelRow>> {
             width: 9,
             cell: |l| usage_cell(l, |u| u.workloads),
             key: |l| usage_key(l, |u| u.workloads),
-            right: true,
+            right: false,
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
         },
         Column {
             title: "rules",
-            width: 5,
+            // One spare, left-aligned cell: the last column below 90
+            // columns, and an overlay box leaves the table's last cell
+            // visible beside it.
+            width: 6,
             cell: |l| usage_cell(l, |u| u.rules),
             key: |l| usage_key(l, |u| u.rules),
-            right: true,
+            right: false,
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
@@ -1854,7 +1857,8 @@ pub fn label_columns() -> Vec<Column<LabelRow>> {
             },
             key: |l| SortKey::Num(u64::from(l.is_deleted())),
             right: false,
-            hide_below: 0,
+            // Deleted rows are dimmed anyway; at 80 columns the counts need the room.
+            hide_below: 90,
             narrow: None,
             narrow_width: 0,
         },
@@ -1983,6 +1987,9 @@ pub struct ObjectsState {
     /// Usage by label href, from the cached workloads, policy and label
     /// groups (`Model::recount_labels`); `None` until all three are loaded.
     pub label_usage: Option<HashMap<String, pce::LabelUsage>>,
+    /// The workload list behind `label_usage` was cut short: a label it
+    /// counts as unused may be carried by a workload not read.
+    pub usage_truncated: bool,
     pub groups: TableView<LabelGroup>,
     pub services: TableView<Service>,
     /// The IP lists tab.
@@ -2010,6 +2017,7 @@ impl ObjectsState {
             ignored_hidden: 0,
             unused_only: false,
             label_usage: None,
+            usage_truncated: false,
             groups: TableView::new(group_columns_objects()),
             services: TableView::new(service_columns()),
             ip_lists: IpListsState::new(min_refresh),
@@ -2824,9 +2832,11 @@ impl Model {
             pce::label_usage(
                 &self.workloads.raw,
                 &self.policy.raw,
+                self.policy.fallback_deny.values().flatten(),
                 self.objects.groups.rows(),
             )
         });
+        self.objects.usage_truncated = self.workloads.truncated;
         self.objects.rebuild_labels(&self.limits.key_order());
     }
 

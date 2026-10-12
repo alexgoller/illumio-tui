@@ -572,12 +572,15 @@ impl LabelUsage {
     }
 }
 
-/// Usage of every label referenced by `workloads`, `rule_sets` or `groups`,
-/// by label href; a label missing from the map is used by none of them.
-/// One pass over each list; the workload side is `workload_labels`.
-pub fn label_usage(
+/// Usage of every label referenced by `workloads`, `rule_sets` (their
+/// rules and inline deny rules), `fallback_deny` (deny rules read from the
+/// per-ruleset endpoint for rulesets whose inline list is empty) or
+/// `groups`, by label href; a label missing from the map is used by none
+/// of them. One pass over each list; the workload side is `workload_labels`.
+pub fn label_usage<'a>(
     workloads: &[Workload],
     rule_sets: &[RuleSet],
+    fallback_deny: impl IntoIterator<Item = &'a DenyRule>,
     groups: &[LabelGroup],
 ) -> HashMap<String, LabelUsage> {
     let mut out: HashMap<String, LabelUsage> = HashMap::new();
@@ -603,12 +606,11 @@ pub fn label_usage(
             .map(|r| (&r.providers, &r.consumers))
             .chain(rs.deny_rules.iter().map(|d| (&d.providers, &d.consumers)));
         for (p, c) in sides {
-            let mut hrefs = named(p);
-            hrefs.extend(named(c));
-            for href in hrefs {
-                out.entry(href).or_default().rules += 1;
-            }
+            count_rule(&mut out, named(p), named(c));
         }
+    }
+    for d in fallback_deny {
+        count_rule(&mut out, named(&d.providers), named(&d.consumers));
     }
     for g in groups {
         let listed: HashSet<&str> = g.labels.iter().map(|r| r.href.as_str()).collect();
@@ -617,6 +619,17 @@ pub fn label_usage(
         }
     }
     out
+}
+
+/// One rule naming the labels of `providers` and `consumers`: each counted once.
+fn count_rule(
+    out: &mut HashMap<String, LabelUsage>,
+    providers: HashSet<String>,
+    consumers: HashSet<String>,
+) {
+    for href in providers.union(&consumers) {
+        out.entry(href.clone()).or_default().rules += 1;
+    }
 }
 
 #[cfg(test)]
@@ -665,7 +678,7 @@ mod tests {
     fn label_usage_counts_workloads_rules_scopes_and_groups() {
         let groups: Vec<LabelGroup> =
             serde_json::from_str(include_str!("../../../fixtures/label_groups.json")).unwrap();
-        let u = label_usage(&workloads(), &rule_sets(), &groups);
+        let u = label_usage(&workloads(), &rule_sets(), [], &groups);
         let get = |n: u32| u.get(&format!("/orgs/5/labels/{n}")).copied();
         let usage = |workloads, rules, scopes, groups| LabelUsage {
             workloads,
@@ -683,7 +696,13 @@ mod tests {
         assert_eq!(get(4), Some(usage(2, 0, 1, 1)), "env=prod");
         assert_eq!(get(5), None, "loc=eu is unused");
         assert!(get(4).unwrap().is_used() && !LabelUsage::default().is_used());
-        assert!(label_usage(&[], &[], &[]).is_empty());
+        assert!(label_usage(&[], &[], [], &[]).is_empty());
+        // A fallback deny rule counts like an inline one.
+        let deny: Vec<DenyRule> =
+            serde_json::from_str(include_str!("../../../fixtures/deny_rules.json")).unwrap();
+        let with = label_usage(&[], &[], &deny, &[]);
+        assert_eq!(with.len(), 1, "{with:?}");
+        assert_eq!(with["/orgs/5/labels/2"].rules, 1, "role=db");
     }
 
     fn actors(v: Value) -> Vec<Actor> {

@@ -352,6 +352,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                             .rebuild_rules(&idx, model.workloads.impact_source());
                     }
                     model.objects.ip_lists.recount(&model.policy);
+                    model.recount_labels();
                 }
                 Err(e) if e.contains("not found") => {
                     model.policy.fallback_deny.insert(href, Vec::new());
@@ -2290,13 +2291,18 @@ fn objects_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
 }
 
 /// `f` on the Labels tab: the profile's scope and tier keys, then every
-/// key the index knows with its label count; the current filter checked.
+/// key the index knows with its label count (ignored keys only while `i`
+/// shows them); the current filter checked.
 fn open_label_key_picker(model: &Model) -> KeyPicker {
+    let order = model.limits.key_order();
+    let hide = model.objects.hide_ignored;
     let seen: Vec<(String, usize)> = model
         .index()
         .map(|idx| {
             idx.label_keys()
                 .into_iter()
+                // Keys `i` hides are not offered while hidden.
+                .filter(|k| !hide || order.shows(k))
                 .map(|k| {
                     let n = idx.values_for_key(&k).len();
                     (k, n)
@@ -2355,41 +2361,116 @@ fn unused_labels_key(model: &mut Model) -> Vec<Cmd> {
         return Vec::new();
     }
     let missing = |loaded: bool, loading: bool| !loaded && !loading;
-    if missing(model.workloads.loaded_at.is_some(), model.workloads.loading)
-        || missing(model.policy.loaded_at.is_some(), model.policy.loading)
-    {
-        let reason = "unused needs workloads and policy loaded: press y to load both";
-        model.status = StatusLine::info(reason);
+    let workloads = missing(model.workloads.loaded_at.is_some(), model.workloads.loading);
+    let policy = missing(model.policy.loaded_at.is_some(), model.policy.loading);
+    if workloads || policy {
+        let reason = match (workloads, policy) {
+            (true, false) => "unused needs workloads loaded: press y to load workloads".to_string(),
+            (false, _) => "unused needs policy loaded: press y to load policy \
+                 (it may also fetch the selected ruleset's deny rules)"
+                .to_string(),
+            (true, true) => "unused needs workloads and policy loaded: press y to load both \
+                 (policy may also fetch the selected ruleset's deny rules)"
+                .to_string(),
+        };
+        model.status = StatusLine::info(reason.clone());
         model.overlay = Overlay::Confirm {
-            reason: reason.into(),
+            reason,
             action: PendingAction::LoadLabelUsage,
         };
         return Vec::new();
     }
+    apply_unused(model);
+    Vec::new()
+}
+
+/// Turns `unused_only` on once usage can be counted or is on its way;
+/// otherwise leaves it off and says what is missing.
+fn apply_unused(model: &mut Model) {
+    if let Some(gap) = usage_gap(model) {
+        model.status = StatusLine::warn(gap);
+        return;
+    }
     model.objects.unused_only = true;
     model.recount_labels();
-    model.status = StatusLine::info(if model.objects.label_usage.is_some() {
-        format!("{} unused labels", model.objects.labels.len())
+    let o = &model.objects;
+    model.status = match (&o.label_usage, o.usage_truncated) {
+        (None, _) => StatusLine::info("unused labels: waiting for workloads and policy"),
+        (Some(_), true) => StatusLine::warn(format!(
+            "{} unused labels; the workload list is truncated, some may be in use",
+            o.labels.len()
+        )),
+        (Some(_), false) => StatusLine::info(format!("{} unused labels", o.labels.len())),
+    };
+}
+
+/// Why label usage cannot be counted: what is neither cached nor loading.
+/// `None` when usage is ready or every missing part is in flight.
+fn usage_gap(model: &Model) -> Option<String> {
+    if model.usage_ready() {
+        return None;
+    }
+    let groups = ObjectKind::LabelGroups.index();
+    let parts = [
+        (
+            "workloads",
+            model.workloads.loaded_at.is_some(),
+            model.workloads.loading,
+        ),
+        (
+            "policy",
+            model.policy.loaded_at.is_some(),
+            model.policy.loading,
+        ),
+        (
+            "label groups",
+            model.objects.ages[groups].is_some(),
+            model.objects.loading[groups],
+        ),
+    ];
+    let missing: Vec<&str> = parts
+        .iter()
+        .filter(|(_, loaded, loading)| !loaded && !loading)
+        .map(|(name, _, _)| *name)
+        .collect();
+    if missing.is_empty() {
+        return None; // all on their way
+    }
+    let index = if model.index().is_none() {
+        " (no name index yet)"
     } else {
-        "unused labels: waiting for workloads and policy".to_string()
-    });
-    Vec::new()
+        ""
+    };
+    Some(format!(
+        "unused labels need {} loaded{index}",
+        missing.join(" and ")
+    ))
 }
 
 /// `y` on the `u` confirm: the workloads and the rulesets, each through its
 /// screen's own load unless cached or on its way; the filter applies when
-/// both have arrived.
+/// they have arrived. Nothing to load and nothing coming: the filter stays
+/// off and the status line names the gap.
 fn load_label_usage(model: &mut Model) -> Vec<Cmd> {
     if !model.is_connected() {
+        model.status = StatusLine::warn("unused labels: not connected");
         return Vec::new();
     }
-    model.objects.unused_only = true;
+    if model.index().is_none() {
+        // The workloads wait for the index: load nothing rather than half.
+        if let Some(gap) = usage_gap(model) {
+            model.status = StatusLine::warn(gap);
+        }
+        return Vec::new();
+    }
     let mut cmds = load_missing_workloads(model);
     if model.policy.loaded_at.is_none() && !model.policy.loading {
         cmds.extend(load_rule_sets(model, CacheMode::Use));
     }
-    model.recount_labels();
-    model.status = StatusLine::info("unused labels: loading workloads and policy");
+    apply_unused(model);
+    if !cmds.is_empty() && model.objects.unused_only {
+        model.status = StatusLine::info("unused labels: loading workloads and policy");
+    }
     cmds
 }
 
@@ -8669,7 +8750,8 @@ mod label_filter_tests {
         press(&mut m, KeyCode::Char('u'));
         assert_eq!(
             m.status.text,
-            "unused needs workloads and policy loaded: press y to load both"
+            "unused needs workloads and policy loaded: press y to load both \
+             (policy may also fetch the selected ruleset's deny rules)"
         );
         assert!(matches!(
             m.overlay,
@@ -8761,5 +8843,143 @@ mod label_filter_tests {
         press(&mut m, KeyCode::Char('f'));
         press(&mut m, KeyCode::Esc);
         press(&mut m, KeyCode::Char('i'));
+    }
+
+    /// Workloads, policy and objects cached, usage counted, on the Labels tab.
+    fn all_cached() -> Model {
+        let mut m = with_workloads(model_with_policy());
+        m.objects = model_with_objects().objects;
+        m.recount_labels();
+        assert!(update(&mut m, Msg::Key(KeyEvent::from(KeyCode::Char('3')))).is_empty());
+        m
+    }
+
+    #[test]
+    fn a_truncated_workload_list_is_named_in_the_header_and_the_status() {
+        use crate::tui::model::StatusKind;
+        use crate::tui::test_support::render_to_string;
+        let mut m = all_cached();
+        m.workloads.truncated = true;
+        m.recount_labels();
+        press(&mut m, KeyCode::Char('u'));
+        assert_eq!(m.status.kind, StatusKind::Warn);
+        assert_eq!(
+            m.status.text,
+            "2 unused labels; the workload list is truncated, some may be in use"
+        );
+        let out = render_to_string(&m, 100, 24);
+        assert!(out.contains("unused (workloads truncated)"), "{out}");
+        m.workloads.truncated = false;
+        m.recount_labels();
+        let out = render_to_string(&m, 100, 24);
+        assert!(out.contains("· unused ·"), "{out}");
+    }
+
+    #[test]
+    fn fallback_deny_rules_count_once_loaded() {
+        let mut m = all_cached();
+        let loc = |m: &Model| {
+            m.objects
+                .label_usage
+                .as_ref()
+                .unwrap()
+                .get("/orgs/5/labels/5")
+                .copied()
+        };
+        assert_eq!(loc(&m), None, "loc=eu is unused so far");
+        let deny: Vec<pce::models::DenyRule> = serde_json::from_value(serde_json::json!([{
+            "href": "/orgs/5/sec_policy/draft/rule_sets/101/deny_rules/9",
+            "enabled": true,
+            "providers": [{"label": {"href": "/orgs/5/labels/5"}}],
+            "consumers": [{"actors": "ams"}],
+            "ingress_services": [],
+            "override": false
+        }]))
+        .unwrap();
+        update(
+            &mut m,
+            Msg::DenyRulesLoaded {
+                href: "/orgs/5/sec_policy/draft/rule_sets/101".into(),
+                result: Ok(deny),
+            },
+        );
+        assert_eq!(loc(&m).map(|u| u.rules), Some(1));
+        press(&mut m, KeyCode::Char('u'));
+        assert_eq!(
+            shown(&m),
+            vec![("app".into(), String::new())],
+            "only the deleted app label is left unused"
+        );
+    }
+
+    #[test]
+    fn u_names_only_what_is_missing_and_leaves_the_filter_off_on_a_gap() {
+        // Workloads cached, policy not: the confirm asks for policy alone.
+        let mut m = with_workloads(model_with_objects());
+        assert!(update(&mut m, Msg::Key(KeyEvent::from(KeyCode::Char('3')))).is_empty());
+        press(&mut m, KeyCode::Char('u'));
+        assert_eq!(
+            m.status.text,
+            "unused needs policy loaded: press y to load policy \
+             (it may also fetch the selected ruleset's deny rules)"
+        );
+        assert_eq!(
+            update(&mut m, kc(KeyCode::Char('y'))),
+            vec![Cmd::LoadRuleSets {
+                scope: pce::models::PolicyScope::Draft,
+                mode: pce::CacheMode::Use
+            }]
+        );
+        assert!(m.objects.unused_only);
+
+        // Workloads and policy cached, label groups never loaded: nothing
+        // to ask, nothing coming, the filter stays off.
+        let mut m = all_cached();
+        m.objects.unused_only = false;
+        m.objects.ages[ObjectKind::LabelGroups.index()] = None;
+        m.recount_labels();
+        press(&mut m, KeyCode::Char('u'));
+        assert!(!m.objects.unused_only);
+        assert_eq!(m.status.text, "unused labels need label groups loaded");
+        assert_eq!(m.overlay, Overlay::None);
+
+        // No name index: `y` loads nothing, so the filter stays off.
+        let mut m = on_labels();
+        if let crate::tui::model::Connection::Connected { index, .. } = &mut m.connection {
+            *index = None;
+        }
+        press(&mut m, KeyCode::Char('u'));
+        assert_eq!(update(&mut m, kc(KeyCode::Char('y'))), Vec::<Cmd>::new());
+        assert!(!m.objects.unused_only);
+        assert!(
+            m.status
+                .text
+                .starts_with("unused labels need workloads and policy")
+                && m.status.text.ends_with("(no name index yet)"),
+            "{}",
+            m.status.text
+        );
+    }
+
+    #[test]
+    fn the_key_picker_leaves_out_hidden_ignored_keys() {
+        let mut m = on_labels();
+        m.set_label_model(
+            vec!["app".into(), "env".into()],
+            "role".into(),
+            vec!["loc".into()],
+        );
+        let offered = |m: &mut Model| {
+            press(m, KeyCode::Char('f'));
+            let Overlay::LabelKeys(p) = &m.overlay else {
+                panic!("{:?}", m.overlay)
+            };
+            let keys: Vec<String> = p.entries.iter().map(|e| e.key.clone()).collect();
+            press(m, KeyCode::Esc);
+            keys
+        };
+        assert!(!offered(&mut m).contains(&"loc".to_string()));
+        press(&mut m, KeyCode::Char('i'));
+        assert!(offered(&mut m).contains(&"loc".to_string()));
     }
 }

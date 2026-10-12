@@ -299,7 +299,8 @@ pub async fn labels(ctx: &Context, args: &LabelsArgs) -> Result<(), CliError> {
         .rule_sets(PolicyScope::Draft, ctx.cache_mode)
         .await?;
     let groups = ctx.pce.label_groups(ctx.cache_mode).await?;
-    let usage = label_usage(&w.value, &sets.value, &groups.value);
+    // Inline deny rules only: the per-ruleset fallback would cost a read each.
+    let usage = label_usage(&w.value, &sets.value, [], &groups.value);
     let truncated = c.truncated || w.truncated || sets.truncated || groups.truncated;
     ctx.emit(&unused_labels(data, &usage), cache, truncated, None)
 }
@@ -695,7 +696,7 @@ mod tests {
             serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
         let groups: Vec<LabelGroup> =
             serde_json::from_str(include_str!("../../../../fixtures/label_groups.json")).unwrap();
-        let usage = label_usage(&workloads, &sets, &groups);
+        let usage = label_usage(&workloads, &sets, [], &groups);
         let out = unused_labels(fixture(), &usage);
         let hrefs: Vec<&str> = out.iter().map(|o| o.label.href.as_str()).collect();
         assert_eq!(hrefs, vec!["/orgs/5/labels/5", "/orgs/5/labels/6"]);

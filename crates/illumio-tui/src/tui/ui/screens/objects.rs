@@ -160,10 +160,10 @@ fn label_filter_meta(o: &ObjectsState, shown: usize, total: usize) -> String {
         parts.push(format!("key {}", o.label_keys.join(",")));
     }
     if o.unused_only {
-        parts.push(if o.label_usage.is_some() {
-            "unused".to_string()
-        } else {
-            "unused: loading".to_string()
+        parts.push(match (&o.label_usage, o.usage_truncated) {
+            (None, _) => "unused: loading".to_string(),
+            (Some(_), true) => "unused (workloads truncated)".to_string(),
+            (Some(_), false) => "unused".to_string(),
         });
     }
     parts.push(format!("{shown} of {total}"));

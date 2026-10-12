@@ -6,13 +6,13 @@ expression: out
   1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
   Labels  │  Label groups  │  Services  │  IP lists
 ╭ Labels ────────────────────────────────────────────── cached 3s ago · 6 rows ╮
-│  key              value                               workloads rules deleted│
-│▸ role             web                                         -     -        │
-│  role             db                                          -     -        │
-│  app              shop                                        -     -        │
-│  env              prod                                        -     -        │
-│  loc              eu                                          -     -        │
-│  app                                                          -     - yes    │
+│  key              value                                      workloads rules │
+│▸ role             web                                        -         -     │
+│  role             db                                         -         -     │
+│  app              shop                                       -         -     │
+│  env              prod                                       -         -     │
+│  loc              eu                                         -         -     │
+│  app                                                         -         -     │
 │                                                                              │
 │                                                                              │
 │                                                                              │

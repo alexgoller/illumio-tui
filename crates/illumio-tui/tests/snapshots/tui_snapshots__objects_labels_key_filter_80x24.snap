@@ -6,10 +6,10 @@ expression: out
   1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
   Labels  │  Label groups  │  Services  │  IP lists
 ╭ Labels ──────────────────── cached 3s ago · key role,env · 3 of 6 · 1 hidden ╮
-│  key              value                               workloads rules deleted│
-│▸ role             web                                         -     -        │
-│  role             db                                          -     -        │
-│  env              prod                                        -     -        │
+│  key              value                                      workloads rules │
+│▸ role             web                                        -         -     │
+│  role             db                                         -         -     │
+│  env              prod                                       -         -     │
 │                                                                              │
 │                                                                              │
 │                                                                              │
