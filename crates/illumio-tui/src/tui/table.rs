@@ -56,6 +56,10 @@ pub struct TableView<T> {
     search: String,
     searching: bool,
     search_draft: String,
+    /// Decides which rows are shown, given the lowercased search text
+    /// (possibly empty); `None` keeps the default substring match over
+    /// every cell.
+    matcher: Option<fn(&T, &str) -> bool>,
 }
 
 impl<T> TableView<T> {
@@ -70,7 +74,14 @@ impl<T> TableView<T> {
             search: String::new(),
             searching: false,
             search_draft: String::new(),
+            matcher: None,
         }
+    }
+
+    /// The table with its own row filter in place of the substring search.
+    pub fn with_matcher(mut self, matcher: fn(&T, &str) -> bool) -> Self {
+        self.matcher = Some(matcher);
+        self
     }
 
     pub fn set_rows(&mut self, rows: Vec<T>) {
@@ -224,6 +235,9 @@ impl<T> TableView<T> {
         let needle = self.search_text().to_lowercase();
         let mut vis: Vec<usize> = (0..self.rows.len())
             .filter(|&i| {
+                if let Some(m) = self.matcher {
+                    return m(&self.rows[i], &needle);
+                }
                 needle.is_empty()
                     || self
                         .columns
@@ -362,6 +376,23 @@ mod tests {
         v.search_cancel();
         assert_eq!(v.len(), 4);
         assert_eq!(v.search_text(), "");
+    }
+
+    #[test]
+    fn a_matcher_replaces_the_substring_search_and_sees_every_row() {
+        let mut v = view().with_matcher(|r: &R, needle: &str| {
+            r.n > 4 && (needle.is_empty() || r.name.starts_with(needle))
+        });
+        v.set_rows(view().rows().to_vec());
+        assert_eq!(v.len(), 3, "the matcher also runs without a search");
+        v.start_search();
+        v.search_push('W');
+        assert_eq!(v.len(), 2, "lowercased needle");
+        v.search_push('e');
+        v.search_push('b');
+        v.search_push('0');
+        v.search_push('2');
+        assert_eq!(v.selected_item().unwrap().name, "web02");
     }
 
     #[test]

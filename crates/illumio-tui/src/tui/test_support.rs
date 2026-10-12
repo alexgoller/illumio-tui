@@ -148,10 +148,12 @@ pub fn with_workloads(mut m: Model) -> Model {
 /// A connected model with the three fixture object lists loaded (ages of 3 s).
 pub fn model_with_objects() -> Model {
     let mut m = model_fixture();
+    let order = m.limits.key_order();
     let o = &mut m.objects;
-    o.labels.set_rows(
+    o.set_labels(
         serde_json::from_str(include_str!("../../../../fixtures/labels.json"))
             .expect("labels fixture"),
+        &order,
     );
     o.groups.set_rows(
         serde_json::from_str(include_str!("../../../../fixtures/label_groups.json"))

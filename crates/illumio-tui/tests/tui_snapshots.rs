@@ -284,6 +284,45 @@ fn policy_rule_detail_overlay_80x24() {
 }
 
 #[test]
+fn objects_labels_key_filter_and_hidden_count_80x24() {
+    use illumio_tui::tui::model::{Overlay, Screen};
+    use illumio_tui::tui::picker::KeyPicker;
+    use illumio_tui::tui::test_support::model_with_objects;
+    let mut m = model_with_objects();
+    m.screen = Screen::Objects;
+    m.set_label_model(
+        vec!["app".into(), "env".into()],
+        "role".into(),
+        vec!["loc".into()],
+    );
+    m.objects.label_keys = vec!["role".into(), "env".into()];
+    m.objects.rebuild_labels(&m.limits.key_order());
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("key role,env · 3 of 6 · 1 hidden"), "{out}");
+    assert!(!out.contains("shop"), "{out}");
+    insta::assert_snapshot!("objects_labels_key_filter_80x24", out);
+    let seen = vec![
+        ("app".to_string(), 2),
+        ("env".to_string(), 1),
+        ("role".to_string(), 2),
+        ("loc".to_string(), 1),
+    ];
+    m.overlay = Overlay::LabelKeys(KeyPicker::new(
+        &m.limits.scope_keys,
+        &m.limits.tier_key,
+        &seen,
+        &m.objects.label_keys,
+        false,
+    ));
+    let out = render_to_string(&m, 80, 24);
+    assert!(
+        out.contains("Label keys") && out.contains("(1 label)"),
+        "{out}"
+    );
+    insta::assert_snapshot!("objects_label_keys_picker_80x24", out);
+}
+
+#[test]
 fn objects_screen_tabs_80x24() {
     use illumio_tui::tui::model::{ObjectKind, Screen};
     use illumio_tui::tui::test_support::model_with_objects;

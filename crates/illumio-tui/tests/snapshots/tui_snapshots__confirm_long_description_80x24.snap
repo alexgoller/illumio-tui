@@ -6,7 +6,7 @@ expression: out
   1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
   Labels  │  Label groups  │  Services  │  IP lists
 ╭ Labels ────────────────────────────────────────────── cached 3s ago · 6 rows ╮
-│ ╭ Send this request? ─────────────────────────────────── y send · n cancel ╮ │
+│ ╭ Send this request? ─────────────────────────────────── y send · n cancel ╮d│
 │▸│create ip_list Corp                                                       │ │
 │ │POST /orgs/5/sec_policy/draft/ip_lists                                    │ │
 │ │                                                                          │ │

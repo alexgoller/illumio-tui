@@ -78,6 +78,14 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "next tab: labels, groups, services, IP lists · detail",
     ),
     (
+        "Labels   f / i / u",
+        "key filter · ignored keys · unused only (asks first)",
+    ),
+    (
+        "Labels   /=text /k=text",
+        "search values only · the values of key k",
+    ),
+    (
         "IP lists Enter",
         "detail: ranges · FQDNs · size · rules using it",
     ),
@@ -166,11 +174,33 @@ pub fn render_prompt(model: &Model, input: &str, f: &mut Frame, area: Rect) {
 /// labels`, the editable `keys:` line and the key hints. The rows scroll
 /// when the box is shorter than the list; the last three lines stay.
 pub fn render_key_picker(model: &Model, p: &KeyPicker, f: &mut Frame, area: Rect) {
+    draw_key_picker(
+        model,
+        p,
+        ("Group by", "seen in", "flow", "all labels"),
+        f,
+        area,
+    );
+}
+
+/// `f` on the Labels tab: the same picker, its counts in labels.
+pub fn render_label_key_picker(model: &Model, p: &KeyPicker, f: &mut Frame, area: Rect) {
+    draw_key_picker(model, p, ("Label keys", "", "label", "all keys"), f, area);
+}
+
+/// `(title, count prefix, count noun, all row)` name what the picker picks.
+fn draw_key_picker(
+    model: &Model,
+    p: &KeyPicker,
+    (title, prefix, noun, all_text): (&str, &str, &str, &str),
+    f: &mut Frame,
+    area: Rect,
+) {
     let t = &model.theme;
     let rows = p.entries.len() as u16 + 1;
     let r = centered(area, 42, rows + 5);
     f.render_widget(Clear, r);
-    let block = panel("Group by", "", t, true);
+    let block = panel(title, "", t, true);
     let inner = block.inner(r);
     f.render_widget(block, r);
     let list_h = inner.height.saturating_sub(3) as usize;
@@ -193,9 +223,14 @@ pub fn render_key_picker(model: &Model, p: &KeyPicker, f: &mut Frame, area: Rect
             let mark = if p.is_checked(&e.key) { "[x]" } else { "[ ]" };
             let mut spans = vec![Span::styled(format!("{mark} {:<15}", e.key), row_style(i))];
             if let Some(n) = e.seen {
-                let noun = if n == 1 { "flow" } else { "flows" };
+                let plural = if n == 1 { "" } else { "s" };
+                let prefix = if prefix.is_empty() {
+                    String::new()
+                } else {
+                    format!("{prefix} ")
+                };
                 spans.push(Span::styled(
-                    format!(" (seen in {n} {noun})"),
+                    format!(" ({prefix}{n} {noun}{plural})"),
                     t.dim_style(),
                 ));
             }
@@ -204,13 +239,13 @@ pub fn render_key_picker(model: &Model, p: &KeyPicker, f: &mut Frame, area: Rect
         .collect();
     let all = if p.all { "[x]" } else { "[ ]" };
     lines.push(Line::from(Span::styled(
-        format!("{all} all labels"),
+        format!("{all} {all_text}"),
         row_style(p.all_row()),
     )));
     let mut out: Vec<Line> = lines.into_iter().skip(first).take(list_h).collect();
     out.push(Line::from(""));
     let text = if p.all {
-        "all labels".to_string()
+        all_text.to_string()
     } else {
         p.text.clone()
     };

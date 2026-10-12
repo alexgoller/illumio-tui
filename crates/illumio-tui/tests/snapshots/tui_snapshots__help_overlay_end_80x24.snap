@@ -2,9 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ Keys ───────────────────────────────── 14-35 of 35 · j/k scroll · Esc closes ╮
-│Traffic  f               edit filter: window src dst service decisions        │
-│Traffic  g               pick the label keys every view groups by             │
+╭ Keys ───────────────────────────────── 16-37 of 37 · j/k scroll · Esc closes ╮
 │Traffic  Enter           detail (flows) · drill into a row (app-to-app, mesh) │
 │Mesh     u / p           show or hide the user · process columns              │
 │Treemap  hjkl Enter b    move · zoom, then drill · conns/bytes · Esc out      │
@@ -17,6 +15,8 @@ expression: out
 │Policy   N               new deny rule in the selected ruleset (rules pane)   │
 │Policy   i               rule impact: load the workloads once (1 request)     │
 │Objects  Tab / Enter     next tab: labels, groups, services, IP lists · detail│
+│Labels   f / i / u       key filter · ignored keys · unused only (asks first) │
+│Labels   /=text /k=text  search values only · the values of key k             │
 │IP lists Enter           detail: ranges · FQDNs · size · rules using it       │
 │Workloads t/T h H Enter  Traffic as src/dst · unhealthy · health sort · detail│
 │Events   f / Enter / S   filter · event as JSON · sort by severity            │

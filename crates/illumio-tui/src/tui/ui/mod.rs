@@ -42,6 +42,9 @@ pub fn view(model: &Model, f: &mut Frame) {
         Overlay::Help => widgets::overlay::render_help(model, f, area),
         Overlay::Prompt { input } => widgets::overlay::render_prompt(model, input, f, area),
         Overlay::GroupKeys(picker) => widgets::overlay::render_key_picker(model, picker, f, area),
+        Overlay::LabelKeys(picker) => {
+            widgets::overlay::render_label_key_picker(model, picker, f, area)
+        }
         Overlay::FilterEditor(e) => widgets::overlay::render_filter_editor(model, e, f, area),
         Overlay::Confirm { reason, .. } => widgets::overlay::render_confirm(model, reason, f, area),
         Overlay::RuleDetail(rule) => widgets::overlay::render_rule_detail(model, rule, f, area),

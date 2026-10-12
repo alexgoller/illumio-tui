@@ -315,6 +315,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         None => model.policy.raw = raw, // built when the index arrives
                     }
                     model.objects.ip_lists.recount(&model.policy);
+                    model.recount_labels();
                     model.refresh_confirm_impact();
                     if !quiet {
                         model.status = StatusLine::info(format!(
@@ -382,6 +383,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     // detail reads them from the rows, so no overlay is
                     // touched here.
                     model.rebuild_rules();
+                    model.recount_labels();
                     model.refresh_confirm_impact();
                 }
                 Err(e) => {
@@ -433,7 +435,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     let o = &mut model.objects;
                     let age = match payload {
                         ObjectsPayload::Labels(v, a) => {
-                            o.labels.set_rows(v);
+                            o.all_labels = v;
                             a
                         }
                         ObjectsPayload::LabelGroups(v, a) => {
@@ -448,6 +450,10 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     o.ages[i] = Some(age);
                     o.loaded_at[i] = Some(Instant::now());
                     o.auto.from_tick = false;
+                    if kind != ObjectKind::Services {
+                        // The Labels tab's rows (and their usage) follow.
+                        model.recount_labels();
+                    }
                     if relabelled {
                         // The rules pane's names and stored impacts follow.
                         model.rebuild_rules();
@@ -840,6 +846,17 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             }
             Vec::new()
         }
+        Overlay::LabelKeys(picker) => {
+            match picker.key(k) {
+                PickerOutcome::Open(p) => model.overlay = Overlay::LabelKeys(p),
+                PickerOutcome::Close => model.overlay = Overlay::None,
+                PickerOutcome::Apply { keys, all } => {
+                    model.overlay = Overlay::None;
+                    apply_label_keys(model, if all { Vec::new() } else { keys });
+                }
+            }
+            Vec::new()
+        }
         Overlay::FilterEditor(mut e) => {
             match k.code {
                 KeyCode::Esc => model.overlay = Overlay::None,
@@ -879,6 +896,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 match action {
                     PendingAction::RunQuery(f) => update(model, Msg::ApplyFilter(f)),
                     PendingAction::RunNow(f) => run_now(model, f),
+                    PendingAction::LoadLabelUsage => load_label_usage(model),
                 }
             }
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
@@ -2248,6 +2266,15 @@ fn objects_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 return Vec::new();
             }
             KeyCode::Char(c @ ('n' | 'e' | 'x')) => return objects_edit_key(model, c),
+            KeyCode::Char('f') if kind == ObjectKind::Labels => {
+                model.overlay = Overlay::LabelKeys(open_label_key_picker(model));
+                return Vec::new();
+            }
+            KeyCode::Char('i') if kind == ObjectKind::Labels => {
+                toggle_ignored_labels(model);
+                return Vec::new();
+            }
+            KeyCode::Char('u') if kind == ObjectKind::Labels => return unused_labels_key(model),
             _ => {}
         }
     }
@@ -2260,6 +2287,110 @@ fn objects_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         ObjectKind::IpLists => return ip_lists_key(model, k),
     }
     Vec::new()
+}
+
+/// `f` on the Labels tab: the profile's scope and tier keys, then every
+/// key the index knows with its label count; the current filter checked.
+fn open_label_key_picker(model: &Model) -> KeyPicker {
+    let seen: Vec<(String, usize)> = model
+        .index()
+        .map(|idx| {
+            idx.label_keys()
+                .into_iter()
+                .map(|k| {
+                    let n = idx.values_for_key(&k).len();
+                    (k, n)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let keys = &model.objects.label_keys;
+    KeyPicker::new(
+        &model.limits.scope_keys,
+        &model.limits.tier_key,
+        &seen,
+        keys,
+        keys.is_empty(),
+    )
+}
+
+/// Enter in the label key picker: the Labels tab shows these keys (every
+/// key when empty). No request.
+fn apply_label_keys(model: &mut Model, keys: Vec<String>) {
+    model.status = StatusLine::info(if keys.is_empty() {
+        "labels: all keys".to_string()
+    } else {
+        format!("labels: key {}", keys.join(","))
+    });
+    model.objects.label_keys = keys;
+    model.objects.rebuild_labels(&model.limits.key_order());
+}
+
+/// `i` on the Labels tab: show or hide the labels of the profile's `ignore_keys`.
+fn toggle_ignored_labels(model: &mut Model) {
+    if model.limits.ignore_keys.is_empty() {
+        model.status = StatusLine::info("the profile has no ignore_keys");
+        return;
+    }
+    let o = &mut model.objects;
+    o.hide_ignored = !o.hide_ignored;
+    o.rebuild_labels(&model.limits.key_order());
+    let keys = model.limits.ignore_keys.join(",");
+    model.status = StatusLine::info(if model.objects.hide_ignored {
+        format!("ignored keys hidden ({keys})")
+    } else {
+        format!("ignored keys shown ({keys})")
+    });
+}
+
+/// `u` on the Labels tab: unused labels only, or all again. Usage needs the
+/// workloads and the rulesets; when one is neither cached nor on its way
+/// the reads wait for a `y` (no request before it).
+fn unused_labels_key(model: &mut Model) -> Vec<Cmd> {
+    let o = &mut model.objects;
+    if o.unused_only {
+        o.unused_only = false;
+        o.rebuild_labels(&model.limits.key_order());
+        model.status = StatusLine::info("labels: all, used or not");
+        return Vec::new();
+    }
+    let missing = |loaded: bool, loading: bool| !loaded && !loading;
+    if missing(model.workloads.loaded_at.is_some(), model.workloads.loading)
+        || missing(model.policy.loaded_at.is_some(), model.policy.loading)
+    {
+        let reason = "unused needs workloads and policy loaded: press y to load both";
+        model.status = StatusLine::info(reason);
+        model.overlay = Overlay::Confirm {
+            reason: reason.into(),
+            action: PendingAction::LoadLabelUsage,
+        };
+        return Vec::new();
+    }
+    model.objects.unused_only = true;
+    model.recount_labels();
+    model.status = StatusLine::info(if model.objects.label_usage.is_some() {
+        format!("{} unused labels", model.objects.labels.len())
+    } else {
+        "unused labels: waiting for workloads and policy".to_string()
+    });
+    Vec::new()
+}
+
+/// `y` on the `u` confirm: the workloads and the rulesets, each through its
+/// screen's own load unless cached or on its way; the filter applies when
+/// both have arrived.
+fn load_label_usage(model: &mut Model) -> Vec<Cmd> {
+    if !model.is_connected() {
+        return Vec::new();
+    }
+    model.objects.unused_only = true;
+    let mut cmds = load_missing_workloads(model);
+    if model.policy.loaded_at.is_none() && !model.policy.loading {
+        cmds.extend(load_rule_sets(model, CacheMode::Use));
+    }
+    model.recount_labels();
+    model.status = StatusLine::info("unused labels: loading workloads and policy");
+    cmds
 }
 
 /// `writes on`, or `writes off: <reason>` (just the reason when it already
@@ -2327,13 +2458,11 @@ fn objects_edit_key(model: &mut Model, c: char) -> Vec<Cmd> {
         (ObjectKind::Labels, 'e') => o
             .labels
             .selected_item()
-            .cloned()
-            .map(EditIntent::UpdateLabel),
+            .map(|r| EditIntent::UpdateLabel(r.label.clone())),
         (ObjectKind::Labels, _) => o
             .labels
             .selected_item()
-            .cloned()
-            .map(EditIntent::DeleteLabel),
+            .map(|r| EditIntent::DeleteLabel(r.label.clone())),
         (ObjectKind::Services, 'e') => o
             .services
             .selected_item()
@@ -6408,7 +6537,8 @@ mod tests {
     fn help_scrolls_to_its_last_line_and_reopens_at_the_top() {
         use crate::tui::ui::widgets::overlay::{HELP_LINES, help_last_scroll};
         let mut m = model_fixture(); // 80x24
-        assert_eq!(HELP_LINES.len(), 35);
+        assert_eq!(HELP_LINES.len(), 37);
+        assert!(HELP_LINES.iter().any(|(k, _)| *k == "Labels   f / i / u"));
         assert!(
             HELP_LINES
                 .iter()
@@ -6424,7 +6554,7 @@ mod tests {
         );
         update(&mut m, key('?'));
         let last = help_last_scroll(24);
-        assert_eq!(last, 13, "35 lines, 22 rows inside the box");
+        assert_eq!(last, 15, "37 lines, 22 rows inside the box");
 
         for _ in 0..40 {
             update(&mut m, key('j'));
@@ -8350,5 +8480,286 @@ mod tests {
         update(&mut m, ctrl('u'));
         assert!(update(&mut m, ctrl('n')).is_empty());
         assert_eq!(form_value(&m, "Ruleset"), "");
+    }
+}
+
+/// The Labels tab's `f` key filter, `=` searches, `i` and `u` (issue #9).
+#[cfg(test)]
+mod label_filter_tests {
+    use super::*;
+    use crate::tui::model::{Model, ObjectKind, Overlay, PendingAction};
+    use crate::tui::msg::{Cmd, Msg, ObjectsPayload};
+    use crate::tui::test_support::{model_with_objects, model_with_policy, with_workloads};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn kc(code: KeyCode) -> Msg {
+        Msg::Key(KeyEvent::new(code, KeyModifiers::NONE))
+    }
+
+    /// Sends the key and asserts it asked for nothing.
+    #[track_caller]
+    fn press(m: &mut Model, code: KeyCode) {
+        assert_eq!(update(m, kc(code)), Vec::<Cmd>::new());
+    }
+
+    #[track_caller]
+    fn type_text(m: &mut Model, text: &str) {
+        for c in text.chars() {
+            press(m, KeyCode::Char(c));
+        }
+    }
+
+    /// The Labels tab with the fixture objects, nothing else cached.
+    fn on_labels() -> Model {
+        let mut m = model_with_objects();
+        assert!(update(&mut m, Msg::Key(KeyEvent::from(KeyCode::Char('3')))).is_empty());
+        assert_eq!(m.objects.kind, ObjectKind::Labels);
+        m
+    }
+
+    /// `(key, value)` of the shown rows.
+    fn shown(m: &Model) -> Vec<(String, String)> {
+        let t = &m.objects.labels;
+        t.visible()
+            .iter()
+            .map(|&i| (t.rows()[i].key.clone(), t.rows()[i].value.clone()))
+            .collect()
+    }
+
+    /// `/` starts from the current search; it is cleared first.
+    fn search(m: &mut Model, text: &str) {
+        press(m, KeyCode::Char('/'));
+        for _ in 0..20 {
+            press(m, KeyCode::Backspace);
+        }
+        type_text(m, text);
+        press(m, KeyCode::Enter);
+    }
+
+    fn filter_keys(m: &mut Model, text: &str) {
+        press(m, KeyCode::Char('f'));
+        assert!(matches!(m.overlay, Overlay::LabelKeys(_)));
+        // A printable key jumps to the text line; clear it first.
+        for _ in 0..20 {
+            press(m, KeyCode::Backspace);
+        }
+        type_text(m, text);
+        press(m, KeyCode::Enter);
+        assert_eq!(m.overlay, Overlay::None);
+    }
+
+    #[test]
+    fn f_opens_the_key_picker_with_label_counts_and_filters_the_tab() {
+        let mut m = on_labels();
+        press(&mut m, KeyCode::Char('f'));
+        let Overlay::LabelKeys(p) = &m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        let listed: Vec<(&str, Option<usize>)> =
+            p.entries.iter().map(|e| (e.key.as_str(), e.seen)).collect();
+        // The profile's scope keys and tier key first, then the other keys
+        // the index knows with their label counts.
+        assert_eq!(
+            &listed[..3],
+            &[("app", None), ("env", None), ("role", None)]
+        );
+        assert!(listed.contains(&("loc", Some(1))), "{listed:?}");
+        assert!(p.all, "no filter: all keys checked");
+        press(&mut m, KeyCode::Esc);
+        assert_eq!(m.objects.labels.len(), 6, "Esc changes nothing");
+
+        filter_keys(&mut m, "role,env");
+        assert_eq!(m.objects.label_keys, vec!["role", "env"]);
+        assert_eq!(
+            shown(&m),
+            vec![
+                ("role".into(), "web".into()),
+                ("role".into(), "db".into()),
+                ("env".into(), "prod".into())
+            ]
+        );
+        // `r` keeps the filter: the reload's rows go through it.
+        let labels = m.objects.all_labels.clone();
+        update(
+            &mut m,
+            Msg::ObjectsLoaded {
+                kind: ObjectKind::Labels,
+                result: Ok(ObjectsPayload::Labels(labels, 0)),
+            },
+        );
+        assert_eq!(m.objects.labels.len(), 3, "the filter survives a reload");
+        // `all keys` clears it.
+        press(&mut m, KeyCode::Char('f'));
+        let Overlay::LabelKeys(p) = &m.overlay else {
+            unreachable!()
+        };
+        let all_row = p.all_row();
+        for _ in 0..all_row {
+            press(&mut m, KeyCode::Down);
+        }
+        press(&mut m, KeyCode::Char(' '));
+        press(&mut m, KeyCode::Enter);
+        assert!(m.objects.label_keys.is_empty());
+        assert_eq!(m.objects.labels.len(), 6);
+    }
+
+    #[test]
+    fn search_within_a_key_filter_and_value_only_searches() {
+        let mut m = on_labels();
+        search(&mut m, "=e");
+        assert_eq!(
+            shown(&m),
+            vec![("role".into(), "web".into()), ("loc".into(), "eu".into())],
+            "=text matches values only, not the key env"
+        );
+        search(&mut m, "=PRO");
+        assert_eq!(shown(&m), vec![("env".into(), "prod".into())]);
+        filter_keys(&mut m, "role");
+        search(&mut m, "=e");
+        assert_eq!(shown(&m), vec![("role".into(), "web".into())]);
+        search(&mut m, "d");
+        assert_eq!(
+            shown(&m),
+            vec![("role".into(), "db".into())],
+            "a plain search stays within the key filter"
+        );
+        search(&mut m, "app=sh");
+        assert_eq!(
+            shown(&m),
+            vec![("app".into(), "shop".into())],
+            "key=text names its key, outside the filter too"
+        );
+        search(&mut m, "app=");
+        assert_eq!(shown(&m).len(), 2, "every app label, the deleted one too");
+        press(&mut m, KeyCode::Char('/'));
+        press(&mut m, KeyCode::Esc);
+        assert_eq!(shown(&m).len(), 2, "back to the key filter alone");
+    }
+
+    #[test]
+    fn i_toggles_the_ignored_keys_and_counts_them() {
+        let mut m = on_labels();
+        press(&mut m, KeyCode::Char('i'));
+        assert_eq!(m.status.text, "the profile has no ignore_keys");
+        assert_eq!(m.objects.labels.len(), 6);
+        m.set_label_model(
+            vec!["app".into(), "env".into()],
+            "role".into(),
+            vec!["loc".into()],
+        );
+        assert!(m.objects.hide_ignored, "hidden by default once set");
+        assert_eq!(m.objects.ignored_hidden, 1);
+        assert_eq!(m.objects.labels.len(), 5);
+        assert!(m.objects.labels_filtered());
+        press(&mut m, KeyCode::Char('i'));
+        assert_eq!((m.objects.labels.len(), m.objects.ignored_hidden), (6, 0));
+        assert!(!m.objects.labels_filtered());
+        press(&mut m, KeyCode::Char('i'));
+        assert_eq!((m.objects.labels.len(), m.objects.ignored_hidden), (5, 1));
+        // A profile switch starts with the new profile's default and no key filter.
+        m.objects.label_keys = vec!["role".into()];
+        m.objects.hide_ignored = false;
+        m.reset_data();
+        assert!(m.objects.hide_ignored && m.objects.label_keys.is_empty());
+    }
+
+    #[test]
+    fn u_without_workloads_asks_first_and_sends_nothing_until_y() {
+        let mut m = on_labels();
+        press(&mut m, KeyCode::Char('u'));
+        assert_eq!(
+            m.status.text,
+            "unused needs workloads and policy loaded: press y to load both"
+        );
+        assert!(matches!(
+            m.overlay,
+            Overlay::Confirm {
+                action: PendingAction::LoadLabelUsage,
+                ..
+            }
+        ));
+        press(&mut m, KeyCode::Char('n'));
+        assert_eq!(m.overlay, Overlay::None);
+        assert!(!m.objects.unused_only);
+        press(&mut m, KeyCode::Char('u'));
+        press(&mut m, KeyCode::Esc);
+        assert!(!m.objects.unused_only, "Esc cancels too");
+
+        press(&mut m, KeyCode::Char('u'));
+        let cmds = update(&mut m, kc(KeyCode::Char('y')));
+        assert_eq!(
+            cmds,
+            vec![
+                Cmd::LoadWorkloads(pce::CacheMode::Use),
+                Cmd::LoadRuleSets {
+                    scope: pce::models::PolicyScope::Draft,
+                    mode: pce::CacheMode::Use
+                }
+            ],
+            "the two screens' own loads, nothing new"
+        );
+        assert!(m.objects.unused_only);
+        assert_eq!(m.objects.labels.len(), 6, "not applied before the data");
+        press(&mut m, KeyCode::Char('u'));
+        assert!(!m.objects.unused_only, "u while loading turns it off again");
+        press(&mut m, KeyCode::Char('u'));
+        assert!(
+            m.objects.unused_only,
+            "both on their way: no second confirm"
+        );
+        assert_eq!(m.overlay, Overlay::None);
+
+        let workloads: Vec<pce::models::Workload> =
+            serde_json::from_str(include_str!("../../../../fixtures/workloads.json")).unwrap();
+        let rule_sets: Vec<pce::models::RuleSet> =
+            serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
+        update(&mut m, Msg::WorkloadsLoaded(Ok((workloads, 0, false))));
+        assert!(
+            m.objects.label_usage.is_none(),
+            "the policy is still missing"
+        );
+        update(
+            &mut m,
+            Msg::RuleSetsLoaded {
+                scope: pce::models::PolicyScope::Draft,
+                result: Ok((rule_sets, 0)),
+            },
+        );
+        assert!(m.objects.label_usage.is_some());
+        assert_eq!(
+            shown(&m),
+            vec![("loc".into(), "eu".into()), ("app".into(), String::new())]
+        );
+    }
+
+    #[test]
+    fn with_everything_cached_u_applies_at_once_and_the_counts_sort() {
+        let mut m = with_workloads(model_with_policy());
+        let objects = model_with_objects().objects;
+        m.objects = objects;
+        m.recount_labels();
+        assert!(update(&mut m, Msg::Key(KeyEvent::from(KeyCode::Char('3')))).is_empty());
+        let row = |m: &Model, i: usize| {
+            let t = &m.objects.labels;
+            t.rows()[t.visible()[i]].clone()
+        };
+        let u = row(&m, 0).usage.unwrap();
+        assert_eq!((u.workloads, u.rules), (1, 2), "role=web");
+        // `s` cycles to the workloads column, descending on the second press.
+        for _ in 0..6 {
+            press(&mut m, KeyCode::Char('s'));
+        }
+        assert_eq!(m.objects.labels.sort(), Some((2, true)));
+        assert_eq!(row(&m, 0).usage.unwrap().workloads, 2);
+        press(&mut m, KeyCode::Char('u'));
+        assert_eq!(m.overlay, Overlay::None, "nothing to load, nothing to ask");
+        assert_eq!(m.status.text, "2 unused labels");
+        assert_eq!(m.objects.labels.len(), 2);
+        press(&mut m, KeyCode::Char('u'));
+        assert_eq!(m.objects.labels.len(), 6);
+        // The other Labels-tab keys stay local too.
+        press(&mut m, KeyCode::Char('f'));
+        press(&mut m, KeyCode::Esc);
+        press(&mut m, KeyCode::Char('i'));
     }
 }

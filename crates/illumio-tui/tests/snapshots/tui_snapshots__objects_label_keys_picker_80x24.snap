@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+  Labels  │  Label groups  │  Services  │  IP lists
+╭ Labels ──────────────────── cached 3s ago · key role,env · 3 of 6 · 1 hidden ╮
+│  key              value                               workloads rules deleted│
+│▸ role             web                                         -     -        │
+│  role             db                                          -     -        │
+│  env             ╭ Label keys ────────────────────────────╮   -     -        │
+│                  │[ ] app                                 │                  │
+│                  │[x] env                                 │                  │
+│                  │[x] role                                │                  │
+│                  │[ ] loc             (1 label)           │                  │
+│                  │[ ] all keys                            │                  │
+│                  │                                        │                  │
+│                  │keys: role,env                          │                  │
+│                  │Space toggle · Enter apply · Esc close  │                  │
+│                  ╰────────────────────────────────────────╯                  │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ready        Tab type  Enter detail  r refresh  a auto  / search  : cmd  ? help

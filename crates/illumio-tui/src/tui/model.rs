@@ -180,6 +180,8 @@ pub enum Overlay {
     },
     /// `g`: the label keys every traffic view groups by.
     GroupKeys(KeyPicker),
+    /// `f` on the Labels tab: the label keys it shows.
+    LabelKeys(KeyPicker),
     /// The selected policy rule in full.
     RuleDetail(RuleView),
     /// Pending (unprovisioned) changes; the list lives in `PolicyState::pending`.
@@ -221,7 +223,8 @@ impl PartialEq for Overlay {
             | (Overlay::Pending, Overlay::Pending) => true,
             (Overlay::Prompt { input: a }, Overlay::Prompt { input: b })
             | (Overlay::Error(a), Overlay::Error(b)) => a == b,
-            (Overlay::GroupKeys(a), Overlay::GroupKeys(b)) => a == b,
+            (Overlay::GroupKeys(a), Overlay::GroupKeys(b))
+            | (Overlay::LabelKeys(a), Overlay::LabelKeys(b)) => a == b,
             (Overlay::FilterEditor(a), Overlay::FilterEditor(b)) => a == b,
             (Overlay::Form(a), Overlay::Form(b)) => a == b,
             (
@@ -293,6 +296,9 @@ pub enum PendingAction {
     RunQuery(TrafficFilter),
     /// `r` on a filter that did not produce the data on screen: bypasses the cache.
     RunNow(TrafficFilter),
+    /// `u` on the Labels tab: the workloads and the rulesets not cached
+    /// yet, read with their screens' own loads.
+    LoadLabelUsage,
 }
 
 #[derive(Debug)]
@@ -1744,7 +1750,57 @@ impl ObjectKind {
     }
 }
 
-pub fn label_columns() -> Vec<Column<Label>> {
+/// A Labels-tab row: the label, its usage once the workloads, the policy
+/// and the label groups are loaded (`None` before), and whether the `f`
+/// key filter keeps it. Built by `ObjectsState::rebuild_labels`, so the
+/// column `fn` pointers and the matcher stay pure.
+#[derive(Debug, Clone)]
+pub struct LabelRow {
+    pub label: Label,
+    pub usage: Option<pce::LabelUsage>,
+    pub in_keys: bool,
+}
+
+impl std::ops::Deref for LabelRow {
+    type Target = Label;
+
+    fn deref(&self) -> &Label {
+        &self.label
+    }
+}
+
+/// A usage count cell: the number, or `-` before the data is loaded.
+fn usage_cell(r: &LabelRow, n: fn(&pce::LabelUsage) -> usize) -> String {
+    r.usage.map_or_else(|| "-".into(), |u| n(&u).to_string())
+}
+
+/// Its sort key: rows without usage sort last.
+fn usage_key(r: &LabelRow, n: fn(&pce::LabelUsage) -> usize) -> SortKey {
+    SortKey::Num(r.usage.map_or(u64::MAX, |u| n(&u) as u64))
+}
+
+/// The Labels-tab search (`needle` is lowercased): `=text` matches values,
+/// `key=text` the values of that key (even outside the `f` filter),
+/// anything else the key, value or href. Rows the `f` filter drops are
+/// shown only by a `key=text` search.
+pub fn label_matches(r: &LabelRow, needle: &str) -> bool {
+    let value_has = |v: &str| r.value.to_lowercase().contains(v);
+    match needle.split_once('=') {
+        Some((key, v)) if !key.trim().is_empty() => {
+            r.key.to_lowercase() == key.trim() && value_has(v)
+        }
+        Some((_, v)) => r.in_keys && value_has(v),
+        None => {
+            r.in_keys
+                && (needle.is_empty()
+                    || r.key.to_lowercase().contains(needle)
+                    || value_has(needle)
+                    || r.href.to_lowercase().contains(needle))
+        }
+    }
+}
+
+pub fn label_columns() -> Vec<Column<LabelRow>> {
     vec![
         Column {
             title: "key",
@@ -1762,6 +1818,26 @@ pub fn label_columns() -> Vec<Column<Label>> {
             cell: |l| l.value.clone(),
             key: |l| SortKey::Text(l.value.clone()),
             right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "workloads",
+            width: 9,
+            cell: |l| usage_cell(l, |u| u.workloads),
+            key: |l| usage_key(l, |u| u.workloads),
+            right: true,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "rules",
+            width: 5,
+            cell: |l| usage_cell(l, |u| u.rules),
+            key: |l| usage_key(l, |u| u.rules),
+            right: true,
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
@@ -1788,7 +1864,8 @@ pub fn label_columns() -> Vec<Column<Label>> {
             cell: |l| l.href.clone(),
             key: |l| SortKey::Text(l.href.clone()),
             right: false,
-            hide_below: 70,
+            // Below 100 columns the usage counts keep the value readable.
+            hide_below: 100,
             narrow: None,
             narrow_width: 0,
         },
@@ -1888,7 +1965,24 @@ pub fn service_columns() -> Vec<Column<Service>> {
 #[derive(Debug)]
 pub struct ObjectsState {
     pub kind: ObjectKind,
-    pub labels: TableView<Label>,
+    /// The Labels tab: a projection of `all_labels` through the filters below.
+    pub labels: TableView<LabelRow>,
+    /// The labels as fetched.
+    pub all_labels: Vec<Label>,
+    /// `f`: the keys the Labels tab shows (empty: every key). Kept across
+    /// `r`; a profile switch starts over.
+    pub label_keys: Vec<String>,
+    /// `i`: labels whose key the profile ignores are left out (on by
+    /// default when it has `ignore_keys`).
+    pub hide_ignored: bool,
+    /// How many labels `hide_ignored` leaves out.
+    pub ignored_hidden: usize,
+    /// `u`: only labels no workload, rule, scope or label group uses;
+    /// applies once `label_usage` exists.
+    pub unused_only: bool,
+    /// Usage by label href, from the cached workloads, policy and label
+    /// groups (`Model::recount_labels`); `None` until all three are loaded.
+    pub label_usage: Option<HashMap<String, pce::LabelUsage>>,
     pub groups: TableView<LabelGroup>,
     pub services: TableView<Service>,
     /// The IP lists tab.
@@ -1909,7 +2003,13 @@ impl ObjectsState {
     pub fn new(min_refresh: u64) -> Self {
         Self {
             kind: ObjectKind::Labels,
-            labels: TableView::new(label_columns()),
+            labels: TableView::new(label_columns()).with_matcher(label_matches),
+            all_labels: Vec::new(),
+            label_keys: Vec::new(),
+            hide_ignored: false,
+            ignored_hidden: 0,
+            unused_only: false,
+            label_usage: None,
             groups: TableView::new(group_columns_objects()),
             services: TableView::new(service_columns()),
             ip_lists: IpListsState::new(min_refresh),
@@ -1920,6 +2020,42 @@ impl ObjectsState {
             index_failed: false,
             auto: AutoRefresh::new(min_refresh),
         }
+    }
+
+    /// The fetched labels; the tab's rows follow.
+    pub fn set_labels(&mut self, labels: Vec<Label>, order: &KeyOrder) {
+        self.all_labels = labels;
+        self.rebuild_labels(order);
+    }
+
+    /// The Labels tab's rows again from `all_labels`, the filters and the
+    /// stored usage (`order` says which keys are ignored). No request.
+    pub fn rebuild_labels(&mut self, order: &KeyOrder) {
+        let usage = self.label_usage.as_ref();
+        let unused_only = self.unused_only && usage.is_some();
+        let mut hidden = 0;
+        let rows: Vec<LabelRow> = self
+            .all_labels
+            .iter()
+            .filter(|l| {
+                let hide = self.hide_ignored && !order.shows(&l.key);
+                hidden += usize::from(hide);
+                !hide
+            })
+            .map(|l| LabelRow {
+                usage: usage.map(|u| u.get(&l.href).copied().unwrap_or_default()),
+                in_keys: self.label_keys.is_empty() || self.label_keys.contains(&l.key),
+                label: l.clone(),
+            })
+            .filter(|r| !unused_only || r.usage.is_some_and(|u| !u.is_used()))
+            .collect();
+        self.ignored_hidden = hidden;
+        self.labels.set_rows(rows);
+    }
+
+    /// Whether any Labels-tab filter (`f`, `i`, `u`) leaves rows out.
+    pub fn labels_filtered(&self) -> bool {
+        !self.label_keys.is_empty() || self.ignored_hidden > 0 || self.unused_only
     }
 
     /// Whether the three `FETCHED` kinds have arrived.
@@ -2669,6 +2805,29 @@ impl Model {
         self.traffic.set_key_order(&order);
         self.traffic.rebuild_views();
         self.workloads.rebuild(&order);
+        self.objects.hide_ignored = !self.limits.ignore_keys.is_empty();
+        self.objects.rebuild_labels(&order);
+    }
+
+    /// Whether the Labels tab's usage can be counted: the workloads, the
+    /// rulesets and the label groups are all cached.
+    pub fn usage_ready(&self) -> bool {
+        self.workloads.loaded_at.is_some()
+            && self.policy.loaded_at.is_some()
+            && self.objects.ages[ObjectKind::LabelGroups.index()].is_some()
+    }
+
+    /// Counts label usage from what is cached (none until `usage_ready`)
+    /// and rebuilds the Labels tab. No request.
+    pub fn recount_labels(&mut self) {
+        self.objects.label_usage = self.usage_ready().then(|| {
+            pce::label_usage(
+                &self.workloads.raw,
+                &self.policy.raw,
+                self.objects.groups.rows(),
+            )
+        });
+        self.objects.rebuild_labels(&self.limits.key_order());
     }
 
     /// What a `w` form is pre-filled from: the profile's label model and
@@ -2745,6 +2904,7 @@ impl Model {
         self.traffic = traffic;
         self.policy = PolicyState::new(min);
         self.objects = ObjectsState::new(min);
+        self.objects.hide_ignored = !self.limits.ignore_keys.is_empty();
         self.workloads = WorkloadsState::new(min);
         self.events = EventsState::new(min);
         self.stats = StatsSnapshot { calls: 0, bytes: 0 };

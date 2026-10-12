@@ -2,7 +2,7 @@
 //! groups, services, IP lists), the current kind's table, and an optional
 //! detail pane for the selected object. The IP lists tab is drawn by
 //! `screens::iplists` below the strip.
-use crate::tui::model::{Model, ObjectKind};
+use crate::tui::model::{LabelRow, Model, ObjectKind, ObjectsState};
 use crate::tui::ui::widgets::bars::age_text;
 use crate::tui::ui::widgets::panel::panel;
 use crate::tui::ui::widgets::table::{header_meta, render};
@@ -92,11 +92,7 @@ fn render_table(model: &Model, f: &mut Frame, area: Rect) {
     let o = &model.objects;
     let kind = o.kind;
     let (shown, total, sort_meta) = match kind {
-        ObjectKind::Labels => (
-            o.labels.len(),
-            o.labels.rows().len(),
-            header_meta(&o.labels),
-        ),
+        ObjectKind::Labels => (o.labels.len(), o.all_labels.len(), header_meta(&o.labels)),
         ObjectKind::LabelGroups => (
             o.groups.len(),
             o.groups.rows().len(),
@@ -118,7 +114,9 @@ fn render_table(model: &Model, f: &mut Frame, area: Rect) {
             .unwrap_or_default()
     };
     let noun = if total == 1 { "row" } else { "rows" };
-    let rows = if shown == total {
+    let rows = if kind == ObjectKind::Labels && o.labels_filtered() {
+        label_filter_meta(o, shown, total)
+    } else if shown == total {
         format!("{total} {noun}")
     } else {
         format!("{shown}/{total} {noun}")
@@ -136,7 +134,7 @@ fn render_table(model: &Model, f: &mut Frame, area: Rect) {
     match kind {
         ObjectKind::Labels => {
             let dim = t.dim_style();
-            render(f, area, &o.labels, t, block, &move |l: &Label| {
+            render(f, area, &o.labels, t, block, &move |l: &LabelRow| {
                 if l.is_deleted() {
                     dim
                 } else {
@@ -152,6 +150,27 @@ fn render_table(model: &Model, f: &mut Frame, area: Rect) {
         }),
         ObjectKind::IpLists => {}
     }
+}
+
+/// `key app,env · unused · 212 of 4310 · 38 hidden`: the Labels tab's
+/// filters, only the parts that apply.
+fn label_filter_meta(o: &ObjectsState, shown: usize, total: usize) -> String {
+    let mut parts = Vec::new();
+    if !o.label_keys.is_empty() {
+        parts.push(format!("key {}", o.label_keys.join(",")));
+    }
+    if o.unused_only {
+        parts.push(if o.label_usage.is_some() {
+            "unused".to_string()
+        } else {
+            "unused: loading".to_string()
+        });
+    }
+    parts.push(format!("{shown} of {total}"));
+    if o.ignored_hidden > 0 {
+        parts.push(format!("{} hidden", o.ignored_hidden));
+    }
+    parts.join(" · ")
 }
 
 fn render_detail(model: &Model, f: &mut Frame, area: Rect) {
