@@ -237,3 +237,11 @@ Spec: docs/superpowers/specs/2026-10-11-traffic-views-design.md · Plan: docs/su
 - [x] Real screenshots (7) and a 30 s tour (mp4 + gif) from demo100, wired into the site; Pages live (f5f6b23)
 - [x] #11 window/cap stepping with lazy slices and flow merging (opus impl + opus review, 1 fix wave, rebase, 886 tests) merged 4fa2f13
 - [x] Read-only smoke of + / - on demo100: r 4 calls, + 4 calls (2 slices), - 0 calls (two earlier tries hit the PCE's transient startup 500)
+
+## Issues #7 #8 #12 #13 #14 (2026-10-12, parallel worktrees)
+- [x] #8 label-group diffs, `policy pending --diff` (b7b06df)
+- [x] #12 app sections: App-to-app in/out/both, Blocked as preset (2a2952d); `--blocked` JSON is now `{"sections": [...]}`
+- [x] #7 policy revert, typed-word confirm (27d802b); endpoint unverified live
+- [x] #13 coverage + backfill with cap ladder and 50-slice batches (188d825)
+- [x] #14 filter editor completion (42df01d); 981 tests
+- [ ] #15 CSV output (later)

@@ -96,3 +96,9 @@ Captured after corrections and review findings, so the same mistake is not repea
 - A docs branch and a feature branch both off the same base cannot both fast-forward: merge one, then rebase the other before its gate. Run the gate after the rebase, not before.
 - Lazy slices need a merge key, or the Flows view lists one row per slice; and once rows merge, narrowing can only approximate per-slice counts. Say so in the issue close.
 - demo100 answers the five startup object loads with a transient HTTP 500 a few times a day; a headless driver must stop on the error box and retry after a few minutes rather than press on.
+
+## Five issues in parallel (2026-10-12)
+- Read the code before filing: #8 was half-built already (pending diff on Enter existed); narrowing the issue saved a full implementation.
+- An issue's own example must satisfy its own formula: #13's "9 slices of 2h" could not follow from a 1000 cap filling in 4 minutes, and the 50-slice limit then refused the very case the feature was for. Work one real large-PCE example end to end before writing limits.
+- Any feature that pages a truncated result must not treat the truncated span as covered: Explorer rows are not time-ordered within the cap.
+- Parking a finished branch to merge last costs one conflict-heavy rebase (help overlay, update.rs); have its implementer resolve it.
