@@ -2,15 +2,15 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ Keys ───────────────────────────────── 13-34 of 34 · j/k scroll · Esc closes ╮
-│Traffic  v               cycle Flows · App-to-app · Mesh · Blocked · Treemap  │
+╭ Keys ───────────────────────────────── 14-35 of 35 · j/k scroll · Esc closes ╮
 │Traffic  f               edit filter: window src dst service decisions        │
 │Traffic  g               pick the label keys every view groups by             │
 │Traffic  Enter           detail (flows) · drill into a row (app-to-app, mesh) │
 │Mesh     u / p           show or hide the user · process columns              │
 │Treemap  hjkl Enter b    move · zoom, then drill · conns/bytes · Esc out      │
 │Traffic  w               draft allow rule from a blocked flow or row (writes) │
-│w form   Ctrl-A Ctrl-N   all labels · new ruleset                             │
+│Form     Ctrl-N Ctrl-P   complete from the index · cycle back                 │
+│w form   Ctrl-A Ctrl-R   all labels · new ruleset                             │
 │Policy   d               toggle draft / active                                │
 │Policy   p               pending changes                                      │
 │Policy   Tab / Enter     pane · rule detail · on a ruleset: load deny rules   │

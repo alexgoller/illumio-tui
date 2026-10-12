@@ -5,9 +5,9 @@ expression: out
  illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
   1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
 ╭ Filters ────────────────────────────────── window 24h · cap 1000 · unbounded ╮
-│wind╭ Allow rule from flow ───────────── Ctrl-N new ruleset · Esc cancel ╮    │
+│wind╭ Allow rule from flow ───────────── Ctrl-R new ruleset · Esc cancel ╮    │
 ╰────│▸ Ruleset*      New-App▏                                            │────╯
-╭ Res│                Ctrl-N: create it, scoped app=shop, env=prod        │ago ╮
+╭ Res│                Ctrl-R: create it, scoped app=shop, env=prod        │ago ╮
 │4 fl│  Providers*    role=web                                            │████│
 ╰────│                app=web, group:Name, iplist:Corp, all, !env=dev     │────╯
 ╭ Flo│  Consumers*    iplist:Corp                                         │────╮

@@ -1874,7 +1874,7 @@ async fn w_creates_a_rule_in_the_named_ruleset() {
     assert_eq!(model.busy, 0);
 }
 
-/// `w` on the potentially blocked flow, `New-App` typed (unknown), `Ctrl-N`,
+/// `w` on the potentially blocked flow, `New-App` typed (unknown), `Ctrl-R`,
 /// `y` on the ruleset's confirm, then `last` on the rule's. Returns the
 /// model, the requests of the confirms shown (method, path, body) and the
 /// audit entries.
@@ -1932,7 +1932,7 @@ async fn new_ruleset_session(
     keys.extend(typed("New-App").into_iter().map(|(ms, c)| plain(ms, c)));
     keys.extend([
         plain(50, KeyCode::Enter),
-        (300, KeyEvent::new(ch('n'), KeyModifiers::CONTROL)),
+        (300, KeyEvent::new(ch('r'), KeyModifiers::CONTROL)),
         plain(300, ch('y')),
         plain(400, ch(last)),
         plain(400, KeyCode::F(12)),
@@ -1961,7 +1961,7 @@ async fn new_ruleset_session(
 }
 
 #[tokio::test]
-async fn ctrl_n_creates_the_scoped_ruleset_then_the_rule_two_confirms_two_posts() {
+async fn ctrl_r_creates_the_scoped_ruleset_then_the_rule_two_confirms_two_posts() {
     let server = MockServer::start().await;
     let (model, confirms, audited) = new_ruleset_session(&server, 3, 'y').await;
     assert_eq!(
@@ -1990,7 +1990,7 @@ async fn ctrl_n_creates_the_scoped_ruleset_then_the_rule_two_confirms_two_posts(
 }
 
 #[tokio::test]
-async fn cancelling_the_rule_after_ctrl_n_sends_only_the_ruleset() {
+async fn cancelling_the_rule_after_ctrl_r_sends_only_the_ruleset() {
     let server = MockServer::start().await;
     let (model, confirms, audited) = new_ruleset_session(&server, 2, 'n').await;
     assert_eq!(confirms.len(), 2, "the rule's confirm was shown");

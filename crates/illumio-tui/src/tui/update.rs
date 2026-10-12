@@ -2,7 +2,7 @@
 use crate::tui::commands::{self, Command};
 use crate::tui::edit::{self, EditIntent, RulesetTarget, Start, WriteIntent};
 use crate::tui::filter::{FilterEditor, TrafficFilter};
-use crate::tui::form::FormEvent;
+use crate::tui::form::{Form, FormEvent};
 use crate::tui::model::{
     Connection, Dir, Drill, EventsFilterEdit, Model, ObjectKind, Overlay, PendingAction,
     PolicyPane, PolicyState, QueryState, Screen, StatusLine, TrafficData, TrafficView, WritesState,
@@ -649,7 +649,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::Planned(result) => {
             model.writes.in_flight = false;
             let flow_form = model.traffic.rule_form.take();
-            // A ruleset `Ctrl-N` asked for keeps its rule only up to its confirm.
+            // A ruleset `Ctrl-R` asked for keeps its rule only up to its confirm.
             if !matches!(&result, Ok((Plan::Send { .. }, _))) || model.overlay != Overlay::None {
                 model.policy.rule_after_ruleset = None;
             }
@@ -680,7 +680,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     if let Some(mut f) = flow_form
                         && model.overlay == Overlay::None
                     {
-                        // An unknown name with a scoped destination offers Ctrl-N.
+                        // An unknown name with a scoped destination offers Ctrl-R.
                         f.offers_ruleset =
                             edit::new_ruleset_offer(&f, &e, &model.limits.scope_keys);
                         f.error = Some(e.clone());
@@ -691,6 +691,34 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             }
             Vec::new()
         }
+    }
+}
+
+/// `Ctrl-N` (`forward`) or `Ctrl-P` in a form: cycles an open completion,
+/// or opens one from the name index and the loaded draft rulesets (`Ctrl-P`
+/// opens on the last candidate). A shown key (`app=`) or prefix (`group:`)
+/// completes what follows it on `Ctrl-N`. Without an index, or for a text
+/// field, nothing happens. Never a request.
+fn complete_form(model: &Model, form: &mut Form, forward: bool) {
+    let dives = forward && form.completion_dives();
+    if form.completion.is_some() && !dives {
+        form.cycle(forward);
+        return;
+    }
+    let Some(idx) = model.index() else {
+        return;
+    };
+    let Some((kind, token, earlier)) = form.completion_request() else {
+        return;
+    };
+    let rulesets = model.flow_prefill().rulesets;
+    let candidates = crate::tui::complete::complete(kind, &token, &earlier, idx, rulesets);
+    if form.start_completion(candidates) {
+        if !forward {
+            form.cycle(false);
+        }
+    } else if dives {
+        form.cycle(true);
     }
 }
 
@@ -933,6 +961,14 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 event,
                 scroll: next,
             };
+            Vec::new()
+        }
+        Overlay::Form(mut form)
+            if k.modifiers.contains(KeyModifiers::CONTROL)
+                && matches!(k.code, KeyCode::Char('n' | 'p')) =>
+        {
+            complete_form(model, &mut form, k.code == KeyCode::Char('n'));
+            model.overlay = Overlay::Form(form);
             Vec::new()
         }
         Overlay::Form(mut form) => match form.on_key(k) {
@@ -6358,7 +6394,8 @@ mod tests {
         let keys: Vec<&str> = HELP_LINES.iter().map(|(k, _)| *k).collect();
         for k in [
             "Traffic  w",
-            "w form   Ctrl-A Ctrl-N",
+            "w form   Ctrl-A Ctrl-R",
+            "Form     Ctrl-N Ctrl-P",
             "Policy   N",
             "Pending  j/k Space Enter",
             "Pending  P",
@@ -6371,7 +6408,7 @@ mod tests {
     fn help_scrolls_to_its_last_line_and_reopens_at_the_top() {
         use crate::tui::ui::widgets::overlay::{HELP_LINES, help_last_scroll};
         let mut m = model_fixture(); // 80x24
-        assert_eq!(HELP_LINES.len(), 34);
+        assert_eq!(HELP_LINES.len(), 35);
         assert!(
             HELP_LINES
                 .iter()
@@ -6387,7 +6424,7 @@ mod tests {
         );
         update(&mut m, key('?'));
         let last = help_last_scroll(24);
-        assert_eq!(last, 12, "34 lines, 22 rows inside the box");
+        assert_eq!(last, 13, "35 lines, 22 rows inside the box");
 
         for _ in 0..40 {
             update(&mut m, key('j'));
@@ -7642,7 +7679,7 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_n_creates_the_scoped_ruleset_then_plans_the_rule_in_it() {
+    fn ctrl_r_creates_the_scoped_ruleset_then_plans_the_rule_in_it() {
         use crate::tui::edit::{RulesetTarget, WriteIntent};
         use crate::tui::test_support::model_with_flows;
         use pce::write::{ActorKind, ActorRef};
@@ -7655,7 +7692,7 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
-        let cmds = update(&mut m, ctrl_key('n'));
+        let cmds = update(&mut m, ctrl_key('r'));
         let [Cmd::PlanWrite(WriteIntent::CreateRuleSet(d))] = cmds.as_slice() else {
             panic!("{cmds:?}")
         };
@@ -7737,7 +7774,7 @@ mod tests {
     }
 
     #[test]
-    fn editing_the_ruleset_name_disarms_ctrl_n() {
+    fn editing_the_ruleset_name_disarms_ctrl_r() {
         use crate::tui::test_support::model_with_flows;
         let mut m = writes_on(model_with_flows());
         unknown_ruleset_form(&mut m);
@@ -7746,7 +7783,7 @@ mod tests {
             Overlay::Form(f) => assert!(f.ruleset_offer_armed().is_none(), "the hint reverts"),
             other => panic!("{other:?}"),
         }
-        assert!(update(&mut m, ctrl_key('n')).is_empty(), "nothing planned");
+        assert!(update(&mut m, ctrl_key('r')).is_empty(), "nothing planned");
         match &m.overlay {
             Overlay::Form(f) => assert_eq!(
                 f.error.as_deref(),
@@ -7762,7 +7799,7 @@ mod tests {
         use crate::tui::test_support::{label_post_plan, model_with_flows};
         let pending = |m: &mut Model| {
             unknown_ruleset_form(m);
-            assert_eq!(update(m, ctrl_key('n')).len(), 1);
+            assert_eq!(update(m, ctrl_key('r')).len(), 1);
             assert!(m.policy.rule_after_ruleset.is_some());
         };
         // A failed plan.
@@ -7801,13 +7838,13 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_n_is_offered_only_for_an_unknown_name_and_a_scoped_destination() {
+    fn ctrl_r_is_offered_only_for_an_unknown_name_and_a_scoped_destination() {
         use crate::tui::test_support::model_with_flows;
-        // Ctrl-N on a fresh form does nothing.
+        // Ctrl-R on a fresh form does nothing.
         let mut m = writes_on(model_with_flows());
         update(&mut m, key('j'));
         update(&mut m, key('w'));
-        assert!(update(&mut m, ctrl_key('n')).is_empty());
+        assert!(update(&mut m, ctrl_key('r')).is_empty());
         assert!(matches!(m.overlay, Overlay::Form(_)));
         // Another planner error is shown as it is, without the offer.
         let mut m = writes_on(model_with_flows());
@@ -7822,7 +7859,7 @@ mod tests {
             Overlay::Form(f) => assert_eq!(f.error.as_deref(), Some("authentication failed")),
             other => panic!("{other:?}"),
         }
-        assert!(update(&mut m, ctrl_key('n')).is_empty());
+        assert!(update(&mut m, ctrl_key('r')).is_empty());
         assert!(m.policy.rule_after_ruleset.is_none());
         // A destination without scope labels: the plain unknown-name error.
         let mut m = writes_on(model_with_flows());
@@ -7834,7 +7871,7 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
-        assert!(update(&mut m, ctrl_key('n')).is_empty());
+        assert!(update(&mut m, ctrl_key('r')).is_empty());
     }
 
     #[test]
@@ -8177,5 +8214,141 @@ mod tests {
         update(&mut m, Msg::WritesSet(WritesState::off(WRITES_OFF)));
         assert_eq!(m.status.text, WRITES_OFF);
         assert!(m.writes.reason.is_some());
+    }
+
+    fn ctrl(c: char) -> Msg {
+        Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL))
+    }
+
+    fn open_form(m: &mut Model, intent: EditIntent) {
+        let idx = m.index().cloned();
+        let form = edit::form_for(intent, idx.as_deref(), m.flow_prefill()).expect("a form");
+        m.overlay = Overlay::Form(form);
+    }
+
+    fn form_value(m: &Model, label: &str) -> String {
+        match &m.overlay {
+            Overlay::Form(f) => f.value(label).to_string(),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn ctrl_n_completes_a_new_labels_key_then_its_values_without_a_request() {
+        let mut m = writes_on(model_fixture());
+        open_form(&mut m, EditIntent::CreateLabel);
+        for c in "RO".chars() {
+            update(&mut m, key(c));
+        }
+        assert!(update(&mut m, ctrl('n')).is_empty());
+        assert_eq!(form_value(&m, "Key"), "role", "real case");
+        update(&mut m, kc(KeyCode::Tab));
+        assert!(update(&mut m, ctrl('n')).is_empty());
+        assert_eq!(form_value(&m, "Value"), "db", "the Key field's values");
+        assert!(update(&mut m, ctrl('n')).is_empty());
+        assert_eq!(form_value(&m, "Value"), "web");
+        assert!(update(&mut m, ctrl('p')).is_empty());
+        assert_eq!(form_value(&m, "Value"), "db");
+        match &m.overlay {
+            Overlay::Form(f) => {
+                assert_eq!(
+                    f.completion_strip(),
+                    Some(vec![("db".to_string(), true), ("web".to_string(), false)])
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_completed_key_continues_into_its_values_and_esc_restores_the_typed_token() {
+        let mut m = writes_on(model_fixture());
+        open_form(
+            &mut m,
+            EditIntent::CreateRule {
+                ruleset_href: "/orgs/5/sec_policy/draft/rule_sets/100".into(),
+            },
+        );
+        for c in "env=prod, ap".chars() {
+            update(&mut m, key(c));
+        }
+        assert!(update(&mut m, ctrl('n')).is_empty());
+        assert_eq!(
+            form_value(&m, "Providers"),
+            "env=prod, app=",
+            "the key first"
+        );
+        assert!(update(&mut m, ctrl('n')).is_empty());
+        assert_eq!(
+            form_value(&m, "Providers"),
+            "env=prod, app=shop",
+            "the second Ctrl-N: app's only value"
+        );
+        assert!(update(&mut m, kc(KeyCode::Esc)).is_empty());
+        assert_eq!(form_value(&m, "Providers"), "env=prod, ap", "as typed");
+        assert!(
+            matches!(m.overlay, Overlay::Form(_)),
+            "Esc ended the completion only"
+        );
+        update(&mut m, kc(KeyCode::Esc));
+        assert_eq!(m.overlay, Overlay::None, "a second Esc cancels the form");
+        // Ctrl-P opens on the last candidate.
+        open_form(
+            &mut m,
+            EditIntent::CreateRule {
+                ruleset_href: "/orgs/5/sec_policy/draft/rule_sets/100".into(),
+            },
+        );
+        update(&mut m, key('e'));
+        assert!(update(&mut m, ctrl('p')).is_empty());
+        assert_eq!(form_value(&m, "Providers"), "group:All prod envs");
+    }
+
+    #[test]
+    fn ctrl_n_does_nothing_without_an_index_or_in_a_text_field() {
+        let mut m = writes_on(model_fixture());
+        open_form(&mut m, EditIntent::CreateIpList);
+        update(&mut m, key('C'));
+        let before = m.overlay.clone();
+        assert!(update(&mut m, ctrl('n')).is_empty());
+        assert_eq!(m.overlay, before, "a text field");
+        open_form(&mut m, EditIntent::CreateLabel);
+        update(&mut m, key('r'));
+        m.connection = Connection::Connected {
+            index: None,
+            index_age_secs: 0,
+        };
+        let before = m.overlay.clone();
+        assert!(update(&mut m, ctrl('n')).is_empty());
+        assert!(update(&mut m, ctrl('p')).is_empty());
+        assert_eq!(m.overlay, before, "no index: no candidates");
+    }
+
+    #[test]
+    fn a_w_forms_ruleset_completes_from_the_loaded_draft_rulesets() {
+        use crate::tui::test_support::{fixture_index, model_with_flows};
+        let mut m = writes_on(model_with_flows());
+        update(&mut m, key('j'));
+        update(&mut m, key('w'));
+        update(&mut m, key('g'));
+        assert!(update(&mut m, ctrl('n')).is_empty());
+        assert_eq!(
+            form_value(&m, "Ruleset"),
+            "g",
+            "nothing loaded: no candidates"
+        );
+        let raw: Vec<pce::models::RuleSet> =
+            serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
+        m.policy.set_rule_sets(raw, &fixture_index(), None);
+        assert!(update(&mut m, ctrl('n')).is_empty());
+        assert_eq!(form_value(&m, "Ruleset"), "Global-Infra");
+        // The active scope's rulesets are not draft names.
+        update(&mut m, kc(KeyCode::Esc));
+        update(&mut m, kc(KeyCode::Esc));
+        m.policy.scope = PolicyScope::Active;
+        update(&mut m, key('w'));
+        update(&mut m, ctrl('u'));
+        assert!(update(&mut m, ctrl('n')).is_empty());
+        assert_eq!(form_value(&m, "Ruleset"), "");
     }
 }

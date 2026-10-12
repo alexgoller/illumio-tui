@@ -861,7 +861,7 @@ fn rule_from_flow_form_80x24() {
 }
 
 #[test]
-fn rule_from_flow_form_offering_ctrl_n_80x24() {
+fn rule_from_flow_form_offering_ctrl_r_80x24() {
     use illumio_tui::tui::edit::{EditIntent, form_for, new_ruleset_offer};
     use illumio_tui::tui::model::Overlay;
     use illumio_tui::tui::test_support::{fixture_flows, fixture_index};
@@ -881,17 +881,42 @@ fn rule_from_flow_form_offering_ctrl_n_80x24() {
     m.overlay = Overlay::Form(form);
     let out = render_to_string(&m, 80, 24);
     assert!(
-        out.contains("Ctrl-N: create it, scoped app=shop, env=prod"),
+        out.contains("Ctrl-R: create it, scoped app=shop, env=prod"),
         "{out}"
     );
-    assert!(out.contains("Ctrl-N new ruleset"), "{out}");
+    assert!(out.contains("Ctrl-R new ruleset"), "{out}");
     assert!(out.contains("similar: Shop-Prod"), "{out}");
-    insta::assert_snapshot!("form_rule_from_flow_ctrl_n_80x24", out);
+    insta::assert_snapshot!("form_rule_from_flow_ctrl_r_80x24", out);
     m.set_theme("light");
     insta::assert_snapshot!(
-        "form_rule_from_flow_ctrl_n_light_styled_80x24",
+        "form_rule_from_flow_ctrl_r_light_styled_80x24",
         render_styled(&m, 80, 24)
     );
+}
+
+#[test]
+fn label_form_completing_the_key_80x24() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use illumio_tui::tui::edit::{EditIntent, form_for};
+    use illumio_tui::tui::model::Overlay;
+    use illumio_tui::tui::msg::Msg;
+    use illumio_tui::tui::test_support::fixture_index;
+    use illumio_tui::tui::update;
+    let mut m = model_fixture();
+    let idx = fixture_index();
+    let form = form_for(
+        EditIntent::CreateLabel,
+        Some(idx.as_ref()),
+        m.flow_prefill(),
+    )
+    .expect("a form");
+    m.overlay = Overlay::Form(form);
+    let ctrl_n = || Msg::Key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL));
+    assert!(update(&mut m, ctrl_n()).is_empty());
+    assert!(update(&mut m, ctrl_n()).is_empty());
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("app  env  loc  role"), "{out}");
+    insta::assert_snapshot!("form_label_completing_key_80x24", out);
 }
 
 #[test]

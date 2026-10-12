@@ -6,12 +6,13 @@ use crate::tui::model::{Model, Screen, rule_kind_name};
 use crate::tui::picker::KeyPicker;
 use crate::tui::ui::layout::centered;
 use crate::tui::ui::screens::workloads::plain;
+use crate::tui::ui::theme::Theme;
 use crate::tui::ui::widgets::panel::panel;
 use pce::RuleView;
 use pce::write::{Plan, WriteRequest};
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
 
@@ -53,7 +54,11 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "Traffic  w",
         "draft allow rule from a blocked flow or row (writes)",
     ),
-    ("w form   Ctrl-A Ctrl-N", "all labels · new ruleset"),
+    (
+        "Form     Ctrl-N Ctrl-P",
+        "complete from the index · cycle back",
+    ),
+    ("w form   Ctrl-A Ctrl-R", "all labels · new ruleset"),
     ("Policy   d", "toggle draft / active"),
     ("Policy   p", "pending changes"),
     (
@@ -273,10 +278,10 @@ pub fn render_form(model: &Model, form: &Form, f: &mut Frame, area: Rect) {
     let fits =
         |meta: &str| form.title.chars().count() + meta.chars().count() + 6 <= r.width as usize - 2;
     let meta = match offer {
-        Some(_) if fits("Ctrl-N new ruleset · Enter review · Esc cancel") => {
-            "Ctrl-N new ruleset · Enter review · Esc cancel"
+        Some(_) if fits("Ctrl-R new ruleset · Enter review · Esc cancel") => {
+            "Ctrl-R new ruleset · Enter review · Esc cancel"
         }
-        Some(_) => "Ctrl-N new ruleset · Esc cancel",
+        Some(_) => "Ctrl-R new ruleset · Esc cancel",
         None if fits("Tab next · Enter review · Esc cancel") => {
             "Tab next · Enter review · Esc cancel"
         }
@@ -309,10 +314,15 @@ pub fn render_form(model: &Model, form: &Form, f: &mut Frame, area: Rect) {
                 },
             ),
         ]));
-        // While Ctrl-N is armed the Ruleset hint says what it creates.
+        // While completing, the candidates take the hint's row.
+        if let Some(strip) = form.completion_strip().filter(|_| on) {
+            lines.push(completion_line(&strip, width + 1, t));
+            continue;
+        }
+        // While Ctrl-R is armed the Ruleset hint says what it creates.
         let hint = match offer {
             Some(o) if field.label == "Ruleset" => {
-                format!("Ctrl-N: create it, scoped {}", o.scope).into()
+                format!("Ctrl-R: create it, scoped {}", o.scope).into()
             }
             _ => field.hint.clone(),
         };
@@ -344,6 +354,35 @@ pub fn render_form(model: &Model, form: &Form, f: &mut Frame, area: Rect) {
             .wrap(Wrap { trim: false }),
         r,
     );
+}
+
+/// The candidate strip under the field being completed: the shown candidate
+/// in the accent colour, the others and `+N more` dim, two blanks apart,
+/// cut to `width`.
+fn completion_line<'a>(strip: &[(String, bool)], width: usize, t: &Theme) -> Line<'a> {
+    let mut spans = vec![Span::raw(" ".repeat(2 + FORM_LABEL_WIDTH))];
+    let mut used = 0;
+    for (i, (text, current)) in strip.iter().enumerate() {
+        let gap = if i == 0 { 0 } else { 2 };
+        let room = width.saturating_sub(used + gap);
+        if room == 0 {
+            break;
+        }
+        let shown = clip(&plain(text), room);
+        used += gap + shown.chars().count();
+        if gap > 0 {
+            spans.push(Span::raw("  "));
+        }
+        spans.push(if *current {
+            Span::styled(
+                shown,
+                Style::new().fg(t.accent).add_modifier(Modifier::BOLD),
+            )
+        } else {
+            Span::styled(shown, t.dim_style())
+        });
+    }
+    Line::from(spans)
 }
 
 /// Field names of the events editor, in the order of `Overlay::EventsEditor::values`.

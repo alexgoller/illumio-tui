@@ -1,6 +1,10 @@
 //! One generic form for every editable kind, held in `Overlay::Form`. Pure:
 //! keys change the form; `update` decides what a submit means. Fields are
 //! single-line and the cursor is always at the end of the active field.
+//! `Ctrl-N`/`Ctrl-P` complete the active field's current token; the form
+//! cannot see the name index, so `update` asks [`Form::completion_request`],
+//! computes the candidates ([`crate::tui::complete`]) and hands them to
+//! [`Form::start_completion`].
 use crate::tui::edit::EditIntent;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::borrow::Cow;
@@ -14,6 +18,81 @@ pub struct Field {
     /// scope a `w` form's ruleset needs).
     pub hint: Cow<'static, str>,
     pub required: bool,
+    /// What `Ctrl-N` completes in this field.
+    pub kind: FieldKind,
+}
+
+/// What a field holds, for completion: which candidates `Ctrl-N` offers and
+/// how the field splits into tokens.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum FieldKind {
+    /// Free text: no candidates.
+    #[default]
+    Text,
+    /// A label key (the whole field).
+    LabelKey,
+    /// A label value (the whole field) of the form's key: the sibling `Key`
+    /// field, or the key of the label being edited.
+    LabelValue,
+    /// A workload's labels, `key=value` comma list, one label per key.
+    Labels,
+    /// Ruleset scopes: labels and label groups, `,` within a scope and `|`
+    /// between scopes, one label per key within a scope.
+    Scope,
+    /// Rule providers or consumers: labels, `group:`, `iplist:`, `all`.
+    Actors,
+    /// Rule services: service names (`port/proto` is left as typed).
+    Services,
+    /// A ruleset name (the whole field), from the loaded draft rulesets.
+    Ruleset,
+}
+
+impl FieldKind {
+    /// The characters that end a token; none: the whole field is one token.
+    fn separators(self) -> &'static [char] {
+        match self {
+            Self::Labels | Self::Actors | Self::Services => &[','],
+            Self::Scope => &[',', '|'],
+            Self::Text | Self::LabelKey | Self::LabelValue | Self::Ruleset => &[],
+        }
+    }
+
+    /// The field text split into what stays (`head`, separators and the
+    /// blanks after the last one included) and the token being typed.
+    fn split(self, value: &str) -> (&str, &str) {
+        let start = value.rfind(self.separators()).map_or(0, |i| {
+            i + value[i..].chars().next().map_or(1, char::len_utf8)
+        });
+        let rest = &value[start..];
+        let token = rest.trim_start();
+        (&value[..value.len() - token.len()], token)
+    }
+}
+
+/// An open completion: `Ctrl-N`/`Ctrl-P` cycle `candidates` in the token
+/// of field `field`; `Esc` puts `prefix` back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Completion {
+    pub field: usize,
+    /// The token as typed.
+    pub prefix: String,
+    /// The field text before the token, kept as typed.
+    pub head: String,
+    pub candidates: Vec<String>,
+    /// The candidate shown in the field.
+    pub index: usize,
+}
+
+/// Candidates the strip under a field shows at once.
+pub const STRIP_LEN: usize = 5;
+
+/// `head` with `token` after it; a space after a separator for readability.
+fn joined(head: &str, token: &str) -> String {
+    if head.is_empty() || head.ends_with(char::is_whitespace) {
+        format!("{head}{token}")
+    } else {
+        format!("{head} {token}")
+    }
 }
 
 impl Field {
@@ -28,7 +107,14 @@ impl Field {
             value: value.into(),
             hint: hint.into(),
             required,
+            kind: FieldKind::Text,
         }
+    }
+
+    /// This field, completed as `kind`.
+    pub fn kind(mut self, kind: FieldKind) -> Self {
+        self.kind = kind;
+        self
     }
 }
 
@@ -47,13 +133,16 @@ pub struct Form {
     pub alt: Option<Vec<(usize, String)>>,
     /// The alternates are shown (`Ctrl-A` was pressed an odd number of times).
     pub expanded: bool,
-    /// `Ctrl-N` creates this ruleset (a `w` form whose name the planner did
+    /// `Ctrl-R` creates this ruleset (a `w` form whose name the planner did
     /// not know); armed while the Ruleset field still holds that name.
     /// Boxed: `Overlay::Form` stays within clippy's variant-size budget.
     pub offers_ruleset: Option<Box<RulesetOffer>>,
+    /// The completion being cycled; any key but `Ctrl-N`/`Ctrl-P` ends it.
+    /// Boxed like `offers_ruleset`.
+    pub completion: Option<Box<Completion>>,
 }
 
-/// The ruleset `Ctrl-N` would create: the name the planner checked and the
+/// The ruleset `Ctrl-R` would create: the name the planner checked and the
 /// destination scope as tokens (`app=shop, env=prod`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RulesetOffer {
@@ -70,7 +159,7 @@ pub enum FormEvent {
     Submit,
     /// Esc: close without a request.
     Cancel,
-    /// Ctrl-N where the form offers it: create the ruleset it names.
+    /// Ctrl-R where the form offers it: create the ruleset it names.
     NewRuleset,
 }
 
@@ -85,6 +174,136 @@ impl Form {
             alt: None,
             expanded: false,
             offers_ruleset: None,
+            completion: None,
+        }
+    }
+
+    /// What to complete in the active field: its kind, the token being
+    /// typed and the earlier tokens that matter (those of the current scope
+    /// for `Scope`; the key for `LabelValue`). `None` for a text field.
+    pub fn completion_request(&self) -> Option<(FieldKind, String, Vec<String>)> {
+        let field = self.fields.get(self.active)?;
+        let (head, token) = field.kind.split(&field.value);
+        let tokens = |text: &str| -> Vec<String> {
+            text.split(',')
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .map(String::from)
+                .collect()
+        };
+        let earlier = match field.kind {
+            FieldKind::Text => return None,
+            FieldKind::LabelKey | FieldKind::Ruleset => Vec::new(),
+            FieldKind::LabelValue => {
+                let key = match (&self.intent, self.fields.iter().find(|f| f.label == "Key")) {
+                    (_, Some(f)) => f.value.trim().to_string(),
+                    (EditIntent::UpdateLabel(l), None) => l.key.clone(),
+                    _ => String::new(),
+                };
+                vec![key]
+            }
+            FieldKind::Labels | FieldKind::Actors | FieldKind::Services => tokens(head),
+            FieldKind::Scope => tokens(head.rsplit('|').next().unwrap_or(head)),
+        };
+        Some((field.kind, token.to_string(), earlier))
+    }
+
+    /// Opens a completion on the active field with `candidates` (the first
+    /// one shown); `false`, and nothing changes, when there are none. A
+    /// completion already open on the field (a key completed to `app=`,
+    /// now its values) keeps the prefix `Esc` restores.
+    pub fn start_completion(&mut self, candidates: Vec<String>) -> bool {
+        let Some(first) = candidates.first() else {
+            return false;
+        };
+        let active = self.active;
+        let Some(field) = self.fields.get_mut(active) else {
+            return false;
+        };
+        let (head, prefix) = match self.completion.take() {
+            Some(c) if c.field == active => {
+                let c = *c;
+                (c.head, c.prefix)
+            }
+            _ => {
+                let (head, token) = field.kind.split(&field.value);
+                (head.to_string(), token.to_string())
+            }
+        };
+        field.value = joined(&head, first);
+        self.completion = Some(Box::new(Completion {
+            field: active,
+            prefix,
+            head,
+            candidates,
+            index: 0,
+        }));
+        true
+    }
+
+    /// The next (or previous) candidate, wrapping; nothing without a
+    /// completion.
+    pub fn cycle(&mut self, forward: bool) {
+        let Some(c) = self.completion.as_mut() else {
+            return;
+        };
+        let n = c.candidates.len();
+        if n == 0 {
+            return;
+        }
+        c.index = if forward {
+            (c.index + 1) % n
+        } else {
+            (c.index + n - 1) % n
+        };
+        if let Some(f) = self.fields.get_mut(c.field) {
+            f.value = joined(&c.head, &c.candidates[c.index]);
+        }
+    }
+
+    /// The shown candidate in a token list is a key or a prefix (`app=`,
+    /// `group:`): the next `Ctrl-N` completes what follows it instead of
+    /// cycling. Never in a name field (a ruleset named `a:`).
+    pub fn completion_dives(&self) -> bool {
+        self.completion.as_ref().is_some_and(|c| {
+            let tokens = self.fields.get(c.field).is_some_and(|f| {
+                matches!(
+                    f.kind,
+                    FieldKind::Labels | FieldKind::Scope | FieldKind::Actors
+                )
+            });
+            tokens
+                && c.candidates
+                    .get(c.index)
+                    .is_some_and(|s| s.ends_with('=') || s.ends_with(':'))
+        })
+    }
+
+    /// Up to [`STRIP_LEN`] candidates around the shown one (`true`), then
+    /// `+N more` (`false`) for the ones not in the strip.
+    pub fn completion_strip(&self) -> Option<Vec<(String, bool)>> {
+        let c = self.completion.as_ref()?;
+        let start = c.index / STRIP_LEN * STRIP_LEN;
+        let end = (start + STRIP_LEN).min(c.candidates.len());
+        let mut strip: Vec<(String, bool)> = c.candidates[start..end]
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (s.clone(), start + i == c.index))
+            .collect();
+        let more = c.candidates.len() - (end - start);
+        if more > 0 {
+            strip.push((format!("+{more} more"), false));
+        }
+        Some(strip)
+    }
+
+    /// Ends the completion; `restore` puts the typed token back.
+    fn end_completion(&mut self, restore: bool) {
+        if let Some(c) = self.completion.take()
+            && restore
+            && let Some(f) = self.fields.get_mut(c.field)
+        {
+            f.value = format!("{}{}", c.head, c.prefix);
         }
     }
 
@@ -123,6 +342,19 @@ impl Form {
     pub fn on_key(&mut self, k: KeyEvent) -> FormEvent {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         let n = self.fields.len().max(1);
+        if ctrl && matches!(k.code, KeyCode::Char('n' | 'p')) {
+            self.cycle(k.code == KeyCode::Char('n'));
+            return FormEvent::Continue;
+        }
+        if self.completion.is_some() {
+            // Esc puts the typed token back; any other key keeps the shown
+            // candidate and then does what it always does.
+            let esc = k.code == KeyCode::Esc;
+            self.end_completion(esc);
+            if esc {
+                return FormEvent::Continue;
+            }
+        }
         match k.code {
             KeyCode::Esc => return FormEvent::Cancel,
             KeyCode::Enter => {
@@ -146,7 +378,7 @@ impl Form {
                 }
             }
             KeyCode::Char('a') if ctrl => self.swap_alternates(),
-            KeyCode::Char('n') if ctrl && self.offers_ruleset.is_some() => {
+            KeyCode::Char('r') if ctrl && self.offers_ruleset.is_some() => {
                 if self.ruleset_offer_armed().is_some() {
                     return FormEvent::NewRuleset;
                 }
@@ -329,9 +561,9 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_n_fires_only_for_the_offered_name() {
+    fn ctrl_r_fires_only_for_the_offered_name() {
         let mut f = flow_like();
-        assert_eq!(f.on_key(ctrl('n')), FormEvent::Continue, "no offer");
+        assert_eq!(f.on_key(ctrl('r')), FormEvent::Continue, "no offer");
         assert_eq!(f.error, None);
         f.fields[0].value = " new-app ".into();
         f.offers_ruleset = Some(Box::new(RulesetOffer {
@@ -339,14 +571,163 @@ mod tests {
             scope: "app=shop, env=prod".into(),
         }));
         assert!(f.ruleset_offer_armed().is_some(), "trimmed, any case");
-        assert_eq!(f.on_key(ctrl('n')), FormEvent::NewRuleset);
+        assert_eq!(f.on_key(ctrl('r')), FormEvent::NewRuleset);
         f.active = 0;
         f.on_key(k(KeyCode::Char('2')));
         assert!(f.ruleset_offer_armed().is_none(), "an edit disarms it");
-        assert_eq!(f.on_key(ctrl('n')), FormEvent::Continue);
+        assert_eq!(f.on_key(ctrl('r')), FormEvent::Continue);
         assert_eq!(
             f.error.as_deref(),
             Some("the ruleset name changed; press Enter to check it first")
+        );
+    }
+
+    fn actors_form(value: &str) -> Form {
+        Form::new(
+            "New allow rule",
+            vec![
+                Field::new("Providers", value, "actors", true).kind(FieldKind::Actors),
+                Field::new("Note", "", "optional", false),
+            ],
+            EditIntent::CreateLabel,
+        )
+    }
+
+    fn cands(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn completion_request_gives_the_token_and_the_earlier_ones() {
+        let f = actors_form("app=shop,  !role=w");
+        assert_eq!(
+            f.completion_request(),
+            Some((
+                FieldKind::Actors,
+                "!role=w".to_string(),
+                cands(&["app=shop"])
+            ))
+        );
+        let mut scope = actors_form("app=a, env=b | role=");
+        scope.fields[0].kind = FieldKind::Scope;
+        let (_, token, earlier) = scope.completion_request().unwrap();
+        assert_eq!(
+            (token.as_str(), earlier),
+            ("role=", Vec::new()),
+            "this scope only"
+        );
+        let mut label = label_form();
+        label.fields[0].kind = FieldKind::LabelKey;
+        label.fields[1].kind = FieldKind::LabelValue;
+        label.fields[0].value = "role".into();
+        label.active = 1;
+        assert_eq!(
+            label.completion_request(),
+            Some((FieldKind::LabelValue, String::new(), cands(&["role"])))
+        );
+        label.active = 2;
+        assert_eq!(label.completion_request(), None, "a text field");
+    }
+
+    #[test]
+    fn ctrl_n_cycles_ctrl_p_goes_back_and_earlier_tokens_stay() {
+        let mut f = actors_form("app=shop,ro");
+        assert!(
+            !f.start_completion(Vec::new()),
+            "no candidates, no completion"
+        );
+        assert_eq!(f.completion, None);
+        assert!(f.start_completion(cands(&["role=db", "role=web", "role="])));
+        assert_eq!(f.value("Providers"), "app=shop, role=db");
+        assert_eq!(f.on_key(ctrl('n')), FormEvent::Continue);
+        assert_eq!(f.value("Providers"), "app=shop, role=web");
+        f.on_key(ctrl('n'));
+        assert_eq!(f.value("Providers"), "app=shop, role=");
+        assert!(
+            f.completion_dives(),
+            "a key: the next Ctrl-N completes its values"
+        );
+        f.on_key(ctrl('n'));
+        assert_eq!(f.value("Providers"), "app=shop, role=db", "wraps");
+        f.on_key(ctrl('p'));
+        assert_eq!(f.value("Providers"), "app=shop, role=");
+        f.on_key(ctrl('p'));
+        assert_eq!(f.value("Providers"), "app=shop, role=web");
+    }
+
+    #[test]
+    fn a_typed_key_accepts_and_esc_restores_the_prefix() {
+        let mut f = actors_form("app=shop, ro");
+        f.start_completion(cands(&["role=db", "role=web"]));
+        f.on_key(ctrl('n'));
+        assert_eq!(f.on_key(k(KeyCode::Char(','))), FormEvent::Continue);
+        assert_eq!(
+            f.value("Providers"),
+            "app=shop, role=web,",
+            "accepted, then typed"
+        );
+        assert_eq!(f.completion, None);
+        let mut f = actors_form("app=shop, ro");
+        f.start_completion(cands(&["role=db", "role=web"]));
+        f.on_key(ctrl('n'));
+        assert_eq!(
+            f.on_key(k(KeyCode::Esc)),
+            FormEvent::Continue,
+            "not a cancel"
+        );
+        assert_eq!(
+            f.value("Providers"),
+            "app=shop, ro",
+            "the typed prefix is back"
+        );
+        assert_eq!(f.completion, None);
+        assert_eq!(
+            f.on_key(k(KeyCode::Esc)),
+            FormEvent::Cancel,
+            "a second Esc cancels"
+        );
+        // Tab accepts and moves on; Ctrl-N without a completion does nothing.
+        let mut f = actors_form("ro");
+        f.start_completion(cands(&["role="]));
+        f.on_key(k(KeyCode::Tab));
+        assert_eq!((f.value("Providers"), f.active), ("role=", 1));
+        let before = f.clone();
+        f.on_key(ctrl('n'));
+        assert_eq!(f, before);
+    }
+
+    #[test]
+    fn a_second_start_on_the_field_keeps_the_typed_prefix() {
+        let mut f = actors_form("ro");
+        f.start_completion(cands(&["role="]));
+        // `update` asks again for what follows `role=`.
+        assert_eq!(f.completion_request().unwrap().1, "role=");
+        f.start_completion(cands(&["role=db", "role=web"]));
+        assert_eq!(f.value("Providers"), "role=db");
+        f.on_key(k(KeyCode::Esc));
+        assert_eq!(f.value("Providers"), "ro");
+    }
+
+    #[test]
+    fn the_strip_shows_five_around_the_current_one_and_counts_the_rest() {
+        let mut f = actors_form("");
+        assert_eq!(f.completion_strip(), None);
+        let all: Vec<String> = (1..=7).map(|i| format!("c{i}")).collect();
+        f.start_completion(all);
+        let strip = f.completion_strip().unwrap();
+        assert_eq!(strip.len(), 6);
+        assert_eq!(strip[0], ("c1".to_string(), true));
+        assert_eq!(strip[5], ("+2 more".to_string(), false));
+        for _ in 0..5 {
+            f.on_key(ctrl('n'));
+        }
+        let strip = f.completion_strip().unwrap();
+        assert_eq!(strip[0], ("c6".to_string(), true), "the next page");
+        assert_eq!(strip.last().unwrap().0, "+5 more");
+        f.start_completion(cands(&["only"]));
+        assert_eq!(
+            f.completion_strip().unwrap(),
+            vec![("only".to_string(), true)]
         );
     }
 

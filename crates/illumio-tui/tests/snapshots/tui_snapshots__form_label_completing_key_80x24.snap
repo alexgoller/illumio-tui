@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭ Filters ────────────────────────────────── window 24h · cap 1000 · unbounded ╮
+│window 24h  src *  dst *  svc *  decision all                                 │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭ Result ────────────────────────────────────────────── no query yet · press r ╮
+│run a query with r, edit the filter with f                                    │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭ Flo╭ New label ─────────────────── Tab next · Enter review · Esc cancel ╮────╮
+│no r│▸ Key*          env▏                                                │    │
+│    │                app  env  loc  role                                 │    │
+│    │  Value*                                                            │    │
+│    │                web                                                 │    │
+│    │* required                                                          │    │
+╰────╰────────────────────────────────────────────────────────────────────╯────╯
+╭ Detail ───────────────────────────────────────────────────────── Enter shows ╮
+│select a flow and press Enter                                                 │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ready         f filter  r run  a auto  v view  g group  / search  : cmd  ? help

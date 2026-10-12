@@ -6,7 +6,7 @@ use crate::tokens::{
     ActorToken, ServiceToken, actor_from_href_token, is_href, parse_scope_tokens,
     service_from_href_token, similar, split_kv, with_exclusion, with_similar,
 };
-use crate::tui::form::{Field, Form, RulesetOffer};
+use crate::tui::form::{Field, FieldKind, Form, RulesetOffer};
 use pce::models::{
     Actor, DenyRule, Fqdn, IngressService, Interface, IpList, Label, Rule, RuleSet, Service,
     Workload,
@@ -216,14 +216,16 @@ pub fn start(intent: EditIntent, index: Option<&NameIndex>, prefill: FlowPrefill
         EditIntent::CreateLabel => form(
             "New label".into(),
             vec![
-                Field::new("Key", "", "app, env, role, loc or your own", true),
-                Field::new("Value", "", "web", true),
+                Field::new("Key", "", "app, env, role, loc or your own", true)
+                    .kind(FieldKind::LabelKey),
+                Field::new("Value", "", "web", true).kind(FieldKind::LabelValue),
             ],
             EditIntent::CreateLabel,
         ),
         EditIntent::UpdateLabel(l) => {
             let title = format!("Edit label {}", l.display());
-            let fields = vec![Field::new("Value", l.value.clone(), "web", true)];
+            let fields =
+                vec![Field::new("Value", l.value.clone(), "web", true).kind(FieldKind::LabelValue)];
             form(title, fields, EditIntent::UpdateLabel(l))
         }
         EditIntent::DeleteLabel(l) => Start::Plan(WriteIntent::DeleteLabel {
@@ -421,7 +423,8 @@ fn workload_fields(w: Option<&Workload>, index: Option<&NameIndex>) -> Vec<Field
             w.map(|w| labels_text(w, index)).unwrap_or_default(),
             LABELS_HINT,
             false,
-        ),
+        )
+        .kind(FieldKind::Labels),
     ]
 }
 
@@ -472,7 +475,8 @@ fn rule_set_fields(rs: Option<&RuleSet>, idx: &NameIndex) -> Vec<Field> {
             rs.map(|r| scopes_text(&r.scopes, idx)).unwrap_or_default(),
             SCOPES_HINT,
             false,
-        ),
+        )
+        .kind(FieldKind::Scope),
     ]
 }
 
@@ -542,9 +546,9 @@ fn side_fields(
         },
     );
     vec![
-        Field::new("Providers", p, ACTORS_HINT, true),
-        Field::new("Consumers", c, ACTORS_HINT, true),
-        Field::new("Services", s, SERVICES_HINT, true),
+        Field::new("Providers", p, ACTORS_HINT, true).kind(FieldKind::Actors),
+        Field::new("Consumers", c, ACTORS_HINT, true).kind(FieldKind::Actors),
+        Field::new("Services", s, SERVICES_HINT, true).kind(FieldKind::Services),
     ]
 }
 
@@ -798,7 +802,7 @@ fn unknown_ruleset_scope<'f>(
     (!is_href(name) && names_it && !scope.is_empty()).then_some(scope)
 }
 
-/// What `Ctrl-N` offers when a `w` form's ruleset name is unknown and the
+/// What `Ctrl-R` offers when a `w` form's ruleset name is unknown and the
 /// destination has a scope: that name, scoped like the destination.
 pub fn new_ruleset_offer(
     form: &Form,
@@ -813,7 +817,7 @@ pub fn new_ruleset_offer(
     })
 }
 
-/// `Ctrl-N`: the ruleset the form names, scoped like the destination, and
+/// `Ctrl-R`: the ruleset the form names, scoped like the destination, and
 /// the rule to create in it once it exists.
 pub fn new_ruleset_intent(
     form: &Form,
@@ -822,14 +826,14 @@ pub fn new_ruleset_intent(
     scope_keys: &[String],
 ) -> Result<(WriteIntent, RuleDraft), String> {
     let EditIntent::RuleFromFlow(f) = &form.intent else {
-        return Err("Ctrl-N creates a ruleset from a w form only".into());
+        return Err("Ctrl-R creates a ruleset from a w form only".into());
     };
     let Some(WriteIntent::CreateRule {
         ruleset: RulesetTarget::Name(name),
         draft,
     }) = build_intent(form, index, org_id)?
     else {
-        return Err("Ctrl-N creates a ruleset by name; type one".into());
+        return Err("Ctrl-R creates a ruleset by name; type one".into());
     };
     let scope: Vec<ActorRef> = scope_of(&f.dst, scope_keys)
         .iter()
@@ -962,10 +966,11 @@ fn flow_rule_fields(
         ),
     };
     let fields = vec![
-        Field::new("Ruleset", ruleset, hint, true),
-        Field::new("Providers", providers, ACTORS_HINT, true),
-        Field::new("Consumers", consumers, ACTORS_HINT, true),
-        Field::new("Services", flow_services_text(f, idx), SERVICES_HINT, true),
+        Field::new("Ruleset", ruleset, hint, true).kind(FieldKind::Ruleset),
+        Field::new("Providers", providers, ACTORS_HINT, true).kind(FieldKind::Actors),
+        Field::new("Consumers", consumers, ACTORS_HINT, true).kind(FieldKind::Actors),
+        Field::new("Services", flow_services_text(f, idx), SERVICES_HINT, true)
+            .kind(FieldKind::Services),
         Field::new(
             "Description",
             format!(

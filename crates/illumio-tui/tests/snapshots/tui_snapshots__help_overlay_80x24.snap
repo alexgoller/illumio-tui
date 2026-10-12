@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ Keys ────────────────────────────────── 1-22 of 34 · j/k scroll · Esc closes ╮
+╭ Keys ────────────────────────────────── 1-22 of 35 · j/k scroll · Esc closes ╮
 │1 2 3 4 5                Traffic · Policy · Objects · Workloads · Events      │
 │:                        command prompt: :traffic :policy :objects :workloads │
 │                         :events  :iplists  :filter <expr>  :window <dur>     │
@@ -22,7 +22,7 @@ expression: out
 │Mesh     u / p           show or hide the user · process columns              │
 │Treemap  hjkl Enter b    move · zoom, then drill · conns/bytes · Esc out      │
 │Traffic  w               draft allow rule from a blocked flow or row (writes) │
-│w form   Ctrl-A Ctrl-N   all labels · new ruleset                             │
+│Form     Ctrl-N Ctrl-P   complete from the index · cycle back                 │
+│w form   Ctrl-A Ctrl-R   all labels · new ruleset                             │
 │Policy   d               toggle draft / active                                │
-│Policy   p               pending changes                                      │
 ╰──────────────────────────────────────────────────────────────────────────────╯
