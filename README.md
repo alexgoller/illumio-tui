@@ -1,11 +1,14 @@
 # illumio-tui
 
 Terminal UI and CLI for the Illumio Core PCE, built for administrators,
-Illumio Professional Services, and agents. Reads by default; writes for labels, IP lists, services and unmanaged workloads are opt-in (see Writes).
+Illumio Professional Services, and agents. Reads by default; writes for labels, IP lists,
+services, unmanaged workloads and policy (rulesets, rules, provisioning) are opt-in (see Writes).
 
-Website: https://alexgoller.github.io/illumio-tui/
+Documentation: https://alexgoller.github.io/illumio-tui/
 
 ## Install
+
+From a clone of this repository (Rust 1.88 or newer):
 
     cargo install --path crates/illumio-tui
 
@@ -65,7 +68,8 @@ or a profile in `~/.config/illumio-tui/config.toml`:
     api_secret_cmd = "op read op://vault/pce/secret"
     writes = true    # optional: allow writes (the CLI still needs --yes, the TUI :writes on)
 
-`--env-file .env` loads a dotenv file for one run. Connection settings can
+`PCE_TLS_VERIFY=false` skips certificate checks like `--insecure`; `ILLUMIO_PROFILE` picks
+the profile and `ILLUMIO_TUI_THEME` the TUI theme. `--env-file .env` loads a dotenv file for one run. Connection settings can
 also be overridden per run with global flags: `--host`, `--pce-port`,
 `--org-id`, `--profile`, `--config`, `--insecure`, `--no-cache` (the
 connection-port flag is `--pce-port`, not `--port`, because `traffic query`
@@ -150,6 +154,7 @@ the API call and byte counters at all times.
     illumio-tui policy rules impact /orgs/1/sec_policy/draft/rule_sets/7/sec_rules/3
     illumio-tui iplists --table
     illumio-tui policy pending
+    illumio-tui events --since 1h --severity err
     illumio-tui traffic query --window 24h --src app=web --dst app=db --json
     illumio-tui traffic query --window 1h --group app,env
     illumio-tui traffic query --window 1h --blocked
@@ -429,8 +434,8 @@ empty entries (`,`) is refused, as is an empty `scope_keys` in the profile.
 The TUI's `w` form (pre-fill and `Ctrl-N`) uses them, the traffic views group by the scope keys
 until `g` picks others (for the session), and `traffic groups`, `traffic mesh` and
 `traffic query --blocked` default to them.
-`ignore_keys` (or `ILLUMIO_IGNORE_KEYS=DFIRBubble,os`, which outranks the
-profile; empty counts as unset) hides housekeeping keys from the label text
+`ignore_keys` (after 0.1.1, so not in that release; or `ILLUMIO_IGNORE_KEYS=DFIRBubble,os`,
+which outranks the profile; empty counts as unset) hides housekeeping keys from the label text
 of the traffic and workload tables, the flow detail, `all labels` and the
 `g` picker; JSON output, the workload edit form and the Labels tab keep
 them, and a scope or tier key is never ignored.
