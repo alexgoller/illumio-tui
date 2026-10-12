@@ -323,6 +323,8 @@ pub struct TrafficData {
     pub matches_count: Option<u64>,
     pub elapsed: Duration,
     pub cache_hit: bool,
+    /// When the first slice arrived: the Result header's age. A merged
+    /// slice does not reset it.
     pub fetched_at: Instant,
     pub filter: TrafficFilter,
     /// The time range the flows cover, slice by slice; `None` when the

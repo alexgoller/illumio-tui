@@ -1,14 +1,14 @@
 //! Bottom status line: query/connection state on the left, key hints right.
 use crate::tui::model::{Model, StatusKind};
 use crate::tui::ui::widgets::overlay::{screen_hint, screen_hint_more};
-
-/// Columns the status text keeps before the extra hints are shown.
-const STATUS_ROOM: usize = 40;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
+
+/// Columns the status text keeps before the extra hints are shown.
+const STATUS_ROOM: usize = 40;
 
 pub fn render(model: &Model, f: &mut Frame, area: Rect) {
     let t = &model.theme;

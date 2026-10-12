@@ -207,7 +207,12 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             let f = model.traffic.filter.clone();
             // The cost guard applies unless this exact filter produced the data on
             // screen (e.g. profile defaults above the thresholds, never confirmed).
-            let fetched_with = model.traffic.data.as_ref().is_some_and(|d| d.filter == f);
+            // Merged slices were confirmed slice by slice: one query for the
+            // whole window is a different (larger) request.
+            let fetched_with =
+                model.traffic.data.as_ref().is_some_and(|d| {
+                    d.filter == f && d.slices.as_ref().is_none_or(|s| s.count() <= 1)
+                });
             if !fetched_with && let Some(reason) = f.needs_confirmation() {
                 model.overlay = Overlay::Confirm {
                     reason: format!("{reason}. Run anyway? (y/n)"),
@@ -1573,7 +1578,7 @@ fn on_slice(model: &mut Model, result: Result<QueryOutcome, String>) {
         Ok(o) => {
             let n = o.flows.len();
             let cap = o.filter.max_results;
-            d.flows.extend(o.flows);
+            pce::traffic::merge_flows(&mut d.flows, o.flows);
             d.truncated |= o.truncated;
             d.matches_count = d.matches_count.zip(o.matches_count).map(|(a, b)| a + b);
             d.elapsed += o.elapsed;
@@ -1584,8 +1589,18 @@ fn on_slice(model: &mut Model, result: Result<QueryOutcome, String>) {
             }
             let total = d.flows.len();
             let window = d.filter.window.clone();
+            // A tick re-runs the whole merged window as one query; past the
+            // cost thresholds that needs a confirm each time, so it stops.
+            let auto_off = model.traffic.auto.enabled && d.filter.needs_confirmation().is_some();
+            if auto_off {
+                model.traffic.auto.enabled = false;
+            }
             model.traffic.rebuild_views();
-            model.status = if o.truncated {
+            model.status = if auto_off {
+                StatusLine::warn(format!(
+                    "auto off: window {window} needs a confirm each run"
+                ))
+            } else if o.truncated {
                 StatusLine::warn(format!("slice truncated at {cap}: ] raises the cap"))
             } else {
                 StatusLine::info(format!(
@@ -1621,32 +1636,35 @@ fn narrow_window(model: &mut Model) -> Vec<Cmd> {
     };
     let t = &mut model.traffic;
     t.cancel_query();
-    let mut same = t.filter.clone();
     t.filter.window = step.to_string();
     let mut dropped = None;
-    if let Some(d) = t.data.as_mut()
-        && let Some(s) = d.slices.as_mut()
-    {
-        // Only data fetched with this filter (whatever its window) narrows.
-        same.window = d.filter.window.clone();
+    if let Some(d) = t.data.as_mut() {
+        // A cancelled `]`, `[` or `f` query never ran: the filter goes back
+        // to the one the flows were fetched with, at the stepped window.
+        let window = std::mem::take(&mut t.filter.window);
+        t.filter = TrafficFilter {
+            window,
+            ..d.filter.clone()
+        };
         let span = t
             .filter
             .window_duration()
             .ok()
             .and_then(|w| jiff::Span::try_from(w).ok());
-        if same == d.filter
+        // Only a range that covers the new window narrows; a wider window
+        // than the flows cover waits for `r`.
+        if let Some(s) = d.slices.as_mut()
             && let Some(start) = span.and_then(|span| s.end.checked_sub(span).ok())
+            && start >= s.start()
         {
             let before = d.flows.len();
-            if start > s.start() {
-                d.flows.retain(|f| {
-                    f.last_detected
-                        .as_deref()
-                        .and_then(|l| l.parse::<jiff::Timestamp>().ok())
-                        .is_none_or(|l| l >= start)
-                });
-                s.narrow(start);
-            }
+            d.flows.retain(|f| {
+                f.last_detected
+                    .as_deref()
+                    .and_then(|l| l.parse::<jiff::Timestamp>().ok())
+                    .is_none_or(|l| l >= start)
+            });
+            s.narrow(start);
             d.filter.window = step.to_string();
             dropped = Some(before - d.flows.len());
         }
@@ -9245,15 +9263,26 @@ mod window_step_tests {
     }
 
     /// `n` fixture flows re-dated to `last` (an older slice's answer).
-    fn older_flows(m: &Model, n: usize, last: &str) -> Vec<ResolvedFlow> {
+    /// Identical to loaded ones, so they fold into them.
+    fn same_flows(m: &Model, n: usize, last: &str) -> Vec<ResolvedFlow> {
         m.traffic.loaded_flows()[..n]
             .iter()
             .cloned()
             .map(|mut f| {
+                f.first_detected = Some("2026-10-08T00:00:00Z".into());
                 f.last_detected = Some(last.into());
                 f
             })
             .collect()
+    }
+
+    /// Like `same_flows` on ports nothing loaded uses: new rows.
+    fn older_flows(m: &Model, n: usize, last: &str) -> Vec<ResolvedFlow> {
+        let mut flows = same_flows(m, n, last);
+        for (i, f) in flows.iter_mut().enumerate() {
+            f.port = Some(60_000 + i as u16);
+        }
+        flows
     }
 
     fn slice_done(
@@ -9291,7 +9320,15 @@ mod window_step_tests {
         let mut m = model_with_window("1d");
         let loaded = m.traffic.loaded_flows().len();
         let groups_before: u64 = m.traffic.groups.rows().iter().map(|g| g.connections).sum();
-        m.traffic.drill = Some(Drill::Pair(vec!["x".into()], vec!["y".into()]));
+        let keys = m.traffic.effective_keys();
+        let first = m.traffic.loaded_flows()[0].clone();
+        m.traffic.drill = Some(Drill::Pair(
+            pce::traffic::group_key(&first.src, &keys),
+            pce::traffic::group_key(&first.dst, &keys),
+        ));
+        m.traffic.rebuild_views();
+        let drilled = m.traffic.flows.rows().len();
+        assert!(drilled > 0);
         let cmds = update(&mut m, key('+'));
         assert_eq!(cmds, vec![slice_cmd(&m, "2d", ago(48), ago(24))]);
         assert_eq!(
@@ -9310,7 +9347,11 @@ mod window_step_tests {
         assert!(!m.traffic.is_running());
         let groups_after: u64 = m.traffic.groups.rows().iter().map(|g| g.connections).sum();
         assert_eq!(groups_after, groups_before + extra_conns, "views rebuilt");
-        assert!(m.traffic.drill.is_some(), "the drill stays, rebuilt");
+        assert!(m.traffic.drill.is_some(), "the drill stays");
+        assert!(
+            m.traffic.flows.rows().len() > drilled,
+            "the drilled pair's new flows show"
+        );
         assert!(
             m.status.text.contains("3 flows in the slice"),
             "{}",
@@ -9322,6 +9363,88 @@ mod window_step_tests {
         assert_eq!(cmds, vec![slice_cmd(&m, "3d", ago(72), ago(48))]);
         merge(&mut m, Vec::new(), false, (ago(72), ago(48)));
         assert_eq!(slices(&m).count(), 3);
+    }
+
+    #[test]
+    fn identical_flows_from_a_slice_fold_into_the_loaded_rows() {
+        let mut m = model_with_window("1d");
+        let loaded: Vec<ResolvedFlow> = m.traffic.loaded_flows().to_vec();
+        update(&mut m, key('+'));
+        let same = same_flows(&m, 3, "2026-10-08T12:00:00Z");
+        merge(&mut m, same, false, (ago(48), ago(24)));
+        let now = m.traffic.loaded_flows();
+        assert_eq!(now.len(), loaded.len(), "no new rows");
+        for (a, b) in loaded.iter().zip(now).take(3) {
+            assert_eq!(b.num_connections, 2 * a.num_connections);
+            assert_eq!(b.last_detected, a.last_detected, "the later one stays");
+            assert_eq!(b.first_detected.as_deref(), Some("2026-10-08T00:00:00Z"));
+        }
+        assert_eq!(now[3].num_connections, loaded[3].num_connections);
+    }
+
+    #[test]
+    fn r_after_widening_confirms_the_whole_merged_window() {
+        let mut m = model_with_window("1w");
+        quiet(&mut m, key('+'));
+        assert_eq!(update(&mut m, key('y')).len(), 1);
+        merge(&mut m, Vec::new(), false, (ago(14 * 24), ago(7 * 24)));
+        quiet(&mut m, key('r'));
+        assert!(
+            matches!(&m.overlay, Overlay::Confirm { reason, action: PendingAction::RunNow(f) } if reason.contains("window 2w") && f.window == "2w"),
+            "{:?}",
+            m.overlay
+        );
+        quiet(&mut m, key('n'));
+        // A cheap merged window runs straight away, as one query.
+        let mut m = model_with_window("1d");
+        update(&mut m, key('+'));
+        merge(&mut m, Vec::new(), false, (ago(48), ago(24)));
+        let cmds = update(&mut m, key('r'));
+        assert!(
+            matches!(&cmds[..], [Cmd::RunQuery { filter, mode: CacheMode::Bypass, .. }] if filter.window == "2d"),
+            "{cmds:?}"
+        );
+    }
+
+    #[test]
+    fn widening_past_the_threshold_switches_auto_refresh_off() {
+        let mut m = model_with_window("1w");
+        m.traffic.auto.enabled = true;
+        quiet(&mut m, key('+'));
+        assert_eq!(update(&mut m, key('y')).len(), 1);
+        merge(&mut m, Vec::new(), false, (ago(14 * 24), ago(7 * 24)));
+        assert!(!m.traffic.auto.enabled);
+        assert_eq!(
+            m.status.text,
+            "auto off: window 2w needs a confirm each run"
+        );
+        // Below the thresholds auto-refresh stays on.
+        let mut m = model_with_window("1d");
+        m.traffic.auto.enabled = true;
+        update(&mut m, key('+'));
+        merge(&mut m, Vec::new(), false, (ago(48), ago(24)));
+        assert!(m.traffic.auto.enabled);
+    }
+
+    #[test]
+    fn minus_during_a_cap_query_puts_the_loaded_filter_back() {
+        let mut m = model_with_window("1d");
+        m.limits.traffic_max_results = 20_000;
+        assert_eq!(update(&mut m, key(']')).len(), 1);
+        assert_eq!(m.traffic.filter.max_results, 2000);
+        quiet(&mut m, key('-'));
+        assert!(!m.traffic.is_running());
+        assert_eq!(m.traffic.filter.max_results, 1000, "the unrun cap is gone");
+        assert_eq!(m.traffic.filter.window, "12h");
+        assert_eq!(m.traffic.data.as_ref().unwrap().filter, m.traffic.filter);
+        // The same for an editor query with another source.
+        let mut m = model_with_window("1d");
+        let mut f = m.traffic.filter.clone();
+        f.src = "app=shop".into();
+        assert_eq!(update(&mut m, Msg::ApplyFilter(f)).len(), 1);
+        quiet(&mut m, key('-'));
+        assert_eq!(m.traffic.filter.src, "");
+        assert_eq!(m.traffic.filter.window, "12h");
     }
 
     #[test]
