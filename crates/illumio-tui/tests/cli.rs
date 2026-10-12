@@ -322,6 +322,63 @@ async fn labels_filter_exactly_and_hide_deleted() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn labels_repeatable_keys_value_contains_and_unused() {
+    let server = MockServer::start().await;
+    mount_policy(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/workloads.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(2) // the two --unused runs; the plain list reads no workloads
+        .mount(&server)
+        .await;
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "labels",
+                "--key",
+                "role",
+                "--key",
+                "env",
+                "--value-contains",
+                "E",
+            ])
+            .assert()
+            .success(),
+    );
+    let rows = out["data"].as_array().unwrap();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0]["value"], "web");
+    assert!(rows[0].get("workloads").is_none(), "shape unchanged");
+    assert_eq!(out["meta"]["api_calls"], 1);
+    let out = stdout_json(
+        cmd(&server)
+            .args(["labels", "--unused", "--include-deleted"])
+            .assert()
+            .success(),
+    );
+    let rows = out["data"].as_array().unwrap();
+    let hrefs: Vec<&str> = rows.iter().map(|r| r["href"].as_str().unwrap()).collect();
+    assert_eq!(hrefs, vec!["/orgs/5/labels/5", "/orgs/5/labels/6"]);
+    assert_eq!(
+        (rows[0]["workloads"].as_u64(), rows[0]["rules"].as_u64()),
+        (Some(0), Some(0))
+    );
+    assert_eq!(
+        out["meta"]["api_calls"], 4,
+        "labels, workloads, draft rulesets, label groups"
+    );
+    cmd(&server)
+        .args(["labels", "--unused", "--table"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("workloads  rules"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn other_object_lists() {
     let server = MockServer::start().await;
     mount_objects(&server).await;
