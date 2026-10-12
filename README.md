@@ -6,6 +6,8 @@ services, unmanaged workloads and policy (rulesets, rules, provisioning) are opt
 
 Documentation: https://alexgoller.github.io/illumio-tui/
 
+Screenshots and a short recording: https://alexgoller.github.io/illumio-tui/#screens
+
 ## Install
 
 From a clone of this repository (Rust 1.88 or newer):
