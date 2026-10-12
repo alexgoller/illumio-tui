@@ -81,3 +81,8 @@ Captured after corrections and review findings, so the same mistake is not repea
 - Aggregations that change their grouping must change every renderer of that group: the CLI blocked table kept printing the first host after the TUI grouped by destination group.
 - Subagents in this harness carry an Opus attribution reminder; state the trailer in every dispatch and verify with git log before each review; rewrite once with filter-branch before the final review, not per task.
 - Store resolved keys at rebuild time, never derive them per draw; the `quiet()` test helper makes "no request from this key" a one-liner.
+
+## Label order (2026-10-12)
+- A display order that lives in one shared comparator (`pce::KeyOrder::cmp_kv`) is the only way every surface agrees; the picker had grown its own list with a hard-coded `loc` because the order had no home.
+- "Alphabetical" for a human means case-insensitive; byte order put `DFIRBubble` before `bu`. Check sorting against real data once, not only fixtures with lowercase keys.
+- The reviewer's "today's behaviour" claim in a brief must be read from the code, not assumed: `?` sorted first, not last, before this change.
