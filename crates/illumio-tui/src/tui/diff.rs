@@ -1,7 +1,8 @@
-//! What a pending IP list, service or ruleset changes against its active version.
-//! Pure: the runtime loads both lists, these functions compare them. Every
-//! entry is listed, unchanged ones with `Sign::Same`, so the reader sees the
-//! whole object.
+//! What a pending IP list, label group, service or ruleset changes against its
+//! active version. The `*_diff_for` and `diff_*` functions are pure: they
+//! compare two loaded lists, listing every entry (unchanged ones with
+//! `Sign::Same`) so the reader sees the whole object. [`load_diff`] is the one
+//! cached I/O entry point, shared by the TUI runtime and `policy pending --diff`.
 use crate::tui::edit::{actor_tokens, service_tokens};
 use crate::tui::model::rule_kind_name;
 use pce::models::{

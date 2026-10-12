@@ -22,7 +22,7 @@ use pce::write::{
     ProvisionSubset, RuleDraft, RulePatch, RuleSetDraft, RuleSetPatch, ServiceRef, WriteError,
     checked_nested_href,
 };
-use pce::{Cached, PceError, RuleKind, RuleSetView, RuleView};
+use pce::{CacheMode, Cached, PceError, RuleKind, RuleSetView, RuleView};
 use serde::Serialize;
 
 #[derive(Subcommand, Debug)]
@@ -787,26 +787,27 @@ impl TableRows for Vec<PendingRow> {
         vec!["object_type", "change_type", "name", "href"]
     }
     fn rows(&self) -> Vec<Vec<String>> {
-        let mut rows = Vec::new();
-        for p in self {
-            rows.push(vec![
-                p.change.object_type.clone(),
-                p.change.change_type.clone(),
-                p.change.name.clone().unwrap_or_default(),
-                p.change.href.clone(),
-            ]);
-            // The diff lines sit in the last column, two spaces in, so a
-            // long line is not squeezed by the narrow ones before it.
-            for d in p.diff.iter().flatten() {
-                rows.push(vec![
-                    String::new(),
-                    String::new(),
-                    String::new(),
-                    format!("  {} {}", d.glyph(), d.text),
-                ]);
-            }
-        }
-        rows
+        self.iter()
+            .map(|p| {
+                vec![
+                    p.change.object_type.clone(),
+                    p.change.change_type.clone(),
+                    p.change.name.clone().unwrap_or_default(),
+                    p.change.href.clone(),
+                ]
+            })
+            .collect()
+    }
+    fn notes(&self) -> Vec<Vec<String>> {
+        self.iter()
+            .map(|p| {
+                p.diff
+                    .iter()
+                    .flatten()
+                    .map(|d| format!("  {} {}", d.glyph(), d.text))
+                    .collect()
+            })
+            .collect()
     }
 }
 
@@ -845,19 +846,27 @@ async fn pending(ctx: &Context, args: &PendingArgs) -> Result<(), CliError> {
     if kinds.contains(&ObjectKind::LabelGroup) || kinds.contains(&ObjectKind::RuleSet) {
         index = Some(ctx.pce.name_index(ctx.cache_mode).await?);
     }
+    // This loop exists only so `--no-cache` refreshes each list once: the
+    // index already read the draft label group, IP list and service lists, so
+    // those are taken from the cache it just filled.
     let mode = ctx.cache_mode;
+    let draft_mode = if index.is_some() {
+        CacheMode::Use
+    } else {
+        mode
+    };
     for kind in &kinds {
         match kind {
             ObjectKind::LabelGroup => {
-                ctx.pce.label_groups(mode).await?;
+                ctx.pce.label_groups(draft_mode).await?;
                 ctx.pce.active_label_groups(mode).await?;
             }
             ObjectKind::IpList => {
-                ctx.pce.ip_lists(mode).await?;
+                ctx.pce.ip_lists(draft_mode).await?;
                 ctx.pce.active_ip_lists(mode).await?;
             }
             ObjectKind::Service => {
-                ctx.pce.services(mode).await?;
+                ctx.pce.services(draft_mode).await?;
                 ctx.pce.active_services(mode).await?;
             }
             ObjectKind::RuleSet => {

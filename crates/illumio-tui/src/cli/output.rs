@@ -64,6 +64,11 @@ pub struct Envelope<'a, T: Serialize> {
 pub trait TableRows {
     fn headers(&self) -> Vec<&'static str>;
     fn rows(&self) -> Vec<Vec<String>>;
+    /// Full-width lines printed under each row, outside the column layout
+    /// (so never clipped). Empty, or one entry per row.
+    fn notes(&self) -> Vec<Vec<String>> {
+        Vec::new()
+    }
 }
 
 const MAX_COL: usize = 60;
@@ -136,7 +141,22 @@ pub fn write_json<T: Serialize>(
 
 pub fn write_table<T: TableRows>(out: &mut impl Write, data: &T) -> std::io::Result<()> {
     let headers = data.headers();
-    writeln!(out, "{}", render_table(&headers, &data.rows()))
+    let rows = data.rows();
+    let table = render_table(&headers, &rows);
+    let notes = data.notes();
+    if notes.iter().all(Vec::is_empty) {
+        return writeln!(out, "{table}");
+    }
+    // Two lines of header and rule, then one line per row.
+    for (i, line) in table.lines().enumerate() {
+        writeln!(out, "{line}")?;
+        if let Some(extra) = i.checked_sub(2).and_then(|r| notes.get(r)) {
+            for l in extra {
+                writeln!(out, "{l}")?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// One line for stderr in table mode so stdout stays clean.

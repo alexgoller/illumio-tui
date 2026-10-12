@@ -766,14 +766,21 @@ async fn policy_pending_diff_prints_the_lines_under_each_change() {
         .assert()
         .success();
     let text = String::from_utf8_lossy(&out.get_output().stdout).to_string();
-    for want in [
-        "  + label env=prod",
-        "  + name: Corp",
-        "    name: All prod envs",
-        "  (no diff)",
-    ] {
-        assert!(text.contains(want), "{want:?} missing from\n{text}");
-    }
+    let lines: Vec<&str> = text.lines().collect();
+    let at = |word: &str| {
+        lines
+            .iter()
+            .position(|l| l.contains(word))
+            .unwrap_or_else(|| panic!("{word} missing from\n{text}"))
+    };
+    // Each change row is followed by its own full-width lines.
+    let group = at("label_groups");
+    assert_eq!(lines[group + 1], "    name: All prod envs");
+    assert!(lines[group + 2..group + 5].contains(&"  + label env=prod"));
+    let corp = at("ip_lists");
+    assert_eq!(lines[corp + 1], "  + name: Corp");
+    let fw = at("firewall_settings");
+    assert_eq!(lines[fw + 1], "    (no diff)");
     let stderr = String::from_utf8_lossy(&out.get_output().stderr).to_string();
     assert!(stderr.contains("7 api calls"), "{stderr}");
 }
@@ -808,18 +815,24 @@ async fn policy_pending_json_carries_diff_only_with_the_flag() {
     let plain = MockServer::start().await;
     mount_policy(&plain).await;
     let out = stdout_json(cmd(&plain).args(["policy", "pending"]).assert().success());
-    let expected: Value =
-        serde_json::from_str(include_str!("../../../fixtures/pending_list.json")).unwrap();
-    for (got, want) in out["data"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .zip(expected.as_array().unwrap())
-    {
-        assert!(got.get("diff").is_none(), "no diff key without the flag");
-        assert_eq!(got["href"], want["href"]);
-    }
+    let expected = pce::models::parse_pending(
+        serde_json::from_str(include_str!("../../../fixtures/pending_list.json")).unwrap(),
+    );
+    assert_eq!(out["data"], serde_json::to_value(expected).unwrap());
     assert_eq!(out["meta"]["api_calls"], 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn policy_pending_diff_with_no_cache_reads_every_list_once() {
+    let server = MockServer::start().await;
+    mount_pending_diff(&server).await;
+    let out = stdout_json(
+        cmd(&server)
+            .args(["--no-cache", "policy", "pending", "--diff", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["meta"]["api_calls"], 7);
 }
 
 const QHREF: &str = "/orgs/5/traffic_flows/async_queries/q-1";

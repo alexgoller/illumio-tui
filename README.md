@@ -404,7 +404,9 @@ for the active list of the kind, cached for five minutes.
 `policy pending --diff` prints the same lines under each change (`+`, `-` or a space,
 indented two spaces; kinds without a diff say `(no diff)`). With `--json` each change
 gains `diff: [{sign, text}]`, only when `--diff` is given. Each kind's draft and active
-list is read once, counted in `meta.api_calls`.
+list is read once, counted in `meta.api_calls`. The CLI does not fetch deny rules served
+through the fallback endpoint; such a ruleset shows them as "not compared". Label groups
+have no description to compare.
 
 ### Policy editing in the TUI
 
