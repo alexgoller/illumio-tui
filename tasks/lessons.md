@@ -91,3 +91,8 @@ Captured after corrections and review findings, so the same mistake is not repea
 - Two features in sibling worktrees worked; the only conflicts were the help overlay (line count and its snapshots) and `update.rs`. Merge the first, then make the second branch's fix wave start with `git rebase main` so one agent resolves conflicts with full context.
 - Subagents' Write tool refuses files outside the repo; relay their reports into the scratchpad yourself before dispatching a reviewer.
 - A demo PCE can answer a burst of four reads with a transient 500; retry once before suspecting the code, and never add automatic retries for it.
+
+## Screenshots, #11 (2026-10-12)
+- A docs branch and a feature branch both off the same base cannot both fast-forward: merge one, then rebase the other before its gate. Run the gate after the rebase, not before.
+- Lazy slices need a merge key, or the Flows view lists one row per slice; and once rows merge, narrowing can only approximate per-slice counts. Say so in the issue close.
+- demo100 answers the five startup object loads with a transient HTTP 500 a few times a day; a headless driver must stop on the error box and retry after a few minutes rather than press on.
