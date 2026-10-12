@@ -112,7 +112,7 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   decision: `h` / `j` / `k` / `l` move, `Enter` zooms into a source and then drills into a
   destination, `Esc` zooms out. None of this sends a request. With writes on, `w` turns a
   blocked flow (or the first one behind a Blocked or Mesh row) into a draft allow rule.
-- **Policy**: `d` toggle draft / active, `p` pending changes, `Tab` switch panes, `Enter` rule
+- **Policy**: `d` toggle draft / active, `p` pending changes (`Enter` on one shows its diff against active), `Tab` switch panes, `Enter` rule
   detail, or on a ruleset load its deny rules. Rules are listed in evaluation order: override
   deny, allow, deny. With writes on, `n` / `e` / `x` create, edit and delete rulesets and rules
   in draft (`N` a deny rule), and the pending overlay marks with `Space` and provisions with `P`.
@@ -173,6 +173,7 @@ the API call and byte counters at all times.
     illumio-tui policy rules impact /orgs/1/sec_policy/draft/rule_sets/7/sec_rules/3
     illumio-tui iplists --table
     illumio-tui policy pending
+    illumio-tui policy pending --diff --table
     illumio-tui events --since 1h --severity err
     illumio-tui traffic query --window 24h --src app=web --dst app=db --json
     illumio-tui traffic query --window 1h --group app,env
@@ -395,9 +396,15 @@ retrying and reloads. TUI writes go to the same audit log with
 `"source": "tui"`.
 
 On the Policy screen `p` lists pending changes; `j`/`k` select one, and
-`Enter` on a pending IP list or service shows what it changes against the
-active version (`+` added, `-` removed, unchanged entries dimmed). That costs
-one GET for the active list of the kind, cached for five minutes.
+`Enter` on a pending IP list, service, label group or ruleset shows what it changes
+against the active version (`+` added, `-` removed, unchanged entries dimmed; a label
+group lists its labels as `key=value` and its sub-groups by name). That costs one GET
+for the active list of the kind, cached for five minutes.
+
+`policy pending --diff` prints the same lines under each change (`+`, `-` or a space,
+indented two spaces; kinds without a diff say `(no diff)`). With `--json` each change
+gains `diff: [{sign, text}]`, only when `--diff` is given. Each kind's draft and active
+list is read once, counted in `meta.api_calls`.
 
 ### Policy editing in the TUI
 

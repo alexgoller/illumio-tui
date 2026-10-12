@@ -557,6 +557,18 @@ pub fn rule_set_diff_for(
     })
 }
 
+/// The kind of a pending change's `object_type` that has a diff. A rule is
+/// diffed through its ruleset, so rules have none of their own.
+pub fn diff_object_kind(object_type: &str) -> Option<ObjectKind> {
+    match object_type {
+        "label_groups" => Some(ObjectKind::LabelGroup),
+        "ip_lists" => Some(ObjectKind::IpList),
+        "services" => Some(ObjectKind::Service),
+        "rule_sets" => Some(ObjectKind::RuleSet),
+        _ => None,
+    }
+}
+
 /// The draft and active list of one kind through the cache, compared
 /// locally. The draft list is usually cached by the name index, so the
 /// common cost is one GET for the active list, and none when both are fresh.

@@ -2169,20 +2169,13 @@ fn pending_diff(model: &mut Model) -> Vec<Cmd> {
     else {
         return Vec::new();
     };
-    let kind = match change.object_type.as_str() {
-        "label_groups" => pce::write::ObjectKind::LabelGroup,
-        "ip_lists" => pce::write::ObjectKind::IpList,
-        "services" => pce::write::ObjectKind::Service,
-        "rule_sets" => pce::write::ObjectKind::RuleSet,
-        // A rule is provisioned, and diffed, through its ruleset.
-        "sec_rules" | "deny_rules" => {
-            model.status = StatusLine::info("rule changes show in their ruleset's diff");
-            return Vec::new();
-        }
-        other => {
-            model.status = StatusLine::info(format!("no diff for {other}"));
-            return Vec::new();
-        }
+    let Some(kind) = crate::tui::diff::diff_object_kind(&change.object_type) else {
+        model.status = StatusLine::info(match change.object_type.as_str() {
+            // A rule is provisioned, and diffed, through its ruleset.
+            "sec_rules" | "deny_rules" => "rule changes show in their ruleset's diff".to_string(),
+            other => format!("no diff for {other}"),
+        });
+        return Vec::new();
     };
     if model.policy.diff_loading {
         model.status = StatusLine::info("diff already loading");

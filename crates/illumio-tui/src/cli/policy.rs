@@ -8,6 +8,7 @@ use super::write::{
     self, ActorToken, Lists, ServiceToken, WriteFlags, is_href, parse_actors, parse_scopes,
     parse_services, resolve_actors, resolve_scopes, resolve_services, run_plan, run_rule_plan,
 };
+use crate::tui::diff::{Sign, diff_object_kind, load_diff};
 use clap::{Args, Subcommand};
 use pce::impact::{
     Impact, ImpactInputs, RuleActors, is_rule_href, rule_impact, rule_impact_with,
@@ -17,8 +18,9 @@ use pce::models::{
     DenyRule, PendingChange, PolicyScope, ResolveLabelsAs, RuleSet, Workload, WorkloadFilter,
 };
 use pce::write::{
-    ActorRef, DenyRuleDraft, DenyRulePatch, IfMissing, Plan, ProvisionRequest, ProvisionSubset,
-    RuleDraft, RulePatch, RuleSetDraft, RuleSetPatch, ServiceRef, WriteError, checked_nested_href,
+    ActorRef, DenyRuleDraft, DenyRulePatch, IfMissing, ObjectKind, Plan, ProvisionRequest,
+    ProvisionSubset, RuleDraft, RulePatch, RuleSetDraft, RuleSetPatch, ServiceRef, WriteError,
+    checked_nested_href,
 };
 use pce::{Cached, PceError, RuleKind, RuleSetView, RuleView};
 use serde::Serialize;
@@ -33,9 +35,16 @@ pub enum PolicyCmd {
     #[command(subcommand)]
     DenyRules(DenyRulesAction),
     /// List changes waiting to be provisioned
-    Pending,
+    Pending(PendingArgs),
     /// Provision pending changes (needs writes = true in the profile)
     Provision(ProvisionArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct PendingArgs {
+    /// Under each change, show what it changes against the active version
+    #[arg(long)]
+    pub diff: bool,
 }
 
 /// `policy rulesets` lists by default; `add`, `update` and `delete` write.
@@ -497,24 +506,6 @@ impl TableRows for RuleOut {
     }
 }
 
-impl TableRows for Vec<PendingChange> {
-    fn headers(&self) -> Vec<&'static str> {
-        vec!["object_type", "change_type", "name", "href"]
-    }
-    fn rows(&self) -> Vec<Vec<String>> {
-        self.iter()
-            .map(|p| {
-                vec![
-                    p.object_type.clone(),
-                    p.change_type.clone(),
-                    p.name.clone().unwrap_or_default(),
-                    p.href.clone(),
-                ]
-            })
-            .collect()
-    }
-}
-
 pub async fn run(ctx: &Context, cmd: &PolicyCmd) -> Result<(), CliError> {
     match cmd {
         PolicyCmd::Rulesets(c) => match &c.action {
@@ -535,7 +526,7 @@ pub async fn run(ctx: &Context, cmd: &PolicyCmd) -> Result<(), CliError> {
             DenyRulesAction::Update(a) => deny_rule_update(ctx, a).await,
             DenyRulesAction::Delete(a) => deny_rule_delete(ctx, a).await,
         },
-        PolicyCmd::Pending => pending(ctx).await,
+        PolicyCmd::Pending(a) => pending(ctx, a).await,
         PolicyCmd::Provision(a) => provision(ctx, a).await,
     }
 }
@@ -765,9 +756,140 @@ async fn rule_impact_one(ctx: &Context, a: &RuleImpactArgs) -> Result<(), CliErr
     )
 }
 
-async fn pending(ctx: &Context) -> Result<(), CliError> {
+/// One pending change; with `--diff` also its diff lines (`diff` is left out
+/// of the JSON otherwise, so the shape without the flag is unchanged).
+#[derive(Serialize)]
+struct PendingRow {
+    #[serde(flatten)]
+    change: PendingChange,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    diff: Option<Vec<DiffRow>>,
+}
+
+#[derive(Serialize)]
+struct DiffRow {
+    sign: &'static str,
+    text: String,
+}
+
+impl DiffRow {
+    fn glyph(&self) -> &'static str {
+        match self.sign {
+            "added" => "+",
+            "removed" => "-",
+            _ => " ",
+        }
+    }
+}
+
+impl TableRows for Vec<PendingRow> {
+    fn headers(&self) -> Vec<&'static str> {
+        vec!["object_type", "change_type", "name", "href"]
+    }
+    fn rows(&self) -> Vec<Vec<String>> {
+        let mut rows = Vec::new();
+        for p in self {
+            rows.push(vec![
+                p.change.object_type.clone(),
+                p.change.change_type.clone(),
+                p.change.name.clone().unwrap_or_default(),
+                p.change.href.clone(),
+            ]);
+            // The diff lines sit in the last column, two spaces in, so a
+            // long line is not squeezed by the narrow ones before it.
+            for d in p.diff.iter().flatten() {
+                rows.push(vec![
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    format!("  {} {}", d.glyph(), d.text),
+                ]);
+            }
+        }
+        rows
+    }
+}
+
+fn sign_name(s: Sign) -> &'static str {
+    match s {
+        Sign::Same => "same",
+        Sign::Added => "added",
+        Sign::Removed => "removed",
+    }
+}
+
+async fn pending(ctx: &Context, args: &PendingArgs) -> Result<(), CliError> {
     let c = ctx.pce.pending_changes(ctx.cache_mode).await?;
-    ctx.emit(&c.value, cache_label(c.hit, ctx.cache_mode), false, None)
+    let cache = cache_label(c.hit, ctx.cache_mode);
+    if !args.diff {
+        let rows: Vec<PendingRow> = c
+            .value
+            .into_iter()
+            .map(|change| PendingRow { change, diff: None })
+            .collect();
+        return ctx.emit(&rows, cache, false, None);
+    }
+    // The draft and active list of each kind present is read once, past the
+    // cache when asked to; every change then compares from the cache.
+    let mut kinds: Vec<ObjectKind> = Vec::new();
+    for k in c
+        .value
+        .iter()
+        .filter_map(|p| diff_object_kind(&p.object_type))
+    {
+        if !kinds.contains(&k) {
+            kinds.push(k);
+        }
+    }
+    let mut index = None;
+    if kinds.contains(&ObjectKind::LabelGroup) || kinds.contains(&ObjectKind::RuleSet) {
+        index = Some(ctx.pce.name_index(ctx.cache_mode).await?);
+    }
+    let mode = ctx.cache_mode;
+    for kind in &kinds {
+        match kind {
+            ObjectKind::LabelGroup => {
+                ctx.pce.label_groups(mode).await?;
+                ctx.pce.active_label_groups(mode).await?;
+            }
+            ObjectKind::IpList => {
+                ctx.pce.ip_lists(mode).await?;
+                ctx.pce.active_ip_lists(mode).await?;
+            }
+            ObjectKind::Service => {
+                ctx.pce.services(mode).await?;
+                ctx.pce.active_services(mode).await?;
+            }
+            ObjectKind::RuleSet => {
+                ctx.pce.rule_sets(PolicyScope::Draft, mode).await?;
+                ctx.pce.rule_sets(PolicyScope::Active, mode).await?;
+            }
+            _ => {}
+        }
+    }
+    let mut rows = Vec::new();
+    for change in c.value {
+        let lines = match diff_object_kind(&change.object_type) {
+            Some(kind) => load_diff(&ctx.pce, &change, kind, index.as_deref(), None)
+                .await?
+                .lines
+                .into_iter()
+                .map(|l| DiffRow {
+                    sign: sign_name(l.sign),
+                    text: l.text,
+                })
+                .collect(),
+            None => vec![DiffRow {
+                sign: "same",
+                text: "(no diff)".into(),
+            }],
+        };
+        rows.push(PendingRow {
+            change,
+            diff: Some(lines),
+        });
+    }
+    ctx.emit(&rows, cache, false, None)
 }
 
 fn on_off(on: bool, off: bool) -> Option<bool> {

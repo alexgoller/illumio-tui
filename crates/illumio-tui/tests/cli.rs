@@ -51,6 +51,7 @@ fn every_flag_has_help_text() {
         vec!["traffic", "query", "--help"],
         vec!["traffic", "groups", "--help"],
         vec!["traffic", "mesh", "--help"],
+        vec!["policy", "pending", "--help"],
         vec!["policy", "rulesets", "--help"],
         vec!["policy", "rules", "--help"],
         vec!["policy", "rulesets", "add", "--help"],
@@ -727,6 +728,98 @@ async fn policy_pending_lists_changes() {
     let out = stdout_json(cmd(&server).args(["policy", "pending"]).assert().success());
     assert_eq!(out["data"][0]["object_type"], "rule_sets");
     assert_eq!(out["data"][1]["name"], "Corp");
+}
+
+/// Pending changes of three kinds against an active label group missing its
+/// member and an empty active IP list. `expect` pins each GET to one call.
+async fn mount_pending_diff(server: &MockServer) {
+    mount_objects_expecting(server, Some(1)).await;
+    let pending = json!([
+        {"href": "/orgs/5/sec_policy/draft/label_groups/10", "change_type": "update", "name": "All prod envs"},
+        {"href": "/orgs/5/sec_policy/draft/ip_lists/21", "change_type": "create", "name": "Corp"},
+        {"href": "/orgs/5/sec_policy/draft/firewall_settings", "change_type": "update", "object_type": "firewall_settings"}
+    ]);
+    let active_group = json!([{"href": "/orgs/5/sec_policy/active/label_groups/10", "name": "All prod envs", "key": "env", "labels": []}]);
+    for (p, body) in [
+        ("/api/v2/orgs/5/sec_policy/pending", pending),
+        (
+            "/api/v2/orgs/5/sec_policy/active/label_groups",
+            active_group,
+        ),
+        ("/api/v2/orgs/5/sec_policy/active/ip_lists", json!([])),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(p))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .expect(1)
+            .mount(server)
+            .await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn policy_pending_diff_prints_the_lines_under_each_change() {
+    let server = MockServer::start().await;
+    mount_pending_diff(&server).await;
+    let out = cmd(&server)
+        .args(["policy", "pending", "--diff", "--table"])
+        .assert()
+        .success();
+    let text = String::from_utf8_lossy(&out.get_output().stdout).to_string();
+    for want in [
+        "  + label env=prod",
+        "  + name: Corp",
+        "    name: All prod envs",
+        "  (no diff)",
+    ] {
+        assert!(text.contains(want), "{want:?} missing from\n{text}");
+    }
+    let stderr = String::from_utf8_lossy(&out.get_output().stderr).to_string();
+    assert!(stderr.contains("7 api calls"), "{stderr}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn policy_pending_json_carries_diff_only_with_the_flag() {
+    let server = MockServer::start().await;
+    mount_pending_diff(&server).await;
+    let out = stdout_json(
+        cmd(&server)
+            .args(["policy", "pending", "--diff", "--json"])
+            .assert()
+            .success(),
+    );
+    let first = &out["data"][0];
+    assert_eq!(
+        first["diff"][0],
+        json!({"sign": "same", "text": "name: All prod envs"})
+    );
+    assert!(
+        first["diff"]
+            .as_array()
+            .unwrap()
+            .contains(&json!({"sign": "added", "text": "label env=prod"}))
+    );
+    assert_eq!(
+        out["data"][2]["diff"],
+        json!([{"sign": "same", "text": "(no diff)"}])
+    );
+    assert_eq!(out["meta"]["api_calls"], 7);
+
+    let plain = MockServer::start().await;
+    mount_policy(&plain).await;
+    let out = stdout_json(cmd(&plain).args(["policy", "pending"]).assert().success());
+    let expected: Value =
+        serde_json::from_str(include_str!("../../../fixtures/pending_list.json")).unwrap();
+    for (got, want) in out["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(expected.as_array().unwrap())
+    {
+        assert!(got.get("diff").is_none(), "no diff key without the flag");
+        assert_eq!(got["href"], want["href"]);
+    }
+    assert_eq!(out["meta"]["api_calls"], 1);
 }
 
 const QHREF: &str = "/orgs/5/traffic_flows/async_queries/q-1";
