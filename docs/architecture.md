@@ -65,8 +65,8 @@ One message, top to bottom: pressing `r` on Traffic.
    (`+` sends `Cmd::RunSlice` instead: `filter.to_query_between` for the older
    slice only, answered with `Msg::SliceDone` and appended to the loaded flows).
 4. `update` stores the result and calls `rebuild_views`, which derives the
-   Flows, App-to-app, Mesh and Blocked tables and the treemap's tiles from the
-   one result, grouped by the label keys in force.
+   Flows, App-to-app (pairs, or sections per app), Mesh and Blocked tables and
+   the treemap's tiles from the one result, grouped by the label keys in force.
 5. `app` draws the model once, after draining whatever else is queued.
 
 Tick policy: no timer at all while idle; 250 ms while a request is in
@@ -300,7 +300,7 @@ or the edit form.
 every view with them. Grouping lives in `pce::traffic`: `group_text`
 (`-` in every slot of a non-workload) labels the Flows rows, which are
 `FlowRow`s because a column cell is a plain `fn` that cannot see the keys;
-the aggregations (`group_by_labels`, `blocked_summary`, `mesh`) group by
+the aggregations (`group_by_labels`, `app_sections`, `mesh`) group by
 `group_key`, which keeps IP lists, FQDNs and unlabelled hosts apart under
 their name. `pce::traffic::mesh` places the one process the PCE reports per
 flow on the destination for inbound flows and on the source otherwise.
@@ -313,6 +313,12 @@ groups, the keys, the zoom, the weight or the terminal size change
 Flows view to an App-to-app or treemap pair or a Mesh row; new keys and a
 new result drop it and the zoom. The CLI's `traffic groups` and
 `traffic mesh` run the same functions over one `fetch`.
+`pce::traffic::sections::app_sections` groups the flows under each app on one
+side (`Direction::In` or `Out`), one `PeerRow` per peer group and service,
+after the decision filter; App-to-app's `in` / `out` / `both` states and the
+Blocked view (`in` with `Decisions::Blocked`) are its rows, header rows drawn
+across the table (`render_spanning`). The state, the filter and the folds
+live in `TrafficState::apps_state` and survive every rebuild.
 
 ## Testing
 
