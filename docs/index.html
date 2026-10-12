@@ -104,31 +104,44 @@ illumio-tui 0.1.3</code></pre>
   <p class="lede">Explorer, policy and inventory on five keyboard-driven screens, in the spirit of btop.</p>
   <p>Run <code>illumio-tui</code> with no subcommand and it opens on your default profile (<code>--profile prod</code> for another, <code>--theme light</code> for the light palette). Boxed panels with titled borders, dense stats, decision colours, and the API call and byte counters in the header at all times.</p>
 
-<pre class="mock" aria-label="The Traffic screen in its Mesh view, rendered by the test suite from fixture data"><code> illumio-tui pce.example · org 5 <span class="ok">●</span>                        <span class="dim">api 5 calls · 20.8 KB</span>
-  <span class="hl">1 Traffic</span>  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
-<span class="frame">╭ Filters ────────────────────────────────── window 24h · cap 1000 · unbounded ╮</span>
-<span class="frame">│</span>window 24h  src *  dst *  svc *  decision all                                 <span class="frame">│</span>
-<span class="frame">╰──────────────────────────────────────────────────────────────────────────────╯</span>
-<span class="frame">╭ Result ─────────────────────────────────────────────────── 30 flows · 3s ago ╮</span>
-<span class="frame">│</span>30 flows <span class="ok">allowed 15</span> <span class="warn">pot.blocked 7</span> <span class="bad">blocked 7</span>  ▅▄▂▂▂▃▄▃▃▄█▂ <span class="ok">████████████</span><span class="warn">████</span><span class="bad">████</span><span class="frame">│</span>
-<span class="frame">╰──────────────────────────────────────────────────────────────────────────────╯</span>
-<span class="frame">╭ Mesh ────────────────────── keys app,env · u user · p process · Enter drills ╮</span>
-<span class="frame">│</span><span class="dim">  user     process    src            dst            service   conns  decision </span><span class="frame">│</span>
-<span class="frame">│</span>▸ -        -          ipl:Corp/-     shop/prod      443/tcp      700 <span class="ok">allowed</span>  <span class="frame">│</span>
-<span class="frame">│</span>  -        -          crm/prod       crm/prod       3306/tcp     610 <span class="ok">allowed</span>  <span class="frame">│</span>
-<span class="frame">│</span>  -        -          ipl:Corp/-     crm/prod       443/tcp      520 <span class="ok">allowed</span>  <span class="frame">│</span>
-<span class="frame">│</span>  -        -          shop/prod      shop/prod      5432/tcp     420 <span class="ok">allowed</span>  <span class="frame">│</span>
-<span class="frame">│</span>  app      java       shop/prod      shop/prod      5432/tcp     380 <span class="ok">allowed</span>  <span class="frame">│</span>
-<span class="frame">│</span>  -        -          erp/prod       erp/prod       1521/tcp     300 <span class="ok">allowed</span>  <span class="frame">│</span>
-<span class="frame">│</span>  erp      java       erp/prod       erp/prod       1521/tcp     290 <span class="ok">allowed</span>  <span class="frame">│</span>
-<span class="frame">│</span>  www      node       crm/prod       crm/prod       3306/tcp     240 <span class="ok">allowed</span>  <span class="frame">│</span>
-<span class="frame">│</span>  app      java       shop/prod      crm/prod       443/tcp      150 <span class="ok">allowed</span>  <span class="frame">│</span>
-<span class="frame">│</span>  -        -          shop/dev       shop/dev       5432/tcp      90 <span class="ok">allowed</span>  <span class="frame">│</span>
-<span class="frame">│</span>  -        -          ipl:Corp/-     hr/prod        443/tcp       75 <span class="warn">pot.blk</span>  <span class="frame">│</span>
-<span class="frame">│</span>  root     curl       hr/prod        crm/prod       443/tcp       60 <span class="ok">allowed</span>  <span class="frame">│</span>
-<span class="frame">╰──────────────────────────────────────────────────────────────────────────────╯</span>
-<span class="dim">ready         f filter  r run  a auto  v view  g group  / search  : cmd  ? help</span></code></pre>
-  <p class="caption">The Traffic screen's Mesh view at 80×24, as the test suite renders it from fixture data (<a href="https://github.com/alexgoller/illumio-tui/blob/main/crates/illumio-tui/tests/snapshots/tui_snapshots__traffic_mesh_80x24.snap">snapshot</a>); colours added here to match the dark theme.</p>
+  <figure class="shot tour">
+    <video controls muted playsinline preload="metadata" poster="assets/traffic-flows.png" width="2216" height="1352">
+      <source src="assets/tour.mp4" type="video/mp4">
+      <a href="assets/tour.gif">Watch the tour as a GIF</a>.
+    </video>
+    <figcaption>A 30-second tour against a demo PCE: one <code>r</code> query, <code>v</code> through the five views, the <code>g</code> key picker, <code>Enter</code> on a flow, then Objects and Workloads. <a href="assets/tour.gif">GIF version</a>.</figcaption>
+  </figure>
+
+  <div class="shots">
+    <figure class="shot">
+      <img src="assets/traffic-flows.png" alt="The Traffic screen, Flows view: filter bar, a result of 1000 flows with a decision bar, the flow table with one row selected, and the detail panel showing both label sets, process, user and bytes" width="2216" height="1352" loading="lazy">
+      <figcaption><kbd>1</kbd> Traffic, Flows view with the detail of the selected flow.</figcaption>
+    </figure>
+    <figure class="shot">
+      <img src="assets/traffic-mesh.png" alt="The Traffic screen, Mesh view: rows of user, process, source group, destination group, service, destination process, connections and decision" width="2216" height="1352" loading="lazy">
+      <figcaption>Mesh: who talks to whom, by user and process.</figcaption>
+    </figure>
+    <figure class="shot">
+      <img src="assets/traffic-treemap.png" alt="The Traffic screen, Treemap view: one box per source app and environment, tiles per destination sized by connections and coloured by decision, the largest source selected" width="2216" height="1352" loading="lazy">
+      <figcaption>Treemap: each source a box, destinations sized by connections.</figcaption>
+    </figure>
+    <figure class="shot">
+      <img src="assets/traffic-blocked.png" alt="The Traffic screen, Blocked view grouped by destination app and environment, empty because the result holds no blocked or potentially blocked flows" width="2216" height="1352" loading="lazy">
+      <figcaption>Blocked: empty here, the demo PCE allowed every flow in this window.</figcaption>
+    </figure>
+    <figure class="shot">
+      <img src="assets/objects-labels.png" alt="The Objects screen, Labels tab, searched for app: key, value, workload and rule counts, and href per label, 27 of 132 rows" width="2216" height="1352" loading="lazy">
+      <figcaption><kbd>3</kbd> Objects, Labels tab with a <code>/app</code> search.</figcaption>
+    </figure>
+    <figure class="shot">
+      <img src="assets/workloads.png" alt="The Workloads screen: a VEN health summary line with a bar, then hostname, IP, labels, enforcement, online, agent, health, heartbeat and sync columns for 206 workloads" width="2216" height="1352" loading="lazy">
+      <figcaption><kbd>4</kbd> Workloads with VEN health.</figcaption>
+    </figure>
+    <figure class="shot">
+      <img src="assets/help.png" alt="The key map overlay opened with ?, listing global keys and the keys for each screen" width="2216" height="1352" loading="lazy">
+      <figcaption><kbd>?</kbd> The key map.</figcaption>
+    </figure>
+  </div>
 
   <div class="cols">
     <div>

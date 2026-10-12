@@ -236,21 +236,22 @@ td:first-child { white-space: nowrap; }
 .guards b { display: block; font: 700 1.25rem/1.25 var(--mono); margin-bottom: .35rem; }
 .guards span { color: var(--muted); font-size: .95rem; }
 
-/* ---------- TUI mockup ---------- */
-.mock {
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
-  font-size: clamp(.5rem, 1.55vw, .82rem);
-  line-height: 1.2;
-  border-left-color: var(--warn);
+/* ---------- screenshots and recording ---------- */
+.shot { margin: 0 0 1.5rem; min-width: 0; }
+.shot img, .shot video {
+  display: block;
+  width: 100%; max-width: 100%; height: auto;
   background: var(--code-bg);
+  border: 1px solid var(--line);
 }
-.mock code { font-family: inherit; }
-.mock .frame { color: var(--title); }
-.mock .hl { color: var(--bg); background: var(--title); }
-.mock .dim { color: var(--muted); }
-.mock .ok { color: var(--ok); }
-.mock .warn { color: var(--warn); }
-.mock .bad { color: var(--bad); }
+.shot.tour video { border-left: 3px solid var(--warn); }
+.shot figcaption { font-size: .9rem; color: var(--muted); margin-top: .5rem; max-width: var(--measure); }
+.shot figcaption kbd { color: var(--title); }
+.shots { display: grid; gap: 1.5rem 2rem; grid-template-columns: minmax(0, 1fr); margin: 0 0 1.5rem; }
+.shots .shot { margin: 0; }
+@media (min-width: 900px) {
+  .shots { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
 .caption { font-size: .9rem; color: var(--muted); margin: -.5rem 0 1.5rem; }
 
 .status-tag {
