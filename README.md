@@ -104,18 +104,30 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   without a request. `r` after widening runs one query for the whole window and asks first
   when that is expensive. A truncated result that covers under half its window says how much
   in the Result header (`1000 flows · covers 4m of 24h · truncated`) and the status line,
-  with what `]` and `B` would do. `B` fills the rest of the window backwards in slices sized to
-  fit the cap (the measured rate, `0.8 × cap`, rounded down to 1m 5m 15m 30m 1h 2h 6h 12h 1d):
-  it asks once (`backfill 23h 56m in 9 slices of 2h (9 requests, cap 1000 each)? y/n`), then
-  sends one slice at a time, newest first, merged like `+` and counted in the header
-  (`slice 3 of 9`). A slice that still truncates is fetched again in halves; one that truncates
-  at 1m stops the backfill (`raise traffic_max_results`). `Esc` stops after the running slice,
-  and `B` again continues. At most 50 slices per `B`; above that `B` says so instead of asking.
-  A backfill keeps auto-refresh off, the header then shows its real coverage and slice count
-  (`24h · 10 slices`), and `+` extends it by one slice of the same length.
+  with what `]` and `B` would do. Explorer rows are not time-ordered within the cap, so the
+  truncated rows say nothing reliable about any part of the window: `B` fetches the whole
+  window again, backwards from its end, in slices sized to fit the cap (the measured rate,
+  `0.8 × cap`, rounded down to 1m 5m 15m 30m 1h 2h 6h 12h 1d). When the cap cannot fit the
+  window in 50 slices, `B` proposes the smallest cap of the `]` ladder (up to the profile's
+  `traffic_max_results`) that can. It asks once, for example after 1000 flows covering 2h 30m
+  of 24h (`backfill 1d in 12 slices of 2h at cap 1000: 12 queries (≥36 API calls)? y/n`) or
+  4 minutes of 24h with a profile maximum of 10000 (`raise the cap to 10000 and backfill 1d in
+  48 slices of 30m: 48 queries (≥144 API calls)? y/n`); each query is at least a submit, a
+  status poll and a download, and a cap above 10000 is named as expensive in the same question.
+  It then sends one slice at a time, newest first, and counts them in the header
+  (`slice 3 of 12`): the first slice replaces the truncated rows, later ones merge like `+`,
+  and the result stays marked truncated until the slices reach the window start. A slice that
+  still truncates is fetched again in halves (never below 1m); a 1m slice that truncates stops
+  the backfill (`raise traffic_max_results`). A run sends at most 50 slices: when even the
+  profile's cap needs more, `B` offers the newest 50 (`backfill the next 50 slices of 15m:
+  12h 30m of the remaining 1d, …; B again continues`). `Esc` stops after the running slice, and
+  `B` again continues where a run stopped. A backfill keeps auto-refresh off, the header shows
+  its real coverage and slice count (`1d · 12 slices`, or `covers 6h of 1d · 3 slices ·
+  truncated`), and `+` extends it by one slice of the same length.
   The profile setting `traffic_auto_backfill = true` (or `ILLUMIO_AUTO_BACKFILL=1`) starts that
-  backfill right after a truncated, low-coverage query without the `y`, with the same limits,
-  progress and `Esc`. It is off by default because every request must be user-caused: setting
+  run right after a truncated, low-coverage query without the `y`, with the same limits,
+  progress and `Esc`: one run (at most 50 slices) per query, never chained, and a cap above
+  10000 is still asked. It is off by default because every request must be user-caused: setting
   it is the user saying yes in advance, once, in writing. `]` / `[` step the result cap (`500` up to `10000`, then the
   profile's `traffic_max_results`; never above it) and re-run the query. `v` cycles five
   views of the one result, all grouped by the same label keys: the profile's scope keys
@@ -214,10 +226,13 @@ the API call and byte counters at all times.
 JSON output (default when piped) is `{"data": ..., "meta": {...}}` where
 `meta` reports API calls, bytes, cache status, truncation, and the query
 window; traffic commands add `meta.covered`, the span the flows' last-seen times cover
-(`"4m"`). With `--backfill` (`query`, `groups` and `mesh`) a truncated result's window is
-filled in slices as the TUI's `B` does, one query at a time; `meta.slices` counts the queries
-merged, `meta.api_calls` every request, and `--max-slices` (default 50) bounds it (a plan
-above it is reported on stderr and nothing more is sent). Errors go to stderr as JSON. Exit codes: 1 generic, 2 arguments or
+(`"4m"`; the whole window when the result is complete). With `--backfill` (`query`, `groups`
+and `mesh`) a truncated result's window is fetched again in slices as the TUI's `B` does,
+newest first, one query at a time, the cap raised along the ladder up to the profile's when
+the slices would not fit in 50 (past 10000 only with `--yes`); `meta.slices` counts the slices
+merged and `meta.api_calls` every request (at least 3 per query). A run sends at most
+`--max-slices` queries (1 to 50, default 50); when the window needs more, stderr names the
+`--to` that continues and `meta.truncated` stays true. Errors go to stderr as JSON. Exit codes: 1 generic, 2 arguments or
 config, 3 auth, 4 PCE error, 5 rate limited, 6 write refused by the guard.
 
 `traffic groups` and `traffic mesh` take the `traffic query` filter flags (and its dry run,
@@ -543,7 +558,7 @@ Explorer queries default to a 24 h window and 1000 rows; larger windows
 (> 7 d) or caps (> 10 000) need `--yes`. `--dry-run` shows the request
 body without sending it. A traffic backfill sends nothing before `B` and `y` (or
 `--backfill`, or the written `traffic_auto_backfill` opt-in), never more than one slice at a
-time and never more than 50 slices per run.
+time and never more than 50 queries (at least 150 API calls) per run.
 
 ## Development
 

@@ -66,7 +66,8 @@ One message, top to bottom: pressing `r` on Traffic.
    slice only, answered with `Msg::SliceDone` and appended to the loaded flows;
    `B` sends the same `Cmd::RunSlice` once per backfill slice, the next only
    after `SliceDone` for the previous one, walking `pce::traffic::BackfillRun`
-   from the oldest covered instant back to the window start).
+   from the window end back to the window start, the first slice replacing
+   the truncated rows; at most 50 slices per run).
 4. `update` stores the result and calls `rebuild_views`, which derives the
    Flows, App-to-app (pairs, or sections per app), Mesh and Blocked tables and
    the treemap's tiles from the one result, grouped by the label keys in force.
