@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ Keys ───────────────────────────────── 24-45 of 45 · j/k scroll · Esc closes ╮
+╭ Keys ───────────────────────────────── 26-47 of 47 · j/k scroll · Esc closes ╮
 │Mesh     u / p           show or hide the user · process columns              │
 │Treemap  hjkl Enter b    move · zoom, then drill · conns/bytes · Esc out      │
 │Traffic  w               draft allow rule from a blocked flow or row (writes) │

@@ -7,6 +7,8 @@
 //! `[profiles.<name>.labels]` (or `ILLUMIO_SCOPE_KEYS`, `ILLUMIO_TIER_KEY`)
 //! names the label model the TUI writes rules in; its `ignore_keys` (or
 //! `ILLUMIO_IGNORE_KEYS`) hides housekeeping keys from label columns.
+//! `traffic_auto_backfill` (or `ILLUMIO_AUTO_BACKFILL`) lets the TUI fill a
+//! truncated traffic result without asking; off unless written down.
 //! The tool never writes secrets anywhere.
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -77,6 +79,9 @@ pub struct Limits {
     pub auto_refresh_min_seconds: Option<u64>,
     pub traffic_max_results: Option<u32>,
     pub traffic_default_window: Option<String>,
+    /// Start the traffic backfill after a truncated query without asking
+    /// (the user saying yes in advance, in writing).
+    pub traffic_auto_backfill: Option<bool>,
 }
 
 impl Limits {
@@ -85,6 +90,7 @@ impl Limits {
             && self.auto_refresh_min_seconds.is_none()
             && self.traffic_max_results.is_none()
             && self.traffic_default_window.is_none()
+            && self.traffic_auto_backfill.is_none()
     }
 }
 
@@ -135,6 +141,9 @@ pub struct ResolvedConfig {
     pub auto_refresh_min_seconds: u64,
     pub traffic_max_results: u32,
     pub traffic_default_window: String,
+    /// `traffic_auto_backfill` or `ILLUMIO_AUTO_BACKFILL`: a truncated
+    /// query with low coverage starts the backfill without the `y`.
+    pub traffic_auto_backfill: bool,
     pub writes: bool,
     /// Label keys a ruleset scope is made of, in order.
     pub scope_keys: Vec<String>,
@@ -394,6 +403,12 @@ pub fn resolve(
             .traffic_default_window
             .clone()
             .unwrap_or_else(|| "24h".into()),
+        traffic_auto_backfill: match env_str("ILLUMIO_AUTO_BACKFILL") {
+            Some(raw) => parse_bool(&raw).ok_or_else(|| {
+                ConfigError::Message(format!("ILLUMIO_AUTO_BACKFILL is not a boolean: {raw:?}"))
+            })?,
+            None => profile.limits.traffic_auto_backfill.unwrap_or(false),
+        },
         writes: match env_str("ILLUMIO_WRITES") {
             Some(raw) => parse_bool(&raw).ok_or_else(|| {
                 ConfigError::Message(format!("ILLUMIO_WRITES is not a boolean: {raw:?}"))
@@ -759,6 +774,55 @@ ignore_keys = [" DFIRBubble ", "", "os", "DFIRBubble", "app", "role", "bu"]
         .unwrap_err();
         assert!(
             err.to_string().contains("ILLUMIO_WRITES is not a boolean"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn auto_backfill_is_off_unless_written_down_and_env_outranks() {
+        let r = resolve(&file(), &Overrides::default(), &env(&[])).unwrap();
+        assert!(!r.traffic_auto_backfill, "off by default");
+        let f: ConfigFile = toml::from_str(
+            r#"
+[profiles.default]
+host = "h"
+org_id = 1
+api_key = "k"
+api_secret = "s"
+
+[profiles.default.limits]
+traffic_auto_backfill = true
+"#,
+        )
+        .unwrap();
+        assert!(
+            resolve(&f, &Overrides::default(), &env(&[]))
+                .unwrap()
+                .traffic_auto_backfill
+        );
+        let r = resolve(
+            &f,
+            &Overrides::default(),
+            &env(&[("ILLUMIO_AUTO_BACKFILL", "0")]),
+        )
+        .unwrap();
+        assert!(!r.traffic_auto_backfill, "env outranks the profile");
+        let r = resolve(
+            &file(),
+            &Overrides::default(),
+            &env(&[("ILLUMIO_AUTO_BACKFILL", "1")]),
+        )
+        .unwrap();
+        assert!(r.traffic_auto_backfill);
+        let err = resolve(
+            &file(),
+            &Overrides::default(),
+            &env(&[("ILLUMIO_AUTO_BACKFILL", "sometimes")]),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("ILLUMIO_AUTO_BACKFILL is not a boolean"),
             "{err}"
         );
     }

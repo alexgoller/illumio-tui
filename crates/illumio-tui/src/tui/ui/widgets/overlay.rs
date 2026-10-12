@@ -47,6 +47,11 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ),
     ("", "window steps 1h 6h 12h 1d 2d 3d 1w 2w 4w 90d"),
     (
+        "Traffic  B",
+        "backfill a truncated result in slices (asks first)",
+    ),
+    ("", "newest first, one at a time; Esc stops after one"),
+    (
         "Traffic  ] / [",
         "raise / lower the result cap (re-runs the query)",
     ),

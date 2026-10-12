@@ -305,6 +305,8 @@ pub enum PendingAction {
     /// `+` past a cost threshold: the filter with the wider window and the
     /// slice it fetches (`start` to `end`, the loaded start).
     RunSlice(TrafficFilter, jiff::Timestamp, jiff::Timestamp),
+    /// `B`: fill the rest of the window in slices.
+    Backfill(pce::traffic::BackfillPlan),
 }
 
 #[derive(Debug)]
@@ -333,6 +335,170 @@ pub struct TrafficData {
     /// The time range the flows cover, slice by slice; `None` when the
     /// outcome carried no bounds (then `+` runs a full query).
     pub slices: Option<Slices>,
+    /// The slice length of the backfill that filled this data (`+` extends
+    /// by it); `Some` while the data is a backfill, which keeps
+    /// auto-refresh off (a tick would replace it with one truncated query).
+    pub backfill: Option<Duration>,
+}
+
+/// How much of its window the loaded data covers.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DataCoverage {
+    pub covered: Duration,
+    pub window: Duration,
+    /// The oldest covered instant: a backfill continues from here.
+    pub oldest: Option<jiff::Timestamp>,
+}
+
+impl DataCoverage {
+    pub fn share(&self) -> f64 {
+        pce::traffic::coverage::share(self.covered, self.window)
+    }
+
+    pub fn complete(&self) -> bool {
+        self.covered >= self.window
+    }
+}
+
+/// Below this share of its window a truncated result says so and offers `B`.
+pub const LOW_COVERAGE: f64 = 0.5;
+
+impl TrafficData {
+    /// Where the window the data was asked for begins: the range's end
+    /// minus the filter's window.
+    pub fn window_start(&self) -> Option<jiff::Timestamp> {
+        let end = self.slices.as_ref()?.end;
+        let span = jiff::Span::try_from(self.filter.window_duration().ok()?).ok()?;
+        end.checked_sub(span).ok()
+    }
+
+    /// A backfill covers its range (`end` back to the oldest slice start);
+    /// any other result what its flows' `last_detected` span.
+    pub fn coverage(&self) -> Option<DataCoverage> {
+        let window = self.filter.window_duration().ok()?;
+        if self.backfill.is_some() {
+            let s = self.slices.as_ref()?;
+            return Some(DataCoverage {
+                covered: s.end.duration_since(s.start()).unsigned_abs().min(window),
+                window,
+                oldest: Some(s.start()),
+            });
+        }
+        let c = pce::traffic::coverage(&self.flows, window);
+        Some(DataCoverage {
+            covered: c.covered,
+            window,
+            oldest: c.oldest,
+        })
+    }
+
+    /// A truncated, not backfilled result covering under half its window
+    /// (measured on at least one flow).
+    pub fn low_coverage(&self) -> Option<DataCoverage> {
+        if !self.truncated || self.backfill.is_some() {
+            return None;
+        }
+        // Without a single `last_detected` there is nothing to measure.
+        self.coverage()
+            .filter(|c| c.oldest.is_some() && c.share() < LOW_COVERAGE)
+    }
+
+    /// What `B` would fetch: the rest of a truncated result's window in
+    /// slices sized from its rate, or the rest of a backfill's in its
+    /// slice length. `None` when nothing is left (or the range is unknown).
+    pub fn backfill_plan(&self) -> Option<pce::traffic::BackfillPlan> {
+        let window_start = self.window_start()?;
+        match self.backfill {
+            Some(slice) => {
+                let from = self.slices.as_ref()?.start();
+                let uncovered = pce::traffic::coverage::uncovered(window_start, from)?;
+                Some(pce::traffic::BackfillPlan::with_slice(uncovered, slice))
+            }
+            None => {
+                let window = self.filter.window_duration().ok()?;
+                let c = pce::traffic::coverage(&self.flows, window);
+                pce::traffic::plan_backfill(
+                    &c,
+                    self.truncated,
+                    self.filter.max_results,
+                    window_start,
+                )
+            }
+        }
+    }
+
+    /// The Result header's coverage part: `covers 4m of 24h · truncated`
+    /// for a low-coverage result; `24h · 10 slices` or `covers 23h of 24h
+    /// · 10 slices` for a backfill. `None` otherwise.
+    pub fn coverage_meta(&self) -> Option<String> {
+        let window = &self.filter.window;
+        if self.backfill.is_some() {
+            let c = self.coverage()?;
+            let n = self.slices.as_ref().map_or(1, Slices::count);
+            let mut s = if c.complete() {
+                window.clone()
+            } else {
+                format!(
+                    "covers {} of {window}",
+                    pce::traffic::compact_duration(c.covered)
+                )
+            };
+            s.push_str(&format!(" · {n} slice{}", if n == 1 { "" } else { "s" }));
+            if self.truncated {
+                s.push_str(" · truncated");
+            }
+            return Some(s);
+        }
+        let c = self.low_coverage()?;
+        Some(format!(
+            "covers {} of {window} · truncated",
+            pce::traffic::compact_duration(c.covered)
+        ))
+    }
+}
+
+/// A backfill in flight: the walk, `Esc` asking it to stop after the
+/// running slice, and whether the profile's opt-in started it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveBackfill {
+    pub run: pce::traffic::BackfillRun,
+    pub cancel: bool,
+    pub auto: bool,
+    /// Why the slice length changed (a truncated slice halved it).
+    pub note: Option<String>,
+}
+
+impl ActiveBackfill {
+    /// `slice 3 of 9`: the running slice (retries count as the same one).
+    pub fn progress(&self) -> String {
+        format!(
+            "slice {} of {}",
+            self.run.done + 1,
+            self.run.total().max(self.run.done + 1)
+        )
+    }
+
+    /// `backfill: slice 3 of 9 · halved to 1h`, or `auto backfill: slice 1
+    /// of 9 (profile traffic_auto_backfill)`; `Esc` adds that it stops.
+    pub fn status_text(&self) -> String {
+        let mut s = if self.auto {
+            format!(
+                "auto backfill: {} (profile traffic_auto_backfill)",
+                self.progress()
+            )
+        } else {
+            format!("backfill: {}", self.progress())
+        };
+        if let Some(n) = &self.note {
+            s.push_str(&format!(" · {n}"));
+        }
+        s.push_str(if self.cancel {
+            " · stops after this slice"
+        } else {
+            " · Esc stops"
+        });
+        s
+    }
 }
 
 /// The time range the loaded flows cover. The first query fetched
@@ -1341,6 +1507,9 @@ pub struct TrafficState {
     /// A submitted `w` form while its plan is on the way: a planner error
     /// (an unknown ruleset name) brings it back with the error.
     pub rule_form: Option<Form>,
+    /// `B` (or the profile's opt-in) is filling the window slice by slice;
+    /// one slice in flight at a time. Any other query or a cancel ends it.
+    pub backfill: Option<ActiveBackfill>,
 }
 
 /// Both optional Mesh columns shown.
@@ -1475,6 +1644,7 @@ impl TrafficState {
             drill: None,
             auto: AutoRefresh::new(auto_min_seconds),
             rule_form: None,
+            backfill: None,
         }
     }
 
@@ -1746,6 +1916,7 @@ impl TrafficState {
     /// Cancels a running query without starting another: its answer is
     /// stale from here on.
     pub fn cancel_query(&mut self) {
+        self.backfill = None;
         if let QueryState::Running { cancel, .. } = &self.query {
             cancel.cancel();
             self.seq += 1;
@@ -1754,7 +1925,10 @@ impl TrafficState {
     }
 
     /// Cancels a running query (if any) and returns the next sequence number.
+    /// Ends a backfill: its next slice comes from `next_backfill_slice`,
+    /// which puts it back after this.
     pub fn start_query(&mut self, now: Instant) -> (u64, CancellationToken) {
+        self.backfill = None;
         if let QueryState::Running { cancel, .. } = &self.query {
             cancel.cancel();
         }
@@ -3251,6 +3425,8 @@ pub struct Limits {
     pub auto_refresh_min_seconds: u64,
     pub traffic_max_results: u32,
     pub traffic_default_window: String,
+    /// Start the backfill after a truncated query without the `y`.
+    pub traffic_auto_backfill: bool,
     /// Label keys a ruleset scope is made of (`app`, `env`).
     pub scope_keys: Vec<String>,
     /// The label key that names a tier (`role`).
@@ -3267,6 +3443,7 @@ impl Limits {
             auto_refresh_min_seconds: cfg.auto_refresh_min_seconds,
             traffic_max_results: cfg.traffic_max_results,
             traffic_default_window: cfg.traffic_default_window.clone(),
+            traffic_auto_backfill: cfg.traffic_auto_backfill,
             scope_keys: cfg.scope_keys.clone(),
             tier_key: cfg.tier_key.clone(),
             ignore_keys: cfg.ignore_keys.clone(),
@@ -3345,6 +3522,7 @@ impl Model {
                 auto_refresh_min_seconds,
                 traffic_max_results,
                 traffic_default_window,
+                traffic_auto_backfill: false,
                 scope_keys,
                 tier_key: crate::config::DEFAULT_TIER_KEY.into(),
                 ignore_keys: Vec::new(),

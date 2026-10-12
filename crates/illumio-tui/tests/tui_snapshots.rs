@@ -256,6 +256,58 @@ fn traffic_merged_slices_80x24() {
     insta::assert_snapshot!("traffic_merged_slices_80x24", out);
 }
 
+/// A truncated `1d` result whose flows span 4 minutes: the Result header
+/// says how much it covers.
+#[test]
+fn traffic_coverage_header_80x24() {
+    use illumio_tui::tui::filter::TrafficFilter;
+    use illumio_tui::tui::msg::{Msg, QueryOutcome};
+    use illumio_tui::tui::test_support::{FIXTURE_END, fixture_flows_rich};
+    use illumio_tui::tui::update;
+    let mut m = model_fixture();
+    let end: jiff::Timestamp = FIXTURE_END.parse().unwrap();
+    let mut flows = fixture_flows_rich();
+    let n = flows.len();
+    for (i, f) in flows.iter_mut().enumerate() {
+        let t = end
+            .checked_sub(jiff::Span::new().seconds((i * 240 / (n - 1)) as i64))
+            .unwrap();
+        f.last_detected = Some(pce::traffic::format_timestamp(t));
+    }
+    let filter = TrafficFilter::defaults("1d", n as u32);
+    update(&mut m, Msg::ApplyFilter(filter.clone()));
+    let seq = m.traffic.seq;
+    let start = end.checked_sub(jiff::Span::new().hours(24)).unwrap();
+    update(
+        &mut m,
+        Msg::QueryDone {
+            seq,
+            result: Ok(QueryOutcome {
+                flows,
+                truncated: true,
+                matches_count: None,
+                elapsed: std::time::Duration::from_millis(900),
+                hit: false,
+                filter,
+                bounds: Some((start, end)),
+            }),
+        },
+    );
+    assert!(
+        m.status.text.starts_with(&format!(
+            "cap {n} covers ~4 minutes of 1d: ] raises the cap"
+        )),
+        "{}",
+        m.status.text
+    );
+    let out = render_to_string(&m, 80, 24);
+    assert!(
+        out.contains(&format!("{n} flows · covers 4m of 1d · truncated")),
+        "{out}"
+    );
+    insta::assert_snapshot!("traffic_coverage_header_80x24", out);
+}
+
 #[test]
 fn traffic_flows_truncated_shows_warning() {
     let mut m = model_with_flows();

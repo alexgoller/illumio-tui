@@ -87,14 +87,24 @@ fn query_meta(model: &Model) -> String {
     match &model.traffic.query {
         QueryState::Running {
             started, status, ..
-        } => format!("running {:.1}s · {status}", started.elapsed().as_secs_f64()),
+        } => format!(
+            "{}running {:.1}s · {status}",
+            model
+                .traffic
+                .backfill
+                .as_ref()
+                .map_or(String::new(), |b| format!("{} · ", b.progress())),
+            started.elapsed().as_secs_f64()
+        ),
         QueryState::Failed(_) => "failed".into(),
         QueryState::Idle => match &model.traffic.data {
             Some(d) => {
                 let auto = &model.traffic.auto;
                 format!(
-                    "{} flows · {}{}{}",
+                    "{} flows · {}{}{}{}",
                     d.flows.len(),
+                    d.coverage_meta()
+                        .map_or(String::new(), |c| format!("{c} · ")),
                     bars::age_text(d.fetched_at.elapsed()),
                     if d.cache_hit { " · cached" } else { "" },
                     auto.meta(Instant::now())

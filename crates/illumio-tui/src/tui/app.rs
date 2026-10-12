@@ -924,6 +924,7 @@ mod tests {
             auto_refresh_min_seconds: 60,
             traffic_max_results: 1000,
             traffic_default_window: "24h".into(),
+            traffic_auto_backfill: false,
             scope_keys: vec!["app".into(), "env".into()],
             tier_key: "role".into(),
             ignore_keys: Vec::new(),

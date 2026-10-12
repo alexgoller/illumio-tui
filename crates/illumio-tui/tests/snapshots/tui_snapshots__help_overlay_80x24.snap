@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ Keys ────────────────────────────────── 1-22 of 45 · j/k scroll · Esc closes ╮
+╭ Keys ────────────────────────────────── 1-22 of 47 · j/k scroll · Esc closes ╮
 │1 2 3 4 5                Traffic · Policy · Objects · Workloads · Events      │
 │:                        command prompt: :traffic :policy :objects :workloads │
 │                         :events  :iplists  :filter <expr>  :window <dur>     │
@@ -19,10 +19,10 @@ expression: out
 │Traffic  f               edit filter: window src dst service decisions        │
 │Traffic  + / -           widen (fetches the older slice only) / narrow        │
 │                         window steps 1h 6h 12h 1d 2d 3d 1w 2w 4w 90d         │
+│Traffic  B               backfill a truncated result in slices (asks first)   │
+│                         newest first, one at a time; Esc stops after one     │
 │Traffic  ] / [           raise / lower the result cap (re-runs the query)     │
 │                         cap steps 500 1000 2000 5000 10000, profile max      │
 │Traffic  g               pick the label keys every view groups by             │
 │Traffic  Enter           detail (flows) · drill into a row or section header  │
-│App-to-app x / X         pairs · in · out · both (sections per app) · back    │
-│App-to-app d             decision filter: all · blocked · blocked only        │
 ╰──────────────────────────────────────────────────────────────────────────────╯

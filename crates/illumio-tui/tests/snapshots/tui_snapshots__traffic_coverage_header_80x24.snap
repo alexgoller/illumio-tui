@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭ Filters ───────────────────────────────────── window 1d · cap 30 · unbounded ╮
+│window 1d  src *  dst *  svc *  decision all                                  │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭ Result ───────────────────── 30 flows · covers 4m of 1d · truncated · 0s ago ╮
+│30 flows allowed 15 pot.blocked 7 blocked 7  ⚠ truncat██▅██▅██▅█▅▃ ███████████│
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭ Flows ───────────────────────────────────────────────────────────────────────╮
+│  src            src group  dst            dst group  service   conns decision│
+│▸ shop-web-p.exa shop/prod  shop-db-p.exam shop/prod  5432/tcp    420 allowed │
+│  shop-web-p.exa shop/prod  shop-db-p.exam shop/prod  5432/tcp    380 allowed │
+│  shop-web-p.exa shop/prod  crm-web-p.exam crm/prod   443/tcp     150 allowed │
+│  crm-web-p.exam crm/prod   crm-db-p.examp crm/prod   3306/tcp    610 allowed │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭ Detail ───────────────────────────────────────────────────────── Enter shows ╮
+│select a flow and press Enter                                                 │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+cap 30 covers f filter  r run  a auto  v view  g group  / search  : cmd  ? help
