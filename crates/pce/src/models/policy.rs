@@ -167,6 +167,9 @@ pub struct RuleSet {
     pub extra: Map<String, Value>,
 }
 
+/// The `change_type` of a pending entry that names none.
+pub const UNKNOWN_CHANGE_TYPE: &str = "unknown";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingChange {
     pub href: String,
@@ -186,7 +189,7 @@ pub fn parse_pending(v: Value) -> Vec<PendingChange> {
             .get("change_type")
             .or_else(|| v.get("update_type"))
             .and_then(Value::as_str)
-            .unwrap_or("update")
+            .unwrap_or(UNKNOWN_CHANGE_TYPE)
             .to_string();
         let name = v.get("name").and_then(Value::as_str).map(str::to_string);
         let object_type = Ref::new(&href).object_type().to_string();

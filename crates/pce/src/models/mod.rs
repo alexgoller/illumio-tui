@@ -13,7 +13,7 @@ pub use events::{Event, EventFilter};
 pub use labels::{Fqdn, IpList, IpRange, Label, LabelGroup, Service, ServicePort};
 pub use policy::{
     Actor, DenyRule, IngressService, PendingChange, PolicyScope, ResolveLabelsAs, Rule, RuleSet,
-    parse_pending,
+    UNKNOWN_CHANGE_TYPE, parse_pending,
 };
 pub use traffic::{
     ActorFilter, ActorMatch, AsyncQueryStatus, Endpoint, Flow, FlowService, FlowWorkload, NamedRef,

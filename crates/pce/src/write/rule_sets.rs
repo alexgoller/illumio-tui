@@ -186,6 +186,7 @@ impl Writer<'_> {
                 path: self.pce().client().org_path("sec_policy/draft/rule_sets"),
                 body: Some(draft.to_body()),
                 summary: format!("create rule_set {name}"),
+                objects: Vec::new(),
             },
             kind: ObjectKind::RuleSet,
         })
@@ -215,6 +216,7 @@ impl Writer<'_> {
                 path: href,
                 body: Some(body),
                 summary: format!("update rule_set {}", current.name),
+                objects: Vec::new(),
             },
             kind: ObjectKind::RuleSet,
         })
@@ -228,6 +230,7 @@ impl Writer<'_> {
                 path: href.clone(),
                 body: None,
                 summary: format!("delete rule_set {href}"),
+                objects: Vec::new(),
             },
             kind: ObjectKind::RuleSet,
         })

@@ -7696,6 +7696,7 @@ mod tests {
                 path: "/orgs/5/labels".into(),
                 body: Some(serde_json::json!({"key": "app", "value": long})),
                 summary: "create label".into(),
+                objects: Vec::new(),
             },
             kind: pce::write::ObjectKind::Label,
         };

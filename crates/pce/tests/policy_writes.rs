@@ -50,6 +50,7 @@ fn send_plan(method: WriteMethod, path: &str, body: Option<Value>, kind: ObjectK
             path: path.into(),
             body,
             summary: "test".into(),
+            objects: Vec::new(),
         },
         kind,
     }
@@ -1378,6 +1379,13 @@ mod revert {
                 "revert all 2 pending changes: ip_list \"Corp\" (removed), \
                  rule_set \"Global-Infra\" (removed)"
             );
+            assert_eq!(
+                req.objects,
+                vec![
+                    "ip_list \"Corp\" (removed)",
+                    "rule_set \"Global-Infra\" (removed)"
+                ]
+            );
             assert!(matches!(
                 plan,
                 Plan::Send {
@@ -1398,13 +1406,23 @@ mod revert {
                 {"href": "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1", "change_type": "create"},
                 {"href": "/orgs/5/sec_policy/draft/rule_sets/200", "change_type": "delete", "name": "Old"},
                 {"href": "/orgs/5/sec_policy/draft/services/31", "change_type": "update", "name": "PostgreSQL"},
-                {"href": "/orgs/5/sec_policy/draft/ip_lists/21", "change_type": "create", "name": "Corp"}
+                {"href": "/orgs/5/sec_policy/draft/ip_lists/21", "change_type": "create", "name": "Corp"},
+                {"href": "/orgs/5/sec_policy/draft/label_groups/9", "name": "Tiers"}
             ]),
         )
         .await;
         let pce = pce_for(&server);
         let guard = guard_with(MemoryAudit::new());
         let w = pce.writer(&guard);
+        let plan = w
+            .plan_revert(&hrefs(&["/orgs/5/sec_policy/draft/label_groups/9"]))
+            .await
+            .unwrap();
+        assert_eq!(
+            plan.request().unwrap().objects,
+            vec!["label_group \"Tiers\" (fate unknown)"],
+            "no change type: the fate is not guessed"
+        );
         let plan = w
             .plan_revert(&hrefs(&[
                 "/orgs/5/sec_policy/active/rule_sets/100/sec_rules/1",
@@ -1432,6 +1450,14 @@ mod revert {
             req.summary,
             "revert 3 changes: rule_set /orgs/5/sec_policy/draft/rule_sets/100 (back to active), \
              rule_set \"Old\" (back to active), service \"PostgreSQL\" (back to active)"
+        );
+        assert_eq!(
+            req.objects,
+            vec![
+                "rule_set /orgs/5/sec_policy/draft/rule_sets/100 (back to active)",
+                "rule_set \"Old\" (back to active)",
+                "service \"PostgreSQL\" (back to active)"
+            ]
         );
         let plan = w
             .plan_revert(&hrefs(&["/orgs/5/sec_policy/draft/ip_lists/21"]))

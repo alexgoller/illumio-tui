@@ -233,6 +233,7 @@ impl Writer<'_> {
                 path: self.pce().client().org_path("sec_policy"),
                 body: Some(body),
                 summary: summary(&counts),
+                objects: Vec::new(),
             },
             kind: ObjectKind::Provision,
         })

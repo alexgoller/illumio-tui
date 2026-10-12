@@ -46,6 +46,7 @@ fn send_plan(method: WriteMethod, path: &str, body: Option<Value>, kind: ObjectK
             path: path.into(),
             body,
             summary: "test".into(),
+            objects: Vec::new(),
         },
         kind,
     }

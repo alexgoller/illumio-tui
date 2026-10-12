@@ -3221,6 +3221,13 @@ mod revert {
             "revert all 2 pending changes: ip_list \"Corp\" (removed), \
              rule_set \"Global-Infra\" (removed)"
         );
+        assert_eq!(
+            out["data"]["objects"],
+            json!([
+                "ip_list \"Corp\" (removed)",
+                "rule_set \"Global-Infra\" (removed)"
+            ])
+        );
         assert_eq!(server.received_requests().await.unwrap().len(), 1);
         assert!(audit_lines(state.path()).is_empty());
         // The table shows the body too.

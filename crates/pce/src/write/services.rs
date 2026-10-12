@@ -158,6 +158,7 @@ impl Writer<'_> {
                 path: self.pce().client().org_path("sec_policy/draft/services"),
                 body: Some(draft.to_body()),
                 summary: format!("create service {}", draft.name.trim()),
+                objects: Vec::new(),
             },
             kind: ObjectKind::Service,
         })
@@ -201,6 +202,7 @@ impl Writer<'_> {
                 path: href.clone(),
                 body: Some(patch.body(&draft)),
                 summary: format!("update service {}", current.name),
+                objects: Vec::new(),
             },
             kind: ObjectKind::Service,
         })
@@ -214,6 +216,7 @@ impl Writer<'_> {
                 path: href.clone(),
                 body: None,
                 summary: format!("delete service {href}"),
+                objects: Vec::new(),
             },
             kind: ObjectKind::Service,
         })

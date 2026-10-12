@@ -9,6 +9,7 @@ use super::provision::{
 };
 use super::{ObjectKind, Plan, ProvisionSubset, WriteError, WriteRequest, Writer};
 use crate::client::WriteMethod;
+use crate::models::UNKNOWN_CHANGE_TYPE;
 use serde_json::json;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -24,9 +25,12 @@ pub struct RevertRequest {
 pub const BACK_TO_ACTIVE: &str = "back to active";
 /// An object that only exists in draft: the revert deletes it.
 pub const REMOVED: &str = "removed";
+/// A pending entry that named no change type: the fate is not guessed.
+pub const FATE_UNKNOWN: &str = "fate unknown";
 
 /// `ip_list "Corp" (removed)` for each chosen object: its own pending entry
-/// decides the fate (`create` → removed); a ruleset pending only through its
+/// decides the fate (`create` → removed, `update` or `delete` → back to
+/// active, none given → fate unknown); a ruleset pending only through its
 /// rules goes back to active.
 fn fates(picked: &PendingSubset, org: u64) -> Vec<String> {
     picked
@@ -37,10 +41,10 @@ fn fates(picked: &PendingSubset, org: u64) -> Vec<String> {
                 !is_rule_child(&p.href)
                     && provisionable(&p.href, org).is_ok_and(|(k, h)| &k == kind && &h == href)
             });
-            let fate = if own.is_some_and(|p| p.change_type == "create") {
-                REMOVED
-            } else {
-                BACK_TO_ACTIVE
+            let fate = match own.map(|p| p.change_type.as_str()) {
+                Some("create") => REMOVED,
+                Some(UNKNOWN_CHANGE_TYPE) => FATE_UNKNOWN,
+                _ => BACK_TO_ACTIVE,
             };
             let name = own
                 .and_then(|p| p.name.as_deref())
@@ -78,13 +82,15 @@ impl Writer<'_> {
             (false, 1) => "1 change".to_string(),
             (false, _) => format!("{n} changes"),
         };
-        let summary = format!("revert {what}: {}", fates(&picked, org).join(", "));
+        let objects = fates(&picked, org);
+        let summary = format!("revert {what}: {}", objects.join(", "));
         Ok(Plan::Send {
             request: WriteRequest {
                 method: WriteMethod::Put,
                 path: self.pce().client().org_path("sec_policy/delete"),
                 body: Some(body),
                 summary,
+                objects,
             },
             kind: ObjectKind::Revert,
         })

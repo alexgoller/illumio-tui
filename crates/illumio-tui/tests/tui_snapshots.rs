@@ -735,6 +735,7 @@ fn confirm_write_overlay_wraps_a_long_value_instead_of_clipping_it() {
                 "ip_ranges": [{"from_ip": "10.1.0.0/16"}]
             })),
             summary: "create ip_list Corp".into(),
+            objects: Vec::new(),
         },
         kind: pce::write::ObjectKind::IpList,
     };

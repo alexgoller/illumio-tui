@@ -379,6 +379,7 @@ impl Writer<'_> {
                 path: self.pce().client().org_path("workloads"),
                 body: Some(draft.to_body()),
                 summary: format!("create workload {}", draft.name.trim()),
+                objects: Vec::new(),
             },
             kind: ObjectKind::Workload,
         })
@@ -413,6 +414,7 @@ impl Writer<'_> {
                 path: href,
                 body: Some(body),
                 summary: format!("update workload {who}"),
+                objects: Vec::new(),
             },
             kind: ObjectKind::Workload,
         })
@@ -454,6 +456,7 @@ impl Writer<'_> {
                 path: href,
                 body: Some(body),
                 summary: format!("relabel workload {who}"),
+                objects: Vec::new(),
             },
             kind: ObjectKind::Workload,
         })
@@ -474,6 +477,7 @@ impl Writer<'_> {
                 path: href,
                 body: None,
                 summary: format!("delete workload {who}"),
+                objects: Vec::new(),
             },
             kind: ObjectKind::Workload,
         })

@@ -196,6 +196,7 @@ impl Writer<'_> {
                 path: self.pce().client().org_path("sec_policy/draft/ip_lists"),
                 body: Some(draft.to_body()),
                 summary: format!("create ip_list {}", draft.name.trim()),
+                objects: Vec::new(),
             },
             kind: ObjectKind::IpList,
         })
@@ -219,6 +220,7 @@ impl Writer<'_> {
                 path: href.clone(),
                 body: Some(patch.body(&draft)),
                 summary: format!("update ip_list {}", current.name),
+                objects: Vec::new(),
             },
             kind: ObjectKind::IpList,
         })
@@ -232,6 +234,7 @@ impl Writer<'_> {
                 path: href.clone(),
                 body: None,
                 summary: format!("delete ip_list {href}"),
+                objects: Vec::new(),
             },
             kind: ObjectKind::IpList,
         })

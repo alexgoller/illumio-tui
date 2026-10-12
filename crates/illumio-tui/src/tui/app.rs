@@ -1108,6 +1108,7 @@ mod tests {
                 path: "/orgs/5/sec_policy/draft/rule_sets/100".into(),
                 body: None,
                 summary: "delete /orgs/5/sec_policy/draft/rule_sets/100".into(),
+                objects: Vec::new(),
             },
             kind: pce::write::ObjectKind::RuleSet,
         };

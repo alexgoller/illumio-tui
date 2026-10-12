@@ -286,6 +286,7 @@ pub fn label_post_plan() -> pce::write::Plan {
             path: "/orgs/5/labels".into(),
             body: Some(serde_json::json!({"key": "app", "value": "web2"})),
             summary: "create label app=web2".into(),
+            objects: Vec::new(),
         },
         kind: pce::write::ObjectKind::Label,
     }
@@ -306,6 +307,7 @@ pub fn rule_post_plan() -> pce::write::Plan {
                 "unscoped_consumers": true
             })),
             summary: "create rule in ruleset 100".into(),
+            objects: Vec::new(),
         },
         kind: pce::write::ObjectKind::Rule,
     }
@@ -319,6 +321,7 @@ pub fn ip_list_delete_plan() -> pce::write::Plan {
             path: "/orgs/5/sec_policy/draft/ip_lists/21".into(),
             body: None,
             summary: "delete ip_list Corp".into(),
+            objects: Vec::new(),
         },
         kind: pce::write::ObjectKind::IpList,
     }
@@ -362,6 +365,7 @@ pub fn provision_plan() -> pce::write::Plan {
                 }
             })),
             summary: "provision 1 ip_list, 1 rule_set".into(),
+            objects: Vec::new(),
         },
         kind: pce::write::ObjectKind::Provision,
     }
@@ -384,6 +388,7 @@ pub fn revert_plan() -> pce::write::Plan {
             summary: "revert 2 changes: ip_list \"Corp\" (removed), \
                       rule_set \"Global-Infra\" (back to active)"
                 .into(),
+            objects: Vec::new(),
         },
         kind: pce::write::ObjectKind::Revert,
     }

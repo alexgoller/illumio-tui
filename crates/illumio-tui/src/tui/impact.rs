@@ -411,6 +411,7 @@ mod tests {
                 body: Some(serde_json::json!({"resolve_labels_as":
                     {"providers": ["workloads"], "consumers": ["virtual_services"]}})),
                 summary: "update rule".into(),
+                objects: Vec::new(),
             },
             kind: pce::write::ObjectKind::Rule,
         };
@@ -510,6 +511,7 @@ mod tests {
                     {"actors": "ams"}
                 ]})),
                 summary: "update rule".into(),
+                objects: Vec::new(),
             },
             kind: pce::write::ObjectKind::Rule,
         };
@@ -525,6 +527,7 @@ mod tests {
                 path: RULE_2.into(),
                 body: None,
                 summary: "delete rule".into(),
+                objects: Vec::new(),
             },
             kind: pce::write::ObjectKind::Rule,
         };

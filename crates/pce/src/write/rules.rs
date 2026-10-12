@@ -472,6 +472,7 @@ fn create(ruleset: &str, child: &str, what: &str, body: Value, kind: ObjectKind)
             path: format!("{ruleset}/{child}"),
             body: Some(body),
             summary: format!("create {what} in rule_set {ruleset}"),
+            objects: Vec::new(),
         },
         kind,
     }
@@ -490,6 +491,7 @@ fn update(href: String, what: &str, body: Value, kind: ObjectKind) -> Plan {
             path: href.clone(),
             body: Some(body),
             summary: format!("update {what} {href}"),
+            objects: Vec::new(),
         },
         kind,
     }
@@ -502,6 +504,7 @@ fn delete(href: String, what: &str, kind: ObjectKind) -> Plan {
             path: href.clone(),
             body: None,
             summary: format!("delete {what} {href}"),
+            objects: Vec::new(),
         },
         kind,
     }

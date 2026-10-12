@@ -753,6 +753,7 @@ mod tests {
             path: "/orgs/5/labels".into(),
             body: Some(json!({"key": "app"})),
             summary: "create label app=web".into(),
+            objects: Vec::new(),
         });
         assert_eq!(out.headers(), vec!["field", "value"]);
         let rows = out.rows();

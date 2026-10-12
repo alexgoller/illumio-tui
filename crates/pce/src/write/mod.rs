@@ -28,7 +28,7 @@ pub use guard::{WriteContext, WriteGuard, WriteRefused};
 pub use ip_lists::{IpListDraft, IpListPatch};
 pub use labels::LabelDraft;
 pub use provision::{ProvisionRequest, ProvisionSubset, provision_counts};
-pub use revert::{BACK_TO_ACTIVE, REMOVED, RevertRequest};
+pub use revert::{BACK_TO_ACTIVE, FATE_UNKNOWN, REMOVED, RevertRequest};
 pub use rule_sets::{RuleSetDraft, RuleSetPatch};
 pub use rules::{
     DenyRuleDraft, DenyRulePatch, INLINE_SERVICE, RuleDraft, RulePatch, apply_deny_rule_patch,
@@ -117,6 +117,11 @@ pub struct WriteRequest {
     pub body: Option<Value>,
     /// One line for humans: `create label app=web`.
     pub summary: String,
+    /// One line per object the request touches, for a request that names
+    /// many (a revert: `ip_list "Corp" (removed)`); empty otherwise.
+    /// Shown, never sent.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub objects: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

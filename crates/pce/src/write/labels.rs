@@ -63,6 +63,7 @@ impl Writer<'_> {
                 path: self.pce().client().org_path("labels"),
                 body: Some(draft.to_body()),
                 summary: format!("create label {}", draft.display()),
+                objects: Vec::new(),
             },
             kind: ObjectKind::Label,
         })
@@ -80,6 +81,7 @@ impl Writer<'_> {
                 path: href.clone(),
                 body: Some(json!({"value": value})),
                 summary: format!("update label {href} value to {value}"),
+                objects: Vec::new(),
             },
             kind: ObjectKind::Label,
         })
@@ -93,6 +95,7 @@ impl Writer<'_> {
                 path: href.clone(),
                 body: None,
                 summary: format!("delete label {href}"),
+                objects: Vec::new(),
             },
             kind: ObjectKind::Label,
         })
