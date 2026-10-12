@@ -48,7 +48,8 @@ Module map under `crates/illumio-tui/src/tui/`:
 | `commands` | parser for the `:` prompt |
 | `filter` | the filter editor and its conversion to a traffic query |
 | `table` | sortable, searchable table state shared by every screen |
-| `form` | the generic edit form (fields, keys, horizontal scroll) |
+| `form` | the generic edit form (fields, keys, horizontal scroll, the open completion) |
+| `complete` | `Ctrl-N` candidates for a field's kind from the name index and the loaded draft rulesets; pure |
 | `edit` | edit intents, pre-filled forms, form to library draft or patch |
 | `diff` | draft against active for a pending IP list, service or ruleset |
 | `impact` | rule impact as the TUI shows it: `P/C` cells, the rule detail's rows, the confirm line |
@@ -147,6 +148,10 @@ switch while the toggle is on. A switch to a profile without writes drops
 the guard and the header marker; the toggle itself is never persisted.
 
 One edit, top to bottom: `e` on an IP list.
+(In any form, `Ctrl-N`/`Ctrl-P` are handled by `update` before the form sees
+them: `Form::completion_request` names the field's `FieldKind` and token,
+`complete::complete` computes the candidates without a request and
+`Form::start_completion`/`cycle` apply them; the form never sees the index.)
 
 1. `update` checks `model.writes`, clones the selected list into
    `EditIntent::UpdateIpList` and opens `Overlay::Form` pre-filled by
@@ -204,7 +209,7 @@ scope and tier (unscoped), and the ruleset with the one loaded draft ruleset
 whose scope is the destination's (by label href); nothing is requested.
 `Form.alt` holds every attached label for `Ctrl-A`. When the plan says the
 typed name is unknown and the destination has a scope, the form offers
-`Ctrl-N` (`Form.offers_ruleset`, a `RulesetOffer` of the checked name and the
+`Ctrl-R` (`Form.offers_ruleset`, a `RulesetOffer` of the checked name and the
 scope, shown in the Ruleset hint row and the panel keys while the field still
 holds that name): it plans `CreateRuleSet` scoped like the destination and
 keeps the rule and the form in `PolicyState.rule_after_ruleset`; the

@@ -344,6 +344,14 @@ index when the labels reload after the write, and `r` on Labels refreshes it
 from the PCE). `Tab`/`Shift-Tab` move between
 fields, `Ctrl-U` clears one, `Enter` checks the form, `Esc` leaves without a
 request.
+`Ctrl-N` completes the token being typed (after the last comma) from what is
+already loaded: label keys and values (`app=p` offers `app`'s values with a
+`p`; a bare `pay` also offers `app=payment`), label groups (`group:`), IP lists
+(`iplist:`), service names and the loaded draft rulesets; prefix matches
+come first, any case, and a workload's labels or a scope never offer a key
+they already have. Each further `Ctrl-N` cycles forward, `Ctrl-P` back; up to
+five candidates show under the field. Any other key keeps the candidate,
+`Esc` puts the typed text back. Completion never sends a request.
 An edit sends only what changed; an edit that changes nothing says
 `no changes`.
 
@@ -412,7 +420,7 @@ one loaded draft ruleset is scoped like the destination; otherwise the hint
 names that scope (`scope app=shop, env=prod`). Type the ruleset's name or
 href; a name costs one draft ruleset read at submit, and an unknown name
 brings the form back with similar names. When the destination has a scope,
-the form offers `Ctrl-N` (the Ruleset hint says `Ctrl-N: create it, scoped
+the form offers `Ctrl-R` (the Ruleset hint says `Ctrl-R: create it, scoped
 …`): it creates the ruleset under that name scoped like the destination (its
 own confirm and POST), then plans the rule into it for a second confirm;
 cancelling either sends nothing more. Editing the name withdraws the offer
@@ -431,7 +439,7 @@ names, per profile:
 or `ILLUMIO_SCOPE_KEYS=app,env` and `ILLUMIO_TIER_KEY=role`, which outrank
 the profile. An empty `ILLUMIO_SCOPE_KEYS` counts as unset; a list of only
 empty entries (`,`) is refused, as is an empty `scope_keys` in the profile.
-The TUI's `w` form (pre-fill and `Ctrl-N`) uses them, the traffic views group by the scope keys
+The TUI's `w` form (pre-fill and `Ctrl-R`) uses them, the traffic views group by the scope keys
 until `g` picks others (for the session), and `traffic groups`, `traffic mesh` and
 `traffic query --blocked` default to them.
 `ignore_keys` (or `ILLUMIO_IGNORE_KEYS=DFIRBubble,os`,
