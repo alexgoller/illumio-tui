@@ -2268,3 +2268,71 @@ async fn w_confirm_shows_the_impact_after_i_and_y_still_posts_once() {
     assert_eq!(audit.entries().len(), 1);
     assert_eq!(model.busy, 0);
 }
+
+#[tokio::test]
+async fn a_late_revert_plan_after_a_profile_switch_is_dropped() {
+    use illumio_tui::cli::GlobalArgs;
+    use illumio_tui::tui::edit::WriteIntent;
+    use illumio_tui::tui::model::Overlay;
+    use illumio_tui::tui::msg::Msg;
+    use pce::write::RevertRequest;
+    let a = MockServer::start().await;
+    let b = MockServer::start().await;
+    // The old PCE answers the planner's pending read late.
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/sec_policy/pending"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!([{"href": "/orgs/5/sec_policy/draft/ip_lists/21", "change_type": "create", "name": "Corp"}]))
+                .set_delay(Duration::from_millis(400)),
+        )
+        .expect(1)
+        .mount(&a)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/health"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .mount(&b)
+        .await;
+    mount_objects(&b).await;
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = two_profile_config(dir.path(), &b);
+    let global = GlobalArgs {
+        config: Some(cfg),
+        profile: Some("a".into()),
+        ..Default::default()
+    };
+    let (mut rt, tx) = Runtime::with_args_and_writer(
+        pce_for(&a),
+        writes_model(),
+        global,
+        tui_guard(MemoryAudit::new()),
+    );
+    rt.execute(Cmd::PlanWrite(WriteIntent::Revert(RevertRequest {
+        all: false,
+        targets: vec!["/orgs/5/sec_policy/draft/ip_lists/21".into()],
+    })));
+    tx.send(Msg::Command(illumio_tui::tui::commands::Command::Profile(
+        "b".into(),
+    )))
+    .unwrap();
+    let model = run_loop(&mut rt, Box::pin(wait(900)), &mut |_| {}).await;
+    assert!(
+        !matches!(model.overlay, Overlay::ConfirmWrite { .. }),
+        "the old PCE's plan must not open a confirm: {:?}",
+        model.overlay
+    );
+    assert_eq!(model.profile.name, "b");
+    assert!(!model.writes.in_flight);
+    assert_eq!(model.busy, 0);
+    assert!(writes_seen(&a).await.is_empty());
+    assert!(writes_seen(&b).await.is_empty());
+    assert!(
+        b.received_requests()
+            .await
+            .unwrap_or_default()
+            .iter()
+            .all(|r| r.url.path() != "/api/v2/orgs/5/sec_policy/pending"),
+        "nothing re-planned against the new PCE"
+    );
+}

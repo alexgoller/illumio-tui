@@ -388,7 +388,35 @@ pub fn revert_plan() -> pce::write::Plan {
             summary: "revert 2 changes: ip_list \"Corp\" (removed), \
                       rule_set \"Global-Infra\" (back to active)"
                 .into(),
-            objects: Vec::new(),
+            objects: vec![
+                "ip_list \"Corp\" (removed)".into(),
+                "rule_set \"Global-Infra\" (back to active)".into(),
+            ],
+        },
+        kind: pce::write::ObjectKind::Revert,
+    }
+}
+
+/// A revert plan of `n` IP lists created in draft, as `Writer::plan_revert`
+/// builds it: enough objects to overflow the confirm box.
+pub fn revert_plan_of(n: usize) -> pce::write::Plan {
+    let hrefs: Vec<String> = (1..=n)
+        .map(|i| format!("/orgs/5/sec_policy/draft/ip_lists/{i}"))
+        .collect();
+    let objects: Vec<String> = (1..=n)
+        .map(|i| format!("ip_list \"List-{i:02}\" (removed)"))
+        .collect();
+    pce::write::Plan::Send {
+        request: pce::write::WriteRequest {
+            method: pce::WriteMethod::Put,
+            path: "/orgs/5/sec_policy/delete".into(),
+            body: Some(serde_json::json!({
+                "change_subset": {
+                    "ip_lists": hrefs.iter().map(|h| serde_json::json!({"href": h})).collect::<Vec<_>>()
+                }
+            })),
+            summary: format!("revert {n} changes: {}", objects.join(", ")),
+            objects,
         },
         kind: pce::write::ObjectKind::Revert,
     }

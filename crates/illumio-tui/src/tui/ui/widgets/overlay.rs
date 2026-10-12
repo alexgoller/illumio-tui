@@ -132,7 +132,10 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "Pending  P",
         "provision the marked entries, or all (writes)",
     ),
-    ("Pending  R", "revert the marked entries to active (writes)"),
+    (
+        "Pending  R",
+        "revert marked entries (draft-only ones are deleted)",
+    ),
     ("y / n", "send / cancel a shown request"),
     ("Esc", "close overlay / cancel"),
 ];
@@ -567,64 +570,74 @@ fn confirm_extra_rows(plan: &Plan, kind: ObjectKind) -> u16 {
     crate::tui::impact::confirm_rows(plan) + u16::from(kind == ObjectKind::Revert)
 }
 
-/// The summary as the box shows it. A revert's
-/// (`revert 2 changes: ip_list "Corp" (removed), rule_set ... (back to active)`)
-/// lists one object and its fate per line under its head.
-fn summary_lines(summary: &str, kind: ObjectKind) -> Vec<String> {
-    let summary = plain(summary);
-    match summary.split_once(": ") {
-        Some((head, items)) if kind == ObjectKind::Revert => {
-            let mut lines = vec![format!("{head}:")];
-            let mut rest = items;
-            while let Some((item, tail)) = rest.split_once("), ") {
-                lines.push(format!("  {item})"));
-                rest = tail;
-            }
-            lines.push(format!("  {rest}"));
-            lines
-        }
-        _ => vec![summary],
-    }
+/// The confirm box as drawn: pinned rows on top, then a scrolled window of
+/// `content` (`rows` fit); the first `objects` content lines are the
+/// request's objects.
+struct ConfirmLayout {
+    rect: Rect,
+    summary: Vec<String>,
+    content: Vec<String>,
+    objects: usize,
+    rows: usize,
 }
 
-/// The confirm box in `area`, the summary and the request body wrapped to
-/// its inner width (the box is the dry run: nothing may be clipped; a
-/// revert's summary names every object), and how many body rows fit.
-/// Extra rows ([`confirm_extra_rows`]) sit above the body. Shared by the
-/// renderer and the scroll keys so they cannot drift.
-fn confirm_write_layout(
-    req: &WriteRequest,
-    kind: ObjectKind,
-    area: Rect,
-    extra: u16,
-) -> (Rect, Vec<String>, Vec<String>, usize) {
+/// The confirm box in `area`, every line wrapped to its inner width (the box
+/// is the dry run: nothing may be clipped). The summary, the extra rows
+/// ([`confirm_extra_rows`]) and `METHOD path` stay pinned; the request's
+/// objects (a revert's, one per line, under the summary's head) and the
+/// body scroll. Shared by the renderer and the scroll keys so they cannot
+/// drift.
+fn confirm_write_layout(req: &WriteRequest, area: Rect, extra: u16) -> ConfirmLayout {
     let width = usize::from(CONFIRM_WIDTH.min(area.width).saturating_sub(2));
-    let summary: Vec<String> = summary_lines(&req.summary, kind)
+    let wrap = |l: &str| wrap_chars(&plain(l), width);
+    let summary = if req.objects.is_empty() {
+        wrap(&req.summary)
+    } else {
+        // `revert 2 changes: <objects>`: the head, the objects below it.
+        let head = req
+            .summary
+            .split_once(": ")
+            .map_or(req.summary.as_str(), |(h, _)| h);
+        wrap(&format!("{head}:"))
+    };
+    let mut content: Vec<String> = req
+        .objects
         .iter()
-        .flat_map(|l| wrap_chars(l, width))
+        .flat_map(|o| wrap(&format!("  {o}")))
         .collect();
-    let body: Vec<String> = crate::tui::edit::request_body_lines(req)
-        .iter()
-        .flat_map(|l| wrap_chars(&plain(l), width))
-        .collect();
+    let objects = content.len();
+    if objects > 0 {
+        content.push(String::new());
+    }
+    content.extend(
+        crate::tui::edit::request_body_lines(req)
+            .iter()
+            .flat_map(|l| wrap(l)),
+    );
     let chrome = CONFIRM_CHROME
         .saturating_add(u16::try_from(summary.len()).unwrap_or(u16::MAX))
         .saturating_add(extra);
-    let height = u16::try_from(body.len())
+    let height = u16::try_from(content.len())
         .unwrap_or(u16::MAX)
         .saturating_add(chrome);
-    let r = centered(area, CONFIRM_WIDTH, height);
-    let rows = usize::from(r.height.saturating_sub(chrome));
-    (r, summary, body, rows)
+    let rect = centered(area, CONFIRM_WIDTH, height);
+    let rows = usize::from(rect.height.saturating_sub(chrome));
+    ConfirmLayout {
+        rect,
+        summary,
+        content,
+        objects,
+        rows,
+    }
 }
 
-/// The first wrapped body line shown when scrolled to the end.
+/// The first scrolled line shown when scrolled to the end.
 pub fn confirm_write_last_scroll(plan: &Plan, kind: ObjectKind, area: Rect) -> usize {
     let Some(req) = plan.request() else {
         return 0;
     };
-    let (_, _, body, rows) = confirm_write_layout(req, kind, area, confirm_extra_rows(plan, kind));
-    body.len().saturating_sub(rows)
+    let l = confirm_write_layout(req, area, confirm_extra_rows(plan, kind));
+    l.content.len().saturating_sub(l.rows)
 }
 
 /// `line` in pieces of at most `width` characters; an empty line stays one.
@@ -650,18 +663,21 @@ pub fn render_confirm_write(
     };
     let revert = kind == ObjectKind::Revert;
     let extra = confirm_extra_rows(plan, kind);
-    let (r, summary, body, rows) = confirm_write_layout(req, kind, area, extra);
+    let l = confirm_write_layout(req, area, extra);
+    let r = l.rect;
     f.render_widget(Clear, r);
-    let first = (scroll as usize).min(body.len().saturating_sub(rows));
-    let meta = match (revert, body.len() > rows) {
+    let first = (scroll as usize).min(l.content.len().saturating_sub(l.rows));
+    let meta = match (revert, l.content.len() > l.rows) {
         (true, true) => "↑/↓ scroll · type revert, Enter · Esc cancel",
         (true, false) => "type revert, Enter · Esc cancel",
         (false, true) => "j/k scroll · y send · n cancel",
         (false, false) => "y send · n cancel",
     };
-    let mut lines: Vec<Line> = summary
+    let warn = Style::new().fg(t.warn);
+    let mut lines: Vec<Line> = l
+        .summary
         .into_iter()
-        .map(|l| Line::from(Span::styled(l, Style::new().fg(t.warn))))
+        .map(|s| Line::from(Span::styled(s, warn)))
         .collect();
     if revert {
         lines.push(Line::from(vec![
@@ -681,11 +697,14 @@ pub fn render_confirm_write(
         t.header_style(),
     )));
     lines.push(Line::from(""));
+    let objects = l.objects;
     lines.extend(
-        body.into_iter()
+        l.content
+            .into_iter()
+            .enumerate()
             .skip(first)
-            .take(rows)
-            .map(|l| Line::from(Span::styled(l, t.base()))),
+            .take(l.rows)
+            .map(|(i, s)| Line::from(Span::styled(s, if i < objects { warn } else { t.base() }))),
     );
     f.render_widget(
         Paragraph::new(lines)

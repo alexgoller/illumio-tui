@@ -22,7 +22,7 @@ expression: out
 │n / e / x (writes)       new/edit/delete: Objects, IP lists, Workloads, Policy│
 │Pending  j/k Space Enter select · mark · diff of a pending entry              │
 │Pending  P               provision the marked entries, or all (writes)        │
-│Pending  R               revert the marked entries to active (writes)         │
+│Pending  R               revert marked entries (draft-only ones are deleted)  │
 │y / n                    send / cancel a shown request                        │
 │Esc                      close overlay / cancel                               │
 ╰──────────────────────────────────────────────────────────────────────────────╯

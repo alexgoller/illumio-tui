@@ -96,6 +96,16 @@ impl Runtime {
         Self::build(pce, model, None, Some(Arc::new(writer)))
     }
 
+    /// [`Runtime::with_writer`] that can also switch profiles (tests).
+    pub fn with_args_and_writer(
+        pce: Arc<Pce>,
+        model: Model,
+        global: GlobalArgs,
+        writer: WriteGuard,
+    ) -> (Self, UnboundedSender<Msg>) {
+        Self::build(pce, model, Some(global), Some(Arc::new(writer)))
+    }
+
     fn build(
         pce: Arc<Pce>,
         model: Model,

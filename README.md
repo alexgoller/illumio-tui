@@ -364,7 +364,7 @@ its active version, and one that only exists in draft (a create) is deleted.
 It takes `--all` or names and hrefs like `policy provision` and sends
 `PUT /orgs/N/sec_policy/delete` with the same explicit `change_subset` (never
 the empty body, which would revert everything, including changes made after
-the read); `data.summary` names each object and its fate. The endpoint is the
+the read); `data.summary` and `data.objects` name each object and its fate. The endpoint is the
 one the Illumio REST API documents, not yet verified live from this project:
 `--dry-run` prints the exact body, so check it against a lab PCE first.
 
@@ -460,8 +460,9 @@ shows the exact `POST /orgs/N/sec_policy` body with its `change_subset`;
 `y` sends it once, the status line says `provisioned <version href>: <counts>`,
 and the pending list and the rulesets reload. `R` reverts the marked entries
 (never everything; with none marked it says so): the confirm lists each
-object and whether it goes back to active or is removed, and only typing
-`revert` and `Enter` sends it. After any policy write the
+object and whether it goes back to active, is removed, or (when the PCE
+named no change type) has a fate unknown; `↑`/`↓` scroll a long list while
+the prompt stays in view, and only typing `revert` and `Enter` sends it. After any policy write the
 draft rulesets reload once; when the selected ruleset's inline deny list is
 empty, that may cost one more GET for its deny rules. `Enter` on a pending
 ruleset shows its changes against active: name, description, state, scopes and one

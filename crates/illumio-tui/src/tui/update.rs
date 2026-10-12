@@ -684,7 +684,10 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 Ok((Plan::Send { .. }, _)) if model.overlay != Overlay::None => {
                     model.status = StatusLine::warn("request discarded, nothing sent");
                 }
-                Ok((plan @ Plan::Send { .. }, kind)) => {
+                Ok((mut plan @ Plan::Send { .. }, kind)) => {
+                    if kind == pce::write::ObjectKind::Revert {
+                        name_rulesets(&mut plan, &model.policy.raw);
+                    }
                     model.policy.revert_typed.clear();
                     model.status = StatusLine::info(if kind == pce::write::ObjectKind::Revert {
                         "review the revert: type revert and Enter to send it, Esc cancels"
@@ -2316,6 +2319,30 @@ fn revert_key(model: &mut Model) -> Vec<Cmd> {
     }))]
 }
 
+/// A revert's object lines name a ruleset pending only through its rules
+/// by href (the pending list has no name for it): the loaded rulesets
+/// (either scope) give the name when they hold it. Display only: the lines
+/// are neither sent nor audited.
+fn name_rulesets(plan: &mut Plan, sets: &[pce::models::RuleSet]) {
+    let Plan::Send { request, .. } = plan else {
+        return;
+    };
+    for line in &mut request.objects {
+        let Some(rest) = line.strip_prefix("rule_set /") else {
+            continue;
+        };
+        let href = format!("/{}", rest.split(' ').next().unwrap_or_default());
+        let named = sets.iter().find(|rs| {
+            rs.href
+                .replacen("/sec_policy/active/", "/sec_policy/draft/", 1)
+                == href
+        });
+        if let Some(rs) = named {
+            *line = line.replacen(&href, &format!("{:?}", rs.name), 1);
+        }
+    }
+}
+
 /// The word typed into a revert confirm before `Enter` sends it.
 pub const REVERT_WORD: &str = "revert";
 
@@ -2348,7 +2375,9 @@ fn revert_confirm_key(model: &mut Model, plan: Plan, scroll: u16, code: KeyCode)
         KeyCode::Backspace => {
             typed.pop();
         }
-        KeyCode::Char(c) if typed.chars().count() < REVERT_WORD.len() + 8 => typed.push(c),
+        KeyCode::Char(c) if typed.chars().count() < REVERT_WORD.chars().count() + 8 => {
+            typed.push(c)
+        }
         KeyCode::Down => {
             model.overlay = Overlay::ConfirmWrite {
                 plan,
@@ -8199,6 +8228,73 @@ mod tests {
         update(&mut e, Msg::Planned(Ok((revert_plan(), revert))));
         assert!(e.policy.revert_typed.is_empty());
         assert!(update(&mut e, kc(KeyCode::Enter)).is_empty());
+    }
+
+    #[test]
+    fn a_long_revert_scrolls_its_objects_and_keeps_the_prompt_in_view() {
+        use crate::tui::test_support::{model_with_policy, render_to_string, revert_plan_of};
+        let revert = pce::write::ObjectKind::Revert;
+        let mut m = writes_on(model_with_policy());
+        m.size = (80, 24);
+        m.screen = Screen::Policy;
+        update(&mut m, Msg::Planned(Ok((revert_plan_of(30), revert))));
+        let out = render_to_string(&m, 80, 24);
+        assert!(out.contains("revert 30 changes:"), "{out}");
+        assert!(out.contains("List-01"), "{out}");
+        assert!(!out.contains("List-30"), "the list overflows: {out}");
+        assert!(out.contains("type revert to confirm:"), "{out}");
+        assert!(out.contains("↑/↓ scroll"), "{out}");
+        let mut seen_last = false;
+        for _ in 0..60 {
+            update(&mut m, kc(KeyCode::Down));
+            let out = render_to_string(&m, 80, 24);
+            assert!(out.contains("type revert to confirm:"), "pinned: {out}");
+            assert!(out.contains("revert 30 changes:"), "pinned: {out}");
+            seen_last |= out.contains("ip_list \"List-30\" (removed)");
+        }
+        assert!(seen_last, "the last object is reachable by scrolling");
+        let Overlay::ConfirmWrite { scroll, .. } = m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        assert!(scroll > 0);
+        for _ in 0..60 {
+            update(&mut m, kc(KeyCode::Up));
+        }
+        assert!(render_to_string(&m, 80, 24).contains("List-01"));
+        for c in "revert".chars() {
+            update(&mut m, key(c));
+        }
+        assert_eq!(update(&mut m, kc(KeyCode::Enter)).len(), 1);
+    }
+
+    #[test]
+    fn a_revert_names_a_ruleset_pending_through_its_rules_from_the_loaded_rulesets() {
+        use crate::tui::test_support::model_with_policy;
+        let mut m = writes_on(model_with_policy());
+        m.screen = Screen::Policy;
+        let known = m.policy.raw[0].clone();
+        let mut plan = crate::tui::test_support::revert_plan();
+        if let Plan::Send { request, .. } = &mut plan {
+            request.objects = vec![
+                format!("rule_set {} (back to active)", known.href),
+                "rule_set /orgs/5/sec_policy/draft/rule_sets/999 (back to active)".into(),
+            ];
+        }
+        update(
+            &mut m,
+            Msg::Planned(Ok((plan, pce::write::ObjectKind::Revert))),
+        );
+        let Overlay::ConfirmWrite { plan, .. } = &m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        assert_eq!(
+            plan.request().unwrap().objects,
+            vec![
+                format!("rule_set {:?} (back to active)", known.name),
+                "rule_set /orgs/5/sec_policy/draft/rule_sets/999 (back to active)".to_string(),
+            ],
+            "named when loaded, the href otherwise"
+        );
     }
 
     #[test]
