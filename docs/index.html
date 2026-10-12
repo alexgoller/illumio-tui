@@ -254,6 +254,25 @@ illumio-tui 0.1.4</code></pre>
     <li><strong>Every sent write is audited</strong> to <code>~/.local/state/illumio-tui/writes.jsonl</code> (mode 0600) with the body sent and the status received.</li>
     <li><strong>Updates send only what changes</strong>, and carry untouched list entries through exactly as the PCE returned them.</li>
   </ul>
+
+  <figure class="shot tour">
+    <video controls muted playsinline preload="metadata" poster="assets/confirm-rule.png" width="2216" height="1352">
+      <source src="assets/tour-policy.mp4" type="video/mp4">
+      <a href="assets/tour-policy.gif">Watch the policy editing tour as a GIF</a>.
+    </video>
+    <figcaption>Writes armed with <code>:writes on</code>, <code>w</code> drafts an allow rule from a blocked flow, <code>Ctrl-N</code> completes labels, services and values in the rule and label forms, and the recording ends at the confirm with <code>n</code>: nothing was sent. <a href="assets/tour-policy.gif">GIF version</a>.</figcaption>
+  </figure>
+
+  <div class="shots">
+    <figure class="shot">
+      <img src="assets/form-rule-from-flow.png" alt="The allow-rule form opened with w on a blocked pos Staging flow: ruleset RF-pos-Staging, providers role=db, consumers role=processing with app=ad being completed, the candidate strip app=ad, app=assetmgmt, app=cart, app=catalog under the field, service 5432/tcp" width="2216" height="1352" loading="lazy">
+      <figcaption><kbd>w</kbd> on a blocked flow: the rule form pre-filled from its labels, <code>Ctrl-N</code> cycling label values.</figcaption>
+    </figure>
+    <figure class="shot">
+      <img src="assets/confirm-rule.png" alt="The Send this request? overlay: create rule in the draft ruleset, impact 6 providers and 9 consumers, POST to the ruleset's sec_rules path and the whole JSON body with consumers, description, ingress services and providers; y sends, n cancels" width="2216" height="1352" loading="lazy">
+      <figcaption>The confirm overlay: summary, impact, <code>POST</code> path and the whole body before anything is sent.</figcaption>
+    </figure>
+  </div>
 <pre><code><span class="p">$ </span>illumio-tui labels add app=web --yes
 <span class="p">$ </span>illumio-tui iplists update Corp --add-range 10.2.0.0/16 --dry-run
 <span class="p">$ </span>illumio-tui policy rules add Web-Tier --provider app=web --consumer iplist:Corp --service 443/tcp --dry-run --impact
