@@ -280,6 +280,49 @@ fn traffic_aggregate_and_blocked_80x24() {
 }
 
 #[test]
+fn app_to_app_sections_in_and_both_80x24() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use illumio_tui::tui::model::{By, TrafficView};
+    use illumio_tui::tui::test_support::model_with_rich_flows;
+    use illumio_tui::tui::{Msg, update};
+    let mut m = model_with_rich_flows();
+    m.traffic.view = TrafficView::Aggregate;
+    let x = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE);
+    assert!(update(&mut m, Msg::Key(x)).is_empty());
+    assert_eq!(m.traffic.apps_state.by, By::In);
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("in · keys app,env"), "{out}");
+    assert!(
+        out.contains("▾ crm/prod  in · 6 groups · 1601 conns"),
+        "{out}"
+    );
+    insta::assert_snapshot!("traffic_app_sections_in_80x24", out);
+    m.traffic.apps_state.by = By::Both;
+    m.traffic.rebuild_views();
+    let out = render_to_string(&m, 80, 24);
+    assert!(
+        out.contains("▾ shop/prod  ← 4 groups · 1545 conns"),
+        "{out}"
+    );
+    assert!(out.contains("    → crm/prod"), "{out}");
+    insta::assert_snapshot!("traffic_app_sections_both_80x24", out);
+}
+
+#[test]
+fn app_to_app_hints_x_and_d_where_the_status_line_has_room() {
+    use illumio_tui::tui::model::TrafficView;
+    use illumio_tui::tui::test_support::model_with_rich_flows;
+    let mut m = model_with_rich_flows();
+    let out = render_to_string(&m, 160, 48);
+    assert!(!out.contains("x mode"), "{out}");
+    m.traffic.view = TrafficView::Aggregate;
+    let out = render_to_string(&m, 160, 48);
+    assert!(out.contains("]/[ cap  x mode  d decision"), "{out}");
+    let out = render_to_string(&m, 80, 24);
+    assert!(!out.contains("x mode"), "no room at 80: {out}");
+}
+
+#[test]
 fn policy_screen_80x24_and_160x48() {
     use illumio_tui::tui::model::Screen;
     use illumio_tui::tui::test_support::model_with_policy;
@@ -1170,7 +1213,7 @@ fn traffic_group_columns_picker_and_blocked_by_group_80x24() {
     m.traffic.view = TrafficView::Blocked;
     let out = render_to_string(&m, 80, 24);
     assert!(out.contains("dst name") && out.contains("hr/prod"), "{out}");
-    assert!(out.contains("by dst app,env"), "{out}");
+    assert!(out.contains("in · blocked · keys app,env"), "{out}");
     insta::assert_snapshot!("traffic_blocked_groups_80x24", out);
 }
 

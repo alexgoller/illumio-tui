@@ -12,14 +12,16 @@ use pce::models::{
 };
 use pce::traffic::treemap::{Rect as TreemapRect, Tile, Weight, layout, layout_zoomed};
 use pce::traffic::{
-    BlockedGroup, FlowGroup, MeshColumns, MeshKey, MeshRow, ResolvedFlow, blocked_summary,
-    group_by_labels, group_key, group_text, keys_or_default, keys_seen, mesh, mesh_key,
+    AppSection, Decisions, Direction, FlowGroup, MeshColumns, MeshKey, MeshRow, PeerRow,
+    ResolvedFlow, Totals, app_sections, app_sections_both, compact_count, group_by_labels,
+    group_key, group_text, in_app, in_peer, keys_or_default, keys_seen, mesh, mesh_key,
 };
 use pce::write::Plan;
 use pce::{
     IpListSize, KeyOrder, NameIndex, RuleKind, RuleSetView, RuleView, StatsSnapshot, ip_list_size,
 };
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
@@ -836,53 +838,265 @@ pub fn group_columns() -> Vec<Column<FlowGroup>> {
     ]
 }
 
-pub fn blocked_columns() -> Vec<Column<BlockedGroup>> {
+/// App-to-app's state (`x` / `X`): the flat pair table, or sections per
+/// app inbound, outbound or both.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum By {
+    #[default]
+    Pairs,
+    In,
+    Out,
+    Both,
+}
+
+impl By {
+    /// `x`: pairs → in → out → both → pairs.
+    pub fn next(self) -> Self {
+        match self {
+            By::Pairs => By::In,
+            By::In => By::Out,
+            By::Out => By::Both,
+            By::Both => By::Pairs,
+        }
+    }
+
+    /// `X`: the other way round.
+    pub fn prev(self) -> Self {
+        match self {
+            By::Pairs => By::Both,
+            By::In => By::Pairs,
+            By::Out => By::In,
+            By::Both => By::Out,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            By::Pairs => "pairs",
+            By::In => "in",
+            By::Out => "out",
+            By::Both => "both",
+        }
+    }
+}
+
+/// App-to-app's session state: kept across `g`, `r`, `+` / `-`, `f` and
+/// `:window` (the tables are rebuilt from it), reset by `:profile`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AppState {
+    pub by: By,
+    pub decisions: Decisions,
+    /// The apps whose sections show only their header row.
+    pub folded: BTreeSet<Vec<String>>,
+}
+
+/// What a section row is: an app's header with its totals per direction
+/// (one direction, or in then out for `both`), or one of its peer rows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RowKind {
+    Header {
+        totals: Vec<(Direction, Totals)>,
+        folded: bool,
+    },
+    Peer {
+        direction: Direction,
+        /// Draw `←` / `→` before the peer (`both`).
+        arrow: bool,
+        row: PeerRow,
+    },
+}
+
+/// One row of a sectioned table (App-to-app `in` / `out` / `both`,
+/// Blocked): a header row per app, then its peers unless folded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SectionRow {
+    pub app: Vec<String>,
+    pub kind: RowKind,
+    /// The section's header and every peer row, lowercased: `/` keeps a
+    /// whole section when any of it matches.
+    haystack: Arc<str>,
+}
+
+impl SectionRow {
+    pub fn is_header(&self) -> bool {
+        matches!(self.kind, RowKind::Header { .. })
+    }
+
+    pub fn peer(&self) -> Option<(Direction, &PeerRow)> {
+        match &self.kind {
+            RowKind::Peer { direction, row, .. } => Some((*direction, row)),
+            RowKind::Header { .. } => None,
+        }
+    }
+
+    /// A header's one line: `▾ shop/prod  in · 7 groups · 412 conns`;
+    /// `▹` when folded; `← 7 groups · …  → 2 groups · …` for `both`.
+    /// `None` for a peer.
+    pub fn header_line(&self) -> Option<String> {
+        let RowKind::Header { totals, folded } = &self.kind else {
+            return None;
+        };
+        let arrows = totals.len() > 1;
+        let parts: Vec<String> = totals
+            .iter()
+            .map(|(d, t)| {
+                if arrows {
+                    format!("{} {}", d.arrow(), t.text())
+                } else {
+                    format!("{} · {}", d.as_str(), t.text())
+                }
+            })
+            .collect();
+        Some(format!(
+            "{} {}  {}",
+            if *folded { "▹" } else { "▾" },
+            self.app.join("/"),
+            parts.join("  ")
+        ))
+    }
+
+    fn peer_cell(&self) -> String {
+        match &self.kind {
+            RowKind::Peer {
+                direction,
+                arrow,
+                row,
+            } => {
+                if *arrow {
+                    format!("  {} {}", direction.arrow(), row.peer_text())
+                } else {
+                    format!("  {}", row.peer_text())
+                }
+            }
+            RowKind::Header { .. } => self.app.join("/"),
+        }
+    }
+
+    fn with_row<R: Default>(&self, f: impl Fn(&PeerRow) -> R) -> R {
+        self.peer().map(|(_, r)| f(r)).unwrap_or_default()
+    }
+}
+
+/// `/` on a sectioned table: the row's section matches.
+fn section_matches(r: &SectionRow, needle: &str) -> bool {
+    needle.is_empty() || r.haystack.contains(needle)
+}
+
+/// `allowed`, `pot.blocked`, `blocked` or `unknown`.
+fn decision_text(d: pce::models::PolicyDecision) -> String {
+    match d {
+        pce::models::PolicyDecision::PotentiallyBlocked => "pot.blocked".into(),
+        d => d.as_str().into(),
+    }
+}
+
+/// The rows of `sections` (in table order): consecutive sections of one
+/// app share a header (`both`); a folded app shows its header only.
+pub fn section_rows(
+    sections: &[AppSection],
+    folded: &BTreeSet<Vec<String>>,
+    arrows: bool,
+) -> Vec<SectionRow> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < sections.len() {
+        let app = sections[i].app.clone();
+        let mut j = i;
+        while j < sections.len() && sections[j].app == app {
+            j += 1;
+        }
+        let group = &sections[i..j];
+        let is_folded = folded.contains(&app);
+        let mut header = SectionRow {
+            app: app.clone(),
+            kind: RowKind::Header {
+                totals: group
+                    .iter()
+                    .map(|s| (s.direction, s.totals.clone()))
+                    .collect(),
+                folded: is_folded,
+            },
+            haystack: Arc::from(""),
+        };
+        let mut text = header.header_line().unwrap_or_default();
+        let peers: Vec<SectionRow> = group
+            .iter()
+            .flat_map(|s| {
+                s.rows.iter().map(|r| SectionRow {
+                    app: app.clone(),
+                    kind: RowKind::Peer {
+                        direction: s.direction,
+                        arrow: arrows,
+                        row: r.clone(),
+                    },
+                    haystack: Arc::from(""),
+                })
+            })
+            .collect();
+        for p in &peers {
+            if let Some((_, r)) = p.peer() {
+                text.push_str(&format!(
+                    "\n{} {} {} {} {}",
+                    r.peer_text(),
+                    r.peer_name_text(),
+                    r.app_name_text(),
+                    r.service,
+                    decision_text(r.dominant())
+                ));
+            }
+        }
+        let hay: Arc<str> = Arc::from(text.to_lowercase());
+        header.haystack = hay.clone();
+        out.push(header);
+        if !is_folded {
+            out.extend(peers.into_iter().map(|mut p| {
+                p.haystack = hay.clone();
+                p
+            }));
+        }
+        i = j;
+    }
+    out
+}
+
+/// Bytes as `1.2K`, `-` when none were reported.
+fn bytes_text(b: u64) -> String {
+    if b == 0 { "-".into() } else { compact_count(b) }
+}
+
+fn no_sort(_: &SectionRow) -> SortKey {
+    SortKey::Num(0)
+}
+
+/// App-to-app's `in` / `out` / `both` columns. Header rows span the
+/// table (`SectionRow::header_line`); the cells are the peer rows'.
+pub fn app_columns() -> Vec<Column<SectionRow>> {
     vec![
         Column {
-            title: "last seen",
-            width: 16,
-            cell: |b| {
-                b.last_detected
-                    .as_deref()
-                    .map(short_time)
-                    .unwrap_or_default()
-            },
-            key: |b| SortKey::Text(b.last_detected.clone().unwrap_or_default()),
-            right: false,
-            hide_below: 0,
-            narrow: Some(|b| {
-                b.last_detected
-                    .as_deref()
-                    .map(short_time_narrow)
-                    .unwrap_or_default()
-            }),
-            narrow_width: 11,
-        },
-        Column {
-            title: "dst",
-            width: 18,
-            cell: |b| b.dst_group_text(),
-            key: |b| SortKey::Text(b.dst_group_text()),
+            title: "peer",
+            width: 0,
+            cell: SectionRow::peer_cell,
+            key: no_sort,
             right: false,
             hide_below: 0,
             narrow: None,
-            narrow_width: 12,
+            narrow_width: 0,
         },
         Column {
-            title: "dst name",
+            title: "hosts",
             width: 22,
-            cell: |b| b.dst_name_text(),
-            key: |b| SortKey::Text(b.dst_name_text()),
+            cell: |r| r.with_row(PeerRow::peer_name_text),
+            key: no_sort,
             right: false,
-            hide_below: 0,
+            hide_below: 120,
             narrow: None,
-            narrow_width: 14,
+            narrow_width: 0,
         },
         Column {
             title: "service",
             width: 10,
-            cell: |b| b.service_text(),
-            key: |b| SortKey::Num(u64::from(b.port.unwrap_or(0))),
+            cell: |r| r.with_row(|p| p.service.clone()),
+            key: no_sort,
             right: false,
             hide_below: 0,
             narrow: None,
@@ -891,8 +1105,90 @@ pub fn blocked_columns() -> Vec<Column<BlockedGroup>> {
         Column {
             title: "flows",
             width: 6,
-            cell: |b| b.flows.to_string(),
-            key: |b| SortKey::Num(b.flows),
+            cell: |r| r.with_row(|p| p.flows.to_string()),
+            key: no_sort,
+            right: true,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 5,
+        },
+        Column {
+            title: "conns",
+            width: 8,
+            cell: |r| r.with_row(|p| p.connections.to_string()),
+            key: no_sort,
+            right: true,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 6,
+        },
+        Column {
+            title: "bytes",
+            width: 8,
+            cell: |r| r.with_row(|p| bytes_text(p.bytes)),
+            key: no_sort,
+            right: true,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 6,
+        },
+        Column {
+            title: "decision",
+            width: 11,
+            cell: |r| r.with_row(|p| decision_text(p.dominant())),
+            key: no_sort,
+            right: false,
+            hide_below: 0,
+            narrow: Some(|r| {
+                r.with_row(|p| match p.dominant() {
+                    pce::models::PolicyDecision::PotentiallyBlocked => "pot.blk".into(),
+                    d => d.as_str().into(),
+                })
+            }),
+            narrow_width: 8,
+        },
+    ]
+}
+
+/// Blocked's columns: App-to-app `in` with `blocked`, its peers the
+/// sources, plus the destination host(s) and when the row was last seen.
+pub fn blocked_columns() -> Vec<Column<SectionRow>> {
+    vec![
+        Column {
+            title: "src",
+            width: 0,
+            cell: SectionRow::peer_cell,
+            key: no_sort,
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+        },
+        Column {
+            title: "dst name",
+            width: 22,
+            cell: |r| r.with_row(PeerRow::app_name_text),
+            key: no_sort,
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 14,
+        },
+        Column {
+            title: "service",
+            width: 10,
+            cell: |r| r.with_row(|p| p.service.clone()),
+            key: no_sort,
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 9,
+        },
+        Column {
+            title: "flows",
+            width: 6,
+            cell: |r| r.with_row(|p| p.flows.to_string()),
+            key: no_sort,
             right: true,
             hide_below: 0,
             narrow: None,
@@ -901,22 +1197,36 @@ pub fn blocked_columns() -> Vec<Column<BlockedGroup>> {
         Column {
             title: "conns",
             width: 7,
-            cell: |b| b.connections.to_string(),
-            key: |b| SortKey::Num(b.connections),
+            cell: |r| r.with_row(|p| p.connections.to_string()),
+            key: no_sort,
             right: true,
             hide_below: 0,
             narrow: None,
             narrow_width: 5,
         },
         Column {
-            title: "sources",
-            width: 0,
-            cell: |b| b.sources_text(),
-            key: |b| SortKey::Text(b.sources_text()),
+            title: "last seen",
+            width: 16,
+            cell: |r| {
+                r.with_row(|p| {
+                    p.last_detected
+                        .as_deref()
+                        .map(short_time)
+                        .unwrap_or_default()
+                })
+            },
+            key: no_sort,
             right: false,
             hide_below: 0,
-            narrow: None,
-            narrow_width: 0,
+            narrow: Some(|r| {
+                r.with_row(|p| {
+                    p.last_detected
+                        .as_deref()
+                        .map(short_time_narrow)
+                        .unwrap_or_default()
+                })
+            }),
+            narrow_width: 11,
         },
     ]
 }
@@ -1027,7 +1337,12 @@ pub struct TrafficState {
     pub mesh: TableView<MeshRow>,
     /// The Mesh view's optional columns (`u`, `p`); both shown at first.
     pub mesh_cols: MeshColumns,
-    pub blocked: TableView<BlockedGroup>,
+    /// App-to-app's `in` / `out` / `both` sections (`pairs` uses `groups`).
+    pub apps: TableView<SectionRow>,
+    pub apps_state: AppState,
+    /// Blocked: App-to-app `in` with `blocked`, with its own cursor and folds.
+    pub blocked: TableView<SectionRow>,
+    pub blocked_folded: BTreeSet<Vec<String>>,
     pub treemap: TreemapState,
     /// What the Flows view is narrowed to.
     pub drill: Option<Drill>,
@@ -1050,6 +1365,30 @@ pub enum Drill {
     Pair(Vec<String>, Vec<String>),
     /// A Mesh row, under the columns it was grouped with.
     Mesh { key: MeshKey, cols: MeshColumns },
+    /// A section header: every flow of `app` in `direction` (either side
+    /// when `None`, from `both`) that `decisions` keeps.
+    App {
+        app: Vec<String>,
+        direction: Option<Direction>,
+        decisions: Decisions,
+    },
+    /// A section's peer row: its peer and service under `app`.
+    Peer {
+        app: Vec<String>,
+        direction: Direction,
+        peer: Vec<String>,
+        service: String,
+        decisions: Decisions,
+    },
+}
+
+/// ` · blocked` when the drill keeps only some decisions.
+fn decisions_suffix(d: Decisions) -> String {
+    if d == Decisions::All {
+        String::new()
+    } else {
+        format!(" · {}", d.label())
+    }
 }
 
 impl Drill {
@@ -1060,6 +1399,18 @@ impl Drill {
                 &group_key(&f.src, keys) == src && &group_key(&f.dst, keys) == dst
             }
             Drill::Mesh { key, cols } => &mesh_key(f, keys, *cols) == key,
+            Drill::App {
+                app,
+                direction,
+                decisions,
+            } => in_app(f, keys, app, *direction, *decisions),
+            Drill::Peer {
+                app,
+                direction,
+                peer,
+                service,
+                decisions,
+            } => in_peer(f, keys, app, *direction, peer, service, *decisions),
         }
     }
 
@@ -1073,6 +1424,37 @@ impl Drill {
                 key.dst.join("/"),
                 key.service_text()
             ),
+            Drill::App {
+                app,
+                direction,
+                decisions,
+            } => {
+                let app = app.join("/");
+                let pair = match direction {
+                    Some(Direction::In) => format!("* → {app}"),
+                    Some(Direction::Out) => format!("{app} → *"),
+                    None => format!("{app} ↔ *"),
+                };
+                format!("{pair}{}", decisions_suffix(*decisions))
+            }
+            Drill::Peer {
+                app,
+                direction,
+                peer,
+                service,
+                decisions,
+            } => {
+                let (src, dst) = match direction {
+                    Direction::In => (peer, app),
+                    Direction::Out => (app, peer),
+                };
+                format!(
+                    "{} → {} {service}{}",
+                    src.join("/"),
+                    dst.join("/"),
+                    decisions_suffix(*decisions)
+                )
+            }
         }
     }
 }
@@ -1094,7 +1476,10 @@ impl TrafficState {
             groups: TableView::new(group_columns()),
             mesh: TableView::new(mesh_columns(MESH_ALL)),
             mesh_cols: MESH_ALL,
-            blocked: TableView::new(blocked_columns()),
+            apps: TableView::new(app_columns()).with_matcher(section_matches),
+            apps_state: AppState::default(),
+            blocked: TableView::new(blocked_columns()).with_matcher(section_matches),
+            blocked_folded: BTreeSet::new(),
             treemap: TreemapState::new(TreemapRect::default()),
             drill: None,
             auto: AutoRefresh::new(auto_min_seconds),
@@ -1170,12 +1555,149 @@ impl TrafficState {
             .collect();
         let groups = group_by_labels(flows, keys);
         let mesh_rows = mesh(flows, keys, self.mesh_cols);
-        let blocked = blocked_summary(flows, keys, &self.key_order);
         self.flows.set_rows(shown);
         self.groups.set_rows(groups);
         self.mesh.set_rows(mesh_rows);
-        self.blocked.set_rows(blocked);
+        self.rebuild_sections();
         self.relayout_treemap();
+    }
+
+    /// App-to-app's sections (none in `pairs`) and Blocked's, from the
+    /// loaded flows, the keys in force, the state and the folds. Pure.
+    pub fn rebuild_sections(&mut self) {
+        let keys = &self.keys;
+        let flows = self.loaded_flows();
+        let st = &self.apps_state;
+        let apps = match st.by {
+            By::Pairs => Vec::new(),
+            By::In => section_rows(
+                &app_sections(flows, keys, Direction::In, st.decisions),
+                &st.folded,
+                false,
+            ),
+            By::Out => section_rows(
+                &app_sections(flows, keys, Direction::Out, st.decisions),
+                &st.folded,
+                false,
+            ),
+            By::Both => section_rows(
+                &app_sections_both(flows, keys, st.decisions),
+                &st.folded,
+                true,
+            ),
+        };
+        let blocked = section_rows(
+            &app_sections(flows, keys, Direction::In, Decisions::Blocked),
+            &self.blocked_folded,
+            false,
+        );
+        self.apps.set_rows(apps);
+        self.blocked.set_rows(blocked);
+    }
+
+    /// The sectioned table the active view shows, if any: App-to-app
+    /// outside `pairs`, or Blocked.
+    pub fn section_table(&self) -> Option<&TableView<SectionRow>> {
+        match self.view {
+            TrafficView::Aggregate if self.apps_state.by != By::Pairs => Some(&self.apps),
+            TrafficView::Blocked => Some(&self.blocked),
+            _ => None,
+        }
+    }
+
+    /// `Space`: folds or unfolds the selected row's section; the cursor
+    /// lands on its header.
+    pub fn toggle_fold(&mut self) {
+        let Some(app) = self
+            .section_table()
+            .and_then(|t| t.selected_item())
+            .map(|r| r.app.clone())
+        else {
+            return;
+        };
+        let folded = self.folds_mut();
+        if !folded.remove(&app) {
+            folded.insert(app.clone());
+        }
+        self.rebuild_sections();
+        if let Some(t) = self.section_table_mut() {
+            t.select_where(|r| r.is_header() && r.app == app);
+        }
+    }
+
+    /// `z`: folds every section, or unfolds them all when all are folded.
+    pub fn toggle_fold_all(&mut self) {
+        let Some(t) = self.section_table() else {
+            return;
+        };
+        let headers: Vec<(Vec<String>, bool)> = t
+            .rows()
+            .iter()
+            .filter_map(|r| match &r.kind {
+                RowKind::Header { folded, .. } => Some((r.app.clone(), *folded)),
+                RowKind::Peer { .. } => None,
+            })
+            .collect();
+        let app = t.selected_item().map(|r| r.app.clone());
+        let all_folded = headers.iter().all(|(_, f)| *f);
+        let folded = self.folds_mut();
+        if all_folded {
+            folded.clear();
+        } else {
+            folded.extend(headers.into_iter().map(|(a, _)| a));
+        }
+        self.rebuild_sections();
+        if let (Some(app), Some(t)) = (app, self.section_table_mut()) {
+            t.select_where(|r| r.is_header() && r.app == app);
+        }
+    }
+
+    fn section_table_mut(&mut self) -> Option<&mut TableView<SectionRow>> {
+        match self.view {
+            TrafficView::Aggregate if self.apps_state.by != By::Pairs => Some(&mut self.apps),
+            TrafficView::Blocked => Some(&mut self.blocked),
+            _ => None,
+        }
+    }
+
+    fn folds_mut(&mut self) -> &mut BTreeSet<Vec<String>> {
+        if self.view == TrafficView::Blocked {
+            &mut self.blocked_folded
+        } else {
+            &mut self.apps_state.folded
+        }
+    }
+
+    /// The decision filter of the sectioned table on screen.
+    pub fn section_decisions(&self) -> Decisions {
+        if self.view == TrafficView::Blocked {
+            Decisions::Blocked
+        } else {
+            self.apps_state.decisions
+        }
+    }
+
+    /// `Enter` on a section row: the drill for its header or peer row.
+    pub fn section_drill(&self) -> Option<Drill> {
+        let r = self.section_table()?.selected_item()?;
+        let decisions = self.section_decisions();
+        Some(match &r.kind {
+            RowKind::Header { totals, .. } => Drill::App {
+                app: r.app.clone(),
+                direction: match totals.as_slice() {
+                    [(d, _)] => Some(*d),
+                    _ => None,
+                },
+                decisions,
+            },
+            RowKind::Peer { direction, row, .. } => Drill::Peer {
+                app: r.app.clone(),
+                direction: *direction,
+                peer: row.peer.clone(),
+                service: row.service.clone(),
+                decisions,
+            },
+        })
     }
 
     /// The treemap's tiles again from the current groups, zoom, weight and
@@ -1218,7 +1740,8 @@ impl TrafficState {
     pub fn is_searching(&self) -> bool {
         match self.view {
             TrafficView::Flows => self.flows.is_searching(),
-            TrafficView::Aggregate => self.groups.is_searching(),
+            TrafficView::Aggregate if self.apps_state.by == By::Pairs => self.groups.is_searching(),
+            TrafficView::Aggregate => self.apps.is_searching(),
             TrafficView::Mesh => self.mesh.is_searching(),
             TrafficView::Blocked => self.blocked.is_searching(),
             TrafficView::Treemap => false,
@@ -3117,37 +3640,136 @@ mod tests {
         let titles: Vec<&str> = blocked.iter().map(|c| c.title).collect();
         assert_eq!(
             titles,
-            vec![
-                "last seen",
-                "dst",
-                "dst name",
-                "service",
-                "flows",
-                "conns",
-                "sources"
-            ]
+            vec!["src", "dst name", "service", "flows", "conns", "last seen"]
         );
+        // A fill column (width 0) gets at least 8 cells.
+        let fill_width = |cols: &[(usize, u16, bool)]| -> u16 {
+            cols.iter()
+                .map(|c| if c.1 == 0 { 8 } else { c.1 })
+                .sum::<u16>()
+                + cols.len() as u16
+                - 1
+                + 2
+        };
+        let at80 = visible_columns(&blocked, 80);
+        assert!(fill_width(&at80) <= 78 - 16, "room for the sources at 80");
+        let apps = app_columns();
+        let at80 = visible_columns(&apps, 80);
+        let titles: Vec<&str> = at80.iter().map(|c| apps[c.0].title).collect();
+        assert_eq!(
+            titles,
+            vec!["peer", "service", "flows", "conns", "bytes", "decision"]
+        );
+        assert!(fill_width(&at80) <= 78 - 16, "room for the peer at 80");
+        let at160 = visible_columns(&apps, 160);
+        assert_eq!(apps[at160[1].0].title, "hosts");
+    }
+
+    fn rich_sections(direction: Direction, decisions: Decisions, arrows: bool) -> Vec<SectionRow> {
+        let flows = crate::tui::test_support::fixture_flows_rich();
+        let keys = vec!["app".to_string(), "env".to_string()];
+        let sections = if arrows {
+            app_sections_both(&flows, &keys, decisions)
+        } else {
+            app_sections(&flows, &keys, direction, decisions)
+        };
+        section_rows(&sections, &BTreeSet::new(), arrows)
     }
 
     #[test]
-    fn blocked_cells_name_one_host_or_count_them_and_count_more_sources() {
+    fn blocked_cells_name_one_host_or_count_them() {
+        let rows = rich_sections(Direction::In, Decisions::Blocked, false);
+        let cols = blocked_columns();
+        let header = rows
+            .iter()
+            .find(|r| r.is_header() && r.app == vec!["shop", "prod"])
+            .unwrap();
+        assert_eq!(
+            header.header_line().unwrap(),
+            "▾ shop/prod  in · 3 groups · 24 conns · 2 blocked · 1 pot.blocked"
+        );
+        assert!(
+            cols.iter()
+                .all(|c| (c.cell)(header).is_empty() || c.title == "src")
+        );
+        let peers: Vec<Vec<String>> = rows
+            .iter()
+            .filter(|r| !r.is_header() && r.app == vec!["shop", "prod"])
+            .map(|r| cols.iter().map(|c| (c.cell)(r)).collect())
+            .collect();
+        assert_eq!(peers.len(), 3);
+        assert!(
+            peers
+                .iter()
+                .all(|p| p[1] == "shop-db-p.example" && p[2] == "5432/tcp")
+        );
+        let srcs: BTreeSet<&str> = peers.iter().map(|p| p[0].as_str()).collect();
+        assert_eq!(
+            srcs,
+            BTreeSet::from(["  hr/prod", "  shop/dev", "  ipl:Corp/-"]),
+            "indented sources"
+        );
+        let mut many = rows
+            .iter()
+            .find(|r| !r.is_header() && r.app == vec!["shop", "prod"])
+            .unwrap()
+            .clone();
+        if let RowKind::Peer { row, .. } = &mut many.kind {
+            row.app_hosts = 8;
+            row.app_names = vec!["a".into(), "b".into()];
+        }
+        assert_eq!((cols[1].cell)(&many), "8 hosts");
+    }
+
+    #[test]
+    fn both_rows_mark_the_direction_and_share_one_header_per_app() {
+        let rows = rich_sections(Direction::In, Decisions::All, true);
+        let header = &rows[0];
+        let line = header.header_line().unwrap();
+        assert_eq!(
+            line,
+            "▾ shop/prod  ← 4 groups · 1545 conns · 2 blocked · 1 pot.blocked  → 3 groups · 1004 conns"
+        );
+        let peers: Vec<String> = rows
+            .iter()
+            .skip(1)
+            .take_while(|r| !r.is_header())
+            .map(|r| (app_columns()[0].cell)(r))
+            .collect();
+        assert!(peers.iter().any(|p| p.starts_with("  ← ")), "{peers:?}");
+        assert!(peers.iter().any(|p| p.starts_with("  → ")), "{peers:?}");
+        let first_out = peers.iter().position(|p| p.starts_with("  → ")).unwrap();
+        assert!(
+            peers[first_out..].iter().all(|p| p.starts_with("  → ")),
+            "inbound rows, then outbound"
+        );
+        let headers = rows.iter().filter(|r| r.is_header()).count();
+        let apps: BTreeSet<&Vec<String>> = rows.iter().map(|r| &r.app).collect();
+        assert_eq!(headers, apps.len());
+    }
+
+    #[test]
+    fn a_folded_section_keeps_its_header_and_search_keeps_whole_sections() {
         let flows = crate::tui::test_support::fixture_flows_rich();
         let keys = vec!["app".to_string(), "env".to_string()];
-        let rows = pce::traffic::blocked_summary(&flows, &keys, &KeyOrder::default());
-        let cols = blocked_columns();
-        let shop = rows
-            .iter()
-            .find(|r| r.dst_group == vec!["shop", "prod"])
-            .unwrap();
-        assert_eq!((cols[1].cell)(shop), "shop/prod");
-        assert_eq!((cols[2].cell)(shop), "shop-db-p.example");
-        assert_eq!((cols[6].cell)(shop), "hr/prod, shop/dev, ipl:Corp/-");
-        let mut many = shop.clone();
-        many.dst_hosts = 8;
-        many.source_count = 10;
-        many.sources = vec!["a".into(), "b".into(), "c".into(), "d".into(), "e".into()];
-        assert_eq!((cols[2].cell)(&many), "8 hosts");
-        assert_eq!((cols[6].cell)(&many), "a, b, c, d, e +5");
+        let sections = app_sections(&flows, &keys, Direction::In, Decisions::All);
+        let folded = BTreeSet::from([vec!["crm".to_string(), "prod".to_string()]]);
+        let rows = section_rows(&sections, &folded, false);
+        assert!(rows[0].header_line().unwrap().starts_with("▹ crm/prod"));
+        assert!(rows[1].is_header(), "no peers under a folded header");
+        let mut t = TableView::new(app_columns()).with_matcher(section_matches);
+        t.set_rows(section_rows(&sections, &BTreeSet::new(), false));
+        let all = t.len();
+        t.start_search();
+        for c in "api.partner".chars() {
+            t.search_push(c);
+        }
+        assert!(t.len() < all && !t.is_empty());
+        let shown: Vec<&SectionRow> = t.visible().iter().map(|&i| &t.rows()[i]).collect();
+        let app = &shown[0].app;
+        assert!(shown[0].is_header());
+        assert!(shown.iter().all(|r| &r.app == app), "one whole section");
+        assert!(shown.len() > 2, "with its rows that do not match too");
     }
 
     #[test]

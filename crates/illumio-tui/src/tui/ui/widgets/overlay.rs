@@ -2,7 +2,7 @@
 use crate::tui::diff::{ObjectDiff, Sign};
 use crate::tui::filter::{FIELD_NAMES, FilterEditor};
 use crate::tui::form::{Form, clip, visible_tail};
-use crate::tui::model::{Model, Screen, rule_kind_name};
+use crate::tui::model::{Model, Screen, TrafficView, rule_kind_name};
 use crate::tui::picker::KeyPicker;
 use crate::tui::ui::layout::centered;
 use crate::tui::ui::screens::workloads::plain;
@@ -53,7 +53,19 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ("Traffic  g", "pick the label keys every view groups by"),
     (
         "Traffic  Enter",
-        "detail (flows) · drill into a row (app-to-app, mesh)",
+        "detail (flows) · drill into a row or section header",
+    ),
+    (
+        "App-to-app x / X",
+        "pairs · in · out · both (sections per app) · back",
+    ),
+    (
+        "App-to-app d",
+        "decision filter: all · blocked · blocked only",
+    ),
+    (
+        "Sections Space / z",
+        "fold a section · fold or unfold all (also Blocked)",
     ),
     ("Mesh     u / p", "show or hide the user · process columns"),
     (
@@ -837,11 +849,13 @@ pub fn screen_hint(screen: Screen, writes: bool) -> &'static str {
     }
 }
 
-/// More key hints for a screen, shown after `screen_hint` only when the
-/// status line still has room for the status text.
-pub fn screen_hint_more(screen: Screen) -> &'static str {
-    match screen {
-        Screen::Traffic => "+/- window  ]/[ cap",
+/// More key hints for a screen (and the Traffic view), shown after
+/// `screen_hint` only when the status line still has room for the status
+/// text.
+pub fn screen_hint_more(screen: Screen, view: TrafficView) -> &'static str {
+    match (screen, view) {
+        (Screen::Traffic, TrafficView::Aggregate) => "+/- window  ]/[ cap  x mode  d decision",
+        (Screen::Traffic, _) => "+/- window  ]/[ cap",
         _ => "",
     }
 }

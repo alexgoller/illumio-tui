@@ -127,6 +127,13 @@ impl<T> TableView<T> {
         }
     }
 
+    /// Moves the cursor to the first visible row `pred` accepts, if any.
+    pub fn select_where(&mut self, pred: impl Fn(&T) -> bool) {
+        if let Some(pos) = self.visible.iter().position(|&i| pred(&self.rows[i])) {
+            self.selected = pos;
+        }
+    }
+
     pub fn select_prev(&mut self) {
         self.selected = self.selected.saturating_sub(1);
     }

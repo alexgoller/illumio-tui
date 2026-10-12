@@ -2,8 +2,8 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ Keys ───────────────────────────────── 20-41 of 41 · j/k scroll · Esc closes ╮
-│Traffic  Enter           detail (flows) · drill into a row (app-to-app, mesh) │
+╭ Keys ───────────────────────────────── 23-44 of 44 · j/k scroll · Esc closes ╮
+│Sections Space / z       fold a section · fold or unfold all (also Blocked)   │
 │Mesh     u / p           show or hide the user · process columns              │
 │Treemap  hjkl Enter b    move · zoom, then drill · conns/bytes · Esc out      │
 │Traffic  w               draft allow rule from a blocked flow or row (writes) │

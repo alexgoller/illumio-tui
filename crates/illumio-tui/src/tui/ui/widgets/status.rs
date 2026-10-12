@@ -18,7 +18,7 @@ pub fn render(model: &Model, f: &mut Frame, area: Rect) {
         StatusKind::Error => t.bad,
     };
     let base = screen_hint(model.screen, model.writes.enabled);
-    let more = screen_hint_more(model.screen);
+    let more = screen_hint_more(model.screen, model.traffic.view);
     let mut hints = format!(" {base}  : cmd  ? help ");
     if !more.is_empty() && usize::from(area.width) >= hints.len() + more.len() + 2 + STATUS_ROOM {
         hints = format!(" {base}  {more}  : cmd  ? help ");

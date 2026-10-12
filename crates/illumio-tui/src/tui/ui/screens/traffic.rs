@@ -1,12 +1,13 @@
 //! The Traffic screen: filter bar, result stats, flow table and detail pane.
-use crate::tui::model::{Model, QueryState, TrafficView, TreemapState};
+use crate::tui::model::{By, Model, QueryState, SectionRow, TrafficView, TreemapState};
+use crate::tui::table::TableView;
 use crate::tui::ui::theme::Theme;
 use crate::tui::ui::widgets::bars;
 use crate::tui::ui::widgets::panel::{panel, panel_spans};
 use pce::KeyOrder;
 use pce::models::PolicyDecision;
 use pce::traffic::treemap::{Rect as TreemapRect, Tile, Weight};
-use pce::traffic::{ResolvedEndpoint, ResolvedFlow, compact_count};
+use pce::traffic::{Decisions, ResolvedEndpoint, ResolvedFlow, compact_count};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -186,12 +187,66 @@ fn render_flows(model: &Model, f: &mut Frame, area: Rect) {
     });
 }
 
+/// The panel meta of a sectioned table: `in · blocked · keys app,env ·
+/// Enter drills`, then sort and search as every table shows them.
+fn sections_meta(model: &Model, by: &str, view: &TableView<SectionRow>) -> String {
+    let st = model.traffic.section_decisions();
+    let mut parts = vec![by.to_string()];
+    if st != Decisions::All {
+        parts.push(st.label().to_string());
+    }
+    parts.push(format!("keys {}", model.traffic.effective_keys().join(",")));
+    parts.push("Enter drills".into());
+    let meta = crate::tui::ui::widgets::table::header_meta(view);
+    if !meta.is_empty() {
+        parts.push(meta);
+    }
+    parts.join(" · ")
+}
+
+/// A sectioned table: header rows in the accent colour across the table,
+/// peer rows by `peer_style`.
+fn render_sections(
+    model: &Model,
+    f: &mut Frame,
+    area: Rect,
+    title: &str,
+    meta: &str,
+    view: &TableView<SectionRow>,
+    peer_style: &dyn Fn(&SectionRow) -> Style,
+) {
+    let t = &model.theme;
+    let block = panel(title, meta, t, true);
+    let accent = Style::new().fg(t.accent).add_modifier(Modifier::BOLD);
+    crate::tui::ui::widgets::table::render_spanning(f, area, view, t, block, peer_style, &|r| {
+        r.header_line().map(|l| (l, accent))
+    });
+}
+
 /// Rows are styled by their dominant decision: blocked > potentially blocked > allowed.
 fn render_groups(model: &Model, f: &mut Frame, area: Rect) {
     let t = &model.theme;
+    let by = model.traffic.apps_state.by;
+    if by != By::Pairs {
+        let meta = sections_meta(model, by.label(), &model.traffic.apps);
+        let theme = t.clone();
+        render_sections(
+            model,
+            f,
+            area,
+            TrafficView::Aggregate.title(),
+            &meta,
+            &model.traffic.apps,
+            &move |r| {
+                r.peer()
+                    .map_or_else(Style::new, |(_, p)| theme.decision_style(p.dominant()))
+            },
+        );
+        return;
+    }
     let meta = crate::tui::ui::widgets::table::header_meta(&model.traffic.groups);
     let meta = format!(
-        "keys {} · Enter drills{}{}",
+        "pairs · keys {} · Enter drills{}{}",
         model.traffic.effective_keys().join(","),
         if meta.is_empty() { "" } else { " · " },
         meta
@@ -337,21 +392,20 @@ fn draw_fill(f: &mut Frame, clip: Rect, tile: &Tile, t: &Theme, cursor: bool) {
     f.render_widget(Paragraph::new(lines), r);
 }
 
-/// Every row here is blocked or potentially blocked; both read as `bad`.
+/// App-to-app `in` with `blocked`: every peer row is blocked or
+/// potentially blocked; both read as `bad`.
 fn render_blocked(model: &Model, f: &mut Frame, area: Rect) {
-    let t = &model.theme;
-    let meta = crate::tui::ui::widgets::table::header_meta(&model.traffic.blocked);
-    let meta = format!(
-        "by dst {}{}{}",
-        model.traffic.effective_keys().join(","),
-        if meta.is_empty() { "" } else { " · " },
-        meta
+    let meta = sections_meta(model, "in", &model.traffic.blocked);
+    let bad = Style::new().fg(model.theme.bad);
+    render_sections(
+        model,
+        f,
+        area,
+        TrafficView::Blocked.title(),
+        &meta,
+        &model.traffic.blocked,
+        &move |_| bad,
     );
-    let block = panel(TrafficView::Blocked.title(), &meta, t, true);
-    let bad = Style::new().fg(t.bad);
-    crate::tui::ui::widgets::table::render(f, area, &model.traffic.blocked, t, block, &move |_| {
-        bad
-    });
 }
 
 /// `name  ip`, then the IP lists the endpoint belongs to.

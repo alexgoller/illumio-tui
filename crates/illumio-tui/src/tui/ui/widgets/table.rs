@@ -123,6 +123,117 @@ pub fn render<T>(
     f.render_stateful_widget(table, inner, &mut state);
 }
 
+/// Pads or clips `s` to `w` cells (right-aligned when `right`).
+fn fit(s: &str, w: usize, right: bool) -> String {
+    let s: String = s.chars().take(w).collect();
+    if right {
+        format!("{s:>w$}")
+    } else {
+        format!("{s:<w$}")
+    }
+}
+
+/// Like `render`, for tables some of whose rows are one line across every
+/// column (`spanning` returns it): drawn as lines, columns laid out the
+/// same way (fixed widths, `width == 0` takes the rest, one cell apart,
+/// the `▸ ` cursor). `header_style` styles the spanning rows.
+pub fn render_spanning<T>(
+    f: &mut Frame,
+    area: Rect,
+    view: &TableView<T>,
+    theme: &Theme,
+    block: Block,
+    row_style: &dyn Fn(&T) -> Style,
+    spanning: &dyn Fn(&T) -> Option<(String, Style)>,
+) {
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+    if view.is_empty() {
+        let msg = if view.search_text().is_empty() {
+            "no rows"
+        } else {
+            "no rows match the search"
+        };
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(msg, theme.dim_style()))),
+            inner,
+        );
+        return;
+    }
+    let cols = visible_columns(&view.columns, area.width);
+    let avail = inner.width.saturating_sub(2) as usize;
+    let fixed: usize =
+        cols.iter().map(|c| c.1 as usize).sum::<usize>() + cols.len().saturating_sub(1);
+    let fill = avail.saturating_sub(fixed).max(8);
+    let widths: Vec<usize> = cols
+        .iter()
+        .map(|&(_, w, _)| if w == 0 { fill } else { w as usize })
+        .collect();
+    let line_of = |cells: Vec<String>| -> String {
+        let mut s = String::new();
+        for (i, c) in cells.iter().enumerate() {
+            if i > 0 {
+                s.push(' ');
+            }
+            s.push_str(c);
+        }
+        s.chars()
+            .take(avail)
+            .collect::<String>()
+            .trim_end()
+            .to_string()
+    };
+    let header = line_of(
+        cols.iter()
+            .zip(&widths)
+            .map(|(&(ci, _, _), &w)| fit(view.columns[ci].title, w, false))
+            .collect(),
+    );
+    let mut lines = vec![Line::from(Span::styled(
+        format!("  {header}"),
+        theme.header_style(),
+    ))];
+    let height = inner.height.saturating_sub(1) as usize;
+    let start = view.offset().min(view.visible().len());
+    let end = (start + height).min(view.visible().len());
+    for (pos, &i) in view.visible()[start..end].iter().enumerate() {
+        let item = &view.rows()[i];
+        let (text, mut style) = match spanning(item) {
+            Some((text, style)) => (text.chars().take(avail).collect(), style),
+            None => {
+                let cells = cols
+                    .iter()
+                    .zip(&widths)
+                    .map(|(&(ci, _, narrow), &w)| {
+                        let c = &view.columns[ci];
+                        let text = match (narrow, c.narrow) {
+                            (true, Some(n)) => n(item),
+                            _ => view.cell(item, ci),
+                        };
+                        fit(&text, w, c.right)
+                    })
+                    .collect();
+                (line_of(cells), row_style(item))
+            }
+        };
+        let selected = start + pos == view.selected_pos();
+        if selected {
+            style = style.patch(theme.selected_style());
+        }
+        let mut line = format!("{}{text}", if selected { "▸ " } else { "  " });
+        if selected {
+            // The cursor row is highlighted across the whole width.
+            let n = line.chars().count();
+            line.push_str(&" ".repeat((inner.width as usize).saturating_sub(n)));
+        }
+        lines.push(Line::from(Span::styled(line, style)));
+    }
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

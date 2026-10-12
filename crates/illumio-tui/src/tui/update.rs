@@ -4,7 +4,7 @@ use crate::tui::edit::{self, EditIntent, RulesetTarget, Start, WriteIntent};
 use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::form::{Form, FormEvent};
 use crate::tui::model::{
-    Connection, Dir, Drill, EventsFilterEdit, Model, ObjectKind, Overlay, PendingAction,
+    By, Connection, Dir, Drill, EventsFilterEdit, Model, ObjectKind, Overlay, PendingAction,
     PolicyPane, PolicyState, QueryState, Screen, Slices, StatusLine, TrafficData, TrafficView,
     WritesState, rule_line,
 };
@@ -1290,9 +1290,13 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 search_key(&mut t.flows, k);
                 t.flows.ensure_visible(page);
             }
-            TrafficView::Aggregate => {
+            TrafficView::Aggregate if t.apps_state.by == By::Pairs => {
                 search_key(&mut t.groups, k);
                 t.groups.ensure_visible(page);
+            }
+            TrafficView::Aggregate => {
+                search_key(&mut t.apps, k);
+                t.apps.ensure_visible(page);
             }
             TrafficView::Mesh => {
                 search_key(&mut t.mesh, k);
@@ -1327,6 +1331,46 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         }
         KeyCode::Char(c @ ('u' | 'p')) if model.traffic.view == TrafficView::Mesh => {
             model.traffic.toggle_mesh_column(c == 'u');
+        }
+        KeyCode::Char('x' | 'X' | 'd') if model.traffic.view == TrafficView::Blocked => {
+            model.status = StatusLine::info("Blocked is App-to-app with in · blocked; press v");
+        }
+        KeyCode::Char(c @ ('x' | 'X')) if model.traffic.view == TrafficView::Aggregate => {
+            let t = &mut model.traffic;
+            t.apps_state.by = if c == 'x' {
+                t.apps_state.by.next()
+            } else {
+                t.apps_state.by.prev()
+            };
+            t.apps.home();
+            t.rebuild_sections();
+        }
+        KeyCode::Char('d') if model.traffic.view == TrafficView::Aggregate => {
+            let t = &mut model.traffic;
+            t.apps_state.decisions = t.apps_state.decisions.next();
+            t.rebuild_sections();
+            let label = t.apps_state.decisions.label();
+            model.status = StatusLine::info(if t.apps_state.by == By::Pairs {
+                format!("decision {label}: shown in in, out and both (x)")
+            } else {
+                format!("decision {label}")
+            });
+        }
+        KeyCode::Char(' ') if model.traffic.section_table().is_some() => {
+            model.traffic.toggle_fold();
+        }
+        KeyCode::Char('z') if model.traffic.section_table().is_some() => {
+            model.traffic.toggle_fold_all();
+        }
+        // Sections keep their order (by connections): no sort.
+        KeyCode::Char('s') if model.traffic.section_table().is_some() => {}
+        KeyCode::Enter if model.traffic.section_table().is_some() => {
+            let t = &mut model.traffic;
+            if let Some(drill) = t.section_drill() {
+                t.drill = Some(drill);
+                t.view = TrafficView::Flows;
+                t.rebuild_views();
+            }
         }
         KeyCode::Enter => match model.traffic.view {
             TrafficView::Aggregate => {
@@ -1374,7 +1418,10 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             let t = &mut model.traffic;
             match t.view {
                 TrafficView::Flows => table_key(&mut t.flows, k, page),
-                TrafficView::Aggregate => table_key(&mut t.groups, k, page),
+                TrafficView::Aggregate if t.apps_state.by == By::Pairs => {
+                    table_key(&mut t.groups, k, page)
+                }
+                TrafficView::Aggregate => table_key(&mut t.apps, k, page),
                 TrafficView::Mesh => table_key(&mut t.mesh, k, page),
                 TrafficView::Blocked => table_key(&mut t.blocked, k, page),
                 TrafficView::Treemap => {
@@ -1395,7 +1442,8 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     let t = &mut model.traffic;
     match t.view {
         TrafficView::Flows => t.flows.ensure_visible(page),
-        TrafficView::Aggregate => t.groups.ensure_visible(page),
+        TrafficView::Aggregate if t.apps_state.by == By::Pairs => t.groups.ensure_visible(page),
+        TrafficView::Aggregate => t.apps.ensure_visible(page),
         TrafficView::Mesh => t.mesh.ensure_visible(page),
         TrafficView::Blocked => t.blocked.ensure_visible(page),
         TrafficView::Treemap => {}
@@ -1754,7 +1802,10 @@ fn scroll_focused(model: &mut Model, down: bool) {
             let t = &mut model.traffic;
             match t.view {
                 TrafficView::Flows => step(&mut t.flows, down, page),
-                TrafficView::Aggregate => step(&mut t.groups, down, page),
+                TrafficView::Aggregate if t.apps_state.by == By::Pairs => {
+                    step(&mut t.groups, down, page)
+                }
+                TrafficView::Aggregate => step(&mut t.apps, down, page),
                 TrafficView::Mesh => step(&mut t.mesh, down, page),
                 TrafficView::Blocked => step(&mut t.blocked, down, page),
                 // The wheel moves table rows; the treemap has none.
@@ -2877,8 +2928,9 @@ fn rule_intent(p: &PolicyState, c: char) -> Option<EditIntent> {
 
 /// `w` on Traffic: a draft allow rule from the selected blocked or
 /// potentially blocked flow (Flows view or a drilled pair), or from the
-/// first such flow behind a Blocked or Mesh row. App-to-app refuses: a
-/// pair holds flows of every decision.
+/// first such flow behind a section's peer row (App-to-app `in` / `out` /
+/// `both`, Blocked) or a Mesh row. App-to-app `pairs` refuses: a pair holds
+/// flows of every decision; so does a section header.
 fn flow_rule_key(model: &mut Model) -> Vec<Cmd> {
     if writes_refused(model) {
         return Vec::new();
@@ -2886,15 +2938,25 @@ fn flow_rule_key(model: &mut Model) -> Vec<Cmd> {
     let t = &model.traffic;
     let flow = match t.view {
         TrafficView::Flows => t.flows.selected_item().map(|r| r.flow.clone()),
-        TrafficView::Blocked => t.blocked.selected_item().and_then(|b| {
-            let keys = t.effective_keys();
-            t.first_flow(|f| b.contains(f, &keys))
-        }),
+        TrafficView::Blocked | TrafficView::Aggregate if t.section_table().is_some() => {
+            match t.section_drill() {
+                Some(d @ Drill::Peer { .. }) => {
+                    let keys = t.effective_keys();
+                    t.first_flow(|f| d.matches(f, &keys))
+                }
+                Some(_) => {
+                    model.status =
+                        StatusLine::warn("select a peer row (a header holds a whole app)");
+                    return Vec::new();
+                }
+                None => None,
+            }
+        }
         TrafficView::Mesh => t.mesh.selected_item().and_then(|r| {
             let keys = t.effective_keys();
             t.first_flow(|f| r.contains(f, &keys, t.mesh_cols))
         }),
-        TrafficView::Aggregate | TrafficView::Treemap => {
+        TrafficView::Blocked | TrafficView::Aggregate | TrafficView::Treemap => {
             model.status = StatusLine::warn("select a flow in the Flows view (Enter on a pair)");
             return Vec::new();
         }
@@ -3073,7 +3135,19 @@ mod tests {
         assert_eq!(m.traffic.view, TrafficView::Mesh);
         assert!(update(&mut m, key('v')).is_empty());
         assert_eq!(m.traffic.view, TrafficView::Blocked);
-        assert_eq!(m.traffic.blocked.len(), 2);
+        let headers = |m: &Model| {
+            m.traffic
+                .blocked
+                .rows()
+                .iter()
+                .filter(|r| r.is_header())
+                .count()
+        };
+        assert_eq!(
+            (headers(&m), m.traffic.blocked.len()),
+            (2, 4),
+            "two destination roles, one blocked source each"
+        );
         assert!(update(&mut m, key('v')).is_empty());
         assert_eq!(m.traffic.view, TrafficView::Treemap);
         assert!(update(&mut m, key('v')).is_empty());
@@ -3106,13 +3180,7 @@ mod tests {
         assert_eq!(m.traffic.flows.rows()[0].src_group, "shop/prod/web");
         assert_eq!(m.traffic.flows.rows()[0].dst_group, "shop/prod/db");
         assert!(m.traffic.groups.rows().iter().all(|g| g.src.len() == 3));
-        assert!(
-            m.traffic
-                .blocked
-                .rows()
-                .iter()
-                .all(|b| b.dst_group.len() == 3)
-        );
+        assert!(m.traffic.blocked.rows().iter().all(|b| b.app.len() == 3));
         // A non-workload endpoint shows `-` in every slot.
         let corp = m
             .traffic
@@ -3318,13 +3386,22 @@ mod tests {
         let mut m = writes_on(model_with_rich_flows());
         m.traffic.view = TrafficView::Blocked;
         let row = m.traffic.blocked.selected_item().unwrap().clone();
-        assert_eq!(row.dst_group, vec!["hr", "prod"], "newest first");
+        assert!(row.is_header(), "{row:?}");
+        assert!(update(&mut m, key('w')).is_empty(), "no request");
+        assert_eq!(m.overlay, Overlay::None, "a header holds a whole app");
+        assert_eq!(
+            m.status.text,
+            "select a peer row (a header holds a whole app)"
+        );
+        quiet(&mut m, key('j'));
+        let (_, peer) = m.traffic.blocked.selected_item().unwrap().peer().unwrap();
+        let service = peer.service.clone();
         assert!(update(&mut m, key('w')).is_empty(), "no request");
         let Overlay::Form(f) = &m.overlay else {
             panic!("{:?}", m.overlay)
         };
         assert_eq!(f.title, "Allow rule from flow");
-        assert_eq!(f.value("Services"), "443/tcp");
+        assert_eq!(f.value("Services"), service);
         quiet(&mut m, kc(KeyCode::Esc));
         m.traffic.blocked.set_rows(Vec::new());
         quiet(&mut m, key('w'));
@@ -3773,7 +3850,11 @@ mod tests {
             },
         );
         assert!(!m.traffic.groups.is_empty());
-        assert_eq!(m.traffic.blocked.len(), 2);
+        assert_eq!(
+            m.traffic.blocked.len(),
+            3,
+            "the shop/prod header and its two blocked sources"
+        );
     }
 
     #[test]
@@ -6845,7 +6926,7 @@ mod tests {
     fn help_scrolls_to_its_last_line_and_reopens_at_the_top() {
         use crate::tui::ui::widgets::overlay::{HELP_LINES, help_last_scroll};
         let mut m = model_fixture(); // 80x24
-        assert_eq!(HELP_LINES.len(), 41);
+        assert_eq!(HELP_LINES.len(), 44);
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  + / -"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  ] / ["));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Labels   f / i / u"));
@@ -6864,7 +6945,10 @@ mod tests {
         );
         update(&mut m, key('?'));
         let last = help_last_scroll(24);
-        assert_eq!(last, 19, "41 lines, 22 rows inside the box");
+        assert_eq!(last, 22, "44 lines, 22 rows inside the box");
+        assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app x / X"));
+        assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app d"));
+        assert!(HELP_LINES.iter().any(|(k, _)| *k == "Sections Space / z"));
 
         for _ in 0..40 {
             update(&mut m, key('j'));
@@ -9329,6 +9413,39 @@ mod window_step_tests {
     }
 
     #[test]
+    fn app_to_app_state_survives_plus_and_minus() {
+        use crate::tui::model::By;
+        let mut m = model_with_window("1d");
+        m.traffic.view = TrafficView::Aggregate;
+        quiet(&mut m, key('x'));
+        quiet(&mut m, key('x'));
+        quiet(&mut m, key('d'));
+        let st = m.traffic.apps_state.clone();
+        assert_eq!(st.by, By::Out);
+        let cmds = update(&mut m, key('+'));
+        assert_eq!(cmds, vec![slice_cmd(&m, "2d", ago(48), ago(24))]);
+        let older = older_flows(&m, 3, "2026-10-08T12:00:00Z");
+        merge(&mut m, older, false, (ago(48), ago(24)));
+        assert_eq!(m.traffic.apps_state, st);
+        let rows: u64 = m
+            .traffic
+            .apps
+            .rows()
+            .iter()
+            .filter_map(|r| r.peer().map(|(_, p)| p.flows))
+            .sum();
+        let kept = m
+            .traffic
+            .loaded_flows()
+            .iter()
+            .filter(|f| st.decisions.keeps(f.policy_decision))
+            .count() as u64;
+        assert_eq!(rows, kept, "rebuilt from the merged flows");
+        update(&mut m, key('-'));
+        assert_eq!(m.traffic.apps_state, st);
+    }
+
+    #[test]
     fn plus_fetches_only_the_older_slice_and_merges_it() {
         let mut m = model_with_window("1d");
         let loaded = m.traffic.loaded_flows().len();
@@ -9705,5 +9822,313 @@ mod window_step_tests {
         let cmds = update(&mut m, key('y'));
         assert_eq!(cmds.len(), 1);
         assert!(matches!(&cmds[0], Cmd::RunQuery { filter, .. } if filter.max_results == 20_000));
+    }
+}
+
+#[cfg(test)]
+mod app_sections_tests {
+    use super::*;
+    use crate::tui::model::{AppState, Model, Overlay, RowKind};
+    use crate::tui::test_support::model_with_rich_flows;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use pce::traffic::{Decisions, Direction};
+
+    fn key(c: char) -> Msg {
+        Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))
+    }
+
+    fn kc(code: KeyCode) -> Msg {
+        Msg::Key(KeyEvent::new(code, KeyModifiers::NONE))
+    }
+
+    #[track_caller]
+    fn quiet(m: &mut Model, msg: Msg) {
+        assert_eq!(update(m, msg), Vec::<Cmd>::new());
+    }
+
+    fn on_apps() -> Model {
+        let mut m = model_with_rich_flows();
+        quiet(&mut m, key('v'));
+        assert_eq!(m.traffic.view, TrafficView::Aggregate);
+        m
+    }
+
+    fn headers(m: &Model) -> Vec<String> {
+        m.traffic
+            .apps
+            .rows()
+            .iter()
+            .filter(|r| r.is_header())
+            .map(|r| r.app.join("/"))
+            .collect()
+    }
+
+    #[test]
+    fn x_and_capital_x_cycle_the_state_and_d_the_decision_filter_without_requests() {
+        let mut m = on_apps();
+        assert_eq!(m.traffic.apps_state.by, By::Pairs);
+        assert!(m.traffic.apps.is_empty(), "pairs builds no sections");
+        let mut seen = Vec::new();
+        for _ in 0..4 {
+            quiet(&mut m, key('x'));
+            seen.push(m.traffic.apps_state.by);
+        }
+        assert_eq!(seen, vec![By::In, By::Out, By::Both, By::Pairs]);
+        let mut seen = Vec::new();
+        for _ in 0..4 {
+            quiet(&mut m, key('X'));
+            seen.push(m.traffic.apps_state.by);
+        }
+        assert_eq!(seen, vec![By::Both, By::Out, By::In, By::Pairs]);
+        quiet(&mut m, key('x'));
+        let all = m.traffic.apps.len();
+        let mut seen = Vec::new();
+        for _ in 0..3 {
+            quiet(&mut m, key('d'));
+            seen.push((m.traffic.apps_state.decisions, m.traffic.apps.len()));
+        }
+        assert_eq!(seen[0].0, Decisions::Blocked);
+        assert_eq!(seen[1].0, Decisions::BlockedOnly);
+        assert_eq!(seen[2], (Decisions::All, all));
+        assert!(seen[1].1 < seen[0].1 && seen[0].1 < all, "{seen:?}");
+        assert_eq!(m.status.text, "decision all");
+    }
+
+    #[test]
+    fn enter_on_a_header_drills_to_the_app_and_on_a_peer_row_to_its_flows() {
+        let mut m = on_apps();
+        quiet(&mut m, key('x'));
+        quiet(&mut m, key('d')); // blocked
+        let first = m.traffic.apps.selected_item().unwrap().clone();
+        let RowKind::Header { totals, .. } = &first.kind else {
+            panic!("{first:?}")
+        };
+        let expected = totals[0].1.flows as usize;
+        quiet(&mut m, kc(KeyCode::Enter));
+        assert_eq!(m.traffic.view, TrafficView::Flows);
+        assert_eq!(
+            m.traffic.drill,
+            Some(Drill::App {
+                app: first.app.clone(),
+                direction: Some(Direction::In),
+                decisions: Decisions::Blocked,
+            })
+        );
+        assert_eq!(m.traffic.flows.len(), expected);
+        assert!(
+            m.traffic
+                .drill
+                .as_ref()
+                .unwrap()
+                .title()
+                .ends_with(" · blocked")
+        );
+        quiet(&mut m, kc(KeyCode::Esc));
+        quiet(&mut m, key('v'));
+        assert_eq!(m.traffic.view, TrafficView::Aggregate);
+        assert_eq!(
+            m.traffic.apps_state.by,
+            By::In,
+            "the state outlives the drill"
+        );
+        quiet(&mut m, key('j'));
+        let row = m.traffic.apps.selected_item().unwrap().clone();
+        let (direction, peer) = row.peer().unwrap();
+        let (flows, peer_key, service) = (peer.flows, peer.peer.clone(), peer.service.clone());
+        quiet(&mut m, kc(KeyCode::Enter));
+        assert_eq!(
+            m.traffic.drill,
+            Some(Drill::Peer {
+                app: row.app.clone(),
+                direction,
+                peer: peer_key,
+                service,
+                decisions: Decisions::Blocked,
+            })
+        );
+        assert_eq!(m.traffic.flows.len() as u64, flows);
+        assert!(
+            m.traffic
+                .flows
+                .rows()
+                .iter()
+                .all(|r| r.flow.policy_decision != PolicyDecision::Allowed)
+        );
+    }
+
+    #[test]
+    fn both_header_drills_to_either_side() {
+        let mut m = on_apps();
+        m.traffic.apps_state.by = By::Both;
+        m.traffic.rebuild_views();
+        let app = m.traffic.apps.selected_item().unwrap().app.clone();
+        quiet(&mut m, kc(KeyCode::Enter));
+        let Some(Drill::App { direction, .. }) = &m.traffic.drill else {
+            panic!("{:?}", m.traffic.drill)
+        };
+        assert_eq!(*direction, None);
+        let keys = m.traffic.effective_keys();
+        let n = m
+            .traffic
+            .loaded_flows()
+            .iter()
+            .filter(|f| {
+                pce::traffic::group_key(&f.src, &keys) == app
+                    || pce::traffic::group_key(&f.dst, &keys) == app
+            })
+            .count();
+        assert_eq!(m.traffic.flows.len(), n);
+    }
+
+    #[test]
+    fn space_folds_a_section_and_z_folds_or_unfolds_them_all() {
+        let mut m = on_apps();
+        quiet(&mut m, key('x'));
+        let all = m.traffic.apps.len();
+        let apps = headers(&m);
+        quiet(&mut m, key('j'));
+        quiet(&mut m, key('j'));
+        quiet(&mut m, key(' '));
+        let sel = m.traffic.apps.selected_item().unwrap();
+        assert!(sel.is_header(), "the cursor lands on the folded header");
+        assert!(m.traffic.apps_state.folded.contains(&sel.app));
+        assert!(m.traffic.apps.len() < all);
+        assert_eq!(headers(&m), apps, "every section keeps its header");
+        quiet(&mut m, key(' '));
+        assert_eq!(m.traffic.apps.len(), all);
+        quiet(&mut m, key('z'));
+        assert_eq!(m.traffic.apps.len(), apps.len(), "headers only");
+        quiet(&mut m, key('z'));
+        assert_eq!(m.traffic.apps.len(), all);
+        quiet(&mut m, key('s'));
+        assert_eq!(m.traffic.apps.sort(), None, "sections keep their order");
+    }
+
+    #[test]
+    fn search_keeps_a_section_when_any_of_its_rows_matches() {
+        let mut m = on_apps();
+        quiet(&mut m, key('x'));
+        quiet(&mut m, key('/'));
+        for c in "53/udp".chars() {
+            quiet(&mut m, key(c));
+        }
+        quiet(&mut m, kc(KeyCode::Enter));
+        let shown: Vec<_> = m
+            .traffic
+            .apps
+            .visible()
+            .iter()
+            .map(|&i| m.traffic.apps.rows()[i].clone())
+            .collect();
+        assert!(!shown.is_empty());
+        assert!(shown.iter().any(|r| r.is_header()));
+        assert!(shown.len() < m.traffic.apps.rows().len());
+        let apps: std::collections::BTreeSet<_> = shown.iter().map(|r| r.app.clone()).collect();
+        for app in &apps {
+            let whole = m
+                .traffic
+                .apps
+                .rows()
+                .iter()
+                .filter(|r| &r.app == app)
+                .count();
+            let kept = shown.iter().filter(|r| &r.app == app).count();
+            assert_eq!(whole, kept, "the whole section stays");
+        }
+    }
+
+    #[test]
+    fn the_state_survives_g_and_r_and_a_profile_switch_resets_it() {
+        let mut m = on_apps();
+        quiet(&mut m, key('x'));
+        quiet(&mut m, key('d'));
+        quiet(&mut m, key('z'));
+        let st = m.traffic.apps_state.clone();
+        assert!(!st.folded.is_empty());
+        quiet(&mut m, key('g'));
+        quiet(&mut m, kc(KeyCode::Enter));
+        assert_eq!(m.overlay, Overlay::None);
+        assert_eq!(m.traffic.apps_state, st, "g keeps it");
+        assert!(!m.traffic.apps.is_empty());
+        let cmds = update(&mut m, key('r'));
+        assert!(!cmds.is_empty(), "r runs the query");
+        let filter = m.traffic.filter.clone();
+        let flows = crate::tui::test_support::fixture_flows_rich();
+        let seq = m.traffic.seq;
+        quiet(
+            &mut m,
+            Msg::QueryDone {
+                seq,
+                result: Ok(crate::tui::msg::QueryOutcome {
+                    flows,
+                    truncated: false,
+                    matches_count: None,
+                    elapsed: std::time::Duration::from_secs(1),
+                    hit: false,
+                    filter,
+                    bounds: None,
+                }),
+            },
+        );
+        assert_eq!(m.traffic.apps_state, st, "r keeps it");
+        assert_eq!(m.traffic.apps.len(), headers(&m).len(), "still folded");
+        m.reset_data();
+        assert_eq!(
+            m.traffic.apps_state,
+            AppState::default(),
+            ":profile resets it"
+        );
+    }
+
+    #[test]
+    fn w_on_a_peer_row_opens_the_rule_form_and_on_a_header_explains() {
+        let mut m = on_apps();
+        m.writes = crate::tui::model::WritesState::on();
+        quiet(&mut m, key('x'));
+        quiet(&mut m, key('d'));
+        quiet(&mut m, key('w'));
+        assert_eq!(m.overlay, Overlay::None);
+        assert_eq!(
+            m.status.text,
+            "select a peer row (a header holds a whole app)"
+        );
+        quiet(&mut m, key('j'));
+        quiet(&mut m, key('w'));
+        let Overlay::Form(f) = &m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        assert_eq!(f.title, "Allow rule from flow");
+    }
+
+    #[test]
+    fn blocked_ignores_x_and_d_and_says_why() {
+        let mut m = model_with_rich_flows();
+        m.traffic.view = TrafficView::Blocked;
+        let before = (m.traffic.apps_state.clone(), m.traffic.blocked.len());
+        for c in ['x', 'X', 'd'] {
+            quiet(&mut m, key(c));
+            assert_eq!(
+                m.status.text,
+                "Blocked is App-to-app with in · blocked; press v"
+            );
+            assert_eq!(
+                (m.traffic.apps_state.clone(), m.traffic.blocked.len()),
+                before
+            );
+        }
+        quiet(&mut m, key('z'));
+        assert!(m.traffic.blocked.rows().iter().all(|r| r.is_header()));
+        assert!(m.traffic.apps_state.folded.is_empty(), "its own folds");
+        quiet(&mut m, key('z'));
+        quiet(&mut m, key('j'));
+        quiet(&mut m, kc(KeyCode::Enter));
+        assert!(matches!(
+            m.traffic.drill,
+            Some(Drill::Peer {
+                direction: Direction::In,
+                decisions: Decisions::Blocked,
+                ..
+            })
+        ));
     }
 }
