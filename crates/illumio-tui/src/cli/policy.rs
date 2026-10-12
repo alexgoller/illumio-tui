@@ -1,6 +1,6 @@
 //! Policy: rulesets (list; add, update, delete), the rules of one ruleset
 //! (list; add, update, delete allow rules), deny rules, and pending
-//! provisioning changes.
+//! provisioning changes (list, provision, revert).
 use super::context::{Context, cache_label};
 use super::error::CliError;
 use super::output::TableRows;
@@ -19,8 +19,8 @@ use pce::models::{
 };
 use pce::write::{
     ActorRef, DenyRuleDraft, DenyRulePatch, IfMissing, ObjectKind, Plan, ProvisionRequest,
-    ProvisionSubset, RuleDraft, RulePatch, RuleSetDraft, RuleSetPatch, ServiceRef, WriteError,
-    checked_nested_href,
+    ProvisionSubset, RevertRequest, RuleDraft, RulePatch, RuleSetDraft, RuleSetPatch, ServiceRef,
+    WriteError, checked_nested_href,
 };
 use pce::{CacheMode, Cached, PceError, RuleKind, RuleSetView, RuleView};
 use serde::Serialize;
@@ -38,6 +38,8 @@ pub enum PolicyCmd {
     Pending(PendingArgs),
     /// Provision pending changes (needs writes = true in the profile)
     Provision(ProvisionArgs),
+    /// Revert pending changes to their active version; draft-only objects are deleted (needs writes = true in the profile)
+    Revert(RevertArgs),
 }
 
 #[derive(Args, Debug)]
@@ -332,6 +334,17 @@ pub struct ProvisionArgs {
     pub write: WriteFlags,
 }
 
+#[derive(Args, Debug)]
+pub struct RevertArgs {
+    /// Revert every pending change (each listed in the request)
+    #[arg(long, conflicts_with = "targets", required_unless_present = "targets")]
+    pub all: bool,
+    /// Ruleset names, or hrefs of pending rulesets, rules, IP lists, services or label groups
+    pub targets: Vec<String>,
+    #[command(flatten)]
+    pub write: WriteFlags,
+}
+
 #[derive(Args, Debug, Clone, Default)]
 pub struct RulesetsArgs {
     /// Read active policy instead of draft
@@ -528,6 +541,7 @@ pub async fn run(ctx: &Context, cmd: &PolicyCmd) -> Result<(), CliError> {
         },
         PolicyCmd::Pending(a) => pending(ctx, a).await,
         PolicyCmd::Provision(a) => provision(ctx, a).await,
+        PolicyCmd::Revert(a) => revert(ctx, a).await,
     }
 }
 
@@ -1292,6 +1306,31 @@ async fn provision_targets(
         .collect()
 }
 
+/// What the user typed beside each href, and the hrefs, for a provision or
+/// a revert of named targets.
+async fn typed_targets(
+    ctx: &Context,
+    targets: &[String],
+) -> Result<(Vec<(String, String)>, Vec<String>), CliError> {
+    let pairs = provision_targets(ctx, targets).await?;
+    let hrefs = pairs.iter().map(|(_, h)| h.clone()).collect();
+    Ok((pairs, hrefs))
+}
+
+/// A planner's `Invalid` with each `<href> has no pending changes` naming
+/// what the user typed.
+fn with_typed(e: WriteError, typed: &[(String, String)]) -> CliError {
+    match e {
+        WriteError::Invalid(errs) => WriteError::Invalid(
+            errs.into_iter()
+                .map(|m| name_typed_target(m, typed))
+                .collect(),
+        )
+        .into(),
+        e => e.into(),
+    }
+}
+
 /// `<href> has no pending changes` becomes `<typed> (<href>) ...` when the
 /// target was given by name.
 fn name_typed_target(msg: String, typed: &[(String, String)]) -> String {
@@ -1304,31 +1343,41 @@ fn name_typed_target(msg: String, typed: &[(String, String)]) -> String {
 
 async fn provision(ctx: &Context, a: &ProvisionArgs) -> Result<(), CliError> {
     let guard = write::prepare(ctx, &a.write)?;
-    let mut typed = Vec::new();
-    let subset = if a.all {
-        ProvisionSubset::All
+    let (typed, subset) = if a.all {
+        (Vec::new(), ProvisionSubset::All)
     } else {
-        let pairs = provision_targets(ctx, &a.targets).await?;
-        let hrefs = pairs.iter().map(|(_, h)| h.clone()).collect();
-        typed = pairs;
-        ProvisionSubset::Hrefs(hrefs)
+        let (typed, hrefs) = typed_targets(ctx, &a.targets).await?;
+        (typed, ProvisionSubset::Hrefs(hrefs))
     };
     let req = ProvisionRequest {
         description: a.description.clone(),
         subset,
     };
-    let plan = match ctx.pce.writer(&guard).plan_provision(&req).await {
-        Ok(p) => p,
-        // Name what the user typed alongside the href.
-        Err(WriteError::Invalid(errs)) => {
-            return Err(WriteError::Invalid(
-                errs.into_iter()
-                    .map(|m| name_typed_target(m, &typed))
-                    .collect(),
-            )
-            .into());
-        }
-        Err(e) => return Err(e.into()),
+    let plan = ctx
+        .pce
+        .writer(&guard)
+        .plan_provision(&req)
+        .await
+        .map_err(|e| with_typed(e, &typed))?;
+    write::run_provision_plan(ctx, &a.write, &guard, plan).await
+}
+
+async fn revert(ctx: &Context, a: &RevertArgs) -> Result<(), CliError> {
+    let guard = write::prepare(ctx, &a.write)?;
+    let (typed, targets) = if a.all {
+        (Vec::new(), Vec::new())
+    } else {
+        typed_targets(ctx, &a.targets).await?
     };
+    let req = RevertRequest {
+        all: a.all,
+        targets,
+    };
+    let plan = ctx
+        .pce
+        .writer(&guard)
+        .plan_revert(&req)
+        .await
+        .map_err(|e| with_typed(e, &typed))?;
     write::run_provision_plan(ctx, &a.write, &guard, plan).await
 }

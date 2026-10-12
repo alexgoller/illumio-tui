@@ -211,7 +211,7 @@ async fn allow_writes_is_still_accepted_and_changes_nothing() {
 }
 
 /// Every write subcommand, with arguments that would otherwise be valid.
-const ALL_WRITES: [&[&str]; 27] = [
+const ALL_WRITES: [&[&str]; 28] = [
     &["labels", "add", "a=b"],
     &["labels", "update", "/orgs/5/labels/1", "--value", "x"],
     &["labels", "delete", "/orgs/5/labels/1"],
@@ -360,6 +360,7 @@ const ALL_WRITES: [&[&str]; 27] = [
         "--impact",
     ],
     &["policy", "provision", "--all"],
+    &["policy", "revert", "--all"],
 ];
 
 #[tokio::test(flavor = "multi_thread")]
@@ -3172,6 +3173,222 @@ mod provision {
         let lines = audit_lines(state.path());
         assert_eq!(lines.len(), 2, "one audit line per send");
         assert_eq!(lines[0]["body"], all_body());
+    }
+}
+
+mod revert {
+    use super::policy::{fixture_rule_sets, mount_get};
+    use super::*;
+
+    fn pending_dict() -> Value {
+        serde_json::from_str(include_str!("../../../fixtures/pending_dict.json")).unwrap()
+    }
+
+    fn all_body() -> Value {
+        json!({
+            "change_subset": {
+                "ip_lists": [{"href": "/orgs/5/sec_policy/draft/ip_lists/21"}],
+                "rule_sets": [{"href": "/orgs/5/sec_policy/draft/rule_sets/101"}]
+            }
+        })
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn dry_run_prints_the_put_and_its_body_and_sends_nothing() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_get(&server, "/orgs/5/sec_policy/pending", pending_dict()).await;
+        Mock::given(method("PUT"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(0)
+            .mount(&server)
+            .await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args(["policy", "revert", "--all", "--dry-run"])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["method"], "PUT");
+        assert_eq!(out["data"]["path"], "/orgs/5/sec_policy/delete");
+        assert_eq!(out["data"]["body"], all_body());
+        assert_eq!(
+            out["data"]["counts"],
+            json!({"ip_lists": 1, "rule_sets": 1})
+        );
+        assert_eq!(
+            out["data"]["summary"],
+            "revert all 2 pending changes: ip_list \"Corp\" (removed), \
+             rule_set \"Global-Infra\" (removed)"
+        );
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+        assert!(audit_lines(state.path()).is_empty());
+        // The table shows the body too.
+        let mut t = cmd(&server);
+        t.env("ILLUMIO_WRITES", "1")
+            .env("XDG_STATE_HOME", state.path());
+        t.args(["--table", "policy", "revert", "--all", "--dry-run"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("/orgs/5/sec_policy/delete")
+                    .and(predicate::str::contains("change_subset")),
+            );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn by_ruleset_name_and_href() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_get(&server, "/orgs/5/sec_policy/pending", pending_dict()).await;
+        mount_get(
+            &server,
+            "/orgs/5/sec_policy/draft/rule_sets",
+            fixture_rule_sets(),
+        )
+        .await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args([
+                    "policy",
+                    "revert",
+                    "global-infra",
+                    "/orgs/5/sec_policy/active/ip_lists/21",
+                    "--dry-run",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["body"], all_body());
+        assert_eq!(
+            out["data"]["summary"],
+            "revert 2 changes: ip_list \"Corp\" (removed), rule_set \"Global-Infra\" (removed)"
+        );
+        let a = writer(&server, state.path())
+            .args(["policy", "revert", "Shop-Prod", "--dry-run"])
+            .assert()
+            .code(2);
+        assert_eq!(
+            stderr_json(&a)["error"]["message"],
+            "Shop-Prod (/orgs/5/sec_policy/draft/rule_sets/100) has no pending changes"
+        );
+        assert_eq!(
+            count(&server, "PUT", "/api/v2/orgs/5/sec_policy/delete").await,
+            0
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn argument_errors_send_nothing() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        for args in [
+            &["policy", "revert", "--yes"][..],
+            &["policy", "revert", "--dry-run"],
+            &["policy", "revert", "--all", "Global-Infra", "--dry-run"],
+            &["policy", "revert", "--all", "--dry-run", "--yes"],
+            &["policy", "revert", "--all"],
+        ] {
+            writer(&server, state.path()).args(args).assert().code(2);
+        }
+        assert!(server.received_requests().await.unwrap().is_empty());
+        assert!(audit_lines(state.path()).is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn nothing_pending_is_skipped() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_get(&server, "/orgs/5/sec_policy/pending", json!([])).await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args(["policy", "revert", "--all", "--yes"])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["skipped"], true);
+        assert_eq!(out["data"]["reason"], "nothing pending");
+        assert_eq!(
+            count(&server, "PUT", "/api/v2/orgs/5/sec_policy/delete").await,
+            0
+        );
+        assert!(audit_lines(state.path()).is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sends_once_and_reports_in_json_and_table() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_get(&server, "/orgs/5/sec_policy/pending", pending_dict()).await;
+        Mock::given(method("PUT"))
+            .and(path("/api/v2/orgs/5/sec_policy/delete"))
+            .and(body_json(all_body()))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(2)
+            .mount(&server)
+            .await;
+        let a = writer(&server, state.path())
+            .args(["policy", "revert", "--all", "--yes"])
+            .assert()
+            .success();
+        assert_no_secret(&a);
+        let out = stdout_json(a);
+        assert_eq!(out["data"]["status"], 204);
+        assert_eq!(out["data"]["pending"], false);
+        assert_eq!(
+            out["data"]["counts"],
+            json!({"ip_lists": 1, "rule_sets": 1})
+        );
+        assert_eq!(out["meta"]["write"]["method"], "PUT");
+        assert_eq!(out["meta"]["write"]["path"], "/orgs/5/sec_policy/delete");
+        let mut t = cmd(&server);
+        t.env("ILLUMIO_WRITES", "1")
+            .env("XDG_STATE_HOME", state.path());
+        t.args(["--table", "policy", "revert", "--all", "--yes"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("reverted")
+                    .and(predicate::str::contains("ip_lists=1, rule_sets=1")),
+            );
+        let lines = audit_lines(state.path());
+        assert_eq!(lines.len(), 2, "one audit line per send");
+        assert_eq!(lines[0]["method"], "PUT");
+        assert_eq!(lines[0]["path"], "/orgs/5/sec_policy/delete");
+        assert_eq!(lines[0]["body"], all_body());
+        assert_eq!(lines[0]["status"], 204);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_4xx_is_a_json_error_and_a_502_is_not_retried() {
+        for (status, kind) in [(406, "rejected"), (502, "write_unanswered")] {
+            let server = MockServer::start().await;
+            let state = tempfile::tempdir().unwrap();
+            mount_get(&server, "/orgs/5/sec_policy/pending", pending_dict()).await;
+            Mock::given(method("PUT"))
+                .and(path("/api/v2/orgs/5/sec_policy/delete"))
+                .respond_with(
+                    ResponseTemplate::new(status).set_body_json(
+                        json!([{"token": "invalid_change_subset", "message": "nope"}]),
+                    ),
+                )
+                .expect(1)
+                .mount(&server)
+                .await;
+            let a = writer(&server, state.path())
+                .args(["policy", "revert", "--all", "--yes"])
+                .assert()
+                .failure();
+            assert_eq!(stderr_json(&a)["error"]["kind"], kind, "{status}");
+            assert_eq!(
+                count(&server, "PUT", "/api/v2/orgs/5/sec_policy/delete").await,
+                1,
+                "{status}: sent once"
+            );
+            let lines = audit_lines(state.path());
+            assert_eq!(lines.len(), 1);
+            assert_eq!(lines[0]["status"], status);
+        }
     }
 }
 

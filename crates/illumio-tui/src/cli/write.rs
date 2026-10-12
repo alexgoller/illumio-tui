@@ -14,8 +14,8 @@ use pce::NameIndex;
 use pce::models::{IpList, Label, LabelGroup, Service};
 use pce::write::provision_counts;
 use pce::write::{
-    ActorKind, ActorRef, JsonlAudit, Outcome, Plan, ServiceRef, WriteContext, WriteError,
-    WriteGuard, WriteRefused, WriteRequest, Written, checked_href, checked_policy_href,
+    ActorKind, ActorRef, JsonlAudit, ObjectKind, Outcome, Plan, ServiceRef, WriteContext,
+    WriteError, WriteGuard, WriteRefused, WriteRequest, Written, checked_href, checked_policy_href,
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -82,7 +82,8 @@ pub enum WriteOutput {
         href: String,
         reason: String,
     },
-    /// `policy provision --dry-run`: the request and its object counts.
+    /// `policy provision --dry-run` and `policy revert --dry-run`: the
+    /// request and its object counts.
     ProvisionDryRun {
         #[serde(flatten)]
         request: WriteRequest,
@@ -90,6 +91,12 @@ pub enum WriteOutput {
     },
     /// `policy provision --yes`: the new policy version and the counts.
     Provisioned {
+        #[serde(flatten)]
+        written: Written,
+        counts: BTreeMap<String, usize>,
+    },
+    /// `policy revert --yes`: the PCE's answer and the counts.
+    Reverted {
         #[serde(flatten)]
         written: Written,
         counts: BTreeMap<String, usize>,
@@ -184,6 +191,11 @@ impl TableRows for WriteOutput {
                 rows.extend(written_rows(written));
                 rows
             }
+            WriteOutput::Reverted { written, counts } => {
+                let mut rows = vec![row("reverted", counts_text(counts))];
+                rows.extend(written_rows(written));
+                rows
+            }
             WriteOutput::DryRunImpact { request, impact } => {
                 let mut rows = request_rows(request);
                 rows.extend(impact_rows(impact));
@@ -201,7 +213,8 @@ impl TableRows for WriteOutput {
 /// What a write's output carries besides the request or the result.
 enum Extra {
     None,
-    /// `policy provision`: object counts from `change_subset`.
+    /// `policy provision` and `policy revert`: object counts from
+    /// `change_subset`.
     Counts,
     /// `--impact` on a rule write, and whether its reads were truncated.
     Impact(Impact, bool),
@@ -218,8 +231,9 @@ pub async fn run_plan(
     send(ctx, flags, guard, plan, Extra::None).await
 }
 
-/// [`run_plan`] for `policy provision`: the dry run and the result carry
-/// `counts` (object type to number of hrefs in `change_subset`).
+/// [`run_plan`] for `policy provision` and `policy revert`: the dry run
+/// and the result carry `counts` (object type to number of hrefs in
+/// `change_subset`).
 pub async fn run_provision_plan(
     ctx: &Context,
     flags: &WriteFlags,
@@ -298,6 +312,9 @@ async fn send(
             };
             let out = match (extra, counts) {
                 (Extra::Impact(impact, _), _) => WriteOutput::WrittenImpact { written: w, impact },
+                (_, Some(counts)) if kind == ObjectKind::Revert => {
+                    WriteOutput::Reverted { written: w, counts }
+                }
                 (_, Some(counts)) => WriteOutput::Provisioned { written: w, counts },
                 _ => WriteOutput::Written(w),
             };
