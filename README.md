@@ -125,8 +125,12 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   `g` picker, with label counts), `/=pay` searches values only and `/app=pay` the values of
   one key, `i` shows or hides the profile's `ignore_keys` (hidden by default, counted in the
   header: `key app,env · 212 of 4310 · 38 hidden`), and `u` keeps the labels no workload,
-  label group, ruleset scope or rule uses; the `workloads` and `rules` columns sort and show
-  `-` until Workloads and Policy are loaded, and `u` asks before loading them.
+  label group, ruleset scope or rule uses, counted in the policy scope the Policy screen has
+  loaded (draft by default, active once `d` toggles it); the `workloads` and `rules` columns
+  sort and show `-` until Workloads and Policy are loaded, and `u` asks before loading them.
+  A label used only by a deny rule the PCE serves through the per-ruleset fallback endpoint
+  counts once that ruleset's deny rules have been loaded, and a truncated workload list is
+  named in the header (`unused (workloads truncated)`).
 - **Workloads**: VEN health columns and a summary line, `h` unhealthy only, `H` sort by
   severity, `t` / `T` jump to Traffic with the workload as source / destination.
 - **Events**: severity-coloured audit events, `f` edit severity / type / window, `S` sort by
@@ -193,7 +197,8 @@ exactly, `--value-contains` is a case-insensitive substring, `--ignore-keys` hid
 profile's `ignore_keys` (`--no-ignore-keys`, the default, keeps every key). `--unused` keeps
 the labels no workload, rule, ruleset scope or label group uses: it reads the workloads, the
 draft rulesets and the label groups (through the cache, counted in `meta`) and adds
-`workloads` and `rules` to each row; without it the rows are unchanged.
+`workloads` and `rules` to each row; deny rules count when the ruleset carries them inline
+(no fallback reads). Without it the rows are unchanged.
 
 `--impact` on `policy rules <ruleset>` adds each rule's `impact` (JSON) or a `P/C` column
 (table): `providers` and `consumers` (workloads matched, unions over the ruleset's scopes),

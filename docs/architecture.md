@@ -53,7 +53,7 @@ Module map under `crates/illumio-tui/src/tui/`:
 | `edit` | edit intents, pre-filled forms, form to library draft or patch |
 | `diff` | draft against active for a pending IP list, service or ruleset |
 | `impact` | rule impact as the TUI shows it: `P/C` cells, the rule detail's rows, the confirm line |
-| `picker` | the `g` overlay: which label keys the traffic views group by; also the Labels tab's `f` key filter, whose usage counts come from `pce::label_usage` |
+| `picker` | the `g` overlay: which label keys the traffic views group by; also the Labels tab's `f` key filter |
 | `ui/` | theme, layout, per-screen drawing and widgets (panels, overlays) |
 
 One message, top to bottom: pressing `r` on Traffic.
@@ -270,7 +270,12 @@ opening or closing an overlay. IP lists are the Objects screen's fourth tab
 `Cmd::LoadIpLists` on the tab's first visit): the list is the index's own (a cache
 hit after startup), sizes are computed once per load, and `used_by` counts
 the loaded draft rules that name the list, recomputed when the rulesets or
-their fetched deny rules arrive.
+their fetched deny rules arrive. The Labels tab works the same way: its rows
+are a projection of `ObjectsState.all_labels` (`rebuild_labels`: the `f`
+keys, `i` ignored keys, `u` unused only), and their `workloads` and `rules`
+counts come from `pce::label_usage` over the cached workloads, rulesets,
+fetched deny rules and label groups (`Model::recount_labels`, on each of
+those loads), so the counts cost no request.
 
 The CLI's `--impact` costs one workloads read through the cache; on a write
 it runs after the guard and the plan and before the send, and its
@@ -287,7 +292,8 @@ tier key first, `TrafficState.key_order`). Everywhere labels are
 printed they follow the same `pce::KeyOrder` (scope keys, tier key, then
 alphabetical; `NameIndex::resolve_labels`, `Workload::label_text`), whose
 ignored keys (`KeyOrder::shows`, from `ignore_keys`) stay out of label text, `keys_seen`
-and the `g` picker only, never from JSON, the edit form or the Labels tab.
+and the `g` picker, and out of the Labels tab and its `f` picker until `i`; never from JSON
+or the edit form.
 `rebuild_views` resolves the keys once (`effective_keys`) and rebuilds
 every view with them. Grouping lives in `pce::traffic`: `group_text`
 (`-` in every slot of a non-workload) labels the Flows rows, which are
