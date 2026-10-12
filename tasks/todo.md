@@ -226,4 +226,4 @@ Spec: docs/superpowers/specs/2026-10-11-traffic-views-design.md · Plan: docs/su
 - [x] `ignore_keys` per profile / `ILLUMIO_IGNORE_KEYS`; `KeyOrder::with_ignored`/`shows`
 - [x] Hidden from label columns, traffic detail, blocked dst labels, `all labels` and the `g` picker; kept in JSON, the edit form, the Labels tab
 - [x] 16 tests (819 passed), opus review (5 minors, 4 applied), demo100 read-only check, merge
-- [ ] Docs run (README, GitHub Pages site) and enable Pages
+- [x] Docs run (README, GitHub Pages site) and enable Pages (live 2026-10-12)
