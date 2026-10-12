@@ -236,4 +236,4 @@ Spec: docs/superpowers/specs/2026-10-11-traffic-views-design.md · Plan: docs/su
 ## Docs media and issue #11 (2026-10-12)
 - [x] Real screenshots (7) and a 30 s tour (mp4 + gif) from demo100, wired into the site; Pages live (f5f6b23)
 - [x] #11 window/cap stepping with lazy slices and flow merging (opus impl + opus review, 1 fix wave, rebase, 886 tests) merged 4fa2f13
-- [ ] Read-only smoke of + / - on demo100 (first try hit the PCE's transient 500; retry pending)
+- [x] Read-only smoke of + / - on demo100: r 4 calls, + 4 calls (2 slices), - 0 calls (two earlier tries hit the PCE's transient startup 500)
