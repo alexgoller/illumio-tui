@@ -272,3 +272,9 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 3rem; font-size: .9r
 footer .wrap { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content: space-between; }
 
 pre.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Long inline paths and commands (audit log, quarantine command) wrap on
+   phones instead of clipping at the body's overflow-x: hidden. */
+@media (max-width: 600px) {
+  :not(pre) > code { white-space: normal; overflow-wrap: anywhere; }
+}
