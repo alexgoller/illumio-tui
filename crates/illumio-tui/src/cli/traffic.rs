@@ -3,7 +3,7 @@
 //! label-pair groups, the blocked summary or the mesh.
 use super::context::{Context, cache_label};
 use super::error::CliError;
-use super::output::{TableRows, Window};
+use super::output::{Meta, TableRows, Window};
 use clap::{Args, Subcommand, ValueEnum};
 use jiff::Timestamp;
 use jiff::civil::Date;
@@ -11,13 +11,15 @@ use pce::models::{
     ActorMatch, PolicyDecision, ServiceMatch, TrafficQuery, WorkloadFilter, proto_number,
 };
 use pce::traffic::{
-    AppSection, Decisions, Direction, FilterExpr, FlowGroup, MeshColumns, MeshRow, ResolvedFlow,
-    TrafficQueryBuilder, app_header, app_sections, app_sections_both, group_by_labels, mesh,
-    parse_window, resolve_actor, resolve_flows,
+    AppSection, BackfillRun, Decisions, Direction, FilterExpr, FlowGroup, MAX_SLICES, MeshColumns,
+    MeshRow, Next, ResolvedFlow, Step, TrafficQueryBuilder, app_header, app_sections,
+    app_sections_both, compact_duration, coverage, format_timestamp, group_by_labels, merge_flows,
+    mesh, parse_window, plan_backfill, resolve_actor, resolve_flows,
 };
 use pce::{KeyOrder, NameIndex};
 use serde::Serialize;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Subcommand, Debug)]
@@ -158,6 +160,13 @@ pub struct FilterArgs {
     /// Confirm an expensive query (window > 7d or max_results > 10000)
     #[arg(long)]
     pub yes: bool,
+    /// When the result is truncated, fill the rest of the window in slices that fit
+    /// the cap, newest first (one more query per slice; meta.slices counts them)
+    #[arg(long)]
+    pub backfill: bool,
+    /// With --backfill: at most this many slice queries (default 50)
+    #[arg(long, requires = "backfill")]
+    pub max_slices: Option<u32>,
 }
 
 /// RFC 3339, or a date; a date-only `--to` means 23:59:59 of that day.
@@ -564,12 +573,124 @@ pub async fn run(ctx: &Context, cmd: &TrafficCmd) -> Result<(), CliError> {
     }
 }
 
-/// One query's flows, resolved, and what the envelope reports about them.
+/// One query's flows (with `--backfill`, every slice's merged), resolved,
+/// and what the envelope reports about them.
 struct Fetched {
     flows: Vec<ResolvedFlow>,
     cache: &'static str,
     truncated: bool,
     window: Option<Window>,
+    /// How much of the window the flows cover.
+    covered: Duration,
+    /// `--backfill`: the queries merged.
+    slices: Option<u32>,
+}
+
+impl Fetched {
+    fn meta(&self, ctx: &Context) -> Meta {
+        let mut m = ctx.meta(self.cache, self.truncated, self.window.clone());
+        m.covered = Some(compact_duration(self.covered));
+        m.slices = self.slices;
+        m
+    }
+}
+
+/// What a backfill added: the queries merged (the first included), the
+/// covered span, and whether the window is still not fully covered.
+struct Backfilled {
+    slices: u32,
+    covered: Duration,
+    truncated: bool,
+}
+
+/// `--backfill`: from the oldest flow of the truncated first result back to
+/// the window start, slices sized to fit the cap, one query at a time,
+/// merged into `flows`. A truncated slice is dropped and its range fetched
+/// again in halves; one that truncates at 1m stops. `None` when there is
+/// nothing to fill.
+async fn backfill(
+    ctx: &Context,
+    q: &TrafficQuery,
+    idx: &NameIndex,
+    flows: &mut Vec<ResolvedFlow>,
+    max: u32,
+) -> Result<Option<Backfilled>, CliError> {
+    let (Ok(start), Ok(end)) = (
+        q.start_date.parse::<Timestamp>(),
+        q.end_date.parse::<Timestamp>(),
+    ) else {
+        return Ok(None);
+    };
+    let window = q.window();
+    let cov = coverage(flows, window);
+    let (Some(plan), Some(from)) = (plan_backfill(&cov, true, q.max_results, start), cov.oldest)
+    else {
+        return Ok(None);
+    };
+    let cap = q.max_results;
+    if plan.count > max {
+        eprintln!(
+            "backfill needs {} slices of {} (--max-slices {max}): shorten the window, raise \
+             --max-results or --max-slices",
+            plan.count,
+            compact_duration(plan.slice)
+        );
+        return Ok(Some(Backfilled {
+            slices: 1,
+            covered: cov.covered,
+            truncated: true,
+        }));
+    }
+    let mut run = BackfillRun::new(plan.slice, start, from, max);
+    let mut slices = 1;
+    let mut truncated = false;
+    loop {
+        let (s, e) = match run.next_slice() {
+            Next::Done => break,
+            Next::OverBudget { remaining } => {
+                eprintln!(
+                    "backfill stopped after {max} queries: {remaining} slices of {} left",
+                    compact_duration(run.slice)
+                );
+                truncated = true;
+                break;
+            }
+            Next::Slice(s, e) => (s, e),
+        };
+        let mut slice = q.clone();
+        slice.start_date = format_timestamp(s);
+        slice.end_date = format_timestamp(e);
+        let r = ctx
+            .pce
+            .traffic(&slice, ctx.cache_mode, &CancellationToken::new(), None)
+            .await?;
+        match run.answered(r.truncated) {
+            Step::Retry { slice } => eprintln!(
+                "slice {} to {} truncated at {cap}: halved to {}",
+                format_timestamp(s),
+                format_timestamp(e),
+                compact_duration(slice)
+            ),
+            Step::Merge => {
+                merge_flows(flows, resolve_flows(&r.value.flows, idx));
+                slices += 1;
+            }
+            Step::TooSmall => {
+                merge_flows(flows, resolve_flows(&r.value.flows, idx));
+                slices += 1;
+                truncated = true;
+                eprintln!(
+                    "cap {cap} is too small for this PCE at 1m: raise --max-results or traffic_max_results"
+                );
+                break;
+            }
+        }
+    }
+    Ok(Some(Backfilled {
+        slices,
+        covered: end.duration_since(run.next_end).unsigned_abs().min(window),
+        truncated,
+    }))
 }
 
 /// Builds and runs the query (cost guard, cache, one name index). A dry
@@ -592,12 +713,27 @@ async fn fetch(ctx: &Context, args: &FilterArgs) -> Result<Option<Fetched>, CliE
         .pce
         .traffic(&q, ctx.cache_mode, &CancellationToken::new(), None)
         .await?;
-    Ok(Some(Fetched {
+    let mut f = Fetched {
         flows: resolve_flows(&result.value.flows, &idx),
         cache: cache_label(result.hit, ctx.cache_mode),
         truncated: result.truncated,
         window,
-    }))
+        covered: Duration::ZERO,
+        slices: None,
+    };
+    f.covered = coverage(&f.flows, q.window()).covered;
+    if args.backfill {
+        f.slices = Some(1);
+        let max = args.max_slices.unwrap_or(MAX_SLICES);
+        if f.truncated
+            && let Some(b) = backfill(ctx, &q, &idx, &mut f.flows, max).await?
+        {
+            f.slices = Some(b.slices);
+            f.covered = b.covered;
+            f.truncated = b.truncated;
+        }
+    }
+    Ok(Some(f))
 }
 
 /// `--keys`, else the profile's scope keys.
@@ -619,21 +755,16 @@ async fn query(ctx: &Context, args: &QueryArgs) -> Result<(), CliError> {
             sections: app_sections(&f.flows, &keys, Direction::In, Decisions::Blocked),
             both: false,
         };
-        ctx.emit(&sections, f.cache, f.truncated, f.window)
+        ctx.emit_meta(&sections, &f.meta(ctx))
     } else if !args.group.is_empty() {
-        ctx.emit(
-            &group_by_labels(&f.flows, &args.group),
-            f.cache,
-            f.truncated,
-            f.window,
-        )
+        ctx.emit_meta(&group_by_labels(&f.flows, &args.group), &f.meta(ctx))
     } else {
         let order = ctx.config.key_order();
         let rows = FlowRows {
             flows: &f.flows,
             order: &order,
         };
-        ctx.emit(&rows, f.cache, f.truncated, f.window)
+        ctx.emit_meta(&rows, &f.meta(ctx))
     }
 }
 
@@ -649,14 +780,9 @@ async fn groups(ctx: &Context, args: &GroupsArgs) -> Result<(), CliError> {
             if let Some(miss) = app_miss(args, &sections) {
                 eprintln!("{miss}");
             }
-            ctx.emit(&sections, f.cache, f.truncated, f.window)
+            ctx.emit_meta(&sections, &f.meta(ctx))
         }
-        None => ctx.emit(
-            &group_by_labels(&f.flows, &keys),
-            f.cache,
-            f.truncated,
-            f.window,
-        ),
+        None => ctx.emit_meta(&group_by_labels(&f.flows, &keys), &f.meta(ctx)),
     }
 }
 
@@ -669,7 +795,7 @@ async fn mesh_cmd(ctx: &Context, args: &MeshArgs) -> Result<(), CliError> {
         user: !args.no_user,
         process: !args.no_process,
     };
-    ctx.emit(&mesh(&f.flows, &keys, cols), f.cache, f.truncated, f.window)
+    ctx.emit_meta(&mesh(&f.flows, &keys, cols), &f.meta(ctx))
 }
 
 #[cfg(test)]

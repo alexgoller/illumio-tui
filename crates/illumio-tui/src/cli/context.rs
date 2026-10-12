@@ -66,6 +66,8 @@ impl Context {
             cache,
             truncated,
             window,
+            covered: None,
+            slices: None,
             write: None,
         }
     }
@@ -77,13 +79,21 @@ impl Context {
         truncated: bool,
         window: Option<Window>,
     ) -> Result<(), CliError> {
-        let meta = self.meta(cache, truncated, window);
+        self.emit_meta(data, &self.meta(cache, truncated, window))
+    }
+
+    /// `emit` with a meta the caller filled in.
+    pub fn emit_meta<T: Serialize + TableRows>(
+        &self,
+        data: &T,
+        meta: &Meta,
+    ) -> Result<(), CliError> {
         let mut out = std::io::stdout().lock();
         match self.format {
-            OutputFormat::Json => write_json(&mut out, data, &meta)?,
+            OutputFormat::Json => write_json(&mut out, data, meta)?,
             OutputFormat::Table => {
                 write_table(&mut out, data)?;
-                eprintln!("{}", meta_line(&meta));
+                eprintln!("{}", meta_line(meta));
             }
         }
         Ok(())

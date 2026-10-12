@@ -934,6 +934,160 @@ async fn traffic_query_blocked_prints_sections_per_destination_and_counts_its_ho
     assert!(!text.contains("dst labels"), "{text}");
 }
 
+/// One Explorer query answering `body` at `href`, expected `times` times
+/// (then the next mock answers).
+async fn mount_query_once(server: &MockServer, href: &str, times: u64, matches: u64, body: String) {
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/traffic_flows/async_queries"))
+        .respond_with(
+            ResponseTemplate::new(202).set_body_json(json!({"href": href, "status": "queued"})),
+        )
+        .up_to_n_times(times.max(1))
+        .expect(times)
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{href}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "completed",
+            "result": {"href": format!("{href}/download")},
+            "matches_count": matches
+        })))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{href}/download")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(body)
+                .insert_header("Content-Type", "application/json"),
+        )
+        .mount(server)
+        .await;
+}
+
+/// The fixture flows last seen at `times` (a port per flow when `port` is set).
+fn flows_at(times: &[&str], port: Option<u64>) -> String {
+    let mut flows: Vec<Value> =
+        serde_json::from_str(include_str!("../../../fixtures/traffic_flows.json")).unwrap();
+    flows.truncate(times.len());
+    for (i, (f, t)) in flows.iter_mut().zip(times).enumerate() {
+        f["timestamp_range"]["last_detected"] = json!(t);
+        if let Some(p) = port {
+            f["service"]["port"] = json!(p + i as u64);
+        }
+    }
+    serde_json::to_string(&flows).unwrap()
+}
+
+/// 06:00 to 08:00, cap 4: the first answer is four flows over the last
+/// hour (truncated), so slices of 30m fill 06:00 to 07:00 in two queries.
+async fn mount_backfill(server: &MockServer, slices: u64) {
+    mount_objects(server).await;
+    let first = flows_at(
+        &[
+            "2026-10-10T08:00:00Z",
+            "2026-10-10T07:40:00Z",
+            "2026-10-10T07:20:00Z",
+            "2026-10-10T07:00:00Z",
+        ],
+        None,
+    );
+    mount_query_once(server, QHREF, 1, 4, first).await;
+    let older = flows_at(
+        &["2026-10-10T06:45:00Z", "2026-10-10T06:15:00Z"],
+        Some(60_000),
+    );
+    mount_query_once(
+        server,
+        "/orgs/5/traffic_flows/async_queries/q-2",
+        slices,
+        2,
+        older,
+    )
+    .await;
+}
+
+const BACKFILL_ARGS: [&str; 8] = [
+    "traffic",
+    "query",
+    "--from",
+    "2026-10-10T06:00:00Z",
+    "--to",
+    "2026-10-10T08:00:00Z",
+    "--max-results",
+    "4",
+];
+
+#[tokio::test(flavor = "multi_thread")]
+async fn traffic_backfill_fills_the_window_in_slices() {
+    let server = MockServer::start().await;
+    mount_backfill(&server, 2).await;
+    let out = stdout_json(
+        cmd(&server)
+            .args(BACKFILL_ARGS)
+            .arg("--backfill")
+            .assert()
+            .success(),
+    );
+    let flows = out["data"].as_array().unwrap();
+    assert_eq!(flows.len(), 6, "4 + 2 new rows, the second slice folded in");
+    let folded: Vec<u64> = flows[4..]
+        .iter()
+        .map(|f| f["num_connections"].as_u64().unwrap())
+        .collect();
+    assert_eq!(
+        folded,
+        flows_conns_doubled(),
+        "both slices' connections add up"
+    );
+    assert_eq!(out["meta"]["slices"], 3, "the first query and two slices");
+    assert_eq!(out["meta"]["covered"], "2h");
+    assert_eq!(out["meta"]["truncated"], false);
+    assert_eq!(out["meta"]["window"]["start"], "2026-10-10T06:00:00Z");
+    // Name index (4 lists) + 3 queries of POST, status, download.
+    assert_eq!(out["meta"]["api_calls"], 4 + 3 * 3);
+    server.verify().await;
+}
+
+/// The two older fixture flows' connections, counted once per slice.
+fn flows_conns_doubled() -> Vec<u64> {
+    let flows: Vec<Value> =
+        serde_json::from_str(include_str!("../../../fixtures/traffic_flows.json")).unwrap();
+    flows[..2]
+        .iter()
+        .map(|f| 2 * f["num_connections"].as_u64().unwrap())
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn traffic_without_backfill_reports_coverage_only() {
+    let server = MockServer::start().await;
+    mount_backfill(&server, 0).await;
+    let out = stdout_json(cmd(&server).args(BACKFILL_ARGS).assert().success());
+    assert_eq!(out["data"].as_array().unwrap().len(), 4);
+    assert_eq!(out["meta"]["covered"], "1h");
+    assert_eq!(out["meta"]["truncated"], true);
+    assert!(out["meta"].get("slices").is_none(), "{}", out["meta"]);
+    // --max-slices below the plan: nothing more is sent.
+    let server = MockServer::start().await;
+    mount_backfill(&server, 0).await;
+    let a = cmd(&server)
+        .args(BACKFILL_ARGS)
+        .args(["--backfill", "--max-slices", "1"])
+        .assert()
+        .success();
+    let err = String::from_utf8_lossy(&a.get_output().stderr).to_string();
+    assert!(
+        err.contains("backfill needs 2 slices of 30m (--max-slices 1)"),
+        "{err}"
+    );
+    let out = stdout_json(a);
+    assert_eq!(out["meta"]["slices"], 1);
+    assert_eq!(out["meta"]["truncated"], true);
+    server.verify().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn traffic_query_flows_json() {
     let server = MockServer::start().await;

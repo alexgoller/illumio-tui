@@ -50,6 +50,13 @@ pub struct Meta {
     pub truncated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window: Option<Window>,
+    /// Traffic: how much of `window` the flows cover (`4m`, `1d`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub covered: Option<String>,
+    /// Traffic with `--backfill`: the queries merged into the result (the
+    /// first one and each backfill slice).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slices: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub write: Option<WriteMeta>,
 }
@@ -189,6 +196,12 @@ pub fn meta_line(meta: &Meta) -> String {
         meta.cache,
         meta.elapsed_ms
     );
+    if let Some(c) = &meta.covered {
+        s.push_str(&format!(" · covers {c}"));
+    }
+    if let Some(n) = meta.slices {
+        s.push_str(&format!(" · {n} slice{}", if n == 1 { "" } else { "s" }));
+    }
     if meta.truncated {
         s.push_str(" · WARNING: result truncated");
     }
@@ -217,6 +230,8 @@ mod tests {
             cache: "none",
             truncated: false,
             window: None,
+            covered: None,
+            slices: None,
             write: Some(WriteMeta {
                 method: WriteMethod::Post,
                 path: "/orgs/5/labels".into(),

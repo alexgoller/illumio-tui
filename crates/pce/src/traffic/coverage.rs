@@ -260,8 +260,11 @@ impl BackfillRun {
 }
 
 /// `4m`, `23h 56m`, `1d 2h`: the two largest non-zero units of d, h, m
-/// (`<1m` under a minute).
+/// (`<1m` under a minute, `0m` for none).
 pub fn compact_duration(d: Duration) -> String {
+    if d.is_zero() {
+        return "0m".into();
+    }
     let mins = d.as_secs() / 60;
     if mins == 0 {
         return "<1m".into();
@@ -503,6 +506,7 @@ mod tests {
         assert_eq!(compact_duration(w("2d 5m")), "2d");
         assert_eq!(compact_duration(w("2h")), "2h");
         assert_eq!(compact_duration(w("30s")), "<1m");
+        assert_eq!(compact_duration(Duration::ZERO), "0m");
         assert_eq!(approx_duration(w("4m 30s")), "~4 minutes");
         assert_eq!(approx_duration(w("1m")), "~1 minute");
         assert_eq!(approx_duration(w("23h 56m")), "~23 hours");
