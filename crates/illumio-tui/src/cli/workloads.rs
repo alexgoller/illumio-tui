@@ -383,7 +383,7 @@ pub async fn run(ctx: &Context, args: &WorkloadsArgs) -> Result<(), CliError> {
     }
     let c = ctx.pce.workloads(&filter, ctx.cache_mode).await?;
     let now = jiff::Timestamp::now();
-    let order = KeyOrder::new(&ctx.config.scope_keys, &ctx.config.tier_key);
+    let order = ctx.config.key_order();
     let rows: Vec<WorkloadRow> = c
         .value
         .into_iter()
@@ -421,5 +421,25 @@ mod tests {
         let json = serde_json::to_value(&rows[0]).unwrap();
         assert!(json.get("label_text").is_none(), "JSON keeps its shape");
         assert!(json["labels"].is_array());
+    }
+
+    #[test]
+    fn table_rows_hide_ignored_keys_and_json_keeps_them() {
+        let now: jiff::Timestamp = "2026-10-10T08:00:00Z".parse().unwrap();
+        let order = KeyOrder::new(&["app".into()], "role").with_ignored(&["env".into()]);
+        let rows: Vec<WorkloadRow> = fixture()
+            .into_iter()
+            .map(|w| WorkloadRow::new(w, now, &order))
+            .collect();
+        let labels = rows.headers().iter().position(|h| *h == "labels").unwrap();
+        assert_eq!(rows.rows()[0][labels], "app=shop role=web");
+        let json = serde_json::to_value(&rows[0]).unwrap();
+        let keys: Vec<&str> = json["labels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|l| l["key"].as_str())
+            .collect();
+        assert!(keys.contains(&"env"), "{keys:?}");
     }
 }

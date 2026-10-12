@@ -7,7 +7,6 @@ use super::output::{TableRows, Window};
 use clap::{Args, Subcommand};
 use jiff::Timestamp;
 use jiff::civil::Date;
-use pce::NameIndex;
 use pce::models::{
     ActorMatch, PolicyDecision, ServiceMatch, TrafficQuery, WorkloadFilter, proto_number,
 };
@@ -15,6 +14,7 @@ use pce::traffic::{
     BlockedGroup, FilterExpr, FlowGroup, MeshColumns, MeshRow, ResolvedFlow, TrafficQueryBuilder,
     blocked_summary, group_by_labels, mesh, parse_window, resolve_actor, resolve_flows,
 };
+use pce::{KeyOrder, NameIndex};
 use serde::Serialize;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -281,7 +281,20 @@ impl TableRows for DryRun {
     }
 }
 
-impl TableRows for Vec<ResolvedFlow> {
+/// Flows as printed: JSON is the flows themselves (every label); the
+/// table's label columns follow `order` and hide its ignored keys.
+struct FlowRows<'a> {
+    flows: &'a [ResolvedFlow],
+    order: &'a KeyOrder,
+}
+
+impl Serialize for FlowRows<'_> {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        self.flows.serialize(s)
+    }
+}
+
+impl TableRows for FlowRows<'_> {
     fn headers(&self) -> Vec<&'static str> {
         vec![
             "last seen",
@@ -296,14 +309,15 @@ impl TableRows for Vec<ResolvedFlow> {
         ]
     }
     fn rows(&self) -> Vec<Vec<String>> {
-        self.iter()
+        self.flows
+            .iter()
             .map(|f| {
                 vec![
                     f.last_detected.clone().unwrap_or_default(),
                     f.src.display_name(),
-                    f.src.label_text(),
+                    f.src.label_text(self.order),
                     f.dst.display_name(),
-                    f.dst.label_text(),
+                    f.dst.label_text(self.order),
                     f.service_text(),
                     f.num_connections.to_string(),
                     f.policy_decision.as_str().to_string(),
@@ -479,7 +493,7 @@ async fn query(ctx: &Context, args: &QueryArgs) -> Result<(), CliError> {
     if args.blocked {
         let keys = keys_or_profile(ctx, &[]);
         ctx.emit(
-            &blocked_summary(&f.flows, &keys),
+            &blocked_summary(&f.flows, &keys, &ctx.config.key_order()),
             f.cache,
             f.truncated,
             f.window,
@@ -492,7 +506,12 @@ async fn query(ctx: &Context, args: &QueryArgs) -> Result<(), CliError> {
             f.window,
         )
     } else {
-        ctx.emit(&f.flows, f.cache, f.truncated, f.window)
+        let order = ctx.config.key_order();
+        let rows = FlowRows {
+            flows: &f.flows,
+            order: &order,
+        };
+        ctx.emit(&rows, f.cache, f.truncated, f.window)
     }
 }
 
@@ -584,10 +603,47 @@ mod tests {
         let idx = NameIndex::new(&labels, &[], &[], &[])
             .with_key_order(pce::KeyOrder::new(&["env".into()], "role"));
         let flows = pce::traffic::resolve_flows(&raw, &idx);
-        let headers = flows.headers();
+        let table = FlowRows {
+            flows: &flows,
+            order: idx.key_order(),
+        };
+        let headers = table.headers();
         let col = |h: &str| headers.iter().position(|x| *x == h).unwrap();
-        let rows = flows.rows();
+        let rows = table.rows();
         assert_eq!(rows[0][col("src labels")], "env=prod role=web app=shop");
         assert_eq!(rows[0][col("dst labels")], "env=prod role=db app=shop");
+    }
+
+    #[test]
+    fn table_label_columns_hide_ignored_keys_and_json_keeps_them() {
+        let labels: Vec<pce::models::Label> =
+            serde_json::from_str(include_str!("../../../../fixtures/labels.json")).unwrap();
+        let raw: Vec<pce::models::Flow> =
+            serde_json::from_str(include_str!("../../../../fixtures/traffic_flows.json")).unwrap();
+        let idx = NameIndex::new(&labels, &[], &[], &[]);
+        let flows = pce::traffic::resolve_flows(&raw, &idx);
+        let order = KeyOrder::new(&["app".into()], "role").with_ignored(&["env".into()]);
+        let table = FlowRows {
+            flows: &flows,
+            order: &order,
+        };
+        let headers = table.headers();
+        let col = |h: &str| headers.iter().position(|x| *x == h).unwrap();
+        let rows = table.rows();
+        assert_eq!(rows[0][col("src labels")], "app=shop role=web");
+        assert_eq!(rows[0][col("dst labels")], "app=shop role=db");
+        let json = serde_json::to_value(&table).unwrap();
+        assert_eq!(
+            json,
+            serde_json::to_value(&flows).unwrap(),
+            "JSON is the flows"
+        );
+        let keys: Vec<&str> = json[0]["src"]["labels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|l| l["key"].as_str())
+            .collect();
+        assert!(keys.contains(&"env"), "{keys:?}");
     }
 }

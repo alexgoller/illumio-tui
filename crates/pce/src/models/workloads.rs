@@ -202,6 +202,7 @@ impl Workload {
             .labels
             .iter()
             .filter_map(|l| Some((l.key.as_deref()?, l.value.as_deref().unwrap_or(""))))
+            .filter(|(k, _)| order.shows(k))
             .collect();
         parts.sort_by(|a, b| order.cmp_kv(*a, *b));
         parts
@@ -374,6 +375,16 @@ mod tests {
         let w = fixture();
         let order = KeyOrder::new(&["env".into()], "role");
         assert_eq!(w[0].label_text(&order), "env=prod role=web app=shop");
+    }
+
+    #[test]
+    fn label_text_hides_ignored_keys_and_keeps_the_rest_in_order() {
+        let w = fixture();
+        let order = KeyOrder::new(&["role".into()], "").with_ignored(&["env".into()]);
+        assert_eq!(w[0].label_text(&order), "role=web app=shop");
+        assert_eq!(w[0].labels.len(), 3, "the labels themselves are kept");
+        let json = serde_json::to_string(&w[0]).unwrap();
+        assert!(json.contains("\"env\""), "{json}");
     }
 
     #[test]

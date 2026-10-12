@@ -1396,7 +1396,7 @@ fn treemap_out(model: &mut Model) {
 /// flows carry.
 fn open_key_picker(model: &Model) -> KeyPicker {
     let t = &model.traffic;
-    let seen = pce::traffic::keys_seen(t.loaded_flows(), &t.preferred_keys);
+    let seen = pce::traffic::keys_seen(t.loaded_flows(), &t.key_order);
     KeyPicker::new(
         &model.limits.scope_keys,
         &model.limits.tier_key,
@@ -2698,6 +2698,7 @@ mod tests {
                         traffic_default_window: "1h".into(),
                         scope_keys: vec!["site".into()],
                         tier_key: "tier".into(),
+                        ignore_keys: Vec::new(),
                     },
                 ))),
             ),
@@ -2716,7 +2717,7 @@ mod tests {
         use crate::tui::model::Overlay;
         use crate::tui::test_support::model_with_rich_flows;
         let mut m = model_with_rich_flows();
-        m.set_label_model(vec!["bu".into(), "app".into()], "tier".into());
+        m.set_label_model(vec!["bu".into(), "app".into()], "tier".into(), Vec::new());
         // The flows carry `bu` and `tier` in place of `loc` and `role`.
         if let Some(d) = m.traffic.data.as_mut() {
             for f in &mut d.flows {
@@ -2743,6 +2744,72 @@ mod tests {
             m.traffic.effective_keys(),
             vec!["bu", "app", "tier", "datacenter", "env"]
         );
+    }
+
+    #[test]
+    fn ignored_keys_stay_out_of_the_picker_and_all_labels_but_can_be_typed() {
+        use crate::tui::model::Overlay;
+        use crate::tui::test_support::model_with_rich_flows;
+        let mut m = model_with_rich_flows();
+        m.set_label_model(
+            vec!["app".into(), "env".into()],
+            "role".into(),
+            vec!["datacenter".into()],
+        );
+        quiet(&mut m, key('g'));
+        let Overlay::GroupKeys(p) = &m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        let listed: Vec<&str> = p.entries.iter().map(|e| e.key.as_str()).collect();
+        assert_eq!(listed, vec!["app", "env", "role", "loc"]);
+        for _ in 0..p.all_row() {
+            quiet(&mut m, key('j'));
+        }
+        quiet(&mut m, key(' '));
+        quiet(&mut m, enter());
+        assert!(m.traffic.all_keys);
+        assert_eq!(
+            m.traffic.effective_keys(),
+            vec!["app", "env", "role", "loc"]
+        );
+        // Typed by hand, an ignored key still groups.
+        quiet(&mut m, key('g'));
+        let Overlay::GroupKeys(p) = &m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        let to_text = p.text_row() - p.cursor;
+        for _ in 0..to_text {
+            quiet(&mut m, key('j'));
+        }
+        for c in "datacenter".chars() {
+            quiet(&mut m, key(c));
+        }
+        quiet(&mut m, enter());
+        assert!(!m.traffic.all_keys);
+        assert_eq!(m.traffic.effective_keys(), vec!["datacenter"]);
+        assert!(
+            m.traffic
+                .flows
+                .rows()
+                .iter()
+                .any(|r| r.src_group == "fra1" || r.dst_group == "fra1"),
+            "grouping by an ignored key still reads its values"
+        );
+    }
+
+    #[test]
+    fn the_flow_detail_hides_ignored_keys() {
+        use crate::tui::test_support::{model_with_flows, render_to_string};
+        let mut m = model_with_flows();
+        m.set_label_model(vec!["app".into()], "role".into(), vec!["env".into()]);
+        m.traffic.show_detail = true;
+        let screen = render_to_string(&m, 160, 50);
+        let line = screen
+            .lines()
+            .find(|l| l.contains("src labels"))
+            .unwrap_or_else(|| panic!("{screen}"));
+        assert!(line.contains("app=shop role=web"), "{line}");
+        assert!(!line.contains("env="), "{line}");
     }
 
     #[test]
@@ -4932,6 +4999,7 @@ mod tests {
                     traffic_default_window: "1h".into(),
                     scope_keys: vec!["site".into()],
                     tier_key: "tier".into(),
+                    ignore_keys: vec!["os".into()],
                 },
             ))),
         );
@@ -4944,6 +5012,12 @@ mod tests {
             "the label model follows the profile"
         );
         assert_eq!(m.limits.tier_key, "tier");
+        assert_eq!(m.limits.ignore_keys, vec!["os"]);
+        assert_eq!(
+            m.traffic.key_order.ignored(),
+            vec!["os"],
+            "the traffic views hide the new profile's ignored keys"
+        );
         assert_eq!(m.limits.traffic_default_window, "1h");
         assert_eq!(m.traffic.filter.max_results, 500);
         assert_eq!(m.traffic.filter.window, "1h");
@@ -5323,6 +5397,7 @@ mod tests {
                     traffic_default_window: "24h".into(),
                     scope_keys: vec!["app".into(), "env".into()],
                     tier_key: "role".into(),
+                    ignore_keys: Vec::new(),
                 },
             ))),
         );

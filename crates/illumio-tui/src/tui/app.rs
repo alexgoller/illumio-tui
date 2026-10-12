@@ -229,13 +229,7 @@ impl Runtime {
                                 host: ctx.config.host.clone(),
                                 org_id: ctx.config.org_id,
                             };
-                            let limits = Limits {
-                                auto_refresh_min_seconds: ctx.config.auto_refresh_min_seconds,
-                                traffic_max_results: ctx.config.traffic_max_results,
-                                traffic_default_window: ctx.config.traffic_default_window.clone(),
-                                scope_keys: ctx.config.scope_keys.clone(),
-                                tier_key: ctx.config.tier_key.clone(),
-                            };
+                            let limits = Limits::from_config(&ctx.config);
                             let inputs = WriteInputs::from_context(&ctx);
                             (ctx.pce, info, limits, inputs)
                         })
@@ -781,7 +775,8 @@ pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
         cfg.traffic_default_window.clone(),
         writes,
     );
-    model.set_label_model(cfg.scope_keys.clone(), cfg.tier_key.clone());
+    let limits = Limits::from_config(cfg);
+    model.set_label_model(limits.scope_keys, limits.tier_key, limits.ignore_keys);
     let (mut rt, _tx) = Runtime::with_args(Arc::new(ctx.pce), model, global);
     rt.writer = writer.map(Arc::new);
     rt.write_inputs = Some(inputs);
@@ -923,6 +918,7 @@ mod tests {
             traffic_default_window: "24h".into(),
             scope_keys: vec!["app".into(), "env".into()],
             tier_key: "role".into(),
+            ignore_keys: Vec::new(),
         }
     }
 

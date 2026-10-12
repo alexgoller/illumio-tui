@@ -5,7 +5,8 @@
 //! CLI still sends nothing without `--yes`, the TUI nothing before `:writes on`
 //! and a confirmed request.
 //! `[profiles.<name>.labels]` (or `ILLUMIO_SCOPE_KEYS`, `ILLUMIO_TIER_KEY`)
-//! names the label model the TUI writes rules in.
+//! names the label model the TUI writes rules in; its `ignore_keys` (or
+//! `ILLUMIO_IGNORE_KEYS`) hides housekeeping keys from label columns.
 //! The tool never writes secrets anywhere.
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -88,11 +89,15 @@ impl Limits {
 }
 
 /// Rulesets are scoped by `scope_keys` (`app`, `env`); rules select tiers
-/// by `tier_key` (`role`). Used by the TUI's `w` pre-fill only.
+/// by `tier_key` (`role`). Used by the TUI's `w` pre-fill and the label key
+/// order. `ignore_keys` are hidden from label text (columns, the `g` picker);
+/// JSON output, the edit form and the Labels tab keep them.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct LabelsConfig {
     pub scope_keys: Option<Vec<String>>,
     pub tier_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ignore_keys: Option<Vec<String>>,
 }
 
 pub const DEFAULT_SCOPE_KEYS: [&str; 2] = ["app", "env"];
@@ -136,9 +141,17 @@ pub struct ResolvedConfig {
     pub scope_keys: Vec<String>,
     /// The label key that names a tier inside a scope.
     pub tier_key: String,
+    /// Label keys hidden from label text; never a scope key or the tier key.
+    pub ignore_keys: Vec<String>,
 }
 
 impl ResolvedConfig {
+    /// The order label keys are printed in: `scope_keys`, `tier_key`, then
+    /// the rest alphabetically; `ignore_keys` hidden from label text.
+    pub fn key_order(&self) -> pce::KeyOrder {
+        pce::KeyOrder::new(&self.scope_keys, &self.tier_key).with_ignored(&self.ignore_keys)
+    }
+
     pub fn client_config(&self) -> pce::ClientConfig {
         let mut c =
             pce::ClientConfig::new(self.host.clone(), self.org_id, self.credentials.clone());
@@ -344,6 +357,23 @@ pub fn resolve(
                 .map(String::from)
         })
         .unwrap_or_else(|| DEFAULT_TIER_KEY.into());
+    // An empty list is fine (ignore nothing), so a blank env falls through
+    // to the profile. Scope and tier keys are the model: never ignored.
+    let ignore_keys: Vec<String> =
+        match env_str("ILLUMIO_IGNORE_KEYS").and_then(|raw| key_list(raw.split(','))) {
+            Some(list) => list,
+            None => labels
+                .ignore_keys
+                .as_deref()
+                .and_then(|list| key_list(list.iter().map(String::as_str)))
+                .unwrap_or_default(),
+        };
+    let mut ignored: Vec<String> = Vec::new();
+    for k in ignore_keys {
+        if k != tier_key && !scope_keys.contains(&k) && !ignored.contains(&k) {
+            ignored.push(k);
+        }
+    }
 
     Ok(ResolvedConfig {
         profile_name,
@@ -373,6 +403,7 @@ pub fn resolve(
         },
         scope_keys,
         tier_key,
+        ignore_keys: ignored,
     })
 }
 
@@ -631,6 +662,68 @@ tier_key = "tier"
     }
 
     #[test]
+    fn ignore_keys_profile_env_and_label_model_keys() {
+        let r = resolve(&file(), &Overrides::default(), &env(&[])).unwrap();
+        assert!(r.ignore_keys.is_empty(), "nothing ignored by default");
+        let f: ConfigFile = toml::from_str(
+            r#"
+[profiles.default]
+host = "h"
+org_id = 1
+api_key = "k"
+api_secret = "s"
+
+[profiles.default.labels]
+scope_keys = ["app", "env"]
+tier_key = "role"
+ignore_keys = [" DFIRBubble ", "", "os", "DFIRBubble", "app", "role", "bu"]
+"#,
+        )
+        .unwrap();
+        let r = resolve(&f, &Overrides::default(), &env(&[])).unwrap();
+        assert_eq!(
+            r.ignore_keys,
+            vec!["DFIRBubble", "os", "bu"],
+            "trimmed, blanks and repeats dropped, scope and tier keys dropped, order kept"
+        );
+        let r = resolve(
+            &f,
+            &Overrides::default(),
+            &env(&[("ILLUMIO_IGNORE_KEYS", " os , ,zone,env")]),
+        )
+        .unwrap();
+        assert_eq!(
+            r.ignore_keys,
+            vec!["os", "zone"],
+            "env outranks the profile"
+        );
+        for blank in ["", " , ,"] {
+            let r = resolve(
+                &f,
+                &Overrides::default(),
+                &env(&[("ILLUMIO_IGNORE_KEYS", blank)]),
+            )
+            .unwrap();
+            assert_eq!(
+                r.ignore_keys,
+                vec!["DFIRBubble", "os", "bu"],
+                "an empty env is unset: {blank:?}"
+            );
+        }
+        let r = resolve(
+            &f,
+            &Overrides::default(),
+            &env(&[("ILLUMIO_SCOPE_KEYS", "os"), ("ILLUMIO_TIER_KEY", "bu")]),
+        )
+        .unwrap();
+        assert_eq!(
+            r.ignore_keys,
+            vec!["DFIRBubble", "app", "role"],
+            "the resolved label model decides what is dropped"
+        );
+    }
+
+    #[test]
     fn an_empty_scope_key_list_is_refused() {
         let err = resolve(
             &file(),
@@ -646,6 +739,7 @@ tier_key = "tier"
         f.profiles.get_mut("demo").unwrap().labels = Some(LabelsConfig {
             scope_keys: Some(vec![" ".into()]),
             tier_key: None,
+            ignore_keys: None,
         });
         let err = resolve(&f, &Overrides::default(), &env(&[])).unwrap_err();
         assert_eq!(

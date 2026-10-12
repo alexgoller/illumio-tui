@@ -1924,6 +1924,20 @@ mod tests {
     }
 
     #[test]
+    fn workload_labels_field_keeps_ignored_keys() {
+        let host1 = || EditIntent::UpdateWorkload(workloads()[0].clone());
+        let idx = NameIndex::new(&labels(), &[], &[], &[])
+            .with_key_order(KeyOrder::new(&["app".into()], "role").with_ignored(&["env".into()]));
+        let f = form_for(host1(), Some(&idx), NO_PREFILL).unwrap();
+        assert_eq!(f.value("Labels"), "app=shop, role=web, env=prod");
+        assert_eq!(
+            build_intent(&f, Some(&idx), 5).unwrap(),
+            None,
+            "saving the untouched form drops no label"
+        );
+    }
+
+    #[test]
     fn unknown_labels_name_the_known_values_and_a_missing_index_refuses() {
         let mut f = form(EditIntent::CreateWorkload);
         set(&mut f, "Name", "printer-1");

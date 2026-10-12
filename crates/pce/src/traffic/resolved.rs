@@ -1,4 +1,5 @@
 //! Flow rows with hrefs replaced by names: what gets printed and displayed.
+use crate::key_order::KeyOrder;
 use crate::models::{Endpoint, Flow, PolicyDecision, proto_name};
 use crate::resolve::{NameIndex, ResolvedLabel};
 use serde::Serialize;
@@ -58,10 +59,12 @@ impl ResolvedEndpoint {
             .map(|l| l.value.as_str())
     }
 
-    /// `app=shop env=prod role=web`
-    pub fn label_text(&self) -> String {
+    /// `app=shop env=prod role=web`: `labels` in their (already sorted)
+    /// order, minus the keys `order` does not show.
+    pub fn label_text(&self, order: &KeyOrder) -> String {
         self.labels
             .iter()
+            .filter(|l| order.shows(&l.key))
             .map(|l| format!("{}={}", l.key, l.value))
             .collect::<Vec<_>>()
             .join(" ")
@@ -208,7 +211,10 @@ pub(crate) mod tests {
     fn resolves_names_labels_and_services() {
         let f = flows();
         assert_eq!(f[0].src.display_name(), "host-1.example");
-        assert_eq!(f[0].src.label_text(), "app=shop env=prod role=web");
+        assert_eq!(
+            f[0].src.label_text(&KeyOrder::default()),
+            "app=shop env=prod role=web"
+        );
         assert_eq!(f[0].src.label_value("role"), Some("web"));
         assert_eq!(f[0].dst.label_value("role"), Some("db"));
         assert_eq!(f[0].service_text(), "5432/tcp");
@@ -216,7 +222,7 @@ pub(crate) mod tests {
         assert_eq!(f[0].policy_decision, PolicyDecision::Allowed);
         assert_eq!(f[1].src.display_name(), "10.1.4.9");
         assert_eq!(f[1].src.ip_lists, vec!["Corp"]);
-        assert_eq!(f[1].src.label_text(), "");
+        assert_eq!(f[1].src.label_text(&KeyOrder::default()), "");
         assert_eq!(f[3].dst.display_name(), "fqdn-1.example");
         assert_eq!(
             f[3].rules,
@@ -230,8 +236,21 @@ pub(crate) mod tests {
             serde_json::from_str(include_str!("../../../../fixtures/traffic_flows.json")).unwrap();
         let idx = index().with_key_order(crate::KeyOrder::new(&["env".into()], "role"));
         let f = resolve_flows(&raw, &idx);
-        assert_eq!(f[0].src.label_text(), "env=prod role=web app=shop");
-        assert_eq!(f[1].src.label_text(), "");
+        assert_eq!(
+            f[0].src.label_text(&KeyOrder::default()),
+            "env=prod role=web app=shop"
+        );
+        assert_eq!(f[1].src.label_text(&KeyOrder::default()), "");
+    }
+
+    #[test]
+    fn endpoint_label_text_hides_ignored_keys_but_labels_keep_them() {
+        let f = flows();
+        let order = KeyOrder::default().with_ignored(&["env".into()]);
+        assert_eq!(f[0].src.label_text(&order), "app=shop role=web");
+        assert_eq!(f[0].src.label_value("env"), Some("prod"));
+        let json = serde_json::to_string(&f[0].src).unwrap();
+        assert!(json.contains("\"key\":\"env\""), "{json}");
     }
 
     #[test]

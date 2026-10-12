@@ -3,6 +3,7 @@ use crate::tui::model::{Model, QueryState, TrafficView, TreemapState};
 use crate::tui::ui::theme::Theme;
 use crate::tui::ui::widgets::bars;
 use crate::tui::ui::widgets::panel::{panel, panel_spans};
+use pce::KeyOrder;
 use pce::models::PolicyDecision;
 use pce::traffic::treemap::{Rect as TreemapRect, Tile, Weight};
 use pce::traffic::{ResolvedEndpoint, ResolvedFlow, compact_count};
@@ -363,8 +364,8 @@ fn endpoint_line(e: &ResolvedEndpoint) -> String {
 }
 
 /// `app=shop env=prod role=web`, or `-` without labels.
-fn labels_line(e: &ResolvedEndpoint) -> String {
-    let s = e.label_text();
+fn labels_line(e: &ResolvedEndpoint, order: &KeyOrder) -> String {
+    let s = e.label_text(order);
     if s.is_empty() { "-".into() } else { s }
 }
 
@@ -408,6 +409,7 @@ fn render_detail(model: &Model, f: &mut Frame, area: Rect) {
         fl.rules.join(", ")
     };
     let dash = || "-".to_string();
+    let order = model.limits.key_order();
     let row = |head: &'static str, body: String| {
         Line::from(vec![
             Span::styled(format!("{head:<11}"), t.header_style()),
@@ -416,9 +418,9 @@ fn render_detail(model: &Model, f: &mut Frame, area: Rect) {
     };
     let lines = vec![
         row("src", endpoint_line(&fl.src)),
-        row("src labels", labels_line(&fl.src)),
+        row("src labels", labels_line(&fl.src, &order)),
         row("dst", endpoint_line(&fl.dst)),
-        row("dst labels", labels_line(&fl.dst)),
+        row("dst labels", labels_line(&fl.dst, &order)),
         row(
             "svc",
             format!(

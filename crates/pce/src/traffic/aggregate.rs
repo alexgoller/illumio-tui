@@ -90,9 +90,9 @@ pub fn group_key(ep: &ResolvedEndpoint, keys: &[String]) -> Vec<String> {
 }
 
 /// Every label key seen in `flows`, with the number of flows carrying it
-/// (on either side), sorted by the preferred order then name. Unresolved
-/// labels (key `?`) are left out.
-pub fn keys_seen(flows: &[ResolvedFlow], preferred: &[String]) -> Vec<(String, usize)> {
+/// (on either side), sorted by [`KeyOrder::cmp_keys`]. Unresolved labels
+/// (key `?`) and keys `order` does not show are left out.
+pub fn keys_seen(flows: &[ResolvedFlow], order: &KeyOrder) -> Vec<(String, usize)> {
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for f in flows {
         let keys: BTreeSet<&str> = f
@@ -101,13 +101,12 @@ pub fn keys_seen(flows: &[ResolvedFlow], preferred: &[String]) -> Vec<(String, u
             .iter()
             .chain(&f.dst.labels)
             .map(|l| l.key.as_str())
-            .filter(|k| *k != "?")
+            .filter(|k| *k != "?" && order.shows(k))
             .collect();
         for k in keys {
             *counts.entry(k.to_string()).or_default() += 1;
         }
     }
-    let order = KeyOrder::from_keys(preferred);
     let mut out: Vec<(String, usize)> = counts.into_iter().collect();
     out.sort_by(|(a, _), (b, _)| order.cmp_keys(a, b));
     out
@@ -253,7 +252,12 @@ fn blocked_key(f: &ResolvedFlow, keys: &[String]) -> BlockedKey {
 
 /// Blocked and potentially blocked flows grouped by destination group,
 /// port and protocol; newest first, then by destination group.
-pub fn blocked_summary(flows: &[ResolvedFlow], keys: &[String]) -> Vec<BlockedGroup> {
+/// `dst_labels` leaves out the keys `order` does not show.
+pub fn blocked_summary(
+    flows: &[ResolvedFlow],
+    keys: &[String],
+    order: &KeyOrder,
+) -> Vec<BlockedGroup> {
     let keys = keys_or_default(keys);
     type Seen = (BTreeSet<String>, BTreeSet<String>);
     let mut map: BTreeMap<BlockedKey, (BlockedGroup, Seen)> = BTreeMap::new();
@@ -263,7 +267,7 @@ pub fn blocked_summary(flows: &[ResolvedFlow], keys: &[String]) -> Vec<BlockedGr
             (
                 BlockedGroup {
                     dst: f.dst.display_name(),
-                    dst_labels: f.dst.label_text(),
+                    dst_labels: f.dst.label_text(order),
                     dst_group: key.0.clone(),
                     dst_names: Vec::new(),
                     dst_hosts: 0,
@@ -372,7 +376,7 @@ mod tests {
 
     #[test]
     fn keys_seen_puts_the_preferred_keys_first_and_counts_flows_once() {
-        let pref = keys(&["app", "env", "role", "loc"]);
+        let pref = KeyOrder::from_keys(&keys(&["app", "env", "role", "loc"]));
         let seen = keys_seen(&rich_flows(), &pref);
         assert_eq!(
             seen,
@@ -384,7 +388,7 @@ mod tests {
                 ("datacenter".to_string(), 11),
             ]
         );
-        let seen = keys_seen(&rich_flows(), &keys(&["role"]));
+        let seen = keys_seen(&rich_flows(), &KeyOrder::from_keys(&keys(&["role"])));
         let order: Vec<&str> = seen.iter().map(|(k, _)| k.as_str()).collect();
         assert_eq!(order, vec!["role", "app", "datacenter", "env", "loc"]);
         let few = keys_seen(&flows(), &pref);
@@ -398,6 +402,29 @@ mod tests {
             "the 4-flow fixture: every flow has a labelled side; loc is on no workload"
         );
         assert!(keys_seen(&[], &pref).is_empty());
+    }
+
+    #[test]
+    fn keys_seen_leaves_ignored_keys_out() {
+        let order = KeyOrder::new(&keys(&["app", "env"]), "role")
+            .with_ignored(&keys(&["datacenter", "loc"]));
+        let seen: Vec<String> = keys_seen(&rich_flows(), &order)
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
+        assert_eq!(seen, keys(&["app", "env", "role"]));
+    }
+
+    #[test]
+    fn blocked_summary_dst_labels_hide_ignored_keys() {
+        let order = KeyOrder::default().with_ignored(&keys(&["env"]));
+        let b = blocked_summary(&flows(), &keys(&["app", "env"]), &order);
+        assert_eq!(b[1].dst_labels, "app=shop role=db");
+        assert_eq!(
+            b[1].dst_group,
+            vec!["shop", "prod"],
+            "grouping still sees env"
+        );
     }
 
     #[test]
@@ -447,7 +474,7 @@ mod tests {
 
     #[test]
     fn blocked_summary_groups_by_destination_and_port() {
-        let b = blocked_summary(&flows(), &keys(&["app", "env"]));
+        let b = blocked_summary(&flows(), &keys(&["app", "env"]), &KeyOrder::default());
         assert_eq!(b.len(), 2);
         assert_eq!(b[0].dst, "host-1.example");
         assert_eq!(b[0].dst_group, vec!["shop", "prod"]);
@@ -464,7 +491,7 @@ mod tests {
 
     #[test]
     fn a_blocked_row_names_one_host_or_counts_them_and_counts_more_sources() {
-        let b = blocked_summary(&rich_flows(), &keys(&["app", "env"]));
+        let b = blocked_summary(&rich_flows(), &keys(&["app", "env"]), &KeyOrder::default());
         let shop = b
             .iter()
             .find(|r| r.dst_group == vec!["shop", "prod"])
@@ -487,7 +514,7 @@ mod tests {
     #[test]
     fn blocked_summary_groups_by_the_destination_group_and_caps_the_names() {
         let k = keys(&["app", "env"]);
-        let b = blocked_summary(&rich_flows(), &k);
+        let b = blocked_summary(&rich_flows(), &k, &KeyOrder::default());
         assert_eq!(b.len(), 10);
         let shop = b
             .iter()
@@ -528,7 +555,7 @@ mod tests {
             });
             many.push(f);
         }
-        let b = blocked_summary(&many, &k);
+        let b = blocked_summary(&many, &k, &KeyOrder::default());
         let row = b
             .iter()
             .find(|r| r.dst_group == vec!["shop", "prod"])
@@ -556,8 +583,8 @@ mod tests {
             group_by_labels(&flows(), &keys(&["app", "env"]))
         );
         assert_eq!(
-            blocked_summary(&flows(), &[]),
-            blocked_summary(&flows(), &keys(&["app", "env"]))
+            blocked_summary(&flows(), &[], &KeyOrder::default()),
+            blocked_summary(&flows(), &keys(&["app", "env"]), &KeyOrder::default())
         );
         assert_eq!(compact_count(999), "999");
         assert_eq!(compact_count(1_234), "1.2K");

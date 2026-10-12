@@ -767,6 +767,24 @@ mod tests {
     }
 
     #[test]
+    fn resolve_labels_keeps_ignored_keys() {
+        let mut labels: Vec<Label> =
+            serde_json::from_str(include_str!("../../../fixtures/labels.json")).unwrap();
+        labels.push(bu_label());
+        let idx = NameIndex::new(&labels, &[], &[], &[])
+            .with_key_order(KeyOrder::new(&["app".into()], "role").with_ignored(&["bu".into()]));
+        let out =
+            idx.resolve_labels(&[Ref::new("/orgs/5/labels/1"), Ref::new("/orgs/5/labels/50")]);
+        let text: Vec<String> = out
+            .iter()
+            .map(|l| format!("{}={}", l.key, l.value))
+            .collect();
+        assert_eq!(text, vec!["role=web", "bu=x"]);
+        assert_eq!(idx.key_order().ignored(), ["bu".to_string()]);
+        assert!(idx.label_keys().contains(&"bu".to_string()));
+    }
+
+    #[test]
     fn with_labels_and_with_ip_lists_keep_the_key_order() {
         let idx = ordered(index());
         let mut labels: Vec<Label> =

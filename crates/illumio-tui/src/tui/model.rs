@@ -958,10 +958,10 @@ pub struct TrafficState {
     pub group_keys: Vec<String>,
     /// `g` chose `all labels`: every key seen in the loaded flows.
     pub all_keys: bool,
-    /// The keys `all labels` lists first when the flows carry them: the
-    /// profile's scope keys, then its tier key (the rest follow
-    /// alphabetically). Set with the label model.
-    pub preferred_keys: Vec<String>,
+    /// The profile's key order: what `all labels` and the `g` picker list
+    /// first (scope keys, then the tier key; the rest alphabetically) and
+    /// which keys they leave out (`ignore_keys`). Set with the label model.
+    pub key_order: KeyOrder,
     /// The keys in force, resolved by `rebuild_views` (the `all labels` scan
     /// runs there, never per draw): what every view and column groups by.
     pub keys: Vec<String>,
@@ -1031,7 +1031,7 @@ impl TrafficState {
             view: TrafficView::Flows,
             group_keys: keys_or_default(keys),
             all_keys: false,
-            preferred_keys: Vec::new(),
+            key_order: KeyOrder::default(),
             keys: keys_or_default(keys),
             groups: TableView::new(group_columns()),
             mesh: TableView::new(mesh_columns(MESH_ALL)),
@@ -1049,10 +1049,10 @@ impl TrafficState {
         self.data.as_ref().map_or(&[], |d| d.flows.as_slice())
     }
 
-    /// The keys `all labels` and the `g` picker list first: the profile's
-    /// scope keys and tier key.
+    /// The order `all labels` and the `g` picker list keys in, and the
+    /// keys they leave out.
     pub fn set_key_order(&mut self, order: &KeyOrder) {
-        self.preferred_keys = order.first().to_vec();
+        self.key_order = order.clone();
     }
 
     /// The keys in force, as the last `rebuild_views` resolved them.
@@ -1060,11 +1060,11 @@ impl TrafficState {
         self.keys.clone()
     }
 
-    /// Every key seen in the loaded flows when `all_keys` (`preferred_keys`
-    /// first, then alphabetically), else `group_keys` (`app,env` when empty).
+    /// Every key seen in the loaded flows when `all_keys` (in `key_order`,
+    /// ignored keys left out), else `group_keys` (`app,env` when empty).
     fn resolve_keys(&self) -> Vec<String> {
         if self.all_keys {
-            let seen: Vec<String> = keys_seen(self.loaded_flows(), &self.preferred_keys)
+            let seen: Vec<String> = keys_seen(self.loaded_flows(), &self.key_order)
                 .into_iter()
                 .map(|(k, _)| k)
                 .collect();
@@ -1112,7 +1112,7 @@ impl TrafficState {
             .collect();
         let groups = group_by_labels(flows, keys);
         let mesh_rows = mesh(flows, keys, self.mesh_cols);
-        let blocked = blocked_summary(flows, keys);
+        let blocked = blocked_summary(flows, keys, &self.key_order);
         self.flows.set_rows(shown);
         self.groups.set_rows(groups);
         self.mesh.set_rows(mesh_rows);
@@ -2531,13 +2531,28 @@ pub struct Limits {
     pub scope_keys: Vec<String>,
     /// The label key that names a tier (`role`).
     pub tier_key: String,
+    /// Label keys hidden from label text (columns, the `g` picker).
+    pub ignore_keys: Vec<String>,
 }
 
 impl Limits {
+    /// The resolved profile's limits and label model (startup's and a
+    /// `:profile` switch's).
+    pub fn from_config(cfg: &crate::config::ResolvedConfig) -> Self {
+        Self {
+            auto_refresh_min_seconds: cfg.auto_refresh_min_seconds,
+            traffic_max_results: cfg.traffic_max_results,
+            traffic_default_window: cfg.traffic_default_window.clone(),
+            scope_keys: cfg.scope_keys.clone(),
+            tier_key: cfg.tier_key.clone(),
+            ignore_keys: cfg.ignore_keys.clone(),
+        }
+    }
+
     /// The order label keys are shown in: `scope_keys`, `tier_key`, then
-    /// the rest alphabetically.
+    /// the rest alphabetically; `ignore_keys` hidden.
     pub fn key_order(&self) -> KeyOrder {
-        KeyOrder::new(&self.scope_keys, &self.tier_key)
+        KeyOrder::new(&self.scope_keys, &self.tier_key).with_ignored(&self.ignore_keys)
     }
 }
 
@@ -2608,6 +2623,7 @@ impl Model {
                 traffic_default_window,
                 scope_keys,
                 tier_key: crate::config::DEFAULT_TIER_KEY.into(),
+                ignore_keys: Vec::new(),
             },
             screen: Screen::Traffic,
             overlay: Overlay::None,
@@ -2635,13 +2651,20 @@ impl Model {
         self.theme = Theme::from_name(name);
     }
 
-    /// The profile's label model: the `w` form's dimensions, and the keys
-    /// every traffic view groups by until `g` changes them.
-    pub fn set_label_model(&mut self, scope_keys: Vec<String>, tier_key: String) {
+    /// The profile's label model: the `w` form's dimensions, the keys
+    /// every traffic view groups by until `g` changes them, and the keys
+    /// label text hides.
+    pub fn set_label_model(
+        &mut self,
+        scope_keys: Vec<String>,
+        tier_key: String,
+        ignore_keys: Vec<String>,
+    ) {
         self.traffic.group_keys = keys_or_default(&scope_keys);
         self.traffic.all_keys = false;
         self.limits.scope_keys = scope_keys;
         self.limits.tier_key = tier_key;
+        self.limits.ignore_keys = ignore_keys;
         self.traffic.set_key_order(&self.limits.key_order());
         self.traffic.rebuild_views();
     }
@@ -2876,7 +2899,7 @@ mod tests {
     fn blocked_cells_name_one_host_or_count_them_and_count_more_sources() {
         let flows = crate::tui::test_support::fixture_flows_rich();
         let keys = vec!["app".to_string(), "env".to_string()];
-        let rows = pce::traffic::blocked_summary(&flows, &keys);
+        let rows = pce::traffic::blocked_summary(&flows, &keys, &KeyOrder::default());
         let cols = blocked_columns();
         let shop = rows
             .iter()
@@ -2938,7 +2961,7 @@ mod tests {
     #[test]
     fn workload_labels_column_follows_the_key_order_and_sorts_by_it() {
         let mut m = crate::tui::test_support::model_with_workloads();
-        m.set_label_model(vec!["env".into()], "role".into());
+        m.set_label_model(vec!["env".into()], "role".into(), Vec::new());
         // host-1 sorts first alphabetically (`app=aaa`), host-2 by the order (`role=db`).
         m.workloads.raw[0].labels[1].value = Some("aaa".into());
         m.workloads.rebuild(&m.limits.key_order());
@@ -2961,23 +2984,76 @@ mod tests {
     }
 
     #[test]
+    fn workload_labels_column_hides_ignored_keys() {
+        let mut m = crate::tui::test_support::model_with_workloads();
+        m.set_label_model(vec!["app".into()], "role".into(), vec!["env".into()]);
+        m.workloads.rebuild(&m.limits.key_order());
+        let t = &m.workloads.table;
+        let col = t.columns.iter().position(|c| c.title == "labels").unwrap();
+        assert_eq!(t.cell(&t.rows()[0], col), "app=shop role=web");
+        assert!(
+            m.workloads.raw[0]
+                .labels
+                .iter()
+                .any(|l| l.key.as_deref() == Some("env")),
+            "the workload itself keeps the label"
+        );
+    }
+
+    #[test]
+    fn limits_from_config_carry_the_ignored_keys() {
+        let file: crate::config::ConfigFile = toml::from_str(
+            r#"
+[profiles.default]
+host = "h"
+org_id = 1
+api_key = "k"
+api_secret = "s"
+
+[profiles.default.labels]
+ignore_keys = ["os", "app"]
+"#,
+        )
+        .unwrap();
+        let cfg = crate::config::resolve(
+            &file,
+            &crate::config::Overrides::default(),
+            &Default::default(),
+        )
+        .unwrap();
+        let limits = Limits::from_config(&cfg);
+        assert_eq!(limits.ignore_keys, vec!["os"], "app is a scope key");
+        assert_eq!(limits.key_order().ignored(), vec!["os"]);
+        let mut m = crate::tui::test_support::model_fixture();
+        m.limits = limits;
+        m.reset_data();
+        assert!(!m.traffic.key_order.shows("os"));
+    }
+
+    #[test]
     fn the_label_model_sets_the_group_keys_and_empty_falls_back_to_app_env() {
         let mut m = crate::tui::test_support::model_fixture();
         assert_eq!(m.traffic.group_keys, vec!["app", "env"]);
-        assert_eq!(m.traffic.preferred_keys, vec!["app", "env", "role"]);
-        m.set_label_model(vec!["site".into(), "zone".into()], "tier".into());
+        assert_eq!(m.traffic.key_order.first(), vec!["app", "env", "role"]);
+        m.set_label_model(
+            vec!["site".into(), "zone".into()],
+            "tier".into(),
+            vec!["os".into()],
+        );
         assert_eq!(m.traffic.group_keys, vec!["site", "zone"]);
         assert_eq!(m.limits.tier_key, "tier");
-        assert_eq!(m.traffic.preferred_keys, vec!["site", "zone", "tier"]);
+        assert_eq!(m.traffic.key_order.first(), vec!["site", "zone", "tier"]);
+        assert_eq!(m.traffic.key_order.ignored(), vec!["os"]);
         m.reset_data();
         assert_eq!(
-            m.traffic.preferred_keys,
+            m.traffic.key_order.first(),
             vec!["site", "zone", "tier"],
             "a profile switch's reset keeps the profile's order"
         );
-        m.set_label_model(Vec::new(), "role".into());
+        assert_eq!(m.traffic.key_order.ignored(), vec!["os"]);
+        m.set_label_model(Vec::new(), "role".into(), Vec::new());
         assert_eq!(m.traffic.group_keys, vec!["app", "env"]);
-        assert_eq!(m.traffic.preferred_keys, vec!["role"]);
+        assert_eq!(m.traffic.key_order.first(), vec!["role"]);
         assert!(
             m.limits.scope_keys.is_empty(),
             "the profile value itself is kept"
