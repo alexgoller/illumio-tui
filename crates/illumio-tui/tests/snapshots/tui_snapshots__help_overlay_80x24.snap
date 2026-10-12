@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ Keys ────────────────────────────────── 1-22 of 37 · j/k scroll · Esc closes ╮
+╭ Keys ────────────────────────────────── 1-22 of 41 · j/k scroll · Esc closes ╮
 │1 2 3 4 5                Traffic · Policy · Objects · Workloads · Events      │
 │:                        command prompt: :traffic :policy :objects :workloads │
 │                         :events  :iplists  :filter <expr>  :window <dur>     │
@@ -17,12 +17,12 @@ expression: out
 │a                        toggle auto-refresh for the current screen           │
 │Traffic  v               cycle Flows · App-to-app · Mesh · Blocked · Treemap  │
 │Traffic  f               edit filter: window src dst service decisions        │
+│Traffic  + / -           widen (fetches the older slice only) / narrow        │
+│                         window steps 1h 6h 12h 1d 2d 3d 1w 2w 4w 90d         │
+│Traffic  ] / [           raise / lower the result cap (re-runs the query)     │
+│                         cap steps 500 1000 2000 5000 10000, profile max      │
 │Traffic  g               pick the label keys every view groups by             │
 │Traffic  Enter           detail (flows) · drill into a row (app-to-app, mesh) │
 │Mesh     u / p           show or hide the user · process columns              │
 │Treemap  hjkl Enter b    move · zoom, then drill · conns/bytes · Esc out      │
-│Traffic  w               draft allow rule from a blocked flow or row (writes) │
-│Form     Ctrl-N Ctrl-P   complete from the index · cycle back                 │
-│w form   Ctrl-A Ctrl-R   all labels · new ruleset                             │
-│Policy   d               toggle draft / active                                │
 ╰──────────────────────────────────────────────────────────────────────────────╯

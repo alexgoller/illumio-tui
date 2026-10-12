@@ -101,6 +101,26 @@ pub fn model_with_rich_flows() -> Model {
     m
 }
 
+/// Where the loaded range of `model_with_window` ends: just after the rich
+/// fixture's last flow.
+pub const FIXTURE_END: &str = "2026-10-10T08:00:00Z";
+
+/// The rich fixture loaded as one query for the last `window` before
+/// `FIXTURE_END`, so `+` and `-` know the loaded range.
+pub fn model_with_window(window: &str) -> Model {
+    let mut m = model_with_rich_flows();
+    m.traffic.filter.window = window.into();
+    let end: jiff::Timestamp = FIXTURE_END.parse().expect("fixture end");
+    let span =
+        jiff::Span::try_from(m.traffic.filter.window_duration().expect("window")).expect("span");
+    let start = end.checked_sub(span).expect("start");
+    if let Some(d) = m.traffic.data.as_mut() {
+        d.filter = m.traffic.filter.clone();
+        d.slices = Some(crate::tui::model::Slices::new(start, end));
+    }
+    m
+}
+
 /// A connected model with the fixture flows loaded as a finished query.
 pub fn model_with_flows() -> Model {
     let mut m = model_fixture();
@@ -113,6 +133,7 @@ pub fn model_with_flows() -> Model {
         cache_hit: false,
         fetched_at: Instant::now() - Duration::from_secs(3),
         filter: m.traffic.filter.clone(),
+        slices: None,
     });
     m.traffic.query = QueryState::Idle;
     m.traffic.auto.last_run = Some(Instant::now() - Duration::from_secs(3));

@@ -1,6 +1,7 @@
 //! The traffic filter as the user edits it (strings), its validation and
 //! cost hints (no network), and its conversion to a `TrafficQuery` (needs
 //! the name index, so it is async and runs in the runtime, not in `update`).
+use jiff::Timestamp;
 use pce::models::{PolicyDecision, ServiceMatch, TrafficQuery, proto_number};
 use pce::traffic::{
     CONFIRM_MAX_RESULTS, CONFIRM_WINDOW, FilterExpr, TrafficQueryBuilder, parse_window,
@@ -128,7 +129,15 @@ impl TrafficFilter {
     }
 
     pub fn cost_hint(&self) -> String {
+        self.cost_hint_with_slices(1)
+    }
+
+    /// `cost_hint` with `· N slices` after the cap when `+` merged more than one.
+    pub fn cost_hint_with_slices(&self, slices: usize) -> String {
         let mut s = format!("window {} · cap {}", self.window, self.max_results);
+        if slices > 1 {
+            s.push_str(&format!(" · {slices} slices"));
+        }
         if self.is_unbounded() {
             s.push_str(" · unbounded");
         }
@@ -178,10 +187,32 @@ impl TrafficFilter {
         )
     }
 
-    /// Resolves names through the facade's cached index and builds the query.
+    /// Resolves names through the facade's cached index and builds the query
+    /// for the last `window`.
     pub async fn to_query(&self, pce: &Pce, mode: CacheMode) -> pce::Result<TrafficQuery> {
         let window = self.window_duration().map_err(pce::PceError::Invalid)?;
-        let mut b = TrafficQueryBuilder::last(window)?;
+        self.build(TrafficQueryBuilder::last(window)?, pce, mode)
+            .await
+    }
+
+    /// The same query for one slice, `start` to `end` (what `+` fetches).
+    pub async fn to_query_between(
+        &self,
+        start: Timestamp,
+        end: Timestamp,
+        pce: &Pce,
+        mode: CacheMode,
+    ) -> pce::Result<TrafficQuery> {
+        self.build(TrafficQueryBuilder::between(start, end), pce, mode)
+            .await
+    }
+
+    async fn build(
+        &self,
+        mut b: TrafficQueryBuilder,
+        pce: &Pce,
+        mode: CacheMode,
+    ) -> pce::Result<TrafficQuery> {
         let src = self.src_groups().map_err(pce::PceError::Invalid)?;
         let dst = self.dst_groups().map_err(pce::PceError::Invalid)?;
         for g in pce.resolve_filter_groups(&src, mode).await? {
@@ -292,6 +323,11 @@ mod tests {
         assert_eq!(f.window, "24h");
         assert!(f.is_unbounded());
         assert_eq!(f.cost_hint(), "window 24h · cap 1000 · unbounded");
+        assert_eq!(f.cost_hint_with_slices(1), f.cost_hint());
+        assert_eq!(
+            f.cost_hint_with_slices(3),
+            "window 24h · cap 1000 · 3 slices · unbounded"
+        );
         assert!(f.needs_confirmation().is_none());
         assert_eq!(f.summary(), "window 24h  src *  dst *  svc *  decision all");
     }

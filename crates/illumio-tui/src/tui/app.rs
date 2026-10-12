@@ -5,6 +5,7 @@ use crate::cli::error::CliError;
 use crate::cli::{Context, GlobalArgs};
 use crate::tui::diff::{self, ObjectDiff};
 use crate::tui::edit::{self, RulesetTarget, WriteIntent};
+use crate::tui::filter::TrafficFilter;
 use crate::tui::model::ObjectKind;
 use crate::tui::model::{Limits, Model, ProfileInfo, WRITES_OFF, WritesState};
 use crate::tui::msg::{Cmd, Msg, ObjectsPayload, QueryOutcome};
@@ -22,6 +23,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio_util::sync::CancellationToken;
 
 pub const BUSY_TICK: Duration = Duration::from_millis(250);
 pub const IDLE_TICK: Duration = Duration::from_secs(1);
@@ -128,6 +130,67 @@ impl Runtime {
             mine: self.generation.load(Ordering::SeqCst),
         };
         (self.pce.clone(), tx)
+    }
+
+    /// One Explorer query in the background: the last `filter.window`, or
+    /// the slice `bounds` for `+` (answered with `SliceDone`, not `QueryDone`).
+    fn run_traffic(
+        &mut self,
+        seq: u64,
+        filter: TrafficFilter,
+        bounds: Option<(jiff::Timestamp, jiff::Timestamp)>,
+        mode: CacheMode,
+        cancel: CancellationToken,
+    ) {
+        self.model.busy += 1;
+        let (pce, tx) = self.task_ctx();
+        tokio::spawn(async move {
+            let (ptx, mut prx) = tokio::sync::mpsc::unbounded_channel();
+            let forward_tx = tx.clone();
+            let forward = tokio::spawn(async move {
+                while let Some(p) = prx.recv().await {
+                    let _ = forward_tx.send(Msg::QueryProgress { seq, progress: p });
+                }
+            });
+            let result = async {
+                let query = match bounds {
+                    Some((start, end)) => {
+                        filter
+                            .to_query_between(start, end, &pce, CacheMode::Use)
+                            .await?
+                    }
+                    None => filter.to_query(&pce, CacheMode::Use).await?,
+                };
+                let cached = pce.traffic(&query, mode, &cancel, Some(&ptx)).await?;
+                let idx = pce.name_index(CacheMode::Use).await?;
+                let flows = pce::traffic::resolve_flows(&cached.value.flows, &idx);
+                let bounds = query
+                    .start_date
+                    .parse()
+                    .ok()
+                    .zip(query.end_date.parse().ok());
+                Ok::<_, pce::PceError>(QueryOutcome {
+                    flows,
+                    truncated: cached.value.truncated,
+                    matches_count: cached.value.matches_count,
+                    elapsed: cached.value.elapsed,
+                    hit: cached.hit,
+                    filter,
+                    bounds,
+                })
+            }
+            .await
+            .map_err(|e| e.to_string());
+            drop(ptx);
+            let _ = forward.await;
+            let msg = if bounds.is_some() {
+                Msg::SliceDone { seq, result }
+            } else {
+                Msg::QueryDone { seq, result }
+            };
+            let _ = tx.send(msg);
+            let _ = tx.send(Msg::Stats(pce.stats()));
+        });
     }
 
     /// Executes one side effect. Tasks report back over the channel and
@@ -254,39 +317,14 @@ impl Runtime {
                 filter,
                 mode,
                 cancel,
-            } => {
-                self.model.busy += 1;
-                let (pce, tx) = self.task_ctx();
-                tokio::spawn(async move {
-                    let (ptx, mut prx) = tokio::sync::mpsc::unbounded_channel();
-                    let forward_tx = tx.clone();
-                    let forward = tokio::spawn(async move {
-                        while let Some(p) = prx.recv().await {
-                            let _ = forward_tx.send(Msg::QueryProgress { seq, progress: p });
-                        }
-                    });
-                    let result = async {
-                        let query = filter.to_query(&pce, CacheMode::Use).await?;
-                        let cached = pce.traffic(&query, mode, &cancel, Some(&ptx)).await?;
-                        let idx = pce.name_index(CacheMode::Use).await?;
-                        let flows = pce::traffic::resolve_flows(&cached.value.flows, &idx);
-                        Ok::<_, pce::PceError>(QueryOutcome {
-                            flows,
-                            truncated: cached.value.truncated,
-                            matches_count: cached.value.matches_count,
-                            elapsed: cached.value.elapsed,
-                            hit: cached.hit,
-                            filter,
-                        })
-                    }
-                    .await
-                    .map_err(|e| e.to_string());
-                    drop(ptx);
-                    let _ = forward.await;
-                    let _ = tx.send(Msg::QueryDone { seq, result });
-                    let _ = tx.send(Msg::Stats(pce.stats()));
-                });
-            }
+            } => self.run_traffic(seq, filter, None, mode, cancel),
+            Cmd::RunSlice {
+                seq,
+                filter,
+                start,
+                end,
+                cancel,
+            } => self.run_traffic(seq, filter, Some((start, end)), CacheMode::Use, cancel),
             Cmd::LoadRuleSets { scope, mode } => {
                 self.model.busy += 1;
                 let (pce, tx) = self.task_ctx();
@@ -449,6 +487,7 @@ impl Runtime {
                 | Msg::IndexLoaded { .. }
                 | Msg::IndexFailed(_)
                 | Msg::QueryDone { .. }
+                | Msg::SliceDone { .. }
                 | Msg::RuleSetsLoaded { .. }
                 | Msg::DenyRulesLoaded { .. }
                 | Msg::PendingLoaded(_)

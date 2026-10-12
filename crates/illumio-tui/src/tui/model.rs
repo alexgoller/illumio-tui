@@ -299,6 +299,9 @@ pub enum PendingAction {
     /// `u` on the Labels tab: the workloads and the rulesets not cached
     /// yet, read with their screens' own loads.
     LoadLabelUsage,
+    /// `+` past a cost threshold: the filter with the wider window and the
+    /// slice it fetches (`start` to `end`, the loaded start).
+    RunSlice(TrafficFilter, jiff::Timestamp, jiff::Timestamp),
 }
 
 #[derive(Debug)]
@@ -322,6 +325,53 @@ pub struct TrafficData {
     pub cache_hit: bool,
     pub fetched_at: Instant,
     pub filter: TrafficFilter,
+    /// The time range the flows cover, slice by slice; `None` when the
+    /// outcome carried no bounds (then `+` runs a full query).
+    pub slices: Option<Slices>,
+}
+
+/// The time range the loaded flows cover. The first query fetched
+/// `starts[0]` to `end`; each `+` fetched the slice from the next start up
+/// to the previous one, so `starts` runs newest to oldest and slices never
+/// overlap.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Slices {
+    pub end: jiff::Timestamp,
+    pub starts: Vec<jiff::Timestamp>,
+}
+
+impl Slices {
+    pub fn new(start: jiff::Timestamp, end: jiff::Timestamp) -> Self {
+        Self {
+            end,
+            starts: vec![start],
+        }
+    }
+
+    /// The oldest loaded instant.
+    pub fn start(&self) -> jiff::Timestamp {
+        *self.starts.last().expect("at least the first slice")
+    }
+
+    pub fn count(&self) -> usize {
+        self.starts.len()
+    }
+
+    /// `-`: the range now begins at `start` (no-op when it already does or
+    /// later). Slices that end at or before `start` are dropped; the oldest
+    /// kept one is cut at `start`.
+    pub fn narrow(&mut self, start: jiff::Timestamp) {
+        if start <= self.start() {
+            return;
+        }
+        // Slice i (i >= 1) ends where slice i-1 starts.
+        let keep = 1 + self.starts[..self.starts.len() - 1]
+            .iter()
+            .filter(|&&s| s > start)
+            .count();
+        self.starts.truncate(keep);
+        *self.starts.last_mut().expect("kept one") = start;
+    }
 }
 
 /// A flow with its grouping text for the keys in force (`shop/prod`): a
@@ -1175,6 +1225,16 @@ impl TrafficState {
 
     pub fn is_running(&self) -> bool {
         matches!(self.query, QueryState::Running { .. })
+    }
+
+    /// Cancels a running query without starting another: its answer is
+    /// stale from here on.
+    pub fn cancel_query(&mut self) {
+        if let QueryState::Running { cancel, .. } = &self.query {
+            cancel.cancel();
+            self.seq += 1;
+            self.query = QueryState::Idle;
+        }
     }
 
     /// Cancels a running query (if any) and returns the next sequence number.

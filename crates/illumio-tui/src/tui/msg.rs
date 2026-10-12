@@ -23,6 +23,8 @@ pub struct QueryOutcome {
     pub elapsed: Duration,
     pub hit: bool,
     pub filter: TrafficFilter,
+    /// The `(start, end)` the query asked for; `None` if unparseable.
+    pub bounds: Option<(jiff::Timestamp, jiff::Timestamp)>,
 }
 
 /// One object list with its cache age in seconds.
@@ -64,6 +66,11 @@ pub enum Msg {
         progress: QueryProgress,
     },
     QueryDone {
+        seq: u64,
+        result: Result<QueryOutcome, String>,
+    },
+    /// The answer to `Cmd::RunSlice`: merged into the loaded flows.
+    SliceDone {
         seq: u64,
         result: Result<QueryOutcome, String>,
     },
@@ -117,6 +124,15 @@ pub enum Cmd {
         seq: u64,
         filter: TrafficFilter,
         mode: CacheMode,
+        cancel: CancellationToken,
+    },
+    /// `+`: the same filter for one older slice, `start` to `end` (the
+    /// loaded start), answered with `Msg::SliceDone`.
+    RunSlice {
+        seq: u64,
+        filter: TrafficFilter,
+        start: jiff::Timestamp,
+        end: jiff::Timestamp,
         cancel: CancellationToken,
     },
     LoadRuleSets {
@@ -183,6 +199,22 @@ impl PartialEq for Cmd {
                     ..
                 },
             ) => a == b && fa == fb && ma == mb,
+            (
+                Cmd::RunSlice {
+                    seq: a,
+                    filter: fa,
+                    start: sa,
+                    end: ea,
+                    ..
+                },
+                Cmd::RunSlice {
+                    seq: b,
+                    filter: fb,
+                    start: sb,
+                    end: eb,
+                    ..
+                },
+            ) => a == b && fa == fb && sa == sb && ea == eb,
             (
                 Cmd::LoadRuleSets {
                     scope: sa,

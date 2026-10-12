@@ -40,6 +40,16 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "Traffic  f",
         "edit filter: window src dst service decisions",
     ),
+    (
+        "Traffic  + / -",
+        "widen (fetches the older slice only) / narrow",
+    ),
+    ("", "window steps 1h 6h 12h 1d 2d 3d 1w 2w 4w 90d"),
+    (
+        "Traffic  ] / [",
+        "raise / lower the result cap (re-runs the query)",
+    ),
+    ("", "cap steps 500 1000 2000 5000 10000, profile max"),
     ("Traffic  g", "pick the label keys every view groups by"),
     (
         "Traffic  Enter",
@@ -824,5 +834,14 @@ pub fn screen_hint(screen: Screen, writes: bool) -> &'static str {
         (Screen::Objects, false) => "Tab type  Enter detail  r refresh  a auto  / search",
         (Screen::Workloads, false) => "t/T traffic  h/H health  Enter detail  r refresh",
         (Screen::Events, _) => "f filter  r refresh  a auto  S severity  Enter detail",
+    }
+}
+
+/// More key hints for a screen, shown after `screen_hint` only when the
+/// status line still has room for the status text.
+pub fn screen_hint_more(screen: Screen) -> &'static str {
+    match screen {
+        Screen::Traffic => "+/- window  ]/[ cap",
+        _ => "",
     }
 }

@@ -451,7 +451,16 @@ fn render_detail(model: &Model, f: &mut Frame, area: Rect) {
 pub fn render_filter_bar(model: &Model, f: &mut Frame, area: Rect) {
     let t = &model.theme;
     let fl = &model.traffic.filter;
-    let hint = fl.cost_hint();
+    // The slice count belongs to the flows on screen, so only while they
+    // were fetched with this filter.
+    let slices = model
+        .traffic
+        .data
+        .as_ref()
+        .filter(|d| &d.filter == fl)
+        .and_then(|d| d.slices.as_ref())
+        .map_or(1, |s| s.count());
+    let hint = fl.cost_hint_with_slices(slices);
     let block = panel("Filters", &hint, t, false);
     let or = |s: &str| {
         if s.trim().is_empty() {
