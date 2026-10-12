@@ -1521,7 +1521,7 @@ async fn traffic_groups_sum_bytes_and_honour_keys() {
 #[tokio::test(flavor = "multi_thread")]
 async fn traffic_groups_by_in_out_both_with_show_and_app() {
     let server = MockServer::start().await;
-    mount_traffic(&server, 3).await;
+    mount_traffic(&server, 4).await;
     let out = stdout_json(
         cmd(&server)
             .args(["traffic", "groups", "--window", "1h", "--by", "in"])
@@ -1560,8 +1560,24 @@ async fn traffic_groups_by_in_out_both_with_show_and_app() {
         .assert()
         .success();
     let text = String::from_utf8_lossy(&table.get_output().stdout).to_string();
-    assert!(text.contains("in · 3 groups · 325 conns"), "{text}");
-    assert!(text.contains("out · "), "{text}");
+    assert!(
+        text.contains("\nshop/prod  ← 325 conns · 1 blocked · 1 pot.blocked  → 315 conns\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("\n  ← ipl:Corp/-") && text.contains("\n  → "),
+        "{text}"
+    );
+    let miss = cmd(&server)
+        .args([
+            "traffic", "groups", "--window", "1h", "--by", "in", "--app", "pos/PCI",
+        ])
+        .assert()
+        .success();
+    let out: serde_json::Value = serde_json::from_slice(&miss.get_output().stdout).unwrap();
+    assert_eq!(out["data"]["sections"], json!([]));
+    let err = String::from_utf8_lossy(&miss.get_output().stderr);
+    assert!(err.contains("no app matches \"pos/PCI\""), "{err}");
     cmd(&server)
         .args(["traffic", "groups", "--window", "1h", "--app", "shop/prod"])
         .assert()

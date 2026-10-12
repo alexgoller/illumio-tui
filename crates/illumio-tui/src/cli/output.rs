@@ -81,10 +81,24 @@ fn clip(s: &str) -> String {
     }
 }
 
+/// A table as text. A row of one cell in a table of several columns is a
+/// heading line (a section header): printed whole in the first column, the
+/// other cells empty, and neither clipped nor counted in the widths.
 pub fn render_table(headers: &[&str], rows: &[Vec<String>]) -> String {
+    let heading = |r: &Vec<String>| r.len() == 1 && headers.len() > 1;
+    let headings: Vec<Option<String>> = rows
+        .iter()
+        .map(|r| heading(r).then(|| r[0].clone()))
+        .collect();
     let rows: Vec<Vec<String>> = rows
         .iter()
-        .map(|r| r.iter().map(|c| clip(c)).collect())
+        .map(|r| {
+            if heading(r) {
+                Vec::new()
+            } else {
+                r.iter().map(|c| clip(c)).collect()
+            }
+        })
         .collect();
     let widths: Vec<u16> = headers
         .iter()
@@ -123,6 +137,11 @@ pub fn render_table(headers: &[&str], rows: &[Vec<String>]) -> String {
                 .to_string()
         })
         .collect();
+    for (i, h) in headings.into_iter().enumerate() {
+        if let Some(h) = h {
+            lines[i + 1] = h;
+        }
+    }
     lines.insert(1, "─".repeat(total as usize));
     if rows.is_empty() {
         lines.push("(no rows)".to_string());

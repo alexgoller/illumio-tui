@@ -12,8 +12,8 @@ use pce::models::{
 };
 use pce::traffic::{
     AppSection, Decisions, Direction, FilterExpr, FlowGroup, MeshColumns, MeshRow, ResolvedFlow,
-    TrafficQueryBuilder, app_sections, app_sections_both, group_by_labels, mesh, parse_window,
-    resolve_actor, resolve_flows,
+    TrafficQueryBuilder, app_header, app_sections, app_sections_both, group_by_labels, mesh,
+    parse_window, resolve_actor, resolve_flows,
 };
 use pce::{KeyOrder, NameIndex};
 use serde::Serialize;
@@ -450,11 +450,15 @@ impl TableRows for Vec<MeshRow> {
 }
 
 /// App sections as printed: JSON `{"sections": [{app, direction, rows,
-/// totals}]}`; the table a header row per section (the app, its totals
-/// in the last column), then its peers indented.
+/// totals}]}`; the table one header row per app like the TUI (`shop/prod
+/// in · 3 groups · …`, or `← … → …` with both directions) in the first
+/// column, then its peers indented (`← ` / `→ ` with `both`).
 #[derive(Debug, Serialize)]
 pub struct Sections {
     pub sections: Vec<AppSection>,
+    /// `--by both`: mark each peer row's direction.
+    #[serde(skip)]
+    pub both: bool,
 }
 
 impl TableRows for Sections {
@@ -471,6 +475,8 @@ impl TableRows for Sections {
             "decision",
         ]
     }
+    /// A header row is one cell: `render_table` prints it whole in the
+    /// first column with the other cells empty.
     fn rows(&self) -> Vec<Vec<String>> {
         let any = self
             .sections
@@ -478,27 +484,46 @@ impl TableRows for Sections {
             .flat_map(|s| &s.rows)
             .any(|r| r.bytes > 0);
         let mut out = Vec::new();
-        for s in &self.sections {
-            let mut head = vec![String::new(); 9];
-            head[0] = s.app_text();
-            head[8] = s.header_text();
-            out.push(head);
-            for r in &s.rows {
-                out.push(vec![
-                    format!("  {}", r.peer_text()),
-                    r.peer_name_text(),
-                    r.app_name_text(),
-                    r.service.clone(),
-                    r.flows.to_string(),
-                    r.connections.to_string(),
-                    bytes_cell(r.bytes, any),
-                    r.last_detected.clone().unwrap_or_default(),
-                    r.dominant().as_str().to_string(),
-                ]);
+        // An app's sections are adjacent (`app_sections_both`).
+        for group in self.sections.chunk_by(|a, b| a.app == b.app) {
+            let parts: Vec<(Direction, &pce::traffic::Totals)> =
+                group.iter().map(|s| (s.direction, &s.totals)).collect();
+            out.push(vec![format!(
+                "{}  {}",
+                group[0].app_text(),
+                app_header(&parts)
+            )]);
+            for s in group {
+                let mark = if self.both {
+                    format!("{} ", s.direction.arrow())
+                } else {
+                    String::new()
+                };
+                for r in &s.rows {
+                    out.push(vec![
+                        format!("  {mark}{}", r.peer_text()),
+                        r.peer_name_text(),
+                        r.app_name_text(),
+                        r.service.clone(),
+                        r.flows.to_string(),
+                        r.connections.to_string(),
+                        bytes_cell(r.bytes, any),
+                        r.last_detected.clone().unwrap_or_default(),
+                        r.dominant().as_str().to_string(),
+                    ]);
+                }
             }
         }
         out
     }
+}
+
+/// `no app matches "pos/PCI"` when `--app` kept no section.
+pub fn app_miss(args: &GroupsArgs, s: &Sections) -> Option<String> {
+    args.app
+        .as_ref()
+        .filter(|_| s.sections.is_empty())
+        .map(|a| format!("no app matches {a:?}"))
 }
 
 /// `--by`, `--show` and `--app` over the loaded flows: the sections, or
@@ -525,7 +550,10 @@ pub fn sections_for(
     if let Some(app) = &args.app {
         sections.retain(|s| &s.app_text() == app);
     }
-    Ok(Some(Sections { sections }))
+    Ok(Some(Sections {
+        sections,
+        both: args.by == ByArg::Both,
+    }))
 }
 
 pub async fn run(ctx: &Context, cmd: &TrafficCmd) -> Result<(), CliError> {
@@ -589,6 +617,7 @@ async fn query(ctx: &Context, args: &QueryArgs) -> Result<(), CliError> {
         let keys = keys_or_profile(ctx, &[]);
         let sections = Sections {
             sections: app_sections(&f.flows, &keys, Direction::In, Decisions::Blocked),
+            both: false,
         };
         ctx.emit(&sections, f.cache, f.truncated, f.window)
     } else if !args.group.is_empty() {
@@ -616,7 +645,12 @@ async fn groups(ctx: &Context, args: &GroupsArgs) -> Result<(), CliError> {
     };
     let keys = keys_or_profile(ctx, &args.keys);
     match sections_for(&f.flows, &keys, args)? {
-        Some(sections) => ctx.emit(&sections, f.cache, f.truncated, f.window),
+        Some(sections) => {
+            if let Some(miss) = app_miss(args, &sections) {
+                eprintln!("{miss}");
+            }
+            ctx.emit(&sections, f.cache, f.truncated, f.window)
+        }
         None => ctx.emit(
             &group_by_labels(&f.flows, &keys),
             f.cache,
@@ -826,23 +860,57 @@ mod tests {
     }
 
     #[test]
+    fn both_prints_one_header_per_app_and_marks_the_direction() {
+        let flows = crate::tui::test_support::fixture_flows_rich();
+        let a = groups_args(&["--by", "both", "--app", "shop/prod"]);
+        let s = sections_for(&flows, &app_env(), &a).unwrap().unwrap();
+        let rows = s.rows();
+        let headers: Vec<&Vec<String>> = rows.iter().filter(|r| r.len() == 1).collect();
+        assert_eq!(
+            headers,
+            vec![&vec![
+                "shop/prod  ← 1545 conns · 2 blocked · 1 pot.blocked  → 1004 conns".to_string()
+            ]]
+        );
+        assert!(rows[1][0].starts_with("  ← "), "{:?}", rows[1]);
+        assert!(rows.last().unwrap()[0].starts_with("  → "));
+        assert_eq!(app_miss(&a, &s), None);
+        let a = groups_args(&["--by", "in", "--app", "pos/PCI"]);
+        let s = sections_for(&flows, &app_env(), &a).unwrap().unwrap();
+        assert!(s.sections.is_empty());
+        assert_eq!(
+            app_miss(&a, &s).as_deref(),
+            Some("no app matches \"pos/PCI\"")
+        );
+    }
+
+    #[test]
     fn sections_print_header_rows_then_indented_peers_and_json_has_sections() {
         let flows = crate::tui::test_support::fixture_flows_rich();
         let s = Sections {
             sections: app_sections(&flows, &app_env(), Direction::In, Decisions::Blocked),
+            both: false,
         };
         let rows = s.rows();
-        assert_eq!(rows[0][0], "erp/prod");
         assert_eq!(
-            rows[0][8],
-            "in · 3 groups · 102 conns · 2 blocked · 3 pot.blocked"
+            rows[0],
+            vec!["erp/prod  in · 3 groups · 102 conns · 2 blocked · 3 pot.blocked"],
+            "a header row: the first column only"
         );
-        assert!(rows[0][1..8].iter().all(String::is_empty));
         assert_eq!(rows[1][0], "  erp/dev");
         assert_eq!(rows[1][2], "erp-api-p.example");
         assert_eq!(rows[1][3], "8443/tcp");
         let text = crate::cli::output::render_table(&s.headers(), &rows);
         assert!(text.lines().next().unwrap().starts_with("app / peer"));
+        assert_eq!(
+            text.lines().nth(2),
+            Some("erp/prod  in · 3 groups · 102 conns · 2 blocked · 3 pot.blocked"),
+            "printed whole, not clipped"
+        );
+        assert!(
+            text.lines().nth(3).unwrap().starts_with("  erp/dev   "),
+            "the header does not widen the first column: {text}"
+        );
         assert!(text.contains("\n  ipl:Corp/-"), "{text}");
         let json = serde_json::to_value(&s).unwrap();
         assert_eq!(

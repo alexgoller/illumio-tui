@@ -202,7 +202,7 @@ destination group (`src`, `dst`, `flows`, `connections`, `bytes`, `allowed`,
 with the app's totals, then its peer groups and services indented (JSON
 `{"sections": [{app, direction, rows, totals}]}`); `--show blocked|blocked-only` counts only
 those decisions among the loaded flows (`--decision` filters the query itself) and `--app`
-keeps one app's sections. `traffic query --blocked` prints the `--by in --show blocked`
+keeps one app's sections (an unknown app prints `no app matches` on stderr). `traffic query --blocked` prints the `--by in --show blocked`
 sections the same way. `mesh` gives one row per source user, source process, source group,
 destination group, port, protocol and destination process. The PCE reports one process per
 flow, seen where the flow was reported: an inbound flow's process is the destination's,
