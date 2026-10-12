@@ -165,7 +165,7 @@ pub struct FilterArgs {
     #[arg(long)]
     pub backfill: bool,
     /// With --backfill: at most this many slice queries per run (1 to 50, default 50);
-    /// stderr names the --to that continues
+    /// stderr names the --from/--to that continue
     #[arg(long, requires = "backfill", value_parser = clap::value_parser!(u32).range(1..=50))]
     pub max_slices: Option<u32>,
 }
@@ -650,8 +650,9 @@ async fn backfill(
             Next::OverBudget { remaining } => {
                 eprintln!(
                     "backfill stopped after {max} queries: {remaining} slices of {} left; \
-                     --to {} continues",
+                     --from {} --to {} continues",
                     compact_duration(run.slice),
+                    format_timestamp(start),
                     format_timestamp(run.next_end)
                 );
                 break;

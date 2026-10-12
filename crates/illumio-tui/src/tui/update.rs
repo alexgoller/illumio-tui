@@ -215,10 +215,12 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             // screen (e.g. profile defaults above the thresholds, never confirmed).
             // Merged slices were confirmed slice by slice: one query for the
             // whole window is a different (larger) request.
-            let fetched_with =
-                model.traffic.data.as_ref().is_some_and(|d| {
-                    d.filter == f && d.slices.as_ref().is_none_or(|s| s.count() <= 1)
-                });
+            // A backfill was confirmed slice by slice too, even with one slice.
+            let fetched_with = model.traffic.data.as_ref().is_some_and(|d| {
+                d.filter == f
+                    && d.backfill.is_none()
+                    && d.slices.as_ref().is_none_or(|s| s.count() <= 1)
+            });
             if !fetched_with && let Some(reason) = f.needs_confirmation() {
                 model.overlay = Overlay::Confirm {
                     reason: format!("{reason}. Run anyway? (y/n)"),
@@ -949,6 +951,17 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                 model.overlay = Overlay::None;
                 model.status = StatusLine::info("cancelled");
+                // The opt-in asks for a cap past the cost threshold after
+                // each truncated query: a no also stops the ticks asking.
+                if let PendingAction::Backfill(plan) = action
+                    && model.limits.traffic_auto_backfill
+                    && plan.cap > pce::traffic::CONFIRM_MAX_RESULTS
+                    && std::mem::take(&mut model.traffic.auto.enabled)
+                {
+                    model.status = StatusLine::info(
+                        "cancelled · auto-refresh off, so the backfill is not asked again each tick",
+                    );
+                }
                 Vec::new()
             }
             _ => Vec::new(),
@@ -1857,8 +1870,9 @@ fn next_backfill_slice(model: &mut Model) -> Vec<Cmd> {
     };
     match bf.run.next_slice() {
         pce::traffic::Next::Slice(start, end) => {
+            // Only the request carries the run's cap: `f`, `]` and `r` keep
+            // acting on the filter of what is loaded until a slice merges.
             let filter = bf.filter.clone();
-            model.traffic.filter = filter.clone();
             let (seq, cancel) = model.traffic.start_query(Instant::now());
             model.status = if bf.note.is_some() {
                 StatusLine::warn(bf.status_text())
@@ -10986,7 +11000,12 @@ mod backfill_tests {
         truncated: bool,
         b: (Timestamp, Timestamp),
     ) -> Vec<Cmd> {
-        let filter = m.traffic.filter.clone();
+        // The runtime answers with the filter the slice was sent with.
+        let filter = m
+            .traffic
+            .backfill
+            .as_ref()
+            .map_or_else(|| m.traffic.filter.clone(), |bf| bf.filter.clone());
         let msg = Msg::SliceDone {
             seq: m.traffic.seq,
             result: Ok(QueryOutcome {
@@ -11426,6 +11445,102 @@ mod backfill_tests {
             matches!(cmds.as_slice(), [Cmd::RunSlice { filter, .. }] if filter.max_results == 200_000),
             "{cmds:?}"
         );
+    }
+
+    /// The raised cap is only in the slice requests: until a slice merges,
+    /// `f`, `]` and `r` act on the cap of what is loaded.
+    #[test]
+    fn a_raised_cap_is_not_the_filter_until_a_slice_merges() {
+        let mut m = model_fixture();
+        quiet_query(&mut m, spread(Span::new().minutes(2), 1), 1);
+        quiet(&mut m, key('B'));
+        let cmds = update(&mut m, key('y'));
+        assert!(
+            matches!(cmds.as_slice(), [Cmd::RunSlice { filter, .. }] if filter.max_results == 1000),
+            "{cmds:?}"
+        );
+        assert_eq!(cap(&m), 30, "the loaded cap");
+        quiet(&mut m, key('r'));
+        assert_eq!(m.status.text, "query already running");
+        quiet(&mut m, key('f'));
+        assert!(
+            matches!(&m.overlay, Overlay::FilterEditor(e) if e.values[5] == "30"),
+            "{:?}",
+            m.overlay
+        );
+        quiet(&mut m, esc());
+        answer(
+            &mut m,
+            rows(1, mins_ago(5), 50_000),
+            false,
+            (mins_ago(30), end()),
+        );
+        assert_eq!(cap(&m), 1000, "merged: the filter is the run's");
+    }
+
+    /// A backfill stopped after one slice at a cap past 10000: `r` would run
+    /// the whole window as one query, so it asks first.
+    #[test]
+    fn r_after_a_backfill_goes_through_the_cost_guard() {
+        let mut m = model_fixture();
+        m.limits.traffic_max_results = 200_000;
+        quiet_query(&mut m, spread(Span::new().seconds(30), 100), 1);
+        quiet(&mut m, key('B'));
+        assert_eq!(plan_of(&m).cap, 200_000);
+        let cmds = update(&mut m, key('y'));
+        assert_eq!(cmds.len(), 1);
+        quiet(&mut m, esc());
+        let Some(Cmd::RunSlice { start, end, .. }) = slice_in_flight(&m) else {
+            unreachable!()
+        };
+        quiet_answer(&mut m, (start, end));
+        assert_eq!(
+            m.traffic
+                .data
+                .as_ref()
+                .unwrap()
+                .slices
+                .as_ref()
+                .unwrap()
+                .count(),
+            1
+        );
+        assert_eq!(cap(&m), 200_000);
+        quiet(&mut m, key('r'));
+        assert!(
+            matches!(&m.overlay, Overlay::Confirm { action: PendingAction::RunNow(_), reason } if reason.contains("200000")),
+            "{:?}",
+            m.overlay
+        );
+    }
+
+    /// `n` to the opt-in's cap question turns auto-refresh off, so the
+    /// next tick does not ask again.
+    #[test]
+    fn no_to_the_opt_in_cap_question_turns_auto_refresh_off() {
+        let mut m = model_fixture();
+        m.limits.traffic_max_results = 200_000;
+        m.limits.traffic_auto_backfill = true;
+        m.traffic.auto.enabled = true;
+        quiet_query(&mut m, spread(Span::new().seconds(30), 100), 1);
+        assert_eq!(plan_of(&m).cap, 200_000);
+        quiet(&mut m, key('n'));
+        assert!(!m.traffic.auto.enabled);
+        assert_eq!(
+            m.status.text,
+            "cancelled · auto-refresh off, so the backfill is not asked again each tick"
+        );
+        quiet(
+            &mut m,
+            Msg::Tick(std::time::Instant::now() + Duration::from_secs(3600)),
+        );
+        // A plain B question declined leaves auto-refresh alone.
+        let mut m = two_hours();
+        m.traffic.auto.enabled = true;
+        quiet(&mut m, key('B'));
+        quiet(&mut m, key('n'));
+        assert!(m.traffic.auto.enabled);
+        assert_eq!(m.status.text, "cancelled");
     }
 
     #[test]

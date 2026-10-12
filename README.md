@@ -232,7 +232,7 @@ newest first, one query at a time, the cap raised along the ladder up to the pro
 the slices would not fit in 50 (past 10000 only with `--yes`); `meta.slices` counts the slices
 merged and `meta.api_calls` every request (at least 3 per query). A run sends at most
 `--max-slices` queries (1 to 50, default 50); when the window needs more, stderr names the
-`--to` that continues and `meta.truncated` stays true. Errors go to stderr as JSON. Exit codes: 1 generic, 2 arguments or
+`--from` / `--to` that continue and `meta.truncated` stays true. Errors go to stderr as JSON. Exit codes: 1 generic, 2 arguments or
 config, 3 auth, 4 PCE error, 5 rate limited, 6 write refused by the guard.
 
 `traffic groups` and `traffic mesh` take the `traffic query` filter flags (and its dry run,
@@ -558,7 +558,7 @@ Explorer queries default to a 24 h window and 1000 rows; larger windows
 (> 7 d) or caps (> 10 000) need `--yes`. `--dry-run` shows the request
 body without sending it. A traffic backfill sends nothing before `B` and `y` (or
 `--backfill`, or the written `traffic_auto_backfill` opt-in), never more than one slice at a
-time and never more than 50 queries (at least 150 API calls) per run.
+time and at most 50 queries per run, each at least 3 API calls.
 
 ## Development
 

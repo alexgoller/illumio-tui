@@ -1099,7 +1099,7 @@ async fn traffic_backfill_halves_a_truncated_slice_and_stops_at_the_limit() {
     );
     assert!(
         err.contains(
-            "backfill stopped after 3 queries: 6 slices of 15m left; --to 2026-10-10T07:30:00Z continues"
+            "backfill stopped after 3 queries: 6 slices of 15m left; --from 2026-10-10T06:00:00Z --to 2026-10-10T07:30:00Z continues"
         ),
         "{err}"
     );
