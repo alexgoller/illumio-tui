@@ -1,6 +1,7 @@
 //! The Explorer traffic query: build it, run it, make the rows readable,
 //! and aggregate them. Nothing here touches the network except `poll`.
 pub mod aggregate;
+pub mod coverage;
 pub mod filter;
 pub mod merge;
 pub mod mesh;
@@ -14,6 +15,10 @@ pub mod treemap;
 pub use aggregate::{
     Dominant, FlowGroup, compact_count, dominant, group_by_labels, group_key, group_text,
     group_values, keys_or_default, keys_seen,
+};
+pub use coverage::{
+    BackfillPlan, BackfillRun, Coverage, MAX_SLICES, MIN_SLICE, Next, SLICE_STEPS, Step,
+    approx_duration, compact_duration, coverage, plan_backfill, window_text,
 };
 pub use filter::{FilterExpr, resolve_actor};
 pub use merge::merge_flows;
