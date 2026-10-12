@@ -301,7 +301,7 @@ fn app_to_app_sections_in_and_both_80x24() {
     m.traffic.rebuild_views();
     let out = render_to_string(&m, 80, 24);
     assert!(
-        out.contains("▾ shop/prod  ← 4 groups · 1545 conns"),
+        out.contains("▾ shop/prod  ← 1545 conns · 2 blocked · 1 pot.blocked  → 1004 conns"),
         "{out}"
     );
     assert!(out.contains("    → crm/prod"), "{out}");

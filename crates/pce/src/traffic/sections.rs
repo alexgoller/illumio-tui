@@ -100,12 +100,17 @@ impl Totals {
     /// `7 groups · 412 conns · 1 blocked · 2 pot.blocked`; the decision
     /// counts only when not zero.
     pub fn text(&self) -> String {
-        let mut s = format!(
-            "{} group{} · {} conns",
+        format!(
+            "{} group{} · {}",
             self.groups,
             if self.groups == 1 { "" } else { "s" },
-            self.connections
-        );
+            self.counts_text()
+        )
+    }
+
+    /// `text` without the group count: `412 conns · 1 blocked`.
+    pub fn counts_text(&self) -> String {
+        let mut s = format!("{} conns", self.connections);
         if self.blocked > 0 {
             s.push_str(&format!(" · {} blocked", self.blocked));
         }
@@ -197,7 +202,21 @@ impl AppSection {
 
     /// `in · 7 groups · 412 conns · 1 blocked`.
     pub fn header_text(&self) -> String {
-        format!("{} · {}", self.direction.as_str(), self.totals.text())
+        app_header(&[(self.direction, &self.totals)])
+    }
+}
+
+/// The header of one app's sections: `in · 7 groups · 412 conns · 1
+/// blocked` for one direction; with both, `← 1545 conns · 2 blocked  →
+/// 1004 conns` (no group counts, so it fits 80 columns).
+pub fn app_header(parts: &[(Direction, &Totals)]) -> String {
+    match parts {
+        [(d, t)] => format!("{} · {}", d.as_str(), t.text()),
+        _ => parts
+            .iter()
+            .map(|(d, t)| format!("{} {}", d.arrow(), t.counts_text()))
+            .collect::<Vec<_>>()
+            .join("  "),
     }
 }
 
@@ -215,7 +234,7 @@ pub fn sides(
 }
 
 /// Whether `f` is counted under `app` in `direction` (any direction when
-/// `None`) with `decisions`.
+/// `None`) with `decisions`. `keys` are the resolved keys (never empty).
 pub fn in_app(
     f: &ResolvedFlow,
     keys: &[String],
@@ -223,15 +242,15 @@ pub fn in_app(
     direction: Option<Direction>,
     decisions: Decisions,
 ) -> bool {
-    let keys = keys_or_default(keys);
     decisions.keeps(f.policy_decision)
         && match direction {
-            Some(d) => sides(f, &keys, d).0 == app,
-            None => group_key(&f.src, &keys) == app || group_key(&f.dst, &keys) == app,
+            Some(d) => sides(f, keys, d).0 == app,
+            None => group_key(&f.src, keys) == app || group_key(&f.dst, keys) == app,
         }
 }
 
 /// Whether `f` is behind the peer row `(peer, service)` under `app`.
+/// `keys` are the resolved keys (never empty).
 pub fn in_peer(
     f: &ResolvedFlow,
     keys: &[String],
@@ -241,11 +260,10 @@ pub fn in_peer(
     service: &str,
     decisions: Decisions,
 ) -> bool {
-    let keys = keys_or_default(keys);
     if !decisions.keeps(f.policy_decision) || service_text(f.port, &f.proto) != service {
         return false;
     }
-    let (a, p) = sides(f, &keys, direction);
+    let (a, p) = sides(f, keys, direction);
     a == app && p == peer
 }
 
@@ -403,17 +421,16 @@ mod tests {
     }
 
     fn sum(s: &AppSection) -> Totals {
-        let mut t = Totals::default();
-        for r in &s.rows {
-            t.add_row(r);
+        let r = &s.rows;
+        Totals {
+            groups: r.iter().map(|r| &r.peer).collect::<BTreeSet<_>>().len(),
+            flows: r.iter().map(|r| r.flows).sum(),
+            connections: r.iter().map(|r| r.connections).sum(),
+            bytes: r.iter().map(|r| r.bytes).sum(),
+            allowed: r.iter().map(|r| r.allowed).sum(),
+            potentially_blocked: r.iter().map(|r| r.potentially_blocked).sum(),
+            blocked: r.iter().map(|r| r.blocked).sum(),
         }
-        t.groups = s
-            .rows
-            .iter()
-            .map(|r| &r.peer)
-            .collect::<BTreeSet<_>>()
-            .len();
-        t
     }
 
     #[test]
@@ -430,7 +447,26 @@ mod tests {
             assert_eq!(s.iter().map(|s| s.totals.connections).sum::<u64>(), total);
             for sec in &s {
                 assert_eq!(sec.totals, sum(sec), "{}", sec.app_text());
-                assert!(sec.rows.iter().all(|_| sec.direction == d));
+                assert_eq!(sec.direction, d);
+                for r in &sec.rows {
+                    // Each row's flows sit on its side: the app on `d`'s
+                    // side, the peer on the other.
+                    let n = f
+                        .iter()
+                        .filter(|x| {
+                            in_peer(
+                                x,
+                                &app_env(),
+                                &sec.app,
+                                d,
+                                &r.peer,
+                                &r.service,
+                                Decisions::All,
+                            )
+                        })
+                        .count() as u64;
+                    assert_eq!(n, r.flows, "{} {}", sec.app_text(), r.peer_text());
+                }
             }
         }
     }
@@ -502,6 +538,30 @@ mod tests {
         );
         assert_eq!(corp.app_name_text(), "host-1.example");
         assert_eq!(corp.dominant(), PolicyDecision::PotentiallyBlocked);
+    }
+
+    #[test]
+    fn the_both_header_drops_the_group_counts_to_fit() {
+        let t_in = Totals {
+            groups: 4,
+            connections: 1545,
+            blocked: 2,
+            potentially_blocked: 1,
+            ..Totals::default()
+        };
+        let t_out = Totals {
+            groups: 3,
+            connections: 1004,
+            ..Totals::default()
+        };
+        assert_eq!(
+            app_header(&[(Direction::In, &t_in)]),
+            "in · 4 groups · 1545 conns · 2 blocked · 1 pot.blocked"
+        );
+        assert_eq!(
+            app_header(&[(Direction::In, &t_in), (Direction::Out, &t_out)]),
+            "← 1545 conns · 2 blocked · 1 pot.blocked  → 1004 conns"
+        );
     }
 
     #[test]

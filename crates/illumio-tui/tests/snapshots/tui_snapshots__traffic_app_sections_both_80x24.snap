@@ -12,7 +12,7 @@ expression: out
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭ App-to-app ────────────────────────────── both · keys app,env · Enter drills ╮
 │  peer                                  service   flows conns  bytes  decision│
-│▸ ▾ shop/prod  ← 4 groups · 1545 conns · 2 blocked · 1 pot.blocked  → 3 groups│
+│▸ ▾ shop/prod  ← 1545 conns · 2 blocked · 1 pot.blocked  → 1004 conns         │
 │    ← shop/prod                         5432/tcp      4    821 940.0K allowed │
 │    ← ipl:Corp/-                        443/tcp       1    700   8.4M allowed │
 │    ← hr/prod                           5432/tcp      1     16   3.8K pot.blk │
@@ -21,7 +21,7 @@ expression: out
 │    → shop/prod                         5432/tcp      4    821 940.0K allowed │
 │    → crm/prod                          443/tcp       1    150  61.0K allowed │
 │    → api.partner.example/-             443/tcp       1     33  15.0K allowed │
-│  ▾ crm/prod  ← 6 groups · 1601 conns · 1 blocked  → 2 groups · 896 conns · 2 │
+│  ▾ crm/prod  ← 1601 conns · 1 blocked  → 896 conns · 2 pot.blocked           │
 │    ← crm/prod                          3306/tcp      2    850   2.5M allowed │
 │    ← ipl:Corp/-                        443/tcp       1    520      - allowed │
 ╰──────────────────────────────────────────────────────────────────────────────╯

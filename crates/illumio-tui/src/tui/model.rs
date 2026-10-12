@@ -13,8 +13,9 @@ use pce::models::{
 use pce::traffic::treemap::{Rect as TreemapRect, Tile, Weight, layout, layout_zoomed};
 use pce::traffic::{
     AppSection, Decisions, Direction, FlowGroup, MeshColumns, MeshKey, MeshRow, PeerRow,
-    ResolvedFlow, Totals, app_sections, app_sections_both, compact_count, group_by_labels,
-    group_key, group_text, in_app, in_peer, keys_or_default, keys_seen, mesh, mesh_key,
+    ResolvedFlow, Totals, app_header, app_sections, app_sections_both, compact_count,
+    group_by_labels, group_key, group_text, in_app, in_peer, keys_or_default, keys_seen, mesh,
+    mesh_key,
 };
 use pce::write::Plan;
 use pce::{
@@ -930,28 +931,18 @@ impl SectionRow {
     }
 
     /// A header's one line: `▾ shop/prod  in · 7 groups · 412 conns`;
-    /// `▹` when folded; `← 7 groups · …  → 2 groups · …` for `both`.
+    /// `▹` when folded; `← 1545 conns · …  → 1004 conns` for `both`.
     /// `None` for a peer.
     pub fn header_line(&self) -> Option<String> {
         let RowKind::Header { totals, folded } = &self.kind else {
             return None;
         };
-        let arrows = totals.len() > 1;
-        let parts: Vec<String> = totals
-            .iter()
-            .map(|(d, t)| {
-                if arrows {
-                    format!("{} {}", d.arrow(), t.text())
-                } else {
-                    format!("{} · {}", d.as_str(), t.text())
-                }
-            })
-            .collect();
+        let parts: Vec<(Direction, &Totals)> = totals.iter().map(|(d, t)| (*d, t)).collect();
         Some(format!(
             "{} {}  {}",
             if *folded { "▹" } else { "▾" },
             self.app.join("/"),
-            parts.join("  ")
+            app_header(&parts)
         ))
     }
 
@@ -3728,7 +3719,7 @@ mod tests {
         let line = header.header_line().unwrap();
         assert_eq!(
             line,
-            "▾ shop/prod  ← 4 groups · 1545 conns · 2 blocked · 1 pot.blocked  → 3 groups · 1004 conns"
+            "▾ shop/prod  ← 1545 conns · 2 blocked · 1 pot.blocked  → 1004 conns"
         );
         let peers: Vec<String> = rows
             .iter()

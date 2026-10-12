@@ -44,6 +44,68 @@ pub fn visible_columns<T>(columns: &[Column<T>], width: u16) -> Vec<(usize, u16,
         .collect()
 }
 
+/// `no rows` / `no rows match the search` drawn in `inner` when the view
+/// is empty; whether it was.
+fn render_empty<T>(f: &mut Frame, inner: Rect, view: &TableView<T>, theme: &Theme) -> bool {
+    if !view.is_empty() {
+        return false;
+    }
+    let msg = if view.search_text().is_empty() {
+        "no rows"
+    } else {
+        "no rows match the search"
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(msg, theme.dim_style()))),
+        inner,
+    );
+    true
+}
+
+/// `s` cut to at most `w` cells of display width (ratatui's measure).
+fn clip_width(s: &str, w: usize) -> String {
+    let mut out = String::new();
+    let mut used = 0;
+    for c in s.chars() {
+        let cw = Span::raw(c.to_string()).width();
+        if used + cw > w {
+            break;
+        }
+        used += cw;
+        out.push(c);
+    }
+    out
+}
+
+/// `s` clipped and padded to exactly `w` cells, right-aligned when `right`.
+fn fit(s: &str, w: usize, right: bool) -> String {
+    let s = clip_width(s, w);
+    let pad = " ".repeat(w.saturating_sub(Span::raw(s.as_str()).width()));
+    if right { pad + &s } else { s + &pad }
+}
+
+/// One row's cells for the drawn columns `cols`: the narrow cell where the
+/// column has one and the table is narrow, fitted to `widths` (`0`: as is,
+/// for a fill column the table widget sizes).
+fn row_cells<T>(
+    view: &TableView<T>,
+    item: &T,
+    cols: &[(usize, u16, bool)],
+    widths: &[usize],
+) -> Vec<String> {
+    cols.iter()
+        .zip(widths)
+        .map(|(&(ci, _, narrow), &w)| {
+            let c = &view.columns[ci];
+            let text = match (narrow, c.narrow) {
+                (true, Some(n)) => n(item),
+                _ => view.cell(item, ci),
+            };
+            if w == 0 { text } else { fit(&text, w, c.right) }
+        })
+        .collect()
+}
+
 pub fn render<T>(
     f: &mut Frame,
     area: Rect,
@@ -54,23 +116,11 @@ pub fn render<T>(
 ) {
     let inner = block.inner(area);
     f.render_widget(block, area);
-    if inner.height == 0 || inner.width == 0 {
-        return;
-    }
-    if view.is_empty() {
-        let msg = if view.search_text().is_empty() {
-            "no rows"
-        } else {
-            "no rows match the search"
-        };
-        f.render_widget(
-            Paragraph::new(Line::from(Span::styled(msg, theme.dim_style()))),
-            inner,
-        );
+    if inner.height == 0 || inner.width == 0 || render_empty(f, inner, view, theme) {
         return;
     }
     let cols = visible_columns(&view.columns, area.width);
-    let widths: Vec<Constraint> = cols
+    let constraints: Vec<Constraint> = cols
         .iter()
         .map(|&(_, w, _)| {
             if w == 0 {
@@ -80,6 +130,7 @@ pub fn render<T>(
             }
         })
         .collect();
+    let widths: Vec<usize> = cols.iter().map(|&(_, w, _)| w as usize).collect();
     let header = Row::new(
         cols.iter()
             .map(|&(ci, _, _)| Cell::from(view.columns[ci].title))
@@ -93,26 +144,10 @@ pub fn render<T>(
         .iter()
         .map(|&i| {
             let item = &view.rows()[i];
-            let cells: Vec<Cell> = cols
-                .iter()
-                .map(|&(ci, w, narrow)| {
-                    let c = &view.columns[ci];
-                    let text = match (narrow, c.narrow) {
-                        (true, Some(n)) => n(item),
-                        _ => view.cell(item, ci),
-                    };
-                    let text = if c.right {
-                        format!("{text:>w$}", w = w as usize)
-                    } else {
-                        text
-                    };
-                    Cell::from(text)
-                })
-                .collect();
-            Row::new(cells).style(row_style(item))
+            Row::new(row_cells(view, item, &cols, &widths)).style(row_style(item))
         })
         .collect();
-    let table = Table::new(rows, widths)
+    let table = Table::new(rows, constraints)
         .header(header)
         .column_spacing(1)
         .row_highlight_style(theme.selected_style())
@@ -123,20 +158,10 @@ pub fn render<T>(
     f.render_stateful_widget(table, inner, &mut state);
 }
 
-/// Pads or clips `s` to `w` cells (right-aligned when `right`).
-fn fit(s: &str, w: usize, right: bool) -> String {
-    let s: String = s.chars().take(w).collect();
-    if right {
-        format!("{s:>w$}")
-    } else {
-        format!("{s:<w$}")
-    }
-}
-
 /// Like `render`, for tables some of whose rows are one line across every
-/// column (`spanning` returns it): drawn as lines, columns laid out the
-/// same way (fixed widths, `width == 0` takes the rest, one cell apart,
-/// the `▸ ` cursor). `header_style` styles the spanning rows.
+/// column (`spanning` returns it with its style): drawn as lines, columns
+/// laid out the same way (fixed widths, `width == 0` takes the rest, one
+/// cell apart, the `▸ ` cursor), measured in display width.
 pub fn render_spanning<T>(
     f: &mut Frame,
     area: Rect,
@@ -148,19 +173,7 @@ pub fn render_spanning<T>(
 ) {
     let inner = block.inner(area);
     f.render_widget(block, area);
-    if inner.height == 0 || inner.width == 0 {
-        return;
-    }
-    if view.is_empty() {
-        let msg = if view.search_text().is_empty() {
-            "no rows"
-        } else {
-            "no rows match the search"
-        };
-        f.render_widget(
-            Paragraph::new(Line::from(Span::styled(msg, theme.dim_style()))),
-            inner,
-        );
+    if inner.height == 0 || inner.width == 0 || render_empty(f, inner, view, theme) {
         return;
     }
     let cols = visible_columns(&view.columns, area.width);
@@ -173,18 +186,7 @@ pub fn render_spanning<T>(
         .map(|&(_, w, _)| if w == 0 { fill } else { w as usize })
         .collect();
     let line_of = |cells: Vec<String>| -> String {
-        let mut s = String::new();
-        for (i, c) in cells.iter().enumerate() {
-            if i > 0 {
-                s.push(' ');
-            }
-            s.push_str(c);
-        }
-        s.chars()
-            .take(avail)
-            .collect::<String>()
-            .trim_end()
-            .to_string()
+        clip_width(&cells.join(" "), avail).trim_end().to_string()
     };
     let header = line_of(
         cols.iter()
@@ -202,32 +204,18 @@ pub fn render_spanning<T>(
     for (pos, &i) in view.visible()[start..end].iter().enumerate() {
         let item = &view.rows()[i];
         let (text, mut style) = match spanning(item) {
-            Some((text, style)) => (text.chars().take(avail).collect(), style),
-            None => {
-                let cells = cols
-                    .iter()
-                    .zip(&widths)
-                    .map(|(&(ci, _, narrow), &w)| {
-                        let c = &view.columns[ci];
-                        let text = match (narrow, c.narrow) {
-                            (true, Some(n)) => n(item),
-                            _ => view.cell(item, ci),
-                        };
-                        fit(&text, w, c.right)
-                    })
-                    .collect();
-                (line_of(cells), row_style(item))
-            }
+            Some((text, style)) => (clip_width(&text, avail), style),
+            None => (
+                line_of(row_cells(view, item, &cols, &widths)),
+                row_style(item),
+            ),
         };
         let selected = start + pos == view.selected_pos();
-        if selected {
-            style = style.patch(theme.selected_style());
-        }
         let mut line = format!("{}{text}", if selected { "▸ " } else { "  " });
         if selected {
             // The cursor row is highlighted across the whole width.
-            let n = line.chars().count();
-            line.push_str(&" ".repeat((inner.width as usize).saturating_sub(n)));
+            style = style.patch(theme.selected_style());
+            line = fit(&line, inner.width as usize, false);
         }
         lines.push(Line::from(Span::styled(line, style)));
     }
@@ -272,6 +260,19 @@ mod tests {
                 narrow_width: 0,
             },
         ]
+    }
+
+    #[test]
+    fn fit_measures_display_width_not_chars() {
+        assert_eq!(
+            fit("日本語", 4, false),
+            "日本",
+            "two wide glyphs fill four cells"
+        );
+        assert_eq!(fit("日本語", 5, false), "日本 ");
+        assert_eq!(fit("42", 4, true), "  42");
+        assert_eq!(fit("← a", 3, false), "← a");
+        assert_eq!(clip_width("abc", 0), "");
     }
 
     #[test]

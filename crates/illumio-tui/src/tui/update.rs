@@ -1333,7 +1333,9 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             model.traffic.toggle_mesh_column(c == 'u');
         }
         KeyCode::Char('x' | 'X' | 'd') if model.traffic.view == TrafficView::Blocked => {
-            model.status = StatusLine::info("Blocked is App-to-app with in · blocked; press v");
+            model.status = StatusLine::info(
+                "Blocked is App-to-app with in · blocked; press v until App-to-app",
+            );
         }
         KeyCode::Char(c @ ('x' | 'X')) if model.traffic.view == TrafficView::Aggregate => {
             let t = &mut model.traffic;
@@ -1362,8 +1364,9 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         KeyCode::Char('z') if model.traffic.section_table().is_some() => {
             model.traffic.toggle_fold_all();
         }
-        // Sections keep their order (by connections): no sort.
-        KeyCode::Char('s') if model.traffic.section_table().is_some() => {}
+        KeyCode::Char('s') if model.traffic.section_table().is_some() => {
+            model.status = StatusLine::info("sections keep their order (by connections)");
+        }
         KeyCode::Enter if model.traffic.section_table().is_some() => {
             let t = &mut model.traffic;
             if let Some(drill) = t.section_drill() {
@@ -10002,6 +10005,7 @@ mod app_sections_tests {
         assert_eq!(m.traffic.apps.len(), all);
         quiet(&mut m, key('s'));
         assert_eq!(m.traffic.apps.sort(), None, "sections keep their order");
+        assert_eq!(m.status.text, "sections keep their order (by connections)");
     }
 
     #[test]
@@ -10051,8 +10055,17 @@ mod app_sections_tests {
         assert_eq!(m.traffic.apps_state, st, "g keeps it");
         assert!(!m.traffic.apps.is_empty());
         let cmds = update(&mut m, key('r'));
-        assert!(!cmds.is_empty(), "r runs the query");
         let filter = m.traffic.filter.clone();
+        assert_eq!(
+            cmds,
+            vec![Cmd::RunQuery {
+                seq: m.traffic.seq,
+                filter: filter.clone(),
+                mode: pce::CacheMode::Bypass,
+                cancel: tokio_util::sync::CancellationToken::new(),
+            }],
+            "r runs the query"
+        );
         let flows = crate::tui::test_support::fixture_flows_rich();
         let seq = m.traffic.seq;
         quiet(
@@ -10109,7 +10122,7 @@ mod app_sections_tests {
             quiet(&mut m, key(c));
             assert_eq!(
                 m.status.text,
-                "Blocked is App-to-app with in · blocked; press v"
+                "Blocked is App-to-app with in · blocked; press v until App-to-app"
             );
             assert_eq!(
                 (m.traffic.apps_state.clone(), m.traffic.blocked.len()),
