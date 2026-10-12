@@ -154,11 +154,15 @@ impl NameIndex {
         keys
     }
 
+    /// The values of `key`, sorted case-insensitively (like `ip_list_names`).
     pub fn values_for_key(&self, key: &str) -> Vec<String> {
-        self.keys
+        let mut values: Vec<String> = self
+            .keys
             .get(key)
             .map(|v| v.iter().cloned().collect())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        values.sort_by_key(|s| s.to_lowercase());
+        values
     }
 
     /// A label group's href by name, case-insensitively (like `ip_list_href`).

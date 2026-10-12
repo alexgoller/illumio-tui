@@ -346,7 +346,9 @@ fields, `Ctrl-U` clears one, `Enter` checks the form, `Esc` leaves without a
 request.
 `Ctrl-N` completes the token being typed (after the last comma) from what is
 already loaded: label keys and values (`app=p` offers `app`'s values with a
-`p`; a bare `pay` also offers `app=payment`), label groups (`group:`), IP lists
+`p`; a bare `pay` also offers `app=payment`; once a key completes to
+`app=`, the next `Ctrl-N` offers its values, and `Ctrl-P` before that steps
+back to the other keys), label groups (`group:`), IP lists
 (`iplist:`), service names and the loaded draft rulesets; prefix matches
 come first, any case, and a workload's labels or a scope never offer a key
 they already have. Each further `Ctrl-N` cycles forward, `Ctrl-P` back; up to

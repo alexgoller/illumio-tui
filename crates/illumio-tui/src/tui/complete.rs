@@ -95,17 +95,22 @@ fn keys(idx: &NameIndex, used: &[String]) -> Vec<String> {
 fn matching_keys(idx: &NameIndex, key: &str, used: &[String]) -> Vec<String> {
     keys(idx, used)
         .into_iter()
-        .filter(|k| k.eq_ignore_ascii_case(key))
+        .filter(|k| k.to_lowercase() == key.to_lowercase())
         .collect()
 }
 
-/// Every `(key, value)` of `keys`, in that order.
+/// Every `(key, value)` of `keys`, in that order; values with a `,` are
+/// left out (the field would split them into two tokens).
 fn pairs<'a>(
     idx: &'a NameIndex,
     keys: &'a [String],
 ) -> impl Iterator<Item = (String, String)> + 'a {
-    keys.iter()
-        .flat_map(|k| idx.values_for_key(k).into_iter().map(|v| (k.clone(), v)))
+    keys.iter().flat_map(|k| {
+        idx.values_for_key(k)
+            .into_iter()
+            .filter(|v| !v.contains(','))
+            .map(|v| (k.clone(), v))
+    })
 }
 
 /// The lowercase keys of `earlier` label tokens (`!` and `label:` dropped).
@@ -198,6 +203,17 @@ fn actors(token: &str, idx: &NameIndex, excluded: bool) -> Vec<String> {
     ];
     if let Some(names) = prefixed(token, &sources) {
         return names;
+    }
+    // `label:key=value` completes like `key=value` and keeps its prefix.
+    if let Some(rest) = token
+        .get(..6)
+        .filter(|h| h.eq_ignore_ascii_case("label:"))
+        .map(|_| &token[6..])
+    {
+        return labels(rest, &[], idx, &[], &[])
+            .into_iter()
+            .map(|c| format!("label:{c}"))
+            .collect();
     }
     // `all` cannot be excluded.
     let words: &[&str] = if excluded {
@@ -316,8 +332,8 @@ mod tests {
         );
         assert_eq!(
             rc(FieldKind::Actors, "app=", &[]),
-            s(&["app=Shop", "app=payment"]),
-            "every value of the key, in index order"
+            s(&["app=payment", "app=Shop"]),
+            "every value of the key, any case in order"
         );
     }
 
@@ -470,6 +486,41 @@ mod tests {
                 "{kind:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_label_prefix_is_completed_and_kept() {
+        assert_eq!(
+            rc(FieldKind::Actors, "label:app=", &[]),
+            s(&["label:app=payment", "label:app=Shop"])
+        );
+        assert_eq!(
+            rc(FieldKind::Actors, "!label:role=w", &[]),
+            s(&["!label:role=web"])
+        );
+        assert_eq!(
+            rc(FieldKind::Actors, "LABEL:sin", &[]),
+            s(&["label:single="])
+        );
+    }
+
+    #[test]
+    fn values_with_a_comma_are_not_offered() {
+        let label = |n: usize, v: &str| -> Label {
+            serde_json::from_value(serde_json::json!({
+                "href": format!("/orgs/5/labels/{n}"), "key": "app", "value": v
+            }))
+            .unwrap()
+        };
+        let idx = NameIndex::new(&[label(1, "a,b"), label(2, "ab")], &[], &[], &[]);
+        assert_eq!(
+            complete(FieldKind::Labels, "app=a", &[], &idx, &[]),
+            s(&["app=ab"])
+        );
+        assert_eq!(
+            complete(FieldKind::Labels, "b", &[], &idx, &[]),
+            s(&["app=ab"])
+        );
     }
 
     #[test]

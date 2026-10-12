@@ -86,6 +86,14 @@ pub struct Completion {
 /// Candidates the strip under a field shows at once.
 pub const STRIP_LEN: usize = 5;
 
+/// A candidate that only names what comes next: a key (`app=`, `!app=`,
+/// `label:app=`; one `=`, at the end) or a bare `group:` / `iplist:`.
+/// A value that happens to end in `=` or `:` (`app=foo:`) is not one.
+fn dives_into(candidate: &str) -> bool {
+    let c = candidate.trim_start_matches('!');
+    (c.ends_with('=') && c.find('=') == Some(c.len() - 1)) || matches!(c, "group:" | "iplist:")
+}
+
 /// `head` with `token` after it; a space after a separator for readability.
 fn joined(head: &str, token: &str) -> String {
     if head.is_empty() || head.ends_with(char::is_whitespace) {
@@ -272,10 +280,7 @@ impl Form {
                     FieldKind::Labels | FieldKind::Scope | FieldKind::Actors
                 )
             });
-            tokens
-                && c.candidates
-                    .get(c.index)
-                    .is_some_and(|s| s.ends_with('=') || s.ends_with(':'))
+            tokens && c.candidates.get(c.index).is_some_and(|s| dives_into(s))
         })
     }
 
@@ -342,6 +347,8 @@ impl Form {
     pub fn on_key(&mut self, k: KeyEvent) -> FormEvent {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         let n = self.fields.len().max(1);
+        // `update` normally intercepts Ctrl-N/Ctrl-P before the form sees
+        // them (it opens a completion from the index); here they only cycle.
         if ctrl && matches!(k.code, KeyCode::Char('n' | 'p')) {
             self.cycle(k.code == KeyCode::Char('n'));
             return FormEvent::Continue;
@@ -694,6 +701,20 @@ mod tests {
         let before = f.clone();
         f.on_key(ctrl('n'));
         assert_eq!(f, before);
+    }
+
+    #[test]
+    fn only_a_key_or_a_bare_prefix_dives() {
+        let mut f = actors_form("ap");
+        f.start_completion(cands(&[
+            "app=foo:", "app=x=", "app=", "group:", "!iplist:", "group:a:",
+        ]));
+        let mut dives = Vec::new();
+        for _ in 0..6 {
+            dives.push(f.completion_dives());
+            f.on_key(ctrl('n'));
+        }
+        assert_eq!(dives, [false, false, true, true, true, false]);
     }
 
     #[test]
