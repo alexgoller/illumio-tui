@@ -221,3 +221,9 @@ Spec: docs/superpowers/specs/2026-10-11-traffic-views-design.md · Plan: docs/su
 - [x] TUI: traffic detail, workloads table/detail, edit form, label group members, "all labels" and the `g` picker follow the order
 - [x] CLI: workloads and traffic tables follow the order
 - [x] Tests per surface (802 passed), docs, opus review (7 minors, all applied), merge
+
+## Ignore keys (2026-10-12, bounded)
+- [x] `ignore_keys` per profile / `ILLUMIO_IGNORE_KEYS`; `KeyOrder::with_ignored`/`shows`
+- [x] Hidden from label columns, traffic detail, blocked dst labels, `all labels` and the `g` picker; kept in JSON, the edit form, the Labels tab
+- [x] 16 tests (819 passed), opus review (5 minors, 4 applied), demo100 read-only check, merge
+- [ ] Docs run (README, GitHub Pages site) and enable Pages
