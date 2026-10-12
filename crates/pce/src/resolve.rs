@@ -168,6 +168,13 @@ impl NameIndex {
             .map(String::as_str)
     }
 
+    /// Label group names, sorted case-insensitively (like `ip_list_names`).
+    pub fn label_group_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.label_groups.values().map(|g| g.name.clone()).collect();
+        names.sort_by_key(|n| n.to_ascii_lowercase());
+        names
+    }
+
     pub fn label_group_name(&self, href: &str) -> Option<&str> {
         self.label_groups
             .get(canon(href).as_ref())
@@ -691,6 +698,7 @@ mod tests {
             idx.ip_list_names(),
             vec!["Any (0.0.0.0/0 and ::/0)", "Corp"]
         );
+        assert_eq!(idx.label_group_names(), vec!["All prod envs"]);
         assert_eq!(
             idx.service_name("/orgs/5/sec_policy/draft/services/31"),
             Some("PostgreSQL")
