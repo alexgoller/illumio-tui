@@ -92,7 +92,11 @@ scrolls the current table and a click on a tab switches screen; on a terminal na
 the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
 
 - **Traffic**: `f` edit the filter, `r` run (bypasses the cache), `a` auto-refresh, `s` sort,
-  `/` search; a filter that would be expensive asks for confirmation first. `v` cycles five
+  `/` search; a filter that would be expensive asks for confirmation first. `+` / `-` step
+  the window along `1h 6h 12h 1d 2d 3d 1w 2w 4w 90d`: `+` fetches only the older slice and
+  merges it into what is on screen (the header counts the slices), `-` drops the older flows
+  without a request. `]` / `[` step the result cap (`500` to `10000`, never above the
+  profile's `traffic_max_results`) and re-run the query. `v` cycles five
   views of the one result, all grouped by the same label keys: the profile's scope keys
   (`app,env` by default) until `g` opens the picker (`Space` toggles a key, `all labels` takes
   every key the flows carry, typing edits the list as text, `Enter` applies, for this session).
