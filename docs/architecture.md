@@ -133,6 +133,9 @@ consumers and services go back exactly as the PCE returned them, unknown
 keys included; the policy models carry an `extra` map for the same reason.
 `plan_provision` reads `sec_policy/pending` once (bypassing the cache) and
 sends an explicit `change_subset`; a pending rule maps to its ruleset.
+`plan_revert` (`write/revert.rs`) shares that read and subset and sends it
+with `PUT sec_policy/delete`, its summary naming each object's fate
+(`ObjectKind::Revert`: whole policy, never re-fetched).
 The token grammar (`ActorToken`, `ServiceToken`, scopes and the strict href
 helpers) lives in `crates/illumio-tui/src/tokens.rs`, shared by the CLI and
 the TUI. The CLI parses tokens before any request and resolves names against
@@ -199,7 +202,9 @@ report in the status line); when the selected ruleset's inline deny list is
 empty, that reload may cost one more GET for its deny rules (the on-demand
 fallback). A provision also reloads the pending list and reports
 `provisioned <version href>: <counts>`, the counts taken from the body when
-`y` was pressed. A plan with nothing to send (`Plan::Noop`, such as an update
+`y` was pressed. `R` plans a `RevertRequest` of the marked hrefs only; its
+confirm sends on the typed word `revert` (`PolicyState.revert_typed`) and the
+same reloads follow. A plan with nothing to send (`Plan::Noop`, such as an update
 whose fields already match) is an info status, never a request.
 
 The `w` pre-fill follows the profile's label model (`Limits.scope_keys`,

@@ -120,7 +120,8 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
 - **Policy**: `d` toggle draft / active, `p` pending changes (`Enter` on one shows its diff against active), `Tab` switch panes, `Enter` rule
   detail, or on a ruleset load its deny rules. Rules are listed in evaluation order: override
   deny, allow, deny. With writes on, `n` / `e` / `x` create, edit and delete rulesets and rules
-  in draft (`N` a deny rule), and the pending overlay marks with `Space` and provisions with `P`.
+  in draft (`N` a deny rule), and the pending overlay marks with `Space`, provisions with `P`
+  and reverts the marked changes with `R`.
   `i` reads the workload list once (unless the Workloads screen already did) for rule impact:
   the rule detail says how many workloads the rule matches (`impact      12 providers · 3
   consumers`, `≥` when the list was truncated) and the size of each IP list it names, the
@@ -305,6 +306,7 @@ its name), and refused when the PCE has none.
     illumio-tui policy deny-rules add Web-Tier --provider all --consumer iplist:Any --service 23/tcp --override --yes
     illumio-tui policy provision --all --dry-run
     illumio-tui policy provision Web-Tier --description "web tier v2" --yes
+    illumio-tui policy revert Web-Tier /orgs/1/sec_policy/draft/ip_lists/21 --dry-run
     illumio-tui workloads update web-01 --add-label env=prod --managed-labels --yes
 
 Providers, consumers and scope members (`--provider`, `--consumer`,
@@ -356,6 +358,15 @@ is `skipped` (exit 0). If the PCE rejects a type it does not accept in a
 subset, the rejection is reported with its body. A pending href that is
 not a draft policy object href (or cannot be parsed) refuses `--all` before
 any write.
+
+`policy revert` throws pending changes away: each object named goes back to
+its active version, and one that only exists in draft (a create) is deleted.
+It takes `--all` or names and hrefs like `policy provision` and sends
+`PUT /orgs/N/sec_policy/delete` with the same explicit `change_subset` (never
+the empty body, which would revert everything, including changes made after
+the read); `data.summary` names each object and its fate. The endpoint is the
+one the Illumio REST API documents, not yet verified live from this project:
+`--dry-run` prints the exact body, so check it against a lab PCE first.
 
 `workloads update --managed-labels` changes the labels of a VEN-managed
 workload with a `PUT` that carries only `labels`; `--name`, `--hostname`,
@@ -447,7 +458,10 @@ In the pending overlay (`p`), `Space` marks entries and `P` provisions the
 marked ones, or everything pending when none is marked. The confirm overlay
 shows the exact `POST /orgs/N/sec_policy` body with its `change_subset`;
 `y` sends it once, the status line says `provisioned <version href>: <counts>`,
-and the pending list and the rulesets reload. After any policy write the
+and the pending list and the rulesets reload. `R` reverts the marked entries
+(never everything; with none marked it says so): the confirm lists each
+object and whether it goes back to active or is removed, and only typing
+`revert` and `Enter` sends it. After any policy write the
 draft rulesets reload once; when the selected ruleset's inline deny list is
 empty, that may cost one more GET for its deny rules. `Enter` on a pending
 ruleset shows its changes against active: name, description, state, scopes and one
