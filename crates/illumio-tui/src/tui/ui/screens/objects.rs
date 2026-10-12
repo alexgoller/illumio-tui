@@ -228,21 +228,27 @@ fn label_lines(l: &Label) -> Vec<DetailLine> {
     ]
 }
 
+/// Members in the index's key order, then by value; unresolved hrefs last.
 fn group_lines(model: &Model, g: &LabelGroup) -> Vec<DetailLine> {
     let idx = model.index();
-    let label = |href: &str| match idx.and_then(|i| i.label(href)) {
-        Some(l) => l.display(),
-        None => format!("{href} (unresolved)"),
+    let unresolved = |href: &str| format!("{href} (unresolved)");
+    let labels: Vec<String> = match idx {
+        Some(i) => i
+            .resolve_labels(&g.labels)
+            .into_iter()
+            .map(|l| match i.label(&l.href) {
+                Some(_) => format!("{}={}", l.key, l.value),
+                None => unresolved(&l.href),
+            })
+            .collect(),
+        None => g.labels.iter().map(|r| unresolved(&r.href)).collect(),
     };
     let group = |href: &str| match idx.and_then(|i| i.label_group_name(href)) {
         Some(n) => n.to_string(),
         None => format!("{href} (unresolved)"),
     };
     let mut out = vec![(Some("group"), format!("{}  key {}", g.name, g.key))];
-    out.extend(items(
-        "labels",
-        g.labels.iter().map(|r| label(&r.href)).collect(),
-    ));
+    out.extend(items("labels", labels));
     if !g.sub_groups.is_empty() {
         out.extend(items(
             "groups",
@@ -265,4 +271,59 @@ fn service_lines(s: &Service) -> Vec<DetailLine> {
         s.service_ports.iter().map(|p| p.display()).collect(),
     ));
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::model::Connection;
+    use crate::tui::test_support::{fixture_index, model_fixture};
+    use pce::{KeyOrder, NameIndex};
+    use std::sync::Arc;
+
+    #[test]
+    fn group_members_follow_the_key_order_with_unresolved_last() {
+        let mut m = model_fixture();
+        let labels: Vec<pce::models::Label> =
+            serde_json::from_str(include_str!("../../../../../../fixtures/labels.json")).unwrap();
+        let ordered = NameIndex::new(&labels, &[], &[], &[])
+            .with_key_order(KeyOrder::new(&["env".into()], "role"));
+        let g: LabelGroup = serde_json::from_value(serde_json::json!({
+            "href": "/orgs/5/sec_policy/draft/label_groups/11", "name": "mixed", "key": "role",
+            "labels": [
+                {"href": "/orgs/5/labels/77"}, {"href": "/orgs/5/labels/3"},
+                {"href": "/orgs/5/labels/1"}, {"href": "/orgs/5/labels/2"},
+                {"href": "/orgs/5/labels/4"}
+            ]
+        }))
+        .unwrap();
+        let members = |m: &Model| -> Vec<String> {
+            group_lines(m, &g)
+                .into_iter()
+                .skip(1)
+                .map(|(_, t)| t)
+                .collect()
+        };
+        if let Connection::Connected { index, .. } = &mut m.connection {
+            *index = Some(Arc::new(ordered));
+        }
+        assert_eq!(
+            members(&m),
+            vec![
+                "env=prod",
+                "role=db",
+                "role=web",
+                "app=shop",
+                "/orgs/5/labels/77 (unresolved)"
+            ]
+        );
+        if let Connection::Connected { index, .. } = &mut m.connection {
+            *index = Some(fixture_index());
+        }
+        assert_eq!(
+            members(&m)[..4],
+            ["app=shop", "env=prod", "role=db", "role=web"],
+            "alphabetical by default"
+        );
+    }
 }

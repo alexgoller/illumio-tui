@@ -18,7 +18,7 @@ use pce::write::{
     RuleSetPatch, ServiceDraft, ServicePatch, ServiceRef, WorkloadDraft, WorkloadPatch,
     WriteRequest, checked_policy_href,
 };
-use pce::{NameIndex, ResolvedLabel};
+use pce::{KeyOrder, NameIndex, ResolvedLabel};
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 
@@ -1031,17 +1031,24 @@ fn interface_text(i: &Interface) -> String {
 }
 
 /// `key=value` from the workload's own label entry, else from the index,
-/// else the href (which `resolve_labels` accepts back as it is).
+/// else the href (which `resolve_labels` accepts back as it is). Entries in
+/// the index's key order (alphabetical without one), unresolved hrefs last.
 fn labels_text(w: &Workload, index: Option<&NameIndex>) -> String {
-    join(w.labels.iter().map(|l| {
-        match (&l.key, &l.value) {
-            (Some(k), Some(v)) => format!("{k}={v}"),
-            _ => index
-                .and_then(|i| i.label(&l.href))
-                .map(Label::display)
-                .unwrap_or_else(|| l.href.clone()),
-        }
-    }))
+    let mut entries: Vec<(String, String, String)> = w
+        .labels
+        .iter()
+        .map(|l| match (&l.key, &l.value) {
+            (Some(k), Some(v)) => (k.clone(), v.clone(), format!("{k}={v}")),
+            _ => match index.and_then(|i| i.label(&l.href)) {
+                Some(label) => (label.key.clone(), label.value.clone(), label.display()),
+                None => ("?".into(), l.href.clone(), l.href.clone()),
+            },
+        })
+        .collect();
+    let default = KeyOrder::default();
+    let order = index.map_or(&default, NameIndex::key_order);
+    entries.sort_by(|a, b| order.cmp_keys(&a.0, &b.0).then_with(|| a.1.cmp(&b.1)));
+    join(entries.into_iter().map(|(_, _, text)| text))
 }
 
 /// Comma-separated entries, trimmed, empty ones dropped.
@@ -1892,8 +1899,28 @@ mod tests {
         assert_eq!(d.labels, vec!["/orgs/5/labels/3", "/orgs/5/labels/4"]);
         assert_eq!(d.hostname, None);
         let host1 = form(EditIntent::UpdateWorkload(workloads()[0].clone()));
-        assert_eq!(host1.value("Labels"), "role=web, app=shop, env=prod");
+        assert_eq!(host1.value("Labels"), "app=shop, env=prod, role=web");
         assert_eq!(host1.value("Addresses"), "10.0.1.10/24");
+    }
+
+    #[test]
+    fn workload_labels_field_follows_the_index_key_order() {
+        let host1 = || EditIntent::UpdateWorkload(workloads()[0].clone());
+        let ordered = NameIndex::new(&labels(), &[], &[], &[])
+            .with_key_order(KeyOrder::new(&["env".into()], "role"));
+        let f = form_for(host1(), Some(&ordered), NO_PREFILL).unwrap();
+        assert_eq!(f.value("Labels"), "env=prod, role=web, app=shop");
+        assert_eq!(
+            build_intent(&f, Some(&ordered), 5).unwrap(),
+            None,
+            "an untouched field round-trips"
+        );
+        let f = form_for(host1(), None, NO_PREFILL).unwrap();
+        assert_eq!(
+            f.value("Labels"),
+            "app=shop, env=prod, role=web",
+            "alphabetical without an index"
+        );
     }
 
     #[test]
