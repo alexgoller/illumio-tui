@@ -204,7 +204,7 @@ fn traffic_filter_editor_completing_src_80x24() {
     assert!(update(&mut m, ctrl_n()).is_empty());
     let out = render_to_string(&m, 80, 24);
     assert!(out.contains("env=prod, app="), "{out}");
-    assert!(out.contains("app=  env=  loc=  role=  ip:"), "{out}");
+    assert!(out.contains("app=  loc=  role=  ip:  ipl:"), "{out}");
     insta::assert_snapshot!("traffic_filter_editor_completing_src_80x24", out);
 }
 

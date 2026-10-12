@@ -240,13 +240,13 @@ pub trait Completing {
 }
 
 /// A candidate that only names what comes next: a key (`app=`, `!app=`,
-/// `label:app=`; one `=`, at the end) or a bare prefix (`group:`,
-/// `iplist:`, and the filter's `ipl:`, `wl:`, `ip:`, `fqdn:`).
+/// `label:app=`; one `=`, at the end) or a bare prefix that has names
+/// after it (`group:`, `iplist:`, and the filter's `ipl:`, `wl:`).
 /// A value that happens to end in `=` or `:` (`app=foo:`) is not one.
 fn dives_into(candidate: &str) -> bool {
     let c = candidate.trim_start_matches('!');
     (c.ends_with('=') && c.find('=') == Some(c.len() - 1))
-        || matches!(c, "group:" | "iplist:" | "ipl:" | "wl:" | "ip:" | "fqdn:")
+        || matches!(c, "group:" | "iplist:" | "ipl:" | "wl:")
 }
 
 /// `head` with `token` after it; a space after a separator for readability.

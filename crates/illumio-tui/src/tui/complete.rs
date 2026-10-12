@@ -10,7 +10,7 @@ use crate::tokens::is_href;
 use crate::tui::form::FieldKind;
 use pce::NameIndex;
 use pce::models::{RuleSet, Workload};
-use pce::traffic::WINDOW_STEPS;
+use pce::traffic::{WINDOW_STEPS, next_window, parse_window};
 
 /// Most candidates one completion cycles through.
 pub const MAX_CANDIDATES: usize = 200;
@@ -63,22 +63,21 @@ pub fn complete(
                 .map(|r| (r.name.clone(), r.name.clone()));
             ranked(token, names)
         }
-        FieldKind::TrafficActors => negatable(token, |t| filter_actors(t, idx, workloads)),
+        FieldKind::TrafficActors => filter_actors(token, &used_keys(earlier), idx, workloads),
         FieldKind::TrafficService => traffic_service(token, idx),
         FieldKind::Decisions => {
+            // `all` stands alone: first or not at all.
             let used: Vec<String> = earlier.iter().map(|e| e.trim().to_lowercase()).collect();
+            if used.iter().any(|u| u == "all") {
+                return Vec::new();
+            }
             let words = DECISIONS
                 .into_iter()
-                .filter(|d| !used.iter().any(|u| u == d))
+                .filter(|d| !used.iter().any(|u| u == d) && (used.is_empty() || *d != "all"))
                 .map(|d| (d.to_string(), d.to_string()));
             ranked(token, words)
         }
-        FieldKind::Window => ranked(
-            token,
-            WINDOW_STEPS
-                .into_iter()
-                .map(|w| (w.to_string(), w.to_string())),
-        ),
+        FieldKind::Window => window_steps(token),
     };
     let mut seen = std::collections::HashSet::new();
     out.retain(|c| seen.insert(c.clone()));
@@ -255,6 +254,22 @@ fn negatable(token: &str, f: impl Fn(&str) -> Vec<String>) -> Vec<String> {
     }
 }
 
+/// The window ladder. A whole window (`24h`) offers every step, starting
+/// at the one `+` would go to, then the rest in ladder order; a partial
+/// token (`1`, `d`) the steps it matches.
+fn window_steps(token: &str) -> Vec<String> {
+    let steps = WINDOW_STEPS.map(String::from);
+    let Ok(current) = parse_window(token.trim()) else {
+        return ranked(token, steps.into_iter().map(|w| (w.clone(), w)));
+    };
+    let start = next_window(current)
+        .and_then(|n| WINDOW_STEPS.iter().position(|w| *w == n))
+        .unwrap_or(0);
+    let mut out = steps.to_vec();
+    out.rotate_left(start);
+    out
+}
+
 /// The words the filter's decision field takes.
 const DECISIONS: [&str; 4] = ["all", "allowed", "potentially_blocked", "blocked"];
 
@@ -263,15 +278,22 @@ const FILTER_WORDS: [&str; 4] = ["ip:", "ipl:", "wl:", "fqdn:"];
 
 /// A traffic filter source or destination, in `FilterExpr`'s grammar:
 /// `ipl:` completes IP list names, `wl:` the loaded workloads' hostnames
-/// and names, `key=` its values; a bare token offers keys, the prefixes,
-/// then label values, IP lists and workloads. `ip:` and `fqdn:` are left
-/// as typed.
-fn filter_actors(token: &str, idx: &NameIndex, workloads: &[Workload]) -> Vec<String> {
-    let literal = ["ip:", "fqdn:"].iter().any(|p| {
-        token
-            .get(..p.len())
-            .is_some_and(|h| h.eq_ignore_ascii_case(p))
-    });
+/// and names, `key=` its values; a bare token offers keys (not those in
+/// `used`, the current AND group's), the prefixes, then label values, IP
+/// lists and workloads. `ip:`, `fqdn:` and a `!` (the filter has no
+/// negation) are left as typed.
+fn filter_actors(
+    token: &str,
+    used: &[String],
+    idx: &NameIndex,
+    workloads: &[Workload],
+) -> Vec<String> {
+    let literal = token.starts_with('!')
+        || ["ip:", "fqdn:"].iter().any(|p| {
+            token
+                .get(..p.len())
+                .is_some_and(|h| h.eq_ignore_ascii_case(p))
+        });
     if literal {
         return Vec::new();
     }
@@ -282,7 +304,7 @@ fn filter_actors(token: &str, idx: &NameIndex, workloads: &[Workload]) -> Vec<St
     if let Some(names) = prefixed(token, &sources) {
         return names;
     }
-    labels(token, &[], idx, &FILTER_WORDS, &named_all(&sources))
+    labels(token, used, idx, &FILTER_WORDS, &named_all(&sources))
 }
 
 /// Hostnames and names of `workloads`, any-case sorted, blanks left out.
@@ -682,18 +704,20 @@ mod tests {
             s(&["env=prod"]),
             "and values across keys"
         );
-        assert_eq!(
-            ff(FieldKind::TrafficActors, "!ro", &[], false),
-            s(&["!role=", "!env=prod"]),
-            "a typed ! is kept"
+        assert!(
+            ff(FieldKind::TrafficActors, "!ro", &[], false).is_empty(),
+            "the filter has no negation: a ! is left as typed"
         );
         assert!(ff(FieldKind::TrafficActors, "ip:10.", &[], true).is_empty());
         assert!(ff(FieldKind::TrafficActors, "fqdn:x", &[], true).is_empty());
+        let got = ff(FieldKind::TrafficActors, "", &["app=shop"], false);
         assert_eq!(
-            ff(FieldKind::TrafficActors, "f", &["app=shop"], false)[0],
-            "fqdn:",
-            "earlier tokens do not narrow the keys"
+            &got[..7],
+            &s(&["env=", "loc=", "role=", "ip:", "ipl:", "wl:", "fqdn:"]),
+            "a key already in the AND group is not offered again"
         );
+        assert!(!got.iter().any(|c| c.starts_with("app=")), "{got:?}");
+        assert!(ff(FieldKind::TrafficActors, "APP=", &["app=shop"], false).is_empty());
     }
 
     #[test]
@@ -779,7 +803,12 @@ mod tests {
         );
         assert_eq!(
             ff(FieldKind::Decisions, "", &["Allowed", "blocked"], false),
-            s(&["all", "potentially_blocked"])
+            s(&["potentially_blocked"]),
+            "`all` only as the first word"
+        );
+        assert!(
+            ff(FieldKind::Decisions, "", &["all"], false).is_empty(),
+            "nothing after `all`"
         );
     }
 
@@ -797,6 +826,15 @@ mod tests {
             ff(FieldKind::Window, "D", &[], false),
             s(&["1d", "2d", "3d", "90d"])
         );
-        assert!(ff(FieldKind::Window, "24h", &[], false).is_empty());
+        assert_eq!(
+            ff(FieldKind::Window, "24h", &[], false),
+            s(&["2d", "3d", "1w", "2w", "4w", "90d", "1h", "6h", "12h", "1d"]),
+            "a whole window: the ladder from where `+` goes, then the rest"
+        );
+        assert_eq!(
+            ff(FieldKind::Window, "90d", &[], false),
+            s(&["1h", "6h", "12h", "1d", "2d", "3d", "1w", "2w", "4w", "90d"]),
+            "the top of the ladder: in ladder order"
+        );
     }
 }

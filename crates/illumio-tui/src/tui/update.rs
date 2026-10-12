@@ -750,28 +750,28 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
 /// the last candidate). A shown key (`app=`) or prefix (`group:`, `wl:`)
 /// completes what follows it on `Ctrl-N`. Without an index, or for a text
 /// field, nothing happens. Never a request.
-fn complete_field(model: &Model, form: &mut impl Completing, forward: bool) {
-    let dives = forward && form.completion_dives();
-    if form.completing() && !dives {
-        form.cycle(forward);
+fn complete_field(model: &Model, editor: &mut impl Completing, forward: bool) {
+    let dives = forward && editor.completion_dives();
+    if editor.completing() && !dives {
+        editor.cycle(forward);
         return;
     }
     let Some(idx) = model.index() else {
         return;
     };
-    let Some((kind, token, earlier)) = form.completion_request() else {
+    let Some((kind, token, earlier)) = editor.completion_request() else {
         return;
     };
     let rulesets = model.flow_prefill().rulesets;
     let workloads = &model.workloads.raw;
     let candidates =
         crate::tui::complete::complete(kind, &token, &earlier, idx, rulesets, workloads);
-    if form.start_completion(candidates) {
+    if editor.start_completion(candidates) {
         if !forward {
-            form.cycle(false);
+            editor.cycle(false);
         }
     } else if dives {
-        form.cycle(true);
+        editor.cycle(true);
     }
 }
 
@@ -11790,21 +11790,21 @@ mod filter_completion_tests {
 
     #[test]
     fn any_other_key_accepts_and_operators_and_earlier_tokens_stay() {
-        let mut m = editing(2, "app=shop | !ro");
+        let mut m = editing(2, "app=shop | ro");
         ctrl(&mut m, 'n');
-        assert_eq!(value(&m, 2), "app=shop | !role=");
+        assert_eq!(value(&m, 2), "app=shop | role=");
         ctrl(&mut m, 'n');
-        assert_eq!(value(&m, 2), "app=shop | !role=db");
+        assert_eq!(value(&m, 2), "app=shop | role=db");
         press(&mut m, KeyCode::Char(','));
-        assert_eq!(value(&m, 2), "app=shop | !role=db,", "accepted, then typed");
+        assert_eq!(value(&m, 2), "app=shop | role=db,", "accepted, then typed");
         assert_eq!(editor(&m).completion, None);
         type_text(&mut m, "ipl:c");
         ctrl(&mut m, 'n');
-        assert_eq!(value(&m, 2), "app=shop | !role=db, ipl:Corp");
+        assert_eq!(value(&m, 2), "app=shop | role=db, ipl:Corp");
         press(&mut m, KeyCode::Tab);
         assert_eq!(
             (value(&m, 2).as_str(), editor(&m).active),
-            ("app=shop | !role=db, ipl:Corp", 3),
+            ("app=shop | role=db, ipl:Corp", 3),
             "Tab accepts and moves on"
         );
         assert_eq!(editor(&m).completion, None);
@@ -11823,6 +11823,18 @@ mod filter_completion_tests {
         assert_eq!(value(&m, 0), "90d", "Ctrl-P opens on the last step");
         ctrl(&mut m, 'p');
         assert_eq!(value(&m, 0), "4w");
+        let mut m = editing(0, "24h");
+        ctrl(&mut m, 'n');
+        assert_eq!(value(&m, 0), "2d", "the pre-filled window: where `+` goes");
+        ctrl(&mut m, 'n');
+        assert_eq!(value(&m, 0), "3d");
+        let mut m = editing(1, "!ro");
+        let before = m.overlay.clone();
+        ctrl(&mut m, 'n');
+        assert_eq!(
+            m.overlay, before,
+            "no negation in the filter: left as typed"
+        );
         let mut m = editing(3, "post");
         ctrl(&mut m, 'n');
         assert_eq!(value(&m, 3), "5432/tcp");
