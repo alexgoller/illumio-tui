@@ -6,6 +6,7 @@ use super::{
     parent_href,
 };
 use crate::client::WriteMethod;
+use crate::models::PendingChange;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -42,13 +43,18 @@ pub fn provision_counts(body: &Value) -> BTreeMap<String, usize> {
         .unwrap_or_default()
 }
 
+/// `ip_list` for `ip_lists`.
+pub(super) fn singular(kind: &str) -> &str {
+    kind.strip_suffix('s').unwrap_or(kind)
+}
+
 /// `provision 1 ip_list, 3 rule_sets`.
 fn summary(counts: &BTreeMap<String, usize>) -> String {
     let parts: Vec<String> = counts
         .iter()
         .map(|(k, n)| {
             if *n == 1 {
-                format!("1 {}", k.strip_suffix('s').unwrap_or(k))
+                format!("1 {}", singular(k))
             } else {
                 format!("{n} {k}")
             }
@@ -92,7 +98,7 @@ fn checked_singleton_href(
     )))
 }
 
-fn provisionable(href: &str, org_id: u64) -> Result<(String, String), WriteError> {
+pub(super) fn provisionable(href: &str, org_id: u64) -> Result<(String, String), WriteError> {
     let trimmed = href.trim().trim_end_matches('/');
     if let Some(single) = checked_singleton_href(trimmed, org_id) {
         return single;
@@ -117,16 +123,62 @@ fn provisionable(href: &str, org_id: u64) -> Result<(String, String), WriteError
     Ok((kind.to_string(), checked))
 }
 
+/// True for a rule or deny rule href: it is provisioned (and reverted)
+/// through its ruleset, so it is never the ruleset's own pending entry.
+pub(super) fn is_rule_child(href: &str) -> bool {
+    href.trim()
+        .trim_end_matches('/')
+        .split('/')
+        .nth(7)
+        .is_some_and(|c| RULE_CHILDREN.contains(&c))
+}
+
+/// What a provision or a revert covers, from one fresh read of the pending
+/// list: the `(object type, draft href)` pairs chosen and the entries read.
+pub(super) struct PendingSubset {
+    pub chosen: BTreeSet<(String, String)>,
+    pub pending: Vec<PendingChange>,
+}
+
+impl PendingSubset {
+    /// `{"ip_lists": [{"href": ...}], ...}`: one list per object type.
+    pub fn change_subset(&self) -> BTreeMap<String, Vec<Value>> {
+        let mut subset: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+        for (kind, href) in &self.chosen {
+            subset
+                .entry(kind.clone())
+                .or_default()
+                .push(json!({ "href": href }));
+        }
+        subset
+    }
+}
+
+/// `Noop` when nothing is pending: provisioning and reverting say the same.
+pub(super) fn nothing_pending(w: &Writer<'_>) -> Plan {
+    Plan::Noop {
+        existing_href: w.pce().client().org_path("sec_policy/pending"),
+        reason: "nothing pending".into(),
+    }
+}
+
 impl Writer<'_> {
-    pub async fn plan_provision(&self, req: &ProvisionRequest) -> Result<Plan, WriteError> {
+    /// Checks requested hrefs before any request, then reads the pending
+    /// list once, past the cache. `All` lists every pending change and
+    /// refuses the whole plan when one cannot be named; explicit hrefs must
+    /// each be pending. `verb` names the operation in errors.
+    pub(super) async fn pending_subset(
+        &self,
+        subset: &ProvisionSubset,
+        verb: &str,
+    ) -> Result<PendingSubset, WriteError> {
         let org = self.pce().client().org_id();
-        // Requested hrefs are checked before any request.
-        let requested: Option<Vec<(String, String)>> = match &req.subset {
+        let requested: Option<Vec<(String, String)>> = match subset {
             ProvisionSubset::All => None,
             ProvisionSubset::Hrefs(h) if h.is_empty() => {
-                return Err(WriteError::invalid(
-                    "nothing to provision: name at least one href, or provision all",
-                ));
+                return Err(WriteError::invalid(format!(
+                    "nothing to {verb}: name at least one href, or {verb} all"
+                )));
             }
             ProvisionSubset::Hrefs(h) => Some(
                 h.iter()
@@ -142,12 +194,12 @@ impl Writer<'_> {
                     pending_set.insert(entry);
                 }
                 // `All` must mean all: an entry this version cannot
-                // provision refuses the whole plan.
+                // name refuses the whole plan.
                 Err(e) if requested.is_none() => return Err(e),
                 Err(_) => {}
             }
         }
-        let chosen: BTreeSet<(String, String)> = match requested {
+        let chosen = match requested {
             None => pending_set,
             Some(list) => {
                 if let Some((_, h)) = list.iter().find(|e| !pending_set.contains(*e)) {
@@ -156,18 +208,13 @@ impl Writer<'_> {
                 list.into_iter().collect()
             }
         };
-        if chosen.is_empty() {
-            return Ok(Plan::Noop {
-                existing_href: self.pce().client().org_path("sec_policy/pending"),
-                reason: "nothing pending".into(),
-            });
-        }
-        let mut subset: BTreeMap<String, Vec<Value>> = BTreeMap::new();
-        for (kind, href) in chosen {
-            subset
-                .entry(kind)
-                .or_default()
-                .push(json!({ "href": href }));
+        Ok(PendingSubset { chosen, pending })
+    }
+
+    pub async fn plan_provision(&self, req: &ProvisionRequest) -> Result<Plan, WriteError> {
+        let picked = self.pending_subset(&req.subset, "provision").await?;
+        if picked.chosen.is_empty() {
+            return Ok(nothing_pending(self));
         }
         let description = req
             .description
@@ -177,7 +224,7 @@ impl Writer<'_> {
             .unwrap_or("illumio-tui provision");
         let body = json!({
             "update_description": description,
-            "change_subset": subset,
+            "change_subset": picked.change_subset(),
         });
         let counts = provision_counts(&body);
         Ok(Plan::Send {

@@ -9,6 +9,7 @@ pub mod guard;
 pub mod ip_lists;
 pub mod labels;
 pub mod provision;
+pub mod revert;
 pub mod rule_sets;
 pub mod rules;
 pub mod services;
@@ -27,6 +28,7 @@ pub use guard::{WriteContext, WriteGuard, WriteRefused};
 pub use ip_lists::{IpListDraft, IpListPatch};
 pub use labels::LabelDraft;
 pub use provision::{ProvisionRequest, ProvisionSubset, provision_counts};
+pub use revert::{BACK_TO_ACTIVE, REMOVED, RevertRequest};
 pub use rule_sets::{RuleSetDraft, RuleSetPatch};
 pub use rules::{
     DenyRuleDraft, DenyRulePatch, INLINE_SERVICE, RuleDraft, RulePatch, apply_deny_rule_patch,
@@ -52,6 +54,9 @@ pub enum ObjectKind {
     /// `POST sec_policy`: changes active policy and therefore every
     /// policy and object list the cache holds.
     Provision,
+    /// `PUT sec_policy/delete`: reverts draft policy objects of any type
+    /// to their active version.
+    Revert,
 }
 
 impl ObjectKind {
@@ -63,7 +68,7 @@ impl ObjectKind {
             | ObjectKind::Service => &["objects:"],
             ObjectKind::Workload => &["workloads"],
             ObjectKind::RuleSet | ObjectKind::Rule | ObjectKind::DenyRule => &["policy:"],
-            ObjectKind::Provision => &["policy:", "objects:"],
+            ObjectKind::Provision | ObjectKind::Revert => &["policy:", "objects:"],
         }
     }
 
@@ -91,7 +96,14 @@ impl ObjectKind {
             ObjectKind::Rule => "rule",
             ObjectKind::DenyRule => "deny_rule",
             ObjectKind::Provision => "provision",
+            ObjectKind::Revert => "revert",
         }
+    }
+
+    /// Acts on the draft policy as a whole: the answer echoes none of the
+    /// request's keys and names no object to re-fetch.
+    pub fn whole_policy(self) -> bool {
+        matches!(self, ObjectKind::Provision | ObjectKind::Revert)
     }
 }
 
@@ -468,6 +480,9 @@ impl<'a> Writer<'a> {
             // Re-fetching the collection path would load the whole list.
             warnings.push("response carried no href; object not re-fetched".into());
             resp.body
+        } else if resp.body.is_null() && kind.whole_policy() {
+            // The path is an action (`sec_policy/delete`), not an object.
+            Value::Null
         } else if resp.body.is_null() {
             match self.fetch(&href).await {
                 Ok(v) => v,
@@ -479,9 +494,9 @@ impl<'a> Writer<'a> {
         } else {
             resp.body
         };
-        // A provision answers with the new policy version, which echoes
-        // none of the request's keys: nothing was dropped.
-        let dropped = if request.method == WriteMethod::Delete || kind == ObjectKind::Provision {
+        // A provision answers with the new policy version, a revert with
+        // little or nothing: neither echoes the request's keys.
+        let dropped = if request.method == WriteMethod::Delete || kind.whole_policy() {
             Vec::new()
         } else {
             dropped_fields(request.body.as_ref(), &object)
@@ -544,6 +559,12 @@ mod tests {
             ObjectKind::Provision.cache_prefixes(),
             &["policy:", "objects:"]
         );
+        assert_eq!(
+            ObjectKind::Revert.cache_prefixes(),
+            &["policy:", "objects:"]
+        );
+        assert!(ObjectKind::Revert.whole_policy() && ObjectKind::Provision.whole_policy());
+        assert!(!ObjectKind::RuleSet.whole_policy());
         for k in [
             ObjectKind::IpList,
             ObjectKind::Service,
@@ -557,11 +578,13 @@ mod tests {
             ObjectKind::Label,
             ObjectKind::Workload,
             ObjectKind::Provision,
+            ObjectKind::Revert,
         ] {
             assert!(!k.pending(), "{k:?}");
         }
         assert_eq!(ObjectKind::DenyRule.as_str(), "deny_rule");
         assert_eq!(ObjectKind::Provision.as_str(), "provision");
+        assert_eq!(ObjectKind::Revert.as_str(), "revert");
         assert_eq!(
             serde_json::to_value(ObjectKind::RuleSet).unwrap(),
             json!("rule_set")

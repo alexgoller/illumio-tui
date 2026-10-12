@@ -2200,8 +2200,9 @@ fn reload_after_write(model: &mut Model, kind: pce::write::ObjectKind) -> Vec<Cm
             model.policy.quiet_reload = true;
             load_rule_sets(model, CacheMode::Bypass)
         }
-        // Provisioning changes both scopes and the pending list.
-        pce::write::ObjectKind::Provision => {
+        // Provisioning changes both scopes and the pending list; a revert
+        // changes the draft and the pending list.
+        pce::write::ObjectKind::Provision | pce::write::ObjectKind::Revert => {
             model.policy.quiet_reload = true;
             let mut cmds = load_rule_sets(model, CacheMode::Bypass);
             model.policy.pending_loading = true;

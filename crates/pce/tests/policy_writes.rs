@@ -1315,6 +1315,327 @@ mod provision {
     }
 }
 
+/// `PUT /orgs/N/sec_policy/delete`, as the Illumio REST API documents it;
+/// not verified live from this repo, so these tests pin path and body.
+mod revert {
+    use super::*;
+    use pce::PceError;
+    use pce::write::RevertRequest;
+    use wiremock::matchers::body_json;
+
+    fn all() -> RevertRequest {
+        RevertRequest {
+            all: true,
+            targets: vec![],
+        }
+    }
+
+    fn hrefs(h: &[&str]) -> RevertRequest {
+        RevertRequest {
+            all: false,
+            targets: h.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    async fn mount_pending(server: &MockServer, body: Value) {
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/sec_policy/pending"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(server)
+            .await;
+    }
+
+    fn fixture_body() -> Value {
+        json!({
+            "change_subset": {
+                "ip_lists": [{"href": "/orgs/5/sec_policy/draft/ip_lists/21"}],
+                "rule_sets": [{"href": "/orgs/5/sec_policy/draft/rule_sets/101"}]
+            }
+        })
+    }
+
+    #[tokio::test]
+    async fn all_puts_every_pending_href_and_names_each_fate() {
+        for fixture in [
+            include_str!("../../../fixtures/pending_dict.json"),
+            include_str!("../../../fixtures/pending_list.json"),
+        ] {
+            let server = MockServer::start().await;
+            mount_pending(&server, serde_json::from_str(fixture).unwrap()).await;
+            let pce = pce_for(&server);
+            let guard = guard_with(MemoryAudit::new());
+            let plan = pce.writer(&guard).plan_revert(&all()).await.unwrap();
+            let req = plan.request().unwrap();
+            assert_eq!(req.method, WriteMethod::Put);
+            assert_eq!(req.path, "/orgs/5/sec_policy/delete");
+            assert_eq!(
+                req.body,
+                Some(fixture_body()),
+                "all is listed, never the empty body"
+            );
+            assert_eq!(
+                req.summary,
+                "revert all 2 pending changes: ip_list \"Corp\" (removed), \
+                 rule_set \"Global-Infra\" (removed)"
+            );
+            assert!(matches!(
+                plan,
+                Plan::Send {
+                    kind: ObjectKind::Revert,
+                    ..
+                }
+            ));
+            assert_eq!(request_count(&server).await, 1, "one pending GET");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_subset_reverts_only_those_and_rules_go_through_their_ruleset() {
+        let server = MockServer::start().await;
+        mount_pending(
+            &server,
+            json!([
+                {"href": "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1", "change_type": "create"},
+                {"href": "/orgs/5/sec_policy/draft/rule_sets/200", "change_type": "delete", "name": "Old"},
+                {"href": "/orgs/5/sec_policy/draft/services/31", "change_type": "update", "name": "PostgreSQL"},
+                {"href": "/orgs/5/sec_policy/draft/ip_lists/21", "change_type": "create", "name": "Corp"}
+            ]),
+        )
+        .await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let w = pce.writer(&guard);
+        let plan = w
+            .plan_revert(&hrefs(&[
+                "/orgs/5/sec_policy/active/rule_sets/100/sec_rules/1",
+                "/orgs/5/sec_policy/draft/rule_sets/200",
+                "/orgs/5/sec_policy/draft/services/31",
+            ]))
+            .await
+            .unwrap();
+        let req = plan.request().unwrap();
+        assert_eq!(req.method, WriteMethod::Put);
+        assert_eq!(req.path, "/orgs/5/sec_policy/delete");
+        assert_eq!(
+            req.body,
+            Some(json!({
+                "change_subset": {
+                    "rule_sets": [
+                        {"href": "/orgs/5/sec_policy/draft/rule_sets/100"},
+                        {"href": "/orgs/5/sec_policy/draft/rule_sets/200"}
+                    ],
+                    "services": [{"href": "/orgs/5/sec_policy/draft/services/31"}]
+                }
+            }))
+        );
+        assert_eq!(
+            req.summary,
+            "revert 3 changes: rule_set /orgs/5/sec_policy/draft/rule_sets/100 (back to active), \
+             rule_set \"Old\" (back to active), service \"PostgreSQL\" (back to active)"
+        );
+        let plan = w
+            .plan_revert(&hrefs(&["/orgs/5/sec_policy/draft/ip_lists/21"]))
+            .await
+            .unwrap();
+        assert_eq!(
+            plan.request().unwrap().summary,
+            "revert 1 change: ip_list \"Corp\" (removed)"
+        );
+        let m = invalid(
+            w.plan_revert(&hrefs(&["/orgs/5/sec_policy/draft/ip_lists/22"]))
+                .await
+                .unwrap_err(),
+        );
+        assert_eq!(
+            m,
+            "/orgs/5/sec_policy/draft/ip_lists/22 has no pending changes"
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_subsets_and_bad_hrefs_are_refused_before_any_request() {
+        let server = MockServer::start().await;
+        let pce = pce_for(&server);
+        let guard = guard_with(MemoryAudit::new());
+        let w = pce.writer(&guard);
+        assert_eq!(
+            invalid(w.plan_revert(&hrefs(&[])).await.unwrap_err()),
+            "nothing to revert: name at least one href, or revert all"
+        );
+        assert_eq!(
+            invalid(w.plan_revert(&RevertRequest::default()).await.unwrap_err()),
+            "nothing to revert: name at least one href, or revert all"
+        );
+        let both = RevertRequest {
+            all: true,
+            targets: vec!["/orgs/5/sec_policy/draft/ip_lists/21".into()],
+        };
+        assert!(invalid(w.plan_revert(&both).await.unwrap_err()).contains("revert all"));
+        for bad in [
+            "/orgs/5/labels/1",
+            "/orgs/5/sec_policy/draft/workloads/1",
+            "/orgs/5/sec_policy/draft/rule_sets/../ip_lists/21",
+            "/orgs/7/sec_policy/draft/ip_lists/21",
+        ] {
+            invalid(w.plan_revert(&hrefs(&[bad])).await.unwrap_err());
+        }
+        assert_eq!(request_count(&server).await, 0);
+    }
+
+    #[tokio::test]
+    async fn nothing_pending_is_a_noop_and_sends_nothing() {
+        let server = MockServer::start().await;
+        mount_pending(&server, json!([])).await;
+        let pce = pce_for(&server);
+        let audit = MemoryAudit::new();
+        let guard = guard_with(audit.clone());
+        let w = pce.writer(&guard);
+        let plan = w.plan_revert(&all()).await.unwrap();
+        assert!(matches!(&plan, Plan::Noop { reason, .. } if reason == "nothing pending"));
+        assert!(matches!(
+            w.execute(plan).await.unwrap(),
+            Outcome::Skipped { .. }
+        ));
+        assert!(audit.entries().is_empty());
+        assert_eq!(request_count(&server).await, 1);
+    }
+
+    #[tokio::test]
+    async fn execute_puts_once_audits_and_invalidates_without_a_refetch() {
+        let server = MockServer::start().await;
+        mount_pending(
+            &server,
+            serde_json::from_str(include_str!("../../../fixtures/pending_dict.json")).unwrap(),
+        )
+        .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/sec_policy/draft/rule_sets"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(rule_sets()))
+            .expect(2)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/orgs/5/sec_policy/draft/ip_lists"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+            .expect(2)
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/api/v2/orgs/5/sec_policy/delete"))
+            .and(body_json(fixture_body()))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let pce = pce_for(&server);
+        pce.rule_sets(PolicyScope::Draft, CacheMode::Use)
+            .await
+            .unwrap();
+        pce.ip_lists(CacheMode::Use).await.unwrap();
+        let audit = MemoryAudit::new();
+        let guard = guard_with(audit.clone());
+        let w = pce.writer(&guard);
+        let plan = w.plan_revert(&all()).await.unwrap();
+        let Outcome::Written(out) = w.execute(plan).await.unwrap() else {
+            panic!("expected Written")
+        };
+        assert_eq!(out.href, "/orgs/5/sec_policy/delete");
+        assert_eq!(out.status, 204);
+        assert!(!out.pending, "a revert is not pending");
+        assert!(out.object.is_null(), "nothing re-fetched");
+        assert!(out.dropped_fields.is_empty() && out.warnings.is_empty());
+        let entries = audit.entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].method, WriteMethod::Put);
+        assert_eq!(entries[0].path, "/orgs/5/sec_policy/delete");
+        assert_eq!(entries[0].body, Some(fixture_body()));
+        assert_eq!(entries[0].status, Some(204));
+        assert!(
+            !pce.rule_sets(PolicyScope::Draft, CacheMode::Use)
+                .await
+                .unwrap()
+                .hit,
+            "policy: invalidated"
+        );
+        assert!(
+            !pce.ip_lists(CacheMode::Use).await.unwrap().hit,
+            "objects: invalidated"
+        );
+        // Two list reads each, the pending GET and the PUT: no re-fetch.
+        assert_eq!(request_count(&server).await, 6);
+    }
+
+    #[tokio::test]
+    async fn a_4xx_is_a_rejected_error_and_audited() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .and(path("/api/v2/orgs/5/sec_policy/delete"))
+            .respond_with(ResponseTemplate::new(406).set_body_json(
+                json!([{"token": "invalid_change_subset", "message": "Invalid change subset"}]),
+            ))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let pce = pce_for(&server);
+        let audit = MemoryAudit::new();
+        let guard = guard_with(audit.clone());
+        let err = pce
+            .writer(&guard)
+            .execute(send_plan(
+                WriteMethod::Put,
+                "/orgs/5/sec_policy/delete",
+                Some(fixture_body()),
+                ObjectKind::Revert,
+            ))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, WriteError::Pce(PceError::Rejected { status: 406, .. })),
+            "{err:?}"
+        );
+        assert_eq!(err.kind(), "rejected");
+        let e = &audit.entries()[0];
+        assert_eq!(e.method, WriteMethod::Put);
+        assert_eq!(e.status, Some(406));
+        assert!(
+            e.error
+                .as_deref()
+                .unwrap()
+                .contains("invalid_change_subset")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_502_is_unanswered_and_never_retried() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .and(path("/api/v2/orgs/5/sec_policy/delete"))
+            .respond_with(ResponseTemplate::new(502).set_body_string("bad gateway"))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let pce = pce_for(&server);
+        let audit = MemoryAudit::new();
+        let guard = guard_with(audit.clone());
+        let err = pce
+            .writer(&guard)
+            .execute(send_plan(
+                WriteMethod::Put,
+                "/orgs/5/sec_policy/delete",
+                Some(fixture_body()),
+                ObjectKind::Revert,
+            ))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, WriteError::Unanswered(_)), "{err:?}");
+        assert!(err.to_string().contains("write may have applied"));
+        assert_eq!(request_count(&server).await, 1, "never retried");
+        let e = &audit.entries()[0];
+        assert_eq!(e.phase.as_deref(), Some("sent"));
+        assert_eq!(e.status, Some(502));
+    }
+}
+
 mod managed_labels {
     use super::*;
     use pce::NameIndex;
