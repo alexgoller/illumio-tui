@@ -1,5 +1,6 @@
-//! Candidates for `Ctrl-N` in a form field, from what the TUI already holds:
-//! the name index and the loaded draft rulesets. Pure; never a request.
+//! Candidates for `Ctrl-N` in a form or traffic filter field, from what the
+//! TUI already holds: the name index, the loaded draft rulesets and the
+//! workloads the Workloads screen loaded. Pure; never a request.
 //!
 //! Matching is case-insensitive, candidates keep their real case. Prefix
 //! matches come before substring matches; within each, index order (label
@@ -8,7 +9,8 @@
 use crate::tokens::is_href;
 use crate::tui::form::FieldKind;
 use pce::NameIndex;
-use pce::models::RuleSet;
+use pce::models::{RuleSet, Workload};
+use pce::traffic::WINDOW_STEPS;
 
 /// Most candidates one completion cycles through.
 pub const MAX_CANDIDATES: usize = 200;
@@ -18,14 +20,16 @@ const UNRESOLVED: &str = "?";
 
 /// The candidates that replace `token` in a field of `kind`, best first.
 /// `earlier` are the field's tokens before it (for `Labels` and `Scope`
-/// their keys are not offered again); for `LabelValue` its first entry is
-/// the key whose values are offered.
+/// their keys are not offered again, for `Decisions` their words); for
+/// `LabelValue` its first entry is the key whose values are offered.
+/// `workloads` are those already loaded (empty when none are).
 pub fn complete(
     kind: FieldKind,
     token: &str,
     earlier: &[String],
     idx: &NameIndex,
     rulesets: &[RuleSet],
+    workloads: &[Workload],
 ) -> Vec<String> {
     let mut out = match kind {
         FieldKind::Text => Vec::new(),
@@ -59,6 +63,22 @@ pub fn complete(
                 .map(|r| (r.name.clone(), r.name.clone()));
             ranked(token, names)
         }
+        FieldKind::TrafficActors => negatable(token, |t| filter_actors(t, idx, workloads)),
+        FieldKind::TrafficService => traffic_service(token, idx),
+        FieldKind::Decisions => {
+            let used: Vec<String> = earlier.iter().map(|e| e.trim().to_lowercase()).collect();
+            let words = DECISIONS
+                .into_iter()
+                .filter(|d| !used.iter().any(|u| u == d))
+                .map(|d| (d.to_string(), d.to_string()));
+            ranked(token, words)
+        }
+        FieldKind::Window => ranked(
+            token,
+            WINDOW_STEPS
+                .into_iter()
+                .map(|w| (w.to_string(), w.to_string())),
+        ),
     };
     let mut seen = std::collections::HashSet::new();
     out.retain(|c| seen.insert(c.clone()));
@@ -235,6 +255,80 @@ fn negatable(token: &str, f: impl Fn(&str) -> Vec<String>) -> Vec<String> {
     }
 }
 
+/// The words the filter's decision field takes.
+const DECISIONS: [&str; 4] = ["all", "allowed", "potentially_blocked", "blocked"];
+
+/// The prefixes `FilterExpr` takes besides `key=value`.
+const FILTER_WORDS: [&str; 4] = ["ip:", "ipl:", "wl:", "fqdn:"];
+
+/// A traffic filter source or destination, in `FilterExpr`'s grammar:
+/// `ipl:` completes IP list names, `wl:` the loaded workloads' hostnames
+/// and names, `key=` its values; a bare token offers keys, the prefixes,
+/// then label values, IP lists and workloads. `ip:` and `fqdn:` are left
+/// as typed.
+fn filter_actors(token: &str, idx: &NameIndex, workloads: &[Workload]) -> Vec<String> {
+    let literal = ["ip:", "fqdn:"].iter().any(|p| {
+        token
+            .get(..p.len())
+            .is_some_and(|h| h.eq_ignore_ascii_case(p))
+    });
+    if literal {
+        return Vec::new();
+    }
+    let sources = [
+        ("ipl:", idx.ip_list_names()),
+        ("wl:", workload_names(workloads)),
+    ];
+    if let Some(names) = prefixed(token, &sources) {
+        return names;
+    }
+    labels(token, &[], idx, &FILTER_WORDS, &named_all(&sources))
+}
+
+/// Hostnames and names of `workloads`, any-case sorted, blanks left out.
+fn workload_names(workloads: &[Workload]) -> Vec<String> {
+    let mut names: Vec<String> = workloads
+        .iter()
+        .flat_map(|w| [w.hostname.as_deref(), w.name.as_deref()])
+        .flatten()
+        .filter(|n| !n.trim().is_empty())
+        .map(String::from)
+        .collect();
+    names.sort_by_key(|n| n.to_lowercase());
+    names.dedup();
+    names
+}
+
+/// A traffic filter service: the protocols, then each index service whose
+/// name matches as its single-port `port/proto` entries (ranges and other
+/// protocols do not fit the field). A port (`/`, digits) is left as typed.
+fn traffic_service(token: &str, idx: &NameIndex) -> Vec<String> {
+    let is_port =
+        token.contains('/') || (!token.is_empty() && token.bytes().all(|b| b.is_ascii_digit()));
+    if is_port {
+        return Vec::new();
+    }
+    let protos = ["tcp", "udp", "icmp", "icmpv6"]
+        .into_iter()
+        .map(|p| (p.to_string(), p.to_string()));
+    let mut out = ranked(token, protos);
+    let ports = idx.services().into_iter().flat_map(|s| {
+        s.service_ports.iter().filter_map(|p| {
+            let proto = match p.proto? {
+                6 => "tcp",
+                17 => "udp",
+                _ => return None,
+            };
+            let single = p.to_port.is_none_or(|to| Some(to) == p.port);
+            p.port
+                .filter(|_| single)
+                .map(|port| (s.name.clone(), format!("{port}/{proto}")))
+        })
+    });
+    out.extend(ranked(token, ports));
+    out
+}
+
 /// Service names (an optional `service:` prefix kept); a token with a `/`
 /// or only digits is a port and left as typed.
 fn services(token: &str, idx: &NameIndex) -> Vec<String> {
@@ -256,7 +350,7 @@ mod tests {
     use super::*;
     use crate::tui::test_support::fixture_index;
     use pce::KeyOrder;
-    use pce::models::{IpList, Label, LabelGroup, Service};
+    use pce::models::{IpList, Label, LabelGroup, Service, Workload};
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| x.to_string()).collect()
@@ -266,7 +360,7 @@ mod tests {
     /// `All prod envs` group, the `Any …` and `Corp` IP lists, the `All
     /// Services`, `PostgreSQL` and `Web` services).
     fn fx(kind: FieldKind, token: &str, earlier: &[&str]) -> Vec<String> {
-        complete(kind, token, &s(earlier), &fixture_index(), &[])
+        complete(kind, token, &s(earlier), &fixture_index(), &[], &[])
     }
 
     /// Labels for the "smart" cases: `pay` in two keys' values, a model
@@ -296,7 +390,7 @@ mod tests {
     }
 
     fn rc(kind: FieldKind, token: &str, earlier: &[&str]) -> Vec<String> {
-        complete(kind, token, &s(earlier), &rich(), &[])
+        complete(kind, token, &s(earlier), &rich(), &[], &[])
     }
 
     #[test]
@@ -459,14 +553,14 @@ mod tests {
             rs("Old", Some("delete")),
             rs("Prod-DB", None),
         ];
-        let got = |t: &str| complete(FieldKind::Ruleset, t, &[], &fixture_index(), &loaded);
+        let got = |t: &str| complete(FieldKind::Ruleset, t, &[], &fixture_index(), &loaded, &[]);
         assert_eq!(got("prod"), s(&["Prod-DB", "Shop-Prod"]));
         assert_eq!(
             got(""),
             s(&["Shop-Prod", "Prod-DB"]),
             "pending deletions left out"
         );
-        assert!(complete(FieldKind::Ruleset, "", &[], &fixture_index(), &[]).is_empty());
+        assert!(complete(FieldKind::Ruleset, "", &[], &fixture_index(), &[], &[]).is_empty());
     }
 
     #[test]
@@ -479,7 +573,7 @@ mod tests {
             FieldKind::Actors,
             FieldKind::Services,
         ] {
-            let got = complete(kind, "", &[], &empty, &[]);
+            let got = complete(kind, "", &[], &empty, &[], &[]);
             assert!(
                 got.iter()
                     .all(|c| ["all", "group:", "iplist:"].contains(&c.as_str())),
@@ -514,11 +608,11 @@ mod tests {
         };
         let idx = NameIndex::new(&[label(1, "a,b"), label(2, "ab")], &[], &[], &[]);
         assert_eq!(
-            complete(FieldKind::Labels, "app=a", &[], &idx, &[]),
+            complete(FieldKind::Labels, "app=a", &[], &idx, &[], &[]),
             s(&["app=ab"])
         );
         assert_eq!(
-            complete(FieldKind::Labels, "b", &[], &idx, &[]),
+            complete(FieldKind::Labels, "b", &[], &idx, &[], &[]),
             s(&["app=ab"])
         );
     }
@@ -534,8 +628,175 @@ mod tests {
         let labels: Vec<Label> = (0..500).map(label).collect();
         let idx = NameIndex::new(&labels, &[], &[], &[]);
         assert_eq!(
-            complete(FieldKind::Labels, "", &[], &idx, &[]).len(),
+            complete(FieldKind::Labels, "", &[], &idx, &[], &[]).len(),
             MAX_CANDIDATES
         );
+    }
+
+    fn workloads() -> Vec<Workload> {
+        serde_json::from_str(include_str!("../../../../fixtures/workloads.json")).unwrap()
+    }
+
+    /// A filter field on the fixture index, with the fixture workloads
+    /// loaded or not.
+    fn ff(kind: FieldKind, token: &str, earlier: &[&str], loaded: bool) -> Vec<String> {
+        let wls = if loaded { workloads() } else { Vec::new() };
+        complete(kind, token, &s(earlier), &fixture_index(), &[], &wls)
+    }
+
+    #[test]
+    fn filter_actors_offer_the_filter_grammar() {
+        let all = ff(FieldKind::TrafficActors, "", &[], false);
+        assert_eq!(
+            &all[..8],
+            &s(&[
+                "app=", "env=", "loc=", "role=", "ip:", "ipl:", "wl:", "fqdn:"
+            ]),
+            "keys in KeyOrder, then the grammar's prefixes"
+        );
+        assert!(all.contains(&"role=db".to_string()));
+        assert!(
+            !all.iter()
+                .any(|c| c.starts_with("group:") || c.starts_with("iplist:") || c == "all"),
+            "the filter takes no label groups, `iplist:` or `all`: {all:?}"
+        );
+        assert_eq!(
+            ff(FieldKind::TrafficActors, "role=", &[], false),
+            s(&["role=db", "role=web"])
+        );
+        assert_eq!(
+            ff(FieldKind::TrafficActors, "ipl:", &[], false),
+            s(&["ipl:Any (0.0.0.0/0 and ::/0)", "ipl:Corp"])
+        );
+        assert_eq!(
+            ff(FieldKind::TrafficActors, "IPL:co", &[], false),
+            s(&["ipl:Corp"])
+        );
+        assert_eq!(
+            ff(FieldKind::TrafficActors, "cor", &[], false),
+            s(&["ipl:Corp"]),
+            "a bare token matches IP list names"
+        );
+        assert_eq!(
+            ff(FieldKind::TrafficActors, "pro", &[], false),
+            s(&["env=prod"]),
+            "and values across keys"
+        );
+        assert_eq!(
+            ff(FieldKind::TrafficActors, "!ro", &[], false),
+            s(&["!role=", "!env=prod"]),
+            "a typed ! is kept"
+        );
+        assert!(ff(FieldKind::TrafficActors, "ip:10.", &[], true).is_empty());
+        assert!(ff(FieldKind::TrafficActors, "fqdn:x", &[], true).is_empty());
+        assert_eq!(
+            ff(FieldKind::TrafficActors, "f", &["app=shop"], false)[0],
+            "fqdn:",
+            "earlier tokens do not narrow the keys"
+        );
+    }
+
+    #[test]
+    fn filter_actors_keep_key_order_and_ignored_keys() {
+        let got = complete(FieldKind::TrafficActors, "pay", &[], &rich(), &[], &[]);
+        assert_eq!(
+            got,
+            s(&["paygrade=", "role=payroll", "app=payment", "bu=repay"]),
+            "the key, then values by prefix in KeyOrder, then substring"
+        );
+        let all = complete(FieldKind::TrafficActors, "", &[], &rich(), &[], &[]);
+        assert_eq!(all.first().map(String::as_str), Some("role="));
+        assert!(
+            all.contains(&"bu=repay".to_string()),
+            "ignored keys still offered"
+        );
+    }
+
+    #[test]
+    fn filter_actors_offer_workloads_only_when_loaded() {
+        assert!(ff(FieldKind::TrafficActors, "wl:", &[], false).is_empty());
+        assert!(ff(FieldKind::TrafficActors, "host", &[], false).is_empty());
+        assert_eq!(
+            ff(FieldKind::TrafficActors, "wl:", &[], true),
+            s(&[
+                "wl:batch04",
+                "wl:host-1.example",
+                "wl:host-2.example",
+                "wl:host-4.example",
+                "wl:unmanaged-nas",
+                "wl:web01",
+            ]),
+            "hostnames and names, any-case sorted"
+        );
+        assert_eq!(
+            ff(FieldKind::TrafficActors, "wl:WEB", &[], true),
+            s(&["wl:web01"])
+        );
+        assert_eq!(
+            ff(FieldKind::TrafficActors, "nas", &[], true),
+            s(&["wl:unmanaged-nas"]),
+            "a bare token matches workload names"
+        );
+    }
+
+    #[test]
+    fn filter_services_offer_protocols_and_single_ports() {
+        assert_eq!(
+            ff(FieldKind::TrafficService, "", &[], false),
+            s(&[
+                "tcp", "udp", "icmp", "icmpv6", "5432/tcp", "80/tcp", "443/tcp"
+            ]),
+            "no range (8000-8099) and no `All Services`"
+        );
+        assert_eq!(
+            ff(FieldKind::TrafficService, "post", &[], false),
+            s(&["5432/tcp"]),
+            "a service by name, as the port/proto the filter takes"
+        );
+        assert_eq!(
+            ff(FieldKind::TrafficService, "WEB", &[], false),
+            s(&["80/tcp", "443/tcp"])
+        );
+        assert_eq!(ff(FieldKind::TrafficService, "u", &[], false), s(&["udp"]));
+        assert!(ff(FieldKind::TrafficService, "443", &[], false).is_empty());
+        assert!(ff(FieldKind::TrafficService, "443/t", &[], false).is_empty());
+    }
+
+    #[test]
+    fn decisions_offer_the_words_not_yet_listed() {
+        assert_eq!(
+            ff(FieldKind::Decisions, "", &[], false),
+            s(&["all", "allowed", "potentially_blocked", "blocked"])
+        );
+        assert_eq!(
+            ff(FieldKind::Decisions, "b", &[], false),
+            s(&["blocked", "potentially_blocked"]),
+            "prefix before substring"
+        );
+        assert_eq!(
+            ff(FieldKind::Decisions, "AL", &[], false),
+            s(&["all", "allowed", "potentially_blocked"])
+        );
+        assert_eq!(
+            ff(FieldKind::Decisions, "", &["Allowed", "blocked"], false),
+            s(&["all", "potentially_blocked"])
+        );
+    }
+
+    #[test]
+    fn windows_follow_the_step_ladder() {
+        assert_eq!(
+            ff(FieldKind::Window, "", &[], false),
+            s(&["1h", "6h", "12h", "1d", "2d", "3d", "1w", "2w", "4w", "90d"])
+        );
+        assert_eq!(
+            ff(FieldKind::Window, "1", &[], false),
+            s(&["1h", "12h", "1d", "1w"])
+        );
+        assert_eq!(
+            ff(FieldKind::Window, "D", &[], false),
+            s(&["1d", "2d", "3d", "90d"])
+        );
+        assert!(ff(FieldKind::Window, "24h", &[], false).is_empty());
     }
 }

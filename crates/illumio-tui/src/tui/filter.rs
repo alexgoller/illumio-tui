@@ -1,6 +1,7 @@
 //! The traffic filter as the user edits it (strings), its validation and
 //! cost hints (no network), and its conversion to a `TrafficQuery` (needs
 //! the name index, so it is async and runs in the runtime, not in `update`).
+use crate::tui::form::{Completing, Completion, FieldKind};
 use jiff::Timestamp;
 use pce::models::{PolicyDecision, ServiceMatch, TrafficQuery, proto_number};
 use pce::traffic::{
@@ -239,11 +240,23 @@ pub const FIELD_NAMES: [&str; 6] = [
     "max results",
 ];
 
+/// What `Ctrl-N` completes in each field, in the order of [`FIELD_NAMES`].
+pub const FIELD_KINDS: [FieldKind; 6] = [
+    FieldKind::Window,
+    FieldKind::TrafficActors,
+    FieldKind::TrafficActors,
+    FieldKind::TrafficService,
+    FieldKind::Decisions,
+    FieldKind::Text,
+];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FilterEditor {
     pub values: [String; 6],
     pub active: usize,
     pub error: Option<String>,
+    /// The completion being cycled; any key but `Ctrl-N`/`Ctrl-P` ends it.
+    pub completion: Option<Box<Completion>>,
 }
 
 impl FilterEditor {
@@ -260,6 +273,7 @@ impl FilterEditor {
             ],
             active: 0,
             error: None,
+            completion: None,
         }
     }
 
@@ -308,6 +322,66 @@ impl FilterEditor {
     pub fn pop(&mut self) {
         self.values[self.active].pop();
         self.error = None;
+    }
+
+    /// Up to five candidates around the shown one, then `+N more`.
+    pub fn completion_strip(&self) -> Option<Vec<(String, bool)>> {
+        self.completion.as_ref().map(|c| c.strip())
+    }
+
+    /// Ends an open completion (`true`); `restore` puts the typed token back.
+    pub fn end_completion(&mut self, restore: bool) -> bool {
+        let Some(c) = self.completion.take() else {
+            return false;
+        };
+        if restore && let Some(v) = self.values.get_mut(c.field) {
+            *v = c.typed();
+        }
+        true
+    }
+}
+
+impl Completing for FilterEditor {
+    fn completion_request(&self) -> Option<(FieldKind, String, Vec<String>)> {
+        let kind = *FIELD_KINDS.get(self.active)?;
+        let (token, earlier) = kind.request(&self.values[self.active])?;
+        Some((kind, token, earlier))
+    }
+
+    fn start_completion(&mut self, candidates: Vec<String>) -> bool {
+        let active = self.active;
+        let (Some(&kind), Some(value)) = (FIELD_KINDS.get(active), self.values.get_mut(active))
+        else {
+            return false;
+        };
+        match Completion::open(self.completion.as_deref(), active, kind, value, candidates) {
+            Some(c) => {
+                self.completion = Some(Box::new(c));
+                self.error = None;
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn cycle(&mut self, forward: bool) {
+        let Some(c) = self.completion.as_mut() else {
+            return;
+        };
+        c.step(forward);
+        if let Some(v) = self.values.get_mut(c.field) {
+            *v = c.shown();
+        }
+    }
+
+    fn completing(&self) -> bool {
+        self.completion.is_some()
+    }
+
+    fn completion_dives(&self) -> bool {
+        self.completion
+            .as_ref()
+            .is_some_and(|c| FIELD_KINDS.get(c.field).is_some_and(|&k| c.dives(k)))
     }
 }
 

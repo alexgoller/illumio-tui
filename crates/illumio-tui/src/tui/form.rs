@@ -2,9 +2,9 @@
 //! keys change the form; `update` decides what a submit means. Fields are
 //! single-line and the cursor is always at the end of the active field.
 //! `Ctrl-N`/`Ctrl-P` complete the active field's current token; the form
-//! cannot see the name index, so `update` asks [`Form::completion_request`],
+//! cannot see the name index, so `update` asks [`Completing::completion_request`],
 //! computes the candidates ([`crate::tui::complete`]) and hands them to
-//! [`Form::start_completion`].
+//! [`Completing::start_completion`].
 use crate::tui::edit::EditIntent;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::borrow::Cow;
@@ -45,16 +45,66 @@ pub enum FieldKind {
     Services,
     /// A ruleset name (the whole field), from the loaded draft rulesets.
     Ruleset,
+    /// A traffic filter's source or destination, in `FilterExpr`'s grammar:
+    /// labels, `ipl:`, `wl:` (the loaded workloads), `ip:`, `fqdn:`; `,`
+    /// within a group and `|` between groups.
+    TrafficActors,
+    /// A traffic filter's service (the whole field): protocols, and the
+    /// index's services as the `port/proto` the filter takes.
+    TrafficService,
+    /// A traffic filter's decisions, comma list.
+    Decisions,
+    /// A traffic window (the whole field): the `+`/`-` step ladder.
+    Window,
 }
 
 impl FieldKind {
     /// The characters that end a token; none: the whole field is one token.
     fn separators(self) -> &'static [char] {
         match self {
-            Self::Labels | Self::Actors | Self::Services => &[','],
-            Self::Scope => &[',', '|'],
-            Self::Text | Self::LabelKey | Self::LabelValue | Self::Ruleset => &[],
+            Self::Labels | Self::Actors | Self::Services | Self::Decisions => &[','],
+            Self::Scope | Self::TrafficActors => &[',', '|'],
+            Self::Text
+            | Self::LabelKey
+            | Self::LabelValue
+            | Self::Ruleset
+            | Self::TrafficService
+            | Self::Window => &[],
         }
+    }
+
+    /// The token being typed in `value` and the earlier tokens that matter
+    /// (only the current group's where `|` separates groups). `None` for a
+    /// text field. A `LabelValue`'s key is not in the field; the form adds it.
+    pub fn request(self, value: &str) -> Option<(String, Vec<String>)> {
+        let (head, token) = self.split(value);
+        let tokens = |text: &str| -> Vec<String> {
+            text.split(',')
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .map(String::from)
+                .collect()
+        };
+        let earlier = match self {
+            Self::Text => return None,
+            Self::LabelKey
+            | Self::LabelValue
+            | Self::Ruleset
+            | Self::TrafficService
+            | Self::Window => Vec::new(),
+            Self::Labels | Self::Actors | Self::Services | Self::Decisions => tokens(head),
+            Self::Scope | Self::TrafficActors => tokens(head.rsplit('|').next().unwrap_or(head)),
+        };
+        Some((token.to_string(), earlier))
+    }
+
+    /// A field of token lists where a key or a prefix (`app=`, `group:`)
+    /// can be completed further; never a name field (a ruleset named `a:`).
+    fn dives(self) -> bool {
+        matches!(
+            self,
+            Self::Labels | Self::Scope | Self::Actors | Self::TrafficActors
+        )
     }
 
     /// The field text split into what stays (`head`, separators and the
@@ -86,12 +136,117 @@ pub struct Completion {
 /// Candidates the strip under a field shows at once.
 pub const STRIP_LEN: usize = 5;
 
+impl Completion {
+    /// A completion on field `field` (of `kind`, holding `value`) showing
+    /// the first of `candidates` in `value`. `prev`, open on the same field
+    /// (a key completed to `app=`, now its values), keeps the prefix `Esc`
+    /// restores. `None`, and `value` unchanged, without candidates.
+    pub fn open(
+        prev: Option<&Completion>,
+        field: usize,
+        kind: FieldKind,
+        value: &mut String,
+        candidates: Vec<String>,
+    ) -> Option<Self> {
+        let first = candidates.first()?;
+        let (head, prefix) = match prev {
+            Some(c) if c.field == field => (c.head.clone(), c.prefix.clone()),
+            _ => {
+                let (head, token) = kind.split(value);
+                (head.to_string(), token.to_string())
+            }
+        };
+        *value = joined(&head, first);
+        Some(Self {
+            field,
+            prefix,
+            head,
+            candidates,
+            index: 0,
+        })
+    }
+
+    /// The field text with the shown candidate.
+    pub fn shown(&self) -> String {
+        joined(
+            &self.head,
+            self.candidates.get(self.index).map_or("", String::as_str),
+        )
+    }
+
+    /// The field text as typed.
+    pub fn typed(&self) -> String {
+        format!("{}{}", self.head, self.prefix)
+    }
+
+    /// The next (or previous) candidate, wrapping.
+    pub fn step(&mut self, forward: bool) {
+        let n = self.candidates.len();
+        if n == 0 {
+            return;
+        }
+        self.index = if forward {
+            (self.index + 1) % n
+        } else {
+            (self.index + n - 1) % n
+        };
+    }
+
+    /// The shown candidate in a token list of `kind` is a key or a prefix:
+    /// the next `Ctrl-N` completes what follows it instead of cycling.
+    pub fn dives(&self, kind: FieldKind) -> bool {
+        kind.dives()
+            && self
+                .candidates
+                .get(self.index)
+                .is_some_and(|s| dives_into(s))
+    }
+
+    /// Up to [`STRIP_LEN`] candidates around the shown one (`true`), then
+    /// `+N more` (`false`) for the ones not in the strip.
+    pub fn strip(&self) -> Vec<(String, bool)> {
+        let start = self.index / STRIP_LEN * STRIP_LEN;
+        let end = (start + STRIP_LEN).min(self.candidates.len());
+        let mut strip: Vec<(String, bool)> = self.candidates[start..end]
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (s.clone(), start + i == self.index))
+            .collect();
+        let more = self.candidates.len() - (end - start);
+        if more > 0 {
+            strip.push((format!("+{more} more"), false));
+        }
+        strip
+    }
+}
+
+/// An editor whose fields `Ctrl-N`/`Ctrl-P` complete: a form or the
+/// traffic filter editor. `update` computes the candidates.
+pub trait Completing {
+    /// The field kind, the token being typed and the earlier tokens that
+    /// matter; `None` for a text field.
+    fn completion_request(&self) -> Option<(FieldKind, String, Vec<String>)>;
+    /// Opens a completion on the active field with `candidates` (the first
+    /// one shown); `false`, and nothing changes, when there are none.
+    fn start_completion(&mut self, candidates: Vec<String>) -> bool;
+    /// The next (or previous) candidate, wrapping; nothing without a
+    /// completion.
+    fn cycle(&mut self, forward: bool);
+    /// A completion is open.
+    fn completing(&self) -> bool;
+    /// The shown candidate is a key or a prefix (`app=`, `group:`): the
+    /// next `Ctrl-N` completes what follows it instead of cycling.
+    fn completion_dives(&self) -> bool;
+}
+
 /// A candidate that only names what comes next: a key (`app=`, `!app=`,
-/// `label:app=`; one `=`, at the end) or a bare `group:` / `iplist:`.
+/// `label:app=`; one `=`, at the end) or a bare prefix (`group:`,
+/// `iplist:`, and the filter's `ipl:`, `wl:`, `ip:`, `fqdn:`).
 /// A value that happens to end in `=` or `:` (`app=foo:`) is not one.
 fn dives_into(candidate: &str) -> bool {
     let c = candidate.trim_start_matches('!');
-    (c.ends_with('=') && c.find('=') == Some(c.len() - 1)) || matches!(c, "group:" | "iplist:")
+    (c.ends_with('=') && c.find('=') == Some(c.len() - 1))
+        || matches!(c, "group:" | "iplist:" | "ipl:" | "wl:" | "ip:" | "fqdn:")
 }
 
 /// `head` with `token` after it; a space after a separator for readability.
@@ -186,120 +341,10 @@ impl Form {
         }
     }
 
-    /// What to complete in the active field: its kind, the token being
-    /// typed and the earlier tokens that matter (those of the current scope
-    /// for `Scope`; the key for `LabelValue`). `None` for a text field.
-    pub fn completion_request(&self) -> Option<(FieldKind, String, Vec<String>)> {
-        let field = self.fields.get(self.active)?;
-        let (head, token) = field.kind.split(&field.value);
-        let tokens = |text: &str| -> Vec<String> {
-            text.split(',')
-                .map(str::trim)
-                .filter(|t| !t.is_empty())
-                .map(String::from)
-                .collect()
-        };
-        let earlier = match field.kind {
-            FieldKind::Text => return None,
-            FieldKind::LabelKey | FieldKind::Ruleset => Vec::new(),
-            FieldKind::LabelValue => {
-                let key = match (&self.intent, self.fields.iter().find(|f| f.label == "Key")) {
-                    (_, Some(f)) => f.value.trim().to_string(),
-                    (EditIntent::UpdateLabel(l), None) => l.key.clone(),
-                    _ => String::new(),
-                };
-                vec![key]
-            }
-            FieldKind::Labels | FieldKind::Actors | FieldKind::Services => tokens(head),
-            FieldKind::Scope => tokens(head.rsplit('|').next().unwrap_or(head)),
-        };
-        Some((field.kind, token.to_string(), earlier))
-    }
-
-    /// Opens a completion on the active field with `candidates` (the first
-    /// one shown); `false`, and nothing changes, when there are none. A
-    /// completion already open on the field (a key completed to `app=`,
-    /// now its values) keeps the prefix `Esc` restores.
-    pub fn start_completion(&mut self, candidates: Vec<String>) -> bool {
-        let Some(first) = candidates.first() else {
-            return false;
-        };
-        let active = self.active;
-        let Some(field) = self.fields.get_mut(active) else {
-            return false;
-        };
-        let (head, prefix) = match self.completion.take() {
-            Some(c) if c.field == active => {
-                let c = *c;
-                (c.head, c.prefix)
-            }
-            _ => {
-                let (head, token) = field.kind.split(&field.value);
-                (head.to_string(), token.to_string())
-            }
-        };
-        field.value = joined(&head, first);
-        self.completion = Some(Box::new(Completion {
-            field: active,
-            prefix,
-            head,
-            candidates,
-            index: 0,
-        }));
-        true
-    }
-
-    /// The next (or previous) candidate, wrapping; nothing without a
-    /// completion.
-    pub fn cycle(&mut self, forward: bool) {
-        let Some(c) = self.completion.as_mut() else {
-            return;
-        };
-        let n = c.candidates.len();
-        if n == 0 {
-            return;
-        }
-        c.index = if forward {
-            (c.index + 1) % n
-        } else {
-            (c.index + n - 1) % n
-        };
-        if let Some(f) = self.fields.get_mut(c.field) {
-            f.value = joined(&c.head, &c.candidates[c.index]);
-        }
-    }
-
-    /// The shown candidate in a token list is a key or a prefix (`app=`,
-    /// `group:`): the next `Ctrl-N` completes what follows it instead of
-    /// cycling. Never in a name field (a ruleset named `a:`).
-    pub fn completion_dives(&self) -> bool {
-        self.completion.as_ref().is_some_and(|c| {
-            let tokens = self.fields.get(c.field).is_some_and(|f| {
-                matches!(
-                    f.kind,
-                    FieldKind::Labels | FieldKind::Scope | FieldKind::Actors
-                )
-            });
-            tokens && c.candidates.get(c.index).is_some_and(|s| dives_into(s))
-        })
-    }
-
     /// Up to [`STRIP_LEN`] candidates around the shown one (`true`), then
     /// `+N more` (`false`) for the ones not in the strip.
     pub fn completion_strip(&self) -> Option<Vec<(String, bool)>> {
-        let c = self.completion.as_ref()?;
-        let start = c.index / STRIP_LEN * STRIP_LEN;
-        let end = (start + STRIP_LEN).min(c.candidates.len());
-        let mut strip: Vec<(String, bool)> = c.candidates[start..end]
-            .iter()
-            .enumerate()
-            .map(|(i, s)| (s.clone(), start + i == c.index))
-            .collect();
-        let more = c.candidates.len() - (end - start);
-        if more > 0 {
-            strip.push((format!("+{more} more"), false));
-        }
-        Some(strip)
+        self.completion.as_ref().map(|c| c.strip())
     }
 
     /// Ends the completion; `restore` puts the typed token back.
@@ -308,7 +353,7 @@ impl Form {
             && restore
             && let Some(f) = self.fields.get_mut(c.field)
         {
-            f.value = format!("{}{}", c.head, c.prefix);
+            f.value = c.typed();
         }
     }
 
@@ -404,6 +449,59 @@ impl Form {
             _ => {}
         }
         FormEvent::Continue
+    }
+}
+
+impl Completing for Form {
+    /// The earlier tokens are those of the current scope for `Scope`; the
+    /// key for `LabelValue`.
+    fn completion_request(&self) -> Option<(FieldKind, String, Vec<String>)> {
+        let field = self.fields.get(self.active)?;
+        let (token, mut earlier) = field.kind.request(&field.value)?;
+        if field.kind == FieldKind::LabelValue {
+            let key = match (&self.intent, self.fields.iter().find(|f| f.label == "Key")) {
+                (_, Some(f)) => f.value.trim().to_string(),
+                (EditIntent::UpdateLabel(l), None) => l.key.clone(),
+                _ => String::new(),
+            };
+            earlier = vec![key];
+        }
+        Some((field.kind, token, earlier))
+    }
+
+    fn start_completion(&mut self, candidates: Vec<String>) -> bool {
+        let active = self.active;
+        let Some(field) = self.fields.get_mut(active) else {
+            return false;
+        };
+        let prev = self.completion.as_deref();
+        match Completion::open(prev, active, field.kind, &mut field.value, candidates) {
+            Some(c) => {
+                self.completion = Some(Box::new(c));
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn cycle(&mut self, forward: bool) {
+        let Some(c) = self.completion.as_mut() else {
+            return;
+        };
+        c.step(forward);
+        if let Some(f) = self.fields.get_mut(c.field) {
+            f.value = c.shown();
+        }
+    }
+
+    fn completing(&self) -> bool {
+        self.completion.is_some()
+    }
+
+    fn completion_dives(&self) -> bool {
+        self.completion
+            .as_ref()
+            .is_some_and(|c| self.fields.get(c.field).is_some_and(|f| c.dives(f.kind)))
     }
 }
 

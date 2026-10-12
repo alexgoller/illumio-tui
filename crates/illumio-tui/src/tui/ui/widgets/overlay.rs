@@ -86,6 +86,10 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "Form     Ctrl-N Ctrl-P",
         "complete from the index · cycle back",
     ),
+    (
+        "Filter   Ctrl-N Ctrl-P",
+        "complete the filter fields · cycle back",
+    ),
     ("w form   Ctrl-A Ctrl-R", "all labels · new ruleset"),
     ("Policy   d", "toggle draft / active"),
     ("Policy   p", "pending changes"),
@@ -295,29 +299,36 @@ fn draw_key_picker(
 
 pub fn render_filter_editor(model: &Model, e: &FilterEditor, f: &mut Frame, area: Rect) {
     let t = &model.theme;
-    let r = centered(area, 70, 12);
+    let strip = e.completion_strip();
+    // While completing, the candidates take a row under the active field.
+    let r = centered(area, 70, 12 + u16::from(strip.is_some()));
     f.render_widget(Clear, r);
     let block = panel("Edit filter", "Tab next · Enter run · Esc cancel", t, true);
-    let mut lines: Vec<Line> = FIELD_NAMES
-        .iter()
-        .enumerate()
-        .map(|(i, name)| {
-            let active = i == e.active;
-            let cursor = if active { "▏" } else { "" };
-            Line::from(vec![
-                Span::styled(if active { "▸ " } else { "  " }, Style::new().fg(t.accent)),
-                Span::styled(format!("{name:<12}"), t.header_style()),
-                Span::styled(
-                    format!("{}{cursor}", e.values[i]),
-                    if active {
-                        Style::new().fg(t.fg).bg(t.selected_bg)
-                    } else {
-                        t.base()
-                    },
-                ),
-            ])
-        })
-        .collect();
+    let mut lines: Vec<Line> = Vec::new();
+    for (i, name) in FIELD_NAMES.iter().enumerate() {
+        let active = i == e.active;
+        let cursor = if active { "▏" } else { "" };
+        lines.push(Line::from(vec![
+            Span::styled(if active { "▸ " } else { "  " }, Style::new().fg(t.accent)),
+            Span::styled(
+                format!("{name:<w$}", w = FILTER_LABEL_WIDTH),
+                t.header_style(),
+            ),
+            Span::styled(
+                format!("{}{cursor}", e.values[i]),
+                if active {
+                    Style::new().fg(t.fg).bg(t.selected_bg)
+                } else {
+                    t.base()
+                },
+            ),
+        ]));
+        if let Some(strip) = strip.as_ref().filter(|_| active) {
+            // Borders (2), the focus marker (2) and the label column.
+            let width = (r.width as usize).saturating_sub(2 + 2 + FILTER_LABEL_WIDTH);
+            lines.push(completion_line(strip, 2 + FILTER_LABEL_WIDTH, width, t));
+        }
+    }
     lines.push(Line::from(""));
     match &e.error {
         Some(err) => lines.push(Line::from(Span::styled(
@@ -331,6 +342,9 @@ pub fn render_filter_editor(model: &Model, e: &FilterEditor, f: &mut Frame, area
     }
     f.render_widget(Paragraph::new(lines).block(block).style(t.base()), r);
 }
+
+/// Label column width inside the filter editor.
+const FILTER_LABEL_WIDTH: usize = 12;
 
 /// Label column width inside the form (the `*` of a required field included).
 const FORM_LABEL_WIDTH: usize = 14;
@@ -383,7 +397,7 @@ pub fn render_form(model: &Model, form: &Form, f: &mut Frame, area: Rect) {
         ]));
         // While completing, the candidates take the hint's row.
         if let Some(strip) = form.completion_strip().filter(|_| on) {
-            lines.push(completion_line(&strip, width + 1, t));
+            lines.push(completion_line(&strip, 2 + FORM_LABEL_WIDTH, width + 1, t));
             continue;
         }
         // While Ctrl-R is armed the Ruleset hint says what it creates.
@@ -425,9 +439,14 @@ pub fn render_form(model: &Model, form: &Form, f: &mut Frame, area: Rect) {
 
 /// The candidate strip under the field being completed: the shown candidate
 /// in the accent colour, the others and `+N more` dim, two blanks apart,
-/// cut to `width`.
-fn completion_line<'a>(strip: &[(String, bool)], width: usize, t: &Theme) -> Line<'a> {
-    let mut spans = vec![Span::raw(" ".repeat(2 + FORM_LABEL_WIDTH))];
+/// `indent` cells in (under the value), cut to `width`.
+fn completion_line<'a>(
+    strip: &[(String, bool)],
+    indent: usize,
+    width: usize,
+    t: &Theme,
+) -> Line<'a> {
+    let mut spans = vec![Span::raw(" ".repeat(indent))];
     let mut used = 0;
     for (i, (text, current)) in strip.iter().enumerate() {
         let gap = if i == 0 { 0 } else { 2 };

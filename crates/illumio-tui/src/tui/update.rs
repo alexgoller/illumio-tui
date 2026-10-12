@@ -2,7 +2,7 @@
 use crate::tui::commands::{self, Command};
 use crate::tui::edit::{self, EditIntent, RulesetTarget, Start, WriteIntent};
 use crate::tui::filter::{FilterEditor, TrafficFilter};
-use crate::tui::form::{Form, FormEvent};
+use crate::tui::form::{Completing, FormEvent};
 use crate::tui::model::{
     By, Connection, Dir, Drill, EventsFilterEdit, Model, ObjectKind, Overlay, PendingAction,
     PolicyPane, PolicyState, QueryState, Screen, Slices, StatusLine, TrafficData, TrafficView,
@@ -744,14 +744,15 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
     }
 }
 
-/// `Ctrl-N` (`forward`) or `Ctrl-P` in a form: cycles an open completion,
-/// or opens one from the name index and the loaded draft rulesets (`Ctrl-P`
-/// opens on the last candidate). A shown key (`app=`) or prefix (`group:`)
+/// `Ctrl-N` (`forward`) or `Ctrl-P` in a form or the filter editor: cycles
+/// an open completion, or opens one from the name index, the loaded draft
+/// rulesets and the workloads the Workloads screen holds (`Ctrl-P` opens on
+/// the last candidate). A shown key (`app=`) or prefix (`group:`, `wl:`)
 /// completes what follows it on `Ctrl-N`. Without an index, or for a text
 /// field, nothing happens. Never a request.
-fn complete_form(model: &Model, form: &mut Form, forward: bool) {
+fn complete_field(model: &Model, form: &mut impl Completing, forward: bool) {
     let dives = forward && form.completion_dives();
-    if form.completion.is_some() && !dives {
+    if form.completing() && !dives {
         form.cycle(forward);
         return;
     }
@@ -762,7 +763,9 @@ fn complete_form(model: &Model, form: &mut Form, forward: bool) {
         return;
     };
     let rulesets = model.flow_prefill().rulesets;
-    let candidates = crate::tui::complete::complete(kind, &token, &earlier, idx, rulesets);
+    let workloads = &model.workloads.raw;
+    let candidates =
+        crate::tui::complete::complete(kind, &token, &earlier, idx, rulesets, workloads);
     if form.start_completion(candidates) {
         if !forward {
             form.cycle(false);
@@ -904,7 +907,22 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             }
             Vec::new()
         }
+        Overlay::FilterEditor(mut e)
+            if k.modifiers.contains(KeyModifiers::CONTROL)
+                && matches!(k.code, KeyCode::Char('n' | 'p')) =>
+        {
+            complete_field(model, &mut e, k.code == KeyCode::Char('n'));
+            model.overlay = Overlay::FilterEditor(e);
+            Vec::new()
+        }
         Overlay::FilterEditor(mut e) => {
+            // Esc puts the typed token back; any other key keeps the shown
+            // candidate and then does what it always does.
+            let esc = k.code == KeyCode::Esc;
+            if e.end_completion(esc) && esc {
+                model.overlay = Overlay::FilterEditor(e);
+                return Vec::new();
+            }
             match k.code {
                 KeyCode::Esc => model.overlay = Overlay::None,
                 KeyCode::Tab | KeyCode::Down => {
@@ -1045,7 +1063,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             if k.modifiers.contains(KeyModifiers::CONTROL)
                 && matches!(k.code, KeyCode::Char('n' | 'p')) =>
         {
-            complete_form(model, &mut form, k.code == KeyCode::Char('n'));
+            complete_field(model, &mut form, k.code == KeyCode::Char('n'));
             model.overlay = Overlay::Form(form);
             Vec::new()
         }
@@ -7423,6 +7441,7 @@ mod tests {
             "Traffic  w",
             "w form   Ctrl-A Ctrl-R",
             "Form     Ctrl-N Ctrl-P",
+            "Filter   Ctrl-N Ctrl-P",
             "Policy   N",
             "Pending  j/k Space Enter",
             "Pending  P",
@@ -7436,7 +7455,7 @@ mod tests {
     fn help_scrolls_to_its_last_line_and_reopens_at_the_top() {
         use crate::tui::ui::widgets::overlay::{HELP_LINES, help_last_scroll};
         let mut m = model_fixture(); // 80x24
-        assert_eq!(HELP_LINES.len(), 47);
+        assert_eq!(HELP_LINES.len(), 48);
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  + / -"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  B"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  ] / ["));
@@ -7456,7 +7475,7 @@ mod tests {
         );
         update(&mut m, key('?'));
         let last = help_last_scroll(24);
-        assert_eq!(last, 25, "47 lines, 22 rows inside the box");
+        assert_eq!(last, 26, "48 lines, 22 rows inside the box");
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app x / X"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app d"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Sections Space / z"));
@@ -11679,5 +11698,174 @@ mod backfill_tests {
             answer(m, rows(1, range.0, 52_000), false, range),
             Vec::<Cmd>::new()
         );
+    }
+}
+
+/// `Ctrl-N`/`Ctrl-P` in the traffic filter editor (issue #14).
+#[cfg(test)]
+mod filter_completion_tests {
+    use super::*;
+    use crate::tui::filter::FilterEditor;
+    use crate::tui::model::{Model, Overlay};
+    use crate::tui::msg::{Cmd, Msg};
+    use crate::tui::test_support::{model_fixture, with_workloads};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    /// Sends the key and asserts it asked for nothing.
+    #[track_caller]
+    fn send(m: &mut Model, code: KeyCode, mods: KeyModifiers) {
+        assert_eq!(
+            update(m, Msg::Key(KeyEvent::new(code, mods))),
+            Vec::<Cmd>::new()
+        );
+    }
+
+    #[track_caller]
+    fn press(m: &mut Model, code: KeyCode) {
+        send(m, code, KeyModifiers::NONE);
+    }
+
+    #[track_caller]
+    fn ctrl(m: &mut Model, c: char) {
+        send(m, KeyCode::Char(c), KeyModifiers::CONTROL);
+    }
+
+    #[track_caller]
+    fn type_text(m: &mut Model, text: &str) {
+        for c in text.chars() {
+            press(m, KeyCode::Char(c));
+        }
+    }
+
+    /// The fixture model with the filter editor open on field `field`, its
+    /// text replaced by `text`.
+    fn editing(field: usize, text: &str) -> Model {
+        let mut m = model_fixture();
+        let mut e = FilterEditor::from_filter(&m.traffic.filter);
+        e.active = field;
+        e.values[field] = text.into();
+        m.overlay = Overlay::FilterEditor(e);
+        m
+    }
+
+    #[track_caller]
+    fn editor(m: &Model) -> &FilterEditor {
+        match &m.overlay {
+            Overlay::FilterEditor(e) => e,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[track_caller]
+    fn value(m: &Model, field: usize) -> String {
+        editor(m).values[field].clone()
+    }
+
+    #[test]
+    fn src_cycles_dives_into_a_key_and_esc_restores_then_cancels() {
+        let mut m = editing(1, "app=shop, r");
+        ctrl(&mut m, 'n');
+        assert_eq!(value(&m, 1), "app=shop, role=", "the key first");
+        ctrl(&mut m, 'n');
+        assert_eq!(value(&m, 1), "app=shop, role=db", "then its values");
+        ctrl(&mut m, 'n');
+        assert_eq!(value(&m, 1), "app=shop, role=web");
+        ctrl(&mut m, 'n');
+        assert_eq!(value(&m, 1), "app=shop, role=db", "wraps");
+        ctrl(&mut m, 'p');
+        assert_eq!(value(&m, 1), "app=shop, role=web");
+        assert_eq!(
+            editor(&m).completion_strip(),
+            Some(vec![
+                ("role=db".to_string(), false),
+                ("role=web".to_string(), true)
+            ])
+        );
+        press(&mut m, KeyCode::Esc);
+        assert_eq!(value(&m, 1), "app=shop, r", "the typed text is back");
+        assert_eq!(editor(&m).completion, None, "Esc ended the completion only");
+        press(&mut m, KeyCode::Esc);
+        assert_eq!(m.overlay, Overlay::None, "a second Esc cancels the editor");
+    }
+
+    #[test]
+    fn any_other_key_accepts_and_operators_and_earlier_tokens_stay() {
+        let mut m = editing(2, "app=shop | !ro");
+        ctrl(&mut m, 'n');
+        assert_eq!(value(&m, 2), "app=shop | !role=");
+        ctrl(&mut m, 'n');
+        assert_eq!(value(&m, 2), "app=shop | !role=db");
+        press(&mut m, KeyCode::Char(','));
+        assert_eq!(value(&m, 2), "app=shop | !role=db,", "accepted, then typed");
+        assert_eq!(editor(&m).completion, None);
+        type_text(&mut m, "ipl:c");
+        ctrl(&mut m, 'n');
+        assert_eq!(value(&m, 2), "app=shop | !role=db, ipl:Corp");
+        press(&mut m, KeyCode::Tab);
+        assert_eq!(
+            (value(&m, 2).as_str(), editor(&m).active),
+            ("app=shop | !role=db, ipl:Corp", 3),
+            "Tab accepts and moves on"
+        );
+        assert_eq!(editor(&m).completion, None);
+        // Backspace accepts and then deletes.
+        let mut m = editing(1, "ipl:a");
+        ctrl(&mut m, 'n');
+        assert_eq!(value(&m, 1), "ipl:Any (0.0.0.0/0 and ::/0)");
+        press(&mut m, KeyCode::Backspace);
+        assert_eq!(value(&m, 1), "ipl:Any (0.0.0.0/0 and ::/0");
+    }
+
+    #[test]
+    fn window_service_and_decision_complete_their_words() {
+        let mut m = editing(0, "");
+        ctrl(&mut m, 'p');
+        assert_eq!(value(&m, 0), "90d", "Ctrl-P opens on the last step");
+        ctrl(&mut m, 'p');
+        assert_eq!(value(&m, 0), "4w");
+        let mut m = editing(3, "post");
+        ctrl(&mut m, 'n');
+        assert_eq!(value(&m, 3), "5432/tcp");
+        let mut m = editing(3, "443/");
+        ctrl(&mut m, 'n');
+        assert_eq!(value(&m, 3), "443/", "a port is left as typed");
+        let mut m = editing(4, "allowed,b");
+        ctrl(&mut m, 'n');
+        assert_eq!(value(&m, 4), "allowed, blocked");
+        ctrl(&mut m, 'n');
+        assert_eq!(value(&m, 4), "allowed, potentially_blocked");
+        press(&mut m, KeyCode::Tab);
+        let f = editor(&m).to_filter().expect("a valid filter");
+        assert_eq!(f.decisions_text(), "allowed,potentially_blocked");
+    }
+
+    #[test]
+    fn workloads_are_offered_only_once_the_workloads_screen_has_loaded() {
+        let mut m = editing(2, "wl:");
+        ctrl(&mut m, 'n');
+        assert_eq!(value(&m, 2), "wl:", "nothing loaded, nothing offered");
+        assert_eq!(editor(&m).completion, None);
+        let mut m = with_workloads(m);
+        ctrl(&mut m, 'n');
+        assert_eq!(value(&m, 2), "wl:batch04");
+        ctrl(&mut m, 'n');
+        assert_eq!(value(&m, 2), "wl:host-1.example");
+    }
+
+    #[test]
+    fn a_text_field_or_no_index_completes_nothing() {
+        let mut m = editing(5, "100");
+        let before = m.overlay.clone();
+        ctrl(&mut m, 'n');
+        assert_eq!(m.overlay, before, "max results: not typed, not completed");
+        let mut m = editing(1, "ro");
+        m.connection = Connection::Connected {
+            index: None,
+            index_age_secs: 0,
+        };
+        let before = m.overlay.clone();
+        ctrl(&mut m, 'n');
+        ctrl(&mut m, 'p');
+        assert_eq!(m.overlay, before);
     }
 }

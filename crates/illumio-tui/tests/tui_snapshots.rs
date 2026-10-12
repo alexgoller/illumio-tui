@@ -189,6 +189,26 @@ fn traffic_filter_bar_and_editor_80x24() {
 }
 
 #[test]
+fn traffic_filter_editor_completing_src_80x24() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use illumio_tui::tui::filter::FilterEditor;
+    use illumio_tui::tui::model::Overlay;
+    use illumio_tui::tui::msg::Msg;
+    use illumio_tui::tui::update;
+    let mut m = model_fixture();
+    let mut e = FilterEditor::from_filter(&m.traffic.filter);
+    e.active = 1;
+    e.values[1] = "env=prod, ".into();
+    m.overlay = Overlay::FilterEditor(e);
+    let ctrl_n = || Msg::Key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL));
+    assert!(update(&mut m, ctrl_n()).is_empty());
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("env=prod, app="), "{out}");
+    assert!(out.contains("app=  env=  loc=  role=  ip:"), "{out}");
+    insta::assert_snapshot!("traffic_filter_editor_completing_src_80x24", out);
+}
+
+#[test]
 fn traffic_flows_80x24() {
     let m = model_with_flows();
     let out = render_to_string(&m, 80, 24);
