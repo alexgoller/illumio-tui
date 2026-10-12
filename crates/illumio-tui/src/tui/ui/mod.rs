@@ -59,8 +59,8 @@ pub fn view(model: &Model, f: &mut Frame) {
             widgets::overlay::render_event_detail(model, event, *scroll, f, area)
         }
         Overlay::Form(form) => widgets::overlay::render_form(model, form, f, area),
-        Overlay::ConfirmWrite { plan, scroll, .. } => {
-            widgets::overlay::render_confirm_write(model, plan, *scroll, f, area)
+        Overlay::ConfirmWrite { plan, kind, scroll } => {
+            widgets::overlay::render_confirm_write(model, plan, *kind, *scroll, f, area)
         }
         Overlay::Diff { diff, scroll } => {
             widgets::overlay::render_diff(model, diff, *scroll, f, area)

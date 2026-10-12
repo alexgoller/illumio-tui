@@ -366,3 +366,25 @@ pub fn provision_plan() -> pce::write::Plan {
         kind: pce::write::ObjectKind::Provision,
     }
 }
+
+/// The plan `R` shows with both fixture entries marked, as
+/// `Writer::plan_revert` builds it when the ruleset was updated and the IP
+/// list created in draft.
+pub fn revert_plan() -> pce::write::Plan {
+    pce::write::Plan::Send {
+        request: pce::write::WriteRequest {
+            method: pce::WriteMethod::Put,
+            path: "/orgs/5/sec_policy/delete".into(),
+            body: Some(serde_json::json!({
+                "change_subset": {
+                    "ip_lists": [{"href": "/orgs/5/sec_policy/draft/ip_lists/21"}],
+                    "rule_sets": [{"href": "/orgs/5/sec_policy/draft/rule_sets/101"}]
+                }
+            })),
+            summary: "revert 2 changes: ip_list \"Corp\" (removed), \
+                      rule_set \"Global-Infra\" (back to active)"
+                .into(),
+        },
+        kind: pce::write::ObjectKind::Revert,
+    }
+}

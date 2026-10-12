@@ -2018,8 +2018,8 @@ pub struct PolicyState {
     /// The open rule confirm's impact line, evaluated when the confirm
     /// opens and when the workloads or rulesets load (never per draw).
     pub confirm_impact: Option<String>,
-    /// Pending entries marked with `Space` for `P` (hrefs); cleared when the
-    /// list is loaded again.
+    /// Pending entries marked with `Space` for `P` and `R` (hrefs); cleared
+    /// when the list is loaded again.
     pub pending_marked: BTreeSet<String>,
     /// The counts of the provision just sent (`ip_lists=1, rule_sets=2`),
     /// taken from its body at `y`: the PCE's answer does not repeat them.
@@ -2027,6 +2027,9 @@ pub struct PolicyState {
     /// The report of the provision just done; the pending reload it caused
     /// shows it in front of the new count.
     pub provisioned: Option<String>,
+    /// What the user typed into an open revert confirm; only `revert`
+    /// followed by `Enter` sends it.
+    pub revert_typed: String,
     /// A `w` rule waiting for the ruleset `Ctrl-N` creates: planned into
     /// it once that write is done, dropped by any failure or cancel.
     /// The form comes along so a failed rule plan can reopen it.
@@ -2066,6 +2069,7 @@ impl PolicyState {
             pending_marked: BTreeSet::new(),
             provision_counts: None,
             provisioned: None,
+            revert_typed: String::new(),
             rule_after_ruleset: None,
             auto: AutoRefresh::new(min_refresh),
         }

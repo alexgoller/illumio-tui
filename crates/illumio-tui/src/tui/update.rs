@@ -15,7 +15,9 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use pce::models::{EventFilter, PolicyDecision, PolicyScope};
 use pce::traffic::QueryProgress;
 use pce::traffic::treemap::Weight;
-use pce::write::{Outcome, Plan, ProvisionRequest, ProvisionSubset, WriteError, provision_counts};
+use pce::write::{
+    Outcome, Plan, ProvisionRequest, ProvisionSubset, RevertRequest, WriteError, provision_counts,
+};
 use pce::{CacheMode, RuleKind, WriteMethod};
 use std::time::Instant;
 
@@ -596,6 +598,8 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 Ok(Outcome::Written(w)) => {
                     let mut text = if kind == pce::write::ObjectKind::Provision {
                         format!("provisioned {}: {}", w.href, counts.unwrap_or_default())
+                    } else if kind == pce::write::ObjectKind::Revert {
+                        format!("reverted {}", counts.unwrap_or_default())
                     } else {
                         let verb = match method {
                             Some(WriteMethod::Post) => "created",
@@ -624,7 +628,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     } else {
                         StatusLine::warn(text)
                     };
-                    if kind == pce::write::ObjectKind::Provision {
+                    if kind.whole_policy() {
                         model.policy.provisioned = Some(model.status.text.clone());
                     }
                     let mut cmds = reload_after_write(model, kind);
@@ -681,7 +685,12 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     model.status = StatusLine::warn("request discarded, nothing sent");
                 }
                 Ok((plan @ Plan::Send { .. }, kind)) => {
-                    model.status = StatusLine::info("review the request: y sends it, n cancels");
+                    model.status = StatusLine::info(if kind == pce::write::ObjectKind::Revert {
+                        model.policy.revert_typed.clear();
+                        "review the revert: type revert and Enter to send it, Esc cancels"
+                    } else {
+                        "review the request: y sends it, n cancels"
+                    });
                     model.overlay = Overlay::ConfirmWrite {
                         plan,
                         kind,
@@ -1063,12 +1072,15 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 }
             }
         },
+        Overlay::ConfirmWrite {
+            plan,
+            kind: pce::write::ObjectKind::Revert,
+            scroll,
+        } => revert_confirm_key(model, plan, scroll, k.code),
         Overlay::ConfirmWrite { plan, kind, scroll } => {
             let area = ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1);
             let extra = crate::tui::impact::confirm_rows(&plan);
-            let last = plan
-                .request()
-                .map_or(0, |r| confirm_write_last_scroll(r, area, extra));
+            let last = confirm_write_last_scroll(&plan, kind, area);
             let last = u16::try_from(last).unwrap_or(u16::MAX);
             match k.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
@@ -1137,6 +1149,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     }
                 }
                 KeyCode::Char('P') => return provision_key(model),
+                KeyCode::Char('R') => return revert_key(model),
                 KeyCode::Enter => return pending_diff(model),
                 _ => {}
             }
@@ -2279,6 +2292,80 @@ fn provision_key(model: &mut Model) -> Vec<Cmd> {
         description: Some(PROVISION_DESCRIPTION.into()),
         subset,
     }))]
+}
+
+/// `R` in the pending overlay: revert the marked entries to their active
+/// version (a draft-only object is deleted). Never everything: with nothing
+/// marked it only says how. The plan reads the pending list once more, past
+/// the cache, and the confirm names each object and its fate.
+fn revert_key(model: &mut Model) -> Vec<Cmd> {
+    if writes_refused(model) {
+        return Vec::new();
+    }
+    if model.policy.pending_marked.is_empty() {
+        model.status = StatusLine::info("mark changes with Space first");
+        return Vec::new();
+    }
+    let targets = model.policy.pending_marked.iter().cloned().collect();
+    model.overlay = Overlay::None;
+    model.status = StatusLine::info("planning…");
+    model.writes.in_flight = true;
+    vec![Cmd::PlanWrite(WriteIntent::Revert(RevertRequest {
+        all: false,
+        targets,
+    }))]
+}
+
+/// The word typed into a revert confirm before `Enter` sends it.
+pub const REVERT_WORD: &str = "revert";
+
+/// Keys of the revert confirm: letters type the word, `Enter` sends only
+/// when it reads `revert`, `Esc` cancels, arrows scroll. `y` is a letter.
+fn revert_confirm_key(model: &mut Model, plan: Plan, scroll: u16, code: KeyCode) -> Vec<Cmd> {
+    let kind = pce::write::ObjectKind::Revert;
+    let area = ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1);
+    let last = confirm_write_last_scroll(&plan, kind, area);
+    let last = u16::try_from(last).unwrap_or(u16::MAX);
+    let typed = &mut model.policy.revert_typed;
+    match code {
+        KeyCode::Enter if typed == REVERT_WORD => {
+            typed.clear();
+            model.policy.provision_counts =
+                Some(counts_text(plan.request().and_then(|r| r.body.as_ref())));
+            model.overlay = Overlay::None;
+            model.status = StatusLine::info("sending …");
+            model.writes.in_flight = true;
+            return vec![Cmd::ExecuteWrite { plan, kind }];
+        }
+        KeyCode::Enter => {
+            model.status = StatusLine::warn("type revert, then Enter, to send it");
+        }
+        KeyCode::Esc => {
+            typed.clear();
+            model.overlay = Overlay::None;
+            model.status = StatusLine::info("cancelled, nothing sent");
+        }
+        KeyCode::Backspace => {
+            typed.pop();
+        }
+        KeyCode::Char(c) if typed.chars().count() < REVERT_WORD.len() + 8 => typed.push(c),
+        KeyCode::Down => {
+            model.overlay = Overlay::ConfirmWrite {
+                plan,
+                kind,
+                scroll: (scroll + 1).min(last),
+            };
+        }
+        KeyCode::Up => {
+            model.overlay = Overlay::ConfirmWrite {
+                plan,
+                kind,
+                scroll: scroll.saturating_sub(1),
+            };
+        }
+        _ => {}
+    }
+    Vec::new()
 }
 
 /// `ip_lists=1, rule_sets=2`: what a provision body lists, per type, as the
@@ -6921,6 +7008,7 @@ mod tests {
             "Policy   N",
             "Pending  j/k Space Enter",
             "Pending  P",
+            "Pending  R",
         ] {
             assert!(keys.contains(&k), "{k}");
         }
@@ -6930,7 +7018,7 @@ mod tests {
     fn help_scrolls_to_its_last_line_and_reopens_at_the_top() {
         use crate::tui::ui::widgets::overlay::{HELP_LINES, help_last_scroll};
         let mut m = model_fixture(); // 80x24
-        assert_eq!(HELP_LINES.len(), 44);
+        assert_eq!(HELP_LINES.len(), 45);
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  + / -"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  ] / ["));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Labels   f / i / u"));
@@ -6949,7 +7037,7 @@ mod tests {
         );
         update(&mut m, key('?'));
         let last = help_last_scroll(24);
-        assert_eq!(last, 22, "44 lines, 22 rows inside the box");
+        assert_eq!(last, 23, "45 lines, 22 rows inside the box");
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app x / X"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app d"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Sections Space / z"));
@@ -8011,6 +8099,142 @@ mod tests {
             m.status.text, report,
             "the rulesets reload keeps the report"
         );
+        update(&mut m, Msg::PendingLoaded(Ok(vec![])));
+        assert_eq!(m.status.text, format!("{report}; 0 pending changes left"));
+        assert_eq!(m.overlay, Overlay::Pending);
+    }
+
+    #[test]
+    fn r_reverts_only_marked_entries_and_never_everything() {
+        use crate::tui::edit::WriteIntent;
+        use crate::tui::test_support::model_with_policy;
+        let mut m = writes_on(model_with_policy());
+        m.screen = Screen::Policy;
+        update(&mut m, Msg::PendingLoaded(Ok(pending_fixture())));
+        assert!(update(&mut m, key('R')).is_empty(), "nothing marked");
+        assert_eq!(m.status.text, "mark changes with Space first");
+        assert_eq!(m.overlay, Overlay::Pending);
+        assert!(!m.writes.in_flight);
+        update(&mut m, key(' '));
+        update(&mut m, key('j'));
+        update(&mut m, key(' '));
+        assert_eq!(
+            update(&mut m, key('R')),
+            vec![Cmd::PlanWrite(WriteIntent::Revert(RevertRequest {
+                all: false,
+                targets: vec![
+                    "/orgs/5/sec_policy/draft/ip_lists/21".into(),
+                    "/orgs/5/sec_policy/draft/rule_sets/101".into(),
+                ],
+            }))]
+        );
+        assert_eq!(m.overlay, Overlay::None);
+        assert!(m.writes.in_flight);
+        let mut off = model_with_policy();
+        off.screen = Screen::Policy;
+        update(&mut off, Msg::PendingLoaded(Ok(pending_fixture())));
+        update(&mut off, key(' '));
+        assert!(update(&mut off, key('R')).is_empty());
+        assert_eq!(off.status.text, crate::tui::model::WRITES_OFF);
+    }
+
+    #[test]
+    fn revert_confirm_names_each_fate_and_sends_only_on_the_typed_word() {
+        use crate::tui::test_support::{model_with_policy, render_to_string, revert_plan};
+        let revert = pce::write::ObjectKind::Revert;
+        let open = || {
+            let mut m = writes_on(model_with_policy());
+            m.screen = Screen::Policy;
+            update(&mut m, Msg::Planned(Ok((revert_plan(), revert))));
+            m
+        };
+        let mut m = open();
+        let confirm = Overlay::ConfirmWrite {
+            plan: revert_plan(),
+            kind: revert,
+            scroll: 0,
+        };
+        assert_eq!(m.overlay, confirm);
+        assert!(m.status.text.contains("type revert"), "{}", m.status.text);
+        let out = render_to_string(&m, 80, 24);
+        for part in [
+            "Revert these changes?",
+            "ip_list \"Corp\" (removed)",
+            "rule_set \"Global-Infra\" (back to active)",
+            "PUT /orgs/5/sec_policy/delete",
+            "type revert to confirm:",
+        ] {
+            assert!(out.contains(part), "{part}: {out}");
+        }
+        // `y` is a letter here, and a wrong word sends nothing.
+        assert!(update(&mut m, key('y')).is_empty());
+        assert!(update(&mut m, kc(KeyCode::Enter)).is_empty());
+        assert_eq!(m.overlay, confirm, "a wrong word keeps the confirm");
+        update(&mut m, kc(KeyCode::Backspace));
+        for c in "revert".chars() {
+            assert!(update(&mut m, key(c)).is_empty(), "{c}");
+        }
+        assert!(
+            render_to_string(&m, 80, 24).contains("type revert to confirm: revert"),
+            "the word shows as typed"
+        );
+        assert_eq!(
+            update(&mut m, kc(KeyCode::Enter)),
+            vec![Cmd::ExecuteWrite {
+                plan: revert_plan(),
+                kind: revert
+            }]
+        );
+        assert_eq!(m.overlay, Overlay::None);
+        assert!(m.policy.revert_typed.is_empty());
+        // Esc, even after the word, sends nothing; a reopened confirm starts empty.
+        let mut e = open();
+        for c in "revert".chars() {
+            update(&mut e, key(c));
+        }
+        assert!(update(&mut e, kc(KeyCode::Esc)).is_empty());
+        assert_eq!(e.overlay, Overlay::None);
+        assert_eq!(e.status.text, "cancelled, nothing sent");
+        update(&mut e, Msg::Planned(Ok((revert_plan(), revert))));
+        assert!(e.policy.revert_typed.is_empty());
+        assert!(update(&mut e, kc(KeyCode::Enter)).is_empty());
+    }
+
+    #[test]
+    fn a_revert_reloads_rulesets_and_pending_and_keeps_its_report() {
+        use crate::tui::test_support::{model_with_policy, revert_plan};
+        use pce::write::Outcome;
+        let mut m = writes_on(model_with_policy());
+        m.screen = Screen::Policy;
+        let revert = pce::write::ObjectKind::Revert;
+        update(&mut m, Msg::Planned(Ok((revert_plan(), revert))));
+        for c in "revert".chars() {
+            update(&mut m, key(c));
+        }
+        assert_eq!(update(&mut m, kc(KeyCode::Enter)).len(), 1);
+        let cmds = update(
+            &mut m,
+            Msg::WriteDone {
+                kind: revert,
+                method: Some(pce::WriteMethod::Put),
+                result: Ok(Outcome::Written(written(
+                    "/orgs/5/sec_policy/delete",
+                    false,
+                ))),
+            },
+        );
+        assert_eq!(
+            cmds,
+            vec![
+                Cmd::LoadRuleSets {
+                    scope: PolicyScope::Draft,
+                    mode: pce::CacheMode::Bypass
+                },
+                Cmd::LoadPending(pce::CacheMode::Bypass),
+            ]
+        );
+        let report = "reverted ip_lists=1, rule_sets=1";
+        assert_eq!(m.status.text, report);
         update(&mut m, Msg::PendingLoaded(Ok(vec![])));
         assert_eq!(m.status.text, format!("{report}; 0 pending changes left"));
         assert_eq!(m.overlay, Overlay::Pending);

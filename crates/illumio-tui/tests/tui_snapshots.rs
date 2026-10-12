@@ -892,7 +892,7 @@ fn pending_marks_and_provision_confirm_80x24() {
     assert!(out.contains("[ ] rule_sets"), "{out}");
     assert!(out.contains("2/2 · 1 marked"), "{out}");
     assert!(
-        out.contains("j/k select · Space mark · Enter diff · P provision · Esc"),
+        out.contains("j/k select · Space mark · Enter diff · P provision · R revert · Esc"),
         "{out}"
     );
     insta::assert_snapshot!("policy_pending_marks_80x24", out);
@@ -918,6 +918,36 @@ fn pending_marks_and_provision_confirm_80x24() {
     c.set_theme("light");
     insta::assert_snapshot!(
         "confirm_provision_light_styled_80x24",
+        render_styled(&c, 80, 24)
+    );
+}
+
+#[test]
+fn confirm_revert_80x24() {
+    use illumio_tui::tui::model::{Overlay, Screen, WritesState};
+    use illumio_tui::tui::test_support::revert_plan;
+    let mut c = model_with_policy();
+    c.writes = WritesState::on();
+    c.screen = Screen::Policy;
+    c.overlay = Overlay::ConfirmWrite {
+        plan: revert_plan(),
+        kind: pce::write::ObjectKind::Revert,
+        scroll: 0,
+    };
+    c.policy.revert_typed = "rev".into();
+    let out = render_to_string(&c, 80, 24);
+    assert!(out.contains("revert 2 changes:"), "{out}");
+    assert!(out.contains("  ip_list \"Corp\" (removed)"), "{out}");
+    assert!(
+        out.contains("  rule_set \"Global-Infra\" (back to active)"),
+        "{out}"
+    );
+    assert!(out.contains("type revert to confirm: rev"), "{out}");
+    assert!(out.contains("PUT /orgs/5/sec_policy/delete"), "{out}");
+    insta::assert_snapshot!("confirm_revert_80x24", out);
+    c.set_theme("light");
+    insta::assert_snapshot!(
+        "confirm_revert_light_styled_80x24",
         render_styled(&c, 80, 24)
     );
 }

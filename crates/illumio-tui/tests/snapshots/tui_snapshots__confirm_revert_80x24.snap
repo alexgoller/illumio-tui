@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui ✎ writes · pce.example · org 5 ●             api 5 calls · 20.8 KB
+  ╭ Revert these changes? ────────────────── type revert, Enter · Esc cancel ╮
+╭ │revert 2 changes:                                                         │ ╮
+│ │  ip_list "Corp" (removed)                                                │g│
+│▸│  rule_set "Global-Infra" (back to active)                                │ │
+│ │type revert to confirm: rev▏                                              │ │
+│ │PUT /orgs/5/sec_policy/delete                                             │ │
+│ │                                                                          │ │
+╰─│{                                                                         │─╯
+╭ │  "change_subset": {                                                      │─╮
+│ │    "ip_lists": [                                                         │ │
+│▸│      {                                                                   │-│
+│ │        "href": "/orgs/5/sec_policy/draft/ip_lists/21"                    │-│
+│ │      }                                                                   │-│
+│ │    ],                                                                    │-│
+│ │    "rule_sets": [                                                        │ │
+│ │      {                                                                   │ │
+│ │        "href": "/orgs/5/sec_policy/draft/rule_sets/101"                  │ │
+│ │      }                                                                   │ │
+│ │    ]                                                                     │ │
+│ │  }                                                                       │ │
+│ │}                                                                         │ │
+╰─╰──────────────────────────────────────────────────────────────────────────╯─╯
+ready                   n/N:new e:edit x:del  d scope  p pending  : cmd  ? help

@@ -644,6 +644,8 @@ async fn plan_intent(
         }
         // One pending GET past the cache, then the explicit change subset.
         WriteIntent::Provision(req) => w.plan_provision(&req).await?,
+        // The same read; the summary names each object and its fate.
+        WriteIntent::Revert(req) => w.plan_revert(&req).await?,
     };
     Ok((plan, kind))
 }

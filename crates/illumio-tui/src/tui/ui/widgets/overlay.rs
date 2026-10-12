@@ -8,8 +8,9 @@ use crate::tui::ui::layout::centered;
 use crate::tui::ui::screens::workloads::plain;
 use crate::tui::ui::theme::Theme;
 use crate::tui::ui::widgets::panel::panel;
+use crate::tui::update::REVERT_WORD;
 use pce::RuleView;
-use pce::write::{Plan, WriteRequest};
+use pce::write::{ObjectKind, Plan, WriteRequest};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -131,6 +132,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "Pending  P",
         "provision the marked entries, or all (writes)",
     ),
+    ("Pending  R", "revert the marked entries to active (writes)"),
     ("y / n", "send / cancel a shown request"),
     ("Esc", "close overlay / cancel"),
 ];
@@ -555,31 +557,73 @@ pub fn render_confirm(model: &Model, reason: &str, f: &mut Frame, area: Rect) {
 
 /// Widest the confirm box gets; borders take two of these columns.
 const CONFIRM_WIDTH: u16 = 76;
-/// Rows around the body: borders, the summary, `METHOD path`, a blank line.
-const CONFIRM_CHROME: u16 = 5;
+/// Rows around the body and the summary: borders, `METHOD path`, a blank
+/// line.
+const CONFIRM_CHROME: u16 = 4;
 
-/// The confirm box in `area`, the request body wrapped to its inner width
-/// (the box is the dry run: nothing may be clipped), and how many body rows
-/// fit. `extra` rows sit above the body (the impact line of a rule plan).
-/// Shared by the renderer and the scroll keys so they cannot drift.
-fn confirm_write_layout(req: &WriteRequest, area: Rect, extra: u16) -> (Rect, Vec<String>, usize) {
+/// Rows between the summary and the body: the impact line of a rule plan,
+/// the typed word of a revert.
+fn confirm_extra_rows(plan: &Plan, kind: ObjectKind) -> u16 {
+    crate::tui::impact::confirm_rows(plan) + u16::from(kind == ObjectKind::Revert)
+}
+
+/// The summary as the box shows it. A revert's
+/// (`revert 2 changes: ip_list "Corp" (removed), rule_set ... (back to active)`)
+/// lists one object and its fate per line under its head.
+fn summary_lines(summary: &str, kind: ObjectKind) -> Vec<String> {
+    let summary = plain(summary);
+    match summary.split_once(": ") {
+        Some((head, items)) if kind == ObjectKind::Revert => {
+            let mut lines = vec![format!("{head}:")];
+            let mut rest = items;
+            while let Some((item, tail)) = rest.split_once("), ") {
+                lines.push(format!("  {item})"));
+                rest = tail;
+            }
+            lines.push(format!("  {rest}"));
+            lines
+        }
+        _ => vec![summary],
+    }
+}
+
+/// The confirm box in `area`, the summary and the request body wrapped to
+/// its inner width (the box is the dry run: nothing may be clipped; a
+/// revert's summary names every object), and how many body rows fit.
+/// Extra rows ([`confirm_extra_rows`]) sit above the body. Shared by the
+/// renderer and the scroll keys so they cannot drift.
+fn confirm_write_layout(
+    req: &WriteRequest,
+    kind: ObjectKind,
+    area: Rect,
+    extra: u16,
+) -> (Rect, Vec<String>, Vec<String>, usize) {
     let width = usize::from(CONFIRM_WIDTH.min(area.width).saturating_sub(2));
+    let summary: Vec<String> = summary_lines(&req.summary, kind)
+        .iter()
+        .flat_map(|l| wrap_chars(l, width))
+        .collect();
     let body: Vec<String> = crate::tui::edit::request_body_lines(req)
         .iter()
         .flat_map(|l| wrap_chars(&plain(l), width))
         .collect();
-    let chrome = CONFIRM_CHROME + extra;
+    let chrome = CONFIRM_CHROME
+        .saturating_add(u16::try_from(summary.len()).unwrap_or(u16::MAX))
+        .saturating_add(extra);
     let height = u16::try_from(body.len())
         .unwrap_or(u16::MAX)
         .saturating_add(chrome);
     let r = centered(area, CONFIRM_WIDTH, height);
     let rows = usize::from(r.height.saturating_sub(chrome));
-    (r, body, rows)
+    (r, summary, body, rows)
 }
 
 /// The first wrapped body line shown when scrolled to the end.
-pub fn confirm_write_last_scroll(req: &WriteRequest, area: Rect, extra: u16) -> usize {
-    let (_, body, rows) = confirm_write_layout(req, area, extra);
+pub fn confirm_write_last_scroll(plan: &Plan, kind: ObjectKind, area: Rect) -> usize {
+    let Some(req) = plan.request() else {
+        return 0;
+    };
+    let (_, _, body, rows) = confirm_write_layout(req, kind, area, confirm_extra_rows(plan, kind));
     body.len().saturating_sub(rows)
 }
 
@@ -592,25 +636,42 @@ fn wrap_chars(line: &str, width: usize) -> Vec<String> {
     chars.chunks(width).map(|c| c.iter().collect()).collect()
 }
 
-pub fn render_confirm_write(model: &Model, plan: &Plan, scroll: u16, f: &mut Frame, area: Rect) {
+pub fn render_confirm_write(
+    model: &Model,
+    plan: &Plan,
+    kind: ObjectKind,
+    scroll: u16,
+    f: &mut Frame,
+    area: Rect,
+) {
     let t = &model.theme;
     let Some(req) = plan.request() else {
         return;
     };
-    let extra = crate::tui::impact::confirm_rows(plan);
-    let (r, body, rows) = confirm_write_layout(req, area, extra);
+    let revert = kind == ObjectKind::Revert;
+    let extra = confirm_extra_rows(plan, kind);
+    let (r, summary, body, rows) = confirm_write_layout(req, kind, area, extra);
     f.render_widget(Clear, r);
     let first = (scroll as usize).min(body.len().saturating_sub(rows));
-    let meta = if body.len() > rows {
-        "j/k scroll · y send · n cancel"
-    } else {
-        "y send · n cancel"
+    let meta = match (revert, body.len() > rows) {
+        (true, true) => "↑/↓ scroll · type revert, Enter · Esc cancel",
+        (true, false) => "type revert, Enter · Esc cancel",
+        (false, true) => "j/k scroll · y send · n cancel",
+        (false, false) => "y send · n cancel",
     };
-    let mut lines = vec![Line::from(Span::styled(
-        plain(&req.summary),
-        Style::new().fg(t.warn),
-    ))];
-    if extra > 0 {
+    let mut lines: Vec<Line> = summary
+        .into_iter()
+        .map(|l| Line::from(Span::styled(l, Style::new().fg(t.warn))))
+        .collect();
+    if revert {
+        lines.push(Line::from(vec![
+            Span::styled(format!("type {REVERT_WORD} to confirm: "), t.header_style()),
+            Span::styled(
+                format!("{}▏", plain(&model.policy.revert_typed)),
+                Style::new().fg(t.accent),
+            ),
+        ]));
+    } else if extra > 0 {
         // Stored when the confirm opened or the workloads loaded.
         let impact = model.policy.confirm_impact.clone().unwrap_or_default();
         lines.push(Line::from(Span::styled(impact, Style::new().fg(t.accent))));
@@ -628,7 +689,16 @@ pub fn render_confirm_write(model: &Model, plan: &Plan, scroll: u16, f: &mut Fra
     );
     f.render_widget(
         Paragraph::new(lines)
-            .block(panel("Send this request?", meta, t, true))
+            .block(panel(
+                if revert {
+                    "Revert these changes?"
+                } else {
+                    "Send this request?"
+                },
+                meta,
+                t,
+                true,
+            ))
             .style(t.base()),
         r,
     );
@@ -731,7 +801,7 @@ pub fn render_rule_detail(model: &Model, rule: &RuleView, f: &mut Frame, area: R
 }
 
 /// The pending overlay's key line, the last row inside its box.
-const PENDING_KEYS: &str = "j/k select · Space mark · Enter diff · P provision · Esc";
+const PENDING_KEYS: &str = "j/k select · Space mark · Enter diff · P provision · R revert · Esc";
 
 pub fn render_pending(model: &Model, f: &mut Frame, area: Rect) {
     let t = &model.theme;

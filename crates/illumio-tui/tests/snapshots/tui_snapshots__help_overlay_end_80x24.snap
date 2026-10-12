@@ -2,8 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ Keys ───────────────────────────────── 23-44 of 44 · j/k scroll · Esc closes ╮
-│Sections Space / z       fold a section · fold or unfold all (also Blocked)   │
+╭ Keys ───────────────────────────────── 24-45 of 45 · j/k scroll · Esc closes ╮
 │Mesh     u / p           show or hide the user · process columns              │
 │Treemap  hjkl Enter b    move · zoom, then drill · conns/bytes · Esc out      │
 │Traffic  w               draft allow rule from a blocked flow or row (writes) │
@@ -23,6 +22,7 @@ expression: out
 │n / e / x (writes)       new/edit/delete: Objects, IP lists, Workloads, Policy│
 │Pending  j/k Space Enter select · mark · diff of a pending entry              │
 │Pending  P               provision the marked entries, or all (writes)        │
+│Pending  R               revert the marked entries to active (writes)         │
 │y / n                    send / cancel a shown request                        │
 │Esc                      close overlay / cancel                               │
 ╰──────────────────────────────────────────────────────────────────────────────╯

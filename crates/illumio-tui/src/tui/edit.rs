@@ -14,9 +14,9 @@ use pce::models::{
 use pce::traffic::{ResolvedEndpoint, ResolvedFlow};
 use pce::write::{
     ActorKind, ActorRef, DenyRuleDraft, DenyRulePatch, InterfaceSpec, IpListDraft, IpListPatch,
-    IpRangeSpec, LabelDraft, PortSpec, ProvisionRequest, RuleDraft, RulePatch, RuleSetDraft,
-    RuleSetPatch, ServiceDraft, ServicePatch, ServiceRef, WorkloadDraft, WorkloadPatch,
-    WriteRequest, checked_policy_href,
+    IpRangeSpec, LabelDraft, PortSpec, ProvisionRequest, RevertRequest, RuleDraft, RulePatch,
+    RuleSetDraft, RuleSetPatch, ServiceDraft, ServicePatch, ServiceRef, WorkloadDraft,
+    WorkloadPatch, WriteRequest, checked_policy_href,
 };
 use pce::{KeyOrder, NameIndex, ResolvedLabel};
 use std::borrow::Cow;
@@ -159,6 +159,8 @@ pub enum WriteIntent {
     },
     /// `P` in the pending overlay: the marked entries, or everything.
     Provision(ProvisionRequest),
+    /// `R` in the pending overlay: the marked entries, never everything.
+    Revert(RevertRequest),
 }
 
 impl WriteIntent {
@@ -186,6 +188,7 @@ impl WriteIntent {
             | WriteIntent::UpdateDenyRule { .. }
             | WriteIntent::DeleteDenyRule { .. } => pce::write::ObjectKind::DenyRule,
             WriteIntent::Provision(_) => pce::write::ObjectKind::Provision,
+            WriteIntent::Revert(_) => pce::write::ObjectKind::Revert,
         }
     }
 }
