@@ -12,8 +12,8 @@ pub mod steps;
 pub mod treemap;
 
 pub use aggregate::{
-    BLOCKED_NAMES, BlockedGroup, Dominant, FlowGroup, blocked_summary, compact_count, dominant,
-    group_by_labels, group_key, group_text, group_values, keys_or_default, keys_seen,
+    Dominant, FlowGroup, compact_count, dominant, group_by_labels, group_key, group_text,
+    group_values, keys_or_default, keys_seen,
 };
 pub use filter::{FilterExpr, resolve_actor};
 pub use merge::merge_flows;

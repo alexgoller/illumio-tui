@@ -582,52 +582,104 @@ mod tests {
         }
     }
     #[test]
-    fn in_with_blocked_reproduces_the_blocked_summary() {
-        use crate::KeyOrder;
-        use crate::traffic::aggregate::blocked_summary;
-        let f = rich_flows();
-        let k = app_env();
-        let old = blocked_summary(&f, &k, &KeyOrder::default());
-        let new = app_sections(&f, &k, Direction::In, Decisions::Blocked);
-        let rows: usize = new.iter().map(|s| s.rows.len()).sum();
-        assert!(rows >= old.len());
-        let mut covered = 0;
-        for b in &old {
-            let sec = new
-                .iter()
-                .find(|s| s.app == b.dst_group)
-                .unwrap_or_else(|| panic!("a section for {:?}", b.dst_group));
-            let rows: Vec<&PeerRow> = sec
-                .rows
-                .iter()
-                .filter(|r| r.service == b.service_text())
-                .collect();
-            covered += rows.len();
-            assert_eq!(rows.iter().map(|r| r.flows).sum::<u64>(), b.flows);
-            assert_eq!(
-                rows.iter().map(|r| r.connections).sum::<u64>(),
-                b.connections
-            );
-            let sources: BTreeSet<String> = rows.iter().map(|r| r.peer_text()).collect();
-            assert_eq!(
-                sources,
-                b.sources.iter().cloned().collect(),
-                "{:?}",
-                b.dst_group
-            );
-            assert_eq!(sources.len() as u64, b.source_count);
-            let names: BTreeSet<String> = rows
-                .iter()
-                .flat_map(|r| r.app_names.iter().cloned())
-                .collect();
-            assert_eq!(names, b.dst_names.iter().cloned().collect());
-            assert_eq!(names.len() as u64, b.dst_hosts);
-            let last = rows.iter().map(|r| r.last_detected.clone()).max().flatten();
-            assert_eq!(last, b.last_detected);
-            if rows.len() == 1 {
-                assert_eq!(rows[0].app_name_text(), b.dst_name_text());
-            }
+    fn in_with_blocked_keeps_every_fact_the_old_blocked_view_showed() {
+        // What `blocked_summary` reported for the rich fixture (proven equal
+        // to these sections before it was removed): per destination group
+        // and service, flows, connections, sources and the host.
+        let s = app_sections(&rich_flows(), &app_env(), Direction::In, Decisions::Blocked);
+        let facts =
+            |app: &[&str], service: &str| -> (u64, u64, BTreeSet<String>, BTreeSet<String>) {
+                let rows: Vec<&PeerRow> = s
+                    .iter()
+                    .find(|s| s.app == keys(app))
+                    .unwrap()
+                    .rows
+                    .iter()
+                    .filter(|r| r.service == service)
+                    .collect();
+                (
+                    rows.iter().map(|r| r.flows).sum(),
+                    rows.iter().map(|r| r.connections).sum(),
+                    rows.iter().map(|r| r.peer_text()).collect(),
+                    rows.iter().flat_map(|r| r.app_names.clone()).collect(),
+                )
+            };
+        let set = |v: &[&str]| -> BTreeSet<String> { v.iter().map(|s| s.to_string()).collect() };
+        assert_eq!(
+            facts(&["shop", "prod"], "5432/tcp"),
+            (
+                3,
+                24,
+                set(&["hr/prod", "shop/dev", "ipl:Corp/-"]),
+                set(&["shop-db-p.example"])
+            )
+        );
+        let erp: Vec<u64> = ["8443/tcp", "1521/tcp", "22/tcp"]
+            .iter()
+            .map(|svc| facts(&["erp", "prod"], svc).1)
+            .collect();
+        assert_eq!(erp, vec![79, 19, 4]);
+        let rows: usize = s.iter().map(|s| s.rows.len()).sum();
+        assert_eq!(rows, 14, "the 10 old rows, split by source");
+        let newest = s
+            .iter()
+            .flat_map(|s| &s.rows)
+            .filter_map(|r| r.last_detected.clone())
+            .max();
+        assert_eq!(newest.as_deref(), Some("2026-10-10T07:26:00Z"));
+        let corp = s.iter().find(|s| s.app == keys(&["hr", "prod"])).unwrap();
+        assert_eq!(corp.rows[0].peer_text(), "ipl:Corp/-");
+        assert_eq!(corp.rows[0].app_name_text(), "hr-web-p.example");
+    }
+
+    #[test]
+    fn names_stop_at_five_while_the_host_counts_keep_going() {
+        let mut many = rich_flows();
+        let template = many[12].clone(); // hr/prod -> shop-db-p 5432 potentially blocked
+        for i in 0..7 {
+            let mut f = template.clone();
+            f.dst.hostname = Some(format!("db-{i}.example"));
+            f.src.hostname = Some(format!("src-{i}.example"));
+            many.push(f);
         }
-        assert_eq!(covered, rows, "every row stands for part of a Blocked row");
+        let s = app_sections(&many, &app_env(), Direction::In, Decisions::Blocked);
+        let row = s
+            .iter()
+            .find(|s| s.app == keys(&["shop", "prod"]))
+            .unwrap()
+            .rows
+            .iter()
+            .find(|r| r.peer == keys(&["hr", "prod"]))
+            .unwrap();
+        assert_eq!((row.peer_names.len(), row.peer_hosts), (PEER_NAMES, 8));
+        assert_eq!((row.app_names.len(), row.app_hosts), (PEER_NAMES, 8));
+        assert_eq!(row.peer_name_text(), "8 hosts");
+        assert_eq!(row.app_name_text(), "8 hosts");
+        let k = app_env();
+        assert!(many.iter().any(|f| in_peer(
+            f,
+            &k,
+            &row_app(),
+            Direction::In,
+            &row.peer,
+            &row.service,
+            Decisions::Blocked
+        )));
+        assert!(
+            !in_peer(
+                &many[0],
+                &k,
+                &row_app(),
+                Direction::In,
+                &row.peer,
+                &row.service,
+                Decisions::Blocked
+            ),
+            "an allowed flow is never behind a blocked row"
+        );
+    }
+
+    fn row_app() -> Vec<String> {
+        keys(&["shop", "prod"])
     }
 }

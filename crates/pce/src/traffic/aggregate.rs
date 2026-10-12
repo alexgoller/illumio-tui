@@ -1,6 +1,6 @@
 //! Pure aggregations over resolved flows. The TUI's views and the CLI's
-//! `--group` / `--blocked` / `groups` use these; no requests.
-use super::resolved::{ResolvedEndpoint, ResolvedFlow, service_text};
+//! `--group` / `groups` use these (`sections` builds on them); no requests.
+use super::resolved::{ResolvedEndpoint, ResolvedFlow};
 use crate::key_order::KeyOrder;
 use crate::models::PolicyDecision;
 use serde::Serialize;
@@ -171,144 +171,6 @@ pub fn group_by_labels(flows: &[ResolvedFlow], keys: &[String]) -> Vec<FlowGroup
     out
 }
 
-/// At most this many names in `BlockedGroup::dst_names` and `sources`.
-pub const BLOCKED_NAMES: usize = 5;
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct BlockedGroup {
-    /// The first destination's display name (kept for existing consumers).
-    pub dst: String,
-    /// The first destination's labels, `app=shop env=prod`.
-    pub dst_labels: String,
-    /// The destination group the row stands for (`group_key` of the keys).
-    pub dst_group: Vec<String>,
-    /// Distinct destination display names, at most 5.
-    pub dst_names: Vec<String>,
-    /// Distinct destinations behind the row, uncapped.
-    pub dst_hosts: u64,
-    pub port: Option<u16>,
-    pub proto: String,
-    pub flows: u64,
-    pub connections: u64,
-    /// Distinct source group texts (`shop/prod`, `ipl:Corp/-`), at most 5.
-    pub sources: Vec<String>,
-    /// Distinct source groups behind the row, uncapped.
-    pub source_count: u64,
-    pub last_detected: Option<String>,
-}
-
-impl BlockedGroup {
-    /// Whether `f` is one of this row's flows under `keys`.
-    pub fn contains(&self, f: &ResolvedFlow, keys: &[String]) -> bool {
-        is_blocked(f) && blocked_key(f, &keys_or_default(keys)) == self.key()
-    }
-
-    fn key(&self) -> BlockedKey {
-        (self.dst_group.clone(), self.port, self.proto.clone())
-    }
-
-    /// The destination group as text, `shop/prod`.
-    pub fn dst_group_text(&self) -> String {
-        self.dst_group.join("/")
-    }
-
-    /// The destination's name when the row has one host, else `N hosts`.
-    pub fn dst_name_text(&self) -> String {
-        match self.dst_names.as_slice() {
-            [one] if self.dst_hosts <= 1 => one.clone(),
-            _ => format!("{} hosts", self.dst_hosts),
-        }
-    }
-
-    /// `5432/tcp`, or just `icmp` when there is no port.
-    pub fn service_text(&self) -> String {
-        service_text(self.port, &self.proto)
-    }
-
-    /// `shop/dev, hr/prod +3`: the first source groups, then how many more.
-    pub fn sources_text(&self) -> String {
-        let mut s = self.sources.join(", ");
-        let more = self.source_count.saturating_sub(self.sources.len() as u64);
-        if more > 0 {
-            s.push_str(&format!(" +{more}"));
-        }
-        s
-    }
-}
-
-fn is_blocked(f: &ResolvedFlow) -> bool {
-    matches!(
-        f.policy_decision,
-        PolicyDecision::Blocked | PolicyDecision::PotentiallyBlocked
-    )
-}
-
-/// `(destination group, port, protocol)`: what a blocked row stands for.
-type BlockedKey = (Vec<String>, Option<u16>, String);
-
-fn blocked_key(f: &ResolvedFlow, keys: &[String]) -> BlockedKey {
-    (group_key(&f.dst, keys), f.port, f.proto.clone())
-}
-
-/// Blocked and potentially blocked flows grouped by destination group,
-/// port and protocol; newest first, then by destination group.
-/// `dst_labels` leaves out the keys `order` does not show.
-pub fn blocked_summary(
-    flows: &[ResolvedFlow],
-    keys: &[String],
-    order: &KeyOrder,
-) -> Vec<BlockedGroup> {
-    let keys = keys_or_default(keys);
-    type Seen = (BTreeSet<String>, BTreeSet<String>);
-    let mut map: BTreeMap<BlockedKey, (BlockedGroup, Seen)> = BTreeMap::new();
-    for f in flows.iter().filter(|f| is_blocked(f)) {
-        let key = blocked_key(f, &keys);
-        let (g, (hosts, srcs)) = map.entry(key.clone()).or_insert_with(|| {
-            (
-                BlockedGroup {
-                    dst: f.dst.display_name(),
-                    dst_labels: f.dst.label_text(order),
-                    dst_group: key.0.clone(),
-                    dst_names: Vec::new(),
-                    dst_hosts: 0,
-                    port: f.port,
-                    proto: f.proto.clone(),
-                    flows: 0,
-                    connections: 0,
-                    sources: Vec::new(),
-                    source_count: 0,
-                    last_detected: None,
-                },
-                (BTreeSet::new(), BTreeSet::new()),
-            )
-        });
-        g.flows += 1;
-        g.connections += f.num_connections;
-        let name = f.dst.display_name();
-        if !g.dst_names.contains(&name) && g.dst_names.len() < BLOCKED_NAMES {
-            g.dst_names.push(name.clone());
-        }
-        hosts.insert(name);
-        g.dst_hosts = hosts.len() as u64;
-        let src = group_key(&f.src, &keys).join("/");
-        if !g.sources.contains(&src) && g.sources.len() < BLOCKED_NAMES {
-            g.sources.push(src.clone());
-        }
-        srcs.insert(src);
-        g.source_count = srcs.len() as u64;
-        if f.last_detected > g.last_detected {
-            g.last_detected = f.last_detected.clone();
-        }
-    }
-    let mut out: Vec<BlockedGroup> = map.into_values().map(|(g, _)| g).collect();
-    out.sort_by(|a, b| {
-        b.last_detected
-            .cmp(&a.last_detected)
-            .then_with(|| a.dst_group.cmp(&b.dst_group))
-    });
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -416,18 +278,6 @@ mod tests {
     }
 
     #[test]
-    fn blocked_summary_dst_labels_hide_ignored_keys() {
-        let order = KeyOrder::default().with_ignored(&keys(&["env"]));
-        let b = blocked_summary(&flows(), &keys(&["app", "env"]), &order);
-        assert_eq!(b[1].dst_labels, "app=shop role=db");
-        assert_eq!(
-            b[1].dst_group,
-            vec!["shop", "prod"],
-            "grouping still sees env"
-        );
-    }
-
-    #[test]
     fn rich_groups_sum_bytes_and_count_unknown_only_in_flows() {
         let groups = group_by_labels(&rich_flows(), &keys(&["app", "env"]));
         assert_eq!(groups.len(), 21);
@@ -473,118 +323,11 @@ mod tests {
     }
 
     #[test]
-    fn blocked_summary_groups_by_destination_and_port() {
-        let b = blocked_summary(&flows(), &keys(&["app", "env"]), &KeyOrder::default());
-        assert_eq!(b.len(), 2);
-        assert_eq!(b[0].dst, "host-1.example");
-        assert_eq!(b[0].dst_group, vec!["shop", "prod"]);
-        assert_eq!(b[0].port, Some(8443));
-        assert_eq!(b[0].proto, "tcp");
-        assert_eq!(b[0].sources, vec!["ipl:Corp/-"]);
-        assert_eq!(b[0].last_detected.as_deref(), Some("2026-10-10T07:30:58Z"));
-        assert_eq!(b[1].dst, "host-2.example");
-        assert_eq!(b[1].dst_labels, "app=shop env=prod role=db");
-        assert_eq!(b[1].proto, "icmp");
-        assert_eq!(b[1].connections, 3);
-        assert_eq!(b[1].sources, vec!["unmanaged-nas/-"]);
-    }
-
-    #[test]
-    fn a_blocked_row_names_one_host_or_counts_them_and_counts_more_sources() {
-        let b = blocked_summary(&rich_flows(), &keys(&["app", "env"]), &KeyOrder::default());
-        let shop = b
-            .iter()
-            .find(|r| r.dst_group == vec!["shop", "prod"])
-            .unwrap();
-        assert_eq!(shop.dst_group_text(), "shop/prod");
-        assert_eq!(shop.dst_name_text(), "shop-db-p.example");
-        assert_eq!(shop.service_text(), "5432/tcp");
-        assert_eq!(shop.sources_text(), "hr/prod, shop/dev, ipl:Corp/-");
-        let mut many = shop.clone();
-        many.dst_hosts = 8;
-        many.source_count = 10;
-        many.sources = vec!["a".into(), "b".into(), "c".into(), "d".into(), "e".into()];
-        assert_eq!(many.dst_name_text(), "8 hosts");
-        assert_eq!(many.sources_text(), "a, b, c, d, e +5");
-        many.port = None;
-        many.proto = "icmp".into();
-        assert_eq!(many.service_text(), "icmp");
-    }
-
-    #[test]
-    fn blocked_summary_groups_by_the_destination_group_and_caps_the_names() {
-        let k = keys(&["app", "env"]);
-        let b = blocked_summary(&rich_flows(), &k, &KeyOrder::default());
-        assert_eq!(b.len(), 10);
-        let shop = b
-            .iter()
-            .find(|r| r.dst_group == vec!["shop", "prod"])
-            .unwrap();
-        assert_eq!(
-            (shop.port, shop.flows, shop.connections),
-            (Some(5432), 3, 24)
-        );
-        assert_eq!(shop.dst_names, vec!["shop-db-p.example"]);
-        assert_eq!(shop.dst_hosts, 1);
-        assert_eq!(shop.sources, vec!["hr/prod", "shop/dev", "ipl:Corp/-"]);
-        assert_eq!(shop.source_count, 3);
-        let erp: Vec<(Option<u16>, u64)> = b
-            .iter()
-            .filter(|r| r.dst_group == vec!["erp", "prod"])
-            .map(|r| (r.port, r.connections))
-            .collect();
-        assert_eq!(erp, vec![(Some(8443), 79), (Some(1521), 19), (Some(22), 4)]);
-        assert_eq!(b[0].last_detected.as_deref(), Some("2026-10-10T07:26:00Z"));
-        assert!(
-            b.windows(2)
-                .all(|w| w[0].last_detected >= w[1].last_detected),
-            "newest first"
-        );
-        // Seven more shop/prod hosts on 5432/tcp from seven new source apps: names stop at five while the counts keep going.
-        let mut many = rich_flows();
-        let template = many[12].clone(); // hr/prod -> shop-db-p 5432 potentially blocked
-        for i in 0..7 {
-            let mut f = template.clone();
-            f.dst.hostname = Some(format!("db-{i}.example"));
-            f.src.hostname = Some(format!("src-{i}.example"));
-            f.src.labels.retain(|l| l.key != "app");
-            f.src.labels.push(crate::resolve::ResolvedLabel {
-                href: format!("/orgs/5/labels/9{i}"),
-                key: "app".into(),
-                value: format!("app{i}"),
-            });
-            many.push(f);
-        }
-        let b = blocked_summary(&many, &k, &KeyOrder::default());
-        let row = b
-            .iter()
-            .find(|r| r.dst_group == vec!["shop", "prod"])
-            .unwrap();
-        assert_eq!(row.dst_names.len(), 5);
-        assert_eq!(row.dst_hosts, 8);
-        assert_eq!(row.sources.len(), 5);
-        assert_eq!(row.source_count, 10);
-        let first = many
-            .iter()
-            .find(|f| row.contains(f, &k))
-            .expect("a flow behind the row");
-        assert_eq!(first.dst.display_name(), "shop-db-p.example");
-        assert!(
-            !row.contains(&many[0], &k),
-            "an allowed flow is never behind a blocked row"
-        );
-    }
-
-    #[test]
     fn empty_keys_fall_back_to_app_and_env() {
         assert_eq!(keys_or_default(&[]), keys(&["app", "env"]));
         assert_eq!(
             group_by_labels(&flows(), &[]),
             group_by_labels(&flows(), &keys(&["app", "env"]))
-        );
-        assert_eq!(
-            blocked_summary(&flows(), &[], &KeyOrder::default()),
-            blocked_summary(&flows(), &keys(&["app", "env"]), &KeyOrder::default())
         );
         assert_eq!(compact_count(999), "999");
         assert_eq!(compact_count(1_234), "1.2K");
