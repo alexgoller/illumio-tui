@@ -25,4 +25,4 @@ expression: out
 │                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-cap 30 covers f filter  r run  a auto  v view  g group  / search  : cmd  ? help
+cap 30 covers ~4 minutes of 1d: ] raises the cap, B backfills the window ? help

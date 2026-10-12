@@ -1,4 +1,5 @@
-//! Bottom status line: query/connection state on the left, key hints right.
+//! Bottom status line: query/connection state on the left, key hints right
+//! (only `? help` when a warning or an error needs the room).
 use crate::tui::model::{Model, StatusKind};
 use crate::tui::ui::widgets::overlay::{screen_hint, screen_hint_more};
 use ratatui::Frame;
@@ -19,8 +20,14 @@ pub fn render(model: &Model, f: &mut Frame, area: Rect) {
     };
     let base = screen_hint(model.screen, model.writes.enabled);
     let more = screen_hint_more(model.screen, model.traffic.view);
+    let width = usize::from(area.width);
     let mut hints = format!(" {base}  : cmd  ? help ");
-    if !more.is_empty() && usize::from(area.width) >= hints.len() + more.len() + 2 + STATUS_ROOM {
+    if model.status.kind != StatusKind::Info
+        && model.status.text.chars().count() + hints.chars().count() > width
+    {
+        // A warning or an error says what to do next: it outranks the hints.
+        hints = " ? help ".to_string();
+    } else if !more.is_empty() && width >= hints.len() + more.len() + 2 + STATUS_ROOM {
         hints = format!(" {base}  {more}  : cmd  ? help ");
     }
     let left_width = area.width.saturating_sub(hints.len() as u16) as usize;

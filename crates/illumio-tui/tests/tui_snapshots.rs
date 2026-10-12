@@ -305,6 +305,10 @@ fn traffic_coverage_header_80x24() {
         out.contains(&format!("{n} flows · covers 4m of 1d · truncated")),
         "{out}"
     );
+    assert!(
+        out.lines().last().unwrap().contains("B backfills"),
+        "the warning outranks the key hints at 80 columns: {out}"
+    );
     insta::assert_snapshot!("traffic_coverage_header_80x24", out);
 }
 

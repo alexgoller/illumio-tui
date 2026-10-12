@@ -335,10 +335,19 @@ pub struct TrafficData {
     /// The time range the flows cover, slice by slice; `None` when the
     /// outcome carried no bounds (then `+` runs a full query).
     pub slices: Option<Slices>,
-    /// The slice length of the backfill that filled this data (`+` extends
-    /// by it); `Some` while the data is a backfill, which keeps
-    /// auto-refresh off (a tick would replace it with one truncated query).
-    pub backfill: Option<Duration>,
+    /// Set once a backfill's first slice replaced the truncated result:
+    /// the data is a backfill from then on, which keeps auto-refresh off
+    /// (a tick would replace it with one truncated query).
+    pub backfill: Option<Backfilled>,
+}
+
+/// What a backfill left in `TrafficData`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Backfilled {
+    /// The slice length it ended with: `B` continues and `+` extends by it.
+    pub slice: Duration,
+    /// A merged slice still hit the cap (at 1m).
+    pub cut: bool,
 }
 
 /// How much of its window the loaded data covers.
@@ -346,7 +355,8 @@ pub struct TrafficData {
 pub struct DataCoverage {
     pub covered: Duration,
     pub window: Duration,
-    /// The oldest covered instant: a backfill continues from here.
+    /// The oldest instant measured (a flow's `last_detected`, or where a
+    /// backfill got to).
     pub oldest: Option<jiff::Timestamp>,
 }
 
@@ -372,8 +382,8 @@ impl TrafficData {
         end.checked_sub(span).ok()
     }
 
-    /// A backfill covers its range (`end` back to the oldest slice start);
-    /// any other result what its flows' `last_detected` span.
+    /// A backfill covers what its slices fetched (`end` back to the oldest
+    /// slice start); any other result what its flows' `last_detected` span.
     pub fn coverage(&self) -> Option<DataCoverage> {
         let window = self.filter.window_duration().ok()?;
         if self.backfill.is_some() {
@@ -403,33 +413,66 @@ impl TrafficData {
             .filter(|c| c.oldest.is_some() && c.share() < LOW_COVERAGE)
     }
 
-    /// What `B` would fetch: the rest of a truncated result's window in
-    /// slices sized from its rate, or the rest of a backfill's in its
-    /// slice length. `None` when nothing is left (or the range is unknown).
-    pub fn backfill_plan(&self) -> Option<pce::traffic::BackfillPlan> {
-        let window_start = self.window_start()?;
-        match self.backfill {
-            Some(slice) => {
-                let from = self.slices.as_ref()?.start();
-                let uncovered = pce::traffic::coverage::uncovered(window_start, from)?;
-                Some(pce::traffic::BackfillPlan::with_slice(uncovered, slice))
-            }
-            None => {
-                let window = self.filter.window_duration().ok()?;
-                let c = pce::traffic::coverage(&self.flows, window);
-                pce::traffic::plan_backfill(
-                    &c,
-                    self.truncated,
-                    self.filter.max_results,
-                    window_start,
-                )
-            }
+    /// Where a backfill walks back from: the window end for a truncated
+    /// result (its rows say nothing reliable about any part of the
+    /// window), the oldest slice start for a backfill that stopped.
+    /// Never after the range's end (clock skew).
+    pub fn backfill_from(&self) -> Option<jiff::Timestamp> {
+        let s = self.slices.as_ref()?;
+        let from = if self.backfill.is_some() {
+            s.start()
+        } else {
+            s.end
+        };
+        Some(from.min(s.end))
+    }
+
+    /// A backfill is truncated while its slices do not reach the window
+    /// start, or when one of them was cut.
+    pub fn settle_backfill_truncated(&mut self) {
+        if let Some(b) = self.backfill {
+            let reached = self
+                .window_start()
+                .zip(self.slices.as_ref())
+                .is_some_and(|(w, s)| s.start() <= w);
+            self.truncated = b.cut || !reached;
         }
+    }
+
+    /// What `B` would fetch: a truncated result's whole window, in slices
+    /// sized from its rate at the smallest cap up to `max_cap` that fits
+    /// (`plan_backfill`); a stopped backfill's rest, in its slice length
+    /// and cap. `Err` says why there is nothing to fetch.
+    pub fn backfill_plan(&self, max_cap: u32) -> Result<pce::traffic::BackfillPlan, String> {
+        if let Some(b) = self.backfill {
+            let rest = self
+                .window_start()
+                .zip(self.backfill_from())
+                .and_then(|(w, from)| pce::traffic::coverage::uncovered(w, from));
+            return match rest {
+                Some(span) => Ok(pce::traffic::BackfillPlan::with_slice(
+                    span,
+                    b.slice,
+                    self.filter.max_results,
+                )),
+                None => Err("nothing to backfill: the backfill reaches the window start".into()),
+            };
+        }
+        if !self.truncated {
+            return Err("nothing to backfill: the result is complete".into());
+        }
+        let window = self.filter.window_duration().map_err(|e| e.to_string())?;
+        let c = pce::traffic::coverage(&self.flows, window);
+        self.window_start()
+            .and_then(|_| {
+                pce::traffic::plan_backfill(&c, true, self.filter.max_results, max_cap, window)
+            })
+            .ok_or_else(|| "cannot measure coverage: no last-seen times".into())
     }
 
     /// The Result header's coverage part: `covers 4m of 24h · truncated`
     /// for a low-coverage result; `24h · 10 slices` or `covers 23h of 24h
-    /// · 10 slices` for a backfill. `None` otherwise.
+    /// · 10 slices · truncated` for a backfill. `None` otherwise.
     pub fn coverage_meta(&self) -> Option<String> {
         let window = &self.filter.window;
         if self.backfill.is_some() {
@@ -457,11 +500,15 @@ impl TrafficData {
     }
 }
 
-/// A backfill in flight: the walk, `Esc` asking it to stop after the
-/// running slice, and whether the profile's opt-in started it.
+/// A backfill in flight: the walk, the filter its slices use (at the
+/// plan's cap), `Esc` asking it to stop after the running slice, and
+/// whether the profile's opt-in started it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActiveBackfill {
     pub run: pce::traffic::BackfillRun,
+    pub filter: TrafficFilter,
+    /// The first slice replaces the truncated result instead of merging.
+    pub replace: bool,
     pub cancel: bool,
     pub auto: bool,
     /// Why the slice length changed (a truncated slice halved it).
@@ -469,12 +516,13 @@ pub struct ActiveBackfill {
 }
 
 impl ActiveBackfill {
-    /// `slice 3 of 9`: the running slice (retries count as the same one).
+    /// `slice 3 of 9`: the running slice (retries count as the same one)
+    /// of this run (at most `MAX_SLICES`).
     pub fn progress(&self) -> String {
         format!(
             "slice {} of {}",
             self.run.done + 1,
-            self.run.total().max(self.run.done + 1)
+            self.run.batch_total().max(self.run.done + 1)
         )
     }
 

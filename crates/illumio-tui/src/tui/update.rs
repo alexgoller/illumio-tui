@@ -1665,7 +1665,7 @@ fn widen_backfill(model: &mut Model, cur: std::time::Duration) -> Option<Vec<Cmd
         .data
         .as_ref()
         .filter(|d| d.filter == model.traffic.filter)?;
-    let slice = d.backfill?;
+    let slice = d.backfill?.slice;
     let s = d.slices.as_ref()?;
     let span = jiff::Span::try_from(slice).ok()?;
     let end = s.start();
@@ -1698,20 +1698,75 @@ fn low_coverage_status(model: &Model) -> Option<StatusLine> {
         pce::traffic::approx_duration(c.covered),
         d.filter.window
     );
-    Some(StatusLine::warn(match d.backfill_plan() {
-        Some(p) if p.too_many() => format!(
-            "{lead}; a backfill needs {} slices of {} (limit {})",
-            p.count,
-            pce::traffic::compact_duration(p.slice),
-            pce::traffic::MAX_SLICES
-        ),
-        Some(p) => format!("{lead}, B backfills the rest in {} slices", p.count),
-        None => lead,
-    }))
+    Some(StatusLine::warn(
+        match d.backfill_plan(model.limits.traffic_max_results) {
+            Ok(p) => {
+                let at = if p.cap > d.filter.max_results {
+                    format!(" at cap {}", p.cap)
+                } else {
+                    String::new()
+                };
+                if p.partial() {
+                    format!(
+                        "{lead}, B backfills the newest {} in {} slices{at}",
+                        pce::traffic::compact_duration(p.batch_span()),
+                        p.batch()
+                    )
+                } else {
+                    format!("{lead}, B backfills the window in {} slices{at}", p.count)
+                }
+            }
+            Err(_) => lead,
+        },
+    ))
 }
 
-/// `B`: asks to fill the rest of the window in slices (never sends
-/// before the `y`); refuses above `MAX_SLICES`.
+/// The `B` question: what the run fetches, at which cap, in how many
+/// queries (each at least a submit, a status poll and a download). A cap
+/// past the cost threshold says so first.
+fn backfill_prompt(plan: &pce::traffic::BackfillPlan, cap: u32) -> String {
+    use pce::traffic::compact_duration as dur;
+    let raised = plan.cap > cap;
+    let head = if raised {
+        format!("raise the cap to {} and backfill", plan.cap)
+    } else {
+        "backfill".to_string()
+    };
+    let at = if raised {
+        String::new()
+    } else {
+        format!(" at cap {}", plan.cap)
+    };
+    let n = plan.batch();
+    let queries = format!("{n} queries (≥{} API calls)", 3 * n);
+    let expensive = if plan.cap > pce::traffic::CONFIRM_MAX_RESULTS {
+        format!(
+            "cap {} exceeds {}. ",
+            plan.cap,
+            pce::traffic::CONFIRM_MAX_RESULTS
+        )
+    } else {
+        String::new()
+    };
+    if plan.partial() {
+        format!(
+            "{expensive}{head} the next {n} slices of {}{at}: {} of the remaining {}, {queries}; B again continues. y/n?",
+            dur(plan.slice),
+            dur(plan.batch_span()),
+            dur(plan.span)
+        )
+    } else {
+        format!(
+            "{expensive}{head} {} in {} slices of {}{at}: {queries}? y/n",
+            dur(plan.span),
+            plan.count,
+            dur(plan.slice)
+        )
+    }
+}
+
+/// `B`: asks before fetching the window (or the rest of a stopped
+/// backfill) in slices; never sends before the `y`.
 fn backfill_key(model: &mut Model) -> Vec<Cmd> {
     if model.traffic.is_running() {
         model.status = StatusLine::info("query already running");
@@ -1726,67 +1781,53 @@ fn backfill_key(model: &mut Model) -> Vec<Cmd> {
         model.status = StatusLine::info("nothing to backfill: r runs the query first");
         return Vec::new();
     };
-    let Some(plan) = d.backfill_plan() else {
-        model.status = StatusLine::info(if d.truncated || d.backfill.is_some() {
-            "nothing to backfill: the result reaches the window start"
-        } else {
-            "nothing to backfill: the result is complete"
-        });
-        return Vec::new();
-    };
-    let slice = pce::traffic::compact_duration(plan.slice);
-    if plan.too_many() {
-        model.status = StatusLine::warn(format!(
-            "a backfill needs {} slices of {slice} (limit {}): shorten the window or raise the cap (])",
-            plan.count,
-            pce::traffic::MAX_SLICES
-        ));
-        return Vec::new();
+    match d.backfill_plan(model.limits.traffic_max_results) {
+        Ok(plan) => {
+            model.overlay = Overlay::Confirm {
+                reason: backfill_prompt(&plan, d.filter.max_results),
+                action: PendingAction::Backfill(plan),
+            };
+        }
+        Err(why) => model.status = StatusLine::info(why),
     }
-    model.overlay = Overlay::Confirm {
-        reason: format!(
-            "backfill {} in {} slices of {slice} ({} requests, cap {} each)? y/n",
-            pce::traffic::compact_duration(plan.uncovered),
-            plan.count,
-            plan.count,
-            d.filter.max_results
-        ),
-        action: PendingAction::Backfill(plan),
-    };
     Vec::new()
 }
 
-/// The profile's opt-in after a truncated, low-coverage result: the same
-/// backfill as `B` then `y`, within the same limits.
+/// The profile's opt-in after a truncated, low-coverage result: one run
+/// (one batch at most) as `B` then `y` would start. A cap past the cost
+/// threshold is proposed with the `B` question instead.
 fn auto_backfill(model: &mut Model) -> Vec<Cmd> {
-    match model.traffic.data.as_ref().and_then(|d| d.backfill_plan()) {
-        Some(plan) if !plan.too_many() => start_backfill(model, plan, true),
-        _ => Vec::new(), // the status already says why
+    let Some(d) = model.traffic.data.as_ref() else {
+        return Vec::new();
+    };
+    let Ok(plan) = d.backfill_plan(model.limits.traffic_max_results) else {
+        return Vec::new(); // the status already says why
+    };
+    if plan.cap > pce::traffic::CONFIRM_MAX_RESULTS {
+        model.overlay = Overlay::Confirm {
+            reason: backfill_prompt(&plan, d.filter.max_results),
+            action: PendingAction::Backfill(plan),
+        };
+        return Vec::new();
     }
+    start_backfill(model, plan, true)
 }
 
-/// Starts the walk from the oldest covered instant back to the window
-/// start: the loaded range now begins there, the data counts as a
-/// backfill (auto-refresh off) and the first slice is sent.
+/// Starts a run from `backfill_from` back to the window start at the
+/// plan's slice and cap, turns auto-refresh off and sends the first slice.
 fn start_backfill(model: &mut Model, plan: pce::traffic::BackfillPlan, auto: bool) -> Vec<Cmd> {
     let t = &mut model.traffic;
-    let Some(d) = t.data.as_mut() else {
+    let Some(d) = t.data.as_ref() else {
         return Vec::new();
     };
-    let (Some(window_start), Some(from)) = (d.window_start(), d.coverage().and_then(|c| c.oldest))
-    else {
+    let (Some(window_start), Some(from)) = (d.window_start(), d.backfill_from()) else {
         return Vec::new();
     };
-    if let Some(s) = d.slices.as_mut() {
-        s.narrow(from);
-    }
-    if d.backfill.is_none() {
-        // The first result counts as covering its oldest flow to its end;
-        // the slices fill the rest, and only a slice that still truncates
-        // marks the data truncated again.
-        d.truncated = false;
-    }
-    d.backfill = Some(plan.slice);
+    let filter = TrafficFilter {
+        max_results: plan.cap,
+        ..d.filter.clone()
+    };
+    let replace = d.backfill.is_none();
     let auto_was_on = std::mem::take(&mut t.auto.enabled);
     t.backfill = Some(crate::tui::model::ActiveBackfill {
         run: pce::traffic::BackfillRun::new(
@@ -1795,11 +1836,12 @@ fn start_backfill(model: &mut Model, plan: pce::traffic::BackfillPlan, auto: boo
             from,
             pce::traffic::MAX_SLICES,
         ),
+        filter,
+        replace,
         cancel: false,
         auto,
         note: None,
     });
-    t.rebuild_views();
     let cmds = next_backfill_slice(model);
     if auto_was_on {
         model.status = StatusLine::info(format!("{} · auto-refresh off", model.status.text));
@@ -1807,17 +1849,15 @@ fn start_backfill(model: &mut Model, plan: pce::traffic::BackfillPlan, auto: boo
     cmds
 }
 
-/// Sends the next slice of the active backfill, or ends it at the window
-/// start or the request limit.
+/// Sends the next slice of the active run, or ends it at the window start
+/// or the end of its batch.
 fn next_backfill_slice(model: &mut Model) -> Vec<Cmd> {
     let Some(mut bf) = model.traffic.backfill.take() else {
         return Vec::new();
     };
-    let Some(filter) = model.traffic.data.as_ref().map(|d| d.filter.clone()) else {
-        return Vec::new();
-    };
     match bf.run.next_slice() {
         pce::traffic::Next::Slice(start, end) => {
+            let filter = bf.filter.clone();
             model.traffic.filter = filter.clone();
             let (seq, cancel) = model.traffic.start_query(Instant::now());
             model.status = if bf.note.is_some() {
@@ -1840,8 +1880,8 @@ fn next_backfill_slice(model: &mut Model) -> Vec<Cmd> {
         }
         pce::traffic::Next::OverBudget { remaining } => {
             model.status = StatusLine::warn(format!(
-                "backfill stopped at the limit of {} requests: {remaining} slices of {} left, B continues",
-                pce::traffic::MAX_SLICES,
+                "backfill batch done: {} · {remaining} slices of {} left, B again continues",
+                loaded_text(model),
                 pce::traffic::compact_duration(bf.run.slice)
             ));
             Vec::new()
@@ -1849,7 +1889,7 @@ fn next_backfill_slice(model: &mut Model) -> Vec<Cmd> {
     }
 }
 
-/// `1234 flows · covers 23h of 24h · 10 slices`.
+/// `1234 flows · covers 23h of 24h · 10 slices · truncated`.
 fn loaded_text(model: &Model) -> String {
     let Some(d) = model.traffic.data.as_ref() else {
         return String::new();
@@ -1860,9 +1900,11 @@ fn loaded_text(model: &Model) -> String {
     }
 }
 
-/// A backfill slice answered: merged and the next one sent; a truncated
-/// one dropped and its range fetched again in halves; one that truncates
-/// at 1m merged and the backfill stopped. `Esc` stops it here.
+/// A backfill slice answered. The first one replaces the truncated result
+/// (whose rows are an unordered cut of the whole window), later ones
+/// merge; then the next is sent. A truncated slice is dropped and its
+/// range fetched again in halves; one that truncates at 1m is kept and the
+/// run stops. `Esc` stops it here.
 fn on_backfill_slice(model: &mut Model, result: Result<QueryOutcome, String>) -> Vec<Cmd> {
     model.traffic.query = QueryState::Idle;
     let Some(mut bf) = model.traffic.backfill.take() else {
@@ -1871,10 +1913,11 @@ fn on_backfill_slice(model: &mut Model, result: Result<QueryOutcome, String>) ->
     let Some(d) = model.traffic.data.as_mut() else {
         return Vec::new();
     };
+    // The filter of what is loaded; the next slice sets the run's again.
+    model.traffic.filter = d.filter.clone();
     let o = match result {
         Ok(o) => o,
         Err(e) => {
-            model.traffic.filter = d.filter.clone();
             let progress = bf.progress();
             fail(model, &format!("backfill stopped at {progress}"), &e, false);
             return Vec::new();
@@ -1882,45 +1925,54 @@ fn on_backfill_slice(model: &mut Model, result: Result<QueryOutcome, String>) ->
     };
     let cap = o.filter.max_results;
     let progress = bf.progress();
-    match bf.run.answered(o.truncated) {
-        pce::traffic::Step::Retry { slice } => {
-            d.backfill = Some(slice);
-            let note = format!(
-                "slice truncated at {cap}, halved to {}",
-                pce::traffic::compact_duration(slice)
-            );
-            if bf.cancel {
-                model.status = StatusLine::warn(format!("backfill stopped: {note}"));
-                return Vec::new();
-            }
-            bf.note = Some(note);
-            model.traffic.backfill = Some(bf);
-            next_backfill_slice(model)
+    let step = bf.run.answered(o.truncated);
+    if let pce::traffic::Step::Retry { slice } = step {
+        let note = format!(
+            "slice truncated at {cap}, halved to {}",
+            pce::traffic::compact_duration(slice)
+        );
+        if bf.cancel {
+            model.status = StatusLine::warn(format!("backfill stopped: {note}"));
+            return Vec::new();
         }
-        pce::traffic::Step::TooSmall => {
-            merge_outcome(d, o);
-            model.traffic.rebuild_views();
-            model.status = StatusLine::error(format!(
-                "cap {cap} is too small for this PCE at 1m: raise traffic_max_results"
-            ));
-            Vec::new()
-        }
-        pce::traffic::Step::Merge => {
-            bf.note = None;
-            d.backfill = Some(bf.run.slice);
-            merge_outcome(d, o);
-            model.traffic.rebuild_views();
-            if bf.cancel {
-                model.status = StatusLine::info(format!(
-                    "backfill stopped after {progress}: {}",
-                    loaded_text(model)
-                ));
-                return Vec::new();
-            }
-            model.traffic.backfill = Some(bf);
-            next_backfill_slice(model)
-        }
+        bf.note = Some(note);
+        model.traffic.backfill = Some(bf);
+        return next_backfill_slice(model);
     }
+    let cut = step == pce::traffic::Step::TooSmall;
+    if std::mem::take(&mut bf.replace) {
+        d.flows = o.flows;
+        d.matches_count = o.matches_count;
+        d.elapsed = o.elapsed;
+        d.cache_hit = o.hit;
+        d.filter = o.filter;
+        d.slices = o.bounds.map(|(start, end)| Slices::new(start, end));
+    } else {
+        merge_outcome(d, o);
+    }
+    d.backfill = Some(crate::tui::model::Backfilled {
+        slice: bf.run.slice,
+        cut: cut || d.backfill.is_some_and(|b| b.cut),
+    });
+    d.settle_backfill_truncated();
+    model.traffic.filter = d.filter.clone();
+    model.traffic.rebuild_views();
+    if cut {
+        model.status = StatusLine::error(format!(
+            "cap {cap} is too small for this PCE at 1m: raise traffic_max_results"
+        ));
+        return Vec::new();
+    }
+    bf.note = None;
+    if bf.cancel {
+        model.status = StatusLine::info(format!(
+            "backfill stopped after {progress}: {}",
+            loaded_text(model)
+        ));
+        return Vec::new();
+    }
+    model.traffic.backfill = Some(bf);
+    next_backfill_slice(model)
 }
 
 /// Folds a slice's flows into the loaded ones; the range grows by it.
@@ -1969,6 +2021,10 @@ fn on_slice(model: &mut Model, result: Result<QueryOutcome, String>) {
             let cap = o.filter.max_results;
             let truncated = o.truncated;
             merge_outcome(d, o);
+            if let Some(b) = d.backfill.as_mut() {
+                b.cut |= truncated;
+            }
+            d.settle_backfill_truncated();
             let total = d.flows.len();
             let window = d.filter.window.clone();
             // A tick re-runs the whole merged window as one query; past the
@@ -2049,6 +2105,7 @@ fn narrow_window(model: &mut Model) -> Vec<Cmd> {
             s.narrow(start);
             d.filter.window = step.to_string();
             dropped = Some(before - d.flows.len());
+            d.settle_backfill_truncated();
         }
     }
     t.rebuild_views();
@@ -10790,12 +10847,12 @@ mod app_sections_tests {
 #[cfg(test)]
 mod backfill_tests {
     use super::*;
-    use crate::tui::model::{Model, Overlay, PendingAction, StatusKind};
+    use crate::tui::model::{Backfilled, Model, Overlay, PendingAction, StatusKind};
     use crate::tui::msg::QueryOutcome;
     use crate::tui::test_support::{FIXTURE_END, fixture_flows_rich, model_fixture};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use jiff::{Span, Timestamp};
-    use pce::traffic::ResolvedFlow;
+    use pce::traffic::{BackfillPlan, ResolvedFlow};
     use std::time::Duration;
     use tokio_util::sync::CancellationToken;
 
@@ -10820,36 +10877,46 @@ mod backfill_tests {
         end().checked_sub(Span::new().hours(hours)).unwrap()
     }
 
+    fn mins_ago(m: i64) -> Timestamp {
+        end().checked_sub(Span::new().minutes(m)).unwrap()
+    }
+
     fn at(t: Timestamp) -> String {
         pce::traffic::format_timestamp(t)
     }
 
-    /// The rich fixture re-dated: the first flow at `FIXTURE_END`, the last
-    /// `span` before it, the rest in between.
-    fn spread(span: Span) -> Vec<ResolvedFlow> {
-        let mut flows = fixture_flows_rich();
+    fn h(n: u64) -> Duration {
+        Duration::from_secs(n * 3600)
+    }
+
+    /// The rich fixture `copies` times, re-dated: the first flow at
+    /// `FIXTURE_END`, the last `span` before it, the rest a minute before
+    /// the end.
+    fn spread(span: Span, copies: usize) -> Vec<ResolvedFlow> {
+        let mut flows: Vec<ResolvedFlow> = (0..copies).flat_map(|_| fixture_flows_rich()).collect();
         let n = flows.len();
-        assert!(n >= 3);
         let oldest = end().checked_sub(span).unwrap();
         for (i, f) in flows.iter_mut().enumerate() {
             let t = match i {
                 0 => end(),
                 i if i == n - 1 => oldest,
-                _ => end().checked_sub(Span::new().minutes(1)).unwrap(),
+                _ => end()
+                    .checked_sub(Span::new().minutes(1))
+                    .unwrap()
+                    .max(oldest),
             };
             f.last_detected = Some(at(t));
         }
         flows
     }
 
-    /// A connected model whose `1d` query just answered, truncated at
-    /// `cap_per_flow × flows`, with the flows covering `span`.
-    fn truncated(m: &mut Model, span: Span, cap_per_flow: u32) -> Vec<Cmd> {
-        let flows = spread(span);
-        let mut f = TrafficFilter::defaults("1d", cap_per_flow * flows.len() as u32);
-        f.max_results = cap_per_flow * flows.len() as u32;
-        let cmds = update(m, Msg::ApplyFilter(f.clone()));
-        assert_eq!(cmds.len(), 1, "{cmds:?}");
+    /// The `1d` query answers `flows`, truncated at `per_flow × flows`.
+    fn answer_query(m: &mut Model, flows: Vec<ResolvedFlow>, per_flow: u32) -> Vec<Cmd> {
+        let f = TrafficFilter::defaults("1d", per_flow * flows.len() as u32);
+        if !m.traffic.is_running() {
+            let cmds = update(m, Msg::ApplyFilter(f.clone()));
+            assert_eq!(cmds.len(), 1, "{cmds:?}");
+        }
         update(
             m,
             Msg::QueryDone {
@@ -10867,11 +10934,16 @@ mod backfill_tests {
         )
     }
 
-    /// Two hours covered at 4 × flows: slices of 6h, 22h left, 4 slices.
+    fn truncated(m: &mut Model, span: Span, per_flow: u32) -> Vec<Cmd> {
+        answer_query(m, spread(span, 1), per_flow)
+    }
+
+    /// Two hours covered at cap 4 × 30 = 120: 6h slices fill the day in 4.
     fn two_hours() -> Model {
         let mut m = model_fixture();
         let cmds = truncated(&mut m, Span::new().hours(2), 4);
         assert_eq!(cmds, Vec::<Cmd>::new(), "nothing without y or the opt-in");
+        assert_eq!(cap(&m), 120);
         m
     }
 
@@ -10880,17 +10952,22 @@ mod backfill_tests {
     }
 
     fn slice_cmd(m: &Model, start: Timestamp, end: Timestamp) -> Cmd {
+        let filter = m
+            .traffic
+            .backfill
+            .as_ref()
+            .map_or_else(|| m.traffic.filter.clone(), |b| b.filter.clone());
         Cmd::RunSlice {
             seq: m.traffic.seq,
-            filter: m.traffic.data.as_ref().unwrap().filter.clone(),
+            filter,
             start,
             end,
             cancel: CancellationToken::new(),
         }
     }
 
-    /// New rows (a port nothing loaded uses) last seen at `last`.
-    fn older(n: usize, last: Timestamp, port: u16) -> Vec<ResolvedFlow> {
+    /// `n` rows on ports nothing else uses (`port..`), last seen at `last`.
+    fn rows(n: usize, last: Timestamp, port: u16) -> Vec<ResolvedFlow> {
         fixture_flows_rich()
             .into_iter()
             .take(n)
@@ -10909,6 +10986,7 @@ mod backfill_tests {
         truncated: bool,
         b: (Timestamp, Timestamp),
     ) -> Vec<Cmd> {
+        let filter = m.traffic.filter.clone();
         let msg = Msg::SliceDone {
             seq: m.traffic.seq,
             result: Ok(QueryOutcome {
@@ -10917,7 +10995,7 @@ mod backfill_tests {
                 matches_count: None,
                 elapsed: Duration::from_millis(500),
                 hit: false,
-                filter: m.traffic.filter.clone(),
+                filter,
                 bounds: Some(b),
             }),
         };
@@ -10932,36 +11010,50 @@ mod backfill_tests {
             .unwrap_or_default()
     }
 
+    fn meta(m: &Model) -> Option<String> {
+        m.traffic.data.as_ref().unwrap().coverage_meta()
+    }
+
+    fn plan_of(m: &Model) -> BackfillPlan {
+        match &m.overlay {
+            Overlay::Confirm {
+                action: PendingAction::Backfill(p),
+                ..
+            } => *p,
+            o => panic!("no backfill question: {o:?}"),
+        }
+    }
+
+    fn reason(m: &Model) -> String {
+        match &m.overlay {
+            Overlay::Confirm { reason, .. } => reason.clone(),
+            o => panic!("no question: {o:?}"),
+        }
+    }
+
     #[test]
     fn a_truncated_low_coverage_result_says_how_much_it_covers() {
         let m = two_hours();
         assert_eq!(m.status.kind, StatusKind::Warn);
         assert_eq!(
             m.status.text,
-            format!(
-                "cap {} covers ~2 hours of 1d: ] raises the cap, B backfills the rest in 4 slices",
-                cap(&m)
-            )
+            "cap 120 covers ~2 hours of 1d: ] raises the cap, B backfills the window in 4 slices"
         );
-        let d = m.traffic.data.as_ref().unwrap();
-        assert_eq!(
-            d.coverage_meta().as_deref(),
-            Some("covers 2h of 1d · truncated")
-        );
+        assert_eq!(meta(&m).as_deref(), Some("covers 2h of 1d · truncated"));
         assert!(m.traffic.backfill.is_none());
     }
 
     #[test]
-    fn half_covered_or_complete_results_keep_the_old_status() {
+    fn half_covered_complete_or_unmeasurable_results() {
         let mut m = model_fixture();
         truncated(&mut m, Span::new().hours(13), 4);
         assert!(m.status.text.contains("truncated"), "{}", m.status.text);
-        assert_eq!(m.traffic.data.as_ref().unwrap().coverage_meta(), None);
+        assert_eq!(meta(&m), None);
         quiet(&mut m, key('B'));
-        assert!(
-            matches!(&m.overlay, Overlay::Confirm { action: PendingAction::Backfill(p), .. } if p.count == 1),
-            "B still offers the rest: {:?}",
-            m.overlay
+        assert_eq!(
+            plan_of(&m),
+            BackfillPlan::with_slice(h(24), h(24), 120),
+            "B still offers the window"
         );
         let mut m = model_fixture();
         quiet(&mut m, key('B'));
@@ -10969,7 +11061,25 @@ mod backfill_tests {
         let mut m = crate::tui::test_support::model_with_window("1d");
         quiet(&mut m, key('B'));
         assert_eq!(m.status.text, "nothing to backfill: the result is complete");
+        // Truncated without a single last-seen time.
+        let mut m = model_fixture();
+        let mut flows = spread(Span::new().hours(2), 1);
+        for f in &mut flows {
+            f.last_detected = None;
+        }
+        quiet_query(&mut m, flows, 4);
+        quiet(&mut m, key('B'));
+        assert_eq!(m.status.text, "cannot measure coverage: no last-seen times");
         assert_eq!(m.overlay, Overlay::None);
+        // Or with an unknown time range.
+        let mut m = two_hours();
+        m.traffic.data.as_mut().unwrap().slices = None;
+        quiet(&mut m, key('B'));
+        assert_eq!(m.status.text, "cannot measure coverage: no last-seen times");
+    }
+
+    fn quiet_query(m: &mut Model, flows: Vec<ResolvedFlow>, per_flow: u32) {
+        assert_eq!(answer_query(m, flows, per_flow), Vec::<Cmd>::new());
     }
 
     #[test]
@@ -10978,41 +11088,30 @@ mod backfill_tests {
         for no in [key('n'), esc()] {
             quiet(&mut m, key('B'));
             assert_eq!(
-                m.overlay,
-                Overlay::Confirm {
-                    reason: format!(
-                        "backfill 22h in 4 slices of 6h (4 requests, cap {} each)? y/n",
-                        cap(&m)
-                    ),
-                    action: PendingAction::Backfill(pce::traffic::BackfillPlan {
-                        uncovered: Duration::from_secs(22 * 3600),
-                        slice: Duration::from_secs(6 * 3600),
-                        count: 4,
-                    }),
-                }
+                reason(&m),
+                "backfill 1d in 4 slices of 6h at cap 120: 4 queries (≥12 API calls)? y/n"
             );
+            assert_eq!(plan_of(&m), BackfillPlan::with_slice(h(24), h(6), 120));
             quiet(&mut m, no);
             assert_eq!(m.overlay, Overlay::None);
             assert!(m.traffic.backfill.is_none());
             assert!(!m.traffic.is_running());
         }
-        // Enter is not a yes.
         quiet(&mut m, key('B'));
         quiet(
             &mut m,
             Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
         );
-        assert!(m.traffic.backfill.is_none());
+        assert!(m.traffic.backfill.is_none(), "Enter is not a yes");
     }
 
     #[test]
-    fn y_sends_one_slice_at_a_time_newest_first() {
+    fn y_walks_the_whole_window_newest_first_replacing_the_truncated_rows() {
         let mut m = two_hours();
-        let loaded = m.traffic.loaded_flows().len();
         m.traffic.auto.enabled = true;
         quiet(&mut m, key('B'));
         let cmds = update(&mut m, key('y'));
-        assert_eq!(cmds, vec![slice_cmd(&m, ago(8), ago(2))]);
+        assert_eq!(cmds, vec![slice_cmd(&m, ago(6), end())]);
         assert_eq!(progress(&m), "slice 1 of 4");
         assert!(
             m.status.text.starts_with("backfill: slice 1 of 4"),
@@ -11029,46 +11128,55 @@ mod backfill_tests {
         quiet(&mut m, key('B'));
         quiet(&mut m, key('r'));
         quiet(&mut m, key('+'));
-        let expected = [
-            (ago(14), ago(8), "slice 2 of 4"),
-            (ago(20), ago(14), "slice 3 of 4"),
-            (ago(24), ago(20), "slice 4 of 4"),
+        // The first slice replaces the 30 truncated rows.
+        let cmds = answer(&mut m, rows(2, ago(1), 50_000), false, (ago(6), end()));
+        assert_eq!(cmds, vec![slice_cmd(&m, ago(12), ago(6))]);
+        assert_eq!(m.traffic.loaded_flows().len(), 2);
+        let d = m.traffic.data.as_ref().unwrap();
+        assert!(
+            d.truncated,
+            "truncated until the walk reaches the window start"
+        );
+        assert_eq!(
+            meta(&m).as_deref(),
+            Some("covers 6h of 1d · 1 slice · truncated")
+        );
+        let next = [
+            (ago(18), ago(12), "slice 3 of 4"),
+            (ago(24), ago(18), "slice 4 of 4"),
         ];
-        let mut range = (ago(8), ago(2));
-        for (i, (s, e, p)) in expected.into_iter().enumerate() {
-            let cmds = answer(
-                &mut m,
-                older(1, range.0, 50_000 + i as u16 * 10),
-                false,
-                range,
-            );
+        let mut range = (ago(12), ago(6));
+        for (i, (s, e, p)) in next.into_iter().enumerate() {
+            let cmds = answer(&mut m, rows(1, range.0, 51_000 + i as u16), false, range);
             assert_eq!(cmds, vec![slice_cmd(&m, s, e)], "{i}");
             assert_eq!(progress(&m), p);
             range = (s, e);
         }
-        let cmds = answer(&mut m, older(1, range.0, 50_100), false, range);
+        let cmds = answer(&mut m, rows(1, range.0, 52_000), false, range);
         assert_eq!(cmds, Vec::<Cmd>::new());
         assert!(m.traffic.backfill.is_none());
         let d = m.traffic.data.as_ref().unwrap();
-        assert_eq!(d.flows.len(), loaded + 4);
-        assert_eq!(d.backfill, Some(Duration::from_secs(6 * 3600)));
-        assert!(!d.truncated);
-        assert_eq!(d.coverage_meta().as_deref(), Some("1d · 5 slices"));
+        assert_eq!(d.flows.len(), 5, "the slices' rows only");
         assert_eq!(
-            m.status.text,
-            format!("backfill done: {} flows · 1d · 5 slices", loaded + 4)
+            d.backfill,
+            Some(Backfilled {
+                slice: h(6),
+                cut: false
+            })
         );
+        assert!(!d.truncated);
+        assert_eq!(meta(&m).as_deref(), Some("1d · 4 slices"));
+        assert_eq!(m.status.text, "backfill done: 5 flows · 1d · 4 slices");
         assert_eq!(m.traffic.filter.window, "1d", "the window is unchanged");
-        // B again: nothing left.
         quiet(&mut m, key('B'));
         assert_eq!(
             m.status.text,
-            "nothing to backfill: the result reaches the window start"
+            "nothing to backfill: the backfill reaches the window start"
         );
     }
 
     #[test]
-    fn esc_stops_after_the_running_slice() {
+    fn esc_stops_after_the_running_slice_and_b_continues() {
         let mut m = two_hours();
         quiet(&mut m, key('B'));
         update(&mut m, key('y'));
@@ -11079,13 +11187,12 @@ mod backfill_tests {
             m.status.text
         );
         assert!(m.traffic.is_running(), "the running slice is not cancelled");
-        let cmds = answer(&mut m, older(2, ago(5), 50_000), false, (ago(8), ago(2)));
+        let cmds = answer(&mut m, rows(2, ago(5), 50_000), false, (ago(6), end()));
         assert_eq!(cmds, Vec::<Cmd>::new());
         assert!(m.traffic.backfill.is_none());
-        let d = m.traffic.data.as_ref().unwrap();
         assert_eq!(
-            d.coverage_meta().as_deref(),
-            Some("covers 8h of 1d · 2 slices")
+            meta(&m).as_deref(),
+            Some("covers 6h of 1d · 1 slice · truncated")
         );
         assert!(
             m.status
@@ -11094,75 +11201,83 @@ mod backfill_tests {
             "{}",
             m.status.text
         );
-        // B continues from where it stopped, in the same slice length.
         quiet(&mut m, key('B'));
-        assert!(
-            matches!(&m.overlay, Overlay::Confirm { reason, .. } if reason.starts_with("backfill 16h in 3 slices of 6h")),
-            "{:?}",
-            m.overlay
+        assert_eq!(
+            reason(&m),
+            "backfill 18h in 3 slices of 6h at cap 120: 3 queries (≥9 API calls)? y/n"
         );
         let cmds = update(&mut m, key('y'));
-        assert_eq!(cmds, vec![slice_cmd(&m, ago(14), ago(8))]);
+        assert_eq!(cmds, vec![slice_cmd(&m, ago(12), ago(6))]);
+        assert_eq!(
+            answer(&mut m, rows(1, ago(7), 51_000), false, (ago(12), ago(6))).len(),
+            1
+        );
+        assert_eq!(m.traffic.loaded_flows().len(), 3, "a continued run merges");
     }
 
     #[test]
     fn a_truncated_slice_is_fetched_again_in_halves() {
         let mut m = two_hours();
-        let loaded = m.traffic.loaded_flows().len();
         quiet(&mut m, key('B'));
         update(&mut m, key('y'));
-        let cmds = answer(&mut m, older(3, ago(3), 50_000), true, (ago(8), ago(2)));
-        assert_eq!(cmds, vec![slice_cmd(&m, ago(5), ago(2))]);
+        let cmds = answer(&mut m, rows(3, ago(3), 50_000), true, (ago(6), end()));
+        assert_eq!(cmds, vec![slice_cmd(&m, ago(3), end())]);
         assert_eq!(m.status.kind, StatusKind::Warn);
         assert!(
             m.status
                 .text
-                .contains(&format!("slice truncated at {}, halved to 3h", cap(&m))),
+                .contains("slice truncated at 120, halved to 3h"),
             "{}",
             m.status.text
         );
         assert_eq!(progress(&m), "slice 1 of 8");
         assert_eq!(
             m.traffic.loaded_flows().len(),
-            loaded,
+            30,
             "the truncated slice is dropped"
         );
-        let cmds = answer(&mut m, older(1, ago(4), 50_000), false, (ago(5), ago(2)));
-        assert_eq!(cmds, vec![slice_cmd(&m, ago(8), ago(5))]);
+        let cmds = answer(&mut m, rows(1, ago(1), 50_000), false, (ago(3), end()));
+        assert_eq!(cmds, vec![slice_cmd(&m, ago(6), ago(3))]);
         assert_eq!(progress(&m), "slice 2 of 8");
+        assert_eq!(m.traffic.loaded_flows().len(), 1, "it replaced the result");
         assert_eq!(
-            m.traffic.data.as_ref().unwrap().backfill,
-            Some(Duration::from_secs(3 * 3600))
+            m.traffic.data.as_ref().unwrap().backfill.unwrap().slice,
+            h(3)
         );
     }
 
     #[test]
-    fn a_1m_slice_that_truncates_stops_the_backfill() {
+    fn only_a_1m_slice_that_truncates_stops_the_backfill() {
         let mut m = two_hours();
         quiet(&mut m, key('B'));
         update(&mut m, key('y'));
-        // The walk has halved down to the floor by now.
-        m.traffic.backfill.as_mut().unwrap().run.slice = pce::traffic::MIN_SLICE;
-        let cmds = answer(&mut m, older(2, ago(3), 50_000), true, (ago(8), ago(2)));
+        // 1m30s halves to the 1m floor, not to 45s.
+        m.traffic.backfill.as_mut().unwrap().run.slice = Duration::from_secs(90);
+        let cmds = answer(&mut m, rows(2, ago(3), 50_000), true, (ago(6), end()));
+        assert_eq!(cmds, vec![slice_cmd(&m, mins_ago(1), end())]);
+        let cmds = answer(
+            &mut m,
+            rows(2, mins_ago(0), 50_000),
+            true,
+            (mins_ago(1), end()),
+        );
         assert_eq!(cmds, Vec::<Cmd>::new());
         assert_eq!(m.status.kind, StatusKind::Error);
         assert_eq!(
             m.status.text,
-            format!(
-                "cap {} is too small for this PCE at 1m: raise traffic_max_results",
-                cap(&m)
-            )
+            "cap 120 is too small for this PCE at 1m: raise traffic_max_results"
         );
         assert!(m.traffic.backfill.is_none());
         let d = m.traffic.data.as_ref().unwrap();
         assert!(d.truncated);
-        assert!(d.coverage_meta().unwrap().ends_with(" · truncated"));
+        assert!(d.backfill.unwrap().cut);
+        assert!(meta(&m).unwrap().ends_with(" · truncated"));
     }
 
     #[test]
     fn a_failed_slice_stops_and_keeps_what_is_loaded() {
         let mut m = two_hours();
-        let loaded = m.traffic.loaded_flows().len();
+        let filter = m.traffic.filter.clone();
         quiet(&mut m, key('B'));
         update(&mut m, key('y'));
         let seq = m.traffic.seq;
@@ -11175,35 +11290,142 @@ mod backfill_tests {
         );
         assert!(m.traffic.backfill.is_none());
         assert_eq!(m.status.text, "backfill stopped at slice 1 of 4: timeout");
-        assert_eq!(m.traffic.loaded_flows().len(), loaded);
+        assert_eq!(m.traffic.loaded_flows().len(), 30);
+        assert_eq!(m.traffic.filter, filter);
     }
 
+    /// 30 flows in 2 minutes at cap 30: 1440 slices of 1m; 48 of 30m at 1000.
     #[test]
-    fn more_than_50_slices_are_refused_with_a_hint() {
+    fn b_raises_the_cap_to_the_smallest_rung_that_fits() {
         let mut m = model_fixture();
-        quiet_truncated(&mut m, Span::new().minutes(2), 1);
+        quiet_query(&mut m, spread(Span::new().minutes(2), 1), 1);
         assert!(
             m.status
                 .text
-                .ends_with("; a backfill needs 1438 slices of 1m (limit 50)"),
+                .ends_with(", B backfills the window in 48 slices at cap 1000"),
             "{}",
             m.status.text
         );
         quiet(&mut m, key('B'));
-        assert_eq!(m.overlay, Overlay::None);
         assert_eq!(
-            m.status.text,
-            "a backfill needs 1438 slices of 1m (limit 50): shorten the window or raise the cap (])"
+            reason(&m),
+            "raise the cap to 1000 and backfill 1d in 48 slices of 30m: 48 queries (≥144 API calls)? y/n"
         );
-        // The opt-in respects the same limit.
-        let mut m = model_fixture();
-        m.limits.traffic_auto_backfill = true;
-        quiet_truncated(&mut m, Span::new().minutes(2), 1);
-        assert!(m.traffic.backfill.is_none());
+        let cmds = update(&mut m, key('y'));
+        let mut f = m.traffic.data.as_ref().unwrap().filter.clone();
+        f.max_results = 1000;
+        assert_eq!(
+            cmds,
+            vec![Cmd::RunSlice {
+                seq: m.traffic.seq,
+                filter: f.clone(),
+                start: mins_ago(30),
+                end: end(),
+                cancel: CancellationToken::new(),
+            }]
+        );
+        answer(
+            &mut m,
+            rows(1, mins_ago(5), 50_000),
+            false,
+            (mins_ago(30), end()),
+        );
+        assert_eq!(m.traffic.data.as_ref().unwrap().filter.max_results, 1000);
     }
 
-    fn quiet_truncated(m: &mut Model, span: Span, per_flow: u32) {
-        assert_eq!(truncated(m, span, per_flow), Vec::<Cmd>::new());
+    /// The profile stops at 500: the newest 50 of 96 slices of 15m, then `B`
+    /// continues; the opt-in never chains a second batch.
+    #[test]
+    fn past_the_profile_cap_a_batch_of_50_and_b_continues() {
+        for auto in [false, true] {
+            let mut m = model_fixture();
+            m.limits.traffic_max_results = 500;
+            m.limits.traffic_auto_backfill = auto;
+            let cmds = answer_query(&mut m, spread(Span::new().minutes(2), 1), 1);
+            if auto {
+                assert_eq!(cmds.len(), 1, "{cmds:?}");
+            } else {
+                assert!(cmds.is_empty());
+                assert!(
+                    m.status
+                        .text
+                        .ends_with(", B backfills the newest 12h 30m in 50 slices at cap 500"),
+                    "{}",
+                    m.status.text
+                );
+                quiet(&mut m, key('B'));
+                assert_eq!(
+                    reason(&m),
+                    "raise the cap to 500 and backfill the next 50 slices of 15m: 12h 30m of \
+                     the remaining 1d, 50 queries (≥150 API calls); B again continues. y/n?"
+                );
+                assert_eq!(update(&mut m, key('y')).len(), 1);
+            }
+            assert_eq!(progress(&m), "slice 1 of 50");
+            let mut sent = 1;
+            loop {
+                let Some(Cmd::RunSlice { start, end, .. }) = slice_in_flight(&m) else {
+                    unreachable!()
+                };
+                let cmds = answer(&mut m, rows(1, start, 50_000 + sent), false, (start, end));
+                if cmds.is_empty() {
+                    break;
+                }
+                assert_eq!(cmds.len(), 1);
+                sent += 1;
+            }
+            assert_eq!(sent, 50, "one batch, never chained");
+            assert_eq!(m.status.kind, StatusKind::Warn);
+            assert!(
+                m.status
+                    .text
+                    .ends_with("· 46 slices of 15m left, B again continues"),
+                "{}",
+                m.status.text
+            );
+            assert_eq!(
+                meta(&m).as_deref(),
+                Some("covers 12h 30m of 1d · 50 slices · truncated")
+            );
+            quiet(&mut m, key('B'));
+            assert_eq!(
+                reason(&m),
+                "backfill 11h 30m in 46 slices of 15m at cap 500: 46 queries (≥138 API calls)? y/n"
+            );
+        }
+    }
+
+    /// The range of the slice in flight, rebuilt from the run.
+    fn slice_in_flight(m: &Model) -> Option<Cmd> {
+        let b = m.traffic.backfill.as_ref()?;
+        let end = b.run.next_end;
+        let start = end
+            .checked_sub(Span::new().seconds(b.run.slice.as_secs() as i64))
+            .unwrap()
+            .max(b.run.window_start);
+        Some(slice_cmd(m, start, end))
+    }
+
+    /// 3000 flows in under a minute: only a cap of 200000 fits the day; the
+    /// opt-in asks instead of passing the cost threshold on its own.
+    #[test]
+    fn a_cap_past_the_cost_threshold_is_always_asked() {
+        let mut m = model_fixture();
+        m.limits.traffic_max_results = 200_000;
+        m.limits.traffic_auto_backfill = true;
+        let cmds = answer_query(&mut m, spread(Span::new().seconds(30), 100), 1);
+        assert_eq!(cmds, Vec::<Cmd>::new());
+        assert_eq!(
+            reason(&m),
+            "cap 200000 exceeds 10000. raise the cap to 200000 and backfill 1d in 48 slices \
+             of 30m: 48 queries (≥144 API calls)? y/n"
+        );
+        assert!(m.traffic.backfill.is_none());
+        let cmds = update(&mut m, key('y'));
+        assert!(
+            matches!(cmds.as_slice(), [Cmd::RunSlice { filter, .. }] if filter.max_results == 200_000),
+            "{cmds:?}"
+        );
     }
 
     #[test]
@@ -11211,7 +11433,7 @@ mod backfill_tests {
         let mut m = model_fixture();
         m.limits.traffic_auto_backfill = true;
         let cmds = truncated(&mut m, Span::new().hours(2), 4);
-        assert_eq!(cmds, vec![slice_cmd(&m, ago(8), ago(2))]);
+        assert_eq!(cmds, vec![slice_cmd(&m, ago(6), end())]);
         assert_eq!(m.overlay, Overlay::None);
         assert!(
             m.status
@@ -11221,9 +11443,43 @@ mod backfill_tests {
             m.status.text
         );
         quiet(&mut m, esc());
-        let cmds = answer(&mut m, older(1, ago(3), 50_000), false, (ago(8), ago(2)));
+        let cmds = answer(&mut m, rows(1, ago(3), 50_000), false, (ago(6), end()));
         assert_eq!(cmds, Vec::<Cmd>::new());
         assert!(m.traffic.backfill.is_none());
+    }
+
+    /// Auto-refresh on with the opt-in: one tick query starts one run, auto
+    /// turns off, and later ticks send nothing.
+    #[test]
+    fn a_tick_query_starts_one_run_and_auto_turns_off() {
+        let mut m = two_hours();
+        m.limits.traffic_auto_backfill = true;
+        m.traffic.auto.enabled = true;
+        let later = std::time::Instant::now() + Duration::from_secs(3600);
+        let cmds = update(&mut m, Msg::Tick(later));
+        assert!(
+            matches!(cmds.as_slice(), [Cmd::RunQuery { .. }]),
+            "{cmds:?}"
+        );
+        let cmds = truncated(&mut m, Span::new().hours(2), 4);
+        assert_eq!(cmds, vec![slice_cmd(&m, ago(6), end())]);
+        assert!(!m.traffic.auto.enabled);
+        quiet(&mut m, Msg::Tick(later + Duration::from_secs(3600)));
+        let mut range = (ago(6), end());
+        for s in [ago(12), ago(18), ago(24)] {
+            assert_eq!(
+                answer(&mut m, rows(1, range.0, 50_000), false, range).len(),
+                1
+            );
+            range = (s, range.0);
+        }
+        quiet(&mut m, Msg::Tick(later + Duration::from_secs(7200)));
+        assert_eq!(
+            answer(&mut m, rows(1, range.0, 51_000), false, range),
+            Vec::<Cmd>::new()
+        );
+        quiet(&mut m, Msg::Tick(later + Duration::from_secs(9000)));
+        assert!(!m.traffic.auto.enabled);
     }
 
     #[test]
@@ -11243,7 +11499,6 @@ mod backfill_tests {
                 result: Err("cancelled".into()),
             },
         );
-        // `-` cancels too.
         let mut m = two_hours();
         quiet(&mut m, key('B'));
         update(&mut m, key('y'));
@@ -11252,27 +11507,21 @@ mod backfill_tests {
     }
 
     /// After a full backfill: `+` adds one slice of its length, auto-refresh
-    /// stays off and its tick sends nothing.
+    /// stays off and its tick sends nothing; `r` replaces it.
     #[test]
     fn plus_extends_a_backfill_by_its_slice_and_auto_stays_off() {
         let mut m = two_hours();
         quiet(&mut m, key('B'));
         update(&mut m, key('y'));
-        let mut range = (ago(8), ago(2));
-        for (s, e) in [
-            (ago(14), ago(8)),
-            (ago(20), ago(14)),
-            (ago(24), ago(20)),
-            (ago(24), ago(24)),
-        ] {
-            let cmds = answer(&mut m, older(1, range.0, 50_000), false, range);
-            if s == e {
-                assert!(cmds.is_empty());
-            } else {
-                assert_eq!(cmds.len(), 1);
-            }
-            range = (s, e);
+        let mut range = (ago(6), end());
+        for s in [ago(12), ago(18), ago(24)] {
+            assert_eq!(
+                answer(&mut m, rows(1, range.0, 50_000), false, range).len(),
+                1
+            );
+            range = (s, range.0);
         }
+        quiet_answer(&mut m, range);
         let mut wide = m.traffic.filter.clone();
         wide.window = "30h".into();
         let cmds = update(&mut m, key('+'));
@@ -11286,13 +11535,11 @@ mod backfill_tests {
                 cancel: CancellationToken::new(),
             }]
         );
-        assert_eq!(
-            answer(&mut m, older(1, ago(26), 51_000), false, (ago(30), ago(24))),
-            Vec::<Cmd>::new()
-        );
+        quiet_answer(&mut m, (ago(30), ago(24)));
         let d = m.traffic.data.as_ref().unwrap();
         assert_eq!(d.filter.window, "30h");
-        assert_eq!(d.coverage_meta().as_deref(), Some("30h · 6 slices"));
+        assert!(!d.truncated);
+        assert_eq!(meta(&m).as_deref(), Some("30h · 5 slices"));
         quiet(&mut m, key('a'));
         assert!(!m.traffic.auto.enabled);
         assert!(
@@ -11305,11 +11552,17 @@ mod backfill_tests {
             &mut m,
             Msg::Tick(std::time::Instant::now() + Duration::from_secs(3600)),
         );
-        // `r` replaces the backfill with one query for the whole window.
         let cmds = update(&mut m, key('r'));
         assert!(
             matches!(cmds.as_slice(), [Cmd::RunQuery { .. }]),
             "{cmds:?}"
+        );
+    }
+
+    fn quiet_answer(m: &mut Model, range: (Timestamp, Timestamp)) {
+        assert_eq!(
+            answer(m, rows(1, range.0, 52_000), false, range),
+            Vec::<Cmd>::new()
         );
     }
 }
