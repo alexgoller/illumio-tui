@@ -53,7 +53,7 @@ Module map under `crates/illumio-tui/src/tui/`:
 | `edit` | edit intents, pre-filled forms, form to library draft or patch |
 | `diff` | draft against active for a pending IP list, service or ruleset |
 | `impact` | rule impact as the TUI shows it: `P/C` cells, the rule detail's rows, the confirm line |
-| `picker` | the `g` overlay: which label keys the traffic views group by |
+| `picker` | the `g` overlay: which label keys the traffic views group by; also the Labels tab's `f` key filter, whose usage counts come from `pce::label_usage` |
 | `ui/` | theme, layout, per-screen drawing and widgets (panels, overlays) |
 
 One message, top to bottom: pressing `r` on Traffic.

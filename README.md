@@ -121,7 +121,12 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   `5 FQDNs` for a list of names only), ranges, FQDNs, `used by` (rules of the loaded draft
   rulesets that name the list; `-` until Policy is loaded) and pending; `Enter` shows the size,
   those rules, then the first ranges and FQDNs. With writes on, `n` / `e` / `x` create, edit
-  and delete labels, services and IP lists.
+  and delete labels, services and IP lists. On the Labels tab `f` picks the keys shown (the
+  `g` picker, with label counts), `/=pay` searches values only and `/app=pay` the values of
+  one key, `i` shows or hides the profile's `ignore_keys` (hidden by default, counted in the
+  header: `key app,env · 212 of 4310 · 38 hidden`), and `u` keeps the labels no workload,
+  label group, ruleset scope or rule uses; the `workloads` and `rules` columns sort and show
+  `-` until Workloads and Policy are loaded, and `u` asks before loading them.
 - **Workloads**: VEN health columns and a summary line, `h` unhealthy only, `H` sort by
   severity, `t` / `T` jump to Traffic with the workload as source / destination.
 - **Events**: severity-coloured audit events, `f` edit severity / type / window, `S` sort by
@@ -147,6 +152,8 @@ the API call and byte counters at all times.
 
     illumio-tui health
     illumio-tui labels --key app
+    illumio-tui labels --key app --key env --value-contains pay --ignore-keys
+    illumio-tui labels --unused --json
     illumio-tui workloads --label app=web --online true
     illumio-tui policy rulesets
     illumio-tui policy rules "Web-DB"
@@ -180,6 +187,13 @@ shown as the source's user on outbound flows and left empty on inbound ones. `--
 the label keys (default: the profile's scope keys), `--no-user` / `--no-process` merge rows
 across users or processes. An endpoint that is not a labelled workload is grouped under its
 name or `ipl:<list>`. `bytes` is `0` in JSON and `-` in tables when the PCE reported none.
+
+`labels` flags combine with AND: `--key` (repeatable, any of the keys) and `--value` match
+exactly, `--value-contains` is a case-insensitive substring, `--ignore-keys` hides the
+profile's `ignore_keys` (`--no-ignore-keys`, the default, keeps every key). `--unused` keeps
+the labels no workload, rule, ruleset scope or label group uses: it reads the workloads, the
+draft rulesets and the label groups (through the cache, counted in `meta`) and adds
+`workloads` and `rules` to each row; without it the rows are unchanged.
 
 `--impact` on `policy rules <ruleset>` adds each rule's `impact` (JSON) or a `P/C` column
 (table): `providers` and `consumers` (workloads matched, unions over the ruleset's scopes),
@@ -447,7 +461,7 @@ until `g` picks others (for the session), and `traffic groups`, `traffic mesh` a
 `ignore_keys` (or `ILLUMIO_IGNORE_KEYS=DFIRBubble,os`,
 which outranks the profile; empty counts as unset) hides housekeeping keys from the label text
 of the traffic and workload tables, the flow detail, `all labels` and the
-`g` picker; JSON output, the workload edit form and the Labels tab keep
+`g` picker, and the Labels tab until `i`; JSON output and the workload edit form keep
 them, and a scope or tier key is never ignored.
 
 ## PCE protection
