@@ -6,7 +6,7 @@ use super::output::{
     Meta, OutputFormat, TableRows, Window, WriteMeta, meta_line, write_json, write_table,
 };
 use crate::config::{self, Overrides};
-use pce::{CacheMode, Pce, PceClient};
+use pce::{CacheMode, KeyOrder, Pce, PceClient};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::time::Instant;
@@ -39,7 +39,8 @@ impl Context {
             tls_verify: if global.insecure { Some(false) } else { None },
         };
         let resolved = config::resolve(&file, &overrides, &env)?;
-        let pce = Pce::new(PceClient::new(resolved.client_config())?);
+        let pce = Pce::new(PceClient::new(resolved.client_config())?)
+            .with_key_order(KeyOrder::new(&resolved.scope_keys, &resolved.tier_key));
         let format = super::output::choose_format(global.json, global.table);
         let cache_mode = if global.no_cache {
             CacheMode::Bypass

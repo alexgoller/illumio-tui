@@ -366,11 +366,12 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             model.workloads.loading = false;
             match result {
                 Ok((rows, age, truncated)) => {
+                    let order = model.limits.key_order();
                     let w = &mut model.workloads;
                     w.raw = rows;
                     w.truncated = truncated;
                     w.error = None;
-                    w.rebuild();
+                    w.rebuild(&order);
                     w.loaded_at = Some(Instant::now());
                     w.auto.from_tick = false;
                     w.age_secs = age;
@@ -2028,9 +2029,10 @@ fn workloads_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 return Vec::new();
             }
             KeyCode::Char('h') => {
+                let order = model.limits.key_order();
                 let w = &mut model.workloads;
                 w.unhealthy_only = !w.unhealthy_only;
-                w.rebuild();
+                w.rebuild(&order);
                 w.show_detail &= w.table.selected_item().is_some();
                 return Vec::new();
             }
@@ -2672,10 +2674,11 @@ mod tests {
         assert!(m.traffic.all_keys);
         assert_eq!(
             m.traffic.effective_keys(),
-            vec!["app", "env", "role", "loc", "datacenter"]
+            vec!["app", "env", "role", "datacenter", "loc"],
+            "scope keys, tier key, then alphabetical"
         );
         assert!(m.traffic.groups.rows().iter().all(|g| g.src.len() == 5));
-        assert_eq!(m.traffic.flows.rows()[4].src_group, "crm/prod/web/us/fra1");
+        assert_eq!(m.traffic.flows.rows()[4].src_group, "crm/prod/web/fra1/us");
         // Reopening shows `all labels` checked and no key.
         quiet(&mut m, key('g'));
         let Overlay::GroupKeys(p) = &m.overlay else {
@@ -2709,6 +2712,40 @@ mod tests {
             "the new profile's label model"
         );
         assert!(!m.traffic.all_keys);
+    }
+
+    #[test]
+    fn all_labels_lists_the_profile_scope_and_tier_keys_first_then_alphabetical() {
+        use crate::tui::model::Overlay;
+        use crate::tui::test_support::model_with_rich_flows;
+        let mut m = model_with_rich_flows();
+        m.set_label_model(vec!["bu".into(), "app".into()], "tier".into());
+        // The flows carry `bu` and `tier` in place of `loc` and `role`.
+        if let Some(d) = m.traffic.data.as_mut() {
+            for f in &mut d.flows {
+                for l in f.src.labels.iter_mut().chain(f.dst.labels.iter_mut()) {
+                    match l.key.as_str() {
+                        "loc" => l.key = "bu".into(),
+                        "role" => l.key = "tier".into(),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        quiet(&mut m, key('g'));
+        let Overlay::GroupKeys(p) = &m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        for _ in 0..p.all_row() {
+            quiet(&mut m, key('j'));
+        }
+        quiet(&mut m, key(' '));
+        quiet(&mut m, enter());
+        assert!(m.traffic.all_keys);
+        assert_eq!(
+            m.traffic.effective_keys(),
+            vec!["bu", "app", "tier", "datacenter", "env"]
+        );
     }
 
     #[test]
@@ -4733,7 +4770,7 @@ mod tests {
         let mut m = model_with_workloads();
         m.workloads.raw[0].hostname = Some("db, primary|1".into());
         m.workloads.raw[1].hostname = Some("my host".into());
-        m.workloads.rebuild();
+        m.workloads.rebuild(&m.limits.key_order());
         update(&mut m, key('4'));
         update(&mut m, key('t'));
         assert_eq!(m.traffic.filter.src, "wl:aaaa-1");
@@ -4781,7 +4818,7 @@ mod tests {
         update(&mut m, key('4'));
         m.workloads.raw.remove(3);
         m.workloads.raw.remove(1);
-        m.workloads.rebuild();
+        m.workloads.rebuild(&m.limits.key_order());
         update(&mut m, key('h'));
         assert_eq!(m.workloads.table.len(), 0);
         assert!(m.workloads.table.selected_item().is_none());
@@ -5827,7 +5864,7 @@ mod tests {
         use crate::tui::test_support::model_with_workloads;
         let mut m = model_with_workloads();
         m.workloads.raw[1].hostname = m.workloads.raw[0].hostname.clone();
-        m.workloads.rebuild();
+        m.workloads.rebuild(&m.limits.key_order());
         update(&mut m, key('4'));
         update(&mut m, key('t'));
         assert_eq!(m.traffic.filter.src, "wl:aaaa-1");

@@ -16,7 +16,9 @@ use pce::traffic::{
     group_by_labels, group_key, group_text, keys_or_default, keys_seen, mesh, mesh_key,
 };
 use pce::write::Plan;
-use pce::{IpListSize, NameIndex, RuleKind, RuleSetView, RuleView, StatsSnapshot, ip_list_size};
+use pce::{
+    IpListSize, KeyOrder, NameIndex, RuleKind, RuleSetView, RuleView, StatsSnapshot, ip_list_size,
+};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
@@ -956,6 +958,10 @@ pub struct TrafficState {
     pub group_keys: Vec<String>,
     /// `g` chose `all labels`: every key seen in the loaded flows.
     pub all_keys: bool,
+    /// The keys `all labels` lists first when the flows carry them: the
+    /// profile's scope keys, then its tier key (the rest follow
+    /// alphabetically). Set with the label model.
+    pub preferred_keys: Vec<String>,
     /// The keys in force, resolved by `rebuild_views` (the `all labels` scan
     /// runs there, never per draw): what every view and column groups by.
     pub keys: Vec<String>,
@@ -978,9 +984,6 @@ pub const MESH_ALL: MeshColumns = MeshColumns {
     user: true,
     process: true,
 };
-
-/// The keys `all labels` lists first when the flows carry them.
-pub const PREFERRED_KEYS: [&str; 4] = ["app", "env", "role", "loc"];
 
 /// What `Enter` narrowed the Flows view to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1028,6 +1031,7 @@ impl TrafficState {
             view: TrafficView::Flows,
             group_keys: keys_or_default(keys),
             all_keys: false,
+            preferred_keys: Vec::new(),
             keys: keys_or_default(keys),
             groups: TableView::new(group_columns()),
             mesh: TableView::new(mesh_columns(MESH_ALL)),
@@ -1050,12 +1054,11 @@ impl TrafficState {
         self.keys.clone()
     }
 
-    /// Every key seen in the loaded flows when `all_keys` (`app`, `env`,
-    /// `role`, `loc` first), else `group_keys` (`app,env` when empty).
+    /// Every key seen in the loaded flows when `all_keys` (`preferred_keys`
+    /// first, then alphabetically), else `group_keys` (`app,env` when empty).
     fn resolve_keys(&self) -> Vec<String> {
         if self.all_keys {
-            let preferred = PREFERRED_KEYS.map(String::from);
-            let seen: Vec<String> = keys_seen(self.loaded_flows(), &preferred)
+            let seen: Vec<String> = keys_seen(self.loaded_flows(), &self.preferred_keys)
                 .into_iter()
                 .map(|(k, _)| k)
                 .collect();
@@ -2095,10 +2098,12 @@ pub struct WorkloadRowView {
     pub heartbeat_secs: Option<u64>,
     pub sync: String,
     pub ven: String,
+    /// `env=prod role=web app=shop`, keys in the profile's [`KeyOrder`].
+    pub labels: String,
 }
 
 impl WorkloadRowView {
-    pub fn new(workload: Workload, now: jiff::Timestamp) -> Self {
+    pub fn new(workload: Workload, now: jiff::Timestamp, order: &KeyOrder) -> Self {
         let health = workload.ven_health(now);
         let a = workload.agent_status_view();
         let age = workload.heartbeat_age(now);
@@ -2113,6 +2118,7 @@ impl WorkloadRowView {
                 .and_then(|a| a.sync_state.clone())
                 .unwrap_or_default(),
             ven: a.and_then(|a| a.version).unwrap_or_default(),
+            labels: workload.label_text(order),
             health,
             workload,
         }
@@ -2197,8 +2203,8 @@ pub fn workload_columns() -> Vec<Column<WorkloadRowView>> {
         wide(text_col(
             "labels",
             0,
-            |r| r.workload.label_text(),
-            |r| SortKey::Text(r.workload.label_text()),
+            |r| r.labels.clone(),
+            |r| SortKey::Text(r.labels.clone()),
         )),
         Column {
             narrow: Some(|r| enforcement_of(r).replace("visibility_only", "visibility")),
@@ -2299,14 +2305,15 @@ impl WorkloadsState {
             .then_some((self.raw.as_slice(), self.truncated))
     }
 
-    /// Recomputes the table rows (and health counts) from `raw`.
-    pub fn rebuild(&mut self) {
+    /// Recomputes the table rows (and health counts) from `raw`, labels in
+    /// `order`.
+    pub fn rebuild(&mut self, order: &KeyOrder) {
         let now = self.now.unwrap_or_else(jiff::Timestamp::now);
         let views: Vec<WorkloadRowView> = self
             .raw
             .iter()
             .cloned()
-            .map(|w| WorkloadRowView::new(w, now))
+            .map(|w| WorkloadRowView::new(w, now, order))
             .collect();
         self.counts = [0; 5];
         for v in &views {
@@ -2520,6 +2527,14 @@ pub struct Limits {
     pub tier_key: String,
 }
 
+impl Limits {
+    /// The order label keys are shown in: `scope_keys`, `tier_key`, then
+    /// the rest alphabetically.
+    pub fn key_order(&self) -> KeyOrder {
+        KeyOrder::new(&self.scope_keys, &self.tier_key)
+    }
+}
+
 #[derive(Debug)]
 pub struct Model {
     pub profile: ProfileInfo,
@@ -2571,6 +2586,9 @@ impl Model {
             &scope_keys,
         );
         traffic.treemap.area = crate::tui::ui::screens::traffic::treemap_area(size);
+        traffic.preferred_keys = KeyOrder::new(&scope_keys, crate::config::DEFAULT_TIER_KEY)
+            .first()
+            .to_vec();
         let policy = PolicyState::new(auto_refresh_min_seconds);
         let objects = ObjectsState::new(auto_refresh_min_seconds);
         let workloads = WorkloadsState::new(auto_refresh_min_seconds);
@@ -2618,9 +2636,10 @@ impl Model {
     pub fn set_label_model(&mut self, scope_keys: Vec<String>, tier_key: String) {
         self.traffic.group_keys = keys_or_default(&scope_keys);
         self.traffic.all_keys = false;
-        self.traffic.rebuild_views();
         self.limits.scope_keys = scope_keys;
         self.limits.tier_key = tier_key;
+        self.traffic.preferred_keys = self.limits.key_order().first().to_vec();
+        self.traffic.rebuild_views();
     }
 
     /// What a `w` form is pre-filled from: the profile's label model and
@@ -2691,6 +2710,7 @@ impl Model {
             min,
             &self.limits.scope_keys,
         );
+        traffic.preferred_keys = self.limits.key_order().first().to_vec();
         traffic.seq = self.traffic.seq + 1; // a late result of the old query is stale
         traffic.treemap.area = crate::tui::ui::screens::traffic::treemap_area(self.size);
         self.traffic = traffic;
@@ -2912,14 +2932,48 @@ mod tests {
     }
 
     #[test]
+    fn workload_labels_column_follows_the_key_order_and_sorts_by_it() {
+        let mut m = crate::tui::test_support::model_with_workloads();
+        m.set_label_model(vec!["env".into()], "role".into());
+        // host-1 sorts first alphabetically (`app=aaa`), host-2 by the order (`role=db`).
+        m.workloads.raw[0].labels[1].value = Some("aaa".into());
+        m.workloads.rebuild(&m.limits.key_order());
+        let t = &m.workloads.table;
+        let col = t.columns.iter().position(|c| c.title == "labels").unwrap();
+        assert_eq!(t.cell(&t.rows()[0], col), "env=prod role=web app=aaa");
+        assert_eq!(t.rows()[0].labels, "env=prod role=web app=aaa");
+        m.workloads.table.sort_by(col, false);
+        let t = &m.workloads.table;
+        let sorted: Vec<&str> = t
+            .visible()
+            .iter()
+            .map(|&i| t.rows()[i].labels.as_str())
+            .filter(|l| !l.is_empty())
+            .collect();
+        assert_eq!(
+            sorted,
+            vec!["env=prod role=db app=shop", "env=prod role=web app=aaa"]
+        );
+    }
+
+    #[test]
     fn the_label_model_sets_the_group_keys_and_empty_falls_back_to_app_env() {
         let mut m = crate::tui::test_support::model_fixture();
         assert_eq!(m.traffic.group_keys, vec!["app", "env"]);
+        assert_eq!(m.traffic.preferred_keys, vec!["app", "env", "role"]);
         m.set_label_model(vec!["site".into(), "zone".into()], "tier".into());
         assert_eq!(m.traffic.group_keys, vec!["site", "zone"]);
         assert_eq!(m.limits.tier_key, "tier");
+        assert_eq!(m.traffic.preferred_keys, vec!["site", "zone", "tier"]);
+        m.reset_data();
+        assert_eq!(
+            m.traffic.preferred_keys,
+            vec!["site", "zone", "tier"],
+            "a profile switch's reset keeps the profile's order"
+        );
         m.set_label_model(Vec::new(), "role".into());
         assert_eq!(m.traffic.group_keys, vec!["app", "env"]);
+        assert_eq!(m.traffic.preferred_keys, vec!["role"]);
         assert!(
             m.limits.scope_keys.is_empty(),
             "the profile value itself is kept"

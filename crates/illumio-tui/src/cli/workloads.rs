@@ -7,11 +7,11 @@ use super::write::{
     self, WriteFlags, label_in, parse_kv, resolve_labels, resolve_workload, run_plan,
 };
 use clap::{Args, Subcommand};
-use pce::PceError;
 use pce::models::{VenHealth, Workload, WorkloadFilter};
 use pce::write::{
     IfMissing, InterfaceSpec, LabelRemoval, LabelsPatch, WorkloadDraft, WorkloadPatch,
 };
+use pce::{KeyOrder, PceError};
 use serde::Serialize;
 
 #[derive(Args, Debug, Clone, Default)]
@@ -282,13 +282,18 @@ pub struct WorkloadRow {
     pub health: VenHealth,
     pub sync_state: Option<String>,
     pub heartbeat_age_secs: Option<u64>,
+    /// The table's `labels` cell, keys in the profile's [`KeyOrder`]; JSON
+    /// carries the `labels` array itself.
+    #[serde(skip)]
+    pub label_text: String,
 }
 
 impl WorkloadRow {
-    pub fn new(workload: Workload, now: jiff::Timestamp) -> Self {
+    pub fn new(workload: Workload, now: jiff::Timestamp, order: &KeyOrder) -> Self {
         let health = workload.ven_health(now);
         let a = workload.agent_status_view();
         Self {
+            label_text: workload.label_text(order),
             heartbeat_age_secs: workload.heartbeat_age(now).map(|d| d.as_secs()),
             sync_state: a.and_then(|a| a.sync_state),
             health,
@@ -332,7 +337,7 @@ impl TableRows for Vec<WorkloadRow> {
                     w.hostname.clone().unwrap_or_default(),
                     w.name.clone().unwrap_or_default(),
                     w.primary_ip().unwrap_or("").to_string(),
-                    w.label_text(),
+                    r.label_text.clone(),
                     w.enforcement_mode.clone().unwrap_or_default(),
                     w.online.map(|b| b.to_string()).unwrap_or_default(),
                     w.agent_status().unwrap_or_default(),
@@ -378,10 +383,11 @@ pub async fn run(ctx: &Context, args: &WorkloadsArgs) -> Result<(), CliError> {
     }
     let c = ctx.pce.workloads(&filter, ctx.cache_mode).await?;
     let now = jiff::Timestamp::now();
+    let order = KeyOrder::new(&ctx.config.scope_keys, &ctx.config.tier_key);
     let rows: Vec<WorkloadRow> = c
         .value
         .into_iter()
-        .map(|w| WorkloadRow::new(w, now))
+        .map(|w| WorkloadRow::new(w, now, &order))
         .filter(|r| {
             !args.unhealthy
                 || matches!(
@@ -391,4 +397,29 @@ pub async fn run(ctx: &Context, args: &WorkloadsArgs) -> Result<(), CliError> {
         })
         .collect();
     ctx.emit(&rows, cache_label(c.hit, ctx.cache_mode), c.truncated, None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture() -> Vec<Workload> {
+        serde_json::from_str(include_str!("../../../../fixtures/workloads.json")).unwrap()
+    }
+
+    #[test]
+    fn rows_print_labels_in_the_profile_key_order() {
+        let now: jiff::Timestamp = "2026-10-10T08:00:00Z".parse().unwrap();
+        let order = KeyOrder::new(&["env".into()], "role");
+        let rows: Vec<WorkloadRow> = fixture()
+            .into_iter()
+            .map(|w| WorkloadRow::new(w, now, &order))
+            .collect();
+        let labels = rows.headers().iter().position(|h| *h == "labels").unwrap();
+        let table = rows.rows();
+        assert_eq!(table[0][labels], "env=prod role=web app=shop");
+        let json = serde_json::to_value(&rows[0]).unwrap();
+        assert!(json.get("label_text").is_none(), "JSON keeps its shape");
+        assert!(json["labels"].is_array());
+    }
 }

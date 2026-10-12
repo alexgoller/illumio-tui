@@ -1,5 +1,5 @@
 use pce::client::{ClientConfig, PceClient};
-use pce::{CacheMode, Credentials, Pce};
+use pce::{CacheMode, Credentials, KeyOrder, Pce};
 use serde_json::json;
 use std::time::Duration;
 use wiremock::matchers::{method, path, query_param};
@@ -138,11 +138,15 @@ async fn name_index_loads_four_lists_once() {
             .mount(&server)
             .await;
     }
-    let p = pce_for(&server);
+    let p = pce_for(&server).with_key_order(KeyOrder::new(&["env".into()], "role"));
     let idx = p.name_index(CacheMode::Use).await.unwrap();
     assert_eq!(idx.label_text("/orgs/5/labels/3"), "app=shop");
     let again = p.name_index(CacheMode::Use).await.unwrap();
-    assert_eq!(again.label_keys().len(), 4);
+    assert_eq!(
+        again.label_keys(),
+        vec!["env", "role", "app", "loc"],
+        "the index is built with the Pce's key order"
+    );
     assert_eq!(p.stats().calls, 4);
 }
 

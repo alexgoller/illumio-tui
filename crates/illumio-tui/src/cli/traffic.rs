@@ -574,4 +574,20 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn table_label_columns_follow_the_index_key_order() {
+        let labels: Vec<pce::models::Label> =
+            serde_json::from_str(include_str!("../../../../fixtures/labels.json")).unwrap();
+        let raw: Vec<pce::models::Flow> =
+            serde_json::from_str(include_str!("../../../../fixtures/traffic_flows.json")).unwrap();
+        let idx = NameIndex::new(&labels, &[], &[], &[])
+            .with_key_order(pce::KeyOrder::new(&["env".into()], "role"));
+        let flows = pce::traffic::resolve_flows(&raw, &idx);
+        let headers = flows.headers();
+        let col = |h: &str| headers.iter().position(|x| *x == h).unwrap();
+        let rows = flows.rows();
+        assert_eq!(rows[0][col("src labels")], "env=prod role=web app=shop");
+        assert_eq!(rows[0][col("dst labels")], "env=prod role=db app=shop");
+    }
 }

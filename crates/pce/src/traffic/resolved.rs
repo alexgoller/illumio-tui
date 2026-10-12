@@ -225,6 +225,16 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn endpoint_labels_follow_the_index_key_order() {
+        let raw: Vec<Flow> =
+            serde_json::from_str(include_str!("../../../../fixtures/traffic_flows.json")).unwrap();
+        let idx = index().with_key_order(crate::KeyOrder::new(&["env".into()], "role"));
+        let f = resolve_flows(&raw, &idx);
+        assert_eq!(f[0].src.label_text(), "env=prod role=web app=shop");
+        assert_eq!(f[1].src.label_text(), "");
+    }
+
+    #[test]
     fn bytes_are_copied_from_dst_bi_and_dst_bo() {
         let f = flows();
         assert_eq!(

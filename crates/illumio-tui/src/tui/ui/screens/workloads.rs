@@ -211,7 +211,7 @@ fn detail_lines(r: &WorkloadRowView) -> Vec<DetailLine> {
     }
     out.push((
         Some("labels"),
-        Some(w.label_text())
+        Some(r.labels.clone())
             .filter(|l| !l.is_empty())
             .unwrap_or_else(|| "-".into()),
     ));

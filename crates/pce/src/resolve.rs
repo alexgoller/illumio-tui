@@ -1,5 +1,6 @@
 //! Turns PCE hrefs into names. Built once from the four object lists and
 //! shared (via `Arc`) by every screen and command. Never makes requests.
+use crate::KeyOrder;
 use crate::models::{IpList, Label, LabelGroup, Ref, Service};
 use serde::Serialize;
 use std::borrow::Cow;
@@ -34,6 +35,7 @@ pub struct NameIndex {
     ip_lists: HashMap<String, IpList>,
     ip_list_by_name: HashMap<String, String>,
     services: HashMap<String, Service>,
+    order: KeyOrder,
 }
 
 impl NameIndex {
@@ -69,6 +71,7 @@ impl NameIndex {
             ip_lists: self.ip_lists.clone(),
             ip_list_by_name: self.ip_list_by_name.clone(),
             services: self.services.clone(),
+            order: self.order.clone(),
             ..Self::default()
         };
         idx.insert_labels(labels);
@@ -86,10 +89,22 @@ impl NameIndex {
             label_groups: self.label_groups.clone(),
             label_group_by_name: self.label_group_by_name.clone(),
             services: self.services.clone(),
+            order: self.order.clone(),
             ..Self::default()
         };
         idx.insert_ip_lists(lists);
         idx
+    }
+
+    /// This index with labels shown in `order` (see [`KeyOrder`]).
+    pub fn with_key_order(mut self, order: KeyOrder) -> Self {
+        self.order = order;
+        self
+    }
+
+    /// The order label keys are shown in.
+    pub fn key_order(&self) -> &KeyOrder {
+        &self.order
     }
 
     fn insert_ip_lists(&mut self, lists: &[IpList]) {
@@ -132,8 +147,11 @@ impl NameIndex {
             .map(String::as_str)
     }
 
+    /// Every label key, in the index's [`KeyOrder`].
     pub fn label_keys(&self) -> Vec<String> {
-        self.keys.keys().cloned().collect()
+        let mut keys: Vec<String> = self.keys.keys().cloned().collect();
+        keys.sort_by(|a, b| self.order.cmp_keys(a, b));
+        keys
     }
 
     pub fn values_for_key(&self, key: &str) -> Vec<String> {
@@ -244,8 +262,9 @@ impl NameIndex {
         hits.next().is_none().then_some(first.href.as_str())
     }
 
-    /// Resolves label refs, sorted by key. Unknown hrefs get key `?` and the
-    /// href as value so nothing silently disappears.
+    /// Resolves label refs, sorted by the index's [`KeyOrder`], then value.
+    /// Unknown hrefs get key `?` (sorted last) and the href as value so
+    /// nothing silently disappears.
     pub fn resolve_labels(&self, refs: &[Ref]) -> Vec<ResolvedLabel> {
         let mut out: Vec<ResolvedLabel> = refs
             .iter()
@@ -262,7 +281,7 @@ impl NameIndex {
                 },
             })
             .collect();
-        out.sort_by(|a, b| a.key.cmp(&b.key).then(a.value.cmp(&b.value)));
+        self.order.sort_labels(&mut out);
         out
     }
 }
@@ -713,7 +732,52 @@ mod tests {
             .iter()
             .map(|l| format!("{}={}", l.key, l.value))
             .collect();
-        assert_eq!(text, vec!["?=/orgs/5/labels/77", "env=prod", "role=web"]);
+        assert_eq!(text, vec!["env=prod", "role=web", "?=/orgs/5/labels/77"]);
+    }
+
+    fn bu_label() -> Label {
+        serde_json::from_value(serde_json::json!({
+            "href": "/orgs/5/labels/50", "key": "bu", "value": "x"
+        }))
+        .unwrap()
+    }
+
+    fn ordered(idx: NameIndex) -> NameIndex {
+        idx.with_key_order(KeyOrder::new(&["app".into(), "env".into()], "role"))
+    }
+
+    #[test]
+    fn resolve_labels_follows_the_key_order() {
+        let mut labels: Vec<Label> =
+            serde_json::from_str(include_str!("../../../fixtures/labels.json")).unwrap();
+        labels.push(bu_label());
+        let idx = ordered(NameIndex::new(&labels, &[], &[], &[]));
+        let out = idx.resolve_labels(&[
+            Ref::new("/orgs/5/labels/1"),
+            Ref::new("/orgs/5/labels/50"),
+            Ref::new("/orgs/5/labels/3"),
+            Ref::new("/orgs/5/labels/4"),
+        ]);
+        let text: Vec<String> = out
+            .iter()
+            .map(|l| format!("{}={}", l.key, l.value))
+            .collect();
+        assert_eq!(text, vec!["app=shop", "env=prod", "role=web", "bu=x"]);
+        assert_eq!(idx.label_keys(), vec!["app", "env", "role", "bu", "loc"]);
+    }
+
+    #[test]
+    fn with_labels_and_with_ip_lists_keep_the_key_order() {
+        let idx = ordered(index());
+        let mut labels: Vec<Label> =
+            serde_json::from_str(include_str!("../../../fixtures/labels.json")).unwrap();
+        labels.push(bu_label());
+        let next = idx.with_labels(&labels);
+        assert_eq!(next.key_order(), idx.key_order());
+        assert_eq!(next.label_keys(), vec!["app", "env", "role", "bu", "loc"]);
+        let lists = idx.with_ip_lists(&[]);
+        assert_eq!(lists.key_order(), idx.key_order());
+        assert_eq!(lists.label_keys(), vec!["app", "env", "role", "loc"]);
     }
 
     #[test]

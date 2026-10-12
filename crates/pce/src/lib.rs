@@ -16,6 +16,7 @@ pub mod client;
 pub mod error;
 pub mod impact;
 pub mod iplist_size;
+pub mod key_order;
 pub mod limiter;
 pub mod models;
 pub mod resolve;
@@ -30,6 +31,7 @@ pub use impact::{
     workload_labels,
 };
 pub use iplist_size::{IpListSize, ip_list_size};
+pub use key_order::KeyOrder;
 pub use resolve::{
     NameIndex, ResolvedActor, ResolvedLabel, ResolvedService, RuleKind, RuleSetView, RuleView,
     describe_actor, describe_ingress_service,
@@ -85,6 +87,7 @@ pub struct Pce {
     cache: TtlCache,
     ttls: CacheTtls,
     poll: traffic::PollConfig,
+    key_order: KeyOrder,
 }
 
 impl Pce {
@@ -98,7 +101,14 @@ impl Pce {
             cache: TtlCache::new(),
             ttls,
             poll: traffic::PollConfig::default(),
+            key_order: KeyOrder::default(),
         }
+    }
+
+    /// The order label keys are shown in; the name index is built with it.
+    pub fn with_key_order(mut self, order: KeyOrder) -> Self {
+        self.key_order = order;
+        self
     }
 
     pub fn set_poll_config(&mut self, poll: traffic::PollConfig) {
@@ -203,7 +213,10 @@ impl Pce {
         let groups = self.label_groups(mode).await?.value;
         let lists = self.ip_lists(mode).await?.value;
         let services = self.services(mode).await?.value;
-        let idx = Arc::new(NameIndex::new(&labels, &groups, &lists, &services));
+        let idx = Arc::new(
+            NameIndex::new(&labels, &groups, &lists, &services)
+                .with_key_order(self.key_order.clone()),
+        );
         self.cache
             .insert("objects:index", idx.clone(), self.ttls.objects);
         Ok(idx)

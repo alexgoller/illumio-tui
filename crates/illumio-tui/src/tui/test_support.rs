@@ -139,7 +139,7 @@ pub fn with_workloads(mut m: Model) -> Model {
     m.workloads.raw = serde_json::from_str(include_str!("../../../../fixtures/workloads.json"))
         .expect("workloads fixture");
     m.workloads.now = Some("2026-10-10T08:00:00Z".parse().expect("fixed test clock"));
-    m.workloads.rebuild();
+    m.workloads.rebuild(&m.limits.key_order());
     m.workloads.loaded_at = Some(Instant::now() - Duration::from_secs(5));
     m.rebuild_rules();
     m
@@ -189,7 +189,7 @@ pub fn model_with_workloads() -> Model {
     m.workloads.raw = serde_json::from_str(include_str!("../../../../fixtures/workloads.json"))
         .expect("workloads fixture");
     m.workloads.now = Some("2026-10-10T08:00:00Z".parse().expect("fixed test clock"));
-    m.workloads.rebuild();
+    m.workloads.rebuild(&m.limits.key_order());
     m.workloads.loaded_at = Some(Instant::now() - Duration::from_secs(5));
     m
 }

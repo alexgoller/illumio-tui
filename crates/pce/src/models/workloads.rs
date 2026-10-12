@@ -1,5 +1,6 @@
 //! Workloads (VEN-managed hosts and unmanaged entries).
 use super::common::Ref;
+use crate::KeyOrder;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
@@ -195,21 +196,19 @@ impl Workload {
             .map(str::to_string)
     }
 
-    /// `app=shop env=prod role=web`, sorted by key.
-    pub fn label_text(&self) -> String {
-        let mut parts: Vec<String> = self
+    /// `app=shop env=prod role=web`, keys in `order`, then by value.
+    pub fn label_text(&self, order: &KeyOrder) -> String {
+        let mut parts: Vec<(&str, &str)> = self
             .labels
             .iter()
-            .filter_map(|l| {
-                Some(format!(
-                    "{}={}",
-                    l.key.as_ref()?,
-                    l.value.as_deref().unwrap_or("")
-                ))
-            })
+            .filter_map(|l| Some((l.key.as_deref()?, l.value.as_deref().unwrap_or(""))))
             .collect();
-        parts.sort();
-        parts.join(" ")
+        parts.sort_by(|a, b| order.cmp_keys(a.0, b.0).then_with(|| a.1.cmp(b.1)));
+        parts
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     pub fn label_hrefs(&self) -> Vec<&str> {
@@ -358,13 +357,23 @@ mod tests {
         assert_eq!(w[0].display_name(), "host-1.example");
         assert_eq!(w[0].primary_ip(), Some("10.0.1.10"));
         assert_eq!(w[0].agent_status(), Some("active".into()));
-        assert_eq!(w[0].label_text(), "app=shop env=prod role=web");
+        assert_eq!(
+            w[0].label_text(&KeyOrder::default()),
+            "app=shop env=prod role=web"
+        );
         assert_eq!(w[1].display_name(), "host-2.example");
         assert_eq!(w[1].agent_status(), Some("stopped".into()));
         assert_eq!(w[2].display_name(), "unmanaged-nas");
         assert_eq!(w[2].agent_status(), None);
-        assert_eq!(w[2].label_text(), "");
+        assert_eq!(w[2].label_text(&KeyOrder::default()), "");
         assert_eq!(w[2].online, None);
+    }
+
+    #[test]
+    fn label_text_follows_the_key_order() {
+        let w = fixture();
+        let order = KeyOrder::new(&["env".into()], "role");
+        assert_eq!(w[0].label_text(&order), "env=prod role=web app=shop");
     }
 
     #[test]
