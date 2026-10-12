@@ -870,7 +870,7 @@ async fn mount_traffic_body(server: &MockServer, expect_post: u64, body: String)
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn traffic_query_blocked_table_shows_the_destination_group_and_counts_its_hosts() {
+async fn traffic_query_blocked_prints_sections_per_destination_and_counts_its_hosts() {
     let server = MockServer::start().await;
     // The fixture plus the Corp 8443/tcp flow to a second shop/prod host.
     let mut flows: Vec<serde_json::Value> =
@@ -885,8 +885,13 @@ async fn traffic_query_blocked_table_shows_the_destination_group_and_counts_its_
             .assert()
             .success(),
     );
-    assert_eq!(out["data"][0]["dst"], "host-1.example", "JSON unchanged");
-    assert_eq!(out["data"][0]["dst_hosts"], 2);
+    let shop = &out["data"]["sections"][0];
+    assert_eq!(shop["app"], json!(["shop", "prod"]));
+    assert_eq!(shop["direction"], "in");
+    assert_eq!(shop["totals"]["groups"], 2);
+    assert_eq!(shop["rows"][0]["peer"], json!(["ipl:Corp", "-"]));
+    assert_eq!(shop["rows"][0]["service"], "8443/tcp");
+    assert_eq!(shop["rows"][0]["app_hosts"], 2);
     let table = cmd(&server)
         .args(["traffic", "query", "--window", "1h", "--blocked", "--table"])
         .assert()
@@ -901,26 +906,31 @@ async fn traffic_query_blocked_table_shows_the_destination_group_and_counts_its_
     assert_eq!(
         cols,
         vec![
-            "last seen",
-            "dst",
-            "dst name",
+            "app / peer",
+            "peer hosts",
+            "app hosts",
             "service",
             "flows",
             "conns",
-            "sources"
+            "bytes",
+            "last seen",
+            "decision"
         ],
         "{header}"
     );
-    let row = text
-        .lines()
+    let lines: Vec<&str> = text.lines().collect();
+    assert!(
+        lines[2].starts_with("shop/prod ")
+            && lines[2].ends_with("in · 2 groups · 27 conns · 1 blocked · 2 pot.blocked"),
+        "a header row: {text}"
+    );
+    let row = lines
+        .iter()
         .find(|l| l.contains("8443/tcp"))
         .unwrap_or_else(|| panic!("{text}"));
-    assert!(
-        row.contains("shop/prod") && row.contains("2 hosts"),
-        "{row}"
-    );
+    assert!(row.starts_with("  ipl:Corp/-"), "an indented peer: {row}");
+    assert!(row.contains("2 hosts"), "{row}");
     assert!(!row.contains("host-1.example"), "{row}");
-    assert!(row.contains("ipl:Corp/-"), "{row}");
     assert!(!text.contains("dst labels"), "{text}");
 }
 
@@ -989,9 +999,14 @@ async fn traffic_query_group_and_blocked_views() {
             .assert()
             .success(),
     );
-    assert_eq!(out["data"].as_array().unwrap().len(), 2);
-    assert_eq!(out["data"][0]["dst"], "host-1.example");
-    assert_eq!(out["data"][0]["port"], 8443);
+    let sections = out["data"]["sections"].as_array().unwrap();
+    assert_eq!(sections.len(), 1, "both blocked flows go to shop/prod");
+    assert_eq!(sections[0]["rows"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        sections[0]["rows"][0]["app_names"],
+        json!(["host-1.example"])
+    );
+    assert_eq!(sections[0]["rows"][0]["service"], "8443/tcp");
     cmd(&server)
         .args(["traffic", "query", "--window", "1h", "--blocked", "--table"])
         .assert()
@@ -1499,6 +1514,56 @@ async fn traffic_groups_sum_bytes_and_honour_keys() {
     assert!(text.contains("web") && text.contains("124000"), "{text}");
     cmd(&server)
         .args(["traffic", "groups", "--blocked"])
+        .assert()
+        .code(2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn traffic_groups_by_in_out_both_with_show_and_app() {
+    let server = MockServer::start().await;
+    mount_traffic(&server, 3).await;
+    let out = stdout_json(
+        cmd(&server)
+            .args(["traffic", "groups", "--window", "1h", "--by", "in"])
+            .assert()
+            .success(),
+    );
+    let sections = out["data"]["sections"].as_array().unwrap();
+    assert_eq!(sections[0]["app"], json!(["shop", "prod"]));
+    assert_eq!(sections[0]["totals"]["connections"], 325);
+    assert_eq!(sections[0]["rows"].as_array().unwrap().len(), 3);
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "traffic",
+                "groups",
+                "--window",
+                "1h",
+                "--by",
+                "out",
+                "--show",
+                "blocked-only",
+                "--app",
+                "unmanaged-nas/-",
+            ])
+            .assert()
+            .success(),
+    );
+    let sections = out["data"]["sections"].as_array().unwrap();
+    assert_eq!(sections.len(), 1);
+    assert_eq!(sections[0]["direction"], "out");
+    assert_eq!(sections[0]["totals"]["blocked"], 1);
+    let table = cmd(&server)
+        .args([
+            "traffic", "groups", "--window", "1h", "--by", "both", "--table",
+        ])
+        .assert()
+        .success();
+    let text = String::from_utf8_lossy(&table.get_output().stdout).to_string();
+    assert!(text.contains("in · 3 groups · 325 conns"), "{text}");
+    assert!(text.contains("out · "), "{text}");
+    cmd(&server)
+        .args(["traffic", "groups", "--window", "1h", "--app", "shop/prod"])
         .assert()
         .code(2);
 }

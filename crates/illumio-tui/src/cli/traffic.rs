@@ -4,15 +4,16 @@
 use super::context::{Context, cache_label};
 use super::error::CliError;
 use super::output::{TableRows, Window};
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 use jiff::Timestamp;
 use jiff::civil::Date;
 use pce::models::{
     ActorMatch, PolicyDecision, ServiceMatch, TrafficQuery, WorkloadFilter, proto_number,
 };
 use pce::traffic::{
-    BlockedGroup, FilterExpr, FlowGroup, MeshColumns, MeshRow, ResolvedFlow, TrafficQueryBuilder,
-    blocked_summary, group_by_labels, mesh, parse_window, resolve_actor, resolve_flows,
+    AppSection, Decisions, Direction, FilterExpr, FlowGroup, MeshColumns, MeshRow, ResolvedFlow,
+    TrafficQueryBuilder, app_sections, app_sections_both, group_by_labels, mesh, parse_window,
+    resolve_actor, resolve_flows,
 };
 use pce::{KeyOrder, NameIndex};
 use serde::Serialize;
@@ -37,9 +38,45 @@ pub struct QueryArgs {
     /// Group by label keys, e.g. app,env
     #[arg(long, value_delimiter = ',', conflicts_with = "blocked")]
     pub group: Vec<String>,
-    /// Only blocked and potentially blocked flows, grouped by destination group and port
+    /// Only blocked and potentially blocked flows, in sections per destination group
+    /// (as `traffic groups --by in --show blocked`; JSON: `{"sections": [...]}`)
     #[arg(long)]
     pub blocked: bool,
+}
+
+/// `traffic groups --by`: the flat pairs, or sections per app.
+#[derive(ValueEnum, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ByArg {
+    /// One row per source and destination group
+    #[default]
+    Pairs,
+    /// One section per destination app, its sources as rows
+    In,
+    /// One section per source app, its destinations as rows
+    Out,
+    /// Each app's inbound section, then its outbound one
+    Both,
+}
+
+/// `traffic groups --show`: which decisions the sections count.
+#[derive(ValueEnum, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ShowArg {
+    #[default]
+    All,
+    /// Blocked and potentially blocked
+    Blocked,
+    /// Blocked only
+    BlockedOnly,
+}
+
+impl From<ShowArg> for Decisions {
+    fn from(s: ShowArg) -> Self {
+        match s {
+            ShowArg::All => Decisions::All,
+            ShowArg::Blocked => Decisions::Blocked,
+            ShowArg::BlockedOnly => Decisions::BlockedOnly,
+        }
+    }
 }
 
 #[derive(Args, Debug, Clone, Default)]
@@ -49,6 +86,16 @@ pub struct GroupsArgs {
     /// Label keys to group by, e.g. app,env,role (default: the profile's scope keys)
     #[arg(long, value_delimiter = ',')]
     pub keys: Vec<String>,
+    /// pairs (default), or sections per app: in, out, both (JSON: `{"sections": [...]}`)
+    #[arg(long, value_enum, default_value_t)]
+    pub by: ByArg,
+    /// Sections only: count all flows, blocked (and potentially blocked) or blocked-only.
+    /// Applied to the loaded flows; `--decision` filters the query itself
+    #[arg(long, value_enum, default_value_t)]
+    pub show: ShowArg,
+    /// Sections only: keep this app's sections, e.g. pos/PCI
+    #[arg(long)]
+    pub app: Option<String>,
 }
 
 #[derive(Args, Debug, Clone, Default)]
@@ -402,35 +449,83 @@ impl TableRows for Vec<MeshRow> {
     }
 }
 
-impl TableRows for Vec<BlockedGroup> {
+/// App sections as printed: JSON `{"sections": [{app, direction, rows,
+/// totals}]}`; the table a header row per section (the app, its totals
+/// in the last column), then its peers indented.
+#[derive(Debug, Serialize)]
+pub struct Sections {
+    pub sections: Vec<AppSection>,
+}
+
+impl TableRows for Sections {
     fn headers(&self) -> Vec<&'static str> {
         vec![
-            "last seen",
-            "dst",
-            "dst name",
+            "app / peer",
+            "peer hosts",
+            "app hosts",
             "service",
             "flows",
             "conns",
-            "sources",
+            "bytes",
+            "last seen",
+            "decision",
         ]
     }
-    /// The TUI's Blocked cells: the row stands for a destination group, so
-    /// `dst` is the group and `dst name` the one host or `N hosts`.
     fn rows(&self) -> Vec<Vec<String>> {
-        self.iter()
-            .map(|g| {
-                vec![
-                    g.last_detected.clone().unwrap_or_default(),
-                    g.dst_group_text(),
-                    g.dst_name_text(),
-                    g.service_text(),
-                    g.flows.to_string(),
-                    g.connections.to_string(),
-                    g.sources_text(),
-                ]
-            })
-            .collect()
+        let any = self
+            .sections
+            .iter()
+            .flat_map(|s| &s.rows)
+            .any(|r| r.bytes > 0);
+        let mut out = Vec::new();
+        for s in &self.sections {
+            let mut head = vec![String::new(); 9];
+            head[0] = s.app_text();
+            head[8] = s.header_text();
+            out.push(head);
+            for r in &s.rows {
+                out.push(vec![
+                    format!("  {}", r.peer_text()),
+                    r.peer_name_text(),
+                    r.app_name_text(),
+                    r.service.clone(),
+                    r.flows.to_string(),
+                    r.connections.to_string(),
+                    bytes_cell(r.bytes, any),
+                    r.last_detected.clone().unwrap_or_default(),
+                    r.dominant().as_str().to_string(),
+                ]);
+            }
+        }
+        out
     }
+}
+
+/// `--by`, `--show` and `--app` over the loaded flows: the sections, or
+/// `None` for `pairs`. `--show` and `--app` need sections.
+pub fn sections_for(
+    flows: &[ResolvedFlow],
+    keys: &[String],
+    args: &GroupsArgs,
+) -> Result<Option<Sections>, CliError> {
+    let decisions = Decisions::from(args.show);
+    let mut sections = match args.by {
+        ByArg::Pairs => {
+            if args.show != ShowArg::All || args.app.is_some() {
+                return Err(CliError::Args(
+                    "--show and --app need sections: add --by in, out or both".into(),
+                ));
+            }
+            return Ok(None);
+        }
+        ByArg::In => app_sections(flows, keys, Direction::In, decisions),
+        ByArg::Out => app_sections(flows, keys, Direction::Out, decisions),
+        ByArg::Both => app_sections_both(flows, keys, decisions),
+    };
+    if let Some(app) = &args.app {
+        sections.retain(|s| &s.app_text() == app);
+    }
+    Ok(Some(Sections { sections }))
 }
 
 pub async fn run(ctx: &Context, cmd: &TrafficCmd) -> Result<(), CliError> {
@@ -492,12 +587,10 @@ async fn query(ctx: &Context, args: &QueryArgs) -> Result<(), CliError> {
     };
     if args.blocked {
         let keys = keys_or_profile(ctx, &[]);
-        ctx.emit(
-            &blocked_summary(&f.flows, &keys, &ctx.config.key_order()),
-            f.cache,
-            f.truncated,
-            f.window,
-        )
+        let sections = Sections {
+            sections: app_sections(&f.flows, &keys, Direction::In, Decisions::Blocked),
+        };
+        ctx.emit(&sections, f.cache, f.truncated, f.window)
     } else if !args.group.is_empty() {
         ctx.emit(
             &group_by_labels(&f.flows, &args.group),
@@ -516,16 +609,21 @@ async fn query(ctx: &Context, args: &QueryArgs) -> Result<(), CliError> {
 }
 
 async fn groups(ctx: &Context, args: &GroupsArgs) -> Result<(), CliError> {
+    // Bad flag combinations fail before any request.
+    sections_for(&[], &[], args)?;
     let Some(f) = fetch(ctx, &args.filter).await? else {
         return Ok(());
     };
     let keys = keys_or_profile(ctx, &args.keys);
-    ctx.emit(
-        &group_by_labels(&f.flows, &keys),
-        f.cache,
-        f.truncated,
-        f.window,
-    )
+    match sections_for(&f.flows, &keys, args)? {
+        Some(sections) => ctx.emit(&sections, f.cache, f.truncated, f.window),
+        None => ctx.emit(
+            &group_by_labels(&f.flows, &keys),
+            f.cache,
+            f.truncated,
+            f.window,
+        ),
+    }
 }
 
 async fn mesh_cmd(ctx: &Context, args: &MeshArgs) -> Result<(), CliError> {
@@ -645,5 +743,114 @@ mod tests {
             .filter_map(|l| l["key"].as_str())
             .collect();
         assert!(keys.contains(&"env"), "{keys:?}");
+    }
+    fn groups_args(argv: &[&str]) -> GroupsArgs {
+        use clap::Parser;
+        let mut full = vec!["illumio-tui", "traffic", "groups"];
+        full.extend_from_slice(argv);
+        let cli = crate::cli::Cli::try_parse_from(full).expect("parses");
+        match cli.command {
+            Some(crate::cli::Command::Traffic(TrafficCmd::Groups(a))) => a,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    fn app_env() -> Vec<String> {
+        vec!["app".into(), "env".into()]
+    }
+
+    #[test]
+    fn by_parses_and_defaults_to_pairs_which_has_no_sections() {
+        let a = groups_args(&[]);
+        assert_eq!(
+            (a.by, a.show, a.app.as_deref()),
+            (ByArg::Pairs, ShowArg::All, None)
+        );
+        let flows = crate::tui::test_support::fixture_flows_rich();
+        assert!(sections_for(&flows, &app_env(), &a).unwrap().is_none());
+        for (arg, by) in [
+            ("in", ByArg::In),
+            ("out", ByArg::Out),
+            ("both", ByArg::Both),
+        ] {
+            assert_eq!(groups_args(&["--by", arg]).by, by);
+        }
+        let ins = sections_for(&flows, &app_env(), &groups_args(&["--by", "in"]))
+            .unwrap()
+            .unwrap();
+        assert!(ins.sections.iter().all(|s| s.direction == Direction::In));
+        assert_eq!(ins.sections[0].app_text(), "crm/prod");
+        let both = sections_for(&flows, &app_env(), &groups_args(&["--by", "both"]))
+            .unwrap()
+            .unwrap();
+        assert!(both.sections.iter().any(|s| s.direction == Direction::Out));
+        assert!(
+            <crate::cli::Cli as clap::Parser>::try_parse_from([
+                "illumio-tui",
+                "traffic",
+                "groups",
+                "--by",
+                "x"
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn show_filters_the_decisions_and_app_keeps_one_apps_sections() {
+        let flows = crate::tui::test_support::fixture_flows_rich();
+        let count = |argv: &[&str]| -> u64 {
+            sections_for(&flows, &app_env(), &groups_args(argv))
+                .unwrap()
+                .unwrap()
+                .sections
+                .iter()
+                .map(|s| s.totals.flows)
+                .sum()
+        };
+        assert_eq!(count(&["--by", "in"]), 30);
+        assert_eq!(count(&["--by", "in", "--show", "blocked"]), 14);
+        assert_eq!(count(&["--by", "in", "--show", "blocked-only"]), 7);
+        let a = groups_args(&["--by", "both", "--app", "shop/prod"]);
+        let s = sections_for(&flows, &app_env(), &a).unwrap().unwrap();
+        assert_eq!(s.sections.len(), 2);
+        assert!(s.sections.iter().all(|s| s.app_text() == "shop/prod"));
+        assert_eq!(
+            (s.sections[0].direction, s.sections[1].direction),
+            (Direction::In, Direction::Out)
+        );
+        for argv in [&["--app", "shop/prod"][..], &["--show", "blocked"][..]] {
+            let err = sections_for(&flows, &app_env(), &groups_args(argv)).unwrap_err();
+            assert!(err.to_string().contains("--by"), "{err}");
+        }
+    }
+
+    #[test]
+    fn sections_print_header_rows_then_indented_peers_and_json_has_sections() {
+        let flows = crate::tui::test_support::fixture_flows_rich();
+        let s = Sections {
+            sections: app_sections(&flows, &app_env(), Direction::In, Decisions::Blocked),
+        };
+        let rows = s.rows();
+        assert_eq!(rows[0][0], "erp/prod");
+        assert_eq!(
+            rows[0][8],
+            "in · 3 groups · 102 conns · 2 blocked · 3 pot.blocked"
+        );
+        assert!(rows[0][1..8].iter().all(String::is_empty));
+        assert_eq!(rows[1][0], "  erp/dev");
+        assert_eq!(rows[1][2], "erp-api-p.example");
+        assert_eq!(rows[1][3], "8443/tcp");
+        let text = crate::cli::output::render_table(&s.headers(), &rows);
+        assert!(text.lines().next().unwrap().starts_with("app / peer"));
+        assert!(text.contains("\n  ipl:Corp/-"), "{text}");
+        let json = serde_json::to_value(&s).unwrap();
+        assert_eq!(
+            json["sections"][0]["app"],
+            serde_json::json!(["erp", "prod"])
+        );
+        assert_eq!(json["sections"][0]["direction"], "in");
+        assert_eq!(json["sections"][0]["totals"]["connections"], 102);
+        assert_eq!(json["sections"][0]["rows"][0]["service"], "8443/tcp");
     }
 }
