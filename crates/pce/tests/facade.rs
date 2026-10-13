@@ -548,3 +548,216 @@ async fn active_lists_are_cached_under_objects_and_dropped_by_a_write() {
     assert!(!p.active_label_groups(CacheMode::Use).await.unwrap().hit);
     assert_eq!(p.stats().calls, 6);
 }
+
+fn fast_poll(p: &mut Pce) {
+    p.set_poll_config(pce::traffic::poll::PollConfig {
+        initial: Duration::from_millis(1),
+        factor: 1.5,
+        cap: Duration::from_millis(5),
+        grace: Duration::from_millis(100),
+    });
+}
+
+/// A POST matching `body` answered with query `name`, its status and its
+/// download (`flows`); exactly `expect` POSTs.
+async fn mount_query(
+    server: &MockServer,
+    name: &str,
+    body: serde_json::Value,
+    flows: &str,
+    expect: u64,
+) {
+    use wiremock::matchers::body_partial_json;
+    let href = format!("/orgs/5/traffic_flows/async_queries/{name}");
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/traffic_flows/async_queries"))
+        .and(body_partial_json(body))
+        .respond_with(
+            ResponseTemplate::new(202).set_body_json(json!({"href": href, "status": "queued"})),
+        )
+        .expect(expect)
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{href}")))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(
+                json!({"status": "completed", "result": format!("{href}/download")}),
+            ),
+        )
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{href}/download")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(flows.to_string())
+                .insert_header("Content-Type", "application/json"),
+        )
+        .mount(server)
+        .await;
+}
+
+fn fixture_index() -> pce::NameIndex {
+    let labels: Vec<pce::models::Label> =
+        serde_json::from_str(include_str!("../../../fixtures/labels.json")).unwrap();
+    pce::NameIndex::new(&labels, &[], &[], &[])
+}
+
+fn shop_labels() -> serde_json::Value {
+    json!([{"label": {"href": "/orgs/5/labels/3"}}, {"label": {"href": "/orgs/5/labels/4"}}])
+}
+
+#[tokio::test]
+async fn focused_traffic_runs_one_query_per_side_in_its_own_slot() {
+    use pce::traffic::{Focus, FocusDirection, TrafficQueryBuilder};
+    use tokio_util::sync::CancellationToken;
+    let server = MockServer::start().await;
+    let flows = include_str!("../../../fixtures/traffic_flows.json");
+    let labels = shop_labels();
+    mount_query(
+        &server,
+        "q-in",
+        json!({"destinations": {"include": [labels.clone()]}}),
+        flows,
+        1,
+    )
+    .await;
+    mount_query(
+        &server,
+        "q-out",
+        json!({"sources": {"include": [labels]}}),
+        flows,
+        1,
+    )
+    .await;
+    let mut p = pce_for(&server);
+    fast_poll(&mut p);
+    let idx = fixture_index();
+    let base = TrafficQueryBuilder::between(
+        "2026-10-09T00:00:00Z".parse().unwrap(),
+        "2026-10-10T00:00:00Z".parse().unwrap(),
+    )
+    .max_results(500)
+    .build()
+    .unwrap();
+    let both = Focus::new(
+        vec!["shop".into(), "prod".into()],
+        vec!["app".into(), "env".into()],
+    );
+    let cancel = CancellationToken::new();
+    let r = p
+        .focused_traffic("focus", &both, &base, &idx, CacheMode::Use, &cancel, None)
+        .await
+        .unwrap();
+    assert_eq!(r.query_count(), 2);
+    assert_eq!(
+        r.flows.len(),
+        4,
+        "flow 0 came back from both queries and counts once"
+    );
+    assert!(!r.hit);
+    let again = p
+        .focused_traffic("focus", &both, &base, &idx, CacheMode::Use, &cancel, None)
+        .await
+        .unwrap();
+    assert!(again.hit, "both slots answer from the cache");
+    let inbound = both.clone().with_direction(FocusDirection::In);
+    let r = p
+        .focused_traffic(
+            "focus",
+            &inbound,
+            &base,
+            &idx,
+            CacheMode::Use,
+            &cancel,
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(r.hit, "the in query is the one `both` ran first");
+    assert_eq!(
+        r.flows.len(),
+        3,
+        "Focus::keeps narrows the in query's answer"
+    );
+    let nope = Focus::new(
+        vec!["nope".into(), "prod".into()],
+        vec!["app".into(), "env".into()],
+    );
+    let e = p
+        .focused_traffic("focus", &nope, &base, &idx, CacheMode::Use, &cancel, None)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&e, pce::PceError::Invalid(m) if m.starts_with("unknown app \"nope/prod\"")),
+        "{e:?}"
+    );
+}
+
+#[tokio::test]
+async fn traffic_slots_do_not_evict_each_other() {
+    use pce::traffic::{Focus, TrafficQueryBuilder};
+    use tokio_util::sync::CancellationToken;
+    let server = MockServer::start().await;
+    let flows = include_str!("../../../fixtures/traffic_flows.json");
+    let labels = shop_labels();
+    mount_query(&server, "q-main", json!({"max_results": 501}), "[]", 1).await;
+    mount_query(
+        &server,
+        "q-in",
+        json!({"destinations": {"include": [labels.clone()]}}),
+        flows,
+        1,
+    )
+    .await;
+    mount_query(
+        &server,
+        "q-out",
+        json!({"sources": {"include": [labels]}}),
+        flows,
+        1,
+    )
+    .await;
+    let mut p = pce_for(&server);
+    fast_poll(&mut p);
+    let idx = fixture_index();
+    let bounds = || {
+        TrafficQueryBuilder::between(
+            "2026-10-09T00:00:00Z".parse().unwrap(),
+            "2026-10-10T00:00:00Z".parse().unwrap(),
+        )
+    };
+    let main = bounds().max_results(501).build().unwrap();
+    let base = bounds().max_results(500).build().unwrap();
+    let focus = Focus::new(
+        vec!["shop".into(), "prod".into()],
+        vec!["app".into(), "env".into()],
+    );
+    let cancel = CancellationToken::new();
+    assert!(
+        !p.traffic(&main, CacheMode::Use, &cancel, None)
+            .await
+            .unwrap()
+            .hit
+    );
+    let f = p
+        .focused_traffic("focus", &focus, &base, &idx, CacheMode::Use, &cancel, None)
+        .await
+        .unwrap();
+    assert!(!f.hit);
+    assert!(
+        p.traffic(&main, CacheMode::Use, &cancel, None)
+            .await
+            .unwrap()
+            .hit,
+        "the focused queries left the main slot alone"
+    );
+    assert!(
+        p.focused_traffic("focus", &focus, &base, &idx, CacheMode::Use, &cancel, None)
+            .await
+            .unwrap()
+            .hit,
+        "and the main query left the focused slots alone"
+    );
+}

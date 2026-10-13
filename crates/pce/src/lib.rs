@@ -324,8 +324,8 @@ impl Pce {
         })
     }
 
-    /// Runs (or reuses) one Explorer query. The cache key is the full query
-    /// body, so the same filter never runs twice until invalidated.
+    /// Runs (or reuses) one Explorer query in the `main` slot: the
+    /// unfocused traffic result (see `traffic_slot`).
     pub async fn traffic(
         &self,
         query: &models::TrafficQuery,
@@ -333,8 +333,28 @@ impl Pce {
         cancel: &tokio_util::sync::CancellationToken,
         progress: Option<&tokio::sync::mpsc::UnboundedSender<traffic::QueryProgress>>,
     ) -> Result<Cached<traffic::TrafficResult>> {
+        self.traffic_slot("main", query, mode, cancel, progress)
+            .await
+    }
+
+    /// Runs (or reuses) one Explorer query in cache slot `slot`. The cache
+    /// key is the slot plus the full query body, so the same filter never
+    /// runs twice until invalidated. Each slot keeps exactly one result set
+    /// (a long TTL stands in for "until the filter changes or the user
+    /// refreshes"): the unfocused result (`main`), the focused ones
+    /// (`focus:in`, `focus:out`) and a timeline's buckets do not evict
+    /// each other.
+    pub async fn traffic_slot(
+        &self,
+        slot: &str,
+        query: &models::TrafficQuery,
+        mode: CacheMode,
+        cancel: &tokio_util::sync::CancellationToken,
+        progress: Option<&tokio::sync::mpsc::UnboundedSender<traffic::QueryProgress>>,
+    ) -> Result<Cached<traffic::TrafficResult>> {
+        let prefix = format!("traffic:{slot}:");
         let key = format!(
-            "traffic:{}",
+            "{prefix}{}",
             serde_json::to_string(query).map_err(|e| PceError::Invalid(e.to_string()))?
         );
         if mode == CacheMode::Use
@@ -350,10 +370,7 @@ impl Pce {
         }
         let result =
             traffic::run_traffic_query(&self.client, query, &self.poll, cancel, progress).await?;
-        // Traffic is kept until the filter changes or the user refreshes:
-        // exactly one result set lives in the cache, and a long TTL stands in
-        // for "forever" within one session.
-        self.cache.invalidate_prefix("traffic:");
+        self.cache.invalidate_prefix(&prefix);
         self.cache
             .insert(&key, result.clone(), Duration::from_secs(24 * 3600));
         let truncated = result.truncated;
@@ -363,6 +380,64 @@ impl Pce {
             hit: false,
             truncated,
         })
+    }
+
+    /// `focus`'s queries over `base` (`Focus::queries`: one per side, `in`
+    /// first), each run (or reused) in its own slot `{slot}:in` /
+    /// `{slot}:out`, one at a time, resolved with `idx`, merged without
+    /// duplicates (`union_flows`) and narrowed by `Focus::keeps`. An app the
+    /// labels do not name is `PceError::Invalid` before any request.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn focused_traffic(
+        &self,
+        slot: &str,
+        focus: &traffic::Focus,
+        base: &models::TrafficQuery,
+        idx: &NameIndex,
+        mode: CacheMode,
+        cancel: &tokio_util::sync::CancellationToken,
+        progress: Option<&tokio::sync::mpsc::UnboundedSender<traffic::QueryProgress>>,
+    ) -> Result<traffic::FocusedTraffic> {
+        let queries = focus.queries(base, idx).map_err(PceError::Invalid)?;
+        let mut merged: Option<Vec<traffic::ResolvedFlow>> = None;
+        let mut out = traffic::FocusedTraffic {
+            flows: Vec::new(),
+            truncated: false,
+            matches_count: Some(0),
+            elapsed: Duration::ZERO,
+            hit: true,
+            queries: Vec::new(),
+        };
+        for (side, q) in queries {
+            let r = self
+                .traffic_slot(
+                    &format!("{slot}:{}", side.as_str()),
+                    &q,
+                    mode,
+                    cancel,
+                    progress,
+                )
+                .await?;
+            let flows = traffic::resolve_flows(&r.value.flows, idx);
+            merged = Some(match merged.take() {
+                None => flows,
+                Some(first) => traffic::union_flows(first, flows),
+            });
+            out.truncated |= r.truncated;
+            out.matches_count = out
+                .matches_count
+                .zip(r.value.matches_count)
+                .map(|(a, b)| a + b);
+            out.elapsed += r.value.elapsed;
+            out.hit &= r.hit;
+            out.queries.push(q);
+        }
+        out.flows = merged
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|f| focus.keeps(f))
+            .collect();
+        Ok(out)
     }
 
     /// Resolves filter expressions (OR of AND-groups) to actor matches,
