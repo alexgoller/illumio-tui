@@ -11,6 +11,8 @@ pub enum Command {
     /// `:focus <app>` narrows every traffic view to one app; `:focus` alone
     /// opens the picker.
     Focus(Option<String>),
+    /// `:app <app>` opens the app overlay; `:app` alone opens the picker.
+    App(Option<String>),
     Profile(String),
     /// `:writes on` / `:writes off`; bare `:writes` shows the state.
     Writes(Option<bool>),
@@ -61,6 +63,7 @@ pub fn parse(input: &str) -> Result<Command, String> {
             "filter <src expr>  (e.g. app=web,env=prod)",
         ),
         "focus" => Ok(Command::Focus((!arg.is_empty()).then(|| arg.to_string()))),
+        "app" => Ok(Command::App((!arg.is_empty()).then(|| arg.to_string()))),
         "window" => with_arg(Command::Window, "window <duration>  (e.g. 1h, 24h, 7d)"),
         "profile" => with_arg(Command::Profile, "profile <name>"),
         "writes" => match arg {
@@ -94,6 +97,11 @@ mod tests {
 
     #[test]
     fn parses_every_documented_command() {
+        assert_eq!(parse("app").unwrap(), Command::App(None));
+        assert_eq!(
+            parse("app shop/prod").unwrap(),
+            Command::App(Some("shop/prod".into()))
+        );
         assert_eq!(parse("traffic").unwrap(), Command::Screen(Screen::Traffic));
         assert_eq!(parse("policy").unwrap(), Command::Screen(Screen::Policy));
         assert_eq!(parse("objects").unwrap(), Command::Screen(Screen::Objects));

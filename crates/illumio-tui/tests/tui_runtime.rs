@@ -2406,3 +2406,51 @@ async fn r_on_a_partial_focus_sends_one_query_per_side() {
         "4 lists for the filter, then POST + poll + download per side"
     );
 }
+#[tokio::test]
+async fn opening_the_app_overlay_reads_workloads_and_rulesets_once() {
+    use illumio_tui::tui::app_view::Loadable;
+    use illumio_tui::tui::commands::Command;
+    use illumio_tui::tui::msg::Msg;
+    use illumio_tui::tui::test_support::model_with_flows;
+    use wiremock::matchers::query_param;
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .and(query_param(
+            "labels",
+            r#"[["/orgs/5/labels/3","/orgs/5/labels/4"]]"#,
+        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/workloads.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/sec_policy/draft/rule_sets"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/rule_sets.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    // The Policy screen's own deny-rule fallback may ask for the selected ruleset's.
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+    let pce = pce_for(&server);
+    let (mut rt, tx) = Runtime::new(pce, model_with_flows());
+    tx.send(Msg::Command(Command::App(Some("shop/prod".into()))))
+        .unwrap();
+    let model = run_loop(&mut rt, Box::pin(press(vec![(600, ch('q'))])), &mut |_| {}).await;
+    let v = model.app_view.as_ref().expect("the overlay");
+    assert_eq!(v.requests, 2);
+    assert!(matches!(&v.workloads, Loadable::Loaded((rows, _)) if rows.len() == 2));
+    assert!(matches!(&v.policy, Loadable::Loaded(rows) if rows.len() == 2));
+    assert_eq!(model.busy, 0);
+}

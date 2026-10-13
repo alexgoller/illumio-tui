@@ -319,6 +319,8 @@ pub enum PendingAction {
     Backfill(pce::traffic::BackfillPlan),
     /// `r` on a partial focus past a cost threshold: one query per side.
     RunFocused(TrafficFilter, pce::traffic::Focus, pce::CacheMode),
+    /// `r` in the app overlay: the workloads and the rulesets again, past the cache.
+    ReloadApp,
 }
 
 #[derive(Debug)]

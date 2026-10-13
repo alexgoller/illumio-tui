@@ -7,6 +7,8 @@ use crossterm::event::{KeyCode, KeyEvent};
 pub enum AppPickerPurpose {
     /// `F` / `:focus`: narrow every traffic view to it.
     Focus,
+    /// `A` / `:app`: open the app overlay for it.
+    Overlay,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

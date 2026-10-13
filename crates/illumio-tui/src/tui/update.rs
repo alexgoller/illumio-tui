@@ -1,5 +1,6 @@
 //! Pure state transitions. Never performs I/O; returns `Cmd`s instead.
 use crate::tui::app_picker::{AppPicker, AppPickerOutcome, AppPickerPurpose};
+use crate::tui::app_view::{AppPanel, AppView, Loadable};
 use crate::tui::commands::{self, Command};
 use crate::tui::edit::{self, EditIntent, RulesetTarget, Start, WriteIntent};
 use crate::tui::filter::{FilterEditor, TrafficFilter};
@@ -13,9 +14,9 @@ use crate::tui::msg::{Cmd, FocusedOutcome, Msg, ObjectsPayload, QueryOutcome};
 use crate::tui::picker::{KeyPicker, PickerOutcome};
 use crate::tui::ui::widgets::overlay::{confirm_write_last_scroll, help_last_scroll};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use pce::models::{EventFilter, PolicyDecision, PolicyScope};
+use pce::models::{EventFilter, PolicyDecision, PolicyScope, Workload};
 use pce::traffic::treemap::Weight;
-use pce::traffic::{Decisions, Focus, GroupKey, QueryProgress};
+use pce::traffic::{Decisions, Direction, Focus, FocusDirection, GroupKey, QueryProgress};
 use pce::write::{
     Outcome, Plan, ProvisionRequest, ProvisionSubset, RevertRequest, WriteError, provision_counts,
 };
@@ -23,6 +24,20 @@ use pce::{CacheMode, RuleKind, WriteMethod};
 use std::time::Instant;
 
 pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
+    let traffic_answer = matches!(
+        msg,
+        Msg::QueryDone { .. } | Msg::FocusedDone { .. } | Msg::SliceDone { .. }
+    );
+    let cmds = on_msg(model, msg);
+    // A traffic answer that lands under the open app overlay: its peers and
+    // timeline follow (no request).
+    if traffic_answer && model.overlay == Overlay::App {
+        rebuild_app_traffic(model);
+    }
+    cmds
+}
+
+fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
     match msg {
         Msg::Key(k) => on_key(model, k),
         Msg::Mouse(me) => on_mouse(model, me),
@@ -414,6 +429,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     } else {
                         CacheMode::Use
                     };
+                    refresh_app_policy(model, Ok(age));
                     deny_fallback(model, mode)
                 }
                 Err(e) => {
@@ -421,6 +437,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     model.policy.bypass_deny = false;
                     let tripped = model.policy.auto.take_tick_failure();
                     fail(model, "rulesets", &e, tripped);
+                    refresh_app_policy(model, Err(&e));
                     Vec::new()
                 }
             }
@@ -444,6 +461,32 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     model.policy.deny_requested.remove(&href); // allow a retry on reselect
                     model.status = StatusLine::warn(format!("deny rules: {e}"));
                 }
+            }
+            Vec::new()
+        }
+        Msg::AppWorkloadsLoaded { seq, result } => {
+            let now = model.workloads.now.unwrap_or_else(jiff::Timestamp::now);
+            let tier = model.limits.tier_key.clone();
+            let idx = model.index().cloned();
+            let Some(v) = model.app_view.as_mut().filter(|v| v.seq == seq) else {
+                return Vec::new(); // an earlier overlay's answer
+            };
+            match (result, idx, v.label_hrefs.clone()) {
+                (Ok(p), Some(idx), Some(hrefs)) => {
+                    if p.hit {
+                        v.cached += 1;
+                    }
+                    let mine: Vec<Workload> = p
+                        .workloads
+                        .into_iter()
+                        .filter(|w| pce::app::workload_in_app(w, &hrefs))
+                        .collect();
+                    v.workloads =
+                        Loadable::Loaded(pce::app::app_workloads(&mine, &idx, &tier, now));
+                    v.workloads_truncated = p.truncated;
+                }
+                (Err(e), _, _) => v.workloads = Loadable::Failed(e),
+                _ => v.workloads = Loadable::Unavailable("the name index is not loaded".into()),
             }
             Vec::new()
         }
@@ -1040,11 +1083,15 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     PendingAction::RunFocused(f, focus, mode) => {
                         start_focused(model, f, focus, mode)
                     }
+                    PendingAction::ReloadApp => app_reload(model),
                 }
             }
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                 model.overlay = Overlay::None;
                 model.status = StatusLine::info("cancelled");
+                if action == PendingAction::ReloadApp {
+                    model.overlay = Overlay::App;
+                }
                 // The opt-in asks for a cap past the cost threshold after
                 // each truncated query: a no also stops the ticks asking.
                 if let PendingAction::Backfill(plan) = action
@@ -1331,12 +1378,15 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             AppPickerOutcome::Pick { app, purpose } => {
                 model.overlay = Overlay::None;
                 match purpose {
-                    AppPickerPurpose::Focus => focus_by_name(model, &app),
+                    AppPickerPurpose::Focus => {
+                        focus_by_name(model, &app);
+                        Vec::new()
+                    }
+                    AppPickerPurpose::Overlay => open_app_by_name(model, &app),
                 }
-                Vec::new()
             }
         },
-        Overlay::App => Vec::new(),
+        Overlay::App => app_overlay_key(model, k),
         Overlay::None => on_screen_key(model, k),
     }
 }
@@ -1495,6 +1545,7 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             return Vec::new();
         }
         KeyCode::Char('F') => return focus_key(model),
+        KeyCode::Char('A') => return app_open_key(model),
         KeyCode::Char('X') if model.traffic.focus.is_some() => {
             model.traffic.cycle_focus_direction();
             model.status = focus_status(&model.traffic);
@@ -1884,6 +1935,372 @@ fn requery_focus(model: &mut Model, focus: Focus) -> Vec<Cmd> {
         return Vec::new();
     }
     start_focused(model, f, focus, mode)
+}
+
+/// The direction a new app overlay starts at: the focus's, else `both`.
+fn app_direction(model: &Model) -> FocusDirection {
+    model
+        .traffic
+        .focus
+        .as_ref()
+        .map_or(FocusDirection::Both, |f| f.direction)
+}
+
+/// `A`: the app overlay for the row's app (the first of `row_apps`, the
+/// order `F` takes), at the focus direction (or `both`); on a row without
+/// an app, the picker.
+fn app_open_key(model: &mut Model) -> Vec<Cmd> {
+    let Some(app) = model.traffic.row_apps().into_iter().next() else {
+        open_app_picker(model, AppPickerPurpose::Overlay, "");
+        return Vec::new();
+    };
+    let focus = Focus::new(app, model.traffic.keys.clone()).with_direction(app_direction(model));
+    open_app(model, focus)
+}
+
+/// `:app <app>` and the picker: an app of the loaded result, or one whose
+/// labels the name index knows (it may have no flows in the window); else
+/// the closest match in the status line, nothing sent.
+fn open_app_by_name(model: &mut Model, name: &str) -> Vec<Cmd> {
+    let keys = model.traffic.keys.clone();
+    let apps = model.traffic.loaded_apps();
+    let app = pce::traffic::parse_app(name);
+    let labelled = model
+        .index()
+        .map(|idx| pce::traffic::app_labels(&app, &keys, idx));
+    if !apps.iter().any(|a| a == name) && !matches!(labelled, Some(Ok(_))) {
+        let near = pce::traffic::closest(name, &apps, 3);
+        model.status = StatusLine::warn(match (near.is_empty(), labelled) {
+            (false, _) => format!(
+                "unknown app {name:?}; closest: {}; nothing sent",
+                near.join(", ")
+            ),
+            (true, Some(Err(e))) => format!("{e}; nothing sent"),
+            (true, _) => {
+                format!("unknown app {name:?} in the loaded result or the labels; nothing sent")
+            }
+        });
+        return Vec::new();
+    }
+    let focus = Focus::new(app, keys).with_direction(app_direction(model));
+    open_app(model, focus)
+}
+
+/// Opens the overlay for `focus`. The traffic panels come from the loaded
+/// result (no request). The workloads come from the Workloads screen when
+/// it holds every workload; the rulesets from the Policy screen when it is
+/// loaded (none is requested while its load is on the way). Reopening the
+/// same app keeps its view (`seq`, panels, cursors): nothing is sent again.
+/// Otherwise one request each, counted. A new app gets a new `seq`, so an
+/// earlier overlay's late answer is dropped.
+fn open_app(model: &mut Model, focus: Focus) -> Vec<Cmd> {
+    let window = model.traffic.filter.window.clone();
+    let (mut v, reused) = match model.app_view.take() {
+        Some(mut v) if v.focus.same_app(&focus) => {
+            v.focus = focus.clone();
+            v.window = window;
+            (v, true)
+        }
+        _ => {
+            model.app_seq += 1;
+            (AppView::new(focus.clone(), window, model.app_seq), false)
+        }
+    };
+    let t = &model.traffic;
+    v.rebuild_traffic(
+        t.flows_for(&focus),
+        t.window_bounds(),
+        t.partial_for(&focus),
+    );
+    let idx = model.index().cloned();
+    v.label_hrefs = idx
+        .as_ref()
+        .and_then(|idx| focus.label_matches(idx).ok())
+        .map(|m| pce::app::label_hrefs(&m));
+    let why = if idx.is_none() {
+        "the name index is not loaded yet".to_string()
+    } else {
+        format!(
+            "{} is not a label group: no workloads or rulesets to match",
+            focus.app_text()
+        )
+    };
+    let mut cmds = Vec::new();
+    match (v.label_hrefs.clone(), &idx) {
+        (Some(hrefs), Some(idx))
+            if model.workloads.loaded_at.is_some() && !model.workloads.truncated =>
+        {
+            let mine: Vec<Workload> = model
+                .workloads
+                .raw
+                .iter()
+                .filter(|w| pce::app::workload_in_app(w, &hrefs))
+                .cloned()
+                .collect();
+            let now = model.workloads.now.unwrap_or_else(jiff::Timestamp::now);
+            v.workloads = Loadable::Loaded(pce::app::app_workloads(
+                &mine,
+                idx,
+                &model.limits.tier_key,
+                now,
+            ));
+            v.workloads_truncated = false;
+        }
+        (Some(_), Some(_)) if reused && !matches!(v.workloads, Loadable::Unavailable(_)) => {}
+        (Some(hrefs), Some(_)) => {
+            v.workloads = Loadable::Loading;
+            cmds.push(Cmd::LoadAppWorkloads {
+                seq: v.seq,
+                filter: pce::app::app_workload_filter(&hrefs),
+                mode: CacheMode::Use,
+            });
+        }
+        _ => v.workloads = Loadable::Unavailable(why.clone()),
+    }
+    match (&v.label_hrefs, &idx) {
+        (Some(hrefs), Some(idx)) if model.policy.loaded_at.is_some() => {
+            v.policy = Loadable::Loaded(pce::app::app_policy(&model.policy.raw, hrefs, idx));
+        }
+        (Some(_), Some(_)) if reused && !matches!(v.policy, Loadable::Unavailable(_)) => {}
+        (Some(_), Some(_)) if model.policy.loading => {
+            v.policy = Loadable::Loading;
+            v.policy_sent = false;
+        }
+        (Some(_), Some(_)) => {
+            v.policy = Loadable::Loading;
+            v.policy_sent = true;
+            cmds.extend(load_rule_sets(model, CacheMode::Use));
+        }
+        _ => v.policy = Loadable::Unavailable(why),
+    }
+    let sent = u32::try_from(cmds.len()).unwrap_or(u32::MAX);
+    v.requests += sent;
+    model.status = StatusLine::info(format!(
+        "{} · {sent} request{}",
+        v.header_title(),
+        if sent == 1 { "" } else { "s" }
+    ));
+    model.app_view = Some(v);
+    model.overlay = Overlay::App;
+    cmds
+}
+
+/// The overlay's peers and timeline again from the loaded flows: after
+/// `X`, and when a traffic answer lands while it is open. No request.
+fn rebuild_app_traffic(model: &mut Model) {
+    let t = &model.traffic;
+    if let Some(v) = model.app_view.as_mut() {
+        let focus = v.focus.clone();
+        v.rebuild_traffic(
+            t.flows_for(&focus),
+            t.window_bounds(),
+            t.partial_for(&focus),
+        );
+    }
+}
+
+/// The overlay's keys: `Esc` / `q` close, `Tab` / `BackTab` panels, `j` /
+/// `k` rows, `X` direction, `Enter` opens, `w` drafts a rule, `r` asks to
+/// reload. Only `r` (after `y`) and `Enter` (on another screen) can send.
+fn app_overlay_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
+    let Some(v) = model.app_view.as_mut() else {
+        model.overlay = Overlay::None;
+        return Vec::new();
+    };
+    match k.code {
+        KeyCode::Esc | KeyCode::Char('q') => model.overlay = Overlay::None,
+        KeyCode::Tab => v.panel = v.panel.next(),
+        KeyCode::BackTab => v.panel = v.panel.prev(),
+        KeyCode::Down | KeyCode::Char('j') => v.move_cursor(1),
+        KeyCode::Up | KeyCode::Char('k') => v.move_cursor(-1),
+        KeyCode::Char('X') => {
+            v.focus.direction = v.focus.direction.next();
+            rebuild_app_traffic(model);
+        }
+        KeyCode::Enter => return app_enter(model),
+        KeyCode::Char('w') => return app_rule_key(model),
+        KeyCode::Char('r') => app_reload_key(model),
+        _ => {}
+    }
+    Vec::new()
+}
+
+/// `r` in the overlay: asks before reloading its two panels.
+fn app_reload_key(model: &mut Model) {
+    let Some(v) = model.app_view.as_ref() else {
+        return;
+    };
+    let app = v.focus.app_text();
+    if v.label_hrefs.is_none() {
+        model.status = StatusLine::info(format!("nothing to reload: {app} is not a label group"));
+        return;
+    }
+    model.overlay = Overlay::Confirm {
+        reason: format!("Reload the workloads and the rulesets of {app}: 2 requests? (y/n)"),
+        action: PendingAction::ReloadApp,
+    };
+}
+
+/// `y` on the reload prompt: both panels past the cache, counted (the
+/// rulesets not while a load of them is on the way); back to the overlay.
+fn app_reload(model: &mut Model) -> Vec<Cmd> {
+    model.overlay = Overlay::App;
+    let policy_loading = model.policy.loading;
+    let Some(v) = model.app_view.as_mut() else {
+        model.overlay = Overlay::None;
+        return Vec::new();
+    };
+    let Some(hrefs) = v.label_hrefs.clone() else {
+        return Vec::new();
+    };
+    v.workloads = Loadable::Loading;
+    v.policy = Loadable::Loading;
+    v.cached = 0;
+    let mut cmds = vec![Cmd::LoadAppWorkloads {
+        seq: v.seq,
+        filter: pce::app::app_workload_filter(&hrefs),
+        mode: CacheMode::Bypass,
+    }];
+    v.policy_sent = !policy_loading;
+    if !policy_loading {
+        cmds.extend(load_rule_sets(model, CacheMode::Bypass));
+    }
+    if let Some(v) = model.app_view.as_mut() {
+        v.requests += u32::try_from(cmds.len()).unwrap_or(u32::MAX);
+    }
+    cmds
+}
+
+/// `Enter`: a peer closes the overlay and focuses that pair in Flows; a
+/// workload opens its detail on the Workloads screen; a ruleset opens it on
+/// the Policy screen (those screens load what they lack, as always).
+fn app_enter(model: &mut Model) -> Vec<Cmd> {
+    let Some(v) = model.app_view.as_ref() else {
+        return Vec::new();
+    };
+    match v.panel {
+        AppPanel::Inbound | AppPanel::Outbound => {
+            let Some((side, p)) = v.selected_peer() else {
+                return Vec::new();
+            };
+            let (src, dst) = match side {
+                Direction::In => (p.peer.clone(), v.focus.app.clone()),
+                Direction::Out => (v.focus.app.clone(), p.peer.clone()),
+            };
+            let service = p.service.clone();
+            let focus = v.focus.clone();
+            model.overlay = Overlay::None;
+            model.screen = Screen::Traffic;
+            let t = &mut model.traffic;
+            t.drill = Some(Drill::Service(src, dst, service, Decisions::All));
+            t.view = TrafficView::Flows;
+            t.show_detail = false;
+            t.set_focus(focus); // rebuilds every view, the drill included
+            model.status = focus_status(&model.traffic);
+            Vec::new()
+        }
+        AppPanel::Workloads => {
+            let Some(href) = v.selected_workload().map(|w| w.href.clone()) else {
+                return Vec::new();
+            };
+            model.overlay = Overlay::None;
+            let cmds = switch(model, Screen::Workloads);
+            let w = &mut model.workloads;
+            w.table.select_where(|r| r.workload.href == href);
+            w.show_detail = w
+                .table
+                .selected_item()
+                .is_some_and(|r| r.workload.href == href);
+            if !w.show_detail {
+                model.status =
+                    StatusLine::info("the Workloads screen is loading: Enter there opens it");
+            }
+            cmds
+        }
+        AppPanel::Policy => {
+            let Some(href) = v.selected_policy().map(|r| r.href.clone()) else {
+                return Vec::new();
+            };
+            model.overlay = Overlay::None;
+            let mut cmds = switch(model, Screen::Policy);
+            model.policy.pane = PolicyPane::RuleSets;
+            model.policy.rulesets.select_where(|r| r.href == href);
+            if let Some(idx) = model.index().cloned() {
+                model
+                    .policy
+                    .rebuild_rules(&idx, model.workloads.impact_source());
+                cmds.extend(deny_fallback(model, CacheMode::Use));
+            }
+            cmds
+        }
+    }
+}
+
+/// `w` on a blocked (or potentially blocked) peer row: the draft allow rule
+/// from one of the flows behind it, as `w` on a traffic row (writes armed).
+/// The form replaces the overlay; `A` reopens it with nothing sent.
+fn app_rule_key(model: &mut Model) -> Vec<Cmd> {
+    if writes_refused(model) {
+        return Vec::new();
+    }
+    let Some(v) = model.app_view.as_ref() else {
+        return Vec::new();
+    };
+    let Some((side, p)) = v.selected_peer() else {
+        model.status = StatusLine::warn("select a peer row (Inbound or Outbound)");
+        return Vec::new();
+    };
+    if !matches!(
+        p.decision,
+        PolicyDecision::Blocked | PolicyDecision::PotentiallyBlocked
+    ) {
+        model.status = StatusLine::warn("this row is allowed; nothing to add");
+        return Vec::new();
+    }
+    let focus = &v.focus;
+    let flow = model
+        .traffic
+        .flows_for(focus)
+        .iter()
+        .find(|f| {
+            let (app_ep, peer_ep) = match side {
+                Direction::In => (&f.dst, &f.src),
+                Direction::Out => (&f.src, &f.dst),
+            };
+            f.policy_decision == p.decision
+                && f.service_text() == p.service
+                && pce::traffic::group_key(app_ep, &focus.keys) == focus.app
+                && pce::traffic::group_key(peer_ep, &focus.keys) == p.peer
+        })
+        .cloned();
+    let Some(flow) = flow else {
+        model.status = StatusLine::warn("no loaded flow behind this row");
+        return Vec::new();
+    };
+    begin_edit(model, EditIntent::RuleFromFlow(Box::new(flow)))
+}
+
+/// The overlay's policy panel from the rulesets that just arrived, or their
+/// error, while it waits for them. `age` above 0 means the answer came
+/// from the cache. Fills the view only: never reopens a closed overlay.
+fn refresh_app_policy(model: &mut Model, outcome: Result<u64, &str>) {
+    let idx = model.index().cloned();
+    let Some(v) = model.app_view.as_mut() else {
+        return;
+    };
+    if !matches!(v.policy, Loadable::Loading) {
+        return;
+    }
+    match (outcome, idx, v.label_hrefs.as_ref()) {
+        (Ok(age), Some(idx), Some(hrefs)) => {
+            if v.policy_sent && age > 0 {
+                v.cached += 1;
+            }
+            v.policy = Loadable::Loaded(pce::app::app_policy(&model.policy.raw, hrefs, &idx));
+        }
+        (Err(e), _, _) => v.policy = Loadable::Failed(e.to_string()),
+        _ => v.policy = Loadable::Unavailable("the name index is not loaded".into()),
+    }
 }
 
 fn start_focused(
@@ -3911,6 +4328,11 @@ pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
                 model.screen = Screen::Traffic;
                 open_app_picker(model, AppPickerPurpose::Focus, "");
             }
+            Vec::new()
+        }
+        Command::App(Some(name)) => open_app_by_name(model, &name),
+        Command::App(None) => {
+            open_app_picker(model, AppPickerPurpose::Overlay, "");
             Vec::new()
         }
         Command::Profile(name) => {
@@ -13547,6 +13969,522 @@ mod focus_tests {
                 .iter()
                 .all(|g| g.src.join("/") == label || g.dst.join("/") == label),
             "the treemap is narrowed to it"
+        );
+    }
+}
+#[cfg(test)]
+mod app_tests {
+    use super::*;
+    use crate::tui::app_view::{AppPanel, Loadable};
+    use crate::tui::model::{Model, Overlay, TrafficView, WritesState};
+    use crate::tui::msg::AppWorkloadsPayload;
+    use crate::tui::test_support::{model_with_flows, with_policy, with_workloads};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use pce::models::Workload;
+    use pce::traffic::FocusDirection;
+
+    fn key(c: char) -> Msg {
+        Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))
+    }
+
+    fn kc(code: KeyCode) -> Msg {
+        Msg::Key(KeyEvent::new(code, KeyModifiers::NONE))
+    }
+
+    #[track_caller]
+    fn quiet(m: &mut Model, msg: Msg) {
+        assert_eq!(update(m, msg), Vec::<Cmd>::new());
+    }
+
+    fn requests(cmds: &[Cmd]) -> u32 {
+        cmds.iter()
+            .filter(|c| matches!(c, Cmd::LoadAppWorkloads { .. } | Cmd::LoadRuleSets { .. }))
+            .count() as u32
+    }
+
+    fn view(m: &Model) -> &crate::tui::app_view::AppView {
+        m.app_view.as_ref().expect("the overlay's state")
+    }
+
+    fn shop_labels() -> Vec<String> {
+        vec!["/orgs/5/labels/3".into(), "/orgs/5/labels/4".into()]
+    }
+
+    fn fixture_workloads() -> Vec<Workload> {
+        serde_json::from_str(include_str!("../../../../fixtures/workloads.json")).unwrap()
+    }
+
+    /// Flows, workloads and rulesets all loaded: the overlay costs nothing.
+    fn everything() -> Model {
+        with_policy(with_workloads(model_with_flows()))
+    }
+
+    #[test]
+    fn a_opens_the_overlay_for_the_row_app_with_at_most_two_requests() {
+        let mut m = model_with_flows();
+        m.traffic
+            .flows
+            .select_where(|r| r.flow.dst.display_name() == "fqdn-1.example");
+        let cmds = update(&mut m, key('A'));
+        assert_eq!(
+            cmds,
+            vec![
+                Cmd::LoadAppWorkloads {
+                    seq: 1,
+                    filter: pce::app::app_workload_filter(&shop_labels()),
+                    mode: CacheMode::Use,
+                },
+                Cmd::LoadRuleSets {
+                    scope: PolicyScope::Draft,
+                    mode: CacheMode::Use,
+                },
+            ]
+        );
+        assert_eq!(m.overlay, Overlay::App);
+        let v = view(&m);
+        assert_eq!(v.requests, 2);
+        assert_eq!(v.focus.app_text(), "shop/prod");
+        assert_eq!(v.focus.direction, FocusDirection::Both, "no focus: both");
+        assert_eq!((v.inbound.len(), v.outbound.len()), (3, 2));
+        assert_eq!(v.header_title(), "shop/prod · in+out · last 24h");
+        assert!(matches!(v.workloads, Loadable::Loading) && matches!(v.policy, Loadable::Loading));
+    }
+
+    #[test]
+    fn loaded_screens_make_the_overlay_free() {
+        let mut m = everything();
+        quiet(&mut m, key('A'));
+        let v = view(&m);
+        assert_eq!(v.requests, 0);
+        assert_eq!(v.header_meta(), "0 req · cached");
+        let Loadable::Loaded((rows, s)) = &v.workloads else {
+            panic!("{:?}", v.workloads)
+        };
+        assert_eq!(
+            rows.iter().map(|w| w.name.as_str()).collect::<Vec<_>>(),
+            vec!["host-1.example", "host-2.example"]
+        );
+        assert_eq!(s.enforcement.text(), "enforced 1 · visibility 1");
+        assert_eq!(s.ven_text(), "1 active · 1 stale");
+        let Loadable::Loaded(p) = &v.policy else {
+            panic!("{:?}", v.policy)
+        };
+        assert_eq!(
+            p.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
+            vec!["Shop-Prod", "Global-Infra"]
+        );
+    }
+
+    #[test]
+    fn the_overlay_takes_the_focus_direction_and_x_cycles_it_without_requests() {
+        let mut m = everything();
+        quiet(
+            &mut m,
+            Msg::Command(Command::Focus(Some("shop/prod".into()))),
+        );
+        quiet(&mut m, key('X')); // in
+        quiet(&mut m, key('A'));
+        assert_eq!(view(&m).focus.direction, FocusDirection::In);
+        assert_eq!(view(&m).outbound.len(), 0);
+        quiet(&mut m, key('X'));
+        assert_eq!(view(&m).focus.direction, FocusDirection::Out);
+        assert_eq!((view(&m).inbound.len(), view(&m).outbound.len()), (0, 2));
+        assert_eq!(
+            m.traffic.focus.as_ref().unwrap().direction,
+            FocusDirection::In,
+            "the overlay's X leaves the traffic focus alone"
+        );
+    }
+
+    #[test]
+    fn esc_closes_and_tab_and_j_k_move_without_requests() {
+        let mut m = everything();
+        quiet(&mut m, key('A'));
+        quiet(&mut m, key('j'));
+        assert_eq!(view(&m).cursor[0], 1);
+        quiet(&mut m, kc(KeyCode::Tab));
+        assert_eq!(view(&m).panel, AppPanel::Outbound);
+        quiet(&mut m, kc(KeyCode::BackTab));
+        assert_eq!(view(&m).panel, AppPanel::Inbound);
+        quiet(&mut m, kc(KeyCode::Esc));
+        assert_eq!(m.overlay, Overlay::None);
+        assert_eq!(m.screen, Screen::Traffic);
+        assert_eq!(
+            m.traffic.view,
+            TrafficView::Flows,
+            "back to the view it was opened from"
+        );
+    }
+
+    #[test]
+    fn enter_on_a_peer_focuses_that_pair_in_flows() {
+        let mut m = everything();
+        quiet(&mut m, key('A'));
+        quiet(&mut m, kc(KeyCode::Enter)); // inbound row 0: shop/prod -> shop/prod 5432/tcp
+        assert_eq!(m.overlay, Overlay::None);
+        assert_eq!(m.traffic.view, TrafficView::Flows);
+        assert_eq!(
+            m.traffic.focus.as_ref().map(|f| f.app_text()).as_deref(),
+            Some("shop/prod")
+        );
+        assert_eq!(
+            m.traffic.drill,
+            Some(Drill::Service(
+                vec!["shop".into(), "prod".into()],
+                vec!["shop".into(), "prod".into()],
+                "5432/tcp".into(),
+                Decisions::All
+            ))
+        );
+        assert_eq!(m.traffic.flows.len(), 1);
+    }
+
+    #[test]
+    fn enter_on_a_workload_or_a_ruleset_opens_it_on_its_screen() {
+        let mut m = everything();
+        quiet(&mut m, key('A'));
+        for _ in 0..3 {
+            quiet(&mut m, kc(KeyCode::Tab));
+        }
+        assert_eq!(view(&m).panel, AppPanel::Workloads);
+        quiet(&mut m, key('j'));
+        let _ = update(&mut m, kc(KeyCode::Enter));
+        assert_eq!(m.screen, Screen::Workloads);
+        assert!(m.workloads.show_detail);
+        assert_eq!(
+            m.workloads
+                .table
+                .selected_item()
+                .map(|r| r.workload.href.as_str()),
+            Some("/orgs/5/workloads/aaaa-2")
+        );
+        m.screen = Screen::Traffic;
+        quiet(&mut m, key('A'));
+        assert_eq!(
+            view(&m).panel,
+            AppPanel::Workloads,
+            "reopened where it was left"
+        );
+        quiet(&mut m, kc(KeyCode::BackTab));
+        let _ = update(&mut m, kc(KeyCode::Enter));
+        assert_eq!(m.screen, Screen::Policy);
+        assert_eq!(
+            m.policy.rulesets.selected_item().map(|r| r.name.as_str()),
+            Some("Shop-Prod")
+        );
+    }
+
+    #[test]
+    fn w_drafts_an_allow_rule_from_a_blocked_peer_only() {
+        let mut m = everything();
+        m.writes = WritesState::on();
+        quiet(&mut m, key('A'));
+        quiet(&mut m, kc(KeyCode::Enter)); // leave via a peer...
+        quiet(&mut m, key('A')); // ...and reopen: nothing sent
+        quiet(&mut m, key('w'));
+        assert_eq!(m.status.text, "this row is allowed; nothing to add");
+        quiet(&mut m, key('j'));
+        quiet(&mut m, key('j')); // unmanaged-nas/- icmp, blocked
+        let _ = update(&mut m, key('w'));
+        assert!(matches!(m.overlay, Overlay::Form(_)), "{:?}", m.overlay);
+    }
+
+    #[test]
+    fn r_asks_then_reloads_both_panels_past_the_cache() {
+        let mut m = everything();
+        quiet(&mut m, key('A'));
+        quiet(&mut m, key('r'));
+        let Overlay::Confirm { reason, .. } = &m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        assert_eq!(
+            reason,
+            "Reload the workloads and the rulesets of shop/prod: 2 requests? (y/n)"
+        );
+        quiet(&mut m, key('n'));
+        assert_eq!(
+            m.overlay,
+            Overlay::App,
+            "no: back to the overlay, nothing sent"
+        );
+        quiet(&mut m, key('r'));
+        let cmds = update(&mut m, key('y'));
+        assert_eq!(requests(&cmds), 2);
+        assert!(cmds.iter().all(|c| matches!(
+            c,
+            Cmd::LoadAppWorkloads {
+                mode: CacheMode::Bypass,
+                ..
+            } | Cmd::LoadRuleSets {
+                mode: CacheMode::Bypass,
+                ..
+            }
+        )));
+        assert_eq!(m.overlay, Overlay::App);
+        assert_eq!(view(&m).requests, 2);
+    }
+
+    #[test]
+    fn the_overlay_never_sends_a_request_it_did_not_count() {
+        let mut m = model_with_flows();
+        let mut sent = 0;
+        for msg in [
+            key('A'),
+            kc(KeyCode::Tab),
+            key('j'),
+            key('X'),
+            key('X'),
+            key('X'),
+            kc(KeyCode::BackTab),
+            key('k'),
+            key('r'),
+            key('y'),
+            key('X'),
+        ] {
+            sent += requests(&update(&mut m, msg));
+        }
+        assert_eq!(
+            sent, 3,
+            "open: workloads and rulesets; r: the workloads again (the rulesets are still loading)"
+        );
+        assert_eq!(view(&m).requests, sent);
+    }
+
+    #[test]
+    fn answers_fill_the_panels_and_stale_ones_are_dropped() {
+        let mut m = model_with_flows();
+        let _ = update(&mut m, key('A'));
+        let seq = view(&m).seq;
+        quiet(
+            &mut m,
+            Msg::AppWorkloadsLoaded {
+                seq: seq + 7,
+                result: Ok(AppWorkloadsPayload {
+                    workloads: fixture_workloads(),
+                    truncated: false,
+                    hit: true,
+                }),
+            },
+        );
+        assert!(
+            matches!(view(&m).workloads, Loadable::Loading),
+            "a stale answer is dropped"
+        );
+        quiet(
+            &mut m,
+            Msg::AppWorkloadsLoaded {
+                seq,
+                result: Ok(AppWorkloadsPayload {
+                    workloads: fixture_workloads(),
+                    truncated: false,
+                    hit: true,
+                }),
+            },
+        );
+        assert!(
+            matches!(&view(&m).workloads, Loadable::Loaded((rows, _)) if rows.len() == 2),
+            "filtered to the app"
+        );
+        assert_eq!(view(&m).cached, 1);
+        let rs: Vec<pce::models::RuleSet> =
+            serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
+        let _ = update(
+            &mut m,
+            Msg::RuleSetsLoaded {
+                scope: PolicyScope::Draft,
+                result: Ok((rs, 3)),
+            },
+        );
+        assert!(matches!(&view(&m).policy, Loadable::Loaded(rows) if rows.len() == 2));
+        assert_eq!(view(&m).header_meta(), "2 req · cached");
+    }
+
+    #[test]
+    fn a_stale_workloads_answer_is_dropped() {
+        let mut m = model_with_flows();
+        let _ = update(&mut m, key('A'));
+        let old = view(&m).seq;
+        quiet(&mut m, kc(KeyCode::Esc));
+        // Another app (row 2's source): a new overlay, a new sequence number.
+        m.traffic
+            .flows
+            .select_where(|r| r.flow.src.display_name() == "unmanaged-nas");
+        quiet(&mut m, key('A'));
+        assert_ne!(view(&m).seq, old);
+        quiet(
+            &mut m,
+            Msg::AppWorkloadsLoaded {
+                seq: old,
+                result: Ok(AppWorkloadsPayload {
+                    workloads: fixture_workloads(),
+                    truncated: false,
+                    hit: false,
+                }),
+            },
+        );
+        assert!(matches!(view(&m).workloads, Loadable::Unavailable(_)));
+        assert_eq!(view(&m).focus.app_text(), "unmanaged-nas/-");
+    }
+
+    #[test]
+    fn a_traffic_answer_under_the_open_overlay_rebuilds_its_peers() {
+        let mut m = everything();
+        quiet(&mut m, key('A'));
+        assert_eq!(view(&m).inbound.len(), 3);
+        let flows = m.traffic.loaded_flows()[..1].to_vec(); // shop/prod -> shop/prod
+        let seq = m.traffic.seq;
+        let filter = m.traffic.filter.clone();
+        let _ = update(
+            &mut m,
+            Msg::QueryDone {
+                seq,
+                result: Ok(crate::tui::msg::QueryOutcome {
+                    flows,
+                    truncated: false,
+                    matches_count: Some(1),
+                    elapsed: std::time::Duration::ZERO,
+                    hit: false,
+                    filter,
+                    bounds: None,
+                }),
+            },
+        );
+        assert_eq!(m.overlay, Overlay::App);
+        assert_eq!((view(&m).inbound.len(), view(&m).outbound.len()), (1, 1));
+    }
+
+    #[test]
+    fn a_late_answer_never_reopens_a_closed_overlay() {
+        let mut m = model_with_flows();
+        let _ = update(&mut m, key('A'));
+        let seq = view(&m).seq;
+        quiet(&mut m, kc(KeyCode::Esc));
+        quiet(
+            &mut m,
+            Msg::AppWorkloadsLoaded {
+                seq,
+                result: Ok(AppWorkloadsPayload {
+                    workloads: fixture_workloads(),
+                    truncated: false,
+                    hit: false,
+                }),
+            },
+        );
+        let rs: Vec<pce::models::RuleSet> =
+            serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
+        let _ = update(
+            &mut m,
+            Msg::RuleSetsLoaded {
+                scope: PolicyScope::Draft,
+                result: Ok((rs, 0)),
+            },
+        );
+        assert_eq!(m.overlay, Overlay::None, "the answers do not reopen it");
+    }
+
+    #[test]
+    fn a_reopens_the_same_app_from_its_view_without_requests() {
+        let mut m = model_with_flows();
+        m.writes = WritesState::on();
+        let cmds = update(&mut m, key('A'));
+        assert_eq!(requests(&cmds), 2);
+        let seq = view(&m).seq;
+        quiet(
+            &mut m,
+            Msg::AppWorkloadsLoaded {
+                seq,
+                result: Ok(AppWorkloadsPayload {
+                    workloads: fixture_workloads(),
+                    truncated: false,
+                    hit: false,
+                }),
+            },
+        );
+        quiet(&mut m, key('j'));
+        quiet(&mut m, key('j')); // unmanaged-nas/- icmp, blocked
+        let _ = update(&mut m, key('w'));
+        assert!(matches!(m.overlay, Overlay::Form(_)), "{:?}", m.overlay);
+        m.overlay = Overlay::None; // the form cancelled
+        quiet(&mut m, key('A'));
+        assert_eq!(m.overlay, Overlay::App);
+        let v = view(&m);
+        assert_eq!(v.seq, seq, "the same view");
+        assert_eq!(v.requests, 2, "nothing more sent");
+        assert!(matches!(&v.workloads, Loadable::Loaded((rows, _)) if rows.len() == 2));
+        assert!(
+            matches!(v.policy, Loadable::Loading),
+            "the rulesets are still on their way"
+        );
+        assert_eq!(v.cursor[0], 2, "the cursor is kept");
+    }
+
+    #[test]
+    fn a_failed_workloads_request_shows_the_error_and_r_retries() {
+        let mut m = model_with_flows();
+        let _ = update(&mut m, key('A'));
+        let seq = view(&m).seq;
+        quiet(
+            &mut m,
+            Msg::AppWorkloadsLoaded {
+                seq,
+                result: Err("HTTP 500".into()),
+            },
+        );
+        assert_eq!(view(&m).workloads, Loadable::Failed("HTTP 500".into()));
+        assert_eq!(view(&m).inbound.len(), 3, "the other panels stay");
+    }
+
+    #[test]
+    fn a_rulesets_load_in_flight_is_not_doubled() {
+        let mut m = with_workloads(model_with_flows());
+        m.policy.loading = true;
+        let cmds = update(&mut m, key('A'));
+        assert_eq!(
+            requests(&cmds),
+            0,
+            "workloads are loaded; the rulesets are on their way"
+        );
+        assert!(matches!(view(&m).policy, Loadable::Loading));
+        assert!(!view(&m).policy_sent);
+    }
+
+    #[test]
+    fn a_name_keyed_app_requests_nothing_for_workloads_or_policy() {
+        let mut m = model_with_flows();
+        // Flows row 2: unmanaged-nas -> shop/prod; A takes the source.
+        m.traffic
+            .flows
+            .select_where(|r| r.flow.src.display_name() == "unmanaged-nas");
+        let cmds = update(&mut m, key('A'));
+        assert_eq!(requests(&cmds), 0);
+        let v = view(&m);
+        assert_eq!(v.focus.app_text(), "unmanaged-nas/-");
+        assert_eq!(v.outbound.len(), 1, "its one blocked flow");
+        assert!(
+            matches!(&v.workloads, Loadable::Unavailable(why) if why.contains("not a label group"))
+        );
+        assert!(matches!(&v.policy, Loadable::Unavailable(_)));
+    }
+
+    #[test]
+    fn app_by_name_reaches_apps_without_flows_and_names_the_closest_otherwise() {
+        let mut m = everything();
+        m.traffic.data.as_mut().unwrap().flows.clear();
+        m.traffic.rebuild_views();
+        quiet(&mut m, Msg::Command(Command::App(Some("shop/prod".into()))));
+        assert_eq!(m.overlay, Overlay::App, "its labels exist");
+        assert!(view(&m).inbound.is_empty() && view(&m).outbound.is_empty());
+        quiet(&mut m, kc(KeyCode::Esc));
+        quiet(&mut m, Msg::Command(Command::App(Some("shop/prd".into()))));
+        assert_eq!(m.overlay, Overlay::None);
+        assert!(
+            m.status.text.starts_with("unknown app \"shop/prd\""),
+            "{}",
+            m.status.text
+        );
+        quiet(&mut m, Msg::Command(Command::App(None)));
+        assert!(
+            matches!(&m.overlay, Overlay::AppPicker(p) if p.purpose == crate::tui::app_picker::AppPickerPurpose::Overlay)
         );
     }
 }

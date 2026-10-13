@@ -6,7 +6,7 @@ use crate::tui::model::{Limits, ObjectKind, ProfileInfo, Screen, WritesState};
 use crossterm::event::{KeyEvent, MouseEvent};
 use pce::models::{
     DenyRule, Event, EventFilter, IpList, Label, LabelGroup, PendingChange, PolicyScope, RuleSet,
-    Service, Workload,
+    Service, Workload, WorkloadFilter,
 };
 use pce::traffic::{Focus, QueryProgress, ResolvedFlow};
 use pce::write::{Outcome, Plan, WriteError};
@@ -36,6 +36,15 @@ pub struct FocusedOutcome {
     pub queries: u32,
     /// The least coverage of the truncated sides (`FocusedTraffic::coverage`).
     pub coverage: Option<pce::traffic::Coverage>,
+}
+
+/// The app overlay's workloads: the PCE's answer to the label filter, and
+/// whether it came from the cache.
+#[derive(Debug)]
+pub struct AppWorkloadsPayload {
+    pub workloads: Vec<Workload>,
+    pub truncated: bool,
+    pub hit: bool,
 }
 
 /// One object list with its cache age in seconds.
@@ -110,6 +119,11 @@ pub enum Msg {
     /// Workloads, the cache age in seconds and whether the PCE holds more
     /// than were returned.
     WorkloadsLoaded(Result<(Vec<Workload>, u64, bool), String>),
+    /// The app overlay's workloads (`Cmd::LoadAppWorkloads`) for overlay `seq`.
+    AppWorkloadsLoaded {
+        seq: u64,
+        result: Result<AppWorkloadsPayload, String>,
+    },
     /// Events, the cache age in seconds and the `(since, until)` the request used.
     EventsLoaded(Result<EventsPayload, String>),
     /// The runtime rebuilt the connection for `:profile <name>` (or could not);
@@ -181,6 +195,12 @@ pub enum Cmd {
     /// The draft IP lists for the Objects IP lists tab (the index's own list, cached).
     LoadIpLists(CacheMode),
     LoadWorkloads(CacheMode),
+    /// The app overlay's workloads: one read filtered by the app's labels.
+    LoadAppWorkloads {
+        seq: u64,
+        filter: WorkloadFilter,
+        mode: CacheMode,
+    },
     LoadEvents {
         filter: EventFilter,
         mode: CacheMode,
@@ -289,6 +309,18 @@ impl PartialEq for Cmd {
             }
             (Cmd::LoadIpLists(a), Cmd::LoadIpLists(b)) => a == b,
             (Cmd::LoadWorkloads(a), Cmd::LoadWorkloads(b)) => a == b,
+            (
+                Cmd::LoadAppWorkloads {
+                    seq: a,
+                    filter: fa,
+                    mode: ma,
+                },
+                Cmd::LoadAppWorkloads {
+                    seq: b,
+                    filter: fb,
+                    mode: mb,
+                },
+            ) => a == b && fa == fb && ma == mb,
             (
                 Cmd::LoadEvents {
                     filter: fa,
