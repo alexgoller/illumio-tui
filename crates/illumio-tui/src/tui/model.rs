@@ -440,10 +440,11 @@ impl TrafficData {
     }
 
     /// What `B` would fetch: a truncated result's whole window, in slices
-    /// sized from its rate at the smallest cap up to `max_cap` that fits
-    /// (`plan_backfill`); a stopped backfill's rest, in its slice length
-    /// and cap. `Err` says why there is nothing to fetch.
-    pub fn backfill_plan(&self, max_cap: u32) -> Result<pce::traffic::BackfillPlan, String> {
+    /// sized from its rate at the smallest cap up to the hard maximum that
+    /// fits (`plan_backfill`; a cap past the confirmation threshold is asked
+    /// about first); a stopped backfill's rest, in its slice length and cap.
+    /// `Err` says why there is nothing to fetch.
+    pub fn backfill_plan(&self) -> Result<pce::traffic::BackfillPlan, String> {
         if let Some(b) = self.backfill {
             let rest = self
                 .window_start()
@@ -465,7 +466,13 @@ impl TrafficData {
         let c = pce::traffic::coverage(&self.flows, window);
         self.window_start()
             .and_then(|_| {
-                pce::traffic::plan_backfill(&c, true, self.filter.max_results, max_cap, window)
+                pce::traffic::plan_backfill(
+                    &c,
+                    true,
+                    self.filter.max_results,
+                    pce::traffic::MAX_TRAFFIC_MAX_RESULTS,
+                    window,
+                )
             })
             .ok_or_else(|| "cannot measure coverage: no last-seen times".into())
     }

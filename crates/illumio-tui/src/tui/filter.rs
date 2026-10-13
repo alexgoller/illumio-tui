@@ -5,7 +5,8 @@ use crate::tui::form::{Completing, Completion, FieldKind};
 use jiff::Timestamp;
 use pce::models::{PolicyDecision, ServiceMatch, TrafficQuery, proto_number};
 use pce::traffic::{
-    CONFIRM_MAX_RESULTS, CONFIRM_WINDOW, FilterExpr, TrafficQueryBuilder, parse_window,
+    CONFIRM_MAX_RESULTS, CONFIRM_WINDOW, FilterExpr, MAX_TRAFFIC_MAX_RESULTS, TrafficQueryBuilder,
+    parse_window,
 };
 use pce::{CacheMode, Pce};
 use std::time::Duration;
@@ -112,6 +113,12 @@ impl TrafficFilter {
         self.service_match()?;
         if self.max_results == 0 {
             return Err("max results must be at least 1".into());
+        }
+        if self.max_results > MAX_TRAFFIC_MAX_RESULTS {
+            return Err(format!(
+                "max results {} is above the maximum of {MAX_TRAFFIC_MAX_RESULTS}",
+                self.max_results
+            ));
         }
         Ok(())
     }
@@ -523,6 +530,11 @@ mod tests {
         f.window = "1h".into();
         f.max_results = 20_000;
         assert!(f.needs_confirmation().unwrap().contains("20000"));
+        f.max_results = 200_000;
+        assert!(f.validate().is_ok());
+        f.max_results = 200_001;
+        assert!(f.validate().unwrap_err().contains("maximum of 200000"));
+        f.max_results = 20_000;
         f.window = "soon".into();
         assert!(f.validate().unwrap_err().contains("window"));
     }

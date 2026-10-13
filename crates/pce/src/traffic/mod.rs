@@ -25,8 +25,8 @@ pub use merge::merge_flows;
 pub use mesh::{MeshColumns, MeshKey, MeshRow, mesh, mesh_key, process_sides};
 pub use poll::{PollConfig, QueryProgress, TrafficResult, run_traffic_query};
 pub use query::{
-    CONFIRM_MAX_RESULTS, CONFIRM_WINDOW, DEFAULT_TRAFFIC_MAX_RESULTS, DEFAULT_WINDOW, QueryCost,
-    TrafficQueryBuilder, format_timestamp, parse_window,
+    CONFIRM_MAX_RESULTS, CONFIRM_WINDOW, DEFAULT_TRAFFIC_MAX_RESULTS, DEFAULT_WINDOW,
+    MAX_TRAFFIC_MAX_RESULTS, QueryCost, TrafficQueryBuilder, format_timestamp, parse_window,
 };
 pub use resolved::{ResolvedEndpoint, ResolvedFlow, resolve_flows};
 pub use sections::{

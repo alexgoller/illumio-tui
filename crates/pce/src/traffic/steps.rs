@@ -1,15 +1,25 @@
 //! The ladders the TUI steps the window (`+`/`-`) and the result cap
 //! (`]`/`[`) along. Pure: no clock, no network.
-use super::query::parse_window;
+use super::query::{MAX_TRAFFIC_MAX_RESULTS, parse_window};
 use std::time::Duration;
 
 /// Window steps, shortest first. A window between two steps snaps to the
 /// next larger (`next_window`) or next smaller (`prev_window`) one.
 pub const WINDOW_STEPS: [&str; 10] = ["1h", "6h", "12h", "1d", "2d", "3d", "1w", "2w", "4w", "90d"];
 
-/// Result cap steps, smallest first. The profile's `traffic_max_results`
-/// tops the ladder: steps at or above it are left out and it is the last rung.
-pub const CAP_STEPS: [u32; 5] = [500, 1000, 2000, 5000, 10_000];
+/// Result cap steps, smallest first, up to the hard maximum. The profile's
+/// `traffic_max_results` (the starting cap) is a rung of its own.
+pub const CAP_STEPS: [u32; 9] = [
+    500,
+    1000,
+    2000,
+    5000,
+    10_000,
+    25_000,
+    50_000,
+    100_000,
+    MAX_TRAFFIC_MAX_RESULTS,
+];
 
 fn step(s: &str) -> Duration {
     parse_window(s).expect("every window step parses")
@@ -25,22 +35,24 @@ pub fn prev_window(current: Duration) -> Option<&'static str> {
     WINDOW_STEPS.into_iter().rev().find(|s| step(s) < current)
 }
 
-fn cap_ladder(profile_max: u32) -> impl DoubleEndedIterator<Item = u32> {
-    CAP_STEPS
-        .into_iter()
-        .filter(move |&c| c < profile_max)
-        .chain(std::iter::once(profile_max))
+/// `CAP_STEPS` with `start` (the profile's starting cap) as a rung of its
+/// own when it lies between two steps, never above the hard maximum.
+fn cap_ladder(start: u32) -> impl DoubleEndedIterator<Item = u32> {
+    let extra = (start > 0 && start < MAX_TRAFFIC_MAX_RESULTS && !CAP_STEPS.contains(&start))
+        .then_some(start);
+    let mut ladder: Vec<u32> = CAP_STEPS.into_iter().chain(extra).collect();
+    ladder.sort_unstable();
+    ladder.into_iter()
 }
 
-/// The first rung above `current`; `None` when `current` is at (or above)
-/// the profile maximum.
-pub fn next_cap(current: u32, profile_max: u32) -> Option<u32> {
-    cap_ladder(profile_max).find(|&c| c > current)
+/// The first rung above `current`; `None` at the hard maximum.
+pub fn next_cap(current: u32, start: u32) -> Option<u32> {
+    cap_ladder(start).find(|&c| c > current)
 }
 
 /// The last rung below `current`; `None` at the bottom of the ladder.
-pub fn prev_cap(current: u32, profile_max: u32) -> Option<u32> {
-    cap_ladder(profile_max).rev().find(|&c| c < current)
+pub fn prev_cap(current: u32, start: u32) -> Option<u32> {
+    cap_ladder(start).rev().find(|&c| c < current)
 }
 
 #[cfg(test)]
@@ -82,35 +94,46 @@ mod tests {
     }
 
     #[test]
-    fn caps_step_up_to_the_profile_maximum() {
+    fn caps_step_up_to_the_hard_maximum() {
+        assert!(CAP_STEPS.windows(2).all(|p| p[0] < p[1]));
         assert_eq!(next_cap(500, 10_000), Some(1000));
         assert_eq!(next_cap(1000, 10_000), Some(2000));
         assert_eq!(next_cap(5000, 10_000), Some(10_000));
-        assert_eq!(next_cap(10_000, 10_000), None);
         assert_eq!(
-            next_cap(10_000, 50_000),
-            Some(50_000),
-            "the profile tops the ladder"
+            next_cap(10_000, 10_000),
+            Some(25_000),
+            "the profile no longer tops the ladder"
         );
-        assert_eq!(next_cap(50_000, 50_000), None);
-        assert_eq!(next_cap(2000, 3000), Some(3000), "never above the profile");
-        assert_eq!(next_cap(1000, 1000), None);
-        assert_eq!(next_cap(50, 200), Some(200));
+        assert_eq!(next_cap(1000, 1000), Some(2000));
+        assert_eq!(next_cap(100_000, 10_000), Some(200_000));
+        assert_eq!(next_cap(200_000, 10_000), None, "the hard maximum");
+        assert_eq!(next_cap(200_000, 300_000), None, "never above it");
         assert_eq!(prev_cap(1000, 10_000), Some(500));
         assert_eq!(prev_cap(500, 10_000), None);
-        assert_eq!(prev_cap(50_000, 50_000), Some(10_000));
+        assert_eq!(prev_cap(200_000, 10_000), Some(100_000));
+        assert_eq!(prev_cap(25_000, 10_000), Some(10_000));
+    }
+
+    #[test]
+    fn a_profile_cap_between_steps_is_its_own_rung() {
+        assert_eq!(next_cap(2000, 3000), Some(3000));
+        assert_eq!(next_cap(3000, 3000), Some(5000));
+        assert_eq!(prev_cap(5000, 3000), Some(3000));
         assert_eq!(prev_cap(3000, 3000), Some(2000));
+        assert_eq!(next_cap(50, 200), Some(200));
+        assert_eq!(prev_cap(500, 200), Some(200));
+        assert_eq!(next_cap(10_000, 30_000), Some(25_000));
+        assert_eq!(next_cap(25_000, 30_000), Some(30_000));
+        assert_eq!(prev_cap(50_000, 30_000), Some(30_000));
     }
 
     #[test]
     fn off_ladder_caps_snap() {
         assert_eq!(next_cap(750, 10_000), Some(1000));
         assert_eq!(prev_cap(750, 10_000), Some(500));
-        assert_eq!(
-            prev_cap(20_000, 3000),
-            Some(3000),
-            "above the profile: back to it"
-        );
-        assert_eq!(next_cap(20_000, 3000), None);
+        assert_eq!(next_cap(20_000, 10_000), Some(25_000));
+        assert_eq!(prev_cap(20_000, 10_000), Some(10_000));
+        assert_eq!(prev_cap(300_000, 10_000), Some(200_000));
+        assert_eq!(next_cap(300_000, 10_000), None);
     }
 }

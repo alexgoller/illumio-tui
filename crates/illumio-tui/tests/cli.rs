@@ -1250,7 +1250,7 @@ async fn traffic_dry_run_prints_body_without_submitting() {
         out["data"]["services"]["include"],
         json!([{"port": 443, "proto": 6}])
     );
-    assert_eq!(out["data"]["max_results"], 1000);
+    assert_eq!(out["data"]["max_results"], 10_000);
     assert_eq!(out["meta"]["cache"], "none");
 }
 
@@ -1303,6 +1303,26 @@ async fn traffic_guards_exit_2() {
         .args(["traffic", "query", "--max-results", "20000"])
         .assert()
         .code(2);
+    // Past the hard maximum even --yes does not help.
+    let assert = cmd(&quiet)
+        .args(["traffic", "query", "--max-results", "200001", "--yes"])
+        .assert()
+        .code(2);
+    let err: Value = serde_json::from_slice(&assert.get_output().stderr).unwrap();
+    assert!(
+        err["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("maximum of 200000"),
+        "{err}"
+    );
+    let out = stdout_json(
+        cmd(&quiet)
+            .args(["traffic", "query", "--max-results", "200000", "--dry-run"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"]["max_results"], 200_000);
     cmd(&quiet)
         .args(["traffic", "query", "--window", "30d", "--src", "app=shop"])
         .assert()
@@ -1880,7 +1900,7 @@ async fn traffic_groups_and_mesh_dry_runs_send_nothing() {
                 .success(),
         );
         assert_eq!(out["data"]["services"]["include"], json!([{"port": 443}]));
-        assert_eq!(out["data"]["max_results"], 1000);
+        assert_eq!(out["data"]["max_results"], 10_000);
         assert_eq!(out["meta"]["cache"], "none");
     }
 }

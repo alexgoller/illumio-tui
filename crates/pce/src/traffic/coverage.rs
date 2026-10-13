@@ -140,9 +140,10 @@ pub fn slices_needed(span: Duration, slice: Duration) -> u32 {
 
 /// The backfill a truncated result needs to fill `window`: slices sized
 /// from its measured rate at the smallest cap of the ladder (from `cap`
-/// up to `max_cap`, see `next_cap`) that fits the window in `MAX_SLICES`
-/// slices; when even `max_cap` does not, the plan at `max_cap` (a partial
-/// run, `batch`). `None` when the result is complete, carries no
+/// up to `max_cap`, see `next_cap`; callers pass the hard maximum, or the
+/// confirmation threshold when a raise past it is not confirmed) that fits
+/// the window in `MAX_SLICES` slices; when even `max_cap` does not, the plan
+/// at `max_cap` (a partial run, `batch`). A `cap` above `max_cap` is kept. `None` when the result is complete, carries no
 /// `last_detected` to measure, or the window is empty.
 pub fn plan_backfill(
     cov: &Coverage,
@@ -157,7 +158,7 @@ pub fn plan_backfill(
     let mut c = cap;
     loop {
         let plan = BackfillPlan::with_slice(window, slice_for(cov.flows, cov.covered, c), c);
-        match super::steps::next_cap(c, max_cap.max(cap)) {
+        match super::steps::next_cap(c, max_cap).filter(|&n| n <= max_cap) {
             Some(next) if plan.partial() => c = next,
             _ => return Some(plan),
         }
@@ -466,14 +467,19 @@ mod tests {
         assert_eq!(
             plan_backfill(&c, true, 1000, 50_000, w("24h")).unwrap().cap,
             10_000,
-            "the smallest cap that fits, not the profile maximum"
+            "the smallest cap that fits, not the maximum"
         );
-        // The profile stops at 5000: a partial run of the newest 50.
+        // 1000 flows in 30s: 1m slices need 25000 for 24h in 58 slices.
+        flows[999] = flow(Some("2026-10-10T11:59:30Z"));
+        let fast = coverage(&flows, w("24h"));
+        let p = plan_backfill(&fast, true, 10_000, 200_000, w("24h")).unwrap();
+        assert!(p.cap > 10_000 && !p.partial(), "{p:?}");
+        // Stopping at 5000: a partial run of the newest 50.
         let p = plan_backfill(&c, true, 1000, 5000, w("24h")).unwrap();
         assert_eq!((p.cap, p.slice, p.count), (5000, w("15m"), 96));
         assert!(p.partial());
         assert_eq!((p.batch(), p.batch_span()), (MAX_SLICES, w("12h 30m")));
-        // A cap already above the profile maximum is kept.
+        // A cap already above the maximum is kept.
         assert_eq!(
             plan_backfill(&c, true, 20_000, 5000, w("24h")).unwrap().cap,
             20_000

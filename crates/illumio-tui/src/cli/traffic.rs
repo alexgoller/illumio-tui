@@ -12,9 +12,10 @@ use pce::models::{
 };
 use pce::traffic::{
     AppSection, BackfillRun, CONFIRM_MAX_RESULTS, Decisions, Direction, FilterExpr, FlowGroup,
-    MAX_SLICES, MeshColumns, MeshRow, Next, ResolvedFlow, Step, TrafficQueryBuilder, app_header,
-    app_sections, app_sections_both, compact_duration, coverage, format_timestamp, group_by_labels,
-    merge_flows, mesh, parse_window, plan_backfill, resolve_actor, resolve_flows,
+    MAX_SLICES, MAX_TRAFFIC_MAX_RESULTS, MeshColumns, MeshRow, Next, ResolvedFlow, Step,
+    TrafficQueryBuilder, app_header, app_sections, app_sections_both, compact_duration, coverage,
+    format_timestamp, group_by_labels, merge_flows, mesh, parse_window, plan_backfill,
+    resolve_actor, resolve_flows,
 };
 use pce::{KeyOrder, NameIndex};
 use serde::Serialize;
@@ -151,7 +152,7 @@ pub struct FilterArgs {
     /// allowed, potentially_blocked, blocked (comma-separated; default all)
     #[arg(long, value_delimiter = ',')]
     pub decision: Vec<String>,
-    /// Row cap (default from profile, 1000; > 10000 needs --yes)
+    /// Row cap, up to 200000 (default from profile, 10000; > 10000 needs --yes)
     #[arg(long)]
     pub max_results: Option<u32>,
     /// Print the request body instead of sending it
@@ -161,7 +162,7 @@ pub struct FilterArgs {
     #[arg(long)]
     pub yes: bool,
     /// When the result is truncated, fetch the window again in slices that fit the cap
-    /// (raised up to the profile's if needed), newest first; meta.slices counts them
+    /// (raised if needed, past 10000 only with --yes), newest first; meta.slices counts them
     #[arg(long)]
     pub backfill: bool,
     /// With --backfill: at most this many slice queries per run (1 to 50, default 50);
@@ -606,8 +607,8 @@ struct Backfilled {
 
 /// `--backfill` on a truncated result: the whole window again, newest
 /// first, in slices sized from the result's rate at the smallest cap that
-/// fits it in `MAX_SLICES` (up to the profile's, and past 10000 only with
-/// `--yes`). The first slice replaces the truncated rows (an unordered cut
+/// fits it in `MAX_SLICES` (up to the hard maximum, and past 10000 only
+/// with `--yes`). The first slice replaces the truncated rows (an unordered cut
 /// of the whole window), later ones merge. A truncated slice is dropped and
 /// its range fetched again in halves; one that truncates at 1m stops. At
 /// most `max` queries; the rest is reported on stderr. `None` when there
@@ -627,10 +628,11 @@ async fn backfill(
     };
     let window = q.window();
     let cov = coverage(flows, window);
-    let mut max_cap = ctx.config.traffic_max_results.max(q.max_results);
-    if !args.yes {
-        max_cap = max_cap.min(CONFIRM_MAX_RESULTS).max(q.max_results);
-    }
+    let max_cap = if args.yes {
+        MAX_TRAFFIC_MAX_RESULTS
+    } else {
+        CONFIRM_MAX_RESULTS
+    };
     let Some(plan) = plan_backfill(&cov, true, q.max_results, max_cap, window) else {
         eprintln!("cannot measure coverage: no last-seen times");
         return Ok(None);
@@ -685,10 +687,17 @@ async fn backfill(
         slices += 1;
         if step == Step::TooSmall {
             cut = true;
-            eprintln!(
-                "cap {} is too small for this PCE at 1m: raise --max-results or traffic_max_results",
-                plan.cap
-            );
+            if plan.cap < MAX_TRAFFIC_MAX_RESULTS {
+                eprintln!(
+                    "cap {} is too small for this PCE at 1m: raise --max-results (up to {MAX_TRAFFIC_MAX_RESULTS})",
+                    plan.cap
+                );
+            } else {
+                eprintln!(
+                    "cap {} is too small for this PCE at 1m: narrow the filter",
+                    plan.cap
+                );
+            }
             break;
         }
     }

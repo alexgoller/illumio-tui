@@ -1729,27 +1729,25 @@ fn low_coverage_status(model: &Model) -> Option<StatusLine> {
         pce::traffic::approx_duration(c.covered),
         d.filter.window
     );
-    Some(StatusLine::warn(
-        match d.backfill_plan(model.limits.traffic_max_results) {
-            Ok(p) => {
-                let at = if p.cap > d.filter.max_results {
-                    format!(" at cap {}", p.cap)
-                } else {
-                    String::new()
-                };
-                if p.partial() {
-                    format!(
-                        "{lead}, B backfills the newest {} in {} slices{at}",
-                        pce::traffic::compact_duration(p.batch_span()),
-                        p.batch()
-                    )
-                } else {
-                    format!("{lead}, B backfills the window in {} slices{at}", p.count)
-                }
+    Some(StatusLine::warn(match d.backfill_plan() {
+        Ok(p) => {
+            let at = if p.cap > d.filter.max_results {
+                format!(" at cap {}", p.cap)
+            } else {
+                String::new()
+            };
+            if p.partial() {
+                format!(
+                    "{lead}, B backfills the newest {} in {} slices{at}",
+                    pce::traffic::compact_duration(p.batch_span()),
+                    p.batch()
+                )
+            } else {
+                format!("{lead}, B backfills the window in {} slices{at}", p.count)
             }
-            Err(_) => lead,
-        },
-    ))
+        }
+        Err(_) => lead,
+    }))
 }
 
 /// The `B` question: what the run fetches, at which cap, in how many
@@ -1812,7 +1810,7 @@ fn backfill_key(model: &mut Model) -> Vec<Cmd> {
         model.status = StatusLine::info("nothing to backfill: r runs the query first");
         return Vec::new();
     };
-    match d.backfill_plan(model.limits.traffic_max_results) {
+    match d.backfill_plan() {
         Ok(plan) => {
             model.overlay = Overlay::Confirm {
                 reason: backfill_prompt(&plan, d.filter.max_results),
@@ -1831,7 +1829,7 @@ fn auto_backfill(model: &mut Model) -> Vec<Cmd> {
     let Some(d) = model.traffic.data.as_ref() else {
         return Vec::new();
     };
-    let Ok(plan) = d.backfill_plan(model.limits.traffic_max_results) else {
+    let Ok(plan) = d.backfill_plan() else {
         return Vec::new(); // the status already says why
     };
     if plan.cap > pce::traffic::CONFIRM_MAX_RESULTS {
@@ -1990,9 +1988,13 @@ fn on_backfill_slice(model: &mut Model, result: Result<QueryOutcome, String>) ->
     model.traffic.filter = d.filter.clone();
     model.traffic.rebuild_views();
     if cut {
-        model.status = StatusLine::error(format!(
-            "cap {cap} is too small for this PCE at 1m: raise traffic_max_results"
-        ));
+        let hint = if cap < pce::traffic::MAX_TRAFFIC_MAX_RESULTS {
+            "] raises the cap"
+        } else {
+            "narrow the filter"
+        };
+        model.status =
+            StatusLine::error(format!("cap {cap} is too small for this PCE at 1m: {hint}"));
         return Vec::new();
     }
     bf.note = None;
@@ -2156,15 +2158,15 @@ fn step_cap(model: &mut Model, up: bool) -> Vec<Cmd> {
         return Vec::new();
     }
     let cur = model.traffic.filter.max_results;
-    let max = model.limits.traffic_max_results;
+    let start = model.limits.traffic_max_results;
     let next = if up {
-        pce::traffic::next_cap(cur, max)
+        pce::traffic::next_cap(cur, start)
     } else {
-        pce::traffic::prev_cap(cur, max)
+        pce::traffic::prev_cap(cur, start)
     };
     let Some(cap) = next else {
         model.status = StatusLine::info(if up {
-            "cap already at the profile maximum"
+            "cap already at the maximum"
         } else {
             "cap already at the minimum"
         });
@@ -10500,9 +10502,10 @@ mod window_step_tests {
         let mut m = model_with_window("1h");
         quiet(&mut m, key('-'));
         assert_eq!(m.status.text, "window already at 1h");
-        let mut m = model_with_window("1d"); // cap 1000 = the profile maximum
+        let mut m = model_with_window("1d");
+        m.traffic.filter.max_results = 200_000;
         quiet(&mut m, key(']'));
-        assert_eq!(m.status.text, "cap already at the profile maximum");
+        assert_eq!(m.status.text, "cap already at the maximum");
         m.traffic.filter.max_results = 500;
         quiet(&mut m, key('['));
         assert_eq!(m.status.text, "cap already at the minimum");
@@ -10556,6 +10559,40 @@ mod window_step_tests {
         let cmds = update(&mut m, key('y'));
         assert_eq!(cmds.len(), 1);
         assert!(matches!(&cmds[0], Cmd::RunQuery { filter, .. } if filter.max_results == 20_000));
+    }
+
+    /// The profile's cap is only where `]` starts: it steps on to 200000,
+    /// every rung past 10000 behind the `y`.
+    #[test]
+    fn the_cap_steps_past_the_profile_value_to_the_hard_maximum() {
+        let mut m = model_with_window("1d");
+        m.limits.traffic_max_results = 3000;
+        m.traffic.filter.max_results = 3000;
+        let mut seen = Vec::new();
+        loop {
+            let cmds = update(&mut m, key(']'));
+            if let Overlay::Confirm { reason, .. } = &m.overlay {
+                assert!(reason.contains("exceeds 10000"), "{reason}");
+                assert!(cmds.is_empty());
+                update(&mut m, key('y'));
+            } else if cmds.is_empty() {
+                break;
+            }
+            let cap = m.traffic.filter.max_results;
+            seen.push(cap);
+            m.traffic.query = QueryState::Idle;
+        }
+        assert_eq!(
+            seen,
+            [5000, 10_000, 25_000, 50_000, 100_000, 200_000],
+            "{}",
+            m.status.text
+        );
+        assert_eq!(m.status.text, "cap already at the maximum");
+        m.traffic.filter.max_results = 5000;
+        m.traffic.query = QueryState::Idle;
+        assert_eq!(update(&mut m, key('[')).len(), 1);
+        assert_eq!(m.traffic.filter.max_results, 3000, "the profile's own rung");
     }
 }
 
@@ -11303,7 +11340,7 @@ mod backfill_tests {
         assert_eq!(m.status.kind, StatusKind::Error);
         assert_eq!(
             m.status.text,
-            "cap 120 is too small for this PCE at 1m: raise traffic_max_results"
+            "cap 120 is too small for this PCE at 1m: ] raises the cap"
         );
         assert!(m.traffic.backfill.is_none());
         let d = m.traffic.data.as_ref().unwrap();
@@ -11371,34 +11408,33 @@ mod backfill_tests {
         assert_eq!(m.traffic.data.as_ref().unwrap().filter.max_results, 1000);
     }
 
-    /// The profile stops at 500: the newest 50 of 96 slices of 15m, then `B`
-    /// continues; the opt-in never chains a second batch.
+    /// 6000 flows in under a minute: even the hard maximum of 200000 needs
+    /// 96 slices of 15m, so the newest 50, then `B` continues; the opt-in
+    /// asks (past the cost threshold) and never chains a second batch.
     #[test]
-    fn past_the_profile_cap_a_batch_of_50_and_b_continues() {
+    fn past_the_hard_maximum_a_batch_of_50_and_b_continues() {
         for auto in [false, true] {
             let mut m = model_fixture();
-            m.limits.traffic_max_results = 500;
             m.limits.traffic_auto_backfill = auto;
-            let cmds = answer_query(&mut m, spread(Span::new().minutes(2), 1), 1);
-            if auto {
-                assert_eq!(cmds.len(), 1, "{cmds:?}");
-            } else {
-                assert!(cmds.is_empty());
+            let cmds = answer_query(&mut m, spread(Span::new().seconds(30), 200), 1);
+            assert!(cmds.is_empty());
+            if !auto {
                 assert!(
                     m.status
                         .text
-                        .ends_with(", B backfills the newest 12h 30m in 50 slices at cap 500"),
+                        .ends_with(", B backfills the newest 12h 30m in 50 slices at cap 200000"),
                     "{}",
                     m.status.text
                 );
                 quiet(&mut m, key('B'));
-                assert_eq!(
-                    reason(&m),
-                    "raise the cap to 500 and backfill the next 50 slices of 15m: 12h 30m of \
-                     the remaining 1d, 50 queries (≥150 API calls); B again continues. y/n?"
-                );
-                assert_eq!(update(&mut m, key('y')).len(), 1);
             }
+            assert_eq!(
+                reason(&m),
+                "cap 200000 exceeds 10000. raise the cap to 200000 and backfill the next 50 \
+                 slices of 15m: 12h 30m of the remaining 1d, 50 queries (≥150 API calls); B \
+                 again continues. y/n?"
+            );
+            assert_eq!(update(&mut m, key('y')).len(), 1);
             assert_eq!(progress(&m), "slice 1 of 50");
             let mut sent = 1;
             loop {
@@ -11428,7 +11464,8 @@ mod backfill_tests {
             quiet(&mut m, key('B'));
             assert_eq!(
                 reason(&m),
-                "backfill 11h 30m in 46 slices of 15m at cap 500: 46 queries (≥138 API calls)? y/n"
+                "cap 200000 exceeds 10000. backfill 11h 30m in 46 slices of 15m at cap 200000: 46 \
+                 queries (≥138 API calls)? y/n"
             );
         }
     }

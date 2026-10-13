@@ -344,7 +344,7 @@ ignore_keys = ["DFIRBubble"]</code></pre>
     <li><b>Cached 15 / 5 min</b><span>Labels, label groups, IP lists and services for 15 minutes; policy and workloads for 5. One traffic result is kept until the filter changes.</span></li>
     <li><b>5 requests to start</b><span>The TUI opens with health plus the four object lists. The first visit to Workloads and to Events costs one request each; going back costs none.</span></li>
     <li><b>No auto-refresh by default</b><span><code>a</code> turns it on per screen, never faster than every 60 seconds, with a countdown; it switches itself off after a failed refresh.</span></li>
-    <li><b>24 h, 1000 rows</b><span>Explorer queries default to a 24-hour window and a 1000-row cap. Truncation is always reported.</span></li>
+    <li><b>24 h, 10 000 rows</b><span>Explorer queries default to a 24-hour window and a 10 000-row cap, at most 200 000. Truncation is always reported.</span></li>
     <li><b><code>--yes</code> above 7 days or 10 000 rows</b><span>Expensive queries stop with exit code 2 and tell you why, until you confirm on purpose.</span></li>
     <li><b><code>--dry-run</code></b><span>Prints the exact Explorer request body and sends nothing. See the query before the PCE does.</span></li>
   </ul>

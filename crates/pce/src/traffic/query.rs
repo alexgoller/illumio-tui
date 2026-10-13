@@ -8,9 +8,12 @@ use jiff::{Span, Timestamp};
 use std::time::Duration;
 
 pub const DEFAULT_WINDOW: Duration = Duration::from_secs(24 * 3600);
-pub const DEFAULT_TRAFFIC_MAX_RESULTS: u32 = 1000;
+pub const DEFAULT_TRAFFIC_MAX_RESULTS: u32 = 10_000;
 pub const CONFIRM_WINDOW: Duration = Duration::from_secs(7 * 24 * 3600);
+/// Caps above this need a confirmation (`--yes`, or `y` in the TUI).
 pub const CONFIRM_MAX_RESULTS: u32 = 10_000;
+/// The largest cap any query may ask for (Explorer's limit).
+pub const MAX_TRAFFIC_MAX_RESULTS: u32 = 200_000;
 
 /// `2026-10-10T07:31:02Z`
 pub fn format_timestamp(t: Timestamp) -> String {
@@ -180,6 +183,12 @@ impl TrafficQueryBuilder {
         if self.max_results == 0 {
             return Err(PceError::Invalid("max_results must be at least 1".into()));
         }
+        if self.max_results > MAX_TRAFFIC_MAX_RESULTS {
+            return Err(PceError::Invalid(format!(
+                "max_results {} is above the maximum of {MAX_TRAFFIC_MAX_RESULTS}",
+                self.max_results
+            )));
+        }
         // The PCE returns nothing for `include: []`; `[[]]` means "no filter".
         self.sources.include.retain(|g| !g.is_empty());
         self.destinations.include.retain(|g| !g.is_empty());
@@ -231,7 +240,7 @@ mod tests {
         );
         assert_eq!(v["start_date"], "2026-10-01T00:00:00Z");
         assert_eq!(v["end_date"], "2026-10-02T00:00:00Z");
-        assert_eq!(v["max_results"], 1000);
+        assert_eq!(v["max_results"], 10_000);
         assert_eq!(v["sources_destinations_query_op"], "and");
         assert_eq!(v["exclude_workloads_from_ip_list_query"], true);
         assert_eq!(v["query_name"], "illumio-tui");
@@ -289,6 +298,19 @@ mod tests {
                 .max_results(0)
                 .build();
         assert!(matches!(r, Err(crate::PceError::Invalid(_))));
+    }
+
+    #[test]
+    fn caps_above_the_hard_maximum_are_rejected() {
+        let b =
+            TrafficQueryBuilder::between(ts("2026-10-01T00:00:00Z"), ts("2026-10-02T00:00:00Z"));
+        let q = b.clone().max_results(200_000).build().unwrap();
+        assert_eq!(q.max_results, 200_000);
+        let r = b.max_results(200_001).build();
+        assert!(
+            matches!(r, Err(crate::PceError::Invalid(ref m)) if m.contains("200001") && m.contains("maximum of 200000")),
+            "{r:?}"
+        );
     }
 
     #[test]

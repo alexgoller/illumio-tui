@@ -55,7 +55,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "Traffic  ] / [",
         "raise / lower the result cap (re-runs the query)",
     ),
-    ("", "cap steps 500 1000 2000 5000 10000, profile max"),
+    ("", "cap steps 500 1000 2000 5000 10000 25000 … 200000"),
     ("Traffic  g", "pick the label keys every view groups by"),
     (
         "Traffic  Enter",

@@ -397,7 +397,7 @@ pub fn resolve(
             .auto_refresh_min_seconds
             .unwrap_or(60)
             .max(60),
-        traffic_max_results: profile.limits.traffic_max_results.unwrap_or(1000),
+        traffic_max_results: traffic_cap(profile.limits.traffic_max_results)?,
         traffic_default_window: profile
             .limits
             .traffic_default_window
@@ -419,6 +419,18 @@ pub fn resolve(
         tier_key,
         ignore_keys: ignored,
     })
+}
+
+/// `traffic_max_results`: the starting cap, 1 up to the hard maximum.
+fn traffic_cap(v: Option<u32>) -> Result<u32, ConfigError> {
+    use pce::traffic::{DEFAULT_TRAFFIC_MAX_RESULTS, MAX_TRAFFIC_MAX_RESULTS};
+    match v {
+        None => Ok(DEFAULT_TRAFFIC_MAX_RESULTS),
+        Some(n) if (1..=MAX_TRAFFIC_MAX_RESULTS).contains(&n) => Ok(n),
+        Some(n) => Err(ConfigError::Message(format!(
+            "traffic_max_results is {n}: it must be between 1 and {MAX_TRAFFIC_MAX_RESULTS}"
+        ))),
+    }
 }
 
 pub fn parse_bool(s: &str) -> Option<bool> {
@@ -543,8 +555,30 @@ api_secret_cmd = "echo   from-command  "
         assert_eq!(c.scheme, "http");
         assert!(c.tls_verify);
         assert_eq!(c.requests_per_second, 2.0);
-        assert_eq!(c.traffic_max_results, 1000);
+        assert_eq!(c.traffic_max_results, 10_000);
         assert_eq!(c.traffic_default_window, "24h");
+    }
+
+    #[test]
+    fn traffic_max_results_must_be_within_the_hard_maximum() {
+        let with = |n: u32| {
+            let mut f = file();
+            f.profiles
+                .get_mut("demo")
+                .unwrap()
+                .limits
+                .traffic_max_results = Some(n);
+            resolve(&f, &Overrides::default(), &env(&[]))
+        };
+        assert_eq!(with(200_000).unwrap().traffic_max_results, 200_000);
+        assert_eq!(with(1).unwrap().traffic_max_results, 1);
+        for bad in [0, 200_001] {
+            let err = with(bad).unwrap_err().to_string();
+            assert!(
+                err.contains("traffic_max_results") && err.contains("200000"),
+                "{err}"
+            );
+        }
     }
 
     #[test]
