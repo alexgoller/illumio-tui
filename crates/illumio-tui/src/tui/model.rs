@@ -3975,6 +3975,7 @@ impl Model {
             } else {
                 &[]
             },
+            group_keys: None,
         }
     }
 

@@ -4,9 +4,12 @@
 //! width, each cell whole; sectioned views as `traffic groups --csv`. No
 //! request: `update` turns the table into `Cmd::Export`, the runtime
 //! writes the file with `write`.
+use crate::cli::output::TableRows;
 use crate::cli::output::write_csv;
-use crate::cli::traffic::{SECTION_CSV_HEADERS, peer_csv_row};
+use crate::cli::traffic::{SECTION_CSV_HEADERS, ServiceGroups, peer_csv_row};
 use crate::tui::model::{Model, ObjectKind, PolicyPane, Screen, SectionRow, TrafficView};
+use crate::tui::table::TableView;
+use pce::traffic::FlowGroup;
 use std::io::Write;
 use std::path::PathBuf;
 
@@ -25,8 +28,9 @@ pub fn current_table(model: &Model) -> Result<Csv, String> {
                 (TrafficView::Treemap, _) => {
                     return Err("the treemap has no table to export".into());
                 }
-                // App-to-app by pairs (by service with `o`).
-                (_, None) => t.pairs_table().export(),
+                // App-to-app by pairs; by service (`o`) as `traffic groups --services --csv`.
+                (_, None) if t.apps_state.by_service => service_pairs(&t.services),
+                (_, None) => t.groups.export(),
             }
         }
         Screen::Policy => match model.policy.pane {
@@ -55,6 +59,20 @@ fn sections(rows: &[SectionRow]) -> Csv {
         })
         .collect();
     (SECTION_CSV_HEADERS.to_vec(), rows)
+}
+
+/// The pairs by service as shown (search and sort applied), in the
+/// columns of `traffic groups --services --csv`: every decision count,
+/// where the screen shows the dominant one.
+fn service_pairs(table: &TableView<FlowGroup>) -> Csv {
+    let shown = ServiceGroups(
+        table
+            .visible()
+            .iter()
+            .map(|&i| table.rows()[i].clone())
+            .collect(),
+    );
+    (shown.full_headers(), shown.full_rows())
 }
 
 /// `~/x` under the home directory; anything else as typed.

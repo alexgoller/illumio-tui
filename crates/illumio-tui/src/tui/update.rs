@@ -1453,9 +1453,7 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         KeyCode::Char('o') if model.traffic.view == TrafficView::Aggregate => {
             let t = &mut model.traffic;
             if t.apps_state.by != By::Pairs {
-                model.status = StatusLine::info(
-                    "o groups pairs by service; in, out and both already show one row per service",
-                );
+                model.status = StatusLine::info("o: pairs only (in/out/both are per service)");
             } else {
                 t.apps_state.by_service = !t.apps_state.by_service;
                 t.rebuild_services();
@@ -3367,6 +3365,10 @@ fn begin_edit(model: &mut Model, intent: EditIntent) -> Vec<Cmd> {
         model.index().map(|i| i.as_ref()),
         model.flow_prefill(),
     );
+    begin_start(model, start)
+}
+
+fn begin_start(model: &mut Model, start: Start) -> Vec<Cmd> {
     match start {
         Start::Form(f) => {
             model.overlay = Overlay::Form(f);
@@ -3542,13 +3544,7 @@ fn flow_rule_key(model: &mut Model) -> Vec<Cmd> {
             let keys = t.effective_keys();
             t.first_flow(|f| r.contains(f, &keys, t.mesh_cols))
         }),
-        // A pair by service (`o`): a flow on the row's groups and service.
-        TrafficView::Aggregate if t.apps_state.by_service => {
-            t.pairs_table().selected_item().and_then(|g| {
-                let keys = t.effective_keys();
-                t.first_flow(|f| g.contains(f, &keys))
-            })
-        }
+        TrafficView::Aggregate if t.apps_state.by_service => return service_pair_rule_key(model),
         TrafficView::Blocked | TrafficView::Aggregate | TrafficView::Treemap => {
             model.status = StatusLine::warn("select a flow in the Flows view (Enter on a pair)");
             return Vec::new();
@@ -3571,6 +3567,36 @@ fn flow_rule_key(model: &mut Model) -> Vec<Cmd> {
             Vec::new()
         }
     }
+}
+
+/// `w` on an App-to-app pair by service (`o`): the allow rule for the
+/// row's tuple, drafted from one of its blocked flows with the row's groups
+/// (under the `g` keys) as providers and consumers and its service.
+fn service_pair_rule_key(model: &mut Model) -> Vec<Cmd> {
+    let t = &model.traffic;
+    let Some(g) = t.pairs_table().selected_item() else {
+        model.status = StatusLine::warn("no row selected");
+        return Vec::new();
+    };
+    if g.blocked + g.potentially_blocked == 0 {
+        model.status = StatusLine::warn("every flow of this row is allowed; nothing to add");
+        return Vec::new();
+    }
+    let keys = t.effective_keys();
+    let Some(flow) = t.first_flow(|f| g.contains(f, &keys)) else {
+        model.status = StatusLine::warn("no row selected");
+        return Vec::new();
+    };
+    let prefill = edit::FlowPrefill {
+        group_keys: Some(&keys),
+        ..model.flow_prefill()
+    };
+    let start = edit::start(
+        EditIntent::RuleFromFlow(Box::new(flow)),
+        model.index().map(|i| i.as_ref()),
+        prefill,
+    );
+    begin_start(model, start)
 }
 
 /// `:draft` / `:active`: like `d` on the Policy screen, but explicit. The scope
@@ -4171,7 +4197,7 @@ mod tests {
             m.traffic.apps_state.by_service,
             "o does nothing outside pairs"
         );
-        assert!(m.status.text.contains("already show one row per service"));
+        assert_eq!(m.status.text, "o: pairs only (in/out/both are per service)");
         for _ in 0..3 {
             quiet(&mut m, key('x'));
         }
@@ -4221,8 +4247,63 @@ mod tests {
         );
     }
 
+    /// Moves the cursor to the first by-service row `pred` accepts.
+    fn select_service_pair(m: &mut Model, pred: impl Fn(&pce::traffic::FlowGroup) -> bool) {
+        m.traffic.services.home();
+        let pos = (0..m.traffic.services.len())
+            .find(|&i| pred(&m.traffic.services.rows()[m.traffic.services.visible()[i]]))
+            .expect("a matching row");
+        for _ in 0..pos {
+            quiet(m, key('j'));
+        }
+    }
+
+    /// A blocked row both of whose groups are labelled workloads under
+    /// the keys in force (no `-` slot, no host-name fallback).
+    fn labelled_blocked(m: &Model) -> impl Fn(&pce::traffic::FlowGroup) -> bool + '_ {
+        let keys = m.traffic.effective_keys();
+        move |g| {
+            g.blocked + g.potentially_blocked > 0
+                && m.traffic.loaded_flows().iter().any(|f| {
+                    g.contains(f, &keys)
+                        && keys.iter().all(|k| {
+                            f.src.label_value(k).is_some() && f.dst.label_value(k).is_some()
+                        })
+                })
+        }
+    }
+
+    /// `app=shop, env=prod`: a group under `keys` as actor tokens.
+    fn group_tokens(keys: &[String], group: &[String]) -> String {
+        keys.iter()
+            .zip(group)
+            .filter(|(_, v)| *v != "-")
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// `w` on the selected by-service row: the form's Providers,
+    /// Consumers and Services, and the row.
+    fn w_form_of_row(m: &mut Model) -> (String, String, String, pce::traffic::FlowGroup) {
+        let row = m.traffic.services.selected_item().unwrap().clone();
+        assert!(update(m, key('w')).is_empty(), "no request");
+        let Overlay::Form(f) = &m.overlay else {
+            panic!("{:?} {}", m.overlay, m.status.text)
+        };
+        assert_eq!(f.title, "Allow rule from flow");
+        let out = (
+            f.value("Providers").to_string(),
+            f.value("Consumers").to_string(),
+            f.value("Services").to_string(),
+            row,
+        );
+        quiet(m, kc(KeyCode::Esc));
+        out
+    }
+
     #[test]
-    fn w_on_a_pair_by_service_drafts_on_its_groups_and_service() {
+    fn w_on_a_pair_by_service_drafts_the_rows_groups_and_service() {
         use crate::tui::test_support::model_with_rich_flows;
         let mut m = writes_on(model_with_rich_flows());
         m.traffic.view = TrafficView::Aggregate;
@@ -4232,46 +4313,139 @@ mod tests {
             "plain pairs hold several services"
         );
         let mut m = on_pairs_by_service(m);
-        let pos = m
+
+        // The default keys: the row's app/env groups, not one flow's tier.
+        let keys = m.traffic.effective_keys();
+        let pred = labelled_blocked(&m);
+        let target = m
             .traffic
             .services
             .rows()
             .iter()
-            .position(|g| g.blocked > 0 && g.allowed > 0)
-            .or_else(|| m.traffic.services.rows().iter().position(|g| g.blocked > 0))
-            .unwrap();
-        for _ in 0..pos {
-            quiet(&mut m, key('j'));
+            .find(|g| pred(g))
+            .unwrap()
+            .clone();
+        drop(pred);
+        select_service_pair(&mut m, |g| *g == target);
+        let (providers, consumers, services, row) = w_form_of_row(&mut m);
+        assert_eq!(providers, group_tokens(&keys, &row.dst));
+        assert_eq!(consumers, group_tokens(&keys, &row.src));
+        assert_eq!(Some(services), row.service);
+
+        // A row whose blocked flows differ in tier still gets its groups.
+        let keep = |f: &pce::traffic::ResolvedFlow| {
+            row.contains(f, &keys)
+                && matches!(
+                    f.policy_decision,
+                    PolicyDecision::Blocked | PolicyDecision::PotentiallyBlocked
+                )
+        };
+        let mut odd = m
+            .traffic
+            .loaded_flows()
+            .iter()
+            .find(|f| keep(f))
+            .unwrap()
+            .clone();
+        for side in [&mut odd.src, &mut odd.dst] {
+            for l in side.labels.iter_mut().filter(|l| l.key == "role") {
+                l.value = "batch-tier".into();
+                l.href = "/orgs/5/labels/9999".into();
+            }
         }
-        let row = m.traffic.services.selected_item().unwrap().clone();
-        assert!(update(&mut m, key('w')).is_empty(), "no request");
-        let Overlay::Form(f) = &m.overlay else {
-            panic!("{:?}", m.overlay)
-        };
-        assert_eq!(f.title, "Allow rule from flow");
-        assert_eq!(Some(f.value("Services").to_string()), row.service);
-        let crate::tui::edit::EditIntent::RuleFromFlow(flow) = &f.intent else {
-            panic!("{:?}", f.intent)
-        };
-        let keys = m.traffic.effective_keys();
-        assert!(row.contains(flow, &keys), "a flow of the row: its groups");
+        m.traffic.data.as_mut().unwrap().flows.insert(0, odd);
+        m.traffic.rebuild_views();
+        select_service_pair(&mut m, |g| {
+            g.src == row.src && g.dst == row.dst && g.service == row.service
+        });
+        let (p2, c2, _, _) = w_form_of_row(&mut m);
+        assert_eq!((p2, c2), (providers, consumers), "group level, not tier");
+
+        // A non-scope `g` key: the row's loc groups.
+        m.traffic.group_keys = vec!["loc".to_string()];
+        m.traffic.rebuild_views();
+        let loc = vec!["loc".to_string()];
+        assert_eq!(m.traffic.effective_keys(), loc);
+        let pred = labelled_blocked(&m);
+        let target = m
+            .traffic
+            .services
+            .rows()
+            .iter()
+            .find(|g| pred(g))
+            .unwrap()
+            .clone();
+        drop(pred);
+        select_service_pair(&mut m, |g| *g == target);
+        let (providers, consumers, services, row) = w_form_of_row(&mut m);
+        assert!(providers.starts_with("loc="), "{providers}");
+        assert_eq!(providers, group_tokens(&loc, &row.dst));
+        assert_eq!(consumers, group_tokens(&loc, &row.src));
+        assert_eq!(Some(services), row.service);
+
+        // Nothing blocked behind the row: nothing to add.
+        select_service_pair(&mut m, |g| g.blocked + g.potentially_blocked == 0);
+        assert!(update(&mut m, key('w')).is_empty());
+        assert_eq!(m.overlay, Overlay::None);
+        assert_eq!(
+            m.status.text,
+            "every flow of this row is allowed; nothing to add"
+        );
     }
 
     #[test]
-    fn export_of_pairs_by_service_carries_the_service_column() {
+    fn export_of_pairs_by_service_is_traffic_groups_services_csv() {
+        use crate::cli::output::TableRows;
+        use crate::cli::traffic::ServiceGroups;
         use crate::tui::test_support::model_with_rich_flows;
         let mut m = on_pairs_by_service(model_with_rich_flows());
         let (_, _, headers, rows) = export_cmd(&mut m, "export p.csv");
+        let cli = ServiceGroups(m.traffic.services.rows().to_vec());
+        assert_eq!(
+            headers,
+            cli.full_headers(),
+            "the CLI's --services --csv header"
+        );
         assert_eq!(
             headers,
             [
-                "src", "dst", "service", "flows", "conns", "bytes", "decision"
+                "src",
+                "dst",
+                "service",
+                "flows",
+                "conns",
+                "bytes",
+                "allowed",
+                "pot.blocked",
+                "blocked"
             ]
         );
         assert_eq!(rows.len(), m.traffic.services.len());
         let first = m.traffic.services.selected_item().unwrap();
         assert_eq!(rows[0][2], first.service.clone().unwrap());
         assert_eq!(rows[0][5], first.bytes.to_string(), "bytes whole");
+        let mixed = m
+            .traffic
+            .services
+            .rows()
+            .iter()
+            .find(|g| g.blocked > 0 && g.allowed + g.potentially_blocked > 0)
+            .or_else(|| m.traffic.services.rows().iter().find(|g| g.blocked > 0))
+            .unwrap();
+        let line = rows
+            .iter()
+            .find(|r| {
+                r[0] == mixed.src.join("/")
+                    && r[1] == mixed.dst.join("/")
+                    && Some(&r[2]) == mixed.service.as_ref()
+            })
+            .unwrap();
+        assert_eq!(line[8], mixed.blocked.to_string(), "blocked counted");
+        assert_eq!(line[6], mixed.allowed.to_string());
+
+        // On screen: the compact decision column.
+        let titles: Vec<&str> = m.traffic.services.columns.iter().map(|c| c.title).collect();
+        assert_eq!(titles.last(), Some(&"decision"));
     }
 
     fn on_treemap(w: u16, h: u16) -> Model {

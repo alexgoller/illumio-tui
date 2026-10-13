@@ -150,8 +150,10 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   the name column) and, on `Enter`, a detail with both label sets and the bytes. **App-to-app**
   pairs the groups; `o` splits each pair by service (`pairs · by service`: one row per source
   group, destination group and `port/proto`, the tuple an allow rule is written for; `Enter`
-  drills into that service's flows, `w` drafts the rule on it, `:export` adds the `service`
-  column); `x` / `X` switch it to sections per app (`in`: each destination app with
+  drills into that service's flows, `w` drafts that rule: consumers the source group's labels,
+  providers the destination group's, the row's service; a `-` slot is no label, so that side
+  is only as narrow as the labels it has; `:export` writes the columns of
+  `traffic groups --services --csv`); `x` / `X` switch it to sections per app (`in`: each destination app with
   its sources, one row per source group and service; `out`: each source app with its
   destinations; `both`: inbound rows `←` then outbound `→`), `d` cycles the decision filter
   (`all`, `blocked` with potentially blocked, `blocked only`), `Space` / `z` fold a section or

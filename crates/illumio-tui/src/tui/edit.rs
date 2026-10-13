@@ -30,6 +30,10 @@ pub struct FlowPrefill<'a> {
     pub scope_keys: &'a [String],
     pub tier_key: &'a str,
     pub rulesets: &'a [RuleSet],
+    /// `w` on an App-to-app pair by service: the keys its groups are made
+    /// of. Providers and consumers are then the row's groups (each side's
+    /// labels under these keys), not one flow's tier.
+    pub group_keys: Option<&'a [String]>,
 }
 
 /// Where a new allow rule goes: the selected ruleset (Policy) or the name
@@ -947,18 +951,29 @@ fn flow_rule_fields(
 ) -> (Vec<Field>, Vec<(usize, String)>) {
     let dst_scope = scope_of(&f.dst, p.scope_keys);
     let src_scope = scope_of(&f.src, p.scope_keys);
-    let providers = tokens_or_fallback(tier_of(&f.dst, p.tier_key).into_iter().collect(), &f.dst);
     let same_scope = !dst_scope.is_empty()
         && dst_scope
             .iter()
             .map(|l| &l.href)
             .eq(src_scope.iter().map(|l| &l.href));
-    let consumers = if same_scope {
-        tokens_or_fallback(tier_of(&f.src, p.tier_key).into_iter().collect(), &f.src)
+    let (providers, consumers) = if let Some(keys) = p.group_keys {
+        // A group's `-` slot is no label: that side widens to the labels
+        // it has.
+        (
+            tokens_or_fallback(scope_of(&f.dst, keys), &f.dst),
+            tokens_or_fallback(scope_of(&f.src, keys), &f.src),
+        )
     } else {
-        let mut labels = src_scope;
-        labels.extend(tier_of(&f.src, p.tier_key));
-        tokens_or_fallback(labels, &f.src)
+        let providers =
+            tokens_or_fallback(tier_of(&f.dst, p.tier_key).into_iter().collect(), &f.dst);
+        let consumers = if same_scope {
+            tokens_or_fallback(tier_of(&f.src, p.tier_key).into_iter().collect(), &f.src)
+        } else {
+            let mut labels = src_scope;
+            labels.extend(tier_of(&f.src, p.tier_key));
+            tokens_or_fallback(labels, &f.src)
+        };
+        (providers, consumers)
     };
     let (ruleset, hint) = match ruleset_scoped(p.rulesets, &dst_scope) {
         _ if dst_scope.is_empty() => (String::new(), Cow::Borrowed(RULESET_HINT)),
@@ -1725,6 +1740,7 @@ mod tests {
         scope_keys: &[],
         tier_key: "role",
         rulesets: &[],
+        group_keys: None,
     };
 
     fn form(intent: EditIntent) -> Form {
@@ -1738,6 +1754,7 @@ mod tests {
             scope_keys: &scope_keys,
             tier_key: tier,
             rulesets: sets,
+            group_keys: None,
         };
         form_for(intent, Some(&*fixture_index()), prefill).expect("a create or update intent")
     }
@@ -2733,6 +2750,7 @@ mod tests {
             scope_keys: &[],
             tier_key: "role",
             rulesets: &[],
+            group_keys: None,
         };
         form_for(
             EditIntent::RuleFromFlow(Box::new(flow.clone())),
