@@ -940,6 +940,19 @@ fn ruleset_scoped(sets: &[RuleSet], scope: &[&ResolvedLabel]) -> Option<String> 
     }
 }
 
+/// How the description names a side: its group (`shop/prod`) when the
+/// form drafts a grouped row, else the endpoint's name.
+fn side_name(e: &ResolvedEndpoint, group_keys: Option<&[String]>) -> String {
+    match group_keys.map(|keys| scope_of(e, keys)) {
+        Some(labels) if !labels.is_empty() => labels
+            .iter()
+            .map(|l| l.value.as_str())
+            .collect::<Vec<_>>()
+            .join("/"),
+        _ => e.display_name(),
+    }
+}
+
 /// The `w` form in the label model: the ruleset whose scope is the
 /// destination's scope, the destination's tier as providers, the source's
 /// tier as consumers when it shares that scope (else its scope and tier,
@@ -975,10 +988,16 @@ fn flow_rule_fields(
         };
         (providers, consumers)
     };
+    // A row grouped on keys that leave out part of the scope covers more
+    // than one scope: no ruleset is picked for it, the hint names the
+    // destination's.
+    let covers_scope = p
+        .group_keys
+        .is_none_or(|keys| p.scope_keys.iter().all(|k| keys.contains(k)));
     let (ruleset, hint) = match ruleset_scoped(p.rulesets, &dst_scope) {
         _ if dst_scope.is_empty() => (String::new(), Cow::Borrowed(RULESET_HINT)),
-        Some(name) => (name, Cow::Borrowed(RULESET_HINT)),
-        None => (
+        Some(name) if covers_scope => (name, Cow::Borrowed(RULESET_HINT)),
+        _ => (
             String::new(),
             Cow::Owned(format!("scope {}", labels_tokens(&dst_scope))),
         ),
@@ -993,8 +1012,8 @@ fn flow_rule_fields(
             "Description",
             format!(
                 "allow {} to {} on {}",
-                f.src.display_name(),
-                f.dst.display_name(),
+                side_name(&f.src, p.group_keys),
+                side_name(&f.dst, p.group_keys),
                 f.service_text()
             ),
             "optional",
@@ -2864,6 +2883,37 @@ mod tests {
         let none = form_with(intent(), &["app", "env"], "role", &rule_sets()[1..]);
         assert_eq!(none.value("Ruleset"), "");
         assert_eq!(none.fields[0].hint, "scope app=shop, env=prod");
+    }
+
+    #[test]
+    fn a_grouped_row_names_its_groups_and_picks_a_ruleset_only_inside_the_scope() {
+        let flows = crate::tui::test_support::fixture_flows();
+        let scope_keys = vec!["app".to_string(), "env".to_string()];
+        let grouped = |keys: &[String]| {
+            let prefill = FlowPrefill {
+                scope_keys: &scope_keys,
+                tier_key: "role",
+                rulesets: &rule_sets(),
+                group_keys: Some(keys),
+            };
+            let intent = EditIntent::RuleFromFlow(Box::new(flows[1].clone()));
+            form_for(intent, Some(&*fixture_index()), prefill).unwrap()
+        };
+        // Grouped on the scope keys (and more): the scope's ruleset.
+        let keys: Vec<String> = ["app", "env", "role"].map(String::from).into();
+        let f = grouped(&keys);
+        assert_eq!(f.value("Ruleset"), "Shop-Prod");
+        // The source is a bare IP: no group, its address.
+        assert_eq!(
+            f.value("Description"),
+            "allow 10.1.4.9 to shop/prod/web on 8443/tcp"
+        );
+        // Grouped on part of the scope: the row spans scopes, no ruleset.
+        let app = vec!["app".to_string()];
+        let f = grouped(&app);
+        assert_eq!(f.value("Ruleset"), "");
+        assert_eq!(f.fields[0].hint, "scope app=shop, env=prod");
+        assert_eq!(f.value("Description"), "allow 10.1.4.9 to shop on 8443/tcp");
     }
 
     #[test]
