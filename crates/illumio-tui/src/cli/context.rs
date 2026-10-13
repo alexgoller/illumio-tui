@@ -10,6 +10,7 @@ use crate::config::{self, Overrides};
 use pce::{CacheMode, Pce, PceClient};
 use serde::Serialize;
 use std::collections::HashMap;
+use std::io::Write;
 use std::time::Instant;
 
 pub struct Context {
@@ -99,6 +100,38 @@ impl Context {
             }
             OutputFormat::Csv => {
                 write_table_csv(&mut out, data)?;
+                eprintln!("{}", meta_line(meta));
+            }
+        }
+        Ok(())
+    }
+
+    /// A report of several tables. JSON: `data` whole. `--table`: each
+    /// table under its title line. `--csv`: the tables' full rows (the
+    /// caller passes exactly one).
+    pub fn emit_report<T: Serialize>(
+        &self,
+        data: &T,
+        tables: &[(String, &dyn TableRows)],
+        meta: &Meta,
+    ) -> Result<(), CliError> {
+        let mut out = std::io::stdout().lock();
+        match self.format {
+            OutputFormat::Json => write_json(&mut out, data, meta)?,
+            OutputFormat::Table => {
+                for (i, (title, table)) in tables.iter().enumerate() {
+                    if i > 0 {
+                        writeln!(out)?;
+                    }
+                    writeln!(out, "{title}")?;
+                    write_table(&mut out, *table)?;
+                }
+                eprintln!("{}", meta_line(meta));
+            }
+            OutputFormat::Csv => {
+                for (_, table) in tables {
+                    write_table_csv(&mut out, *table)?;
+                }
                 eprintln!("{}", meta_line(meta));
             }
         }

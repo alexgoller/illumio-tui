@@ -1,7 +1,7 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use serde_json::{Value, json};
-use wiremock::matchers::{body_partial_json, method, path};
+use wiremock::matchers::{body_partial_json, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// Distinctive so a leak check cannot trip on the word "secret" in prose
@@ -51,6 +51,7 @@ fn every_flag_has_help_text() {
         vec!["traffic", "query", "--help"],
         vec!["traffic", "groups", "--help"],
         vec!["traffic", "mesh", "--help"],
+        vec!["app", "--help"],
         vec!["policy", "pending", "--help"],
         vec!["policy", "rulesets", "--help"],
         vec!["policy", "rules", "--help"],
@@ -2657,4 +2658,141 @@ async fn csv_is_a_usage_error_with_json_table_and_where_there_is_no_table() {
             "{err}"
         );
     }
+}
+async fn mount_app(server: &MockServer, posts: u64) {
+    mount_traffic(server, posts).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .and(query_param(
+            "labels",
+            r#"[["/orgs/5/labels/3","/orgs/5/labels/4"]]"#,
+        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/workloads.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/sec_policy/draft/rule_sets"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/rule_sets.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .mount(server)
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn app_prints_one_envelope_with_every_section() {
+    let server = MockServer::start().await;
+    mount_app(&server, 2).await;
+    let out = stdout_json(
+        cmd(&server)
+            .args(["app", "shop/prod", "--window", "1h"])
+            .assert()
+            .success(),
+    );
+    let d = &out["data"];
+    assert_eq!(d["app"], "shop/prod");
+    assert_eq!(d["direction"], "both");
+    assert_eq!(d["workloads"]["summary"]["workloads"], 2);
+    assert_eq!(d["workloads"]["summary"]["enforcement"]["enforced"], 1);
+    assert_eq!(d["workloads"]["summary"]["enforcement"]["visibility"], 1);
+    let rows = d["workloads"]["rows"].as_array().unwrap();
+    assert_eq!(rows[0]["name"], "host-1.example");
+    assert_eq!(rows[0]["role"], "web");
+    assert_eq!(d["inbound"].as_array().unwrap().len(), 3);
+    assert_eq!(d["outbound"].as_array().unwrap().len(), 2);
+    assert_eq!(d["inbound"][2]["decision"], "blocked");
+    let policy: Vec<(&str, &str)> = d["policy"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| (r["name"].as_str().unwrap(), r["reason"].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        policy,
+        vec![("Shop-Prod", "scope"), ("Global-Infra", "all_workloads")]
+    );
+    assert_eq!(d["timeline"]["exact"], false);
+    assert_eq!(d["timeline"]["buckets"].as_array().unwrap().len(), 24);
+    assert_eq!(out["meta"]["queries"], 2);
+    assert_eq!(
+        out["meta"]["api_calls"],
+        4 + 3 + 3 + 1 + 1,
+        "4 lists, POST + poll + download per side, workloads, rulesets"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn app_tables_and_csv_print_per_section() {
+    let server = MockServer::start().await;
+    mount_app(&server, 2).await;
+    let table = cmd(&server)
+        .args([
+            "app",
+            "shop/prod",
+            "--window",
+            "1h",
+            "--direction",
+            "in",
+            "--table",
+        ])
+        .assert()
+        .success();
+    let text = String::from_utf8_lossy(&table.get_output().stdout).to_string();
+    for s in [
+        "workloads · 2 · enforced 1 · visibility 1 · VENs",
+        "inbound · 3",
+        "outbound · 0",
+        "policy · 2",
+        "timeline · approx",
+    ] {
+        assert!(text.contains(s), "missing {s:?}:\n{text}");
+    }
+    let csv = cmd(&server)
+        .args([
+            "app",
+            "shop/prod",
+            "--window",
+            "1h",
+            "--direction",
+            "out",
+            "--csv",
+            "--section",
+            "outbound",
+        ])
+        .assert()
+        .success();
+    let text = csv_stdout(&csv);
+    assert!(
+        text.starts_with("peer,service,decision,flows,conns,bytes\r\n"),
+        "{text}"
+    );
+    assert_eq!(text.lines().count(), 3, "header and two peers: {text}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn app_mistakes_exit_2_before_any_request() {
+    let server = MockServer::start().await;
+    mount_traffic_quiet(&server).await;
+    let err = cmd(&server)
+        .args(["app", "shop/prod", "--csv"])
+        .assert()
+        .code(2);
+    assert!(
+        String::from_utf8_lossy(&err.get_output().stderr)
+            .contains("--csv prints one table: add --section")
+    );
+    cmd(&server)
+        .args(["app", "shop/prod", "--window", "30d"])
+        .assert()
+        .code(2);
+    let server = MockServer::start().await;
+    mount_app(&server, 0).await;
+    let err = cmd(&server).args(["app", "shp/prod"]).assert().code(2);
+    assert!(String::from_utf8_lossy(&err.get_output().stderr).contains("closest: shop"));
 }

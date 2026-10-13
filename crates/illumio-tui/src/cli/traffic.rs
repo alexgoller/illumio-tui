@@ -828,21 +828,21 @@ pub async fn run(ctx: &Context, cmd: &TrafficCmd) -> Result<(), CliError> {
 
 /// One query's flows (with `--backfill`, every slice's merged), resolved,
 /// and what the envelope reports about them.
-struct Fetched {
-    flows: Vec<ResolvedFlow>,
-    cache: &'static str,
-    truncated: bool,
-    window: Option<Window>,
+pub(crate) struct Fetched {
+    pub(crate) flows: Vec<ResolvedFlow>,
+    pub(crate) cache: &'static str,
+    pub(crate) truncated: bool,
+    pub(crate) window: Option<Window>,
     /// How much of the window the flows cover.
-    covered: Duration,
+    pub(crate) covered: Duration,
     /// `--backfill`: the queries merged.
-    slices: Option<u32>,
+    pub(crate) slices: Option<u32>,
     /// `--app`: the Explorer queries the result took.
-    queries: Option<u32>,
+    pub(crate) queries: Option<u32>,
 }
 
 impl Fetched {
-    fn meta(&self, ctx: &Context) -> Meta {
+    pub(crate) fn meta(&self, ctx: &Context) -> Meta {
         let mut m = ctx.meta(self.cache, self.truncated, self.window.clone());
         m.covered = Some(compact_duration(self.covered));
         m.slices = self.slices;
@@ -970,7 +970,7 @@ async fn backfill(
 /// after the app's labels are checked (an unknown one is exit 2 before any
 /// traffic request). A dry run prints the request body (with `--app`, the
 /// bodies) and returns `None`.
-async fn fetch(
+pub(crate) async fn fetch(
     ctx: &Context,
     args: &FilterArgs,
     focus: Option<&CliFocus>,

@@ -1,5 +1,6 @@
 //! clap definitions and dispatch. Each subcommand lives in its own module
 //! and gets a `Context`.
+pub mod app;
 pub mod context;
 pub mod error;
 pub mod events;
@@ -91,6 +92,8 @@ pub enum Command {
     Events(events::EventsArgs),
     /// List workloads; add, update or delete an unmanaged one
     Workloads(workloads::WorkloadsCmd),
+    /// One app: workloads and VENs, inbound and outbound peers, policy, blocked traffic over time
+    App(app::AppArgs),
     /// Rulesets, rules, deny rules, pending changes, provisioning
     #[command(subcommand)]
     Policy(policy::PolicyCmd),
@@ -150,6 +153,7 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
         Command::Services(c) => objects::services_cmd(&ctx, &c).await,
         Command::Events(a) => events::run(&ctx, &a).await,
         Command::Workloads(a) => workloads::workloads_cmd(&ctx, &a).await,
+        Command::App(a) => app::run(&ctx, &a).await,
         Command::Policy(p) => policy::run(&ctx, &p).await,
         Command::Traffic(t) => traffic::run(&ctx, &t).await,
         Command::Profile(_) => unreachable!("handled above"),
