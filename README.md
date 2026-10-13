@@ -91,7 +91,12 @@ has its own `--port` service-port filter).
 Five screens: `1` Traffic, `2` Policy, `3` Objects, `4` Workloads, `5` Events. The `:` prompt
 takes `:traffic`, `:policy`, `:objects`, `:workloads`, `:events`, `:iplists` (Objects on its
 IP lists tab), `:filter <expr>`, `:window <dur>`, `:profile <name>`, `:writes [on|off]`,
-`:draft`, `:active`, `:help` and `:q`.
+`:export <path>`, `:draft`, `:active`, `:help` and `:q`. `:export <path>` writes the table on
+screen as CSV (the rows shown, with the search and filters applied and in sort order; every
+column, whatever the terminal width, each cell whole; `~/` is the home directory), the same
+format as the CLI's `--csv`, and sends nothing; it refuses an existing file, `:export! <path>`
+overwrites it. Sectioned views (App-to-app `in`/`out`/`both`, Blocked) export one row per peer
+with `app` and `direction` columns; the Treemap has no table.
 `?` shows the full key map, `Esc` closes overlays, `q` or `Ctrl-C` quits. The mouse wheel
 scrolls the current table and a click on a tab switches screen; on a terminal narrower than
 the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
@@ -226,6 +231,8 @@ the API call and byte counters at all times.
     illumio-tui traffic mesh --window 1h --no-user --json
     illumio-tui traffic query --window 30d --dry-run
     illumio-tui traffic query --window 24h --backfill --json
+    illumio-tui workloads --csv > workloads.csv
+    illumio-tui traffic groups --window 24h --by in --csv > peers.csv
     illumio-tui profile list
     illumio-tui profile use prod
 
@@ -241,6 +248,20 @@ merged and `meta.api_calls` every request (at least 3 per query). A run sends at
 `--max-slices` queries (1 to 50, default 50); when the window needs more, stderr names the
 `--from` / `--to` that continue and `meta.truncated` stays true. Errors go to stderr as JSON. Exit codes: 1 generic, 2 arguments or
 config, 3 auth, 4 PCE error, 5 rate limited, 6 write refused by the guard.
+
+`--csv` (beside `--table` and `--json`, exclusive with both) prints the same table as RFC 4180
+CSV for spreadsheets: a header row, `,` separators, quotes only around cells holding `,`, `"`
+or a line break, CRLF line ends, UTF-8 without BOM. The columns are the full set, untrimmed:
+no `…` clipping, lists joined with `; ` where the table folds them (`3 hosts`, a label
+group's member count), plain numbers (`6472`, not `6.5K`), `true`/`false`, and an empty cell
+for nothing (`workloads` gives `heartbeat_age_secs`; `policy rules` adds each rule's `href`;
+`policy pending --diff` a `diff` column). `traffic groups --by ...` and `traffic query --blocked`
+print one row per peer with `app` and `direction` columns. The meta line always goes to
+stderr, so a redirect holds only CSV. `--csv` sends the same requests as the table;
+`workloads`, `labels`, `label-groups`, `services`, `iplists`, `events`, `policy rulesets`,
+`policy rules`, `policy pending`, `traffic query`/`groups`/`mesh` and `profile list` take it.
+Commands that print no table (writes, `health`, `policy rules impact`, `profile use`, a
+traffic `--dry-run`) refuse it with exit 2 before any request.
 
 `traffic groups` and `traffic mesh` take the `traffic query` filter flags (and its dry run,
 cost guard and cache) and print the same envelope. `groups` gives one row per source and
