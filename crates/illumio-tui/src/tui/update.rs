@@ -1336,6 +1336,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 Vec::new()
             }
         },
+        Overlay::App => Vec::new(),
         Overlay::None => on_screen_key(model, k),
     }
 }

@@ -1,6 +1,7 @@
 //! All TUI state. No I/O, no terminal types beyond sizes.
 use crate::cli::output::join_list;
 use crate::tui::app_picker::AppPicker;
+use crate::tui::app_view::AppView;
 use crate::tui::diff::ObjectDiff;
 use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::form::Form;
@@ -188,6 +189,8 @@ pub enum Overlay {
     /// `F` without an app under the cursor, `:focus` alone: the apps of the
     /// loaded result.
     AppPicker(AppPicker),
+    /// `A` / `:app`: the app overlay; its state is `Model::app_view`.
+    App,
     /// `f` on the Labels tab: the label keys it shows.
     LabelKeys(KeyPicker),
     /// The selected policy rule in full.
@@ -228,7 +231,8 @@ impl PartialEq for Overlay {
         match (self, other) {
             (Overlay::None, Overlay::None)
             | (Overlay::Help, Overlay::Help)
-            | (Overlay::Pending, Overlay::Pending) => true,
+            | (Overlay::Pending, Overlay::Pending)
+            | (Overlay::App, Overlay::App) => true,
             (Overlay::Prompt { input: a }, Overlay::Prompt { input: b })
             | (Overlay::Error(a), Overlay::Error(b)) => a == b,
             (Overlay::GroupKeys(a), Overlay::GroupKeys(b))
@@ -2187,6 +2191,33 @@ impl TrafficState {
             None => self.loaded_flows(),
         };
         apps_in(flows, &self.keys)
+    }
+
+    /// The loaded flows an app overlay for `focus` reads: a focused result
+    /// that covers it, else the unfocused result.
+    pub fn flows_for(&self, focus: &Focus) -> &[ResolvedFlow] {
+        match (&self.focus_result, &self.unfocused) {
+            (Some(r), _) if r.covers(focus) => self.loaded_flows(),
+            (_, Some(u)) => &u.flows,
+            _ => self.loaded_flows(),
+        }
+    }
+
+    /// Whether `flows_for(focus)` may miss some of its flows: truncated,
+    /// and not a focused result covering it.
+    pub fn partial_for(&self, focus: &Focus) -> bool {
+        match (&self.focus_result, &self.unfocused) {
+            (Some(r), _) if r.covers(focus) => false,
+            (_, Some(u)) => u.truncated,
+            _ => self.data.as_ref().is_some_and(|d| d.truncated),
+        }
+    }
+
+    /// The loaded result's window, `(start, end)`: its range's end and the
+    /// filter's window back from it. `None` before a result with bounds.
+    pub fn window_bounds(&self) -> Option<(jiff::Timestamp, jiff::Timestamp)> {
+        let d = self.unfocused.as_ref().or(self.data.as_ref())?;
+        Some((d.window_start()?, d.slices.as_ref()?.end))
     }
 
     /// The order `all labels` and the `g` picker list keys in, and the
@@ -4200,6 +4231,11 @@ pub struct Model {
     pub objects: ObjectsState,
     pub workloads: WorkloadsState,
     pub events: EventsState,
+    /// The app overlay's state while it is open (and after, until the next
+    /// `A`: reopening rebuilds it).
+    pub app_view: Option<AppView>,
+    /// The last app overlay's sequence number: answers of older ones are dropped.
+    pub app_seq: u64,
     pub connection: Connection,
     pub stats: StatsSnapshot,
     pub size: (u16, u16),
@@ -4264,6 +4300,8 @@ impl Model {
             objects,
             workloads,
             events,
+            app_view: None,
+            app_seq: 0,
             connection: Connection::Connecting,
             stats: StatsSnapshot { calls: 0, bytes: 0 },
             size,
@@ -4406,6 +4444,7 @@ impl Model {
         self.objects.hide_ignored = !self.limits.ignore_keys.is_empty();
         self.workloads = WorkloadsState::new(min);
         self.events = EventsState::new(min);
+        self.app_view = None;
         self.stats = StatsSnapshot { calls: 0, bytes: 0 };
         self.busy = 0;
         self.overlay = Overlay::None;

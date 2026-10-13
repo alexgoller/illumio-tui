@@ -3,6 +3,7 @@
 //! `ui` renders `&Model`, and `app` is the only place I/O happens.
 pub mod app;
 pub mod app_picker;
+pub mod app_view;
 pub mod commands;
 pub mod complete;
 pub mod diff;

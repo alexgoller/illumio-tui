@@ -143,9 +143,8 @@ pub fn model_with_flows() -> Model {
     m
 }
 
-/// A connected model with the fixture rulesets loaded (draft scope, loaded 5 s ago).
-pub fn model_with_policy() -> Model {
-    let mut m = model_fixture();
+/// `m` with the fixture rulesets loaded (draft scope, loaded 5 s ago).
+pub fn with_policy(mut m: Model) -> Model {
     let raw: Vec<pce::models::RuleSet> =
         serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json"))
             .expect("rule sets fixture");
@@ -154,6 +153,11 @@ pub fn model_with_policy() -> Model {
     // The first ruleset has inline deny rules; the second is left to the fallback.
     m.policy.loaded_at = Some(Instant::now() - Duration::from_secs(5));
     m
+}
+
+/// A connected model with the fixture rulesets loaded (draft scope, loaded 5 s ago).
+pub fn model_with_policy() -> Model {
+    with_policy(model_fixture())
 }
 
 /// `m` with the four fixture workloads cached (loaded 5 s ago, fixed clock)
