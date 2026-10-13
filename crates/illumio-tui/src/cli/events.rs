@@ -2,7 +2,7 @@
 //! and a local event-type substring filter.
 use super::context::{Context, cache_label};
 use super::error::CliError;
-use super::output::{TableRows, Window};
+use super::output::{TableRows, Window, join_list};
 use clap::Args;
 use pce::models::{Event, EventFilter};
 use pce::traffic::{format_timestamp, parse_window};
@@ -51,6 +51,16 @@ impl TableRows for Vec<Event> {
             })
             .collect()
     }
+    /// Every resource change, not just the first.
+    fn full_rows(&self) -> Vec<Vec<String>> {
+        self.iter()
+            .zip(self.rows())
+            .map(|(e, mut row)| {
+                row[4] = join_list(e.resources());
+                row
+            })
+            .collect()
+    }
 }
 
 pub async fn run(ctx: &Context, args: &EventsArgs) -> Result<(), CliError> {
@@ -91,4 +101,28 @@ pub async fn run(ctx: &Context, args: &EventsArgs) -> Result<(), CliError> {
             end: format_timestamp(until),
         }),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn csv_names_every_resource_change() {
+        let events: Vec<Event> = serde_json::from_value(serde_json::json!([{
+            "href": "/orgs/5/events/1",
+            "resource_changes": [
+                {"resource": {"workload": {"hostname": "web01"}}},
+                {"resource": {"label": {"href": "/orgs/5/labels/7"}}}
+            ]
+        }]))
+        .unwrap();
+        let resource = events
+            .headers()
+            .iter()
+            .position(|h| *h == "resource")
+            .unwrap();
+        assert_eq!(events.rows()[0][resource], "workload web01");
+        assert_eq!(events.full_rows()[0][resource], "workload web01; label 7");
+    }
 }

@@ -830,12 +830,23 @@ impl DiffRow {
     }
 }
 
-impl TableRows for Vec<PendingRow> {
+/// `policy pending` as printed: JSON is the rows themselves; `diff` says
+/// whether `--diff` asked for each change's lines (the CSV `diff` column).
+#[derive(Serialize)]
+#[serde(transparent)]
+struct PendingOut {
+    rows: Vec<PendingRow>,
+    #[serde(skip)]
+    diff: bool,
+}
+
+impl TableRows for PendingOut {
     fn headers(&self) -> Vec<&'static str> {
         vec!["object_type", "change_type", "name", "href"]
     }
     fn rows(&self) -> Vec<Vec<String>> {
-        self.iter()
+        self.rows
+            .iter()
             .map(|p| {
                 vec![
                     p.change.object_type.clone(),
@@ -847,7 +858,8 @@ impl TableRows for Vec<PendingRow> {
             .collect()
     }
     fn notes(&self) -> Vec<Vec<String>> {
-        self.iter()
+        self.rows
+            .iter()
             .map(|p| {
                 p.diff
                     .iter()
@@ -860,23 +872,25 @@ impl TableRows for Vec<PendingRow> {
     /// With `--diff`, a `diff` column in place of the lines under each row.
     fn full_headers(&self) -> Vec<&'static str> {
         let mut h = self.headers();
-        if self.iter().any(|p| p.diff.is_some()) {
+        if self.diff {
             h.push("diff");
         }
         h
     }
+    /// The diff lines one per line of the cell (a quoted CSV field).
     fn full_rows(&self) -> Vec<Vec<String>> {
-        let diff = self.iter().any(|p| p.diff.is_some());
-        self.iter()
+        self.rows
+            .iter()
             .zip(self.rows())
             .map(|(p, mut row)| {
-                if diff {
-                    row.push(join_list(
-                        p.diff
-                            .iter()
-                            .flatten()
-                            .map(|d| format!("{} {}", d.glyph(), d.text)),
-                    ));
+                if self.diff {
+                    let lines: Vec<String> = p
+                        .diff
+                        .iter()
+                        .flatten()
+                        .map(|d| format!("{} {}", d.glyph(), d.text))
+                        .collect();
+                    row.push(lines.join("\n"));
                 }
                 row
             })
@@ -901,7 +915,7 @@ async fn pending(ctx: &Context, args: &PendingArgs) -> Result<(), CliError> {
             .into_iter()
             .map(|change| PendingRow { change, diff: None })
             .collect();
-        return ctx.emit(&rows, cache, false, None);
+        return ctx.emit(&PendingOut { rows, diff: false }, cache, false, None);
     }
     // The draft and active list of each kind present is read once, past the
     // cache when asked to; every change then compares from the cache.
@@ -971,7 +985,7 @@ async fn pending(ctx: &Context, args: &PendingArgs) -> Result<(), CliError> {
             diff: Some(lines),
         });
     }
-    ctx.emit(&rows, cache, false, None)
+    ctx.emit(&PendingOut { rows, diff: true }, cache, false, None)
 }
 
 fn on_off(on: bool, off: bool) -> Option<bool> {

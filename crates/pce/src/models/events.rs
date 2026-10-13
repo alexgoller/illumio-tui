@@ -26,6 +26,29 @@ pub struct Event {
     pub extra: Map<String, Value>,
 }
 
+/// `workload host-1.example` of one resource change; `None` without a
+/// resource.
+fn change_resource(change: &Value) -> Option<String> {
+    let res = change.get("resource").and_then(Value::as_object)?;
+    let (kind, v) = res.iter().next()?;
+    let label = v
+        .get("hostname")
+        .or_else(|| v.get("name"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| {
+            v.get("href")
+                .and_then(Value::as_str)
+                .map(|h| h.rsplit('/').next().unwrap_or(h).to_string())
+        })
+        .unwrap_or_default();
+    Some(if label.is_empty() {
+        kind.clone()
+    } else {
+        format!("{kind} {label}")
+    })
+}
+
 impl Event {
     /// `user:<username>`, `agent:<hostname>`, `system`, or `?`.
     pub fn actor(&self) -> String {
@@ -58,35 +81,21 @@ impl Event {
             .unwrap_or_else(|| "?".into())
     }
 
-    /// `workload host-1.example`, `sec_policy 42`, or empty.
+    /// `workload host-1.example`, `sec_policy 42`, or empty: the first
+    /// resource change's.
     pub fn resource(&self) -> String {
-        let Some(res) = self
-            .resource_changes
+        self.resource_changes
             .first()
-            .and_then(|c| c.get("resource"))
-            .and_then(Value::as_object)
-        else {
-            return String::new();
-        };
-        let Some((kind, v)) = res.iter().next() else {
-            return String::new();
-        };
-        let label = v
-            .get("hostname")
-            .or_else(|| v.get("name"))
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .or_else(|| {
-                v.get("href")
-                    .and_then(Value::as_str)
-                    .map(|h| h.rsplit('/').next().unwrap_or(h).to_string())
-            })
-            .unwrap_or_default();
-        if label.is_empty() {
-            kind.clone()
-        } else {
-            format!("{kind} {label}")
-        }
+            .and_then(change_resource)
+            .unwrap_or_default()
+    }
+
+    /// One `kind name` per resource change that names a resource.
+    pub fn resources(&self) -> Vec<String> {
+        self.resource_changes
+            .iter()
+            .filter_map(change_resource)
+            .collect()
     }
 
     /// The PCE's syslog severities ranked for colouring: emerg/alert/crit 3, err 2,
@@ -159,6 +168,8 @@ mod tests {
         assert_eq!(e[1].resource(), "sec_policy 42");
         assert_eq!(e[2].actor(), "agent:host-1.example");
         assert_eq!(e[2].resource(), "workload host-1.example");
+        assert_eq!(e[2].resources(), ["workload host-1.example"]);
+        assert!(e[0].resources().is_empty());
         assert_eq!(e[2].severity_rank(), 2);
         assert_eq!(e[3].actor(), "system");
         assert_eq!(e[3].severity_rank(), 1);

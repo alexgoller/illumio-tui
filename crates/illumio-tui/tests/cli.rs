@@ -801,12 +801,39 @@ async fn policy_pending_diff_csv_puts_the_lines_in_a_diff_column() {
         .iter()
         .find(|l| l.starts_with("ip_lists,"))
         .expect(&text);
-    assert!(corp.contains(",+ name: Corp; "), "{corp}");
+    assert!(
+        corp.contains(",\"+ name: Corp\n+ description: Office ranges\n"),
+        "one diff line per cell line: {corp}"
+    );
     let fw = lines
         .iter()
         .find(|l| l.contains("/firewall_settings,"))
         .expect(&text);
     assert!(fw.ends_with(",  (no diff)"), "{fw}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn policy_pending_csv_has_a_diff_column_exactly_with_the_flag() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/sec_policy/pending"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+    let text = csv_stdout(
+        &cmd(&server)
+            .args(["policy", "pending", "--diff", "--csv"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(text, "object_type,change_type,name,href,diff\r\n");
+    let text = csv_stdout(
+        &cmd(&server)
+            .args(["policy", "pending", "--csv"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(text, "object_type,change_type,name,href\r\n");
 }
 
 #[tokio::test(flavor = "multi_thread")]
