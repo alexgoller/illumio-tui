@@ -220,5 +220,5 @@ Three GitHub issues, each with its own worktree, review and merge:
 
 ## Related
 
-- The illumio-mcp-skills issue proposing an "app profile" skill covering
+- alexgoller/illumio-mcp-skills#1 proposes an "app profile" skill covering
   the same content for agents.
