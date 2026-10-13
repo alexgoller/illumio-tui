@@ -298,7 +298,8 @@ with the app's totals, then its peer groups and services indented (JSON
 those decisions among the loaded flows, in the pairs (with `--services` too) or the sections
 (`--decision` filters the query itself); sections are already per service, so `--services`
 with `--by` is exit 2. `--app shop/prod` (on `traffic query`, `groups` and `mesh`) focuses the
-query on one app, a group of the `--keys` (default: the profile's scope keys): its labels go
+query on one app, a group of the keys the command groups by (`--keys` on `groups` and `mesh`,
+`--group` on `query`, else the profile's scope keys): its labels go
 into the query as destination includes (`--direction in`), source includes (`out`) or both
 (`both`, the default: two queries, merged without duplicates), so the cap is spent on that app;
 `meta.queries` counts them and a dry run prints one body per side. With `--by in|out|both` the

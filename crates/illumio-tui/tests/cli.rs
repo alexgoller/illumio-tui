@@ -2258,6 +2258,40 @@ async fn traffic_app_mistakes_exit_2_before_any_traffic_request() {
             "--window",
             "1h",
             "--app",
+            "shop/prod",
+            "--max-results",
+            "20000",
+        ])
+        .assert()
+        .code(2);
+    let err = String::from_utf8_lossy(&err.get_output().stderr).to_string();
+    assert!(
+        err.contains("(--app runs it as 2 queries); re-run with --yes to confirm"),
+        "the guard names the count: {err}"
+    );
+    let err = cmd(&server)
+        .args([
+            "traffic",
+            "query",
+            "--window",
+            "1h",
+            "--app",
+            "shop/prod",
+            "--direction",
+            "in",
+            "--max-results",
+            "20000",
+        ])
+        .assert()
+        .code(2);
+    assert!(!String::from_utf8_lossy(&err.get_output().stderr).contains("runs it as"));
+    let err = cmd(&server)
+        .args([
+            "traffic",
+            "query",
+            "--window",
+            "1h",
+            "--app",
             "unmanaged-nas/-",
         ])
         .assert()

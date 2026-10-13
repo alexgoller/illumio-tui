@@ -273,7 +273,7 @@ pub fn meta_line(meta: &Meta) -> String {
         s.push_str(&format!(" · {n} slice{}", if n == 1 { "" } else { "s" }));
     }
     if let Some(n) = meta.queries {
-        s.push_str(&format!(" · {n} quer{}", if n == 1 { "y" } else { "ies" }));
+        s.push_str(&format!(" · {}", pce::traffic::queries_text(n)));
     }
     if meta.truncated {
         s.push_str(" · WARNING: result truncated");

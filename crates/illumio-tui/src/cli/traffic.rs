@@ -246,8 +246,9 @@ pub struct FilterArgs {
     /// stderr names the --from/--to that continue
     #[arg(long, requires = "backfill", value_parser = clap::value_parser!(u32).range(1..=50))]
     pub max_slices: Option<u32>,
-    /// Focus on one app, a group of the label keys (--keys, else the profile's scope keys),
-    /// e.g. shop/prod: its labels go into the query, so the cap is spent on it
+    /// Focus on one app, e.g. shop/prod: a group of the keys the command groups by (groups and
+    /// mesh: --keys; query: --group; else the profile's scope keys). Its labels go into the
+    /// query, so the cap is spent on it
     #[arg(long)]
     pub app: Option<String>,
     /// With --app: in (the app is the destination), out (the source) or both
@@ -301,7 +302,13 @@ pub struct BuiltQuery {
 /// caps, the `--yes` guard, filter syntax) is checked before the first PCE
 /// request; the object lists are fetched once, and only when a filter names
 /// something that needs resolving.
-pub async fn build_query(ctx: &Context, args: &FilterArgs) -> Result<BuiltQuery, CliError> {
+/// `queries` is how many Explorer queries the body will run as (`--app
+/// --direction both`: 2); the guard's message names it.
+pub async fn build_query(
+    ctx: &Context,
+    args: &FilterArgs,
+    queries: u32,
+) -> Result<BuiltQuery, CliError> {
     let mut b = match (&args.from, &args.to) {
         (Some(f), Some(t)) => {
             TrafficQueryBuilder::between(parse_time(f, false)?, parse_time(t, true)?)
@@ -349,8 +356,16 @@ pub async fn build_query(ctx: &Context, args: &FilterArgs) -> Result<BuiltQuery,
         && !args.yes
         && let Some(reason) = bounds.needs_confirmation()
     {
+        let runs = if queries > 1 {
+            format!(
+                " (--app runs it as {})",
+                pce::traffic::queries_text(queries)
+            )
+        } else {
+            String::new()
+        };
         return Err(CliError::Args(format!(
-            "expensive query: {reason}; re-run with --yes to confirm"
+            "expensive query: {reason}{runs}; re-run with --yes to confirm"
         )));
     }
 
@@ -775,10 +790,10 @@ pub fn sections_for(
     flows: &[ResolvedFlow],
     keys: &[String],
     args: &GroupsArgs,
-) -> Result<Option<Sections>, CliError> {
+) -> Option<Sections> {
     let decisions = Decisions::from(args.show);
     let mut sections = match args.by {
-        ByArg::Pairs => return Ok(None),
+        ByArg::Pairs => return None,
         ByArg::In => app_sections(flows, keys, Direction::In, decisions),
         ByArg::Out => app_sections(flows, keys, Direction::Out, decisions),
         ByArg::Both => app_sections_both(flows, keys, decisions),
@@ -786,10 +801,10 @@ pub fn sections_for(
     if let Some(app) = &args.filter.app {
         sections.retain(|s| &s.app_text() == app);
     }
-    Ok(Some(Sections {
+    Some(Sections {
         sections,
         both: args.by == ByArg::Both,
-    }))
+    })
 }
 
 /// The pairs (by service with `--services`) of the loaded flows `--show`
@@ -960,7 +975,10 @@ async fn fetch(
     args: &FilterArgs,
     focus: Option<&CliFocus>,
 ) -> Result<Option<Fetched>, CliError> {
-    let BuiltQuery { query: q, index } = build_query(ctx, args).await?;
+    let n = focus
+        .filter(|f| f.query)
+        .map_or(1, |f| f.focus.direction.query_count());
+    let BuiltQuery { query: q, index } = build_query(ctx, args, n).await?;
     let window = Some(Window {
         start: q.start_date.clone(),
         end: q.end_date.clone(),
@@ -993,10 +1011,11 @@ async fn fetch(
                 None,
             )
             .await?;
-        let covered = if ft.truncated {
-            coverage(&ft.flows, q.window()).covered
-        } else {
-            q.window()
+        // A truncated side covers less than the merged rows suggest.
+        let covered = match ft.coverage {
+            Some(c) if ft.truncated => c.covered.min(q.window()),
+            _ if ft.truncated => coverage(&ft.flows, q.window()).covered,
+            _ => q.window(),
         };
         return Ok(Some(Fetched {
             queries: Some(ft.query_count()),
@@ -1080,13 +1099,11 @@ async fn query(ctx: &Context, args: &QueryArgs) -> Result<(), CliError> {
 
 async fn groups(ctx: &Context, args: &GroupsArgs) -> Result<(), CliError> {
     let keys = keys_or_profile(ctx, &args.keys);
-    // Bad flag combinations fail before any request.
-    sections_for(&[], &[], args)?;
     let focus = cli_focus(&args.filter, &keys, args.by)?;
     let Some(f) = fetch(ctx, &args.filter, focus.as_ref()).await? else {
         return Ok(());
     };
-    match sections_for(&f.flows, &keys, args)? {
+    match sections_for(&f.flows, &keys, args) {
         Some(sections) => {
             if let Some(miss) = app_miss(args, &sections) {
                 eprintln!("{miss}");
@@ -1244,7 +1261,7 @@ mod tests {
             (ByArg::Pairs, ShowArg::All, None)
         );
         let flows = crate::tui::test_support::fixture_flows_rich();
-        assert!(sections_for(&flows, &app_env(), &a).unwrap().is_none());
+        assert!(sections_for(&flows, &app_env(), &a).is_none());
         for (arg, by) in [
             ("in", ByArg::In),
             ("out", ByArg::Out),
@@ -1252,14 +1269,10 @@ mod tests {
         ] {
             assert_eq!(groups_args(&["--by", arg]).by, by);
         }
-        let ins = sections_for(&flows, &app_env(), &groups_args(&["--by", "in"]))
-            .unwrap()
-            .unwrap();
+        let ins = sections_for(&flows, &app_env(), &groups_args(&["--by", "in"])).unwrap();
         assert!(ins.sections.iter().all(|s| s.direction == Direction::In));
         assert_eq!(ins.sections[0].app_text(), "crm/prod");
-        let both = sections_for(&flows, &app_env(), &groups_args(&["--by", "both"]))
-            .unwrap()
-            .unwrap();
+        let both = sections_for(&flows, &app_env(), &groups_args(&["--by", "both"])).unwrap();
         assert!(both.sections.iter().any(|s| s.direction == Direction::Out));
         assert!(
             <crate::cli::Cli as clap::Parser>::try_parse_from([
@@ -1279,7 +1292,6 @@ mod tests {
         let count = |argv: &[&str]| -> u64 {
             sections_for(&flows, &app_env(), &groups_args(argv))
                 .unwrap()
-                .unwrap()
                 .sections
                 .iter()
                 .map(|s| s.totals.flows)
@@ -1289,7 +1301,7 @@ mod tests {
         assert_eq!(count(&["--by", "in", "--show", "blocked"]), 14);
         assert_eq!(count(&["--by", "in", "--show", "blocked-only"]), 7);
         let a = groups_args(&["--by", "both", "--app", "shop/prod"]);
-        let s = sections_for(&flows, &app_env(), &a).unwrap().unwrap();
+        let s = sections_for(&flows, &app_env(), &a).unwrap();
         assert_eq!(s.sections.len(), 2);
         assert!(s.sections.iter().all(|s| s.app_text() == "shop/prod"));
         assert_eq!(
@@ -1297,13 +1309,11 @@ mod tests {
             (Direction::In, Direction::Out)
         );
         assert!(
-            sections_for(&flows, &app_env(), &groups_args(&["--app", "shop/prod"]))
-                .unwrap()
-                .is_none(),
+            sections_for(&flows, &app_env(), &groups_args(&["--app", "shop/prod"])).is_none(),
             "--app without --by gives the pairs of the focused flows"
         );
         let a = groups_args(&["--show", "blocked"]);
-        assert!(sections_for(&flows, &app_env(), &a).unwrap().is_none());
+        assert!(sections_for(&flows, &app_env(), &a).is_none());
     }
 
     #[test]
@@ -1334,7 +1344,7 @@ mod tests {
     fn both_prints_one_header_per_app_and_marks_the_direction() {
         let flows = crate::tui::test_support::fixture_flows_rich();
         let a = groups_args(&["--by", "both", "--app", "shop/prod"]);
-        let s = sections_for(&flows, &app_env(), &a).unwrap().unwrap();
+        let s = sections_for(&flows, &app_env(), &a).unwrap();
         let rows = s.rows();
         let headers: Vec<&Vec<String>> = rows.iter().filter(|r| r.len() == 1).collect();
         assert_eq!(
@@ -1347,7 +1357,7 @@ mod tests {
         assert!(rows.last().unwrap()[0].starts_with("  → "));
         assert_eq!(app_miss(&a, &s), None);
         let a = groups_args(&["--by", "in", "--app", "pos/PCI"]);
-        let s = sections_for(&flows, &app_env(), &a).unwrap().unwrap();
+        let s = sections_for(&flows, &app_env(), &a).unwrap();
         assert!(s.sections.is_empty());
         assert_eq!(
             app_miss(&a, &s).as_deref(),
