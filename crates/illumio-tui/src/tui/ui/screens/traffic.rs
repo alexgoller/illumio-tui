@@ -254,16 +254,22 @@ fn render_groups(model: &Model, f: &mut Frame, area: Rect) {
         );
         return;
     }
-    let meta = crate::tui::ui::widgets::table::header_meta(&model.traffic.groups);
+    let table = model.traffic.pairs_table();
+    let meta = crate::tui::ui::widgets::table::header_meta(table);
     let meta = format!(
-        "pairs · keys {} · Enter drills{}{}",
+        "pairs{} · keys {} · Enter drills{}{}",
+        if model.traffic.apps_state.by_service {
+            " · by service"
+        } else {
+            ""
+        },
         model.traffic.effective_keys().join(","),
         if meta.is_empty() { "" } else { " · " },
         meta
     );
     let block = panel(TrafficView::Aggregate.title(), &meta, t, true);
     let theme = t.clone();
-    crate::tui::ui::widgets::table::render(f, area, &model.traffic.groups, t, block, &move |g| {
+    crate::tui::ui::widgets::table::render(f, area, table, t, block, &move |g| {
         theme.decision_style(g.dominant())
     });
 }

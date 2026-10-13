@@ -15,8 +15,8 @@ use pce::traffic::treemap::{Rect as TreemapRect, Tile, Weight, layout, layout_zo
 use pce::traffic::{
     AppSection, Decisions, Direction, FlowGroup, MeshColumns, MeshKey, MeshRow, PeerRow,
     ResolvedFlow, Totals, app_header, app_sections, app_sections_both, compact_count,
-    group_by_labels, group_key, group_text, in_app, in_peer, keys_or_default, keys_seen, mesh,
-    mesh_key,
+    group_by_labels, group_by_service, group_key, group_text, in_app, in_peer, keys_or_default,
+    keys_seen, mesh, mesh_key,
 };
 use pce::write::Plan;
 use pce::{
@@ -1107,6 +1107,59 @@ pub fn group_columns() -> Vec<Column<FlowGroup>> {
     ]
 }
 
+/// App-to-app `pairs` by service (`o`): one row per source group,
+/// destination group and service, the policy tuple.
+pub fn service_group_columns() -> Vec<Column<FlowGroup>> {
+    let mut cols = group_columns();
+    cols.truncate(4);
+    cols.insert(
+        2,
+        Column {
+            title: "service",
+            width: 10,
+            cell: |g| g.service.clone().unwrap_or_default(),
+            key: |g| SortKey::Text(g.service.clone().unwrap_or_default()),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 9,
+            full_title: None,
+            full: None,
+        },
+    );
+    let tail: [Column<FlowGroup>; 2] = [
+        Column {
+            title: "bytes",
+            width: 8,
+            cell: |g| bytes_text(g.bytes),
+            key: |g| SortKey::Num(g.bytes),
+            right: true,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 6,
+            full_title: None,
+            full: Some(|g| g.bytes.to_string()),
+        },
+        Column {
+            title: "decision",
+            width: 11,
+            cell: |g| decision_text(g.dominant()),
+            key: |g| SortKey::Text(decision_text(g.dominant())),
+            right: false,
+            hide_below: 0,
+            narrow: Some(|g| match g.dominant() {
+                pce::models::PolicyDecision::PotentiallyBlocked => "pot.blk".into(),
+                d => d.as_str().into(),
+            }),
+            narrow_width: 8,
+            full_title: None,
+            full: Some(|g| g.dominant().as_str().into()),
+        },
+    ];
+    cols.extend(tail);
+    cols
+}
+
 /// App-to-app's state (`x` / `X`): the flat pair table, or sections per
 /// app inbound, outbound or both.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -1154,6 +1207,8 @@ impl By {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AppState {
     pub by: By,
+    /// `o`: `pairs` one row per service as well (`services`, not `groups`).
+    pub by_service: bool,
     pub decisions: Decisions,
     /// The apps whose sections show only their header row.
     pub folded: BTreeSet<Vec<String>>,
@@ -1619,6 +1674,9 @@ pub struct TrafficState {
     /// runs there, never per draw): what every view and column groups by.
     pub keys: Vec<String>,
     pub groups: TableView<FlowGroup>,
+    /// App-to-app `pairs` by service (`o`); empty while off. The treemap
+    /// keeps drawing `groups`.
+    pub services: TableView<FlowGroup>,
     pub mesh: TableView<MeshRow>,
     /// The Mesh view's optional columns (`u`, `p`); both shown at first.
     pub mesh_cols: MeshColumns,
@@ -1651,6 +1709,8 @@ pub const MESH_ALL: MeshColumns = MeshColumns {
 pub enum Drill {
     /// An App-to-app or treemap pair: source and destination group keys.
     Pair(Vec<String>, Vec<String>),
+    /// An App-to-app pair by service (`o`): the groups and the service.
+    Service(Vec<String>, Vec<String>, String),
     /// A Mesh row, under the columns it was grouped with.
     Mesh { key: MeshKey, cols: MeshColumns },
     /// A section header: every flow of `app` in `direction` (either side
@@ -1686,6 +1746,11 @@ impl Drill {
             Drill::Pair(src, dst) => {
                 &group_key(&f.src, keys) == src && &group_key(&f.dst, keys) == dst
             }
+            Drill::Service(src, dst, service) => {
+                &group_key(&f.src, keys) == src
+                    && &group_key(&f.dst, keys) == dst
+                    && &f.service_text() == service
+            }
             Drill::Mesh { key, cols } => &mesh_key(f, keys, *cols) == key,
             Drill::App {
                 app,
@@ -1706,6 +1771,9 @@ impl Drill {
     pub fn title(&self) -> String {
         match self {
             Drill::Pair(src, dst) => format!("{} → {}", src.join("/"), dst.join("/")),
+            Drill::Service(src, dst, service) => {
+                format!("{} → {} {service}", src.join("/"), dst.join("/"))
+            }
             Drill::Mesh { key, .. } => format!(
                 "{} → {} {}",
                 key.src.join("/"),
@@ -1762,6 +1830,7 @@ impl TrafficState {
             key_order: KeyOrder::default(),
             keys: keys_or_default(keys),
             groups: TableView::new(group_columns()),
+            services: TableView::new(service_group_columns()),
             mesh: TableView::new(mesh_columns(MESH_ALL)),
             mesh_cols: MESH_ALL,
             apps: TableView::new(app_columns()).with_matcher(section_matches),
@@ -1847,8 +1916,37 @@ impl TrafficState {
         self.flows.set_rows(shown);
         self.groups.set_rows(groups);
         self.mesh.set_rows(mesh_rows);
+        self.rebuild_services();
         self.rebuild_sections();
         self.relayout_treemap();
+    }
+
+    /// App-to-app's pairs by service from the loaded flows while `o` is on;
+    /// none while off. Pure.
+    pub fn rebuild_services(&mut self) {
+        let rows = if self.apps_state.by_service {
+            group_by_service(self.loaded_flows(), &self.keys)
+        } else {
+            Vec::new()
+        };
+        self.services.set_rows(rows);
+    }
+
+    /// App-to-app `pairs`' table: by service when `o` is on, else the pairs.
+    pub fn pairs_table(&self) -> &TableView<FlowGroup> {
+        if self.apps_state.by_service {
+            &self.services
+        } else {
+            &self.groups
+        }
+    }
+
+    pub fn pairs_table_mut(&mut self) -> &mut TableView<FlowGroup> {
+        if self.apps_state.by_service {
+            &mut self.services
+        } else {
+            &mut self.groups
+        }
     }
 
     /// App-to-app's sections (none in `pairs`) and Blocked's, from the
@@ -2056,7 +2154,9 @@ impl TrafficState {
     pub fn is_searching(&self) -> bool {
         match self.view {
             TrafficView::Flows => self.flows.is_searching(),
-            TrafficView::Aggregate if self.apps_state.by == By::Pairs => self.groups.is_searching(),
+            TrafficView::Aggregate if self.apps_state.by == By::Pairs => {
+                self.pairs_table().is_searching()
+            }
             TrafficView::Aggregate => self.apps.is_searching(),
             TrafficView::Mesh => self.mesh.is_searching(),
             TrafficView::Blocked => self.blocked.is_searching(),

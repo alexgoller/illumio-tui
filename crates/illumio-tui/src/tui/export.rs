@@ -25,8 +25,8 @@ pub fn current_table(model: &Model) -> Result<Csv, String> {
                 (TrafficView::Treemap, _) => {
                     return Err("the treemap has no table to export".into());
                 }
-                // App-to-app by pairs.
-                (_, None) => t.groups.export(),
+                // App-to-app by pairs (by service with `o`).
+                (_, None) => t.pairs_table().export(),
             }
         }
         Screen::Policy => match model.policy.pane {

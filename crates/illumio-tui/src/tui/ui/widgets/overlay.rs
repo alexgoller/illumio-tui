@@ -67,6 +67,10 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "pairs · in · out · both (sections per app) · back",
     ),
     (
+        "App-to-app o",
+        "pairs by service: one row per src, dst, port/proto",
+    ),
+    (
         "App-to-app d",
         "decision filter: all · blocked · blocked only",
     ),
@@ -968,7 +972,9 @@ pub fn screen_hint(screen: Screen, writes: bool) -> &'static str {
 /// text.
 pub fn screen_hint_more(screen: Screen, view: TrafficView) -> &'static str {
     match (screen, view) {
-        (Screen::Traffic, TrafficView::Aggregate) => "+/- window  ]/[ cap  x mode  d decision",
+        (Screen::Traffic, TrafficView::Aggregate) => {
+            "+/- window  ]/[ cap  x mode  o service  d decision"
+        }
         (Screen::Traffic, _) => "+/- window  ]/[ cap",
         _ => "",
     }

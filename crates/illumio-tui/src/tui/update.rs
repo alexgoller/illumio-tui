@@ -1369,8 +1369,9 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 t.flows.ensure_visible(page);
             }
             TrafficView::Aggregate if t.apps_state.by == By::Pairs => {
-                search_key(&mut t.groups, k);
-                t.groups.ensure_visible(page);
+                let table = t.pairs_table_mut();
+                search_key(table, k);
+                table.ensure_visible(page);
             }
             TrafficView::Aggregate => {
                 search_key(&mut t.apps, k);
@@ -1449,6 +1450,22 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             t.apps.home();
             t.rebuild_sections();
         }
+        KeyCode::Char('o') if model.traffic.view == TrafficView::Aggregate => {
+            let t = &mut model.traffic;
+            if t.apps_state.by != By::Pairs {
+                model.status = StatusLine::info(
+                    "o groups pairs by service; in, out and both already show one row per service",
+                );
+            } else {
+                t.apps_state.by_service = !t.apps_state.by_service;
+                t.rebuild_services();
+                model.status = StatusLine::info(if t.apps_state.by_service {
+                    "pairs · by service: one row per src group, dst group and port/proto"
+                } else {
+                    "pairs"
+                });
+            }
+        }
         KeyCode::Char('d') if model.traffic.view == TrafficView::Aggregate => {
             let t = &mut model.traffic;
             t.apps_state.decisions = t.apps_state.decisions.next();
@@ -1479,10 +1496,15 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         }
         KeyCode::Enter => match model.traffic.view {
             TrafficView::Aggregate => {
-                if let Some(g) = model.traffic.groups.selected_item() {
-                    model.traffic.drill = Some(Drill::Pair(g.src.clone(), g.dst.clone()));
-                    model.traffic.view = TrafficView::Flows;
-                    model.traffic.rebuild_views();
+                let t = &mut model.traffic;
+                if let Some(g) = t.pairs_table().selected_item() {
+                    let (src, dst) = (g.src.clone(), g.dst.clone());
+                    t.drill = Some(match &g.service {
+                        Some(service) => Drill::Service(src, dst, service.clone()),
+                        None => Drill::Pair(src, dst),
+                    });
+                    t.view = TrafficView::Flows;
+                    t.rebuild_views();
                 }
             }
             TrafficView::Mesh => {
@@ -1524,7 +1546,7 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             match t.view {
                 TrafficView::Flows => table_key(&mut t.flows, k, page),
                 TrafficView::Aggregate if t.apps_state.by == By::Pairs => {
-                    table_key(&mut t.groups, k, page)
+                    table_key(t.pairs_table_mut(), k, page)
                 }
                 TrafficView::Aggregate => table_key(&mut t.apps, k, page),
                 TrafficView::Mesh => table_key(&mut t.mesh, k, page),
@@ -1547,7 +1569,9 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     let t = &mut model.traffic;
     match t.view {
         TrafficView::Flows => t.flows.ensure_visible(page),
-        TrafficView::Aggregate if t.apps_state.by == By::Pairs => t.groups.ensure_visible(page),
+        TrafficView::Aggregate if t.apps_state.by == By::Pairs => {
+            t.pairs_table_mut().ensure_visible(page)
+        }
         TrafficView::Aggregate => t.apps.ensure_visible(page),
         TrafficView::Mesh => t.mesh.ensure_visible(page),
         TrafficView::Blocked => t.blocked.ensure_visible(page),
@@ -2264,7 +2288,7 @@ fn scroll_focused(model: &mut Model, down: bool) {
             match t.view {
                 TrafficView::Flows => step(&mut t.flows, down, page),
                 TrafficView::Aggregate if t.apps_state.by == By::Pairs => {
-                    step(&mut t.groups, down, page)
+                    step(t.pairs_table_mut(), down, page)
                 }
                 TrafficView::Aggregate => step(&mut t.apps, down, page),
                 TrafficView::Mesh => step(&mut t.mesh, down, page),
@@ -3518,6 +3542,13 @@ fn flow_rule_key(model: &mut Model) -> Vec<Cmd> {
             let keys = t.effective_keys();
             t.first_flow(|f| r.contains(f, &keys, t.mesh_cols))
         }),
+        // A pair by service (`o`): a flow on the row's groups and service.
+        TrafficView::Aggregate if t.apps_state.by_service => {
+            t.pairs_table().selected_item().and_then(|g| {
+                let keys = t.effective_keys();
+                t.first_flow(|f| g.contains(f, &keys))
+            })
+        }
         TrafficView::Blocked | TrafficView::Aggregate | TrafficView::Treemap => {
             model.status = StatusLine::warn("select a flow in the Flows view (Enter on a pair)");
             return Vec::new();
@@ -4082,6 +4113,165 @@ mod tests {
             panic!("{:?}", m.overlay)
         };
         assert_eq!(f.title, "Allow rule from flow");
+    }
+
+    /// The rich fixture on App-to-app `pairs` with `o` on.
+    fn on_pairs_by_service(m: Model) -> Model {
+        let mut m = m;
+        m.traffic.view = TrafficView::Aggregate;
+        assert!(update(&mut m, key('o')).is_empty(), "no request");
+        m
+    }
+
+    #[test]
+    fn o_groups_the_pairs_by_service_without_a_request_and_holds() {
+        use crate::tui::test_support::model_with_rich_flows;
+        let mut m = on_pairs_by_service(model_with_rich_flows());
+        let t = &m.traffic;
+        assert!(t.apps_state.by_service);
+        let titles: Vec<&str> = t.pairs_table().columns.iter().map(|c| c.title).collect();
+        assert_eq!(
+            titles,
+            [
+                "src", "dst", "service", "flows", "conns", "bytes", "decision"
+            ]
+        );
+        let tuples = t.services.rows();
+        assert!(tuples.len() > t.groups.len(), "some pair has two services");
+        assert!(tuples.iter().all(|g| g.service.is_some()));
+        let conns =
+            |rows: &[pce::traffic::FlowGroup]| rows.iter().map(|g| g.connections).sum::<u64>();
+        assert_eq!(conns(tuples), conns(t.groups.rows()));
+        assert!(m.status.text.starts_with("pairs · by service"));
+        assert!(
+            t.groups.rows().iter().all(|g| g.service.is_none()),
+            "the treemap's pairs stay"
+        );
+
+        // s and / act on the table on screen.
+        quiet(&mut m, key('s'));
+        assert!(m.traffic.services.sort().is_some());
+        assert!(m.traffic.groups.sort().is_none());
+        quiet(&mut m, key('/'));
+        assert!(m.traffic.is_searching());
+        for c in "5432".chars() {
+            quiet(&mut m, key(c));
+        }
+        quiet(&mut m, enter());
+        let shown = m.traffic.services.visible().len();
+        assert!(
+            shown > 0 && shown < m.traffic.services.rows().len(),
+            "{shown}"
+        );
+
+        // Held across x and a regroup; in, out and both are already per service.
+        quiet(&mut m, key('x'));
+        assert!(update(&mut m, key('o')).is_empty());
+        assert!(
+            m.traffic.apps_state.by_service,
+            "o does nothing outside pairs"
+        );
+        assert!(m.status.text.contains("already show one row per service"));
+        for _ in 0..3 {
+            quiet(&mut m, key('x'));
+        }
+        assert_eq!(m.traffic.apps_state.by, By::Pairs);
+        m.traffic.rebuild_views();
+        assert!(!m.traffic.services.is_empty());
+
+        assert!(update(&mut m, key('o')).is_empty());
+        assert!(!m.traffic.apps_state.by_service);
+        assert!(m.traffic.services.is_empty());
+        assert_eq!(
+            m.traffic.pairs_table().columns[2].title,
+            "flows",
+            "today's pairs"
+        );
+    }
+
+    #[test]
+    fn enter_on_a_pair_by_service_drills_to_that_service_only() {
+        use crate::tui::test_support::model_with_rich_flows;
+        let mut m = on_pairs_by_service(model_with_rich_flows());
+        let pos = m
+            .traffic
+            .services
+            .rows()
+            .iter()
+            .position(|g| g.flows > 1)
+            .unwrap();
+        for _ in 0..pos {
+            quiet(&mut m, key('j'));
+        }
+        let row = m.traffic.services.selected_item().unwrap().clone();
+        let service = row.service.clone().unwrap();
+        assert!(update(&mut m, enter()).is_empty(), "no request");
+        assert_eq!(m.traffic.view, TrafficView::Flows);
+        assert_eq!(m.traffic.flows.len() as u64, row.flows);
+        assert!(
+            m.traffic
+                .flows
+                .rows()
+                .iter()
+                .all(|r| r.flow.service_text() == service)
+        );
+        assert_eq!(
+            m.traffic.drill.as_ref().unwrap().title(),
+            format!("{} → {} {service}", row.src.join("/"), row.dst.join("/"))
+        );
+    }
+
+    #[test]
+    fn w_on_a_pair_by_service_drafts_on_its_groups_and_service() {
+        use crate::tui::test_support::model_with_rich_flows;
+        let mut m = writes_on(model_with_rich_flows());
+        m.traffic.view = TrafficView::Aggregate;
+        quiet(&mut m, key('w'));
+        assert_eq!(
+            m.status.text, "select a flow in the Flows view (Enter on a pair)",
+            "plain pairs hold several services"
+        );
+        let mut m = on_pairs_by_service(m);
+        let pos = m
+            .traffic
+            .services
+            .rows()
+            .iter()
+            .position(|g| g.blocked > 0 && g.allowed > 0)
+            .or_else(|| m.traffic.services.rows().iter().position(|g| g.blocked > 0))
+            .unwrap();
+        for _ in 0..pos {
+            quiet(&mut m, key('j'));
+        }
+        let row = m.traffic.services.selected_item().unwrap().clone();
+        assert!(update(&mut m, key('w')).is_empty(), "no request");
+        let Overlay::Form(f) = &m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        assert_eq!(f.title, "Allow rule from flow");
+        assert_eq!(Some(f.value("Services").to_string()), row.service);
+        let crate::tui::edit::EditIntent::RuleFromFlow(flow) = &f.intent else {
+            panic!("{:?}", f.intent)
+        };
+        let keys = m.traffic.effective_keys();
+        assert!(row.contains(flow, &keys), "a flow of the row: its groups");
+    }
+
+    #[test]
+    fn export_of_pairs_by_service_carries_the_service_column() {
+        use crate::tui::test_support::model_with_rich_flows;
+        let mut m = on_pairs_by_service(model_with_rich_flows());
+        let (_, _, headers, rows) = export_cmd(&mut m, "export p.csv");
+        assert_eq!(
+            headers,
+            [
+                "src", "dst", "service", "flows", "conns", "bytes", "decision"
+            ]
+        );
+        assert_eq!(rows.len(), m.traffic.services.len());
+        let first = m.traffic.services.selected_item().unwrap();
+        assert_eq!(rows[0][2], first.service.clone().unwrap());
+        assert_eq!(rows[0][5], first.bytes.to_string(), "bytes whole");
     }
 
     fn on_treemap(w: u16, h: u16) -> Model {
@@ -7691,7 +7881,7 @@ mod tests {
     fn help_scrolls_to_its_last_line_and_reopens_at_the_top() {
         use crate::tui::ui::widgets::overlay::{HELP_LINES, help_last_scroll};
         let mut m = model_fixture(); // 80x24
-        assert_eq!(HELP_LINES.len(), 49);
+        assert_eq!(HELP_LINES.len(), 50);
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  + / -"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  B"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  ] / ["));
@@ -7715,8 +7905,9 @@ mod tests {
         );
         update(&mut m, key('?'));
         let last = help_last_scroll(24);
-        assert_eq!(last, 27, "49 lines, 22 rows inside the box");
+        assert_eq!(last, 28, "50 lines, 22 rows inside the box");
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app x / X"));
+        assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app o"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app d"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Sections Space / z"));
 

@@ -360,6 +360,21 @@ fn traffic_aggregate_and_blocked_80x24() {
 }
 
 #[test]
+fn app_to_app_pairs_by_service_80x24() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use illumio_tui::tui::model::TrafficView;
+    use illumio_tui::tui::{Msg, update};
+    let mut m = model_with_flows();
+    m.traffic.view = TrafficView::Aggregate;
+    let o = KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE);
+    assert!(update(&mut m, Msg::Key(o)).is_empty());
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("pairs · by service"), "{out}");
+    assert!(out.contains("5432/tcp") && out.contains("icmp"), "{out}");
+    insta::assert_snapshot!("traffic_pairs_by_service_80x24", out);
+}
+
+#[test]
 fn app_to_app_sections_in_and_both_80x24() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use illumio_tui::tui::model::{By, TrafficView};
@@ -389,7 +404,7 @@ fn app_to_app_sections_in_and_both_80x24() {
 }
 
 #[test]
-fn app_to_app_hints_x_and_d_where_the_status_line_has_room() {
+fn app_to_app_hints_x_o_and_d_where_the_status_line_has_room() {
     use illumio_tui::tui::model::TrafficView;
     use illumio_tui::tui::test_support::model_with_rich_flows;
     let mut m = model_with_rich_flows();
@@ -397,7 +412,10 @@ fn app_to_app_hints_x_and_d_where_the_status_line_has_room() {
     assert!(!out.contains("x mode"), "{out}");
     m.traffic.view = TrafficView::Aggregate;
     let out = render_to_string(&m, 160, 48);
-    assert!(out.contains("]/[ cap  x mode  d decision"), "{out}");
+    assert!(
+        out.contains("]/[ cap  x mode  o service  d decision"),
+        "{out}"
+    );
     let out = render_to_string(&m, 80, 24);
     assert!(!out.contains("x mode"), "no room at 80: {out}");
 }
