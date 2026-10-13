@@ -11,6 +11,7 @@ pub mod query;
 pub mod resolved;
 pub mod sections;
 pub mod steps;
+pub mod timeline;
 pub mod treemap;
 
 pub use aggregate::{
@@ -39,3 +40,6 @@ pub use sections::{
     app_sections_both, in_app, in_peer,
 };
 pub use steps::{CAP_STEPS, WINDOW_STEPS, next_cap, next_window, prev_cap, prev_window};
+pub use timeline::{
+    APPROX_BUCKETS, Bucket, Timeline, TimelineBucket, approx_timeline, equal_buckets,
+};
