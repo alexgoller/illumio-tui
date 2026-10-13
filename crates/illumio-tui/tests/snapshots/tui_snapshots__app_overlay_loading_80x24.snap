@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭ shop/prod · in+out · last 24h ──────────────────────────────────────── 2 req ╮
+│Workloads  loading…                                                           │
+│                                                                              │
+│╭ Inbound ────────────────────────────╮╭ Outbound ───────────────────────────╮│
+││shop/prod           5432/tcp  ✓   310││shop/prod           5432/tcp  ✓   310││
+││ipl:Corp/-          8443/tcp  ~    12││fqdn-1.example/-    443/tcp   ✓     5││
+││unmanaged-nas/-     icmp      ✗     3││                                     ││
+││                                     ││                                     ││
+││                                     ││                                     ││
+│╰─────────────────────────────────────╯╰─────────────────────────────────────╯│
+│╭ Blocked over time ─────────────────────────────────────────────────────────╮│
+││no time range in this result                                                ││
+│╰────────────────────────────────────────────────────────────────────────────╯│
+│╭ Policy ─────────────────────────────╮╭ Workloads ──────────────────────────╮│
+││loading…                             ││loading…                             ││
+││                                     ││                                     ││
+││                                     ││                                     ││
+││                                     ││                                     ││
+││                                     ││                                     ││
+│╰─────────────────────────────────────╯╰─────────────────────────────────────╯│
+╰──────────────────────────────────────────────────────────────────────────────╯
+shop/prod · 2 requests Tab panel  X dir  Enter open  w rule  r reload  Esc back

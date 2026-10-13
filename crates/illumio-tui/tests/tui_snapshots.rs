@@ -1,7 +1,7 @@
 use illumio_tui::tui::model::{Connection, Screen};
 use illumio_tui::tui::test_support::{
-    model_fixture, model_with_flows, model_with_objects, model_with_policy, model_with_workloads,
-    render_styled, render_to_string,
+    model_fixture, model_with_flows, model_with_objects, model_with_policy, model_with_window,
+    model_with_workloads, render_styled, render_to_string, with_policy, with_workloads,
 };
 
 #[test]
@@ -1500,4 +1500,102 @@ fn traffic_focus_partial_120x30() {
         "{out}"
     );
     insta::assert_snapshot!("traffic_focus_partial_120x30", out);
+}
+fn open_app(m: &mut illumio_tui::tui::model::Model, app: &str) {
+    use illumio_tui::tui::commands::Command;
+    use illumio_tui::tui::msg::Msg;
+    illumio_tui::tui::update(m, Msg::Command(Command::App(Some(app.into()))));
+}
+
+/// The rich flows in a known 24h window, workloads and rulesets loaded:
+/// every panel filled, nothing sent.
+fn app_overlay_model() -> illumio_tui::tui::model::Model {
+    let mut m = with_policy(with_workloads(model_with_window("24h")));
+    open_app(&mut m, "shop/prod");
+    m
+}
+
+#[test]
+fn app_overlay_80x24() {
+    let m = app_overlay_model();
+    let out = render_to_string(&m, 80, 24);
+    for s in [
+        "shop/prod · in+out · last 24h",
+        "0 req · cached",
+        "Workloads 2",
+        "enforced 1 · visibility 1",
+        "VENs  1 active · 1 stale",
+        "Inbound",
+        "Outbound",
+        "Blocked over time",
+        "approx",
+        "RS Shop-Prod",
+        "host-1.example",
+    ] {
+        assert!(out.contains(s), "missing {s:?}:\n{out}");
+    }
+    insta::assert_snapshot!("app_overlay_80x24", out);
+}
+
+#[test]
+fn app_overlay_120x40() {
+    let m = app_overlay_model();
+    insta::assert_snapshot!("app_overlay_120x40", render_to_string(&m, 120, 40));
+}
+
+#[test]
+fn app_overlay_light_styled_80x24() {
+    let mut m = app_overlay_model();
+    m.set_theme("light");
+    insta::assert_snapshot!("app_overlay_light_styled_80x24", render_styled(&m, 80, 24));
+}
+
+#[test]
+fn app_overlay_loading_80x24() {
+    let mut m = model_with_flows();
+    open_app(&mut m, "shop/prod");
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("2 req") && out.contains("loading"), "{out}");
+    assert!(
+        out.contains("no time range"),
+        "model_with_flows has no range: {out}"
+    );
+    insta::assert_snapshot!("app_overlay_loading_80x24", out);
+}
+
+#[test]
+fn app_overlay_no_flows_80x24() {
+    let mut m = with_policy(with_workloads(model_with_window("24h")));
+    m.traffic.data.as_mut().unwrap().flows.clear();
+    m.traffic.rebuild_views();
+    open_app(&mut m, "shop/prod");
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("no flows in the window"), "{out}");
+    assert!(
+        out.contains("host-1.example"),
+        "workloads still load: {out}"
+    );
+    insta::assert_snapshot!("app_overlay_no_flows_80x24", out);
+}
+
+#[test]
+fn app_overlay_workloads_error_80x24() {
+    use illumio_tui::tui::msg::Msg;
+    let mut m = with_policy(model_with_window("24h"));
+    open_app(&mut m, "shop/prod");
+    let seq = m.app_view.as_ref().unwrap().seq;
+    illumio_tui::tui::update(
+        &mut m,
+        Msg::AppWorkloadsLoaded {
+            seq,
+            result: Err("HTTP 500".into()),
+        },
+    );
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("HTTP 500 · r retries"), "{out}");
+    assert!(
+        out.contains("RS Shop-Prod"),
+        "the policy panel still renders: {out}"
+    );
+    insta::assert_snapshot!("app_overlay_workloads_error_80x24", out);
 }

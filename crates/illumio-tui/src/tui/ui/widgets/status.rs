@@ -1,6 +1,6 @@
 //! Bottom status line: query/connection state on the left, key hints right
 //! (only `? help` when a warning or an error needs the room).
-use crate::tui::model::{Model, StatusKind};
+use crate::tui::model::{Model, Overlay, StatusKind};
 use crate::tui::ui::widgets::overlay::{screen_hint, screen_hint_more};
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -10,6 +10,9 @@ use ratatui::widgets::Paragraph;
 
 /// Columns the status text keeps before the extra hints are shown.
 const STATUS_ROOM: usize = 40;
+
+/// The app overlay's keys: it takes every key, so the screen's do not apply.
+const APP_HINTS: &str = " Tab panel  X dir  Enter open  w rule  r reload  Esc back ";
 
 pub fn render(model: &Model, f: &mut Frame, area: Rect) {
     let t = &model.theme;
@@ -22,7 +25,9 @@ pub fn render(model: &Model, f: &mut Frame, area: Rect) {
     let more = screen_hint_more(model.screen, model.traffic.view);
     let width = usize::from(area.width);
     let mut hints = format!(" {base}  : cmd  ? help ");
-    if model.status.kind != StatusKind::Info
+    if model.overlay == Overlay::App {
+        hints = APP_HINTS.to_string();
+    } else if model.status.kind != StatusKind::Info
         && model.status.text.chars().count() + hints.chars().count() > width
     {
         // A warning or an error says what to do next: it outranks the hints.

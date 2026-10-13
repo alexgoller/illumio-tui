@@ -43,7 +43,7 @@ pub fn view(model: &Model, f: &mut Frame) {
         Overlay::Prompt { input } => widgets::overlay::render_prompt(model, input, f, area),
         Overlay::GroupKeys(picker) => widgets::overlay::render_key_picker(model, picker, f, area),
         Overlay::AppPicker(p) => widgets::overlay::render_app_picker(model, p, f, area),
-        Overlay::App => {}
+        Overlay::App => widgets::app_overlay::render_app(model, f, area),
         Overlay::LabelKeys(picker) => {
             widgets::overlay::render_label_key_picker(model, picker, f, area)
         }

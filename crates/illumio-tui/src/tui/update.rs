@@ -2077,7 +2077,7 @@ fn open_app(model: &mut Model, focus: Focus) -> Vec<Cmd> {
     v.requests += sent;
     model.status = StatusLine::info(format!(
         "{} · {sent} request{}",
-        v.header_title(),
+        focus.app_text(),
         if sent == 1 { "" } else { "s" }
     ));
     model.app_view = Some(v);
