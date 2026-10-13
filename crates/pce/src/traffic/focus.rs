@@ -4,6 +4,7 @@
 //! ANDs sources and destinations), and their merge. No requests here;
 //! `Pce::focused_traffic` runs the queries.
 use super::aggregate::{group_key, keys_or_default};
+use super::coverage::{Coverage, coverage};
 use super::merge::flow_key;
 use super::resolved::ResolvedFlow;
 use super::sections::Direction;
@@ -63,6 +64,11 @@ impl FocusDirection {
             "both" => Some(FocusDirection::Both),
             _ => None,
         }
+    }
+
+    /// The Explorer queries a focused re-query takes: 2 for `both`.
+    pub fn query_count(self) -> u32 {
+        u32::try_from(self.sides().len()).unwrap_or(2)
     }
 
     /// The sides a focused query puts the app on, in the order they run.
@@ -165,6 +171,31 @@ impl Focus {
 /// itself holds `/` cannot be written this way.
 pub fn parse_app(text: &str) -> GroupKey {
     text.split('/').map(|s| s.trim().to_string()).collect()
+}
+
+/// `1 query`, `2 queries`: the TUI status and header and the CLI meta line.
+pub fn queries_text(n: u32) -> String {
+    format!("{n} quer{}", if n == 1 { "y" } else { "ies" })
+}
+
+/// The coverage a merged focused result really has: the least of its
+/// truncated sides' (`so_far`, then one more side). A complete side covers
+/// its window, so it never counts; the merged rows would overstate a
+/// truncated side's span. `None` while no side is truncated.
+pub fn truncated_coverage(
+    so_far: Option<Coverage>,
+    truncated: bool,
+    side: &[ResolvedFlow],
+    window: Duration,
+) -> Option<Coverage> {
+    if !truncated {
+        return so_far;
+    }
+    let c = coverage(side, window);
+    Some(match so_far {
+        Some(prev) if prev.covered <= c.covered => prev,
+        _ => c,
+    })
 }
 
 fn plural(n: usize, one: &str, many: &str) -> String {
@@ -334,6 +365,9 @@ pub struct FocusedTraffic {
     pub hit: bool,
     /// The bodies sent (or reused), `in` first.
     pub queries: Vec<TrafficQuery>,
+    /// The least coverage of the truncated sides (`truncated_coverage`);
+    /// `None` when no side was truncated.
+    pub coverage: Option<Coverage>,
 }
 
 impl FocusedTraffic {
@@ -552,6 +586,42 @@ mod tests {
         assert_eq!(c("crm/prd"), vec!["crm/prod"]);
         assert!(c("zzzzzz").is_empty());
         assert!(c("").is_empty());
+    }
+
+    #[test]
+    fn a_merged_result_covers_only_as_much_as_its_worst_truncated_side() {
+        let f = flows();
+        let day = Duration::from_secs(24 * 3600);
+        assert_eq!(
+            truncated_coverage(None, false, &f, day),
+            None,
+            "complete: no override"
+        );
+        let wide = truncated_coverage(None, true, &f[2..], day).unwrap();
+        assert_eq!(wide.covered, Duration::from_secs(84 * 60), "06:05 to 07:29");
+        let narrow = truncated_coverage(Some(wide), true, &f[..2], day).unwrap();
+        assert_eq!(
+            narrow.covered,
+            Duration::from_secs(4),
+            "the worst side wins"
+        );
+        assert_eq!(
+            truncated_coverage(Some(narrow), false, &f, day),
+            Some(narrow),
+            "a complete side never widens it"
+        );
+        assert_eq!(
+            truncated_coverage(Some(narrow), true, &f[2..], day),
+            Some(narrow)
+        );
+        assert_eq!(
+            (In.query_count(), Out.query_count(), Both.query_count()),
+            (1, 1, 2)
+        );
+        assert_eq!(
+            (queries_text(1), queries_text(2)),
+            ("1 query".into(), "2 queries".into())
+        );
     }
 
     #[test]

@@ -24,7 +24,7 @@ pub use coverage::{
 pub use filter::{FilterExpr, resolve_actor};
 pub use focus::{
     Focus, FocusDirection, FocusedTraffic, GroupKey, app_labels, apps_in, closest, focus_flows,
-    focus_query, parse_app, union_flows,
+    focus_query, parse_app, queries_text, truncated_coverage, union_flows,
 };
 pub use merge::merge_flows;
 pub use mesh::{MeshColumns, MeshKey, MeshRow, mesh, mesh_key, process_sides};

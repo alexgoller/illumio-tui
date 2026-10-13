@@ -407,7 +407,9 @@ impl Pce {
             elapsed: Duration::ZERO,
             hit: true,
             queries: Vec::new(),
+            coverage: None,
         };
+        let window = base.window();
         for (side, q) in queries {
             let r = self
                 .traffic_slot(
@@ -419,6 +421,7 @@ impl Pce {
                 )
                 .await?;
             let flows = traffic::resolve_flows(&r.value.flows, idx);
+            out.coverage = traffic::truncated_coverage(out.coverage, r.truncated, &flows, window);
             merged = Some(match merged.take() {
                 None => flows,
                 Some(first) => traffic::union_flows(first, flows),
