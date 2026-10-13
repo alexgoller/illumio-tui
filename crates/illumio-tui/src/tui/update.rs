@@ -2258,9 +2258,11 @@ fn app_enter(model: &mut Model) -> Vec<Cmd> {
                 return Vec::new();
             };
             model.overlay = Overlay::None;
-            let mut cmds = switch(model, Screen::Policy);
+            // Select first, so the deny-rules fallback `switch` fires is
+            // for this ruleset, not the row selected before.
             model.policy.pane = PolicyPane::RuleSets;
             model.policy.rulesets.select_where(|r| r.href == href);
+            let mut cmds = switch(model, Screen::Policy);
             if let Some(idx) = model.index().cloned() {
                 model
                     .policy
@@ -3043,7 +3045,10 @@ fn switch(model: &mut Model, s: Screen) -> Vec<Cmd> {
             load_rule_sets(model, CacheMode::Use)
         }
         // Loaded off this screen: the selected ruleset's deny rules now.
-        Screen::Policy if model.policy.loaded_at.is_some() => deny_fallback(model, CacheMode::Use),
+        // Not during a reload: its answer asks for them, on fresh data.
+        Screen::Policy if model.policy.loaded_at.is_some() && !model.policy.loading => {
+            deny_fallback(model, CacheMode::Use)
+        }
         Screen::Objects => load_missing_objects(model),
         Screen::Workloads => load_missing_workloads(model),
         Screen::Events => load_missing_events(model),
@@ -14219,11 +14224,39 @@ mod app_tests {
             "reopened where it was left"
         );
         quiet(&mut m, kc(KeyCode::BackTab));
-        let _ = update(&mut m, kc(KeyCode::Enter));
+        // Policy's own selection sits on a ruleset left to the fallback.
+        m.policy.rulesets.select_where(|r| r.name != "Shop-Prod");
+        let cmds = update(&mut m, kc(KeyCode::Enter));
         assert_eq!(m.screen, Screen::Policy);
+        let chosen = m.policy.rulesets.selected_item().map(|r| r.href.clone());
         assert_eq!(
             m.policy.rulesets.selected_item().map(|r| r.name.as_str()),
             Some("Shop-Prod")
+        );
+        // No deny rules fetched for the row selected before Enter.
+        for c in &cmds {
+            if let Cmd::LoadDenyRules { href, .. } = c {
+                assert_eq!(Some(href), chosen.as_ref(), "{cmds:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn entering_policy_during_a_rulesets_reload_waits_for_its_answer() {
+        let mut m = everything();
+        m.policy.rulesets.select_where(|r| r.name != "Shop-Prod");
+        m.policy.loading = true;
+        let cmds = switch(&mut m, Screen::Policy);
+        assert!(
+            !cmds.iter().any(|c| matches!(c, Cmd::LoadDenyRules { .. })),
+            "{cmds:?}"
+        );
+        m.policy.loading = false;
+        m.screen = Screen::Traffic;
+        let cmds = switch(&mut m, Screen::Policy);
+        assert!(
+            cmds.iter().any(|c| matches!(c, Cmd::LoadDenyRules { .. })),
+            "{cmds:?}"
         );
     }
 

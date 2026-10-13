@@ -14,7 +14,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 
-pub use crate::tui::ui::widgets::bars::sparkline;
+use crate::tui::ui::widgets::bars::sparkline;
 use crate::tui::ui::widgets::table::{clip_width, fit as fit_cells};
 
 /// Display width, as ratatui measures it.
