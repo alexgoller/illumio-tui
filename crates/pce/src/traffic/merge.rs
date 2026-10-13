@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 /// What makes two flows the same row: both sides (workload href, else IP),
 /// the service, the process and user, the decision and the direction.
-type FlowKey = (
+pub(crate) type FlowKey = (
     Option<String>,
     Option<String>,
     Option<u16>,
@@ -22,7 +22,7 @@ fn side(e: &ResolvedEndpoint) -> Option<String> {
     e.workload_href.clone().or_else(|| e.ip.clone())
 }
 
-fn flow_key(f: &ResolvedFlow) -> FlowKey {
+pub(crate) fn flow_key(f: &ResolvedFlow) -> FlowKey {
     (
         side(&f.src),
         side(&f.dst),

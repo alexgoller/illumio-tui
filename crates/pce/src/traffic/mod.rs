@@ -3,6 +3,7 @@
 pub mod aggregate;
 pub mod coverage;
 pub mod filter;
+pub mod focus;
 pub mod merge;
 pub mod mesh;
 pub mod poll;
@@ -21,6 +22,10 @@ pub use coverage::{
     approx_duration, compact_duration, coverage, plan_backfill, window_text,
 };
 pub use filter::{FilterExpr, resolve_actor};
+pub use focus::{
+    Focus, FocusDirection, FocusedTraffic, GroupKey, app_labels, apps_in, closest, focus_flows,
+    focus_query, parse_app, union_flows,
+};
 pub use merge::merge_flows;
 pub use mesh::{MeshColumns, MeshKey, MeshRow, mesh, mesh_key, process_sides};
 pub use poll::{PollConfig, QueryProgress, TrafficResult, run_traffic_query};
