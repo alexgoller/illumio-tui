@@ -26,6 +26,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     (":", "command prompt: :traffic :policy :objects :workloads"),
     ("", ":events  :iplists  :filter <expr>  :window <dur>"),
     ("", ":profile <name>  :draft  :active  :help  :q"),
+    ("", ":focus <app>  (alone: a picker of the loaded apps)"),
     ("", ":writes [on|off]  :export[!] <path>"),
     ("", "(the table on screen as CSV; ! overwrites)"),
     ("?", "this help"),
@@ -60,12 +61,20 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ("", "cap steps 500 1000 2000 5000 10000 25000 … 200000"),
     ("Traffic  g", "pick the label keys every view groups by"),
     (
+        "Traffic  F / X",
+        "focus on the row's app (again: its other side) · in/out/both",
+    ),
+    (
+        "",
+        "Esc clears; truncated: r re-queries the app (1-2 queries)",
+    ),
+    (
         "Traffic  Enter",
         "detail (flows) · drill into a row or section header",
     ),
     (
         "App-to-app x / X",
-        "pairs · in · out · both (sections per app) · back",
+        "pairs · in · out · both · back (focused: X is direction)",
     ),
     (
         "App-to-app o",

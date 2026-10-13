@@ -169,6 +169,16 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   decision: `h` / `j` / `k` / `l` move, `Enter` zooms into a source and then drills into a
   destination, `Esc` zooms out. None of this sends a request. With writes on, `w` turns a
   blocked flow (or the first one behind a peer row or a Mesh row) into a draft allow rule.
+  `F` focuses all five views on one app, the row's source (on `in` sections and Blocked, its
+  destination; `F` again takes the other side; on a row without an app, or with `:focus`
+  alone, a picker of the loaded apps; `:focus shop/prod` names it): only that app's traffic is
+  shown, `X` cycles `in` (it is the destination), `out` (the source) and `both`, the Result
+  header reads `focus shop/prod · in`, and `d`, `o`, search, sort and drills work on top.
+  `Esc` clears it; changing the keys with `g` clears it too. Setting it sends nothing. When the
+  result was truncated, the header says `focus is partial: r re-queries shop/prod` and `r`
+  runs the query again with the app's labels on its side (two queries for `both`, merged
+  without duplicates, through the same cost guard); `Esc` then puts the unfocused result back
+  without a request.
 - **Policy**: `d` toggle draft / active, `p` pending changes (`Enter` on one shows its diff against active), `Tab` switch panes, `Enter` rule
   detail, or on a ruleset load its deny rules. Rules are listed in evaluation order: override
   deny, allow, deny. With writes on, `n` / `e` / `x` create, edit and delete rulesets and rules
@@ -240,6 +250,7 @@ the API call and byte counters at all times.
     illumio-tui traffic groups --window 1h --services --csv > tuples.csv
     illumio-tui traffic groups --window 1h --services --show blocked --csv > still-blocked.csv
     illumio-tui traffic groups --window 1h --by in --show blocked --app pos/PCI
+    illumio-tui traffic groups --window 1h --app shop/prod --direction in
     illumio-tui traffic mesh --window 1h --no-user --json
     illumio-tui traffic query --window 30d --dry-run
     illumio-tui traffic query --window 24h --backfill --json
@@ -285,9 +296,17 @@ destination group (`src`, `dst`, `flows`, `connections`, `bytes`, `allowed`,
 with the app's totals, then its peer groups and services indented (JSON
 `{"sections": [{app, direction, rows, totals}]}`); `--show blocked|blocked-only` counts only
 those decisions among the loaded flows, in the pairs (with `--services` too) or the sections
-(`--decision` filters the query itself), and `--app` (sections only: without `--by` it is
-exit 2) keeps one app's sections (an unknown app prints `no app matches` on stderr; sections are
-already per service, so `--services` with `--by` is exit 2). `traffic query --blocked` prints the `--by in --show blocked`
+(`--decision` filters the query itself); sections are already per service, so `--services`
+with `--by` is exit 2. `--app shop/prod` (on `traffic query`, `groups` and `mesh`) focuses the
+query on one app, a group of the `--keys` (default: the profile's scope keys): its labels go
+into the query as destination includes (`--direction in`), source includes (`out`) or both
+(`both`, the default: two queries, merged without duplicates), so the cap is spent on that app;
+`meta.queries` counts them and a dry run prints one body per side. With `--by in|out|both` the
+direction is the sections' (`--direction` is then exit 2) and only the app's sections are kept;
+a name-keyed group such as `unmanaged-nas/-` keeps narrowing the sections of an unfocused query.
+An app whose labels do not exist is exit 2 with the closest label values, before any traffic
+request (the labels are fetched, cached). `--backfill` does not combine with `--app`.
+`traffic query --blocked` prints the `--by in --show blocked`
 sections the same way. `mesh` gives one row per source user, source process, source group,
 destination group, port, protocol and destination process. The PCE reports one process per
 flow, seen where the flow was reported: an inbound flow's process is the destination's,

@@ -245,3 +245,22 @@ Spec: docs/superpowers/specs/2026-10-11-traffic-views-design.md · Plan: docs/su
 - [x] #13 coverage + backfill with cap ladder and 50-slice batches (188d825)
 - [x] #14 filter editor completion (42df01d); 981 tests
 - [ ] #15 CSV output (later)
+
+## App focus 1: focus (plan docs/superpowers/plans/2026-10-13-app-focus-1-focus.md)
+- [x] Task 1 pce::traffic::focus
+- [x] Task 2 cache slots and Pce::focused_traffic
+- [x] Task 3 TUI focus state and view_flows
+- [x] Task 4 F / X / Esc / g, picker, :focus, badge
+- [x] Task 5 r re-queries a partial focus
+- [x] Task 6 CLI --app / --direction
+- [x] Task 7 docs, help, smoke, gate
+
+## Review (App focus 1)
+- pce: `Focus::keeps`, `FocusDirection`, focused query bodies (`Focus::queries`, `focus_query`), `union_flows` dedup.
+- pce: traffic cache slots (`traffic:{slot}:{body}`; `main`, `focus:in`, `focus:out`) and `Pce::focused_traffic`.
+- TUI: `F` / `X` (only while focused) / `Esc` / `g` clears / app picker / `:focus` / Result badge; every view reads `view_flows`.
+- TUI: `r` on a partial focus runs one query per side through the cost guard; `+ - ] [ B` restore the unfocused result first; `Esc` puts it back without a request.
+- CLI: `--app` / `--direction` on `traffic query|groups|mesh`; `meta.queries`; dry run prints one body per side; unknown app exit 2; `--backfill` with a focused `--app` exit 2.
+- Tests: 1063 passing, workspace. `git diff main -- '*Cargo.toml' Cargo.lock` empty.
+- Smoke (demo100, read-only, no `--yes`): app `pos/Staging`; `groups --direction in`: 13 pairs, 8 api calls, meta.queries 1; dry run 2 bodies, no traffic request; unknown app exit 2. Nothing was written to any PCE.
+- Deviations: the existing unit test `show_filters_the_decisions_and_app_keeps_one_apps_sections` now expects `--app` without `--by` to give pairs (spec), and `by_parses_...` reads `a.filter.app`; `help_scrolls_to_its_last_line_and_reopens_at_the_top` counts 53 help lines (last scroll 31).
