@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: "render_styled(&m, 80, 24)"
 ---
-╭ Keys ───────────────────────────────── 32-53 of 53 · j/k scroll · Esc closes ╮
+╭ Keys ───────────────────────────────── 36-57 of 57 · j/k scroll · Esc closes ╮
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @2:Rgb(150, 50, 180)/Rgb(250, 250, 247) @6:Rgb(0, 102, 204)/Rgb(250, 250, 247) @41:Rgb(120, 124, 136)/Rgb(250, 250, 247) @78:Rgb(0, 102, 204)/Rgb(250, 250, 247)
 │Treemap  hjkl Enter b    move · zoom, then drill · conns/bytes · Esc out      │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @26:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)

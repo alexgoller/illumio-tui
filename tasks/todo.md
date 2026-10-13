@@ -264,3 +264,21 @@ Spec: docs/superpowers/specs/2026-10-11-traffic-views-design.md · Plan: docs/su
 - Tests: 1063 passing, workspace. `git diff main -- '*Cargo.toml' Cargo.lock` empty.
 - Smoke (demo100, read-only, no `--yes`): app `pos/Staging`; `groups --direction in`: 13 pairs, 8 api calls, meta.queries 1; dry run 2 bodies, no traffic request; unknown app exit 2. Nothing was written to any PCE.
 - Deviations: the existing unit test `show_filters_the_decisions_and_app_keeps_one_apps_sections` now expects `--app` without `--by` to give pairs (spec), and `by_parses_...` reads `a.filter.app`; `help_scrolls_to_its_last_line_and_reopens_at_the_top` counts 53 help lines (last scroll 31).
+
+## App focus 2: overlay (plan docs/superpowers/plans/2026-10-13-app-focus-2-overlay.md)
+- [x] Task 1 pce::traffic::timeline
+- [x] Task 2 pce::app
+- [x] Task 3 TUI AppView and model hooks
+- [x] Task 4 A, :app, keys and loads
+- [x] Task 5 rendering and snapshots
+- [x] Task 6 CLI app
+- [x] Task 7 docs, help, smoke, gate
+
+## Review (App focus 2)
+- pce: `traffic::timeline` (equal buckets, the approximate blocked timeline by last-detected time); `pce::app` (peers per group × service × decision, workload summary with enforcement and VEN active/stale, ruleset scope coverage with `[[]]` as `all_workloads`).
+- TUI: `AppView` in `Model::app_view`, `Overlay::App`; `A` / `:app` / the picker open it with at most 2 counted requests (workloads by the app's labels, rulesets if not loaded/loading); 0 when the Workloads screen holds every workload and the Policy screen is loaded. `Tab`, `j/k`, `X`, `Enter`, `w`, `r` (asks), `Esc`/`q`.
+- Rendering: btop-style panels, overlay key hints in the status line, theme background.
+- CLI: `illumio-tui app <app> [--direction] [--window] [--keys] [--active] [--section]`; JSON whole, `--table` every section, `--csv` needs `--section` (exit 2 before any request).
+- Tests: 1117 passing, workspace. `git diff main -- '*Cargo.toml' Cargo.lock` empty.
+- Smoke (demo100, read-only, no `--yes`, no `y`): `app pos/Staging --window 1h --max-results 200 --json`: 21 workloads (selective 21, 21 active VENs), 47 inbound / 43 outbound peer rows, 17 rulesets, 24 approx buckets (62 blocked records), meta.queries 2, 14 api calls, truncated (the 200-row cap). Nothing was written to any PCE.
+- Deviations: reopening the same app (after `Esc`, `w`, or `Enter`) keeps its view (seq, panels, cursors) and sends nothing, instead of rebuilding it; only another app gets a new seq. A traffic answer that lands under the open overlay rebuilds its peers. The status line shows the overlay's keys. `1 rule` singular. `a_stale_workloads_answer_is_dropped` reopens another app (`A` on the unmanaged-nas row: `:app` only takes loaded or labelled apps) and two tests were added (late answer never reopens; reopen sends nothing). `:app` on an unknown app falls back to the label index's closest values when no loaded app is close.

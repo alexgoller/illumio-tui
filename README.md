@@ -179,6 +179,20 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   runs the query again with the app's labels on its side (two queries for `both`, merged
   without duplicates, through the same cost guard); `Esc` then puts the unfocused result back
   without a request.
+  `A` (or `:app shop/prod`) opens the app overlay for the row's app, at the focus direction
+  (`X` cycles it there too): its workloads with their enforcement modes and VEN health
+  (`Workloads 14   enforced 9 · selective 2 · visibility 3`, `VENs 13 active · 1 stale`;
+  active is healthy or warning, stale is offline or error), its inbound and outbound peers by
+  service and decision, blocked traffic over time (`approx`: flow records by last-detected
+  time), and the rulesets whose scope covers it (a global scope shows as `all`) or whose rules
+  name its labels (draft or active, as on the Policy screen). The traffic panels come from the
+  loaded result; the workloads and the rulesets come from their screens when those are loaded,
+  else one request each (cached), counted in the overlay's header. Reopening the same app sends
+  nothing. `:app` also opens an app that has labels but no flows in the window. `Tab` moves
+  between panels; `Enter` on a peer focuses that pair in Flows, on a workload opens its detail,
+  on a ruleset opens it on the Policy screen; `w` drafts an allow rule from a blocked peer
+  (writes on; the form replaces the overlay and `A` brings it back); `r` reloads the panels
+  after asking; `Esc` returns.
 - **Policy**: `d` toggle draft / active, `p` pending changes (`Enter` on one shows its diff against active), `Tab` switch panes, `Enter` rule
   detail, or on a ruleset load its deny rules. Rules are listed in evaluation order: override
   deny, allow, deny. With writes on, `n` / `e` / `x` create, edit and delete rulesets and rules
@@ -251,6 +265,8 @@ the API call and byte counters at all times.
     illumio-tui traffic groups --window 1h --services --show blocked --csv > still-blocked.csv
     illumio-tui traffic groups --window 1h --by in --show blocked --app pos/PCI
     illumio-tui traffic groups --window 1h --app shop/prod --direction in
+    illumio-tui app shop/prod --window 24h --json
+    illumio-tui app shop/prod --direction in --csv --section inbound > inbound.csv
     illumio-tui traffic mesh --window 1h --no-user --json
     illumio-tui traffic query --window 30d --dry-run
     illumio-tui traffic query --window 24h --backfill --json
@@ -307,6 +323,18 @@ direction is the sections' (`--direction` is then exit 2) and only the app's sec
 a name-keyed group such as `unmanaged-nas/-` keeps narrowing the sections of an unfocused query.
 An app whose labels do not exist is exit 2 with the closest label values, before any traffic
 request (the labels are fetched, cached). `--backfill` does not combine with `--app`.
+
+`illumio-tui app <app> [--direction in|out|both] [--window W] [--keys K] [--active]` prints one
+envelope for one app: `workloads` (`summary` with the enforcement breakdown and the VEN counts,
+`rows` with name, role, enforcement mode and VEN health), `inbound` and `outbound` (one row per
+peer group, service and decision), `policy` (rulesets by `reason`: `scope`, `all_workloads` or
+`rules`, with their rule counts) and `timeline` (`exact: false`: blocked flow records per
+bucket of the window, by last-detected time). It costs the focused traffic queries (one per
+side), one workloads read filtered by the app's labels and one rulesets read, all cached;
+`meta` counts them. `--table` prints each section under a title line; `--csv` prints one,
+chosen with `--section workloads|inbound|outbound|policy|timeline` (without it, exit 2 before
+any request).
+
 `traffic query --blocked` prints the `--by in --show blocked`
 sections the same way. `mesh` gives one row per source user, source process, source group,
 destination group, port, protocol and destination process. The PCE reports one process per

@@ -27,6 +27,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ("", ":events  :iplists  :filter <expr>  :window <dur>"),
     ("", ":profile <name>  :draft  :active  :help  :q"),
     ("", ":focus <app>  (alone: a picker of the loaded apps)"),
+    ("", ":app <app>  the app overlay (alone: the picker)"),
     ("", ":writes [on|off]  :export[!] <path>"),
     ("", "(the table on screen as CSV; ! overwrites)"),
     ("?", "this help"),
@@ -67,6 +68,18 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     (
         "",
         "Esc clears; truncated: r re-queries the app (1-2 queries)",
+    ),
+    (
+        "Traffic  A",
+        "app overlay: peers, blocked over time, policy, workloads",
+    ),
+    (
+        "App      Tab j/k X Enter",
+        "panel · row · direction · open (peer: its flows)",
+    ),
+    (
+        "App      w r Esc",
+        "draft allow rule · reload panels (asks) · back",
     ),
     (
         "Traffic  Enter",
