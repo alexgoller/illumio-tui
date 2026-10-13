@@ -107,17 +107,17 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   connections and bytes added up; the header counts the slices), `-` drops the older flows
   without a request. `r` after widening runs one query for the whole window and asks first
   when that is expensive. A truncated result that covers under half its window says how much
-  in the Result header (`1000 flows · covers 4m of 24h · truncated`) and the status line,
+  in the Result header (`10000 flows · covers 25m of 24h · truncated`) and the status line,
   with what `]` and `B` would do. Explorer rows are not time-ordered within the cap, so the
   truncated rows say nothing reliable about any part of the window: `B` fetches the whole
   window again, backwards from its end, in slices sized to fit the cap (the measured rate,
   `0.8 × cap`, rounded down to 1m 5m 15m 30m 1h 2h 6h 12h 1d). When the cap cannot fit the
   window in 50 slices, `B` proposes the smallest cap of the `]` ladder (up to 200000) that
-  can. It asks once, for example after 1000 flows covering 2h 30m
-  of 24h (`backfill 1d in 12 slices of 2h at cap 1000: 12 queries (≥36 API calls)? y/n`) or
-  4 minutes of 24h (`raise the cap to 10000 and backfill 1d in
-  48 slices of 30m: 48 queries (≥144 API calls)? y/n`); each query is at least a submit, a
-  status poll and a download, and a cap above 10000 is named as expensive in the same question.
+  can. It asks once, for example after 10000 flows covering 2h 30m of 24h (`backfill 1d in
+  12 slices of 2h at cap 10000: 12 queries (≥36 API calls)? y/n`) or 25 minutes of 24h (`cap
+  25000 exceeds 10000. raise the cap to 25000 and backfill 1d in 48 slices of 30m: 48 queries
+  (≥144 API calls)? y/n`): each query is at least a submit, a status poll and a download, and
+  a cap above 10000 is named as expensive first.
   It then sends one slice at a time, newest first, and counts them in the header
   (`slice 3 of 12`): the first slice replaces the truncated rows, later ones merge like `+`,
   and the result stays marked truncated until the slices reach the window start. A slice that
@@ -132,9 +132,10 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   run right after a truncated, low-coverage query without the `y`, with the same limits,
   progress and `Esc`: one run (at most 50 slices) per query, never chained, and a cap above
   10000 is still asked. It is off by default because every request must be user-caused: setting
-  it is the user saying yes in advance, once, in writing. `]` / `[` step the result cap (`500
-  1000 2000 5000 10000 25000 50000 100000 200000`; the profile's `traffic_max_results` is
-  where it starts and a rung of its own; above 10000 asks first) and re-run the query. `v` cycles five
+  it is the user saying yes in advance, once, in writing. `]` / `[` step the result cap
+  (`500 1000 2000 5000 10000 25000 50000 100000 200000`; the profile's `traffic_max_results`
+  is where it starts and a rung of its own; above 10000 asks first, and auto-refresh stays off
+  for such a cap) and re-run the query. `v` cycles five
   views of the one result, all grouped by the same label keys: the profile's scope keys
   (`app,env` by default) until `g` opens the picker (`Space` toggles a key, `all labels` takes
   every key the flows carry, typing edits the list as text, `Enter` applies, for this session).
@@ -234,7 +235,8 @@ window; traffic commands add `meta.covered`, the span the flows' last-seen times
 (`"4m"`; the whole window when the result is complete). With `--backfill` (`query`, `groups`
 and `mesh`) a truncated result's window is fetched again in slices as the TUI's `B` does,
 newest first, one query at a time, the cap raised along the ladder (up to 200000) when
-the slices would not fit in 50 (past 10000 only with `--yes`); `meta.slices` counts the slices
+the slices would not fit in 50 (past 10000 only with `--yes`, so one `--yes` on a
+`--backfill` run allows up to 50 slice queries of up to 200000 rows each); `meta.slices` counts the slices
 merged and `meta.api_calls` every request (at least 3 per query). A run sends at most
 `--max-slices` queries (1 to 50, default 50); when the window needs more, stderr names the
 `--from` / `--to` that continue and `meta.truncated` stays true. Errors go to stderr as JSON. Exit codes: 1 generic, 2 arguments or

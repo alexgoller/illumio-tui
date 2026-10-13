@@ -143,8 +143,9 @@ pub fn slices_needed(span: Duration, slice: Duration) -> u32 {
 /// up to `max_cap`, see `next_cap`; callers pass the hard maximum, or the
 /// confirmation threshold when a raise past it is not confirmed) that fits
 /// the window in `MAX_SLICES` slices; when even `max_cap` does not, the plan
-/// at `max_cap` (a partial run, `batch`). A `cap` above `max_cap` is kept. `None` when the result is complete, carries no
-/// `last_detected` to measure, or the window is empty.
+/// at `max_cap` (a partial run, `batch`). A `cap` above `max_cap` is kept.
+/// `None` when the result is complete, carries no `last_detected` to
+/// measure, or the window is empty.
 pub fn plan_backfill(
     cov: &Coverage,
     truncated: bool,
@@ -484,6 +485,17 @@ mod tests {
             plan_backfill(&c, true, 20_000, 5000, w("24h")).unwrap().cap,
             20_000
         );
+        // The README's examples at the default cap of 10000.
+        let max = crate::traffic::MAX_TRAFFIC_MAX_RESULTS;
+        let mut flows: Vec<ResolvedFlow> = (0..10_000)
+            .map(|_| flow(Some("2026-10-10T12:00:00Z")))
+            .collect();
+        flows[9999] = flow(Some("2026-10-10T09:30:00Z"));
+        let p = plan_backfill(&coverage(&flows, w("24h")), true, 10_000, max, w("24h")).unwrap();
+        assert_eq!((p.cap, p.slice, p.count), (10_000, w("2h"), 12));
+        flows[9999] = flow(Some("2026-10-10T11:35:00Z"));
+        let p = plan_backfill(&coverage(&flows, w("24h")), true, 10_000, max, w("24h")).unwrap();
+        assert_eq!((p.cap, p.slice, p.count), (25_000, w("30m"), 48));
     }
 
     #[test]

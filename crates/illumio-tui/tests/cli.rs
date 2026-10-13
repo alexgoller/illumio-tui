@@ -989,6 +989,94 @@ fn flows_at(times: &[&str], port: u64) -> String {
     serde_json::to_string(&flows).unwrap()
 }
 
+/// `n` flows all last seen at 08:00, each on its own port from `port`.
+fn burst(n: u64, port: u64) -> String {
+    let one: Vec<Value> = serde_json::from_str(&flows_at(&["08:00"], 0)).unwrap();
+    let flows: Vec<Value> = (0..n)
+        .map(|i| {
+            let mut f = one[0].clone();
+            f["service"]["port"] = json!(port + i);
+            f
+        })
+        .collect();
+    serde_json::to_string(&flows).unwrap()
+}
+
+/// The `max_results` of every traffic query the server saw, in order.
+async fn sent_caps(server: &MockServer) -> Vec<u64> {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.method.as_str() == "POST")
+        .map(|r| {
+            serde_json::from_slice::<Value>(&r.body).unwrap()["max_results"]
+                .as_u64()
+                .unwrap()
+        })
+        .collect()
+}
+
+/// 2000 flows in under a minute at cap 2000: 2h needs 120 slices of 1m up
+/// to cap 10000, and 24 of 5m at 25000. Without `--yes` the run stays at
+/// 10000 (its 1m slice truncates: the cap is too small); with it, 25000.
+#[tokio::test(flavor = "multi_thread")]
+async fn traffic_backfill_passes_10000_only_with_yes() {
+    let args = [
+        "traffic",
+        "query",
+        "--from",
+        "2026-10-10T06:00:00Z",
+        "--to",
+        "2026-10-10T08:00:00Z",
+        "--max-results",
+        "2000",
+        "--backfill",
+        "--max-slices",
+        "1",
+    ];
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    mount_range(&server, ("06:00", "08:00"), 1, 2000, burst(2000, 1000)).await;
+    mount_range(
+        &server,
+        ("07:59", "08:00"),
+        1,
+        20_000,
+        flows_at(&["08:00"], 9000),
+    )
+    .await;
+    let a = cmd(&server).args(args).assert().success();
+    let err = String::from_utf8_lossy(&a.get_output().stderr).to_string();
+    assert!(err.contains("backfill raises the cap to 10000"), "{err}");
+    assert!(
+        err.contains(
+            "cap 10000 is too small for this PCE at 1m: raise --max-results (up to 200000)"
+        ),
+        "{err}"
+    );
+    assert_eq!(sent_caps(&server).await, vec![2000, 10_000]);
+    server.verify().await;
+
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    mount_range(&server, ("06:00", "08:00"), 1, 2000, burst(2000, 1000)).await;
+    mount_range(
+        &server,
+        ("07:55", "08:00"),
+        1,
+        1,
+        flows_at(&["07:58"], 9000),
+    )
+    .await;
+    let a = cmd(&server).args(args).arg("--yes").assert().success();
+    let err = String::from_utf8_lossy(&a.get_output().stderr).to_string();
+    assert!(err.contains("backfill raises the cap to 25000"), "{err}");
+    assert_eq!(sent_caps(&server).await, vec![2000, 25_000]);
+    server.verify().await;
+}
+
 /// 06:00 to 08:00 at cap 4: four flows over the last hour, truncated. The
 /// rate fits 30m slices, so the walk is 07:30, 07:00, 06:30, 06:00.
 async fn mount_truncated_first(server: &MockServer, times: u64) {

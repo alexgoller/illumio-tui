@@ -55,6 +55,11 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 && model.traffic.auto.due(now)
             {
                 let f = model.traffic.filter.clone();
+                if let Some(status) = auto_off_status(&f) {
+                    model.traffic.auto.enabled = false;
+                    model.status = status;
+                    return Vec::new();
+                }
                 let cmds = start_query(model, f, CacheMode::Bypass);
                 model.traffic.auto.from_tick = true;
                 return cmds;
@@ -1407,6 +1412,10 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 "auto-refresh stays off while a backfill is loaded: r runs the window as one query",
             );
         }
+        KeyCode::Char('a') if !model.traffic.auto.enabled => {
+            model.status = auto_off_status(&model.traffic.filter)
+                .unwrap_or_else(|| model.traffic.auto.toggle());
+        }
         KeyCode::Char('a') => {
             model.status = model.traffic.auto.toggle();
         }
@@ -2063,15 +2072,18 @@ fn on_slice(model: &mut Model, result: Result<QueryOutcome, String>) {
             let window = d.filter.window.clone();
             // A tick re-runs the whole merged window as one query; past the
             // cost thresholds that needs a confirm each time, so it stops.
-            let auto_off = model.traffic.auto.enabled && d.filter.needs_confirmation().is_some();
-            if auto_off {
+            let auto_off = model
+                .traffic
+                .auto
+                .enabled
+                .then(|| auto_off_status(&d.filter))
+                .flatten();
+            if auto_off.is_some() {
                 model.traffic.auto.enabled = false;
             }
             model.traffic.rebuild_views();
-            model.status = if auto_off {
-                StatusLine::warn(format!(
-                    "auto off: window {window} needs a confirm each run"
-                ))
+            model.status = if let Some(status) = auto_off {
+                status
             } else if truncated {
                 StatusLine::warn(format!("slice truncated at {cap}: ] raises the cap"))
             } else {
@@ -2148,6 +2160,23 @@ fn narrow_window(model: &mut Model) -> Vec<Cmd> {
         None => format!("window {step} · r runs it"),
     });
     Vec::new()
+}
+
+/// Auto-refresh cannot run `f` unattended when it is past a cost threshold:
+/// each run needs a confirm. The status that says so; `None` otherwise.
+fn auto_off_status(f: &TrafficFilter) -> Option<StatusLine> {
+    f.needs_confirmation()?;
+    let what = if f
+        .window_duration()
+        .is_ok_and(|w| w > pce::traffic::CONFIRM_WINDOW)
+    {
+        format!("window {}", f.window)
+    } else {
+        format!("cap {}", f.max_results)
+    };
+    Some(StatusLine::warn(format!(
+        "auto off: {what} needs a confirm each run"
+    )))
 }
 
 /// `]` / `[`: the next or previous cap step, re-running the whole query
@@ -4382,6 +4411,37 @@ mod tests {
             3,
             "the shop/prod header and its two blocked sources"
         );
+    }
+
+    /// A cap past 10000 needs a `y` each run: `a` will not turn auto-refresh
+    /// on for it, and a tick turns it off instead of running unasked.
+    #[test]
+    fn auto_refresh_never_runs_a_cap_that_needs_a_confirm() {
+        use crate::tui::model::QueryState;
+        use crate::tui::test_support::model_with_flows;
+        use std::time::{Duration, Instant};
+        let mut m = model_with_flows();
+        m.traffic.filter.max_results = 10_000;
+        assert!(update(&mut m, key(']')).is_empty());
+        let cmds = update(&mut m, key('y'));
+        assert!(
+            matches!(cmds.as_slice(), [Cmd::RunQuery { filter, .. }] if filter.max_results == 25_000),
+            "{cmds:?}"
+        );
+        m.traffic.query = QueryState::Idle;
+        let off = "auto off: cap 25000 needs a confirm each run";
+        assert!(update(&mut m, key('a')).is_empty());
+        assert!(!m.traffic.auto.enabled);
+        assert_eq!(m.status.text, off);
+        m.traffic.auto.enabled = true; // on from before the raise
+        m.status = StatusLine::info("");
+        let cmds = update(
+            &mut m,
+            Msg::Tick(Instant::now() + Duration::from_secs(3600)),
+        );
+        assert_eq!(cmds, Vec::<Cmd>::new());
+        assert!(!m.traffic.auto.enabled);
+        assert_eq!(m.status.text, off);
     }
 
     #[test]
@@ -10574,7 +10634,7 @@ mod window_step_tests {
             if let Overlay::Confirm { reason, .. } = &m.overlay {
                 assert!(reason.contains("exceeds 10000"), "{reason}");
                 assert!(cmds.is_empty());
-                update(&mut m, key('y'));
+                assert_eq!(update(&mut m, key('y')).len(), 1, "y runs it");
             } else if cmds.is_empty() {
                 break;
             }
