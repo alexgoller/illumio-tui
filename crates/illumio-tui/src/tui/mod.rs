@@ -2,6 +2,7 @@
 //! every event, `update` is a pure state transition that returns `Cmd`s,
 //! `ui` renders `&Model`, and `app` is the only place I/O happens.
 pub mod app;
+pub mod app_picker;
 pub mod commands;
 pub mod complete;
 pub mod diff;

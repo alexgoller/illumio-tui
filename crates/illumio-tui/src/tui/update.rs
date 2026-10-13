@@ -1,12 +1,13 @@
 //! Pure state transitions. Never performs I/O; returns `Cmd`s instead.
+use crate::tui::app_picker::{AppPicker, AppPickerOutcome, AppPickerPurpose};
 use crate::tui::commands::{self, Command};
 use crate::tui::edit::{self, EditIntent, RulesetTarget, Start, WriteIntent};
 use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::form::{Completing, FormEvent};
 use crate::tui::model::{
     By, Connection, Dir, Drill, EventsFilterEdit, Model, ObjectKind, Overlay, PendingAction,
-    PolicyPane, PolicyState, QueryState, Screen, Slices, StatusLine, TrafficData, TrafficView,
-    WritesState, rule_line,
+    PolicyPane, PolicyState, QueryState, Screen, Slices, StatusLine, TrafficData, TrafficState,
+    TrafficView, WritesState, rule_line,
 };
 use crate::tui::msg::{Cmd, Msg, ObjectsPayload, QueryOutcome};
 use crate::tui::picker::{KeyPicker, PickerOutcome};
@@ -14,7 +15,7 @@ use crate::tui::ui::widgets::overlay::{confirm_write_last_scroll, help_last_scro
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use pce::models::{EventFilter, PolicyDecision, PolicyScope};
 use pce::traffic::treemap::Weight;
-use pce::traffic::{Decisions, QueryProgress};
+use pce::traffic::{Decisions, Focus, GroupKey, QueryProgress};
 use pce::write::{
     Outcome, Plan, ProvisionRequest, ProvisionSubset, RevertRequest, WriteError, provision_counts,
 };
@@ -1255,6 +1256,23 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             }
             Vec::new()
         }
+        Overlay::AppPicker(picker) => match picker.key(k) {
+            AppPickerOutcome::Open(p) => {
+                model.overlay = Overlay::AppPicker(p);
+                Vec::new()
+            }
+            AppPickerOutcome::Close => {
+                model.overlay = Overlay::None;
+                Vec::new()
+            }
+            AppPickerOutcome::Pick { app, purpose } => {
+                model.overlay = Overlay::None;
+                match purpose {
+                    AppPickerPurpose::Focus => focus_by_name(model, &app),
+                }
+                Vec::new()
+            }
+        },
         Overlay::None => on_screen_key(model, k),
     }
 }
@@ -1397,10 +1415,21 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         model.status = StatusLine::info(bf.status_text());
         return Vec::new();
     }
+    // With a focus set, Esc clears it first; today's Esc applies after.
+    if k.code == KeyCode::Esc && model.traffic.focus.is_some() {
+        model.traffic.clear_focus();
+        model.status = StatusLine::info("focus cleared");
+        return Vec::new();
+    }
     match k.code {
         KeyCode::Char('f') => {
             model.overlay = Overlay::FilterEditor(FilterEditor::from_filter(&model.traffic.filter));
             return Vec::new();
+        }
+        KeyCode::Char('F') => return focus_key(model),
+        KeyCode::Char('X') if model.traffic.focus.is_some() => {
+            model.traffic.cycle_focus_direction();
+            model.status = focus_status(&model.traffic);
         }
         KeyCode::Char('r') => return update(model, Msg::RunNow),
         KeyCode::Char('+') => return widen_window(model),
@@ -1652,7 +1681,8 @@ fn open_key_picker(model: &Model) -> KeyPicker {
 }
 
 /// Enter in the picker: the keys (the profile's scope keys when none),
-/// every view rebuilt, the drill-down dropped. No request.
+/// every view rebuilt, the drill-down dropped, the focus cleared (its app
+/// is not defined under other keys). No request.
 fn apply_group_keys(model: &mut Model, keys: Vec<String>, all: bool) {
     let t = &mut model.traffic;
     t.all_keys = all;
@@ -1663,10 +1693,92 @@ fn apply_group_keys(model: &mut Model, keys: Vec<String>, all: bool) {
             keys
         };
     }
+    let cleared = t.drop_focus();
     t.drill = None;
     t.treemap.zoom = None;
     t.rebuild_views();
-    model.status = StatusLine::info(format!("grouped by {}", t.effective_keys().join(",")));
+    let mut text = format!("grouped by {}", t.effective_keys().join(","));
+    if cleared {
+        text.push_str(" · focus cleared: the app is not defined under the new keys");
+    }
+    model.status = StatusLine::info(text);
+}
+
+/// `F`: focus on the selected row's app (a second `F` takes its other
+/// side); with no app under the cursor, clear the focus, or open the picker
+/// when there is none. Never requests.
+fn focus_key(model: &mut Model) -> Vec<Cmd> {
+    if model.traffic.data.is_none() {
+        model.status = StatusLine::info("no result to focus yet: r runs the query");
+        return Vec::new();
+    }
+    match model.traffic.next_focus_app() {
+        Some(app) => focus_on(model, app),
+        None if model.traffic.focus.is_some() => {
+            model.traffic.clear_focus();
+            model.status = StatusLine::info("focus cleared");
+        }
+        None => open_app_picker(model, AppPickerPurpose::Focus, ""),
+    }
+    Vec::new()
+}
+
+/// The picker over the apps of the loaded result.
+fn open_app_picker(model: &mut Model, purpose: AppPickerPurpose, input: &str) {
+    model.overlay =
+        Overlay::AppPicker(AppPicker::new(model.traffic.loaded_apps(), purpose).with_input(input));
+}
+
+/// A new focus on `app` under the keys in force, at `both`. No request.
+fn focus_on(model: &mut Model, app: GroupKey) {
+    let focus = Focus::new(app, model.traffic.keys.clone());
+    model.traffic.set_focus(focus);
+    model.status = focus_status(&model.traffic);
+}
+
+/// `focus shop/prod · in · 7 flows`; on a partial focus also what `r`
+/// would send (asked once, here).
+fn focus_status(t: &TrafficState) -> StatusLine {
+    let Some(f) = &t.focus else {
+        return StatusLine::info("focus cleared");
+    };
+    let n = t.view_flows().len();
+    if t.focus_partial() {
+        let q = u32::try_from(f.direction.sides().len()).unwrap_or(2);
+        StatusLine::warn(format!(
+            "{} · {n} flows · the result is truncated: r re-queries {} ({})",
+            f.badge(),
+            f.app_text(),
+            crate::tui::model::queries_text(q)
+        ))
+    } else {
+        StatusLine::info(format!("{} · {n} flows", f.badge()))
+    }
+}
+
+/// `:focus <app>` and the picker: an app of the loaded result by its text
+/// (`shop/prod`), else the closest ones in the status line. Shows the
+/// Traffic screen. Never requests.
+fn focus_by_name(model: &mut Model, name: &str) {
+    if model.traffic.data.is_none() {
+        model.status = StatusLine::info("no result to focus yet: r runs the query");
+        return;
+    }
+    let apps = model.traffic.loaded_apps();
+    if apps.iter().any(|a| a == name) {
+        model.screen = Screen::Traffic;
+        focus_on(model, pce::traffic::parse_app(name));
+        return;
+    }
+    let near = pce::traffic::closest(name, &apps, 3);
+    model.status = StatusLine::warn(if near.is_empty() {
+        format!("unknown app {name:?} in the loaded result; nothing sent")
+    } else {
+        format!(
+            "unknown app {name:?}; closest: {}; nothing sent",
+            near.join(", ")
+        )
+    });
 }
 
 /// `+`: the next window step. With the loaded range known for this filter,
@@ -3657,6 +3769,19 @@ pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
                     Vec::new()
                 }
             }
+        }
+        Command::Focus(Some(name)) => {
+            focus_by_name(model, &name);
+            Vec::new()
+        }
+        Command::Focus(None) => {
+            if model.traffic.data.is_none() {
+                model.status = StatusLine::info("no result to focus yet: r runs the query");
+            } else {
+                model.screen = Screen::Traffic;
+                open_app_picker(model, AppPickerPurpose::Focus, "");
+            }
+            Vec::new()
         }
         Command::Profile(name) => {
             if model.writes.in_flight {
@@ -12687,5 +12812,211 @@ mod filter_completion_tests {
         ctrl(&mut m, 'n');
         ctrl(&mut m, 'p');
         assert_eq!(m.overlay, before);
+    }
+}
+
+#[cfg(test)]
+mod focus_tests {
+    use super::*;
+    use crate::tui::model::{Model, Overlay, TrafficView};
+    use crate::tui::test_support::{model_fixture, model_with_flows, model_with_rich_flows};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use pce::traffic::FocusDirection;
+
+    fn key(c: char) -> Msg {
+        Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))
+    }
+
+    fn kc(code: KeyCode) -> Msg {
+        Msg::Key(KeyEvent::new(code, KeyModifiers::NONE))
+    }
+
+    #[track_caller]
+    fn quiet(m: &mut Model, msg: Msg) {
+        assert_eq!(update(m, msg), Vec::<Cmd>::new());
+    }
+
+    fn focus_cmd(name: &str) -> Msg {
+        Msg::Command(Command::Focus(Some(name.into())))
+    }
+
+    fn focused(m: &Model) -> Option<(String, FocusDirection)> {
+        m.traffic
+            .focus
+            .as_ref()
+            .map(|f| (f.app_text(), f.direction))
+    }
+
+    #[test]
+    fn x_and_esc_cycle_and_clear_the_focus_on_every_view_without_requests() {
+        for view in [
+            TrafficView::Flows,
+            TrafficView::Aggregate,
+            TrafficView::Mesh,
+            TrafficView::Blocked,
+            TrafficView::Treemap,
+        ] {
+            let mut m = model_with_rich_flows();
+            m.traffic.view = view;
+            quiet(&mut m, focus_cmd("crm/prod"));
+            assert_eq!(
+                focused(&m),
+                Some(("crm/prod".into(), FocusDirection::Both)),
+                "{view:?}"
+            );
+            quiet(&mut m, key('X'));
+            assert_eq!(focused(&m).unwrap().1, FocusDirection::In, "{view:?}");
+            let t = &m.traffic;
+            let crm = |k: &Vec<String>| k.join("/") == "crm/prod";
+            match view {
+                TrafficView::Flows => {
+                    assert_eq!(t.flows.len(), 7);
+                    assert!(t.flows.rows().iter().all(|r| r.dst_group == "crm/prod"));
+                }
+                TrafficView::Aggregate => {
+                    assert!(!t.groups.is_empty() && t.groups.rows().iter().all(|g| crm(&g.dst)))
+                }
+                TrafficView::Mesh => {
+                    assert!(!t.mesh.is_empty() && t.mesh.rows().iter().all(|r| crm(&r.dst)))
+                }
+                TrafficView::Blocked => {
+                    assert!(!t.blocked.is_empty() && t.blocked.rows().iter().all(|r| crm(&r.app)))
+                }
+                TrafficView::Treemap => assert!(
+                    !t.treemap.tiles.is_empty() && t.treemap.groups.iter().all(|g| crm(&g.dst))
+                ),
+            }
+            quiet(&mut m, key('X'));
+            assert_eq!(focused(&m).unwrap().1, FocusDirection::Out);
+            quiet(&mut m, key('X'));
+            assert_eq!(focused(&m).unwrap().1, FocusDirection::Both);
+            quiet(&mut m, kc(KeyCode::Esc));
+            assert_eq!(focused(&m), None, "{view:?}");
+            assert_eq!(m.traffic.flows.len(), 30, "{view:?}: every flow again");
+            assert_eq!(m.status.text, "focus cleared");
+        }
+    }
+
+    #[test]
+    fn without_a_focus_x_and_esc_keep_their_old_meaning() {
+        let mut m = model_with_rich_flows();
+        quiet(&mut m, key('v'));
+        assert_eq!(m.traffic.view, TrafficView::Aggregate);
+        quiet(&mut m, key('X'));
+        assert_eq!(m.traffic.apps_state.by, By::Both, "X steps back from pairs");
+        m.traffic.view = TrafficView::Flows;
+        m.traffic.drill = Some(Drill::Pair(
+            vec!["crm".into(), "prod".into()],
+            vec!["crm".into(), "prod".into()],
+            Decisions::All,
+        ));
+        m.traffic.rebuild_views();
+        quiet(&mut m, focus_cmd("crm/prod"));
+        quiet(&mut m, kc(KeyCode::Esc));
+        assert!(
+            m.traffic.drill.is_some(),
+            "the first Esc clears the focus only"
+        );
+        quiet(&mut m, kc(KeyCode::Esc));
+        assert!(
+            m.traffic.drill.is_none(),
+            "then Esc clears the drill as before"
+        );
+    }
+
+    #[test]
+    fn f_on_a_row_takes_its_source_then_its_destination() {
+        let mut m = model_with_flows();
+        m.traffic
+            .flows
+            .select_where(|r| r.flow.dst.display_name() == "fqdn-1.example");
+        quiet(&mut m, key('F'));
+        assert_eq!(
+            focused(&m),
+            Some(("shop/prod".into(), FocusDirection::Both))
+        );
+        assert_eq!(m.status.text, "focus shop/prod · both · 4 flows");
+        m.traffic
+            .flows
+            .select_where(|r| r.flow.dst.display_name() == "fqdn-1.example");
+        quiet(&mut m, key('F'));
+        assert_eq!(focused(&m).unwrap().0, "fqdn-1.example/-");
+        quiet(&mut m, kc(KeyCode::Esc));
+        m.traffic.view = TrafficView::Blocked;
+        m.traffic.blocked.select_where(|r| !r.is_header());
+        quiet(&mut m, key('F'));
+        assert_eq!(
+            focused(&m).unwrap().0,
+            "shop/prod",
+            "Blocked: the destination first"
+        );
+    }
+
+    #[test]
+    fn f_without_a_row_opens_the_picker_or_clears_and_the_picker_focuses() {
+        let mut m = model_with_flows();
+        m.traffic.flows.set_rows(Vec::new());
+        quiet(&mut m, key('F'));
+        let Overlay::AppPicker(p) = &m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        assert_eq!(p.apps, vec!["shop/prod"]);
+        quiet(&mut m, key('s'));
+        quiet(&mut m, key('q'));
+        quiet(&mut m, kc(KeyCode::Backspace));
+        assert!(!m.quit, "q is typed into the picker");
+        quiet(&mut m, kc(KeyCode::Enter));
+        assert_eq!(m.overlay, Overlay::None);
+        assert_eq!(focused(&m).unwrap().0, "shop/prod");
+        m.traffic.flows.set_rows(Vec::new());
+        quiet(&mut m, key('F'));
+        assert_eq!(focused(&m), None, "F on nothing with a focus set clears it");
+        quiet(&mut m, Msg::Command(Command::Focus(None)));
+        assert!(matches!(m.overlay, Overlay::AppPicker(_)));
+        quiet(&mut m, kc(KeyCode::Esc));
+        assert_eq!(m.overlay, Overlay::None);
+        assert_eq!(focused(&m), None);
+    }
+
+    #[test]
+    fn focus_names_an_unknown_app_and_its_closest_match_and_sends_nothing() {
+        let mut m = model_with_rich_flows();
+        quiet(&mut m, focus_cmd("crm/prd"));
+        assert_eq!(focused(&m), None);
+        assert_eq!(
+            m.status.text,
+            "unknown app \"crm/prd\"; closest: crm/prod; nothing sent"
+        );
+        let mut m = model_fixture();
+        quiet(&mut m, focus_cmd("crm/prod"));
+        assert_eq!(m.status.text, "no result to focus yet: r runs the query");
+        quiet(&mut m, key('F'));
+        assert_eq!(m.status.text, "no result to focus yet: r runs the query");
+    }
+
+    #[test]
+    fn focus_from_another_screen_shows_the_traffic_screen() {
+        let mut m = model_with_rich_flows();
+        m.screen = Screen::Workloads;
+        quiet(&mut m, focus_cmd("crm/prod"));
+        assert_eq!(m.screen, Screen::Traffic);
+    }
+
+    #[test]
+    fn g_clears_the_focus_and_says_so() {
+        let mut m = model_with_rich_flows();
+        quiet(&mut m, focus_cmd("crm/prod"));
+        apply_group_keys(&mut m, vec!["app".into()], false);
+        assert_eq!(focused(&m), None);
+        assert_eq!(
+            m.status.text,
+            "grouped by app · focus cleared: the app is not defined under the new keys"
+        );
+        assert_eq!(m.traffic.flows.len(), 30);
+        apply_group_keys(&mut m, vec!["app".into(), "env".into()], false);
+        assert_eq!(
+            m.status.text, "grouped by app,env",
+            "no focus, nothing to say"
+        );
     }
 }

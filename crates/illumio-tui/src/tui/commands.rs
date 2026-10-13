@@ -8,6 +8,9 @@ pub enum Command {
     IpLists,
     Filter(String),
     Window(String),
+    /// `:focus <app>` narrows every traffic view to one app; `:focus` alone
+    /// opens the picker.
+    Focus(Option<String>),
     Profile(String),
     /// `:writes on` / `:writes off`; bare `:writes` shows the state.
     Writes(Option<bool>),
@@ -57,6 +60,7 @@ pub fn parse(input: &str) -> Result<Command, String> {
             Command::Filter,
             "filter <src expr>  (e.g. app=web,env=prod)",
         ),
+        "focus" => Ok(Command::Focus((!arg.is_empty()).then(|| arg.to_string()))),
         "window" => with_arg(Command::Window, "window <duration>  (e.g. 1h, 24h, 7d)"),
         "profile" => with_arg(Command::Profile, "profile <name>"),
         "writes" => match arg {
@@ -135,6 +139,11 @@ mod tests {
         assert_eq!(
             parse("  traffic  ").unwrap(),
             Command::Screen(Screen::Traffic)
+        );
+        assert_eq!(parse("focus").unwrap(), Command::Focus(None));
+        assert_eq!(
+            parse("focus shop/prod").unwrap(),
+            Command::Focus(Some("shop/prod".into()))
         );
     }
 

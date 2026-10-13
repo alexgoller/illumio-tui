@@ -1,5 +1,6 @@
 //! All TUI state. No I/O, no terminal types beyond sizes.
 use crate::cli::output::join_list;
+use crate::tui::app_picker::AppPicker;
 use crate::tui::diff::ObjectDiff;
 use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::form::Form;
@@ -185,6 +186,9 @@ pub enum Overlay {
     },
     /// `g`: the label keys every traffic view groups by.
     GroupKeys(KeyPicker),
+    /// `F` without an app under the cursor, `:focus` alone: the apps of the
+    /// loaded result.
+    AppPicker(AppPicker),
     /// `f` on the Labels tab: the label keys it shows.
     LabelKeys(KeyPicker),
     /// The selected policy rule in full.
@@ -231,6 +235,7 @@ impl PartialEq for Overlay {
             (Overlay::GroupKeys(a), Overlay::GroupKeys(b))
             | (Overlay::LabelKeys(a), Overlay::LabelKeys(b)) => a == b,
             (Overlay::FilterEditor(a), Overlay::FilterEditor(b)) => a == b,
+            (Overlay::AppPicker(a), Overlay::AppPicker(b)) => a == b,
             (Overlay::Form(a), Overlay::Form(b)) => a == b,
             (
                 Overlay::ConfirmWrite {

@@ -1,4 +1,5 @@
 //! Modal overlays drawn on top of the current screen: help and the `:` prompt.
+use crate::tui::app_picker::AppPicker;
 use crate::tui::diff::{ObjectDiff, Sign};
 use crate::tui::filter::{FIELD_NAMES, FilterEditor};
 use crate::tui::form::{Form, clip, visible_tail};
@@ -227,6 +228,39 @@ pub fn render_key_picker(model: &Model, p: &KeyPicker, f: &mut Frame, area: Rect
 /// `f` on the Labels tab: the same picker, its counts in labels.
 pub fn render_label_key_picker(model: &Model, p: &KeyPicker, f: &mut Frame, area: Rect) {
     draw_key_picker(model, p, ("Label keys", "", "label", "all keys"), f, area);
+}
+
+/// `F` without an app, `:focus` alone: the typed text and the apps it keeps.
+pub fn render_app_picker(model: &Model, p: &AppPicker, f: &mut Frame, area: Rect) {
+    let t = &model.theme;
+    let matches = p.matches();
+    let shown = matches.len().clamp(1, 10) as u16;
+    let r = centered(area, area.width.min(60), shown + 4);
+    f.render_widget(Clear, r);
+    let block = panel("Focus on an app", "Enter · Tab completes · Esc", t, true);
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("app: ", t.header_style()),
+            Span::styled(format!("{}▏", p.input), t.base()),
+        ]),
+        Line::from(""),
+    ];
+    if matches.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "no app of the loaded result matches",
+            t.dim_style(),
+        )));
+    }
+    let first = p.selected.saturating_sub(9);
+    for (i, app) in matches.iter().enumerate().skip(first).take(10) {
+        let style = if i == p.selected {
+            t.base().add_modifier(Modifier::REVERSED)
+        } else {
+            t.base()
+        };
+        lines.push(Line::from(Span::styled(format!("  {app}"), style)));
+    }
+    f.render_widget(Paragraph::new(lines).block(block).style(t.base()), r);
 }
 
 /// `(title, count prefix, count noun, all row)` name what the picker picks.

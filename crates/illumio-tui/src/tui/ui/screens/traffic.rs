@@ -83,7 +83,17 @@ pub fn render(model: &Model, f: &mut Frame, body: Rect) {
     }
 }
 
+/// The Result header: the focus badge (`focus shop/prod · in`, or `focus is
+/// partial: r re-queries shop/prod · in`) in front of the query's meta.
 fn query_meta(model: &Model) -> String {
+    let meta = result_meta(model);
+    match model.traffic.focus_meta() {
+        Some(focus) => format!("{focus} · {meta}"),
+        None => meta,
+    }
+}
+
+fn result_meta(model: &Model) -> String {
     match &model.traffic.query {
         QueryState::Running {
             started, status, ..
@@ -131,8 +141,9 @@ fn render_stats(model: &Model, f: &mut Frame, area: Rect) {
         );
         return;
     };
+    let shown = model.traffic.view_flows();
     let (mut a, mut p, mut b) = (0u64, 0u64, 0u64);
-    for fl in &d.flows {
+    for fl in shown.iter() {
         match fl.policy_decision {
             PolicyDecision::Allowed => a += 1,
             PolicyDecision::PotentiallyBlocked => p += 1,
@@ -140,8 +151,13 @@ fn render_stats(model: &Model, f: &mut Frame, area: Rect) {
             PolicyDecision::Unknown => {}
         }
     }
+    let count = if model.traffic.focus.is_some() {
+        format!("{} of {} flows ", shown.len(), d.flows.len())
+    } else {
+        format!("{} flows ", d.flows.len())
+    };
     let mut left = vec![
-        Span::styled(format!("{} flows ", d.flows.len()), t.header_style()),
+        Span::styled(count, t.header_style()),
         Span::styled(format!("allowed {a} "), Style::new().fg(t.ok)),
         Span::styled(format!("pot.blocked {p} "), Style::new().fg(t.warn)),
         Span::styled(format!("blocked {b}"), Style::new().fg(t.bad)),
@@ -158,7 +174,7 @@ fn render_stats(model: &Model, f: &mut Frame, area: Rect) {
     let cols = Layout::horizontal([Constraint::Length(left_w), Constraint::Min(10)]).split(inner);
     f.render_widget(Paragraph::new(Line::from(left)), cols[0]);
     let bar = bars::decision_bar(a, p, b, cols[1].width.saturating_sub(12) as usize, t);
-    let data = bars::sparkline_buckets(&d.flows, 12);
+    let data = bars::sparkline_buckets(&shown, 12);
     let max = *data.iter().max().unwrap_or(&1).max(&1);
     let spark: String = data
         .iter()

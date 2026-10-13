@@ -1454,3 +1454,32 @@ fn mesh_and_treemap_keep_the_truncated_marker() {
         assert!(out.contains("⚠ truncated"), "{view:?}: {out}");
     }
 }
+
+#[test]
+fn traffic_focus_badge_80x24() {
+    use illumio_tui::tui::commands::Command;
+    use illumio_tui::tui::msg::Msg;
+    let mut m = model_with_flows();
+    illumio_tui::tui::update(
+        &mut m,
+        Msg::Command(Command::Focus(Some("shop/prod".into()))),
+    );
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("focus shop/prod · both"), "{out}");
+    assert!(out.contains("4 of 4 flows"), "{out}");
+    insta::assert_snapshot!("traffic_focus_badge_80x24", out);
+}
+
+#[test]
+fn traffic_app_picker_80x24() {
+    use illumio_tui::tui::commands::Command;
+    use illumio_tui::tui::msg::Msg;
+    let mut m = model_with_flows();
+    illumio_tui::tui::update(&mut m, Msg::Command(Command::Focus(None)));
+    let out = render_to_string(&m, 80, 24);
+    assert!(
+        out.contains("Focus on an app") && out.contains("shop/prod"),
+        "{out}"
+    );
+    insta::assert_snapshot!("traffic_app_picker_80x24", out);
+}
