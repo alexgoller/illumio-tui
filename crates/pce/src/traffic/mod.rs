@@ -15,8 +15,8 @@ pub mod timeline;
 pub mod treemap;
 
 pub use aggregate::{
-    Dominant, FlowGroup, compact_count, dominant, group_by_labels, group_by_service, group_key,
-    group_text, group_values, keys_or_default, keys_seen,
+    Dominant, FlowGroup, compact_count, dominant, group_by_labels, group_by_service,
+    group_by_service_refs, group_key, group_text, group_values, keys_or_default, keys_seen,
 };
 pub use coverage::{
     BackfillPlan, BackfillRun, Coverage, MAX_SLICES, MIN_SLICE, Next, SLICE_STEPS, Step,

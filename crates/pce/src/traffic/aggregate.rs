@@ -156,7 +156,20 @@ pub fn group_by_service(flows: &[ResolvedFlow], keys: &[String]) -> Vec<FlowGrou
     group(flows, keys, true)
 }
 
-fn group(flows: &[ResolvedFlow], keys: &[String], by_service: bool) -> Vec<FlowGroup> {
+/// `group_by_service` over borrowed flows: a subset is grouped without
+/// cloning it.
+pub fn group_by_service_refs<'a>(
+    flows: impl IntoIterator<Item = &'a ResolvedFlow>,
+    keys: &[String],
+) -> Vec<FlowGroup> {
+    group(flows, keys, true)
+}
+
+fn group<'a>(
+    flows: impl IntoIterator<Item = &'a ResolvedFlow>,
+    keys: &[String],
+    by_service: bool,
+) -> Vec<FlowGroup> {
     let keys = keys_or_default(keys);
     type Key = (Vec<String>, Vec<String>, Option<String>);
     let mut map: BTreeMap<Key, FlowGroup> = BTreeMap::new();

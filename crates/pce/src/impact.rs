@@ -257,7 +257,7 @@ pub fn is_rule_href(path: &str) -> bool {
 /// The label hrefs a group stands for: its labels and its sub-groups',
 /// recursively. Each group is visited once, so a cycle ends; an unknown
 /// group adds nothing.
-fn group_members(href: &str, idx: &NameIndex) -> HashSet<String> {
+pub(crate) fn group_members(href: &str, idx: &NameIndex) -> HashSet<String> {
     let mut members = HashSet::new();
     let mut seen = HashSet::new();
     let mut todo = vec![canon(href).into_owned()];

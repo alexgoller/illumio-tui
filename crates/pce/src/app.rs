@@ -2,10 +2,10 @@
 //! by service and decision, its workloads' enforcement and VEN health, and
 //! the policy that covers it. Pure; no requests.
 use crate::models::{
-    Actor, ActorMatch, PolicyDecision, Ref, RuleSet, VenHealth, Workload, WorkloadFilter,
+    Actor, ActorMatch, PolicyDecision, RuleSet, VenHealth, Workload, WorkloadFilter,
 };
 use crate::resolve::NameIndex;
-use crate::traffic::{Direction, Focus, GroupKey, ResolvedFlow, group_by_service, group_key};
+use crate::traffic::{Direction, Focus, GroupKey, ResolvedFlow, group_by_service_refs, group_key};
 use jiff::Timestamp;
 use serde::Serialize;
 
@@ -44,19 +44,24 @@ pub fn app_peers(flows: &[ResolvedFlow], focus: &Focus, side: Direction) -> Vec<
             group_key(ep, &focus.keys) == focus.app
         })
         .collect();
-    let mut out = Vec::new();
-    for d in [
+    // One pass splits the side by decision; the groups borrow the flows.
+    const DECISIONS: [PolicyDecision; 4] = [
         PolicyDecision::Blocked,
         PolicyDecision::PotentiallyBlocked,
         PolicyDecision::Allowed,
         PolicyDecision::Unknown,
-    ] {
-        let part: Vec<ResolvedFlow> = on_side
+    ];
+    let mut parts: [Vec<&ResolvedFlow>; 4] = Default::default();
+    for f in on_side {
+        let i = DECISIONS
             .iter()
-            .filter(|f| f.policy_decision == d)
-            .map(|f| (*f).clone())
-            .collect();
-        for g in group_by_service(&part, &focus.keys) {
+            .position(|d| *d == f.policy_decision)
+            .unwrap_or(3);
+        parts[i].push(f);
+    }
+    let mut out = Vec::new();
+    for (d, part) in DECISIONS.into_iter().zip(parts) {
+        for g in group_by_service_refs(part, &focus.keys) {
             out.push(AppPeer {
                 peer: match side {
                     Direction::In => g.src,
@@ -250,14 +255,16 @@ pub struct AppPolicyRow {
     pub rules: usize,
 }
 
+/// The actor is one of the app's labels, or a label group holding one
+/// (its sub-groups included, recursively).
 fn names_app(a: &Actor, hrefs: &[String], idx: &NameIndex) -> bool {
     if let Some(l) = &a.label {
         return hrefs.contains(&l.href);
     }
     if let Some(g) = &a.label_group {
-        return idx
-            .label_group(&g.href)
-            .is_some_and(|g| g.labels.iter().any(|l: &Ref| hrefs.contains(&l.href)));
+        return crate::impact::group_members(&g.href, idx)
+            .iter()
+            .any(|l| hrefs.contains(l));
     }
     false
 }
@@ -300,10 +307,9 @@ pub fn app_policy(rule_sets: &[RuleSet], hrefs: &[String], idx: &NameIndex) -> V
                 .iter()
                 .filter(|s| scope_covers(s, hrefs, idx))
                 .collect();
-            let reason = if covering
-                .iter()
-                .any(|s| s.iter().any(|a| a.exclusion != Some(true)))
-            {
+            // A covering scope with actors (exclusions only included) is
+            // a scope; only an empty one (`[[]]`, or none) is every workload.
+            let reason = if covering.iter().any(|s| !s.is_empty()) {
                 PolicyReason::Scope
             } else if rs.scopes.is_empty() || !covering.is_empty() {
                 PolicyReason::AllWorkloads
@@ -332,6 +338,7 @@ pub fn app_policy(rule_sets: &[RuleSet], hrefs: &[String], idx: &NameIndex) -> V
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{Label, LabelGroup, Ref};
     use crate::traffic::resolved::tests::{flows, index};
     use crate::traffic::{FocusDirection, parse_app};
 
@@ -526,6 +533,68 @@ mod tests {
             scope_covers(&[], &h, &idx),
             "an empty scope is every workload"
         );
+    }
+
+    #[test]
+    fn a_label_group_names_the_app_through_its_sub_groups() {
+        let labels: Vec<Label> =
+            serde_json::from_str(include_str!("../../../fixtures/labels.json")).unwrap();
+        // outer -> inner -> env=prod; outer and loop point at each other.
+        let groups: Vec<LabelGroup> = serde_json::from_value(serde_json::json!([
+            {"href": "/orgs/5/sec_policy/draft/label_groups/20", "name": "outer", "key": "env",
+             "labels": [], "sub_groups": [{"href": "/orgs/5/sec_policy/active/label_groups/21"}, {"href": "/orgs/5/sec_policy/draft/label_groups/22"}]},
+            {"href": "/orgs/5/sec_policy/draft/label_groups/21", "name": "inner", "key": "env",
+             "labels": [{"href": "/orgs/5/labels/4"}], "sub_groups": []},
+            {"href": "/orgs/5/sec_policy/draft/label_groups/22", "name": "loop", "key": "env",
+             "labels": [], "sub_groups": [{"href": "/orgs/5/sec_policy/draft/label_groups/20"}]}
+        ]))
+        .unwrap();
+        let idx = NameIndex::new(&labels, &groups, &[], &[]);
+        let group = |h: &str| Actor {
+            label_group: Some(Ref::new(h)),
+            ..Actor::default()
+        };
+        let shop = Actor {
+            label: Some(Ref::new("/orgs/5/labels/3")),
+            ..Actor::default()
+        };
+        let h = shop_hrefs();
+        let outer = group("/orgs/5/sec_policy/draft/label_groups/20");
+        assert!(
+            scope_covers(&[shop.clone(), outer.clone()], &h, &idx),
+            "env=prod two groups down"
+        );
+        assert!(
+            scope_covers(
+                &[
+                    shop.clone(),
+                    group("/orgs/5/sec_policy/draft/label_groups/22")
+                ],
+                &h,
+                &idx
+            ),
+            "a cycle ends"
+        );
+        let set: RuleSet = serde_json::from_value(serde_json::json!({
+            "href": "/orgs/5/sec_policy/draft/rule_sets/300", "name": "Nested", "enabled": true,
+            "scopes": [[{"label": {"href": "/orgs/5/labels/3"}}, {"label_group": {"href": "/orgs/5/sec_policy/draft/label_groups/20"}}]],
+            "rules": []
+        }))
+        .unwrap();
+        assert_eq!(app_policy(&[set], &h, &idx)[0].reason, PolicyReason::Scope);
+    }
+
+    #[test]
+    fn a_scope_of_exclusions_only_is_a_scope_not_every_workload() {
+        let idx = index();
+        let set: RuleSet = serde_json::from_value(serde_json::json!({
+            "href": "/orgs/5/sec_policy/draft/rule_sets/400", "name": "Not-EU", "enabled": true,
+            "scopes": [[{"label": {"href": "/orgs/5/labels/5"}, "exclusion": true}]],
+            "rules": [{"href": "/r/9", "enabled": true, "consumers": [{"actors": "ams"}], "providers": [{"actors": "ams"}], "ingress_services": []}]
+        }))
+        .unwrap();
+        let rows = app_policy(&[set], &shop_hrefs(), &idx);
+        assert_eq!((rows[0].reason, rows[0].rules), (PolicyReason::Scope, 1));
     }
 
     #[test]
