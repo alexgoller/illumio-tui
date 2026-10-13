@@ -63,7 +63,7 @@ fn render_empty<T>(f: &mut Frame, inner: Rect, view: &TableView<T>, theme: &Them
 }
 
 /// `s` cut to at most `w` cells of display width (ratatui's measure).
-fn clip_width(s: &str, w: usize) -> String {
+pub(crate) fn clip_width(s: &str, w: usize) -> String {
     let mut out = String::new();
     let mut used = 0;
     for c in s.chars() {
@@ -78,7 +78,7 @@ fn clip_width(s: &str, w: usize) -> String {
 }
 
 /// `s` clipped and padded to exactly `w` cells, right-aligned when `right`.
-fn fit(s: &str, w: usize, right: bool) -> String {
+pub(crate) fn fit(s: &str, w: usize, right: bool) -> String {
     let s = clip_width(s, w);
     let pad = " ".repeat(w.saturating_sub(Span::raw(s.as_str()).width()));
     if right { pad + &s } else { s + &pad }

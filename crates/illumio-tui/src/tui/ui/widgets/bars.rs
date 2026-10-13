@@ -48,6 +48,21 @@ pub fn decision_bar(
     ])
 }
 
+/// `▁▂▃▅█`: `counts` scaled to the largest, one cell each, at most `width`
+/// (the newest buckets kept when they do not fit).
+pub fn sparkline(counts: &[u64], width: usize) -> String {
+    let max = counts.iter().copied().max().unwrap_or(0).max(1);
+    let skip = counts.len().saturating_sub(width);
+    counts
+        .iter()
+        .skip(skip)
+        .map(|&v| {
+            let i = ((v * 7) / max) as usize;
+            ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'][i.min(7)]
+        })
+        .collect()
+}
+
 /// Flow counts per time bucket by `last_detected`, oldest bucket first.
 pub fn sparkline_buckets(flows: &[ResolvedFlow], buckets: usize) -> Vec<u64> {
     let n = buckets.max(1);

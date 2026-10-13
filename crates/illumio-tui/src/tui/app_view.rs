@@ -4,6 +4,7 @@
 //! `ui::widgets::app_overlay` draws it.
 use jiff::Timestamp;
 use pce::app::{AppPeer, AppPolicyRow, AppWorkload, WorkloadSummary, app_peers};
+use pce::models::PolicyScope;
 use pce::traffic::{
     APPROX_BUCKETS, Direction, Focus, FocusDirection, ResolvedFlow, Timeline, approx_timeline,
     equal_buckets,
@@ -85,6 +86,9 @@ pub struct AppView {
     pub policy: Loadable<Vec<AppPolicyRow>>,
     /// The rulesets were requested by this overlay (an answer counts).
     pub policy_sent: bool,
+    /// Draft or active: the Policy screen's setting the panel was filled
+    /// (or is loading) for. Another one makes the panel stale.
+    pub policy_scope: PolicyScope,
     /// Requests this overlay sent.
     pub requests: u32,
     /// Of those, the ones answered from the cache.
@@ -108,6 +112,7 @@ impl AppView {
             workloads_truncated: false,
             policy: Loadable::Loading,
             policy_sent: false,
+            policy_scope: PolicyScope::Draft,
             requests: 0,
             cached: 0,
         }

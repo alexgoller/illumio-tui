@@ -14,29 +14,20 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 
-/// `▁▂▃▅█`: `counts` scaled to the largest, one cell each, at most `width`
-/// (the newest buckets kept when they do not fit).
-pub fn sparkline(counts: &[u64], width: usize) -> String {
-    let max = counts.iter().copied().max().unwrap_or(0).max(1);
-    let skip = counts.len().saturating_sub(width);
-    counts
-        .iter()
-        .skip(skip)
-        .map(|&v| {
-            let i = ((v * 7) / max) as usize;
-            ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'][i.min(7)]
-        })
-        .collect()
+pub use crate::tui::ui::widgets::bars::sparkline;
+use crate::tui::ui::widgets::table::{clip_width, fit as fit_cells};
+
+/// Display width, as ratatui measures it.
+fn width(s: &str) -> usize {
+    Span::raw(s).width()
 }
 
+/// `s` padded to `w` cells, or cut with `…` when wider.
 fn fit(s: &str, w: usize) -> String {
-    let n = s.chars().count();
-    if n <= w {
-        format!("{s:<w$}")
-    } else if w == 0 {
-        String::new()
+    if width(s) <= w || w == 0 {
+        fit_cells(s, w, false)
     } else {
-        format!("{}…", s.chars().take(w - 1).collect::<String>())
+        fit_cells(&format!("{}…", clip_width(s, w - 1)), w, false)
     }
 }
 
@@ -147,10 +138,10 @@ fn render_summary(v: &AppView, t: &Theme, f: &mut Frame, area: Rect) {
     f.render_widget(Paragraph::new(lines), area);
 }
 
-fn peer_line<'a>(p: &AppPeer, width: usize, t: &Theme) -> Line<'a> {
+fn peer_line<'a>(p: &AppPeer, cells: usize, t: &Theme) -> Line<'a> {
     let conns = compact_count(p.connections);
     let svc_w = 9;
-    let peer_w = width.saturating_sub(svc_w + conns.len().max(5) + 4);
+    let peer_w = cells.saturating_sub(svc_w + conns.len().max(5) + 4);
     Line::from(Span::styled(
         format!(
             "{} {} {} {:>5}",
@@ -235,7 +226,12 @@ fn render_timeline(v: &AppView, t: &Theme, f: &mut Frame, area: Rect) {
 
 fn render_policy(v: &AppView, t: &Theme, f: &mut Frame, area: Rect) {
     let focused = v.panel == AppPanel::Policy;
-    let block = panel(AppPanel::Policy.title(), "", t, focused);
+    let title = format!(
+        "{} · {}",
+        AppPanel::Policy.title(),
+        v.policy_scope.segment()
+    );
+    let block = panel(&title, "", t, focused);
     let inner = block.inner(area);
     f.render_widget(block, area);
     let rows = match &v.policy {
@@ -270,7 +266,7 @@ fn render_policy(v: &AppView, t: &Theme, f: &mut Frame, area: Rect) {
                 r.rules,
                 if r.rules == 1 { "" } else { "s" }
             );
-            let name_w = w.saturating_sub(tail.chars().count() + 5);
+            let name_w = w.saturating_sub(width(&tail) + 5);
             let style = if r.enabled { t.base() } else { t.dim_style() };
             Line::from(Span::styled(
                 format!("RS {}  {tail}", fit(&r.name, name_w)),
@@ -347,4 +343,19 @@ fn render_workloads(v: &AppView, t: &Theme, f: &mut Frame, area: Rect) {
         ),
         inner,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fit_pads_and_cuts_by_display_width() {
+        assert_eq!(fit("web", 5), "web  ");
+        let wide = fit("日本語ab", 4);
+        assert_eq!(width(&wide), 4, "{wide:?}");
+        assert!(wide.starts_with("日…"), "{wide:?}");
+        assert_eq!(fit("abc", 0), "");
+        assert_eq!(sparkline(&[0, 1, 7], 2), "▂█", "the newest two");
+    }
 }

@@ -174,15 +174,7 @@ fn render_stats(model: &Model, f: &mut Frame, area: Rect) {
     let cols = Layout::horizontal([Constraint::Length(left_w), Constraint::Min(10)]).split(inner);
     f.render_widget(Paragraph::new(Line::from(left)), cols[0]);
     let bar = bars::decision_bar(a, p, b, cols[1].width.saturating_sub(12) as usize, t);
-    let data = bars::sparkline_buckets(shown, 12);
-    let max = *data.iter().max().unwrap_or(&1).max(&1);
-    let spark: String = data
-        .iter()
-        .map(|&v| {
-            let idx = ((v * 7) / max) as usize;
-            ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'][idx.min(7)]
-        })
-        .collect();
+    let spark = bars::sparkline(&bars::sparkline_buckets(shown, 12), 12);
     let mut right = bar.spans;
     right.insert(
         0,

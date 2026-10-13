@@ -29,9 +29,17 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::QueryDone { .. } | Msg::FocusedDone { .. } | Msg::SliceDone { .. }
     );
     let cmds = on_msg(model, msg);
-    // A traffic answer that lands under the open app overlay: its peers and
-    // timeline follow (no request).
-    if traffic_answer && model.overlay == Overlay::App {
+    // A traffic answer that lands under the open app overlay (or its reload
+    // prompt): its peers and timeline follow (no request).
+    let app_open = matches!(
+        model.overlay,
+        Overlay::App
+            | Overlay::Confirm {
+                action: PendingAction::ReloadApp,
+                ..
+            }
+    );
+    if traffic_answer && app_open {
         rebuild_app_traffic(model);
     }
     cmds
@@ -431,7 +439,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     } else {
                         CacheMode::Use
                     };
-                    refresh_app_policy(model, Ok(hit));
+                    refresh_app_policy(model, scope, Ok(hit));
                     // Off the Policy screen (the app overlay, `u` on Labels)
                     // nothing shows the deny rules: `switch` asks on entry.
                     if model.screen == Screen::Policy {
@@ -445,7 +453,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     model.policy.bypass_deny = false;
                     let tripped = model.policy.auto.take_tick_failure();
                     fail(model, "rulesets", &e, tripped);
-                    refresh_app_policy(model, Err(&e));
+                    refresh_app_policy(model, scope, Err(&e));
                     Vec::new()
                 }
             }
@@ -514,6 +522,15 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     w.show_detail &= w.table.selected_item().is_some();
                     model.status =
                         StatusLine::info(format!("{} workloads", model.workloads.table.len()));
+                    // `Enter` on a workload in the app overlay before the list was here.
+                    if let Some(href) = model.workloads.open_on_load.take() {
+                        let w = &mut model.workloads;
+                        w.table.select_where(|r| r.workload.href == href);
+                        w.show_detail = w
+                            .table
+                            .selected_item()
+                            .is_some_and(|r| r.workload.href == href);
+                    }
                     // The rules pane's P/C and impact follow; an open rule
                     // detail reads them from the rows, so no overlay is
                     // touched here.
@@ -523,6 +540,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 }
                 Err(e) => {
                     model.workloads.error = Some(e.clone());
+                    model.workloads.open_on_load = None;
                     let tripped = model.workloads.auto.take_tick_failure();
                     fail(model, "could not load workloads", &e, tripped);
                 }
@@ -2065,11 +2083,15 @@ fn open_app(model: &mut Model, focus: Focus) -> Vec<Cmd> {
         }
         _ => v.workloads = Loadable::Unavailable(why.clone()),
     }
+    // A panel of the other scope (`:draft` / `:active` since) is stale.
+    let same_scope = v.policy_scope == model.policy.scope;
+    v.policy_scope = model.policy.scope;
     match (&v.label_hrefs, &idx) {
         (Some(hrefs), Some(idx)) if model.policy.loaded_at.is_some() => {
             v.policy = Loadable::Loaded(pce::app::app_policy(&model.policy.raw, hrefs, idx));
         }
-        (Some(_), Some(_)) if reused && !matches!(v.policy, Loadable::Unavailable(_)) => {}
+        (Some(_), Some(_))
+            if reused && same_scope && !matches!(v.policy, Loadable::Unavailable(_)) => {}
         (Some(_), Some(_)) if model.policy.loading => {
             v.policy = Loadable::Loading;
             v.policy_sent = false;
@@ -2083,11 +2105,8 @@ fn open_app(model: &mut Model, focus: Focus) -> Vec<Cmd> {
     }
     let sent = u32::try_from(cmds.len()).unwrap_or(u32::MAX);
     v.requests += sent;
-    model.status = StatusLine::info(format!(
-        "{} · {sent} request{}",
-        focus.app_text(),
-        if sent == 1 { "" } else { "s" }
-    ));
+    // `req` as in the header: the hints beside it leave about 20 columns.
+    model.status = StatusLine::info(format!("{} · {sent} req", focus.app_text()));
     model.app_view = Some(v);
     model.overlay = Overlay::App;
     cmds
@@ -2143,8 +2162,14 @@ fn app_reload_key(model: &mut Model) {
         model.status = StatusLine::info(format!("nothing to reload: {app} is not a label group"));
         return;
     }
+    // The rulesets are not asked again while a load of them is on its way.
+    let reason = if model.policy.loading {
+        format!("Reload the workloads of {app} (the rulesets are on their way): 1 request? (y/n)")
+    } else {
+        format!("Reload the workloads and the rulesets of {app}: 2 requests? (y/n)")
+    };
     model.overlay = Overlay::Confirm {
-        reason: format!("Reload the workloads and the rulesets of {app}: 2 requests? (y/n)"),
+        reason,
         action: PendingAction::ReloadApp,
     };
 }
@@ -2163,6 +2188,7 @@ fn app_reload(model: &mut Model) -> Vec<Cmd> {
     };
     v.workloads = Loadable::Loading;
     v.policy = Loadable::Loading;
+    v.policy_scope = model.policy.scope;
     v.cached = 0;
     let mut cmds = vec![Cmd::LoadAppWorkloads {
         seq: v.seq,
@@ -2219,9 +2245,11 @@ fn app_enter(model: &mut Model) -> Vec<Cmd> {
                 .table
                 .selected_item()
                 .is_some_and(|r| r.workload.href == href);
+            w.open_on_load = None;
             if !w.show_detail {
-                model.status =
-                    StatusLine::info("the Workloads screen is loading: Enter there opens it");
+                // Not in the list yet: opened when the list arrives.
+                w.open_on_load = Some(href);
+                model.status = StatusLine::info("loading the workloads: its detail opens then");
             }
             cmds
         }
@@ -2291,12 +2319,12 @@ fn app_rule_key(model: &mut Model) -> Vec<Cmd> {
 /// The overlay's policy panel from the rulesets that just arrived (`hit`:
 /// from the cache), or their error, while it waits for them. Fills the
 /// view only: never reopens a closed overlay.
-fn refresh_app_policy(model: &mut Model, outcome: Result<bool, &str>) {
+fn refresh_app_policy(model: &mut Model, scope: PolicyScope, outcome: Result<bool, &str>) {
     let idx = model.index().cloned();
     let Some(v) = model.app_view.as_mut() else {
         return;
     };
-    if !matches!(v.policy, Loadable::Loading) {
+    if !matches!(v.policy, Loadable::Loading) || v.policy_scope != scope {
         return;
     }
     match (outcome, idx, v.label_hrefs.as_ref()) {
@@ -14405,6 +14433,168 @@ mod app_tests {
             matches!(cmds.as_slice(), [Cmd::LoadDenyRules { .. }]),
             "{cmds:?}"
         );
+    }
+
+    fn one_flow_answer(m: &Model) -> Msg {
+        Msg::QueryDone {
+            seq: m.traffic.seq,
+            result: Ok(crate::tui::msg::QueryOutcome {
+                flows: m.traffic.loaded_flows()[..1].to_vec(),
+                truncated: false,
+                matches_count: Some(1),
+                elapsed: std::time::Duration::ZERO,
+                hit: false,
+                filter: m.traffic.filter.clone(),
+                bounds: None,
+            }),
+        }
+    }
+
+    #[test]
+    fn a_on_pairs_mesh_and_treemap_opens_the_rows_app() {
+        let mut m = everything();
+        quiet(&mut m, key('v'));
+        assert_eq!(m.traffic.apps_state.by, crate::tui::model::By::Pairs);
+        m.traffic
+            .groups
+            .select_where(|g| g.dst.join("/") == "fqdn-1.example/-");
+        quiet(&mut m, key('A'));
+        assert_eq!(view(&m).focus.app_text(), "shop/prod", "a pair: its source");
+        quiet(&mut m, kc(KeyCode::Esc));
+
+        m.traffic.view = TrafficView::Mesh;
+        m.traffic
+            .mesh
+            .select_where(|r| r.src.join("/") == "unmanaged-nas/-");
+        quiet(&mut m, key('A'));
+        assert_eq!(
+            view(&m).focus.app_text(),
+            "unmanaged-nas/-",
+            "a mesh row: its source"
+        );
+        quiet(&mut m, kc(KeyCode::Esc));
+
+        let mut m = with_policy(with_workloads(
+            crate::tui::test_support::model_with_rich_flows(),
+        ));
+        m.traffic.view = TrafficView::Treemap;
+        let tm = &m.traffic.treemap;
+        let label = tm.tile(tm.current().expect("a tile")).label.clone();
+        let cmds = update(&mut m, key('A'));
+        assert_eq!(m.overlay, Overlay::App);
+        assert_eq!(
+            view(&m).focus.app_text(),
+            label,
+            "a treemap tile: its source group"
+        );
+        assert!(requests(&cmds) <= 2);
+        assert_eq!(requests(&cmds), view(&m).requests);
+    }
+
+    #[test]
+    fn a_traffic_answer_under_the_reload_prompt_rebuilds_the_peers() {
+        let mut m = everything();
+        quiet(&mut m, key('A'));
+        quiet(&mut m, key('r'));
+        assert!(matches!(m.overlay, Overlay::Confirm { .. }));
+        let answer = one_flow_answer(&m);
+        let _ = update(&mut m, answer);
+        quiet(&mut m, key('n'));
+        assert_eq!(m.overlay, Overlay::App);
+        assert_eq!((view(&m).inbound.len(), view(&m).outbound.len()), (1, 1));
+    }
+
+    #[test]
+    fn a_reused_view_drops_policy_rows_of_the_other_scope() {
+        let mut m = everything();
+        quiet(&mut m, key('A'));
+        assert_eq!(view(&m).policy_scope, PolicyScope::Draft);
+        quiet(&mut m, kc(KeyCode::Esc));
+        let cmds = update(&mut m, Msg::Command(Command::Active));
+        assert!(matches!(
+            cmds.as_slice(),
+            [Cmd::LoadRuleSets {
+                scope: PolicyScope::Active,
+                ..
+            }]
+        ));
+        m.screen = Screen::Traffic;
+        quiet(&mut m, key('A')); // the active load is on its way: not doubled
+        let v = view(&m);
+        assert_eq!(v.policy_scope, PolicyScope::Active);
+        assert!(
+            matches!(v.policy, Loadable::Loading),
+            "no draft rows: {:?}",
+            v.policy
+        );
+        let mut rs: Vec<pce::models::RuleSet> =
+            serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
+        rs.truncate(1);
+        let _ = update(
+            &mut m,
+            Msg::RuleSetsLoaded {
+                scope: PolicyScope::Active,
+                result: Ok((rs, 0, false)),
+            },
+        );
+        assert!(matches!(&view(&m).policy, Loadable::Loaded(rows) if rows.len() == 1));
+    }
+
+    #[test]
+    fn the_reload_prompt_counts_what_it_will_send() {
+        let mut m = model_with_flows();
+        let _ = update(&mut m, key('A')); // workloads and rulesets on their way
+        quiet(&mut m, key('r'));
+        let Overlay::Confirm { reason, .. } = &m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        assert_eq!(
+            reason,
+            "Reload the workloads of shop/prod (the rulesets are on their way): 1 request? (y/n)"
+        );
+        let cmds = update(&mut m, key('y'));
+        assert_eq!(requests(&cmds), 1);
+        assert_eq!(view(&m).requests, 3);
+    }
+
+    #[test]
+    fn enter_on_a_workload_before_its_list_opens_it_when_the_list_arrives() {
+        let mut m = model_with_flows();
+        let _ = update(&mut m, key('A'));
+        let seq = view(&m).seq;
+        quiet(
+            &mut m,
+            Msg::AppWorkloadsLoaded {
+                seq,
+                result: Ok(AppWorkloadsPayload {
+                    workloads: fixture_workloads(),
+                    truncated: false,
+                    hit: false,
+                }),
+            },
+        );
+        quiet(&mut m, kc(KeyCode::BackTab)); // Workloads
+        quiet(&mut m, key('j'));
+        let cmds = update(&mut m, kc(KeyCode::Enter));
+        assert!(
+            matches!(cmds.as_slice(), [Cmd::LoadWorkloads(_)]),
+            "{cmds:?}"
+        );
+        assert_eq!(m.screen, Screen::Workloads);
+        assert!(!m.workloads.show_detail);
+        let _ = update(
+            &mut m,
+            Msg::WorkloadsLoaded(Ok((fixture_workloads(), 0, false))),
+        );
+        assert!(m.workloads.show_detail);
+        assert_eq!(
+            m.workloads
+                .table
+                .selected_item()
+                .map(|r| r.workload.href.as_str()),
+            Some("/orgs/5/workloads/aaaa-2")
+        );
+        assert_eq!(m.workloads.open_on_load, None);
     }
 
     #[test]

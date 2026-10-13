@@ -17,7 +17,7 @@ expression: out
 │╭ Blocked over time ─────────────────────────────────────────────────────────╮│
 ││no time range in this result                                                ││
 │╰────────────────────────────────────────────────────────────────────────────╯│
-│╭ Policy ─────────────────────────────╮╭ Workloads ──────────────────────────╮│
+│╭ Policy · draft ─────────────────────╮╭ Workloads ──────────────────────────╮│
 ││loading…                             ││loading…                             ││
 ││                                     ││                                     ││
 ││                                     ││                                     ││
@@ -25,4 +25,4 @@ expression: out
 ││                                     ││                                     ││
 │╰─────────────────────────────────────╯╰─────────────────────────────────────╯│
 ╰──────────────────────────────────────────────────────────────────────────────╯
-shop/prod · 2 requests Tab panel  X dir  Enter open  w rule  r reload  Esc back
+shop/prod · 2 req    │ Tab panel  X dir  Enter open  w rule  r reload  Esc back

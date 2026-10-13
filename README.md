@@ -185,10 +185,10 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   active is healthy or warning, stale is offline or error), its inbound and outbound peers by
   service and decision, blocked traffic over time (`approx`: flow records by last-detected
   time), and the rulesets whose scope covers it (a global scope shows as `all`) or whose rules
-  name its labels (draft or active, as on the Policy screen). The traffic panels come from the
+  name its labels (draft or active, as on the Policy screen; its title says which). The traffic panels come from the
   loaded result; the workloads and the rulesets come from their screens when those are loaded,
   else one request each (cached), counted in the overlay's header. Reopening the same app sends
-  nothing. `:app` also opens an app that has labels but no flows in the window. `Tab` moves
+  nothing (after `:draft` / `:active` its policy panel loads again). `:app` also opens an app that has labels but no flows in the window. `Tab` moves
   between panels; `Enter` on a peer focuses that pair in Flows, on a workload opens its detail,
   on a ruleset opens it on the Policy screen; `w` drafts an allow rule from a blocked peer
   (writes on; the form replaces the overlay and `A` brings it back); `r` reloads the panels

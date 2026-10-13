@@ -282,3 +282,9 @@ Spec: docs/superpowers/specs/2026-10-11-traffic-views-design.md · Plan: docs/su
 - Tests: 1117 passing, workspace. `git diff main -- '*Cargo.toml' Cargo.lock` empty.
 - Smoke (demo100, read-only, no `--yes`, no `y`): `app pos/Staging --window 1h --max-results 200 --json`: 21 workloads (selective 21, 21 active VENs), 47 inbound / 43 outbound peer rows, 17 rulesets, 24 approx buckets (62 blocked records), meta.queries 2, 14 api calls, truncated (the 200-row cap). Nothing was written to any PCE.
 - Deviations: reopening the same app (after `Esc`, `w`, or `Enter`) keeps its view (seq, panels, cursors) and sends nothing, instead of rebuilding it; only another app gets a new seq. A traffic answer that lands under the open overlay rebuilds its peers. The status line shows the overlay's keys. `1 rule` singular. `a_stale_workloads_answer_is_dropped` reopens another app (`A` on the unmanaged-nas row: `:app` only takes loaded or labelled apps) and two tests were added (late answer never reopens; reopen sends nothing). `:app` on an unknown app falls back to the label index's closest values when no loaded app is close.
+
+### Review fixes (App focus 2)
+- I1: deny-rule fallback only on the Policy screen (entering it asks); the overlay's tests count every request command and feed every answer; end-to-end budget test.
+- I2: label groups name the app through their sub-groups (`impact::group_members`).
+- I3: CLI `meta.truncated` is the traffic's; `workloads.truncated` and `policy {scope, truncated, rows}`.
+- Minors: rulesets answers carry `hit`; peers rebuilt under the reload prompt; policy panel tied to its draft/active scope; reload prompt counts its requests; shared display-width fit and sparkline; peers grouped by reference; exclusion-only scope is `scope`; Enter on a workload before its list opens it on arrival; `A` tests on pairs, Mesh, Treemap; `--section` filters JSON; status/hints separator.

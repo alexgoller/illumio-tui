@@ -12,7 +12,7 @@ use ratatui::widgets::Paragraph;
 const STATUS_ROOM: usize = 40;
 
 /// The app overlay's keys: it takes every key, so the screen's do not apply.
-const APP_HINTS: &str = " Tab panel  X dir  Enter open  w rule  r reload  Esc back ";
+const APP_HINTS: &str = " │ Tab panel  X dir  Enter open  w rule  r reload  Esc back ";
 
 pub fn render(model: &Model, f: &mut Frame, area: Rect) {
     let t = &model.theme;
@@ -35,7 +35,7 @@ pub fn render(model: &Model, f: &mut Frame, area: Rect) {
     } else if !more.is_empty() && width >= hints.len() + more.len() + 2 + STATUS_ROOM {
         hints = format!(" {base}  {more}  : cmd  ? help ");
     }
-    let left_width = area.width.saturating_sub(hints.len() as u16) as usize;
+    let left_width = area.width.saturating_sub(hints.chars().count() as u16) as usize;
     let text: String = model.status.text.chars().take(left_width).collect();
     let pad = left_width.saturating_sub(text.chars().count());
     let line = Line::from(vec![

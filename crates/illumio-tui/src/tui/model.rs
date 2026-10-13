@@ -3932,6 +3932,9 @@ pub struct WorkloadsState {
     /// The name index failed, so the screen could not load; `r` retries the index.
     pub index_failed: bool,
     pub auto: AutoRefresh,
+    /// `Enter` on a workload in the app overlay while this list loads: the
+    /// workload selected, its detail open, once the list arrives.
+    pub open_on_load: Option<String>,
 }
 
 impl WorkloadsState {
@@ -3950,6 +3953,7 @@ impl WorkloadsState {
             show_detail: false,
             index_failed: false,
             auto: AutoRefresh::new(min_refresh),
+            open_on_load: None,
         }
     }
 

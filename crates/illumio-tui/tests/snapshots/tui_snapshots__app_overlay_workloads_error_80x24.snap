@@ -17,7 +17,7 @@ expression: out
 │╭ Blocked over time ─────────────────────────────────────────────────────────╮│
 ││▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁█  approx                                            ││
 │╰────────────────────────────────────────────────────────────────────────────╯│
-│╭ Policy ─────────────────────────────╮╭ Workloads ──────────────────────────╮│
+│╭ Policy · draft ─────────────────────╮╭ Workloads ──────────────────────────╮│
 ││RS Shop-Prod                  4 rules││HTTP 500 · r retries                 ││
 ││RS Global-Infra          1 rule · all││                                     ││
 ││                                     ││                                     ││
@@ -25,4 +25,4 @@ expression: out
 ││                                     ││                                     ││
 │╰─────────────────────────────────────╯╰─────────────────────────────────────╯│
 ╰──────────────────────────────────────────────────────────────────────────────╯
-shop/prod · 1 request  Tab panel  X dir  Enter open  w rule  r reload  Esc back
+shop/prod · 1 req    │ Tab panel  X dir  Enter open  w rule  r reload  Esc back
