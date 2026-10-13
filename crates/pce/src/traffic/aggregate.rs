@@ -116,6 +116,10 @@ pub fn keys_seen(flows: &[ResolvedFlow], order: &KeyOrder) -> Vec<(String, usize
 pub struct FlowGroup {
     pub src: Vec<String>,
     pub dst: Vec<String>,
+    /// `5432/tcp` (or `icmp`) when grouped by service as well
+    /// (`group_by_service`); `None` for a plain pair.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
     pub flows: u64,
     pub connections: u64,
     /// Bytes in plus out over the group's flows; 0 when none reported any.
@@ -130,21 +134,42 @@ impl FlowGroup {
         dominant(self.allowed, self.potentially_blocked, self.blocked)
     }
 
-    /// Whether `f` is one of this group's flows under `keys`.
+    /// Whether `f` is one of this group's flows under `keys` (on its
+    /// service too when it has one).
     pub fn contains(&self, f: &ResolvedFlow, keys: &[String]) -> bool {
         let keys = keys_or_default(keys);
-        group_key(&f.src, &keys) == self.src && group_key(&f.dst, &keys) == self.dst
+        group_key(&f.src, &keys) == self.src
+            && group_key(&f.dst, &keys) == self.dst
+            && self.service.as_ref().is_none_or(|s| *s == f.service_text())
     }
 }
 
+/// One row per source group and destination group.
 pub fn group_by_labels(flows: &[ResolvedFlow], keys: &[String]) -> Vec<FlowGroup> {
+    group(flows, keys, false)
+}
+
+/// One row per source group, destination group and service (`port/proto`,
+/// or `icmp` without a port): the policy tuple. Hosts, IPs, users and
+/// processes collapse; the totals are those of `group_by_labels`.
+pub fn group_by_service(flows: &[ResolvedFlow], keys: &[String]) -> Vec<FlowGroup> {
+    group(flows, keys, true)
+}
+
+fn group(flows: &[ResolvedFlow], keys: &[String], by_service: bool) -> Vec<FlowGroup> {
     let keys = keys_or_default(keys);
-    let mut map: BTreeMap<(Vec<String>, Vec<String>), FlowGroup> = BTreeMap::new();
+    type Key = (Vec<String>, Vec<String>, Option<String>);
+    let mut map: BTreeMap<Key, FlowGroup> = BTreeMap::new();
     for f in flows {
-        let key = (group_key(&f.src, &keys), group_key(&f.dst, &keys));
+        let key = (
+            group_key(&f.src, &keys),
+            group_key(&f.dst, &keys),
+            by_service.then(|| f.service_text()),
+        );
         let g = map.entry(key.clone()).or_insert_with(|| FlowGroup {
             src: key.0.clone(),
             dst: key.1.clone(),
+            service: key.2.clone(),
             flows: 0,
             connections: 0,
             bytes: 0,
@@ -211,6 +236,79 @@ mod tests {
                 .all(|w| w[0].connections >= w[1].connections),
             "sorted by connections desc"
         );
+    }
+
+    #[test]
+    fn group_by_service_splits_pairs_by_port_and_keeps_the_totals() {
+        let k = keys(&["app", "env"]);
+        let f = flows();
+        let tuples = group_by_service(&f, &k);
+        let icmp = tuples
+            .iter()
+            .find(|g| g.src == vec!["unmanaged-nas", "-"])
+            .expect("the icmp flow");
+        assert_eq!(icmp.service.as_deref(), Some("icmp"), "no port: just icmp");
+        assert!(icmp.contains(&f[2], &k));
+        assert!(group_by_labels(&f, &k).iter().all(|g| g.service.is_none()));
+
+        let rich = rich_flows();
+        let pairs = group_by_labels(&rich, &k);
+        let tuples = group_by_service(&rich, &k);
+        assert!(tuples.len() > pairs.len(), "some pair carries two services");
+        assert!(tuples.iter().all(|g| g.service.is_some()));
+        let sum = |gs: &[FlowGroup]| {
+            gs.iter().fold((0, 0, 0, 0, 0, 0), |a, g| {
+                (
+                    a.0 + g.flows,
+                    a.1 + g.connections,
+                    a.2 + g.bytes,
+                    a.3 + g.allowed,
+                    a.4 + g.potentially_blocked,
+                    a.5 + g.blocked,
+                )
+            })
+        };
+        assert_eq!(sum(&tuples), sum(&pairs), "every flow in exactly one tuple");
+        for p in &pairs {
+            let parts: Vec<&FlowGroup> = tuples
+                .iter()
+                .filter(|t| t.src == p.src && t.dst == p.dst)
+                .collect();
+            assert_eq!(
+                parts.iter().map(|t| t.connections).sum::<u64>(),
+                p.connections
+            );
+        }
+        for t in &tuples {
+            let behind: Vec<&ResolvedFlow> = rich.iter().filter(|f| t.contains(f, &k)).collect();
+            assert_eq!(behind.len() as u64, t.flows);
+            assert!(behind.iter().all(|f| Some(f.service_text()) == t.service));
+        }
+    }
+
+    #[test]
+    fn group_by_service_collapses_hosts_processes_and_users() {
+        let k = keys(&["app", "env"]);
+        let mut a = flows()[0].clone();
+        a.process_name = Some("nginx".into());
+        a.user_name = Some("www".into());
+        let mut b = a.clone();
+        b.src.hostname = Some("other-host".into());
+        b.src.name = Some("other-host".into());
+        b.src.ip = Some("10.9.9.9".into());
+        b.dst.ip = Some("10.9.9.10".into());
+        b.process_name = Some("httpd".into());
+        b.user_name = Some("root".into());
+        b.num_connections = 5;
+        let tuples = group_by_service(&[a.clone(), b], &k);
+        assert_eq!(tuples.len(), 1, "{tuples:?}");
+        assert_eq!(tuples[0].flows, 2);
+        assert_eq!(tuples[0].connections, a.num_connections + 5);
+        assert_eq!(tuples[0].service, Some(a.service_text()));
+        let json = serde_json::to_value(&tuples[0]).unwrap();
+        assert_eq!(json["service"], a.service_text());
+        let json = serde_json::to_value(&group_by_labels(&[a], &k)[0]).unwrap();
+        assert!(json.get("service").is_none(), "pairs JSON unchanged");
     }
 
     #[test]

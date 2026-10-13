@@ -321,6 +321,7 @@ mod tests {
         FlowGroup {
             src: vec![src.into()],
             dst: vec![dst.into()],
+            service: None,
             flows: 1,
             connections,
             bytes: 0,
