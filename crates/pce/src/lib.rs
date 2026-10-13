@@ -10,6 +10,7 @@
 //!   truncation reporting.
 //! - `models`, `resolve`, `traffic`: data types, href-to-name resolution, and
 //!   the Explorer traffic query (builder, poller, aggregation).
+pub mod app;
 pub mod auth;
 pub mod cache;
 pub mod client;
