@@ -72,7 +72,7 @@ pub enum ByArg {
     Both,
 }
 
-/// `traffic groups --show`: which decisions the sections count.
+/// `traffic groups --show`: which decisions the pairs or sections count.
 #[derive(ValueEnum, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ShowArg {
     #[default]
@@ -103,8 +103,9 @@ pub struct GroupsArgs {
     /// pairs (default), or sections per app: in, out, both (JSON: `{"sections": [...]}`)
     #[arg(long, value_enum, default_value_t)]
     pub by: ByArg,
-    /// Sections only: count all flows, blocked (and potentially blocked) or blocked-only.
-    /// Applied to the loaded flows; `--decision` filters the query itself
+    /// Count all flows, blocked (and potentially blocked) or blocked-only, in the pairs
+    /// (with `--services` too) or the sections. Applied to the loaded flows; `--decision`
+    /// filters the query itself
     #[arg(long, value_enum, default_value_t)]
     pub show: ShowArg,
     /// Sections only: keep this app's sections, e.g. pos/PCI
@@ -677,7 +678,7 @@ pub fn app_miss(args: &GroupsArgs, s: &Sections) -> Option<String> {
 }
 
 /// `--by`, `--show` and `--app` over the loaded flows: the sections, or
-/// `None` for `pairs`. `--show` and `--app` need sections.
+/// `None` for `pairs` (see `pairs_for`). `--app` needs sections.
 pub fn sections_for(
     flows: &[ResolvedFlow],
     keys: &[String],
@@ -686,9 +687,9 @@ pub fn sections_for(
     let decisions = Decisions::from(args.show);
     let mut sections = match args.by {
         ByArg::Pairs => {
-            if args.show != ShowArg::All || args.app.is_some() {
+            if args.app.is_some() {
                 return Err(CliError::Args(
-                    "--show and --app need sections: add --by in, out or both".into(),
+                    "--app needs sections: add --by in, out or both".into(),
                 ));
             }
             return Ok(None);
@@ -704,6 +705,17 @@ pub fn sections_for(
         sections,
         both: args.by == ByArg::Both,
     }))
+}
+
+/// The pairs (by service with `--services`) of the loaded flows `--show`
+/// keeps.
+pub fn pairs_for(flows: &[ResolvedFlow], keys: &[String], args: &GroupsArgs) -> Vec<FlowGroup> {
+    let kept = Decisions::from(args.show).kept(flows);
+    if args.services {
+        group_by_service(&kept, keys)
+    } else {
+        group_by_labels(&kept, keys)
+    }
 }
 
 pub async fn run(ctx: &Context, cmd: &TrafficCmd) -> Result<(), CliError> {
@@ -944,10 +956,10 @@ async fn groups(ctx: &Context, args: &GroupsArgs) -> Result<(), CliError> {
             ctx.emit_meta(&sections, &f.meta(ctx))
         }
         None if args.services => ctx.emit_meta(
-            &ServiceGroups(group_by_service(&f.flows, &keys)),
+            &ServiceGroups(pairs_for(&f.flows, &keys, args)),
             &f.meta(ctx),
         ),
-        None => ctx.emit_meta(&group_by_labels(&f.flows, &keys), &f.meta(ctx)),
+        None => ctx.emit_meta(&pairs_for(&f.flows, &keys, args), &f.meta(ctx)),
     }
 }
 
@@ -1145,10 +1157,38 @@ mod tests {
             (s.sections[0].direction, s.sections[1].direction),
             (Direction::In, Direction::Out)
         );
-        for argv in [&["--app", "shop/prod"][..], &["--show", "blocked"][..]] {
-            let err = sections_for(&flows, &app_env(), &groups_args(argv)).unwrap_err();
-            assert!(err.to_string().contains("--by"), "{err}");
-        }
+        let err =
+            sections_for(&flows, &app_env(), &groups_args(&["--app", "shop/prod"])).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "--app needs sections: add --by in, out or both"
+        );
+        let a = groups_args(&["--show", "blocked"]);
+        assert!(sections_for(&flows, &app_env(), &a).unwrap().is_none());
+    }
+
+    #[test]
+    fn show_filters_the_pairs_and_the_pairs_by_service() {
+        let flows = crate::tui::test_support::fixture_flows_rich();
+        let pairs = |argv: &[&str]| pairs_for(&flows, &app_env(), &groups_args(argv));
+        let total = |rows: &[FlowGroup]| rows.iter().map(|g| g.flows).sum::<u64>();
+        let all = pairs(&[]);
+        assert_eq!(total(&all), 30);
+        let blocked = pairs(&["--show", "blocked"]);
+        assert_eq!(total(&blocked), 14);
+        assert!(blocked.iter().all(|g| g.allowed == 0));
+        assert!(blocked.iter().any(|g| g.potentially_blocked > 0));
+        assert!(blocked.len() < all.len(), "allowed-only pairs drop out");
+        let only = pairs(&["--show", "blocked-only", "--services"]);
+        assert_eq!(total(&only), 7);
+        assert!(only.iter().all(|g| g.service.is_some()));
+        assert!(
+            only.iter()
+                .all(|g| g.allowed == 0 && g.potentially_blocked == 0)
+        );
+        let services = pairs(&["--services"]);
+        assert_eq!(total(&services), 30);
+        assert!(services.len() > all.len());
     }
 
     #[test]

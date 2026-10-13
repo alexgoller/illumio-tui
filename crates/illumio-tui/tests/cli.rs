@@ -2045,10 +2045,84 @@ async fn traffic_groups_by_in_out_both_with_show_and_app() {
     assert_eq!(out["data"]["sections"], json!([]));
     let err = String::from_utf8_lossy(&miss.get_output().stderr);
     assert!(err.contains("no app matches \"pos/PCI\""), "{err}");
-    cmd(&server)
+    let err = cmd(&server)
         .args(["traffic", "groups", "--window", "1h", "--app", "shop/prod"])
         .assert()
         .code(2);
+    let err = String::from_utf8_lossy(&err.get_output().stderr);
+    assert!(err.contains("--app needs sections"), "{err}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn traffic_groups_show_filters_the_pairs_and_the_services() {
+    let server = MockServer::start().await;
+    mount_traffic(&server, 4).await;
+    let all = stdout_json(
+        cmd(&server)
+            .args(["traffic", "groups", "--window", "1h"])
+            .assert()
+            .success(),
+    );
+    let out = stdout_json(
+        cmd(&server)
+            .args(["traffic", "groups", "--window", "1h", "--show", "blocked"])
+            .assert()
+            .success(),
+    );
+    let data = out["data"].as_array().unwrap();
+    assert!(
+        !data.is_empty() && data.len() < all["data"].as_array().unwrap().len(),
+        "{out}"
+    );
+    assert!(data.iter().all(|g| g["allowed"] == 0), "{out}");
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "traffic",
+                "groups",
+                "--window",
+                "1h",
+                "--services",
+                "--show",
+                "blocked-only",
+            ])
+            .assert()
+            .success(),
+    );
+    let data = out["data"].as_array().unwrap();
+    assert!(!data.is_empty(), "{out}");
+    assert!(
+        data.iter().all(|g| g["allowed"] == 0
+            && g["potentially_blocked"] == 0
+            && g["service"].is_string()),
+        "{out}"
+    );
+    let text = csv_stdout(
+        &cmd(&server)
+            .args([
+                "traffic",
+                "groups",
+                "--window",
+                "1h",
+                "--services",
+                "--show",
+                "blocked",
+                "--csv",
+            ])
+            .assert()
+            .success(),
+    );
+    let mut lines = text.lines();
+    assert_eq!(
+        lines.next(),
+        Some("src,dst,service,flows,conns,bytes,allowed,pot.blocked,blocked")
+    );
+    let rows: Vec<&str> = lines.collect();
+    assert!(!rows.is_empty(), "{text}");
+    assert!(
+        rows.iter().all(|r| r.split(',').nth(6) == Some("0")),
+        "{text}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
