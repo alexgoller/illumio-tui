@@ -238,6 +238,7 @@ mod tests {
                 hide_below: 0,
                 narrow: Some(|n| format!("n{n}")),
                 narrow_width: 4,
+                full: None,
             },
             Column {
                 title: "b",
@@ -248,6 +249,7 @@ mod tests {
                 hide_below: 100,
                 narrow: None,
                 narrow_width: 0,
+                full: None,
             },
             Column {
                 title: "c",
@@ -258,6 +260,7 @@ mod tests {
                 hide_below: 0,
                 narrow: None,
                 narrow_width: 0,
+                full: None,
             },
         ]
     }

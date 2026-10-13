@@ -11,6 +11,12 @@ pub enum Command {
     Profile(String),
     /// `:writes on` / `:writes off`; bare `:writes` shows the state.
     Writes(Option<bool>),
+    /// `:export <path>` writes the table on screen as CSV; `:export!`
+    /// overwrites an existing file.
+    Export {
+        path: String,
+        force: bool,
+    },
     Draft,
     Active,
     Quit,
@@ -59,6 +65,16 @@ pub fn parse(input: &str) -> Result<Command, String> {
             "off" => Ok(Command::Writes(Some(false))),
             _ => Err("usage: :writes [on|off]".into()),
         },
+        "export" | "export!" => {
+            if arg.is_empty() {
+                Err(format!("usage: :{name} <path>"))
+            } else {
+                Ok(Command::Export {
+                    path: arg.to_string(),
+                    force: name == "export!",
+                })
+            }
+        }
         "draft" => no_arg(Command::Draft),
         "active" => no_arg(Command::Active),
         "q" | "quit" => no_arg(Command::Quit),
@@ -97,6 +113,20 @@ mod tests {
         assert_eq!(parse("writes").unwrap(), Command::Writes(None));
         assert_eq!(parse("writes on").unwrap(), Command::Writes(Some(true)));
         assert_eq!(parse("writes off").unwrap(), Command::Writes(Some(false)));
+        assert_eq!(
+            parse("export ~/flows.csv").unwrap(),
+            Command::Export {
+                path: "~/flows.csv".into(),
+                force: false
+            }
+        );
+        assert_eq!(
+            parse("export! out dir/a.csv").unwrap(),
+            Command::Export {
+                path: "out dir/a.csv".into(),
+                force: true
+            }
+        );
         assert_eq!(parse("draft").unwrap(), Command::Draft);
         assert_eq!(parse("active").unwrap(), Command::Active);
         assert_eq!(parse("q").unwrap(), Command::Quit);
@@ -115,6 +145,8 @@ mod tests {
         assert!(parse("filter").unwrap_err().contains("usage"));
         assert!(parse("window").unwrap_err().contains("usage"));
         assert!(parse("profile").unwrap_err().contains("usage"));
+        assert_eq!(parse("export").unwrap_err(), "usage: :export <path>");
+        assert_eq!(parse("export!").unwrap_err(), "usage: :export! <path>");
         assert_eq!(parse("writes yes").unwrap_err(), "usage: :writes [on|off]");
         assert_eq!(
             parse("writes on now").unwrap_err(),

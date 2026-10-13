@@ -1,4 +1,5 @@
 //! All TUI state. No I/O, no terminal types beyond sizes.
+use crate::cli::output::join_list;
 use crate::tui::diff::ObjectDiff;
 use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::form::Form;
@@ -646,6 +647,7 @@ pub fn flow_columns() -> Vec<Column<FlowRow>> {
             hide_below: 140,
             narrow: None,
             narrow_width: 0,
+            full: Some(|f| f.last_detected.clone().unwrap_or_default()),
         },
         Column {
             title: "src",
@@ -656,6 +658,7 @@ pub fn flow_columns() -> Vec<Column<FlowRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 14,
+            full: None,
         },
         Column {
             title: "src group",
@@ -666,6 +669,7 @@ pub fn flow_columns() -> Vec<Column<FlowRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 10,
+            full: None,
         },
         Column {
             title: "dst",
@@ -676,6 +680,7 @@ pub fn flow_columns() -> Vec<Column<FlowRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 14,
+            full: None,
         },
         Column {
             title: "dst group",
@@ -686,6 +691,7 @@ pub fn flow_columns() -> Vec<Column<FlowRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 10,
+            full: None,
         },
         Column {
             title: "service",
@@ -696,6 +702,7 @@ pub fn flow_columns() -> Vec<Column<FlowRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 9,
+            full: None,
         },
         Column {
             title: "conns",
@@ -706,6 +713,7 @@ pub fn flow_columns() -> Vec<Column<FlowRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 5,
+            full: None,
         },
         Column {
             title: "decision",
@@ -719,6 +727,7 @@ pub fn flow_columns() -> Vec<Column<FlowRow>> {
                 other => other.to_string(),
             }),
             narrow_width: 8,
+            full: None,
         },
     ]
 }
@@ -902,6 +911,7 @@ pub fn mesh_columns(cols: MeshColumns) -> Vec<Column<MeshRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 8,
+            full: Some(|r| r.user.clone().unwrap_or_default()),
         });
     }
     if cols.process {
@@ -914,6 +924,7 @@ pub fn mesh_columns(cols: MeshColumns) -> Vec<Column<MeshRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 10,
+            full: Some(|r| r.process.clone().unwrap_or_default()),
         });
     }
     let rest: [Column<MeshRow>; 6] = [
@@ -926,6 +937,7 @@ pub fn mesh_columns(cols: MeshColumns) -> Vec<Column<MeshRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 14,
+            full: None,
         },
         Column {
             title: "dst",
@@ -936,6 +948,7 @@ pub fn mesh_columns(cols: MeshColumns) -> Vec<Column<MeshRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 14,
+            full: None,
         },
         Column {
             title: "service",
@@ -946,6 +959,7 @@ pub fn mesh_columns(cols: MeshColumns) -> Vec<Column<MeshRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 9,
+            full: None,
         },
         Column {
             title: "dst proc",
@@ -956,6 +970,7 @@ pub fn mesh_columns(cols: MeshColumns) -> Vec<Column<MeshRow>> {
             hide_below: 120,
             narrow: None,
             narrow_width: 0,
+            full: Some(|r| r.dst_process.clone().unwrap_or_default()),
         },
         Column {
             title: "conns",
@@ -966,6 +981,7 @@ pub fn mesh_columns(cols: MeshColumns) -> Vec<Column<MeshRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 6,
+            full: None,
         },
         Column {
             title: "decision",
@@ -979,6 +995,7 @@ pub fn mesh_columns(cols: MeshColumns) -> Vec<Column<MeshRow>> {
                 d => d.as_str().into(),
             }),
             narrow_width: 8,
+            full: Some(|r| r.dominant().as_str().into()),
         },
     ];
     out.extend(rest);
@@ -996,6 +1013,7 @@ pub fn group_columns() -> Vec<Column<FlowGroup>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 16,
+            full: None,
         },
         Column {
             title: "dst",
@@ -1006,6 +1024,7 @@ pub fn group_columns() -> Vec<Column<FlowGroup>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 16,
+            full: None,
         },
         Column {
             title: "flows",
@@ -1016,6 +1035,7 @@ pub fn group_columns() -> Vec<Column<FlowGroup>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 5,
+            full: None,
         },
         Column {
             title: "conns",
@@ -1026,6 +1046,7 @@ pub fn group_columns() -> Vec<Column<FlowGroup>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 6,
+            full: None,
         },
         Column {
             title: "allowed",
@@ -1036,6 +1057,7 @@ pub fn group_columns() -> Vec<Column<FlowGroup>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: None,
         },
         Column {
             title: "pot.bl",
@@ -1046,6 +1068,7 @@ pub fn group_columns() -> Vec<Column<FlowGroup>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: None,
         },
         Column {
             title: "blocked",
@@ -1056,6 +1079,7 @@ pub fn group_columns() -> Vec<Column<FlowGroup>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: None,
         },
     ]
 }
@@ -1293,6 +1317,7 @@ pub fn app_columns() -> Vec<Column<SectionRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: Some(|r| r.with_row(PeerRow::peer_text)),
         },
         Column {
             title: "hosts",
@@ -1303,6 +1328,7 @@ pub fn app_columns() -> Vec<Column<SectionRow>> {
             hide_below: 120,
             narrow: None,
             narrow_width: 0,
+            full: Some(|r| r.with_row(|p| join_list(&p.peer_names))),
         },
         Column {
             title: "service",
@@ -1313,6 +1339,7 @@ pub fn app_columns() -> Vec<Column<SectionRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 9,
+            full: None,
         },
         Column {
             title: "flows",
@@ -1323,6 +1350,7 @@ pub fn app_columns() -> Vec<Column<SectionRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 5,
+            full: None,
         },
         Column {
             title: "conns",
@@ -1333,6 +1361,7 @@ pub fn app_columns() -> Vec<Column<SectionRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 6,
+            full: None,
         },
         Column {
             title: "bytes",
@@ -1343,6 +1372,7 @@ pub fn app_columns() -> Vec<Column<SectionRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 6,
+            full: Some(|r| r.with_row(|p| p.bytes.to_string())),
         },
         Column {
             title: "decision",
@@ -1358,6 +1388,7 @@ pub fn app_columns() -> Vec<Column<SectionRow>> {
                 })
             }),
             narrow_width: 8,
+            full: Some(|r| r.with_row(|p| p.dominant().as_str().into())),
         },
     ]
 }
@@ -1375,6 +1406,7 @@ pub fn blocked_columns() -> Vec<Column<SectionRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: Some(|r| r.with_row(PeerRow::peer_text)),
         },
         Column {
             title: "dst name",
@@ -1385,6 +1417,7 @@ pub fn blocked_columns() -> Vec<Column<SectionRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 14,
+            full: Some(|r| r.with_row(|p| join_list(&p.app_names))),
         },
         Column {
             title: "service",
@@ -1395,6 +1428,7 @@ pub fn blocked_columns() -> Vec<Column<SectionRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 9,
+            full: None,
         },
         Column {
             title: "flows",
@@ -1405,6 +1439,7 @@ pub fn blocked_columns() -> Vec<Column<SectionRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 5,
+            full: None,
         },
         Column {
             title: "conns",
@@ -1415,6 +1450,7 @@ pub fn blocked_columns() -> Vec<Column<SectionRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 5,
+            full: None,
         },
         Column {
             title: "last seen",
@@ -1439,6 +1475,7 @@ pub fn blocked_columns() -> Vec<Column<SectionRow>> {
                 })
             }),
             narrow_width: 11,
+            full: Some(|r| r.with_row(|p| p.last_detected.clone().unwrap_or_default())),
         },
     ]
 }
@@ -2068,6 +2105,7 @@ pub fn ruleset_columns() -> Vec<Column<RuleSetView>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: None,
         },
         Column {
             title: "on",
@@ -2078,6 +2116,7 @@ pub fn ruleset_columns() -> Vec<Column<RuleSetView>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: Some(|r| r.enabled.to_string()),
         },
         Column {
             title: "scopes",
@@ -2088,6 +2127,7 @@ pub fn ruleset_columns() -> Vec<Column<RuleSetView>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: Some(|r| join_list(&r.scopes)),
         },
         Column {
             title: "rules",
@@ -2098,6 +2138,7 @@ pub fn ruleset_columns() -> Vec<Column<RuleSetView>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: None,
         },
         Column {
             title: "pending",
@@ -2108,6 +2149,7 @@ pub fn ruleset_columns() -> Vec<Column<RuleSetView>> {
             hide_below: 70,
             narrow: None,
             narrow_width: 0,
+            full: None,
         },
     ]
 }
@@ -2153,6 +2195,7 @@ pub fn rule_columns() -> Vec<Column<RuleRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: None,
         },
         Column {
             title: "on",
@@ -2163,6 +2206,7 @@ pub fn rule_columns() -> Vec<Column<RuleRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: Some(|r| r.enabled.to_string()),
         },
         Column {
             title: "consumers",
@@ -2173,6 +2217,7 @@ pub fn rule_columns() -> Vec<Column<RuleRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: Some(|r| join_list(r.consumers.iter().map(|a| &a.name))),
         },
         Column {
             title: "providers",
@@ -2183,6 +2228,7 @@ pub fn rule_columns() -> Vec<Column<RuleRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: Some(|r| join_list(r.providers.iter().map(|a| &a.name))),
         },
         Column {
             title: "services",
@@ -2193,6 +2239,7 @@ pub fn rule_columns() -> Vec<Column<RuleRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: Some(|r| join_list(r.services.iter().map(|s| &s.name))),
         },
         Column {
             title: "P/C",
@@ -2204,6 +2251,7 @@ pub fn rule_columns() -> Vec<Column<RuleRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: Some(|r| r.impact.as_ref().map(pce::Impact::pc).unwrap_or_default()),
         },
         Column {
             title: "pending",
@@ -2214,6 +2262,7 @@ pub fn rule_columns() -> Vec<Column<RuleRow>> {
             hide_below: 90,
             narrow: None,
             narrow_width: 0,
+            full: None,
         },
     ]
 }
@@ -2583,6 +2632,11 @@ fn usage_cell(r: &LabelRow, n: fn(&pce::LabelUsage) -> usize) -> String {
     r.usage.map_or_else(|| "-".into(), |u| n(&u).to_string())
 }
 
+/// `usage_cell` for `:export`: empty before the data is loaded.
+fn usage_full(r: &LabelRow, n: fn(&pce::LabelUsage) -> usize) -> String {
+    r.usage.map(|u| n(&u).to_string()).unwrap_or_default()
+}
+
 /// Its sort key: rows without usage sort last.
 fn usage_key(r: &LabelRow, n: fn(&pce::LabelUsage) -> usize) -> SortKey {
     SortKey::Num(r.usage.map_or(u64::MAX, |u| n(&u) as u64))
@@ -2620,6 +2674,7 @@ pub fn label_columns() -> Vec<Column<LabelRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: None,
         },
         Column {
             title: "value",
@@ -2630,6 +2685,7 @@ pub fn label_columns() -> Vec<Column<LabelRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: None,
         },
         Column {
             title: "workloads",
@@ -2640,6 +2696,7 @@ pub fn label_columns() -> Vec<Column<LabelRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: Some(|l| usage_full(l, |u| u.workloads)),
         },
         Column {
             title: "rules",
@@ -2653,6 +2710,7 @@ pub fn label_columns() -> Vec<Column<LabelRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: Some(|l| usage_full(l, |u| u.rules)),
         },
         Column {
             title: "deleted",
@@ -2670,6 +2728,7 @@ pub fn label_columns() -> Vec<Column<LabelRow>> {
             hide_below: 90,
             narrow: None,
             narrow_width: 0,
+            full: Some(|l| l.is_deleted().to_string()),
         },
         Column {
             title: "href",
@@ -2681,6 +2740,7 @@ pub fn label_columns() -> Vec<Column<LabelRow>> {
             hide_below: 100,
             narrow: None,
             narrow_width: 0,
+            full: None,
         },
     ]
 }
@@ -2696,6 +2756,7 @@ pub fn group_columns_objects() -> Vec<Column<LabelGroup>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: None,
         },
         Column {
             title: "key",
@@ -2706,6 +2767,7 @@ pub fn group_columns_objects() -> Vec<Column<LabelGroup>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: None,
         },
         Column {
             title: "labels",
@@ -2716,6 +2778,7 @@ pub fn group_columns_objects() -> Vec<Column<LabelGroup>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: Some(|g| join_list(g.labels.iter().map(|r| &r.href))),
         },
         Column {
             title: "groups",
@@ -2726,6 +2789,7 @@ pub fn group_columns_objects() -> Vec<Column<LabelGroup>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: Some(|g| join_list(g.sub_groups.iter().map(|r| &r.href))),
         },
         Column {
             title: "pending",
@@ -2736,6 +2800,7 @@ pub fn group_columns_objects() -> Vec<Column<LabelGroup>> {
             hide_below: 70,
             narrow: None,
             narrow_width: 0,
+            full: None,
         },
     ]
 }
@@ -2751,6 +2816,7 @@ pub fn service_columns() -> Vec<Column<Service>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 24,
+            full: None,
         },
         Column {
             title: "ports",
@@ -2761,6 +2827,7 @@ pub fn service_columns() -> Vec<Column<Service>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: Some(|s| join_list(s.service_ports.iter().map(|p| p.display()))),
         },
         Column {
             title: "pending",
@@ -2771,6 +2838,7 @@ pub fn service_columns() -> Vec<Column<Service>> {
             hide_below: 70,
             narrow: None,
             narrow_width: 0,
+            full: None,
         },
     ]
 }
@@ -2932,6 +3000,7 @@ pub fn ip_list_columns() -> Vec<Column<IpListRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 24,
+            full: None,
         },
         Column {
             title: "size",
@@ -2949,6 +3018,13 @@ pub fn ip_list_columns() -> Vec<Column<IpListRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: Some(|r| {
+                if r.size.unbounded.is_some() {
+                    r.size.display()
+                } else {
+                    r.size.total().to_string()
+                }
+            }),
         },
         Column {
             title: "ranges",
@@ -2959,6 +3035,7 @@ pub fn ip_list_columns() -> Vec<Column<IpListRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: Some(|r| join_list(r.list.entries().iter().take(r.list.ip_ranges.len()))),
         },
         Column {
             title: "fqdns",
@@ -2969,6 +3046,7 @@ pub fn ip_list_columns() -> Vec<Column<IpListRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: Some(|r| join_list(r.list.fqdns.iter().map(|f| &f.fqdn))),
         },
         Column {
             title: "used by",
@@ -2979,6 +3057,7 @@ pub fn ip_list_columns() -> Vec<Column<IpListRow>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: Some(|r| r.used_by.map(|n| n.to_string()).unwrap_or_default()),
         },
         Column {
             title: "pending",
@@ -2989,6 +3068,7 @@ pub fn ip_list_columns() -> Vec<Column<IpListRow>> {
             hide_below: 70,
             narrow: None,
             narrow_width: 0,
+            full: None,
         },
     ]
 }
@@ -3102,6 +3182,7 @@ fn text_col(
         hide_below: 0,
         narrow: None,
         narrow_width: 0,
+        full: None,
     }
 }
 
@@ -3153,12 +3234,16 @@ pub fn workload_columns() -> Vec<Column<WorkloadRowView>> {
             // A workload without a hostname is still identifiable when the name column is hidden.
             narrow: Some(|r| r.workload.display_name()),
             narrow_width: 20,
+            full: None,
             ..text_col("hostname", 22, hostname_of, |r| {
                 SortKey::Text(hostname_of(r))
             })
         },
         wide(text_col("name", 14, name_of, |r| SortKey::Text(name_of(r)))),
-        text_col("ip", 15, ip_of, |r| SortKey::Text(ip_of(r))),
+        Column {
+            full: Some(|r| join_list(r.workload.interfaces.iter().map(|i| &i.address))),
+            ..text_col("ip", 15, ip_of, |r| SortKey::Text(ip_of(r)))
+        },
         wide(text_col(
             "labels",
             0,
@@ -3168,6 +3253,7 @@ pub fn workload_columns() -> Vec<Column<WorkloadRowView>> {
         Column {
             narrow: Some(|r| enforcement_of(r).replace("visibility_only", "visibility")),
             narrow_width: 11,
+            full: None,
             ..text_col("enforcement", 15, enforcement_of, |r| {
                 SortKey::Text(enforcement_of(r))
             })
@@ -3179,12 +3265,16 @@ pub fn workload_columns() -> Vec<Column<WorkloadRowView>> {
                 SortKey::Text(visibility_of(r))
             })
         },
-        wide(text_col("online", 6, online_of, |r| {
-            SortKey::Num(u64::from(r.workload.online.unwrap_or(false)))
-        })),
-        wide(text_col("agent", 9, agent_of, |r| {
-            SortKey::Text(agent_of(r))
-        })),
+        wide(Column {
+            full: Some(|r| r.workload.online.map(|b| b.to_string()).unwrap_or_default()),
+            ..text_col("online", 6, online_of, |r| {
+                SortKey::Num(u64::from(r.workload.online.unwrap_or(false)))
+            })
+        }),
+        wide(Column {
+            full: Some(|r| r.workload.agent_status().unwrap_or_default()),
+            ..text_col("agent", 9, agent_of, |r| SortKey::Text(agent_of(r)))
+        }),
         text_col(
             "health",
             9,
@@ -3329,6 +3419,7 @@ pub fn event_columns() -> Vec<Column<Event>> {
                     .unwrap_or_default()
             }),
             narrow_width: 14,
+            full: Some(|e| e.timestamp.clone().unwrap_or_default()),
         },
         Column {
             title: "severity",
@@ -3339,6 +3430,7 @@ pub fn event_columns() -> Vec<Column<Event>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: None,
         },
         Column {
             title: "type",
@@ -3349,6 +3441,7 @@ pub fn event_columns() -> Vec<Column<Event>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 24,
+            full: None,
         },
         Column {
             title: "actor",
@@ -3359,6 +3452,7 @@ pub fn event_columns() -> Vec<Column<Event>> {
             hide_below: 0,
             narrow: None,
             narrow_width: 20,
+            full: None,
         },
         Column {
             title: "resource",
@@ -3370,6 +3464,7 @@ pub fn event_columns() -> Vec<Column<Event>> {
             hide_below: 120,
             narrow: None,
             narrow_width: 0,
+            full: None,
         },
         Column {
             title: "status",
@@ -3380,6 +3475,7 @@ pub fn event_columns() -> Vec<Column<Event>> {
             hide_below: 100,
             narrow: None,
             narrow_width: 0,
+            full: None,
         },
     ]
 }

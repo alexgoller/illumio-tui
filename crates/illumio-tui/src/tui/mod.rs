@@ -1,11 +1,13 @@
 //! The interactive TUI. Elm-style: `model` holds all state, `msg` lists
 //! every event, `update` is a pure state transition that returns `Cmd`s,
-//! `ui` renders `&Model`, and `app` is the only place I/O happens.
+//! `ui` renders `&Model`, and `app` is the only place I/O happens, but for
+//! the file `:export` writes (`export`).
 pub mod app;
 pub mod commands;
 pub mod complete;
 pub mod diff;
 pub mod edit;
+pub mod export;
 pub mod filter;
 pub mod form;
 pub mod impact;

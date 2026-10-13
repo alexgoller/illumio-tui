@@ -3621,6 +3621,15 @@ pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
             }
             vec![Cmd::SetWrites(on)]
         }
+        Command::Export { path, force } => {
+            model.status = match crate::tui::export::current_table(model)
+                .and_then(|csv| crate::tui::export::write(&path, force, &csv))
+            {
+                Ok(done) => StatusLine::info(done),
+                Err(e) => StatusLine::error(e),
+            };
+            Vec::new()
+        }
         Command::Draft => show_policy(model, PolicyScope::Draft),
         Command::Active => show_policy(model, PolicyScope::Active),
     }
@@ -4754,6 +4763,107 @@ mod tests {
         assert_eq!(m.size, (120, 40));
         update(&mut m, Msg::Focus(false));
         assert!(!m.focused);
+    }
+
+    /// Types `:text` and Enter; what the command asked for.
+    fn colon(m: &mut Model, text: &str) -> Vec<Cmd> {
+        let mut cmds = update(m, key(':'));
+        for c in text.chars() {
+            cmds.extend(update(m, key(c)));
+        }
+        cmds.extend(update(
+            m,
+            Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        ));
+        cmds
+    }
+
+    #[test]
+    fn export_writes_the_table_on_screen_as_csv_and_sends_nothing() {
+        use crate::tui::test_support::model_with_flows;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("flows.csv");
+        let p = path.display().to_string();
+        let mut m = model_with_flows();
+        assert!(colon(&mut m, &format!("export {p}")).is_empty());
+        assert_eq!(m.status.kind, StatusKind::Info);
+        assert_eq!(m.status.text, format!("wrote 4 rows to {p}"));
+        let text = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = text.split("\r\n").collect();
+        assert_eq!(
+            lines[0],
+            "last seen,src,src group,dst,dst group,service,conns,decision"
+        );
+        // Every column, the hidden-below-140 `last seen` whole.
+        assert!(lines[1].starts_with("2026-10-10T07:31:02Z,host-1.example,"));
+        assert_eq!(lines.len(), 6, "header, 4 rows, the empty tail");
+
+        // The search applies; without `!` the file is kept.
+        m.traffic.flows.start_search();
+        for c in "icmp".chars() {
+            m.traffic.flows.search_push(c);
+        }
+        m.traffic.flows.search_commit();
+        assert!(colon(&mut m, &format!("export {p}")).is_empty());
+        assert_eq!(m.status.kind, StatusKind::Error);
+        assert!(
+            m.status.text.contains("exists; :export! "),
+            "{}",
+            m.status.text
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+        assert!(colon(&mut m, &format!("export! {p}")).is_empty());
+        assert_eq!(m.status.text, format!("wrote 1 row to {p}"));
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(text.split("\r\n").count(), 3, "{text}");
+        assert!(text.contains(",icmp,"), "{text}");
+    }
+
+    #[test]
+    fn export_of_sections_is_one_row_per_peer_and_the_treemap_has_none() {
+        use crate::tui::model::TrafficView;
+        use crate::tui::test_support::model_with_flows;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("blocked.csv");
+        let p = path.display().to_string();
+        let mut m = model_with_flows();
+        while m.traffic.view != TrafficView::Blocked {
+            update(&mut m, key('v'));
+        }
+        assert!(colon(&mut m, &format!("export {p}")).is_empty());
+        let text = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = text.split("\r\n").collect();
+        assert_eq!(
+            lines[0],
+            "app,direction,src,dst name,service,flows,conns,last seen"
+        );
+        assert!(
+            lines[1].starts_with("shop/prod,in,ipl:Corp/-,host-1.example,8443/tcp,"),
+            "{text}"
+        );
+        assert!(!text.contains('▾'), "no header rows: {text}");
+
+        update(&mut m, key('v'));
+        assert_eq!(m.traffic.view, TrafficView::Treemap);
+        let other = dir.path().join("treemap.csv");
+        assert!(colon(&mut m, &format!("export {}", other.display())).is_empty());
+        assert_eq!(m.status.kind, StatusKind::Error);
+        assert_eq!(m.status.text, "the treemap has no table to export");
+        assert!(!other.exists());
+    }
+
+    #[test]
+    fn export_reports_an_unwritable_path() {
+        let mut m = model_fixture();
+        assert!(colon(&mut m, "export /nonexistent-dir/x.csv").is_empty());
+        assert_eq!(m.status.kind, StatusKind::Error);
+        assert!(
+            m.status
+                .text
+                .starts_with("cannot write /nonexistent-dir/x.csv"),
+            "{}",
+            m.status.text
+        );
     }
 
     #[test]
@@ -7517,7 +7627,7 @@ mod tests {
     fn help_scrolls_to_its_last_line_and_reopens_at_the_top() {
         use crate::tui::ui::widgets::overlay::{HELP_LINES, help_last_scroll};
         let mut m = model_fixture(); // 80x24
-        assert_eq!(HELP_LINES.len(), 48);
+        assert_eq!(HELP_LINES.len(), 49);
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  + / -"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  B"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  ] / ["));
@@ -7528,7 +7638,11 @@ mod tests {
                 .any(|(k, _)| *k == "Treemap  hjkl Enter b")
         );
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Mesh     u / p"));
-        assert!(HELP_LINES.iter().any(|(_, d)| *d == ":writes [on|off]"));
+        assert!(
+            HELP_LINES
+                .iter()
+                .any(|(_, d)| *d == ":writes [on|off]  :export[!] <path>")
+        );
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "IP lists Enter"));
         assert!(
             HELP_LINES
@@ -7537,7 +7651,7 @@ mod tests {
         );
         update(&mut m, key('?'));
         let last = help_last_scroll(24);
-        assert_eq!(last, 26, "48 lines, 22 rows inside the box");
+        assert_eq!(last, 27, "49 lines, 22 rows inside the box");
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app x / X"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app d"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Sections Space / z"));

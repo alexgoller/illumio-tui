@@ -19,6 +19,9 @@ pub struct Column<T> {
     pub narrow: Option<fn(&T) -> String>,
     /// Width used below 120 columns when > 0.
     pub narrow_width: u16,
+    /// The whole value for `:export` where `cell` abbreviates it (`6.5K`,
+    /// `3 hosts`, a short time); `None` exports `cell`.
+    pub full: Option<fn(&T) -> String>,
 }
 
 impl<T> Clone for Column<T> {
@@ -32,6 +35,7 @@ impl<T> Clone for Column<T> {
             hide_below: self.hide_below,
             narrow: self.narrow,
             narrow_width: self.narrow_width,
+            full: self.full,
         }
     }
 }
@@ -238,6 +242,27 @@ impl<T> TableView<T> {
         (self.columns[col].cell)(row)
     }
 
+    /// Every column's whole value for `row` (`full`, else `cell`),
+    /// whatever the width.
+    pub fn full_cells(&self, row: &T) -> Vec<String> {
+        self.columns
+            .iter()
+            .map(|c| c.full.unwrap_or(c.cell)(row))
+            .collect()
+    }
+
+    /// What `:export` writes: every column's title, and the shown rows
+    /// (search applied, in sort order) as `full_cells`.
+    pub fn export(&self) -> (Vec<&'static str>, Vec<Vec<String>>) {
+        let titles = self.columns.iter().map(|c| c.title).collect();
+        let rows = self
+            .visible
+            .iter()
+            .map(|&i| self.full_cells(&self.rows[i]))
+            .collect();
+        (titles, rows)
+    }
+
     fn apply(&mut self) {
         let needle = self.search_text().to_lowercase();
         let mut vis: Vec<usize> = (0..self.rows.len())
@@ -290,6 +315,7 @@ mod tests {
                 hide_below: 0,
                 narrow: None,
                 narrow_width: 0,
+                full: None,
             },
             Column {
                 title: "n",
@@ -300,6 +326,7 @@ mod tests {
                 hide_below: 0,
                 narrow: None,
                 narrow_width: 0,
+                full: None,
             },
         ];
         let mut v = TableView::new(cols);
@@ -400,6 +427,23 @@ mod tests {
         v.search_push('0');
         v.search_push('2');
         assert_eq!(v.selected_item().unwrap().name, "web02");
+    }
+
+    #[test]
+    fn export_keeps_search_and_sort_and_prefers_full_cells() {
+        let mut v = view();
+        v.columns[1].hide_below = 200;
+        v.columns[1].full = Some(|r: &R| format!("{} exactly", r.n));
+        v.sort_by(1, true);
+        v.start_search();
+        v.search_push('w');
+        v.search_commit();
+        let (titles, rows) = v.export();
+        assert_eq!(titles, ["name", "n"]);
+        assert_eq!(
+            rows,
+            [["web01", "310 exactly"], ["web02", "5 exactly"]].map(|r| r.map(String::from))
+        );
     }
 
     #[test]

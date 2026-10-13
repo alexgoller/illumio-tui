@@ -67,6 +67,7 @@ fn table_widget_renders_header_sort_and_selection() {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: None,
         },
         Column {
             title: "conns",
@@ -77,6 +78,7 @@ fn table_widget_renders_header_sort_and_selection() {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full: None,
         },
     ]);
     v.set_rows(
