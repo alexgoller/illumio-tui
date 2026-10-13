@@ -418,7 +418,7 @@ impl Runtime {
                     let result = pce
                         .rule_sets(scope, mode)
                         .await
-                        .map(|c| (c.value, c.age.as_secs()))
+                        .map(|c| (c.value, c.age.as_secs(), c.hit))
                         .map_err(|e| e.to_string());
                     let _ = tx.send(Msg::RuleSetsLoaded { scope, result });
                     let _ = tx.send(Msg::Stats(pce.stats()));

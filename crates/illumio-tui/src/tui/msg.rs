@@ -102,7 +102,8 @@ pub enum Msg {
     /// Rulesets for `scope` with the cache age in seconds.
     RuleSetsLoaded {
         scope: PolicyScope,
-        result: Result<(Vec<RuleSet>, u64), String>,
+        /// The rulesets, their cache age in seconds, and whether the cache answered.
+        result: Result<(Vec<RuleSet>, u64, bool), String>,
     },
     DenyRulesLoaded {
         href: String,

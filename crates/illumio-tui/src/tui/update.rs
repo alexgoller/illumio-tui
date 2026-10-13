@@ -185,7 +185,9 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 model
                     .policy
                     .set_rule_sets(raw, &idx, model.workloads.impact_source());
-                cmds.extend(deny_fallback(model, CacheMode::Use));
+                if model.screen == Screen::Policy {
+                    cmds.extend(deny_fallback(model, CacheMode::Use));
+                }
             }
             // The Objects screen (IP lists tab included) was opened while the
             // startup load was still running.
@@ -393,7 +395,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             }
             model.policy.loading = false;
             match result {
-                Ok((raw, age)) => {
+                Ok((raw, age, hit)) => {
                     model.policy.loaded_at = Some(Instant::now());
                     model.policy.auto.from_tick = false;
                     model.policy.age_secs = age;
@@ -429,8 +431,14 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     } else {
                         CacheMode::Use
                     };
-                    refresh_app_policy(model, Ok(age));
-                    deny_fallback(model, mode)
+                    refresh_app_policy(model, Ok(hit));
+                    // Off the Policy screen (the app overlay, `u` on Labels)
+                    // nothing shows the deny rules: `switch` asks on entry.
+                    if model.screen == Screen::Policy {
+                        deny_fallback(model, mode)
+                    } else {
+                        Vec::new()
+                    }
                 }
                 Err(e) => {
                     // The explicit refresh failed: its bypass must not leak into a later reload.
@@ -2280,10 +2288,10 @@ fn app_rule_key(model: &mut Model) -> Vec<Cmd> {
     begin_edit(model, EditIntent::RuleFromFlow(Box::new(flow)))
 }
 
-/// The overlay's policy panel from the rulesets that just arrived, or their
-/// error, while it waits for them. `age` above 0 means the answer came
-/// from the cache. Fills the view only: never reopens a closed overlay.
-fn refresh_app_policy(model: &mut Model, outcome: Result<u64, &str>) {
+/// The overlay's policy panel from the rulesets that just arrived (`hit`:
+/// from the cache), or their error, while it waits for them. Fills the
+/// view only: never reopens a closed overlay.
+fn refresh_app_policy(model: &mut Model, outcome: Result<bool, &str>) {
     let idx = model.index().cloned();
     let Some(v) = model.app_view.as_mut() else {
         return;
@@ -2292,8 +2300,8 @@ fn refresh_app_policy(model: &mut Model, outcome: Result<u64, &str>) {
         return;
     }
     match (outcome, idx, v.label_hrefs.as_ref()) {
-        (Ok(age), Some(idx), Some(hrefs)) => {
-            if v.policy_sent && age > 0 {
+        (Ok(hit), Some(idx), Some(hrefs)) => {
+            if v.policy_sent && hit {
                 v.cached += 1;
             }
             v.policy = Loadable::Loaded(pce::app::app_policy(&model.policy.raw, hrefs, &idx));
@@ -3006,6 +3014,8 @@ fn switch(model: &mut Model, s: Screen) -> Vec<Cmd> {
         {
             load_rule_sets(model, CacheMode::Use)
         }
+        // Loaded off this screen: the selected ruleset's deny rules now.
+        Screen::Policy if model.policy.loaded_at.is_some() => deny_fallback(model, CacheMode::Use),
         Screen::Objects => load_missing_objects(model),
         Screen::Workloads => load_missing_workloads(model),
         Screen::Events => load_missing_events(model),
@@ -6516,7 +6526,7 @@ mod tests {
             &mut m,
             Msg::RuleSetsLoaded {
                 scope: PolicyScope::Draft,
-                result: Ok((rs, 0)),
+                result: Ok((rs, 0, false)),
             },
         );
         assert!(!m.policy.loading);
@@ -6555,7 +6565,7 @@ mod tests {
             &mut m,
             Msg::RuleSetsLoaded {
                 scope: PolicyScope::Active,
-                result: Ok((Vec::new(), 0)),
+                result: Ok((Vec::new(), 0, false)),
             },
         );
         let cmds = update(&mut m, key('r'));
@@ -6615,7 +6625,7 @@ mod tests {
             &mut m,
             Msg::RuleSetsLoaded {
                 scope: PolicyScope::Draft,
-                result: Ok((rs, 0)),
+                result: Ok((rs, 0, false)),
             },
         );
         assert_eq!(
@@ -6676,7 +6686,7 @@ mod tests {
             &mut m,
             Msg::RuleSetsLoaded {
                 scope: PolicyScope::Draft,
-                result: Ok((rs.clone(), 0)),
+                result: Ok((rs.clone(), 0, false)),
             },
         );
         update(&mut m, key('d')); // Active now loading
@@ -6685,7 +6695,7 @@ mod tests {
             &mut m,
             Msg::RuleSetsLoaded {
                 scope: PolicyScope::Draft,
-                result: Ok((rs, 0)),
+                result: Ok((rs, 0, false)),
             },
         );
         assert!(m.policy.loading, "the active-scope load is still in flight");
@@ -7025,7 +7035,7 @@ mod tests {
                 m,
                 Msg::RuleSetsLoaded {
                     scope: PolicyScope::Draft,
-                    result: Ok((rs, 0)),
+                    result: Ok((rs, 0, false)),
                 },
             )
         };
@@ -7078,7 +7088,7 @@ mod tests {
                 m,
                 Msg::RuleSetsLoaded {
                     scope: PolicyScope::Draft,
-                    result: Ok((rs, 0)),
+                    result: Ok((rs, 0, false)),
                 },
             )
         };
@@ -7166,7 +7176,7 @@ mod tests {
             &mut m,
             Msg::RuleSetsLoaded {
                 scope: PolicyScope::Draft,
-                result: Ok((rs, 0)),
+                result: Ok((rs, 0, false)),
             },
         );
         assert_eq!(
@@ -8737,7 +8747,7 @@ mod tests {
             &mut m,
             Msg::RuleSetsLoaded {
                 scope: PolicyScope::Draft,
-                result: Ok((raw, 0)),
+                result: Ok((raw, 0, false)),
             },
         );
         assert_eq!(used(&m), vec![Some(1), Some(1)]);
@@ -9699,7 +9709,7 @@ mod tests {
             &mut m,
             Msg::RuleSetsLoaded {
                 scope: PolicyScope::Draft,
-                result: Ok((sets.clone(), 0)),
+                result: Ok((sets.clone(), 0, false)),
             },
         );
         assert_eq!(m.status.text, report, "the reload keeps the write's report");
@@ -9707,7 +9717,7 @@ mod tests {
             &mut m,
             Msg::RuleSetsLoaded {
                 scope: PolicyScope::Draft,
-                result: Ok((sets, 0)),
+                result: Ok((sets, 0, false)),
             },
         );
         assert_eq!(
@@ -9757,7 +9767,7 @@ mod tests {
             &mut m,
             Msg::RuleSetsLoaded {
                 scope: PolicyScope::Draft,
-                result: Ok((sets.clone(), 0)),
+                result: Ok((sets.clone(), 0, false)),
             },
         );
         assert!(!m.policy.quiet_reload, "the ignored answer took the flag");
@@ -9765,7 +9775,7 @@ mod tests {
             &mut m,
             Msg::RuleSetsLoaded {
                 scope: PolicyScope::Active,
-                result: Ok((sets, 0)),
+                result: Ok((sets, 0, false)),
             },
         );
         assert!(
@@ -9982,7 +9992,7 @@ mod tests {
             &mut m,
             Msg::RuleSetsLoaded {
                 scope: PolicyScope::Draft,
-                result: Ok((sets, 0)),
+                result: Ok((sets, 0, false)),
             },
         );
         assert_eq!(
@@ -11319,7 +11329,7 @@ mod label_filter_tests {
             &mut m,
             Msg::RuleSetsLoaded {
                 scope: pce::models::PolicyScope::Draft,
-                result: Ok((rule_sets, 0)),
+                result: Ok((rule_sets, 0, false)),
             },
         );
         assert!(m.objects.label_usage.is_some());
@@ -13997,10 +14007,24 @@ mod app_tests {
         assert_eq!(update(m, msg), Vec::<Cmd>::new());
     }
 
+    /// Every command that reaches the PCE (all but writes-off, export, quit).
     fn requests(cmds: &[Cmd]) -> u32 {
         cmds.iter()
-            .filter(|c| matches!(c, Cmd::LoadAppWorkloads { .. } | Cmd::LoadRuleSets { .. }))
+            .filter(|c| !matches!(c, Cmd::SetWrites(_) | Cmd::Export { .. } | Cmd::Quit))
             .count() as u32
+    }
+
+    /// The fixture rulesets with Global-Infra (no inline deny rules) first:
+    /// selected on the Policy screen, it would ask for its deny rules.
+    fn rulesets_answer(hit: bool) -> Msg {
+        let mut rs: Vec<pce::models::RuleSet> =
+            serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
+        rs.reverse();
+        assert!(rs[0].deny_rules.is_empty());
+        Msg::RuleSetsLoaded {
+            scope: PolicyScope::Draft,
+            result: Ok((rs, u64::from(hit) * 3, hit)),
+        }
     }
 
     fn view(m: &Model) -> &crate::tui::app_view::AppView {
@@ -14287,15 +14311,7 @@ mod app_tests {
             "filtered to the app"
         );
         assert_eq!(view(&m).cached, 1);
-        let rs: Vec<pce::models::RuleSet> =
-            serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
-        let _ = update(
-            &mut m,
-            Msg::RuleSetsLoaded {
-                scope: PolicyScope::Draft,
-                result: Ok((rs, 3)),
-            },
-        );
+        quiet(&mut m, rulesets_answer(true));
         assert!(matches!(&view(&m).policy, Loadable::Loaded(rows) if rows.len() == 2));
         assert_eq!(view(&m).header_meta(), "2 req · cached");
     }
@@ -14355,6 +14371,43 @@ mod app_tests {
     }
 
     #[test]
+    fn the_request_budget_holds_end_to_end_answers_included() {
+        let mut m = model_with_flows();
+        let mut sent = requests(&update(&mut m, key('A')));
+        let seq = view(&m).seq;
+        let workloads = || Msg::AppWorkloadsLoaded {
+            seq,
+            result: Ok(AppWorkloadsPayload {
+                workloads: fixture_workloads(),
+                truncated: false,
+                hit: false,
+            }),
+        };
+        sent += requests(&update(&mut m, workloads()));
+        sent += requests(&update(&mut m, rulesets_answer(false)));
+        assert_eq!(
+            (sent, view(&m).requests),
+            (2, 2),
+            "no deny rules off the Policy screen"
+        );
+        assert_eq!(view(&m).header_meta(), "2 req");
+        for msg in [key('r'), key('y')] {
+            sent += requests(&update(&mut m, msg));
+        }
+        sent += requests(&update(&mut m, workloads()));
+        sent += requests(&update(&mut m, rulesets_answer(true)));
+        assert_eq!((sent, view(&m).requests), (4, 4));
+        assert_eq!(view(&m).header_meta(), "4 req");
+        // The Policy screen asks for the selected ruleset's deny rules on entry.
+        quiet(&mut m, kc(KeyCode::Esc));
+        let cmds = update(&mut m, Msg::Command(Command::Screen(Screen::Policy)));
+        assert!(
+            matches!(cmds.as_slice(), [Cmd::LoadDenyRules { .. }]),
+            "{cmds:?}"
+        );
+    }
+
+    #[test]
     fn a_late_answer_never_reopens_a_closed_overlay() {
         let mut m = model_with_flows();
         let _ = update(&mut m, key('A'));
@@ -14371,15 +14424,7 @@ mod app_tests {
                 }),
             },
         );
-        let rs: Vec<pce::models::RuleSet> =
-            serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
-        let _ = update(
-            &mut m,
-            Msg::RuleSetsLoaded {
-                scope: PolicyScope::Draft,
-                result: Ok((rs, 0)),
-            },
-        );
+        quiet(&mut m, rulesets_answer(false));
         assert_eq!(m.overlay, Overlay::None, "the answers do not reopen it");
     }
 
