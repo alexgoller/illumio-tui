@@ -7,9 +7,9 @@ use crate::tui::form::{Completing, FormEvent};
 use crate::tui::model::{
     By, Connection, Dir, Drill, EventsFilterEdit, Model, ObjectKind, Overlay, PendingAction,
     PolicyPane, PolicyState, QueryState, Screen, Slices, StatusLine, TrafficData, TrafficState,
-    TrafficView, WritesState, rule_line,
+    TrafficView, WritesState, queries_text, rule_line,
 };
-use crate::tui::msg::{Cmd, Msg, ObjectsPayload, QueryOutcome};
+use crate::tui::msg::{Cmd, FocusedOutcome, Msg, ObjectsPayload, QueryOutcome};
 use crate::tui::picker::{KeyPicker, PickerOutcome};
 use crate::tui::ui::widgets::overlay::{confirm_write_last_scroll, help_last_scroll};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -216,6 +216,9 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 model.status = StatusLine::info("query already running");
                 return Vec::new();
             }
+            if let Some(focus) = model.traffic.focus_requery() {
+                return requery_focus(model, focus);
+            }
             let f = model.traffic.filter.clone();
             // The cost guard applies unless this exact filter produced the data on
             // screen (e.g. profile defaults above the thresholds, never confirmed).
@@ -267,6 +270,9 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         filter,
                         bounds,
                     } = o;
+                    // A new unfocused result: a focused one kept aside is stale.
+                    model.traffic.unfocused = None;
+                    model.traffic.focus_result = None;
                     let n = flows.len();
                     model.traffic.data = Some(TrafficData {
                         flows,
@@ -292,9 +298,15 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         }
                         return Vec::new();
                     }
+                    let focus_hint = model
+                        .traffic
+                        .focus
+                        .as_ref()
+                        .map(|f| format!(" · focus is partial: r re-queries {}", f.app_text()))
+                        .unwrap_or_default();
                     model.status = if truncated {
                         StatusLine::warn(format!(
-                            "{n} flows (truncated: the PCE matched {}; raise the cap or narrow the filter)",
+                            "{n} flows (truncated: the PCE matched {}; raise the cap or narrow the filter){focus_hint}",
                             matches_count
                                 .map(|m| m.to_string())
                                 .unwrap_or_else(|| "more".into())
@@ -311,6 +323,61 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     model.traffic.query = QueryState::Failed(e.clone());
                     let tripped = model.traffic.auto.take_tick_failure();
                     fail(model, "query", &e, tripped);
+                }
+            }
+            Vec::new()
+        }
+        Msg::FocusedDone { seq, result } => {
+            if model.traffic.seq != seq {
+                return Vec::new(); // a cancelled or superseded query
+            }
+            match result {
+                Ok(FocusedOutcome {
+                    outcome,
+                    focus,
+                    queries,
+                }) => {
+                    let QueryOutcome {
+                        flows,
+                        truncated,
+                        matches_count,
+                        elapsed,
+                        hit,
+                        filter,
+                        bounds,
+                    } = outcome;
+                    let data = TrafficData {
+                        flows,
+                        truncated,
+                        matches_count,
+                        elapsed,
+                        cache_hit: hit,
+                        fetched_at: Instant::now(),
+                        filter,
+                        slices: bounds.map(|(start, end)| Slices::new(start, end)),
+                        backfill: None,
+                    };
+                    let app = focus.app_text();
+                    model.traffic.query = QueryState::Idle;
+                    model.traffic.show_detail = false;
+                    model.traffic.apply_focused(focus, queries, data);
+                    let n = model.traffic.view_flows().len();
+                    let q = queries_text(queries);
+                    model.status = if truncated {
+                        StatusLine::warn(format!(
+                            "{n} flows for {app} · {q} (truncated: raise the cap or narrow the filter)"
+                        ))
+                    } else {
+                        StatusLine::info(format!(
+                            "{n} flows for {app} in {:.1}s · {q}{}",
+                            elapsed.as_secs_f64(),
+                            if hit { " (cached)" } else { "" }
+                        ))
+                    };
+                }
+                Err(e) => {
+                    model.traffic.query = QueryState::Failed(e.clone());
+                    fail(model, "focused query", &e, false);
                 }
             }
             Vec::new()
@@ -977,6 +1044,9 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     PendingAction::LoadLabelUsage => load_label_usage(model),
                     PendingAction::RunSlice(f, start, end) => run_slice(model, f, start, end),
                     PendingAction::Backfill(plan) => start_backfill(model, plan, false),
+                    PendingAction::RunFocused(f, focus, mode) => {
+                        start_focused(model, f, focus, mode)
+                    }
                 }
             }
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
@@ -1421,6 +1491,10 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         model.status = StatusLine::info("focus cleared");
         return Vec::new();
     }
+    // The window, cap and backfill keys work on the unfocused result.
+    if matches!(k.code, KeyCode::Char('+' | '-' | ']' | '[' | 'B')) {
+        model.traffic.back_to_unfocused();
+    }
     match k.code {
         KeyCode::Char('f') => {
             model.overlay = Overlay::FilterEditor(FilterEditor::from_filter(&model.traffic.filter));
@@ -1779,6 +1853,66 @@ fn focus_by_name(model: &mut Model, name: &str) {
             near.join(", ")
         )
     });
+}
+
+/// `r` on a partial focus (or on its focused result, which it refreshes past
+/// the cache): one query per side, through the cost guard, whose prompt
+/// names the count. An app without labels (`ipl:Corp/-`) is refused.
+fn requery_focus(model: &mut Model, focus: Focus) -> Vec<Cmd> {
+    if !focus.is_label_group() {
+        model.status = StatusLine::error(format!(
+            "{} is not a label group: it cannot be re-queried by its labels",
+            focus.app_text()
+        ));
+        return Vec::new();
+    }
+    let f = model.traffic.filter.clone();
+    let refresh = model
+        .traffic
+        .focus_result
+        .as_ref()
+        .is_some_and(|r| r.covers(&focus));
+    let mode = if refresh {
+        CacheMode::Bypass
+    } else {
+        CacheMode::Use
+    };
+    if let Some(reason) = f.needs_confirmation() {
+        let n = u32::try_from(focus.direction.sides().len()).unwrap_or(2);
+        model.overlay = Overlay::Confirm {
+            reason: format!(
+                "{reason}. Run {} for {} anyway? (y/n)",
+                queries_text(n),
+                focus.app_text()
+            ),
+            action: PendingAction::RunFocused(f, focus, mode),
+        };
+        return Vec::new();
+    }
+    start_focused(model, f, focus, mode)
+}
+
+fn start_focused(
+    model: &mut Model,
+    filter: TrafficFilter,
+    focus: Focus,
+    mode: CacheMode,
+) -> Vec<Cmd> {
+    let (seq, cancel) = model.traffic.start_query(Instant::now());
+    let n = u32::try_from(focus.direction.sides().len()).unwrap_or(2);
+    model.status = StatusLine::info(format!(
+        "focused query running: {} · {}",
+        focus.app_text(),
+        queries_text(n)
+    ));
+    model.traffic.auto.rearm();
+    vec![Cmd::RunFocused {
+        seq,
+        filter,
+        focus,
+        mode,
+        cancel,
+    }]
 }
 
 /// `+`: the next window step. With the loaded range known for this filter,
@@ -12819,9 +12953,11 @@ mod filter_completion_tests {
 mod focus_tests {
     use super::*;
     use crate::tui::model::{Model, Overlay, TrafficView};
+    use crate::tui::msg::FocusedOutcome;
     use crate::tui::test_support::{model_fixture, model_with_flows, model_with_rich_flows};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use pce::traffic::FocusDirection;
+    use std::time::Duration;
 
     fn key(c: char) -> Msg {
         Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))
@@ -13017,6 +13153,237 @@ mod focus_tests {
         assert_eq!(
             m.status.text, "grouped by app,env",
             "no focus, nothing to say"
+        );
+    }
+
+    fn focused_data(m: &Model, n: usize) -> TrafficData {
+        TrafficData {
+            flows: m.traffic.loaded_flows()[..n].to_vec(),
+            truncated: false,
+            matches_count: Some(n as u64),
+            elapsed: Duration::from_millis(900),
+            cache_hit: false,
+            fetched_at: Instant::now(),
+            filter: m.traffic.filter.clone(),
+            slices: None,
+            backfill: None,
+        }
+    }
+
+    #[test]
+    fn a_truncated_result_offers_r_and_r_sends_one_query_per_side() {
+        let mut m = model_with_flows();
+        m.traffic.data.as_mut().unwrap().truncated = true;
+        quiet(&mut m, focus_cmd("shop/prod"));
+        assert_eq!(
+            m.status.text,
+            "focus shop/prod · both · 4 flows · the result is truncated: r re-queries shop/prod (2 queries)"
+        );
+        let cmds = update(&mut m, key('r'));
+        let [
+            Cmd::RunFocused {
+                seq,
+                filter,
+                focus,
+                mode,
+                ..
+            },
+        ] = cmds.as_slice()
+        else {
+            panic!("{cmds:?}")
+        };
+        assert_eq!(*seq, m.traffic.seq);
+        assert_eq!(filter, &m.traffic.filter);
+        assert_eq!(focus.app_text(), "shop/prod");
+        assert_eq!(*mode, CacheMode::Use);
+        assert_eq!(
+            m.status.text,
+            "focused query running: shop/prod · 2 queries"
+        );
+        let flows = crate::tui::test_support::fixture_flows();
+        let outcome = QueryOutcome {
+            flows: flows[..3].to_vec(),
+            truncated: false,
+            matches_count: Some(3),
+            elapsed: Duration::from_millis(900),
+            hit: false,
+            filter: m.traffic.filter.clone(),
+            bounds: None,
+        };
+        let seq = m.traffic.seq;
+        quiet(
+            &mut m,
+            Msg::FocusedDone {
+                seq,
+                result: Ok(FocusedOutcome {
+                    outcome,
+                    focus: focus.clone(),
+                    queries: 2,
+                }),
+            },
+        );
+        assert!(!m.traffic.is_running());
+        assert_eq!(m.traffic.loaded_flows().len(), 3);
+        assert_eq!(
+            m.traffic.focus_meta().as_deref(),
+            Some("focus shop/prod · both · 2 queries")
+        );
+        assert_eq!(m.status.text, "3 flows for shop/prod in 0.9s · 2 queries");
+        let cmds = update(&mut m, key('r'));
+        assert!(
+            matches!(
+                cmds.as_slice(),
+                [Cmd::RunFocused {
+                    mode: CacheMode::Bypass,
+                    ..
+                }]
+            ),
+            "r on the focused result refreshes it past the cache: {cmds:?}"
+        );
+        m.traffic.cancel_query();
+        quiet(&mut m, kc(KeyCode::Esc));
+        assert_eq!(focused(&m), None);
+        assert_eq!(
+            m.traffic.loaded_flows().len(),
+            4,
+            "the unfocused result is back"
+        );
+        assert!(m.traffic.data.as_ref().unwrap().truncated);
+    }
+
+    #[test]
+    fn a_stale_focused_answer_is_dropped() {
+        let mut m = model_with_flows();
+        m.traffic.data.as_mut().unwrap().truncated = true;
+        quiet(&mut m, focus_cmd("shop/prod"));
+        let _ = update(&mut m, key('r'));
+        let stale = m.traffic.seq;
+        m.traffic.cancel_query();
+        let outcome = QueryOutcome {
+            flows: Vec::new(),
+            truncated: false,
+            matches_count: Some(0),
+            elapsed: Duration::ZERO,
+            hit: false,
+            filter: m.traffic.filter.clone(),
+            bounds: None,
+        };
+        let focus = m.traffic.focus.clone().unwrap();
+        quiet(
+            &mut m,
+            Msg::FocusedDone {
+                seq: stale,
+                result: Ok(FocusedOutcome {
+                    outcome,
+                    focus,
+                    queries: 2,
+                }),
+            },
+        );
+        assert!(m.traffic.focus_result.is_none());
+        assert_eq!(m.traffic.loaded_flows().len(), 4);
+    }
+
+    #[test]
+    fn an_expensive_focused_query_asks_first_and_names_the_count() {
+        let mut m = model_with_flows();
+        m.traffic.data.as_mut().unwrap().truncated = true;
+        m.traffic.filter.max_results = 20_000;
+        quiet(&mut m, focus_cmd("shop/prod"));
+        quiet(&mut m, key('X'));
+        quiet(&mut m, key('r'));
+        let Overlay::Confirm { reason, .. } = &m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        assert_eq!(
+            reason,
+            "cap 20000 exceeds 10000. Run 1 query for shop/prod anyway? (y/n)"
+        );
+        let cmds = update(&mut m, key('y'));
+        assert!(
+            matches!(cmds.as_slice(), [Cmd::RunFocused { focus, .. }] if focus.direction == FocusDirection::In),
+            "{cmds:?}"
+        );
+    }
+
+    #[test]
+    fn a_group_without_labels_is_not_re_queried() {
+        let mut m = model_with_flows();
+        m.traffic.data.as_mut().unwrap().truncated = true;
+        m.traffic.view = TrafficView::Blocked;
+        let nas = |r: &crate::tui::model::SectionRow| {
+            r.peer()
+                .is_some_and(|(_, p)| p.peer_text() == "unmanaged-nas/-")
+        };
+        m.traffic.blocked.select_where(nas);
+        quiet(&mut m, key('F'));
+        m.traffic.blocked.select_where(nas);
+        quiet(&mut m, key('F'));
+        assert_eq!(focused(&m).unwrap().0, "unmanaged-nas/-");
+        quiet(&mut m, key('r'));
+        assert_eq!(
+            m.status.text,
+            "unmanaged-nas/- is not a label group: it cannot be re-queried by its labels"
+        );
+    }
+
+    #[test]
+    fn r_without_a_partial_focus_reruns_the_unfocused_query() {
+        let mut m = model_with_flows();
+        quiet(&mut m, focus_cmd("shop/prod"));
+        let cmds = update(&mut m, key('r'));
+        assert!(
+            matches!(
+                cmds.as_slice(),
+                [Cmd::RunQuery {
+                    mode: CacheMode::Bypass,
+                    ..
+                }]
+            ),
+            "{cmds:?}"
+        );
+    }
+
+    #[test]
+    fn window_and_cap_keys_work_on_the_unfocused_result() {
+        let mut m = model_with_flows();
+        m.traffic.data.as_mut().unwrap().truncated = true;
+        quiet(&mut m, focus_cmd("shop/prod"));
+        let f = m.traffic.focus.clone().unwrap();
+        let data = focused_data(&m, 2);
+        m.traffic.apply_focused(f, 2, data);
+        let _ = update(&mut m, key(']'));
+        assert!(m.traffic.unfocused.is_none() && m.traffic.focus_result.is_none());
+        assert_eq!(m.traffic.loaded_flows().len(), 4);
+        assert!(
+            m.traffic.focus.is_some(),
+            "the focus stays and narrows the unfocused result"
+        );
+        // A new unfocused result also drops a focused one kept aside.
+        let f = m.traffic.focus.clone().unwrap();
+        let data = focused_data(&m, 1);
+        m.traffic.apply_focused(f, 2, data);
+        let seq = m.traffic.seq;
+        let outcome = QueryOutcome {
+            flows: crate::tui::test_support::fixture_flows(),
+            truncated: true,
+            matches_count: Some(40),
+            elapsed: Duration::from_millis(100),
+            hit: false,
+            filter: m.traffic.filter.clone(),
+            bounds: None,
+        };
+        let _ = update(
+            &mut m,
+            Msg::QueryDone {
+                seq,
+                result: Ok(outcome),
+            },
+        );
+        assert!(m.traffic.unfocused.is_none() && m.traffic.focus_result.is_none());
+        assert!(
+            m.traffic.focus_partial(),
+            "the new result is truncated: partial again"
         );
     }
 }

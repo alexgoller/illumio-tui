@@ -8,7 +8,7 @@ use pce::models::{
     DenyRule, Event, EventFilter, IpList, Label, LabelGroup, PendingChange, PolicyScope, RuleSet,
     Service, Workload,
 };
-use pce::traffic::{QueryProgress, ResolvedFlow};
+use pce::traffic::{Focus, QueryProgress, ResolvedFlow};
 use pce::write::{Outcome, Plan, WriteError};
 use pce::{CacheMode, StatsSnapshot};
 use std::sync::Arc;
@@ -25,6 +25,15 @@ pub struct QueryOutcome {
     pub filter: TrafficFilter,
     /// The `(start, end)` the query asked for; `None` if unparseable.
     pub bounds: Option<(jiff::Timestamp, jiff::Timestamp)>,
+}
+
+/// A focused re-query's answer: the merged flows (as one query's outcome),
+/// the focus they were queried for and the number of Explorer queries.
+#[derive(Debug)]
+pub struct FocusedOutcome {
+    pub outcome: QueryOutcome,
+    pub focus: Focus,
+    pub queries: u32,
 }
 
 /// One object list with its cache age in seconds.
@@ -73,6 +82,11 @@ pub enum Msg {
     SliceDone {
         seq: u64,
         result: Result<QueryOutcome, String>,
+    },
+    /// The answer to `Cmd::RunFocused`: one query per side, merged.
+    FocusedDone {
+        seq: u64,
+        result: Result<FocusedOutcome, String>,
     },
     /// Rulesets for `scope` with the cache age in seconds.
     RuleSetsLoaded {
@@ -136,6 +150,16 @@ pub enum Cmd {
         filter: TrafficFilter,
         start: jiff::Timestamp,
         end: jiff::Timestamp,
+        cancel: CancellationToken,
+    },
+    /// `r` on a partial focus: `filter` with the app's labels on its side,
+    /// one query per side (`Pce::focused_traffic`), answered with
+    /// `Msg::FocusedDone`.
+    RunFocused {
+        seq: u64,
+        filter: TrafficFilter,
+        focus: Focus,
+        mode: CacheMode,
         cancel: CancellationToken,
     },
     LoadRuleSets {
@@ -227,6 +251,22 @@ impl PartialEq for Cmd {
                     ..
                 },
             ) => a == b && fa == fb && sa == sb && ea == eb,
+            (
+                Cmd::RunFocused {
+                    seq: a,
+                    filter: fa,
+                    focus: xa,
+                    mode: ma,
+                    ..
+                },
+                Cmd::RunFocused {
+                    seq: b,
+                    filter: fb,
+                    focus: xb,
+                    mode: mb,
+                    ..
+                },
+            ) => a == b && fa == fb && xa == xb && ma == mb,
             (
                 Cmd::LoadRuleSets {
                     scope: sa,

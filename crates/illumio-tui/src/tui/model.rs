@@ -314,6 +314,8 @@ pub enum PendingAction {
     RunSlice(TrafficFilter, jiff::Timestamp, jiff::Timestamp),
     /// `B`: fill the rest of the window in slices.
     Backfill(pce::traffic::BackfillPlan),
+    /// `r` on a partial focus past a cost threshold: one query per side.
+    RunFocused(TrafficFilter, pce::traffic::Focus, pce::CacheMode),
 }
 
 #[derive(Debug)]

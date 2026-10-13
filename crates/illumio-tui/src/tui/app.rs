@@ -8,7 +8,7 @@ use crate::tui::edit::{self, RulesetTarget, WriteIntent};
 use crate::tui::filter::TrafficFilter;
 use crate::tui::model::ObjectKind;
 use crate::tui::model::{Limits, Model, ProfileInfo, WRITES_OFF, WritesState};
-use crate::tui::msg::{Cmd, Msg, ObjectsPayload, QueryOutcome};
+use crate::tui::msg::{Cmd, FocusedOutcome, Msg, ObjectsPayload, QueryOutcome};
 use crate::tui::{update, view};
 use crossterm::event::{
     DisableFocusChange, DisableMouseCapture, EnableFocusChange, EnableMouseCapture, Event,
@@ -16,6 +16,7 @@ use crossterm::event::{
 };
 use futures::{Stream, StreamExt};
 use pce::models::{PolicyScope, WorkloadFilter};
+use pce::traffic::Focus;
 use pce::write::{IfMissing, JsonlAudit, Plan, WriteContext, WriteError, WriteGuard, WriteRefused};
 use pce::{CacheMode, NameIndex, Pce};
 use std::path::PathBuf;
@@ -203,6 +204,62 @@ impl Runtime {
         });
     }
 
+    /// `r` on a partial focus: the filter's query with the app's labels on
+    /// its side, one query per side (`Pce::focused_traffic`, cache slots
+    /// `focus:in` / `focus:out`), answered with `Msg::FocusedDone`.
+    fn run_focused(
+        &mut self,
+        seq: u64,
+        filter: TrafficFilter,
+        focus: Focus,
+        mode: CacheMode,
+        cancel: CancellationToken,
+    ) {
+        self.model.busy += 1;
+        let (pce, tx) = self.task_ctx();
+        tokio::spawn(async move {
+            let (ptx, mut prx) = tokio::sync::mpsc::unbounded_channel();
+            let forward_tx = tx.clone();
+            let forward = tokio::spawn(async move {
+                while let Some(p) = prx.recv().await {
+                    let _ = forward_tx.send(Msg::QueryProgress { seq, progress: p });
+                }
+            });
+            let result = async {
+                let query = filter.to_query(&pce, CacheMode::Use).await?;
+                let idx = pce.name_index(CacheMode::Use).await?;
+                let ft = pce
+                    .focused_traffic("focus", &focus, &query, &idx, mode, &cancel, Some(&ptx))
+                    .await?;
+                let bounds = query
+                    .start_date
+                    .parse()
+                    .ok()
+                    .zip(query.end_date.parse().ok());
+                let queries = ft.query_count();
+                Ok::<_, pce::PceError>(FocusedOutcome {
+                    outcome: QueryOutcome {
+                        flows: ft.flows,
+                        truncated: ft.truncated,
+                        matches_count: ft.matches_count,
+                        elapsed: ft.elapsed,
+                        hit: ft.hit,
+                        filter,
+                        bounds,
+                    },
+                    focus,
+                    queries,
+                })
+            }
+            .await
+            .map_err(|e| e.to_string());
+            drop(ptx);
+            let _ = forward.await;
+            let _ = tx.send(Msg::FocusedDone { seq, result });
+            let _ = tx.send(Msg::Stats(pce.stats()));
+        });
+    }
+
     /// Executes one side effect. Tasks report back over the channel and
     /// always finish with `Msg::Stats` so the header counters stay current.
     pub fn execute(&mut self, cmd: Cmd) {
@@ -345,6 +402,13 @@ impl Runtime {
                 end,
                 cancel,
             } => self.run_traffic(seq, filter, Some((start, end)), CacheMode::Use, cancel),
+            Cmd::RunFocused {
+                seq,
+                filter,
+                focus,
+                mode,
+                cancel,
+            } => self.run_focused(seq, filter, focus, mode, cancel),
             Cmd::LoadRuleSets { scope, mode } => {
                 self.model.busy += 1;
                 let (pce, tx) = self.task_ctx();
@@ -508,6 +572,7 @@ impl Runtime {
                 | Msg::IndexFailed(_)
                 | Msg::QueryDone { .. }
                 | Msg::SliceDone { .. }
+                | Msg::FocusedDone { .. }
                 | Msg::RuleSetsLoaded { .. }
                 | Msg::DenyRulesLoaded { .. }
                 | Msg::PendingLoaded(_)

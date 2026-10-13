@@ -2336,3 +2336,73 @@ async fn a_late_revert_plan_after_a_profile_switch_is_dropped() {
         "nothing re-planned against the new PCE"
     );
 }
+
+#[tokio::test]
+async fn r_on_a_partial_focus_sends_one_query_per_side() {
+    use illumio_tui::tui::commands::Command;
+    use illumio_tui::tui::msg::Msg;
+    use illumio_tui::tui::test_support::model_with_flows;
+    use wiremock::matchers::body_partial_json;
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    let labels =
+        json!([{"label": {"href": "/orgs/5/labels/3"}}, {"label": {"href": "/orgs/5/labels/4"}}]);
+    for (side, body) in [
+        ("in", json!({"destinations": {"include": [labels.clone()]}})),
+        ("out", json!({"sources": {"include": [labels.clone()]}})),
+    ] {
+        let href = format!("/orgs/5/traffic_flows/async_queries/q-{side}");
+        Mock::given(method("POST"))
+            .and(path("/api/v2/orgs/5/traffic_flows/async_queries"))
+            .and(body_partial_json(body))
+            .respond_with(
+                ResponseTemplate::new(202).set_body_json(json!({"href": href, "status": "queued"})),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v2{href}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "completed", "result": {"href": format!("{href}/download")}, "matches_count": 4})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v2{href}/download")))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(include_str!("../../../fixtures/traffic_flows.json"))
+                    .insert_header("Content-Type", "application/json"),
+            )
+            .mount(&server)
+            .await;
+    }
+    let pce = pce_for(&server);
+    let mut m = model_with_flows();
+    m.traffic.data.as_mut().unwrap().truncated = true;
+    let (mut rt, tx) = Runtime::new(pce, m);
+    tx.send(Msg::Command(Command::Focus(Some("shop/prod".into()))))
+        .unwrap();
+    let model = run_loop(
+        &mut rt,
+        Box::pin(press(vec![(100, ch('r')), (1500, ch('q'))])),
+        &mut |_| {},
+    )
+    .await;
+    let r = model
+        .traffic
+        .focus_result
+        .as_ref()
+        .expect("a focused result");
+    assert_eq!(r.queries, 2);
+    assert!(
+        model.traffic.unfocused.is_some(),
+        "the unfocused result is kept aside"
+    );
+    assert_eq!(model.traffic.loaded_flows().len(), 4, "flow 0 once");
+    assert_eq!(model.busy, 0);
+    assert_eq!(
+        model.stats.calls,
+        4 + 3 + 3,
+        "4 lists for the filter, then POST + poll + download per side"
+    );
+}

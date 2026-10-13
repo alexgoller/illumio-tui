@@ -1483,3 +1483,21 @@ fn traffic_app_picker_80x24() {
     );
     insta::assert_snapshot!("traffic_app_picker_80x24", out);
 }
+
+#[test]
+fn traffic_focus_partial_120x30() {
+    use illumio_tui::tui::commands::Command;
+    use illumio_tui::tui::msg::Msg;
+    let mut m = model_with_flows();
+    m.traffic.data.as_mut().unwrap().truncated = true;
+    illumio_tui::tui::update(
+        &mut m,
+        Msg::Command(Command::Focus(Some("shop/prod".into()))),
+    );
+    let out = render_to_string(&m, 120, 30);
+    assert!(
+        out.contains("focus is partial: r re-queries shop/prod · both"),
+        "{out}"
+    );
+    insta::assert_snapshot!("traffic_focus_partial_120x30", out);
+}
