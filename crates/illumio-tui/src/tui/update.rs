@@ -261,30 +261,18 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             }
             match result {
                 Ok(o) => {
-                    let QueryOutcome {
-                        flows,
-                        truncated,
-                        matches_count,
-                        elapsed,
-                        hit,
-                        filter,
-                        bounds,
-                    } = o;
                     // A new unfocused result: a focused one kept aside is stale.
                     model.traffic.unfocused = None;
                     model.traffic.focus_result = None;
-                    let n = flows.len();
-                    model.traffic.data = Some(TrafficData {
-                        flows,
-                        truncated,
-                        matches_count,
-                        elapsed,
-                        cache_hit: hit,
-                        fetched_at: Instant::now(),
-                        filter,
-                        slices: bounds.map(|(start, end)| Slices::new(start, end)),
-                        backfill: None,
-                    });
+                    let data = outcome_data(o);
+                    let (n, truncated, matches_count, elapsed, hit) = (
+                        data.flows.len(),
+                        data.truncated,
+                        data.matches_count,
+                        data.elapsed,
+                        data.cache_hit,
+                    );
+                    model.traffic.data = Some(data);
                     model.traffic.drill = None;
                     model.traffic.treemap.zoom = None;
                     model.traffic.rebuild_views();
@@ -336,29 +324,18 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     outcome,
                     focus,
                     queries,
+                    coverage,
                 }) => {
-                    let QueryOutcome {
-                        flows,
-                        truncated,
-                        matches_count,
-                        elapsed,
-                        hit,
-                        filter,
-                        bounds,
-                    } = outcome;
-                    let data = TrafficData {
-                        flows,
-                        truncated,
-                        matches_count,
-                        elapsed,
-                        cache_hit: hit,
-                        fetched_at: Instant::now(),
-                        filter,
-                        slices: bounds.map(|(start, end)| Slices::new(start, end)),
-                        backfill: None,
-                    };
-                    let app = focus.app_text();
                     model.traffic.query = QueryState::Idle;
+                    // Only for the focus still set: clearing or changing it
+                    // cancels the run, and a late answer never revives it.
+                    if model.traffic.focus.as_ref() != Some(&focus) {
+                        return Vec::new();
+                    }
+                    let mut data = outcome_data(outcome);
+                    data.side_coverage = coverage;
+                    let (truncated, elapsed, hit) = (data.truncated, data.elapsed, data.cache_hit);
+                    let app = focus.app_text();
                     model.traffic.show_detail = false;
                     model.traffic.apply_focused(focus, queries, data);
                     let n = model.traffic.view_flows().len();
@@ -863,6 +840,22 @@ pub fn event_detail_lines(event: &pce::models::Event) -> usize {
     serde_json::to_string_pretty(event)
         .map(|s| s.lines().count())
         .unwrap_or(0)
+}
+
+/// A query's answer as the loaded result (its range from the bounds).
+fn outcome_data(o: QueryOutcome) -> TrafficData {
+    TrafficData {
+        flows: o.flows,
+        truncated: o.truncated,
+        matches_count: o.matches_count,
+        elapsed: o.elapsed,
+        cache_hit: o.hit,
+        fetched_at: Instant::now(),
+        filter: o.filter,
+        slices: o.bounds.map(|(start, end)| Slices::new(start, end)),
+        backfill: None,
+        side_coverage: None,
+    }
 }
 
 fn fail(model: &mut Model, context: &str, e: &str, auto_off: bool) {
@@ -1818,7 +1811,7 @@ fn focus_status(t: &TrafficState) -> StatusLine {
     };
     let n = t.view_flows().len();
     if t.focus_partial() {
-        let q = u32::try_from(f.direction.sides().len()).unwrap_or(2);
+        let q = f.direction.query_count();
         StatusLine::warn(format!(
             "{} · {n} flows · the result is truncated: r re-queries {} ({})",
             f.badge(),
@@ -1861,7 +1854,7 @@ fn focus_by_name(model: &mut Model, name: &str) {
 fn requery_focus(model: &mut Model, focus: Focus) -> Vec<Cmd> {
     if !focus.is_label_group() {
         model.status = StatusLine::error(format!(
-            "{} is not a label group: it cannot be re-queried by its labels",
+            "{} is not a label group: it cannot be re-queried by its labels; Esc clears the focus, then r reruns the whole query",
             focus.app_text()
         ));
         return Vec::new();
@@ -1878,7 +1871,7 @@ fn requery_focus(model: &mut Model, focus: Focus) -> Vec<Cmd> {
         CacheMode::Use
     };
     if let Some(reason) = f.needs_confirmation() {
-        let n = u32::try_from(focus.direction.sides().len()).unwrap_or(2);
+        let n = focus.direction.query_count();
         model.overlay = Overlay::Confirm {
             reason: format!(
                 "{reason}. Run {} for {} anyway? (y/n)",
@@ -1898,8 +1891,10 @@ fn start_focused(
     focus: Focus,
     mode: CacheMode,
 ) -> Vec<Cmd> {
-    let (seq, cancel) = model.traffic.start_query(Instant::now());
-    let n = u32::try_from(focus.direction.sides().len()).unwrap_or(2);
+    let (seq, cancel) = model
+        .traffic
+        .start_focused_query(Instant::now(), focus.clone());
+    let n = focus.direction.query_count();
     model.status = StatusLine::info(format!(
         "focused query running: {} · {}",
         focus.app_text(),
@@ -13168,6 +13163,7 @@ mod focus_tests {
             filter: m.traffic.filter.clone(),
             slices: None,
             backfill: None,
+            side_coverage: None,
         }
     }
 
@@ -13220,6 +13216,7 @@ mod focus_tests {
                     outcome,
                     focus: focus.clone(),
                     queries: 2,
+                    coverage: None,
                 }),
             },
         );
@@ -13278,6 +13275,7 @@ mod focus_tests {
                     outcome,
                     focus,
                     queries: 2,
+                    coverage: None,
                 }),
             },
         );
@@ -13324,7 +13322,7 @@ mod focus_tests {
         quiet(&mut m, key('r'));
         assert_eq!(
             m.status.text,
-            "unmanaged-nas/- is not a label group: it cannot be re-queried by its labels"
+            "unmanaged-nas/- is not a label group: it cannot be re-queried by its labels; Esc clears the focus, then r reruns the whole query"
         );
     }
 
@@ -13386,5 +13384,111 @@ mod focus_tests {
             m.traffic.focus_partial(),
             "the new result is truncated: partial again"
         );
+    }
+
+    /// A focused run in flight on the rich fixture (truncated), focused on
+    /// crm/prod: its seq and focus.
+    fn in_flight() -> (Model, u64, pce::traffic::Focus) {
+        let mut m = model_with_rich_flows();
+        m.traffic.data.as_mut().unwrap().truncated = true;
+        quiet(&mut m, focus_cmd("crm/prod"));
+        let cmds = update(&mut m, key('r'));
+        let [Cmd::RunFocused { seq, focus, .. }] = cmds.as_slice() else {
+            panic!("{cmds:?}")
+        };
+        assert!(m.traffic.is_running());
+        assert_eq!(m.traffic.running_focus(), Some(focus));
+        (m, *seq, focus.clone())
+    }
+
+    /// The late answer of the run `in_flight` started.
+    fn late(m: &mut Model, seq: u64, focus: pce::traffic::Focus) {
+        let outcome = QueryOutcome {
+            flows: m.traffic.loaded_flows()[..2].to_vec(),
+            truncated: false,
+            matches_count: Some(2),
+            elapsed: Duration::from_millis(900),
+            hit: false,
+            filter: m.traffic.filter.clone(),
+            bounds: None,
+        };
+        quiet(
+            m,
+            Msg::FocusedDone {
+                seq,
+                result: Ok(FocusedOutcome {
+                    outcome,
+                    focus,
+                    queries: 2,
+                    coverage: None,
+                }),
+            },
+        );
+        assert!(
+            m.traffic.focus_result.is_none(),
+            "the late answer is dropped"
+        );
+        assert!(m.traffic.unfocused.is_none());
+        assert_eq!(
+            m.traffic.loaded_flows().len(),
+            30,
+            "the unfocused result stays"
+        );
+    }
+
+    #[test]
+    fn esc_during_a_focused_run_cancels_it_and_its_answer_never_revives_the_focus() {
+        let (mut m, seq, focus) = in_flight();
+        quiet(&mut m, kc(KeyCode::Esc));
+        assert!(!m.traffic.is_running(), "Esc cancelled the focused run");
+        assert_eq!(focused(&m), None);
+        late(&mut m, seq, focus);
+        assert_eq!(focused(&m), None);
+        assert_eq!(m.traffic.flows.len(), 30);
+    }
+
+    #[test]
+    fn another_app_during_a_focused_run_cancels_it() {
+        let (mut m, seq, focus) = in_flight();
+        quiet(&mut m, focus_cmd("shop/prod"));
+        assert!(!m.traffic.is_running());
+        late(&mut m, seq, focus);
+        assert_eq!(
+            focused(&m),
+            Some(("shop/prod".into(), FocusDirection::Both))
+        );
+    }
+
+    #[test]
+    fn x_during_a_focused_run_cancels_it() {
+        let (mut m, seq, focus) = in_flight();
+        quiet(&mut m, key('X'));
+        assert!(!m.traffic.is_running());
+        late(&mut m, seq, focus);
+        assert_eq!(focused(&m), Some(("crm/prod".into(), FocusDirection::In)));
+        assert_eq!(
+            m.traffic.flows.len(),
+            7,
+            "still narrowed by the new direction"
+        );
+    }
+
+    #[test]
+    fn g_during_a_focused_run_cancels_it() {
+        let (mut m, seq, focus) = in_flight();
+        apply_group_keys(&mut m, vec!["app".into()], false);
+        assert!(!m.traffic.is_running());
+        late(&mut m, seq, focus);
+        assert_eq!(focused(&m), None, "the old keys' focus is not revived");
+    }
+
+    #[test]
+    fn a_focused_answer_for_another_focus_is_dropped_even_on_the_current_seq() {
+        let (mut m, seq, focus) = in_flight();
+        // Bypass the cancel: the outcome guard alone must hold.
+        m.traffic.focus = Some(focus.clone().with_direction(FocusDirection::Out));
+        late(&mut m, seq, focus);
+        assert!(!m.traffic.is_running());
+        assert_eq!(focused(&m).unwrap().1, FocusDirection::Out);
     }
 }

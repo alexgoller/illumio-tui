@@ -135,6 +135,7 @@ pub fn model_with_flows() -> Model {
         filter: m.traffic.filter.clone(),
         slices: None,
         backfill: None,
+        side_coverage: None,
     });
     m.traffic.query = QueryState::Idle;
     m.traffic.auto.last_run = Some(Instant::now() - Duration::from_secs(3));

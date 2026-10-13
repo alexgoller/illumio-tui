@@ -16,14 +16,13 @@ use pce::traffic::treemap::{Rect as TreemapRect, Tile, Weight, layout, layout_zo
 use pce::traffic::{
     AppSection, Decisions, Direction, FlowGroup, Focus, FocusDirection, GroupKey, MeshColumns,
     MeshKey, MeshRow, PeerRow, ResolvedFlow, Totals, app_header, app_sections, app_sections_both,
-    apps_in, compact_count, focus_flows, group_by_labels, group_by_service, group_key, group_text,
-    in_app, in_peer, keys_or_default, keys_seen, mesh, mesh_key,
+    apps_in, compact_count, group_by_labels, group_by_service, group_key, group_text, in_app,
+    in_peer, keys_or_default, keys_seen, mesh, mesh_key,
 };
 use pce::write::Plan;
 use pce::{
     IpListSize, KeyOrder, NameIndex, RuleKind, RuleSetView, RuleView, StatsSnapshot, ip_list_size,
 };
-use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -326,6 +325,9 @@ pub enum QueryState {
         started: Instant,
         status: String,
         cancel: CancellationToken,
+        /// `r` on a partial focus: the focus this run was started for.
+        /// Clearing or changing the focus cancels it.
+        focus: Option<Focus>,
     },
     Failed(String),
 }
@@ -348,6 +350,9 @@ pub struct TrafficData {
     /// the data is a backfill from then on, which keeps auto-refresh off
     /// (a tick would replace it with one truncated query).
     pub backfill: Option<Backfilled>,
+    /// A merged focused result with a truncated side: that side's coverage
+    /// (the least, with two), which the merged rows would overstate.
+    pub side_coverage: Option<pce::traffic::Coverage>,
 }
 
 /// What a backfill left in `TrafficData`.
@@ -403,7 +408,9 @@ impl TrafficData {
                 oldest: Some(s.start()),
             });
         }
-        let c = pce::traffic::coverage(&self.flows, window);
+        let c = self
+            .side_coverage
+            .unwrap_or_else(|| pce::traffic::coverage(&self.flows, window));
         Some(DataCoverage {
             covered: c.covered,
             window,
@@ -1681,10 +1688,8 @@ impl FocusResult {
     }
 }
 
-/// `1 query`, `2 queries`.
-pub fn queries_text(n: u32) -> String {
-    format!("{n} quer{}", if n == 1 { "y" } else { "ies" })
-}
+/// `1 query`, `2 queries` (shared with the CLI's meta line).
+pub use pce::traffic::queries_text;
 
 #[derive(Debug)]
 pub struct TrafficState {
@@ -1741,6 +1746,9 @@ pub struct TrafficState {
     /// The unfocused result `focus_result` replaced; put back, without a
     /// request, when the focus is cleared or moves to another app.
     pub unfocused: Option<TrafficData>,
+    /// The loaded flows the focus keeps, computed once whenever the focus
+    /// or the data changes (`refresh_focused`); `None` without a focus.
+    focused: Option<Vec<ResolvedFlow>>,
 }
 
 /// Both optional Mesh columns shown.
@@ -1903,6 +1911,7 @@ impl TrafficState {
             focus: None,
             focus_result: None,
             unfocused: None,
+            focused: None,
         }
     }
 
@@ -1913,8 +1922,44 @@ impl TrafficState {
 
     /// The loaded flows the focus keeps (all of them, borrowed, without
     /// one): what every view aggregates, under the drill and `d`.
-    pub fn view_flows(&self) -> Cow<'_, [ResolvedFlow]> {
-        focus_flows(self.focus.as_ref(), self.loaded_flows())
+    pub fn view_flows(&self) -> &[ResolvedFlow] {
+        match &self.focused {
+            Some(f) => f,
+            None => self.loaded_flows(),
+        }
+    }
+
+    /// Recomputes the flows the focus keeps from `data`: once per change
+    /// of the focus or the data, never per frame.
+    fn refresh_focused(&mut self) {
+        self.focused = self.focus.as_ref().map(|f| {
+            self.loaded_flows()
+                .iter()
+                .filter(|x| f.keeps(x))
+                .cloned()
+                .collect()
+        });
+    }
+
+    /// The focus a running focused re-query was started for.
+    pub fn running_focus(&self) -> Option<&Focus> {
+        match &self.query {
+            QueryState::Running { focus, .. } => focus.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Cancels a running focused re-query unless it was started for
+    /// exactly the focus now set; whether one was cancelled. Its answer
+    /// would bring back a focus the user cleared or changed.
+    pub fn cancel_stale_focused_run(&mut self) -> bool {
+        let stale = self
+            .running_focus()
+            .is_some_and(|r| self.focus.as_ref() != Some(r));
+        if stale {
+            self.cancel_query();
+        }
+        stale
     }
 
     /// `F` / `:focus`: narrows every view to `focus`. A focused result of
@@ -1929,14 +1974,18 @@ impl TrafficState {
             self.restore_unfocused();
         }
         self.focus = Some(focus);
+        self.cancel_stale_focused_run();
         self.rebuild_views();
     }
 
-    /// The focus gone and the unfocused result back, without a rebuild;
-    /// whether there was a focus.
+    /// The focus gone, a focused re-query in flight cancelled and the
+    /// unfocused result back, without a rebuild; whether there was a focus.
     pub fn drop_focus(&mut self) -> bool {
         self.restore_unfocused();
-        self.focus.take().is_some()
+        let had = self.focus.take().is_some();
+        self.cancel_stale_focused_run();
+        self.refresh_focused();
+        had
     }
 
     /// `Esc`: `drop_focus`, then every view again. No request.
@@ -1953,6 +2002,7 @@ impl TrafficState {
         match self.unfocused.take() {
             Some(d) => {
                 self.data = Some(d);
+                self.refresh_focused();
                 true
             }
             None => false,
@@ -1976,6 +2026,7 @@ impl TrafficState {
         let f = self.focus.as_mut()?;
         f.direction = f.direction.next();
         let d = f.direction;
+        self.cancel_stale_focused_run();
         self.rebuild_views();
         Some(d)
     }
@@ -2200,6 +2251,7 @@ impl TrafficState {
     /// never requests.
     pub fn rebuild_views(&mut self) {
         self.keys = self.resolve_keys();
+        self.refresh_focused();
         let (shown, tree, mesh_rows) = {
             let keys = &self.keys;
             let flows = self.view_flows();
@@ -2210,8 +2262,8 @@ impl TrafficState {
                 .collect();
             (
                 shown,
-                group_by_labels(&flows, keys),
-                mesh(&flows, keys, self.mesh_cols),
+                group_by_labels(flows, keys),
+                mesh(flows, keys, self.mesh_cols),
             )
         };
         self.flows.set_rows(shown);
@@ -2228,7 +2280,7 @@ impl TrafficState {
         let (groups, services) = {
             let st = &self.apps_state;
             let flows = self.view_flows();
-            let kept = st.decisions.kept(&flows);
+            let kept = st.decisions.kept(flows);
             let groups = group_by_labels(&kept, &self.keys);
             let services = if st.by_service {
                 group_by_service(&kept, &self.keys)
@@ -2275,16 +2327,16 @@ impl TrafficState {
         match st.by {
             By::Pairs => Vec::new(),
             By::In => section_rows(
-                &app_sections(&flows, keys, Direction::In, st.decisions),
+                &app_sections(flows, keys, Direction::In, st.decisions),
                 folded,
                 false,
             ),
             By::Out => section_rows(
-                &app_sections(&flows, keys, Direction::Out, st.decisions),
+                &app_sections(flows, keys, Direction::Out, st.decisions),
                 folded,
                 false,
             ),
-            By::Both => section_rows(&app_sections_both(&flows, keys, st.decisions), folded, true),
+            By::Both => section_rows(&app_sections_both(flows, keys, st.decisions), folded, true),
         }
     }
 
@@ -2292,7 +2344,7 @@ impl TrafficState {
     fn blocked_rows(&self, folded: &BTreeSet<Vec<String>>) -> Vec<SectionRow> {
         section_rows(
             &app_sections(
-                &self.view_flows(),
+                self.view_flows(),
                 &self.keys,
                 Direction::In,
                 Decisions::Blocked,
@@ -2505,8 +2557,19 @@ impl TrafficState {
             started: now,
             status: "submitting".into(),
             cancel: cancel.clone(),
+            focus: None,
         };
         (self.seq, cancel)
+    }
+
+    /// `start_query` for `r` on a partial focus: the run remembers its
+    /// focus, so clearing or changing the focus cancels it.
+    pub fn start_focused_query(&mut self, now: Instant, focus: Focus) -> (u64, CancellationToken) {
+        let started = self.start_query(now);
+        if let QueryState::Running { focus: f, .. } = &mut self.query {
+            *f = Some(focus);
+        }
+        started
     }
 }
 
@@ -4880,6 +4943,7 @@ mod focus_tests {
             filter: t.filter.clone(),
             slices: None,
             backfill: None,
+            side_coverage: None,
         }
     }
 
@@ -5053,5 +5117,81 @@ mod focus_tests {
     fn queries_text_counts() {
         assert_eq!(queries_text(1), "1 query");
         assert_eq!(queries_text(2), "2 queries");
+    }
+
+    #[test]
+    fn the_focused_flows_are_computed_once_per_focus_or_data_change() {
+        let mut m = model_with_rich_flows();
+        let t = &mut m.traffic;
+        assert!(
+            std::ptr::eq(t.view_flows().as_ptr(), t.loaded_flows().as_ptr()),
+            "no focus: the loaded flows, borrowed"
+        );
+        t.set_focus(Focus::new(app("crm/prod"), keys()).with_direction(FocusDirection::In));
+        assert_eq!(t.view_flows().len(), 7, "focus set");
+        let cached = t.view_flows().as_ptr();
+        t.rebuild_pairs();
+        assert_eq!(
+            t.view_flows().as_ptr(),
+            cached,
+            "a rebuild of one view reuses it"
+        );
+        t.cycle_focus_direction();
+        assert_eq!(t.view_flows().len(), 4, "X: recomputed");
+        let more = t.loaded_flows()[..3].to_vec();
+        t.data.as_mut().unwrap().flows = more;
+        t.rebuild_views();
+        assert_eq!(
+            t.view_flows().len(),
+            t.loaded_flows()
+                .iter()
+                .filter(|f| t.focus.as_ref().unwrap().keeps(f))
+                .count(),
+            "new data: recomputed"
+        );
+        assert!(t.drop_focus());
+        assert_eq!(
+            t.view_flows().len(),
+            3,
+            "dropped without a rebuild: every flow"
+        );
+        let data = data_of(t, 3);
+        t.apply_focused(Focus::new(app("crm/prod"), keys()), 2, data);
+        assert!(t.restore_unfocused());
+        assert_eq!(
+            t.view_flows().len(),
+            t.loaded_flows()
+                .iter()
+                .filter(|f| t.focus.as_ref().unwrap().keeps(f))
+                .count(),
+            "the unfocused result back: recomputed without a rebuild"
+        );
+    }
+
+    #[test]
+    fn a_merged_focused_result_reports_its_truncated_side_coverage() {
+        let mut m = model_with_flows();
+        let t = &mut m.traffic;
+        let full = t.data.as_ref().unwrap().coverage().unwrap().covered;
+        assert_eq!(
+            full,
+            Duration::from_secs(84 * 60 + 122),
+            "06:05 to 07:31:02"
+        );
+        let side = pce::traffic::coverage(&t.loaded_flows()[..2], Duration::from_secs(86_400));
+        let d = t.data.as_mut().unwrap();
+        d.truncated = true;
+        d.side_coverage = Some(side);
+        let c = d.coverage().unwrap();
+        assert_eq!(
+            c.covered,
+            Duration::from_secs(4),
+            "the truncated side, not the merged rows"
+        );
+        assert!(
+            d.coverage_meta().unwrap().starts_with("covers <1m of 24h"),
+            "{:?}",
+            d.coverage_meta()
+        );
     }
 }

@@ -34,6 +34,8 @@ pub struct FocusedOutcome {
     pub outcome: QueryOutcome,
     pub focus: Focus,
     pub queries: u32,
+    /// The least coverage of the truncated sides (`FocusedTraffic::coverage`).
+    pub coverage: Option<pce::traffic::Coverage>,
 }
 
 /// One object list with its cache age in seconds.

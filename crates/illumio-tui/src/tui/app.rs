@@ -237,6 +237,7 @@ impl Runtime {
                     .ok()
                     .zip(query.end_date.parse().ok());
                 let queries = ft.query_count();
+                let coverage = ft.coverage;
                 Ok::<_, pce::PceError>(FocusedOutcome {
                     outcome: QueryOutcome {
                         flows: ft.flows,
@@ -249,6 +250,7 @@ impl Runtime {
                     },
                     focus,
                     queries,
+                    coverage,
                 })
             }
             .await
