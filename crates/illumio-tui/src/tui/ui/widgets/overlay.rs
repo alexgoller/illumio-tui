@@ -72,7 +72,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ),
     (
         "App-to-app d",
-        "decision filter: all · blocked · blocked only",
+        "pairs and sections: all · blocked · blocked only",
     ),
     (
         "Sections Space / z",

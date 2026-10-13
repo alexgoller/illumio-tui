@@ -813,6 +813,9 @@ pub struct TreemapState {
     /// Index into `targets()`.
     pub cursor: usize,
     pub tiles: Vec<Tile>,
+    /// The pairs the tiles are laid out from: every loaded flow, whatever
+    /// App-to-app's decision filter (`d`).
+    pub groups: Vec<FlowGroup>,
     /// Some loaded flow carried byte counts: `b` may weigh by bytes, and
     /// the meta draws `b bytes` dim when not.
     pub has_bytes: bool,
@@ -828,6 +831,7 @@ impl TreemapState {
             zoom: None,
             cursor: 0,
             tiles: Vec::new(),
+            groups: Vec::new(),
             has_bytes: false,
             area,
         }
@@ -1673,9 +1677,10 @@ pub struct TrafficState {
     /// The keys in force, resolved by `rebuild_views` (the `all labels` scan
     /// runs there, never per draw): what every view and column groups by.
     pub keys: Vec<String>,
+    /// App-to-app `pairs`: the flows the decision filter (`d`) keeps.
     pub groups: TableView<FlowGroup>,
-    /// App-to-app `pairs` by service (`o`); empty while off. The treemap
-    /// keeps drawing `groups`.
+    /// App-to-app `pairs` by service (`o`), under the decision filter too;
+    /// empty while off.
     pub services: TableView<FlowGroup>,
     pub mesh: TableView<MeshRow>,
     /// The Mesh view's optional columns (`u`, `p`); both shown at first.
@@ -1707,10 +1712,12 @@ pub const MESH_ALL: MeshColumns = MeshColumns {
 /// What `Enter` narrowed the Flows view to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Drill {
-    /// An App-to-app or treemap pair: source and destination group keys.
-    Pair(Vec<String>, Vec<String>),
-    /// An App-to-app pair by service (`o`): the groups and the service.
-    Service(Vec<String>, Vec<String>, String),
+    /// An App-to-app or treemap pair: source and destination group keys,
+    /// and the decisions App-to-app's filter kept (`All` from the treemap).
+    Pair(Vec<String>, Vec<String>, Decisions),
+    /// An App-to-app pair by service (`o`): the groups, the service and
+    /// the decisions kept.
+    Service(Vec<String>, Vec<String>, String, Decisions),
     /// A Mesh row, under the columns it was grouped with.
     Mesh { key: MeshKey, cols: MeshColumns },
     /// A section header: every flow of `app` in `direction` (either side
@@ -1743,11 +1750,14 @@ impl Drill {
     /// Whether `f` belongs to the drilled row under `keys`.
     pub fn matches(&self, f: &ResolvedFlow, keys: &[String]) -> bool {
         match self {
-            Drill::Pair(src, dst) => {
-                &group_key(&f.src, keys) == src && &group_key(&f.dst, keys) == dst
+            Drill::Pair(src, dst, decisions) => {
+                decisions.keeps(f.policy_decision)
+                    && &group_key(&f.src, keys) == src
+                    && &group_key(&f.dst, keys) == dst
             }
-            Drill::Service(src, dst, service) => {
-                &group_key(&f.src, keys) == src
+            Drill::Service(src, dst, service, decisions) => {
+                decisions.keeps(f.policy_decision)
+                    && &group_key(&f.src, keys) == src
                     && &group_key(&f.dst, keys) == dst
                     && &f.service_text() == service
             }
@@ -1770,10 +1780,18 @@ impl Drill {
     /// The Flows title after `Flows ▸ `.
     pub fn title(&self) -> String {
         match self {
-            Drill::Pair(src, dst) => format!("{} → {}", src.join("/"), dst.join("/")),
-            Drill::Service(src, dst, service) => {
-                format!("{} → {} {service}", src.join("/"), dst.join("/"))
-            }
+            Drill::Pair(src, dst, decisions) => format!(
+                "{} → {}{}",
+                src.join("/"),
+                dst.join("/"),
+                decisions_suffix(*decisions)
+            ),
+            Drill::Service(src, dst, service, decisions) => format!(
+                "{} → {} {service}{}",
+                src.join("/"),
+                dst.join("/"),
+                decisions_suffix(*decisions)
+            ),
             Drill::Mesh { key, .. } => format!(
                 "{} → {} {}",
                 key.src.join("/"),
@@ -1911,25 +1929,29 @@ impl TrafficState {
             .filter(|f| self.drill.as_ref().is_none_or(|d| d.matches(f, keys)))
             .map(|f| FlowRow::new(f.clone(), keys))
             .collect();
-        let groups = group_by_labels(flows, keys);
+        let tree = group_by_labels(flows, keys);
         let mesh_rows = mesh(flows, keys, self.mesh_cols);
         self.flows.set_rows(shown);
-        self.groups.set_rows(groups);
+        self.treemap.groups = tree;
         self.mesh.set_rows(mesh_rows);
-        self.rebuild_services();
+        self.rebuild_pairs();
         self.rebuild_sections();
         self.relayout_treemap();
     }
 
-    /// App-to-app's pairs by service from the loaded flows while `o` is on;
-    /// none while off. Pure.
-    pub fn rebuild_services(&mut self) {
-        let rows = if self.apps_state.by_service {
-            group_by_service(self.loaded_flows(), &self.keys)
+    /// App-to-app's pairs, and by service while `o` is on (none while off),
+    /// from the loaded flows the decision filter keeps. Pure.
+    pub fn rebuild_pairs(&mut self) {
+        let st = &self.apps_state;
+        let kept = st.decisions.kept(self.loaded_flows());
+        let groups = group_by_labels(&kept, &self.keys);
+        let services = if st.by_service {
+            group_by_service(&kept, &self.keys)
         } else {
             Vec::new()
         };
-        self.services.set_rows(rows);
+        self.groups.set_rows(groups);
+        self.services.set_rows(services);
     }
 
     /// App-to-app `pairs`' table: by service when `o` is on, else the pairs.
@@ -2114,7 +2136,7 @@ impl TrafficState {
         })
     }
 
-    /// The treemap's tiles again from the current groups, zoom, weight and
+    /// The treemap's tiles again from its (unfiltered) groups, zoom, weight and
     /// area. A zoom whose source is gone is dropped; byte weight falls back
     /// to connections when no flow carries bytes; the cursor is clamped.
     pub fn relayout_treemap(&mut self) {
@@ -2122,8 +2144,8 @@ impl TrafficState {
         if !self.treemap.has_bytes {
             self.treemap.weight = Weight::Connections;
         }
-        let groups = self.groups.rows();
         let tm = &mut self.treemap;
+        let groups = &tm.groups;
         if tm
             .zoom
             .as_ref()

@@ -197,9 +197,10 @@ fn render_flows(model: &Model, f: &mut Frame, area: Rect) {
     });
 }
 
-/// The panel meta of a sectioned table: `in · blocked · keys app,env ·
-/// Enter drills`, then sort and search as every table shows them.
-fn sections_meta(model: &Model, by: &str, view: &TableView<SectionRow>) -> String {
+/// The panel meta of App-to-app or Blocked: `in · blocked · keys app,env ·
+/// Enter drills` (`pairs · by service · blocked · ...`), then sort and
+/// search as every table shows them.
+fn view_meta<T>(model: &Model, by: &str, view: &TableView<T>) -> String {
     let st = model.traffic.section_decisions();
     let mut parts = vec![by.to_string()];
     if st != Decisions::All {
@@ -238,7 +239,7 @@ fn render_groups(model: &Model, f: &mut Frame, area: Rect) {
     let t = &model.theme;
     let by = model.traffic.apps_state.by;
     if by != By::Pairs {
-        let meta = sections_meta(model, by.label(), &model.traffic.apps);
+        let meta = view_meta(model, by.label(), &model.traffic.apps);
         let theme = t.clone();
         render_sections(
             model,
@@ -255,18 +256,12 @@ fn render_groups(model: &Model, f: &mut Frame, area: Rect) {
         return;
     }
     let table = model.traffic.pairs_table();
-    let meta = crate::tui::ui::widgets::table::header_meta(table);
-    let meta = format!(
-        "pairs{} · keys {} · Enter drills{}{}",
-        if model.traffic.apps_state.by_service {
-            " · by service"
-        } else {
-            ""
-        },
-        model.traffic.effective_keys().join(","),
-        if meta.is_empty() { "" } else { " · " },
-        meta
-    );
+    let by = if model.traffic.apps_state.by_service {
+        "pairs · by service"
+    } else {
+        "pairs"
+    };
+    let meta = view_meta(model, by, table);
     let block = panel(TrafficView::Aggregate.title(), &meta, t, true);
     let theme = t.clone();
     crate::tui::ui::widgets::table::render(f, area, table, t, block, &move |g| {
@@ -411,7 +406,7 @@ fn draw_fill(f: &mut Frame, clip: Rect, tile: &Tile, t: &Theme, cursor: bool) {
 /// App-to-app `in` with `blocked`: every peer row is blocked or
 /// potentially blocked; both read as `bad`.
 fn render_blocked(model: &Model, f: &mut Frame, area: Rect) {
-    let meta = sections_meta(model, "in", &model.traffic.blocked);
+    let meta = view_meta(model, "in", &model.traffic.blocked);
     let bad = Style::new().fg(model.theme.bad);
     render_sections(
         model,

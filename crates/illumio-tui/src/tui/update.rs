@@ -13,8 +13,8 @@ use crate::tui::picker::{KeyPicker, PickerOutcome};
 use crate::tui::ui::widgets::overlay::{confirm_write_last_scroll, help_last_scroll};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use pce::models::{EventFilter, PolicyDecision, PolicyScope};
-use pce::traffic::QueryProgress;
 use pce::traffic::treemap::Weight;
+use pce::traffic::{Decisions, QueryProgress};
 use pce::write::{
     Outcome, Plan, ProvisionRequest, ProvisionSubset, RevertRequest, WriteError, provision_counts,
 };
@@ -1456,7 +1456,7 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 model.status = StatusLine::info("o: pairs only (in/out/both are per service)");
             } else {
                 t.apps_state.by_service = !t.apps_state.by_service;
-                t.rebuild_services();
+                t.rebuild_pairs();
                 model.status = StatusLine::info(if t.apps_state.by_service {
                     "pairs · by service: one row per src group, dst group and port/proto"
                 } else {
@@ -1467,13 +1467,9 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         KeyCode::Char('d') if model.traffic.view == TrafficView::Aggregate => {
             let t = &mut model.traffic;
             t.apps_state.decisions = t.apps_state.decisions.next();
+            t.rebuild_pairs();
             t.rebuild_sections();
-            let label = t.apps_state.decisions.label();
-            model.status = StatusLine::info(if t.apps_state.by == By::Pairs {
-                format!("decision {label}: shown in in, out and both (x)")
-            } else {
-                format!("decision {label}")
-            });
+            model.status = StatusLine::info(format!("decision {}", t.apps_state.decisions.label()));
         }
         KeyCode::Char(' ') if model.traffic.section_table().is_some() => {
             model.traffic.toggle_fold();
@@ -1497,9 +1493,10 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 let t = &mut model.traffic;
                 if let Some(g) = t.pairs_table().selected_item() {
                     let (src, dst) = (g.src.clone(), g.dst.clone());
+                    let decisions = t.apps_state.decisions;
                     t.drill = Some(match &g.service {
-                        Some(service) => Drill::Service(src, dst, service.clone()),
-                        None => Drill::Pair(src, dst),
+                        Some(service) => Drill::Service(src, dst, service.clone(), decisions),
+                        None => Drill::Pair(src, dst, decisions),
                     });
                     t.view = TrafficView::Flows;
                     t.rebuild_views();
@@ -1594,7 +1591,7 @@ fn treemap_enter(model: &mut Model) {
         ));
         return;
     }
-    let groups = t.groups.rows();
+    let groups = &t.treemap.groups;
     let src_text = match (&t.treemap.zoom, target.inner) {
         (None, None) => {
             let src = groups
@@ -1616,7 +1613,7 @@ fn treemap_enter(model: &mut Model) {
         .find(|g| g.src.join("/") == src_text && g.dst.join("/") == tile.label)
         .map(|g| (g.src.clone(), g.dst.clone()));
     if let Some((src, dst)) = pair {
-        t.drill = Some(Drill::Pair(src, dst));
+        t.drill = Some(Drill::Pair(src, dst, Decisions::All));
         t.view = TrafficView::Flows;
         t.rebuild_views();
     }
@@ -3570,8 +3567,9 @@ fn flow_rule_key(model: &mut Model) -> Vec<Cmd> {
 }
 
 /// `w` on an App-to-app pair by service (`o`): the allow rule for the
-/// row's tuple, drafted from one of its blocked flows with the row's groups
-/// (under the `g` keys) as providers and consumers and its service.
+/// row's tuple, drafted from one of its blocked flows (one the decision
+/// filter keeps) with the row's groups (under the `g` keys) as providers
+/// and consumers and its service.
 fn service_pair_rule_key(model: &mut Model) -> Vec<Cmd> {
     let t = &model.traffic;
     let Some(g) = t.pairs_table().selected_item() else {
@@ -3583,7 +3581,9 @@ fn service_pair_rule_key(model: &mut Model) -> Vec<Cmd> {
         return Vec::new();
     }
     let keys = t.effective_keys();
-    let Some(flow) = t.first_flow(|f| g.contains(f, &keys)) else {
+    let decisions = t.apps_state.decisions;
+    let Some(flow) = t.first_flow(|f| decisions.keeps(f.policy_decision) && g.contains(f, &keys))
+    else {
         model.status = StatusLine::warn("no row selected");
         return Vec::new();
     };
@@ -4247,6 +4247,172 @@ mod tests {
         );
     }
 
+    fn flows_of(rows: &[pce::traffic::FlowGroup]) -> u64 {
+        rows.iter().map(|g| g.flows).sum()
+    }
+
+    #[test]
+    fn d_filters_the_pairs_and_by_service_without_a_request_and_spares_the_treemap() {
+        use crate::tui::test_support::{model_with_rich_flows, render_to_string};
+        use pce::traffic::Decisions;
+        let mut m = model_with_rich_flows();
+        m.traffic.view = TrafficView::Aggregate;
+        let tree = m.traffic.treemap.groups.clone();
+        let tiles = m.traffic.treemap.tiles.clone();
+        assert_eq!(flows_of(m.traffic.groups.rows()), 30);
+        let allowed = m
+            .traffic
+            .groups
+            .rows()
+            .iter()
+            .find(|g| g.blocked + g.potentially_blocked == 0)
+            .expect("a pair with only allowed flows")
+            .clone();
+
+        assert!(update(&mut m, key('d')).is_empty(), "no request");
+        assert_eq!(m.status.text, "decision blocked");
+        let t = &m.traffic;
+        assert_eq!(t.apps_state.decisions, Decisions::Blocked);
+        let rows = t.groups.rows();
+        assert_eq!(flows_of(rows), 14);
+        assert!(rows.iter().all(|g| g.allowed == 0 && g.flows > 0));
+        assert!(
+            rows.iter().any(|g| g.potentially_blocked > 0),
+            "pot.blocked kept"
+        );
+        assert!(
+            !rows
+                .iter()
+                .any(|g| g.src == allowed.src && g.dst == allowed.dst),
+            "an allowed-only pair disappears"
+        );
+        let out = render_to_string(&m, 100, 24);
+        assert!(out.contains("pairs · blocked · keys"), "{out}");
+
+        // By service: the same filter, held across o.
+        quiet(&mut m, key('o'));
+        let rows = m.traffic.services.rows();
+        assert_eq!(flows_of(rows), 14);
+        assert!(rows.iter().all(|g| g.allowed == 0));
+        let out = render_to_string(&m, 100, 24);
+        assert!(out.contains("pairs · by service · blocked · keys"), "{out}");
+
+        assert!(update(&mut m, key('d')).is_empty(), "no request");
+        assert_eq!(m.status.text, "decision blocked only");
+        for rows in [m.traffic.services.rows(), m.traffic.groups.rows()] {
+            assert_eq!(flows_of(rows), 7);
+            assert!(
+                rows.iter()
+                    .all(|g| g.allowed == 0 && g.potentially_blocked == 0)
+            );
+        }
+        let out = render_to_string(&m, 100, 24);
+        assert!(out.contains("by service · blocked only"), "{out}");
+
+        quiet(&mut m, key('d'));
+        assert_eq!(flows_of(m.traffic.services.rows()), 30);
+        assert_eq!(flows_of(m.traffic.groups.rows()), 30);
+        let out = render_to_string(&m, 100, 24);
+        assert!(out.contains("pairs · by service · keys"), "{out}");
+
+        // The treemap kept every flow throughout, and a regroup keeps it so.
+        quiet(&mut m, key('d'));
+        m.traffic.rebuild_views();
+        assert_eq!(flows_of(m.traffic.groups.rows()), 14);
+        assert_eq!(m.traffic.treemap.groups, tree);
+        assert_eq!(m.traffic.treemap.tiles, tiles);
+    }
+
+    #[test]
+    fn enter_on_a_filtered_pair_drills_to_the_flows_it_counts() {
+        use crate::tui::test_support::model_with_rich_flows;
+        let mut m = model_with_rich_flows();
+        m.traffic.view = TrafficView::Aggregate;
+        let mixed: Vec<(Vec<String>, Vec<String>)> = m
+            .traffic
+            .groups
+            .rows()
+            .iter()
+            .filter(|g| g.allowed > 0 && g.blocked + g.potentially_blocked > 0)
+            .map(|g| (g.src.clone(), g.dst.clone()))
+            .collect();
+        assert!(!mixed.is_empty(), "a pair with allowed and blocked flows");
+        quiet(&mut m, key('d'));
+        let pos = m
+            .traffic
+            .groups
+            .visible()
+            .iter()
+            .position(|&i| {
+                let g = &m.traffic.groups.rows()[i];
+                mixed.contains(&(g.src.clone(), g.dst.clone()))
+            })
+            .unwrap();
+        for _ in 0..pos {
+            quiet(&mut m, key('j'));
+        }
+        let row = m.traffic.groups.selected_item().unwrap().clone();
+        assert!(update(&mut m, enter()).is_empty(), "no request");
+        assert_eq!(m.traffic.flows.len() as u64, row.flows);
+        assert!(
+            m.traffic
+                .flows
+                .rows()
+                .iter()
+                .all(|r| r.flow.policy_decision != PolicyDecision::Allowed)
+        );
+        assert_eq!(
+            m.traffic.drill.as_ref().unwrap().title(),
+            format!("{} → {} · blocked", row.src.join("/"), row.dst.join("/"))
+        );
+
+        // By service under blocked only.
+        quiet(&mut m, kc(KeyCode::Esc));
+        m.traffic.view = TrafficView::Aggregate;
+        quiet(&mut m, key('o'));
+        quiet(&mut m, key('d'));
+        let row = m.traffic.services.selected_item().unwrap().clone();
+        assert!(update(&mut m, enter()).is_empty(), "no request");
+        assert_eq!(m.traffic.flows.len() as u64, row.flows);
+        assert!(
+            m.traffic
+                .flows
+                .rows()
+                .iter()
+                .all(|r| r.flow.policy_decision == PolicyDecision::Blocked)
+        );
+        assert!(
+            m.traffic
+                .drill
+                .as_ref()
+                .unwrap()
+                .title()
+                .ends_with(" · blocked only")
+        );
+    }
+
+    #[test]
+    fn w_on_a_pair_by_service_drafts_under_every_decision_filter() {
+        use crate::tui::test_support::model_with_rich_flows;
+        let mut m = on_pairs_by_service(writes_on(model_with_rich_flows()));
+        for _ in 0..3 {
+            let pred = labelled_blocked(&m);
+            let target = m
+                .traffic
+                .services
+                .rows()
+                .iter()
+                .find(|g| pred(g))
+                .unwrap()
+                .clone();
+            drop(pred);
+            select_service_pair(&mut m, |g| *g == target);
+            let (_, _, services, row) = w_form_of_row(&mut m);
+            assert_eq!(Some(services), row.service);
+            quiet(&mut m, key('d'));
+        }
+    }
+
     /// Moves the cursor to the first by-service row `pred` accepts.
     fn select_service_pair(m: &mut Model, pred: impl Fn(&pce::traffic::FlowGroup) -> bool) {
         m.traffic.services.home();
@@ -4563,7 +4729,8 @@ mod tests {
             m.traffic.drill,
             Some(Drill::Pair(
                 vec!["shop".into(), "prod".into()],
-                vec!["shop".into(), "prod".into()]
+                vec!["shop".into(), "prod".into()],
+                Decisions::All
             ))
         );
         assert_eq!(m.traffic.flows.len(), 4);
@@ -10794,6 +10961,7 @@ mod window_step_tests {
         m.traffic.drill = Some(Drill::Pair(
             pce::traffic::group_key(&first.src, &keys),
             pce::traffic::group_key(&first.dst, &keys),
+            Decisions::All,
         ));
         m.traffic.rebuild_views();
         let drilled = m.traffic.flows.rows().len();

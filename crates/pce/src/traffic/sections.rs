@@ -6,6 +6,7 @@ use super::aggregate::{Dominant, dominant, group_key, keys_or_default, tally};
 use super::resolved::{ResolvedFlow, service_text};
 use crate::models::PolicyDecision;
 use serde::Serialize;
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// At most this many names in `PeerRow::peer_names` and `app_names`.
@@ -59,6 +60,21 @@ impl Decisions {
             ),
             Decisions::BlockedOnly => d == PolicyDecision::Blocked,
         }
+    }
+
+    /// The flows this filter keeps, in order: all of them, borrowed, for
+    /// `All`. What the pairs (plain and by service) group.
+    pub fn kept(self, flows: &[ResolvedFlow]) -> Cow<'_, [ResolvedFlow]> {
+        if self == Decisions::All {
+            return Cow::Borrowed(flows);
+        }
+        Cow::Owned(
+            flows
+                .iter()
+                .filter(|f| self.keeps(f.policy_decision))
+                .cloned()
+                .collect(),
+        )
     }
 
     /// `all` → `blocked` → `blocked only` → `all`.
@@ -736,6 +752,25 @@ mod tests {
                 Decisions::Blocked
             ),
             "an allowed flow is never behind a blocked row"
+        );
+    }
+
+    #[test]
+    fn kept_borrows_everything_for_all_and_filters_otherwise() {
+        let flows = rich_flows();
+        assert!(matches!(Decisions::All.kept(&flows), Cow::Borrowed(f) if f.len() == 30));
+        let blocked = Decisions::Blocked.kept(&flows);
+        assert_eq!(blocked.len(), 14);
+        assert!(
+            blocked
+                .iter()
+                .all(|f| f.policy_decision != PolicyDecision::Allowed)
+        );
+        let only = Decisions::BlockedOnly.kept(&flows);
+        assert_eq!(only.len(), 7);
+        assert!(
+            only.iter()
+                .all(|f| f.policy_decision == PolicyDecision::Blocked)
         );
     }
 
