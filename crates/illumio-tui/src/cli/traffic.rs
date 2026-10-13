@@ -580,46 +580,55 @@ impl TableRows for Sections {
     /// One row per peer, no header rows: the app and the direction are
     /// columns, the host names lists beside their counts.
     fn full_headers(&self) -> Vec<&'static str> {
-        vec![
-            "app",
-            "direction",
-            "peer",
-            "peer hosts",
-            "peer names",
-            "app hosts",
-            "app names",
-            "service",
-            "flows",
-            "conns",
-            "bytes",
-            "last seen",
-            "decision",
-        ]
+        SECTION_CSV_HEADERS.to_vec()
     }
     fn full_rows(&self) -> Vec<Vec<String>> {
         self.sections
             .iter()
-            .flat_map(|s| {
-                s.rows.iter().map(|r| {
-                    vec![
-                        s.app_text(),
-                        s.direction.as_str().to_string(),
-                        r.peer_text(),
-                        r.peer_hosts.to_string(),
-                        join_list(&r.peer_names),
-                        r.app_hosts.to_string(),
-                        join_list(&r.app_names),
-                        r.service.clone(),
-                        r.flows.to_string(),
-                        r.connections.to_string(),
-                        r.bytes.to_string(),
-                        r.last_detected.clone().unwrap_or_default(),
-                        r.dominant().as_str().to_string(),
-                    ]
-                })
-            })
+            .flat_map(|s| s.rows.iter().map(|r| peer_csv_row(&s.app, s.direction, r)))
             .collect()
     }
+}
+
+/// The CSV columns of app sections, one row per peer (`--csv` and the
+/// TUI's `:export`).
+pub const SECTION_CSV_HEADERS: [&str; 13] = [
+    "app",
+    "direction",
+    "peer",
+    "peer hosts",
+    "peer names",
+    "app hosts",
+    "app names",
+    "service",
+    "flows",
+    "conns",
+    "bytes",
+    "last seen",
+    "decision",
+];
+
+/// One peer row of an app's section under `SECTION_CSV_HEADERS`.
+pub fn peer_csv_row(
+    app: &[String],
+    direction: Direction,
+    r: &pce::traffic::PeerRow,
+) -> Vec<String> {
+    vec![
+        app.join("/"),
+        direction.as_str().to_string(),
+        r.peer_text(),
+        r.peer_hosts.to_string(),
+        join_list(&r.peer_names),
+        r.app_hosts.to_string(),
+        join_list(&r.app_names),
+        r.service.clone(),
+        r.flows.to_string(),
+        r.connections.to_string(),
+        r.bytes.to_string(),
+        r.last_detected.clone().unwrap_or_default(),
+        r.dominant().as_str().to_string(),
+    ]
 }
 
 /// `no app matches "pos/PCI"` when `--app` kept no section.

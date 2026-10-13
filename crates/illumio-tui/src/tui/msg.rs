@@ -112,6 +112,9 @@ pub enum Msg {
     /// The runtime applied `:writes on|off`: the guard was built (or refused,
     /// with the reason) or dropped.
     WritesSet(WritesState),
+    /// The runtime wrote (or could not write) `:export`'s file: the status
+    /// line text.
+    Exported(Result<String, String>),
 }
 
 #[derive(Debug, Clone)]
@@ -161,6 +164,15 @@ pub enum Cmd {
     /// `:writes on|off`: build the current profile's write guard, or drop it
     /// (no request). The runtime answers with `Msg::WritesSet`.
     SetWrites(bool),
+    /// `:export`: write this table as CSV to `path`, an existing file only
+    /// with `force`. Local only, never the PCE; the runtime answers with
+    /// `Msg::Exported`.
+    Export {
+        path: String,
+        force: bool,
+        headers: Vec<&'static str>,
+        rows: Vec<Vec<String>>,
+    },
     /// Plan a write (one GET for IP lists, services and workloads; none for
     /// labels) and show it in the confirm overlay. Never sends a write.
     PlanWrite(WriteIntent),
@@ -247,6 +259,20 @@ impl PartialEq for Cmd {
             ) => fa == fb && ma == mb,
             (Cmd::SwitchProfile(a), Cmd::SwitchProfile(b)) => a == b,
             (Cmd::SetWrites(a), Cmd::SetWrites(b)) => a == b,
+            (
+                Cmd::Export {
+                    path: pa,
+                    force: fa,
+                    headers: ha,
+                    rows: ra,
+                },
+                Cmd::Export {
+                    path: pb,
+                    force: fb,
+                    headers: hb,
+                    rows: rb,
+                },
+            ) => pa == pb && fa == fb && ha == hb && ra == rb,
             (Cmd::PlanWrite(a), Cmd::PlanWrite(b)) => a == b,
             (
                 Cmd::ExecuteWrite { plan: pa, kind: ka },

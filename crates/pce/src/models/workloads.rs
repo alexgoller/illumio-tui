@@ -198,18 +198,32 @@ impl Workload {
 
     /// `app=shop env=prod role=web`, keys in `order`, then by value.
     pub fn label_text(&self, order: &KeyOrder) -> String {
+        self.sorted_labels(order)
+            .into_iter()
+            .filter(|(k, _)| order.shows(k))
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Every label as `key=value`, keys in `order` (ignored keys too),
+    /// then by value: the CSV `labels` cell.
+    pub fn label_entries(&self, order: &KeyOrder) -> Vec<String> {
+        self.sorted_labels(order)
+            .into_iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect()
+    }
+
+    /// `(key, value)` of every label with a key, in `order`, then by value.
+    fn sorted_labels(&self, order: &KeyOrder) -> Vec<(&str, &str)> {
         let mut parts: Vec<(&str, &str)> = self
             .labels
             .iter()
             .filter_map(|l| Some((l.key.as_deref()?, l.value.as_deref().unwrap_or(""))))
-            .filter(|(k, _)| order.shows(k))
             .collect();
         parts.sort_by(|a, b| order.cmp_kv(*a, *b));
         parts
-            .iter()
-            .map(|(k, v)| format!("{k}={v}"))
-            .collect::<Vec<_>>()
-            .join(" ")
     }
 
     pub fn label_hrefs(&self) -> Vec<&str> {

@@ -1,10 +1,12 @@
 //! `:export <path>`: the table on screen as CSV, through the CLI's
 //! `--csv` writer. The rows as shown (search and filters applied, in sort
-//! order, folded sections without their peers), every column whatever the
-//! width, each cell whole. No request; the file is the only effect.
+//! order; folded sections export every peer), every column whatever the
+//! width, each cell whole; sectioned views as `traffic groups --csv`. No
+//! request: `update` turns the table into `Cmd::Export`, the runtime
+//! writes the file with `write`.
 use crate::cli::output::write_csv;
+use crate::cli::traffic::{SECTION_CSV_HEADERS, peer_csv_row};
 use crate::tui::model::{Model, ObjectKind, PolicyPane, Screen, SectionRow, TrafficView};
-use crate::tui::table::TableView;
 use std::io::Write;
 use std::path::PathBuf;
 
@@ -16,8 +18,8 @@ pub fn current_table(model: &Model) -> Result<Csv, String> {
     Ok(match model.screen {
         Screen::Traffic => {
             let t = &model.traffic;
-            match (t.view, t.section_table()) {
-                (_, Some(s)) => sections(s),
+            match (t.view, t.unfolded_section_rows()) {
+                (_, Some(rows)) => sections(&rows),
                 (TrafficView::Flows, _) => t.flows.export(),
                 (TrafficView::Mesh, _) => t.mesh.export(),
                 (TrafficView::Treemap, _) => {
@@ -42,23 +44,17 @@ pub fn current_table(model: &Model) -> Result<Csv, String> {
     })
 }
 
-/// A sectioned table one row per peer, like `traffic groups --csv`: the
-/// app and the direction lead each row; the header rows are left out.
-fn sections(t: &TableView<SectionRow>) -> Csv {
-    let mut headers = vec!["app", "direction"];
-    headers.extend(t.columns.iter().map(|c| c.title));
-    let rows = t
-        .visible()
+/// Sectioned rows one row per peer, as `traffic groups --by ... --csv`
+/// prints them; the header rows are left out.
+fn sections(rows: &[SectionRow]) -> Csv {
+    let rows = rows
         .iter()
-        .map(|&i| &t.rows()[i])
         .filter_map(|r| {
-            let (direction, _) = r.peer()?;
-            let mut row = vec![r.app.join("/"), direction.as_str().to_string()];
-            row.extend(t.full_cells(r));
-            Some(row)
+            let (direction, peer) = r.peer()?;
+            Some(peer_csv_row(&r.app, direction, peer))
         })
         .collect();
-    (headers, rows)
+    (SECTION_CSV_HEADERS.to_vec(), rows)
 }
 
 /// `~/x` under the home directory; anything else as typed.
@@ -71,7 +67,12 @@ fn expand(path: &str) -> PathBuf {
 
 /// Writes `csv` to `path`; an existing file only when `force`. The status
 /// line text either way.
-pub fn write(path: &str, force: bool, csv: &Csv) -> Result<String, String> {
+pub fn write(
+    path: &str,
+    force: bool,
+    headers: &[&str],
+    rows: &[Vec<String>],
+) -> Result<String, String> {
     let target = expand(path);
     let shown = target.display();
     let mut open = std::fs::OpenOptions::new();
@@ -90,10 +91,10 @@ pub fn write(path: &str, force: bool, csv: &Csv) -> Result<String, String> {
         }
     })?;
     let mut out = std::io::BufWriter::new(file);
-    write_csv(&mut out, &csv.0, &csv.1)
+    write_csv(&mut out, headers, rows)
         .and_then(|()| out.flush())
         .map_err(|e| format!("cannot write {shown}: {e}"))?;
-    let n = csv.1.len();
+    let n = rows.len();
     Ok(format!(
         "wrote {n} row{} to {shown}",
         if n == 1 { "" } else { "s" }
@@ -103,6 +104,47 @@ pub fn write(path: &str, force: bool, csv: &Csv) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn rows() -> (Vec<&'static str>, Vec<Vec<String>>) {
+        (vec!["a", "b"], vec![vec!["1".into(), "x,y".into()]])
+    }
+
+    #[test]
+    fn write_creates_refuses_an_existing_file_and_overwrites_with_force() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.csv");
+        let p = path.display().to_string();
+        let (h, r) = rows();
+        assert_eq!(
+            write(&p, false, &h, &r).unwrap(),
+            format!("wrote 1 row to {p}")
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "a,b\r\n1,\"x,y\"\r\n"
+        );
+        let err = write(&p, false, &h, &[]).unwrap_err();
+        assert_eq!(err, format!("{p} exists; :export! {p} overwrites it"));
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "a,b\r\n1,\"x,y\"\r\n"
+        );
+        assert_eq!(
+            write(&p, true, &h, &[]).unwrap(),
+            format!("wrote 0 rows to {p}")
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "a,b\r\n");
+    }
+
+    #[test]
+    fn write_reports_an_unwritable_path() {
+        let (h, r) = rows();
+        let err = write("/nonexistent-dir/x.csv", true, &h, &r).unwrap_err();
+        assert!(
+            err.starts_with("cannot write /nonexistent-dir/x.csv"),
+            "{err}"
+        );
+    }
 
     #[test]
     fn a_leading_tilde_is_the_home_directory() {

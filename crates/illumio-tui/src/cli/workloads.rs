@@ -298,24 +298,13 @@ impl WorkloadRow {
         let a = workload.agent_status_view();
         Self {
             label_text: workload.label_text(order),
-            label_list: label_list(&workload, order),
+            label_list: join_list(workload.label_entries(order)),
             heartbeat_age_secs: workload.heartbeat_age(now).map(|d| d.as_secs()),
             sync_state: a.and_then(|a| a.sync_state),
             health,
             workload,
         }
     }
-}
-
-/// `app=shop; env=prod; role=web`: every label, keys in `order`, then by value.
-fn label_list(w: &Workload, order: &KeyOrder) -> String {
-    let mut parts: Vec<(&str, &str)> = w
-        .labels
-        .iter()
-        .filter_map(|l| Some((l.key.as_deref()?, l.value.as_deref().unwrap_or(""))))
-        .collect();
-    parts.sort_by(|a, b| order.cmp_kv(*a, *b));
-    join_list(parts.iter().map(|(k, v)| format!("{k}={v}")))
 }
 
 /// `45s`, `2m`, `3h`, `2d`; blank when the age is unknown.

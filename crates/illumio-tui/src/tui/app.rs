@@ -222,6 +222,16 @@ impl Runtime {
                 self.writer = writer.map(Arc::new);
                 self.apply(Msg::WritesSet(writes));
             }
+            // Synchronous and local: a file, never the PCE.
+            Cmd::Export {
+                path,
+                force,
+                headers,
+                rows,
+            } => {
+                let result = crate::tui::export::write(&path, force, &headers, &rows);
+                self.apply(Msg::Exported(result));
+            }
             Cmd::PlanWrite(intent) => {
                 self.model.busy += 1;
                 let (pce, tx) = self.task_ctx();

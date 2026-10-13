@@ -22,6 +22,9 @@ pub struct Column<T> {
     /// The whole value for `:export` where `cell` abbreviates it (`6.5K`,
     /// `3 hosts`, a short time); `None` exports `cell`.
     pub full: Option<fn(&T) -> String>,
+    /// `:export`'s header for `full` when its value differs in kind
+    /// (`heartbeat_age_secs` for a `3m` cell); `None` keeps `title`.
+    pub full_title: Option<&'static str>,
 }
 
 impl<T> Clone for Column<T> {
@@ -36,6 +39,7 @@ impl<T> Clone for Column<T> {
             narrow: self.narrow,
             narrow_width: self.narrow_width,
             full: self.full,
+            full_title: self.full_title,
         }
     }
 }
@@ -254,7 +258,11 @@ impl<T> TableView<T> {
     /// What `:export` writes: every column's title, and the shown rows
     /// (search applied, in sort order) as `full_cells`.
     pub fn export(&self) -> (Vec<&'static str>, Vec<Vec<String>>) {
-        let titles = self.columns.iter().map(|c| c.title).collect();
+        let titles = self
+            .columns
+            .iter()
+            .map(|c| c.full_title.unwrap_or(c.title))
+            .collect();
         let rows = self
             .visible
             .iter()
@@ -263,28 +271,34 @@ impl<T> TableView<T> {
         (titles, rows)
     }
 
-    fn apply(&mut self) {
+    /// The positions in `rows` this view would show, in its order: its
+    /// search (or matcher) and sort applied to other rows.
+    pub fn visible_of(&self, rows: &[T]) -> Vec<usize> {
         let needle = self.search_text().to_lowercase();
-        let mut vis: Vec<usize> = (0..self.rows.len())
+        let mut vis: Vec<usize> = (0..rows.len())
             .filter(|&i| {
                 if let Some(m) = self.matcher {
-                    return m(&self.rows[i], &needle);
+                    return m(&rows[i], &needle);
                 }
                 needle.is_empty()
                     || self
                         .columns
                         .iter()
-                        .any(|c| (c.cell)(&self.rows[i]).to_lowercase().contains(&needle))
+                        .any(|c| (c.cell)(&rows[i]).to_lowercase().contains(&needle))
             })
             .collect();
         if let Some((col, desc)) = self.sort {
             let key = self.columns[col].key;
             vis.sort_by(|&a, &b| {
-                let o = key(&self.rows[a]).cmp(&key(&self.rows[b]));
+                let o = key(&rows[a]).cmp(&key(&rows[b]));
                 if desc { o.reverse() } else { o }
             });
         }
-        self.visible = vis;
+        vis
+    }
+
+    fn apply(&mut self) {
+        self.visible = self.visible_of(&self.rows);
         if self.visible.is_empty() {
             self.selected = 0;
             self.offset = 0;
@@ -315,6 +329,7 @@ mod tests {
                 hide_below: 0,
                 narrow: None,
                 narrow_width: 0,
+                full_title: None,
                 full: None,
             },
             Column {
@@ -326,6 +341,7 @@ mod tests {
                 hide_below: 0,
                 narrow: None,
                 narrow_width: 0,
+                full_title: None,
                 full: None,
             },
         ];

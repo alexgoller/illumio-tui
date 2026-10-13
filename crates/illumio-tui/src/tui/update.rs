@@ -534,6 +534,13 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             }
             Vec::new()
         }
+        Msg::Exported(result) => {
+            model.status = match result {
+                Ok(done) => StatusLine::info(done),
+                Err(e) => StatusLine::error(e),
+            };
+            Vec::new()
+        }
         Msg::WritesSet(state) => {
             model.writes = WritesState {
                 in_flight: false,
@@ -3621,15 +3628,18 @@ pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
             }
             vec![Cmd::SetWrites(on)]
         }
-        Command::Export { path, force } => {
-            model.status = match crate::tui::export::current_table(model)
-                .and_then(|csv| crate::tui::export::write(&path, force, &csv))
-            {
-                Ok(done) => StatusLine::info(done),
-                Err(e) => StatusLine::error(e),
-            };
-            Vec::new()
-        }
+        Command::Export { path, force } => match crate::tui::export::current_table(model) {
+            Ok((headers, rows)) => vec![Cmd::Export {
+                path,
+                force,
+                headers,
+                rows,
+            }],
+            Err(e) => {
+                model.status = StatusLine::error(e);
+                Vec::new()
+            }
+        },
         Command::Draft => show_policy(model, PolicyScope::Draft),
         Command::Active => show_policy(model, PolicyScope::Active),
     }
@@ -4778,92 +4788,146 @@ mod tests {
         cmds
     }
 
-    #[test]
-    fn export_writes_the_table_on_screen_as_csv_and_sends_nothing() {
-        use crate::tui::test_support::model_with_flows;
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("flows.csv");
-        let p = path.display().to_string();
-        let mut m = model_with_flows();
-        assert!(colon(&mut m, &format!("export {p}")).is_empty());
-        assert_eq!(m.status.kind, StatusKind::Info);
-        assert_eq!(m.status.text, format!("wrote 4 rows to {p}"));
-        let text = std::fs::read_to_string(&path).unwrap();
-        let lines: Vec<&str> = text.split("\r\n").collect();
-        assert_eq!(
-            lines[0],
-            "last seen,src,src group,dst,dst group,service,conns,decision"
-        );
-        // Every column, the hidden-below-140 `last seen` whole.
-        assert!(lines[1].starts_with("2026-10-10T07:31:02Z,host-1.example,"));
-        assert_eq!(lines.len(), 6, "header, 4 rows, the empty tail");
+    /// The one `Cmd::Export` `:text` asked for: `(path, force, headers, rows)`.
+    #[track_caller]
+    fn export_cmd(
+        m: &mut Model,
+        text: &str,
+    ) -> (String, bool, Vec<&'static str>, Vec<Vec<String>>) {
+        let mut cmds = colon(m, text);
+        assert_eq!(cmds.len(), 1, "one Cmd, nothing for the PCE: {cmds:?}");
+        match cmds.remove(0) {
+            Cmd::Export {
+                path,
+                force,
+                headers,
+                rows,
+            } => (path, force, headers, rows),
+            other => panic!("not an export: {other:?}"),
+        }
+    }
 
-        // The search applies; without `!` the file is kept.
+    #[test]
+    fn export_asks_the_runtime_to_write_the_table_on_screen() {
+        use crate::tui::test_support::model_with_flows;
+        let mut m = model_with_flows();
+        let (path, force, headers, rows) = export_cmd(&mut m, "export ~/flows.csv");
+        assert_eq!((path.as_str(), force), ("~/flows.csv", false));
+        assert_eq!(
+            headers,
+            [
+                "last seen",
+                "src",
+                "src group",
+                "dst",
+                "dst group",
+                "service",
+                "conns",
+                "decision"
+            ]
+        );
+        assert_eq!(rows.len(), 4);
+        // Every column, the hidden-below-140 `last seen` whole.
+        assert_eq!(rows[0][..2], ["2026-10-10T07:31:02Z", "host-1.example"]);
+
+        // The search applies; `!` forces.
         m.traffic.flows.start_search();
         for c in "icmp".chars() {
             m.traffic.flows.search_push(c);
         }
         m.traffic.flows.search_commit();
-        assert!(colon(&mut m, &format!("export {p}")).is_empty());
+        let (_, force, _, rows) = export_cmd(&mut m, "export! out.csv");
+        assert!(force);
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].contains(&"icmp".to_string()), "{rows:?}");
+
+        // The runtime's answer lands in the status line.
+        assert!(update(&mut m, Msg::Exported(Ok("wrote 1 row to out.csv".into()))).is_empty());
+        assert_eq!(m.status.kind, StatusKind::Info);
+        assert_eq!(m.status.text, "wrote 1 row to out.csv");
+        assert!(update(&mut m, Msg::Exported(Err("out.csv exists".into()))).is_empty());
         assert_eq!(m.status.kind, StatusKind::Error);
-        assert!(
-            m.status.text.contains("exists; :export! "),
-            "{}",
-            m.status.text
-        );
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
-        assert!(colon(&mut m, &format!("export! {p}")).is_empty());
-        assert_eq!(m.status.text, format!("wrote 1 row to {p}"));
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(text.split("\r\n").count(), 3, "{text}");
-        assert!(text.contains(",icmp,"), "{text}");
     }
 
     #[test]
-    fn export_of_sections_is_one_row_per_peer_and_the_treemap_has_none() {
+    fn export_of_sections_is_every_peer_as_the_cli_prints_them_folded_or_not() {
+        use crate::cli::traffic::SECTION_CSV_HEADERS;
         use crate::tui::model::TrafficView;
         use crate::tui::test_support::model_with_flows;
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("blocked.csv");
-        let p = path.display().to_string();
         let mut m = model_with_flows();
         while m.traffic.view != TrafficView::Blocked {
             update(&mut m, key('v'));
         }
-        assert!(colon(&mut m, &format!("export {p}")).is_empty());
-        let text = std::fs::read_to_string(&path).unwrap();
-        let lines: Vec<&str> = text.split("\r\n").collect();
+        let (_, _, headers, open) = export_cmd(&mut m, "export b.csv");
+        assert_eq!(headers, SECTION_CSV_HEADERS);
         assert_eq!(
-            lines[0],
-            "app,direction,src,dst name,service,flows,conns,last seen"
+            open[0],
+            [
+                "shop/prod",
+                "in",
+                "ipl:Corp/-",
+                "1",
+                "10.1.4.9",
+                "1",
+                "host-1.example",
+                "8443/tcp",
+                "1",
+                "12",
+                "0",
+                "2026-10-10T07:30:58Z",
+                "potentially_blocked"
+            ]
         );
+        update(&mut m, key('z'));
+        let shown = m.traffic.section_table().unwrap();
         assert!(
-            lines[1].starts_with("shop/prod,in,ipl:Corp/-,host-1.example,8443/tcp,"),
-            "{text}"
+            (0..shown.len()).all(|i| shown.rows()[shown.visible()[i]].is_header()),
+            "every section folded"
         );
-        assert!(!text.contains('▾'), "no header rows: {text}");
+        let (_, _, _, folded) = export_cmd(&mut m, "export b.csv");
+        assert_eq!(folded, open, "folding hides nothing from the export");
 
         update(&mut m, key('v'));
         assert_eq!(m.traffic.view, TrafficView::Treemap);
-        let other = dir.path().join("treemap.csv");
-        assert!(colon(&mut m, &format!("export {}", other.display())).is_empty());
+        assert!(colon(&mut m, "export t.csv").is_empty());
         assert_eq!(m.status.kind, StatusKind::Error);
         assert_eq!(m.status.text, "the treemap has no table to export");
-        assert!(!other.exists());
     }
 
     #[test]
-    fn export_reports_an_unwritable_path() {
-        let mut m = model_fixture();
-        assert!(colon(&mut m, "export /nonexistent-dir/x.csv").is_empty());
-        assert_eq!(m.status.kind, StatusKind::Error);
-        assert!(
-            m.status
-                .text
-                .starts_with("cannot write /nonexistent-dir/x.csv"),
-            "{}",
-            m.status.text
-        );
+    fn export_of_workloads_matches_workloads_csv() {
+        use crate::cli::output::TableRows;
+        use crate::cli::workloads::WorkloadRow;
+        use crate::tui::test_support::model_with_workloads;
+        let mut m = model_with_workloads();
+        m.screen = Screen::Workloads;
+        let (_, _, headers, rows) = export_cmd(&mut m, "export w.csv");
+        let now = m.workloads.now.unwrap();
+        let order = m.limits.key_order();
+        let cli: Vec<WorkloadRow> = m
+            .workloads
+            .raw
+            .iter()
+            .cloned()
+            .map(|w| WorkloadRow::new(w, now, &order))
+            .collect();
+        let (cli_headers, cli_rows) = (cli.full_headers(), cli.full_rows());
+        // Both in the fetched order (the table is unsorted).
+        assert_eq!(rows.len(), cli_rows.len());
+        let mut shared = 0;
+        for (i, h) in headers.iter().enumerate() {
+            let Some(j) = cli_headers.iter().position(|c| c == h) else {
+                continue;
+            };
+            shared += 1;
+            for (row, cli_row) in rows.iter().zip(&cli_rows) {
+                assert_eq!(row[i], cli_row[j], "{h} of {}", cli_row[j]);
+            }
+        }
+        assert!(headers.contains(&"heartbeat_age_secs"), "{headers:?}");
+        assert!(shared >= 10, "{headers:?}");
+        let labels = headers.iter().position(|h| *h == "labels").unwrap();
+        assert_eq!(rows[0][labels], "app=shop; env=prod; role=web");
     }
 
     #[test]

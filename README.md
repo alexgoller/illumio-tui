@@ -95,8 +95,10 @@ IP lists tab), `:filter <expr>`, `:window <dur>`, `:profile <name>`, `:writes [o
 screen as CSV (the rows shown, with the search and filters applied and in sort order; every
 column, whatever the terminal width, each cell whole; `~/` is the home directory), the same
 format as the CLI's `--csv`, and sends nothing; it refuses an existing file, `:export! <path>`
-overwrites it. Sectioned views (App-to-app `in`/`out`/`both`, Blocked) export one row per peer
-with `app` and `direction` columns; the Treemap has no table.
+overwrites it. Cells match the CLI's for the same data (Workloads: every label, ignored keys
+too, and `heartbeat_age_secs`). Sectioned views (App-to-app `in`/`out`/`both`, Blocked) export
+every peer, folded sections included, in the columns of `traffic groups --by ... --csv`; the
+Treemap has no table.
 `?` shows the full key map, `Esc` closes overlays, `q` or `Ctrl-C` quits. The mouse wheel
 scrolls the current table and a click on a tab switches screen; on a terminal narrower than
 the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
@@ -254,9 +256,11 @@ CSV for spreadsheets: a header row, `,` separators, quotes only around cells hol
 or a line break, CRLF line ends, UTF-8 without BOM. The columns are the full set, untrimmed:
 no `…` clipping, lists joined with `; ` where the table folds them (`3 hosts`, a label
 group's member count), plain numbers (`6472`, not `6.5K`), `true`/`false`, and an empty cell
-for nothing (`workloads` gives `heartbeat_age_secs`; `policy rules` adds each rule's `href`;
-`policy pending --diff` a `diff` column). `traffic groups --by ...` and `traffic query --blocked`
-print one row per peer with `app` and `direction` columns. The meta line always goes to
+for nothing (`workloads` gives `heartbeat_age_secs` and every label, ignored keys too;
+`events` every resource change; `policy rules` adds each rule's `href`; `policy pending --diff`
+a `diff` column, one diff line per line of the cell). `traffic groups --by ...` and
+`traffic query --blocked` print one row per peer with `app`, `direction`, the peer and app host
+counts and their names. The meta line always goes to
 stderr, so a redirect holds only CSV. `--csv` sends the same requests as the table;
 `workloads`, `labels`, `label-groups`, `services`, `iplists`, `events`, `policy rulesets`,
 `policy rules`, `policy pending`, `traffic query`/`groups`/`mesh` and `profile list` take it.

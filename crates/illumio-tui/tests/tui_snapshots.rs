@@ -67,6 +67,7 @@ fn table_widget_renders_header_sort_and_selection() {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full_title: None,
             full: None,
         },
         Column {
@@ -78,6 +79,7 @@ fn table_widget_renders_header_sort_and_selection() {
             hide_below: 0,
             narrow: None,
             narrow_width: 0,
+            full_title: None,
             full: None,
         },
     ]);
