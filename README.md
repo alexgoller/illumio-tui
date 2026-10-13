@@ -156,7 +156,10 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   `traffic groups --services --csv`); `x` / `X` switch it to sections per app (`in`: each destination app with
   its sources, one row per source group and service; `out`: each source app with its
   destinations; `both`: inbound rows `←` then outbound `→`), `d` cycles the decision filter
-  (`all`, `blocked` with potentially blocked, `blocked only`), `Space` / `z` fold a section or
+  (`all`, `blocked` with potentially blocked, `blocked only`) of the pairs, by service too, and
+  the sections (`pairs · by service · blocked` lists just the tuples still blocked, the ones an
+  allow rule is missing for; `Enter` drills into the flows the row counts; the Treemap keeps
+  every flow), `Space` / `z` fold a section or
   all, `/` keeps whole sections, and `Enter` drills into a pair, a peer row or a whole app.
   **Mesh** lists user, process, source, destination, service and destination process like the
   Illumio UI's mesh (`u` / `p` hide the user / process column and merge rows, `Enter` drills).
@@ -235,6 +238,7 @@ the API call and byte counters at all times.
     illumio-tui traffic query --window 1h --blocked
     illumio-tui traffic groups --window 1h --keys app,env,role
     illumio-tui traffic groups --window 1h --services --csv > tuples.csv
+    illumio-tui traffic groups --window 1h --services --show blocked --csv > still-blocked.csv
     illumio-tui traffic groups --window 1h --by in --show blocked --app pos/PCI
     illumio-tui traffic mesh --window 1h --no-user --json
     illumio-tui traffic query --window 30d --dry-run
@@ -280,8 +284,9 @@ destination group (`src`, `dst`, `flows`, `connections`, `bytes`, `allowed`,
 `service` column and field, `5432/tcp` or `icmp`), or with `--by in|out|both` sections per app: a header row
 with the app's totals, then its peer groups and services indented (JSON
 `{"sections": [{app, direction, rows, totals}]}`); `--show blocked|blocked-only` counts only
-those decisions among the loaded flows (`--decision` filters the query itself) and `--app`
-keeps one app's sections (an unknown app prints `no app matches` on stderr; sections are
+those decisions among the loaded flows, in the pairs (with `--services` too) or the sections
+(`--decision` filters the query itself), and `--app` (sections only: without `--by` it is
+exit 2) keeps one app's sections (an unknown app prints `no app matches` on stderr; sections are
 already per service, so `--services` with `--by` is exit 2). `traffic query --blocked` prints the `--by in --show blocked`
 sections the same way. `mesh` gives one row per source user, source process, source group,
 destination group, port, protocol and destination process. The PCE reports one process per

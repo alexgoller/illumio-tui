@@ -326,7 +326,10 @@ new result drop it and the zoom. The CLI's `traffic groups` and
 side (`Direction::In` or `Out`), one `PeerRow` per peer group and service,
 after the decision filter; App-to-app's `in` / `out` / `both` states and the
 Blocked view (`in` with `Decisions::Blocked`) are its rows, header rows drawn
-across the table (`render_spanning`). The state, the filter and the folds
+across the table (`render_spanning`). The `pairs` (plain and by service) group
+the flows `Decisions::kept` leaves; the treemap lays out its own unfiltered
+`TreemapState::groups`, and a pair's `Drill` carries the filter it was
+drilled under. The state, the filter and the folds
 live in `TrafficState::apps_state` and survive every rebuild.
 
 ## Testing
