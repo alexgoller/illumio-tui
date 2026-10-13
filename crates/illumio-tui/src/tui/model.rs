@@ -13,15 +13,16 @@ use pce::models::{
 };
 use pce::traffic::treemap::{Rect as TreemapRect, Tile, Weight, layout, layout_zoomed};
 use pce::traffic::{
-    AppSection, Decisions, Direction, FlowGroup, MeshColumns, MeshKey, MeshRow, PeerRow,
-    ResolvedFlow, Totals, app_header, app_sections, app_sections_both, compact_count,
-    group_by_labels, group_by_service, group_key, group_text, in_app, in_peer, keys_or_default,
-    keys_seen, mesh, mesh_key,
+    AppSection, Decisions, Direction, FlowGroup, Focus, FocusDirection, GroupKey, MeshColumns,
+    MeshKey, MeshRow, PeerRow, ResolvedFlow, Totals, app_header, app_sections, app_sections_both,
+    apps_in, compact_count, focus_flows, group_by_labels, group_by_service, group_key, group_text,
+    in_app, in_peer, keys_or_default, keys_seen, mesh, mesh_key,
 };
 use pce::write::Plan;
 use pce::{
     IpListSize, KeyOrder, NameIndex, RuleKind, RuleSetView, RuleView, StatsSnapshot, ip_list_size,
 };
+use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -1656,6 +1657,28 @@ impl AutoRefresh {
     }
 }
 
+/// What a focused re-query (`r` on a partial focus) loaded into `TrafficData`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FocusResult {
+    pub focus: Focus,
+    /// The Explorer queries it took: 2 for `both`.
+    pub queries: u32,
+}
+
+impl FocusResult {
+    /// Whether this result holds every flow of `f`: the same app under the
+    /// same keys, queried for `f`'s direction or for both.
+    pub fn covers(&self, f: &Focus) -> bool {
+        self.focus.same_app(f)
+            && (self.focus.direction == FocusDirection::Both || self.focus.direction == f.direction)
+    }
+}
+
+/// `1 query`, `2 queries`.
+pub fn queries_text(n: u32) -> String {
+    format!("{n} quer{}", if n == 1 { "y" } else { "ies" })
+}
+
 #[derive(Debug)]
 pub struct TrafficState {
     pub filter: TrafficFilter,
@@ -1701,6 +1724,16 @@ pub struct TrafficState {
     /// `B` (or the profile's opt-in) is filling the window slice by slice;
     /// one slice in flight at a time. Any other query or a cancel ends it.
     pub backfill: Option<ActiveBackfill>,
+    /// `F` / `:focus`: every view shows only this app's traffic
+    /// (`Focus::keeps`) in its direction (`X`). Cleared by `Esc`, `g` and
+    /// `:profile`; a new result keeps it.
+    pub focus: Option<Focus>,
+    /// `data` came from `r` on a partial focus: the focus it was queried
+    /// for and the number of queries.
+    pub focus_result: Option<FocusResult>,
+    /// The unfocused result `focus_result` replaced; put back, without a
+    /// request, when the focus is cleared or moves to another app.
+    pub unfocused: Option<TrafficData>,
 }
 
 /// Both optional Mesh columns shown.
@@ -1860,12 +1893,250 @@ impl TrafficState {
             auto: AutoRefresh::new(auto_min_seconds),
             rule_form: None,
             backfill: None,
+            focus: None,
+            focus_result: None,
+            unfocused: None,
         }
     }
 
     /// The loaded flows (none before the first query).
     pub fn loaded_flows(&self) -> &[ResolvedFlow] {
         self.data.as_ref().map_or(&[], |d| d.flows.as_slice())
+    }
+
+    /// The loaded flows the focus keeps (all of them, borrowed, without
+    /// one): what every view aggregates, under the drill and `d`.
+    pub fn view_flows(&self) -> Cow<'_, [ResolvedFlow]> {
+        focus_flows(self.focus.as_ref(), self.loaded_flows())
+    }
+
+    /// `F` / `:focus`: narrows every view to `focus`. A focused result of
+    /// another app is put back first: it holds only that app's flows.
+    /// No request.
+    pub fn set_focus(&mut self, focus: Focus) {
+        if self
+            .focus_result
+            .as_ref()
+            .is_some_and(|r| !r.focus.same_app(&focus))
+        {
+            self.restore_unfocused();
+        }
+        self.focus = Some(focus);
+        self.rebuild_views();
+    }
+
+    /// The focus gone and the unfocused result back, without a rebuild;
+    /// whether there was a focus.
+    pub fn drop_focus(&mut self) -> bool {
+        self.restore_unfocused();
+        self.focus.take().is_some()
+    }
+
+    /// `Esc`: `drop_focus`, then every view again. No request.
+    pub fn clear_focus(&mut self) -> bool {
+        let had = self.drop_focus();
+        self.rebuild_views();
+        had
+    }
+
+    /// The unfocused result back in `data` if a focused one replaced it
+    /// (no rebuild); whether one was put back.
+    pub fn restore_unfocused(&mut self) -> bool {
+        self.focus_result = None;
+        match self.unfocused.take() {
+            Some(d) => {
+                self.data = Some(d);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// `+`, `-`, `]`, `[` and `B` work on the unfocused result: a focused
+    /// one on screen goes back first and every view is rebuilt (the focus
+    /// stays and narrows it again). Whether one went back.
+    pub fn back_to_unfocused(&mut self) -> bool {
+        if self.focus_result.is_none() {
+            return false;
+        }
+        self.restore_unfocused();
+        self.rebuild_views();
+        true
+    }
+
+    /// `X`: the next direction, every view rebuilt; `None` without a focus.
+    pub fn cycle_focus_direction(&mut self) -> Option<FocusDirection> {
+        let f = self.focus.as_mut()?;
+        f.direction = f.direction.next();
+        let d = f.direction;
+        self.rebuild_views();
+        Some(d)
+    }
+
+    /// A focused re-query's answer: the unfocused result kept aside (once),
+    /// `data` the focused flows, the drill and the zoom dropped (a new
+    /// result), every view rebuilt.
+    pub fn apply_focused(&mut self, focus: Focus, queries: u32, data: TrafficData) {
+        if self.unfocused.is_none() {
+            self.unfocused = self.data.take();
+        }
+        self.data = Some(data);
+        self.focus_result = Some(FocusResult {
+            focus: focus.clone(),
+            queries,
+        });
+        self.focus = Some(focus);
+        self.drill = None;
+        self.treemap.zoom = None;
+        self.rebuild_views();
+    }
+
+    /// The focus may be missing flows: the result it narrows hit the cap
+    /// and no focused query covering it is loaded.
+    pub fn focus_partial(&self) -> bool {
+        let Some(f) = &self.focus else {
+            return false;
+        };
+        match &self.focus_result {
+            Some(r) => !r.covers(f),
+            None => self.data.as_ref().is_some_and(|d| d.truncated),
+        }
+    }
+
+    /// What `r` re-queries: the focus while it is partial, or while the
+    /// result on screen is its focused query (then `r` refreshes it).
+    pub fn focus_requery(&self) -> Option<Focus> {
+        let f = self.focus.as_ref()?;
+        let shown = self.focus_result.as_ref().is_some_and(|r| r.covers(f));
+        (shown || self.focus_partial()).then(|| f.clone())
+    }
+
+    /// The Result header's focus part: `focus shop/prod · in`, with `· 2
+    /// queries` when a focused query loaded the data, or `focus is partial:
+    /// r re-queries shop/prod · in`.
+    pub fn focus_meta(&self) -> Option<String> {
+        let f = self.focus.as_ref()?;
+        if self.focus_partial() {
+            return Some(format!(
+                "focus is partial: r re-queries {} · {}",
+                f.app_text(),
+                f.direction.as_str()
+            ));
+        }
+        Some(match &self.focus_result {
+            Some(r) if r.covers(f) => format!("{} · {}", f.badge(), queries_text(r.queries)),
+            _ => f.badge(),
+        })
+    }
+
+    /// The apps of the row under the cursor, in the order `F` takes them: a
+    /// section header its app; a peer row of `in` sections (App-to-app `in`,
+    /// Blocked) the destination, then the source; any other pair, flow,
+    /// Mesh row or treemap tile the source, then the destination. A flow
+    /// from an app to itself has one. Empty without a row (or on an `other
+    /// (N)` tile).
+    pub fn row_apps(&self) -> Vec<GroupKey> {
+        let keys = &self.keys;
+        let mut apps: Vec<GroupKey> = match self.view {
+            TrafficView::Flows => self
+                .flows
+                .selected_item()
+                .map(|r| vec![group_key(&r.flow.src, keys), group_key(&r.flow.dst, keys)])
+                .unwrap_or_default(),
+            TrafficView::Aggregate if self.apps_state.by == By::Pairs => self
+                .pairs_table()
+                .selected_item()
+                .map(|g| vec![g.src.clone(), g.dst.clone()])
+                .unwrap_or_default(),
+            TrafficView::Aggregate | TrafficView::Blocked => self.section_apps(),
+            TrafficView::Mesh => self
+                .mesh
+                .selected_item()
+                .map(|r| vec![r.src.clone(), r.dst.clone()])
+                .unwrap_or_default(),
+            TrafficView::Treemap => self.treemap_apps(),
+        };
+        apps.dedup();
+        apps
+    }
+
+    fn section_apps(&self) -> Vec<GroupKey> {
+        let Some(r) = self.section_table().and_then(|t| t.selected_item()) else {
+            return Vec::new();
+        };
+        let Some((direction, row)) = r.peer() else {
+            return vec![r.app.clone()];
+        };
+        let (src, dst) = match direction {
+            Direction::In => (row.peer.clone(), r.app.clone()),
+            Direction::Out => (r.app.clone(), row.peer.clone()),
+        };
+        let in_sections = self.view == TrafficView::Blocked || self.apps_state.by == By::In;
+        if in_sections {
+            vec![dst, src]
+        } else {
+            vec![src, dst]
+        }
+    }
+
+    fn treemap_apps(&self) -> Vec<GroupKey> {
+        let tm = &self.treemap;
+        let Some(target) = tm.current() else {
+            return Vec::new();
+        };
+        let tile = tm.tile(target);
+        if tile.is_other() {
+            return Vec::new();
+        }
+        let src_of = |text: &str| {
+            tm.groups
+                .iter()
+                .find(|g| g.src.join("/") == text)
+                .map(|g| g.src.clone())
+        };
+        let dst_of = |text: &str| {
+            tm.groups
+                .iter()
+                .find(|g| g.dst.join("/") == text)
+                .map(|g| g.dst.clone())
+        };
+        match (&tm.zoom, target.inner) {
+            (None, None) => src_of(&tile.label).into_iter().collect(),
+            (Some(z), _) => [Some(z.clone()), dst_of(&tile.label)]
+                .into_iter()
+                .flatten()
+                .collect(),
+            (None, Some(_)) => [src_of(&tm.tiles[target.outer].label), dst_of(&tile.label)]
+                .into_iter()
+                .flatten()
+                .collect(),
+        }
+    }
+
+    /// The app `F` focuses on the selected row: its first app, or its
+    /// second when the focus is already on the first (a second `F` switches
+    /// sides). `None` without an app under the cursor.
+    pub fn next_focus_app(&self) -> Option<GroupKey> {
+        let apps = self.row_apps();
+        let first = apps.first()?;
+        let on_first = self
+            .focus
+            .as_ref()
+            .is_some_and(|f| &f.app == first && f.keys == self.keys);
+        match apps.get(1) {
+            Some(second) if on_first => Some(second.clone()),
+            _ => Some(first.clone()),
+        }
+    }
+
+    /// The apps the picker and `:focus` complete over: every labelled
+    /// workload group of the unfocused result under the keys in force.
+    pub fn loaded_apps(&self) -> Vec<String> {
+        let flows = match &self.unfocused {
+            Some(d) => d.flows.as_slice(),
+            None => self.loaded_flows(),
+        };
+        apps_in(flows, &self.keys)
     }
 
     /// The order `all labels` and the `g` picker list keys in, and the
@@ -1894,9 +2165,9 @@ impl TrafficState {
         keys_or_default(&self.group_keys)
     }
 
-    /// Whether any loaded flow carries a byte count.
+    /// Whether any loaded flow the focus keeps carries a byte count.
     pub fn has_bytes(&self) -> bool {
-        self.loaded_flows().iter().any(ResolvedFlow::has_bytes)
+        self.view_flows().iter().any(ResolvedFlow::has_bytes)
     }
 
     /// The first loaded flow `pred` accepts that is blocked or potentially
@@ -1922,15 +2193,20 @@ impl TrafficState {
     /// never requests.
     pub fn rebuild_views(&mut self) {
         self.keys = self.resolve_keys();
-        let keys = &self.keys;
-        let flows = self.loaded_flows();
-        let shown: Vec<FlowRow> = flows
-            .iter()
-            .filter(|f| self.drill.as_ref().is_none_or(|d| d.matches(f, keys)))
-            .map(|f| FlowRow::new(f.clone(), keys))
-            .collect();
-        let tree = group_by_labels(flows, keys);
-        let mesh_rows = mesh(flows, keys, self.mesh_cols);
+        let (shown, tree, mesh_rows) = {
+            let keys = &self.keys;
+            let flows = self.view_flows();
+            let shown: Vec<FlowRow> = flows
+                .iter()
+                .filter(|f| self.drill.as_ref().is_none_or(|d| d.matches(f, keys)))
+                .map(|f| FlowRow::new(f.clone(), keys))
+                .collect();
+            (
+                shown,
+                group_by_labels(&flows, keys),
+                mesh(&flows, keys, self.mesh_cols),
+            )
+        };
         self.flows.set_rows(shown);
         self.treemap.groups = tree;
         self.mesh.set_rows(mesh_rows);
@@ -1940,15 +2216,19 @@ impl TrafficState {
     }
 
     /// App-to-app's pairs, and by service while `o` is on (none while off),
-    /// from the loaded flows the decision filter keeps. Pure.
+    /// from the flows the focus and the decision filter keep. Pure.
     pub fn rebuild_pairs(&mut self) {
-        let st = &self.apps_state;
-        let kept = st.decisions.kept(self.loaded_flows());
-        let groups = group_by_labels(&kept, &self.keys);
-        let services = if st.by_service {
-            group_by_service(&kept, &self.keys)
-        } else {
-            Vec::new()
+        let (groups, services) = {
+            let st = &self.apps_state;
+            let flows = self.view_flows();
+            let kept = st.decisions.kept(&flows);
+            let groups = group_by_labels(&kept, &self.keys);
+            let services = if st.by_service {
+                group_by_service(&kept, &self.keys)
+            } else {
+                Vec::new()
+            };
+            (groups, services)
         };
         self.groups.set_rows(groups);
         self.services.set_rows(services);
@@ -1983,21 +2263,21 @@ impl TrafficState {
     /// App-to-app's rows under `folded`; none in `pairs`.
     fn apps_rows(&self, folded: &BTreeSet<Vec<String>>) -> Vec<SectionRow> {
         let keys = &self.keys;
-        let flows = self.loaded_flows();
+        let flows = self.view_flows();
         let st = &self.apps_state;
         match st.by {
             By::Pairs => Vec::new(),
             By::In => section_rows(
-                &app_sections(flows, keys, Direction::In, st.decisions),
+                &app_sections(&flows, keys, Direction::In, st.decisions),
                 folded,
                 false,
             ),
             By::Out => section_rows(
-                &app_sections(flows, keys, Direction::Out, st.decisions),
+                &app_sections(&flows, keys, Direction::Out, st.decisions),
                 folded,
                 false,
             ),
-            By::Both => section_rows(&app_sections_both(flows, keys, st.decisions), folded, true),
+            By::Both => section_rows(&app_sections_both(&flows, keys, st.decisions), folded, true),
         }
     }
 
@@ -2005,7 +2285,7 @@ impl TrafficState {
     fn blocked_rows(&self, folded: &BTreeSet<Vec<String>>) -> Vec<SectionRow> {
         section_rows(
             &app_sections(
-                self.loaded_flows(),
+                &self.view_flows(),
                 &self.keys,
                 Direction::In,
                 Decisions::Blocked,
@@ -4565,5 +4845,206 @@ ignore_keys = ["os", "app"]
             vec![("Shop-Prod", RuleKind::Deny), ("Edge", RuleKind::Deny)],
             "the second deny rule comes from fallback_deny"
         );
+    }
+}
+
+#[cfg(test)]
+mod focus_tests {
+    use super::*;
+    use crate::tui::test_support::{model_with_flows, model_with_rich_flows};
+    use pce::traffic::{Focus, FocusDirection};
+
+    fn app(s: &str) -> Vec<String> {
+        s.split('/').map(str::to_string).collect()
+    }
+
+    fn keys() -> Vec<String> {
+        vec!["app".into(), "env".into()]
+    }
+
+    fn data_of(t: &TrafficState, n: usize) -> TrafficData {
+        TrafficData {
+            flows: t.loaded_flows()[..n].to_vec(),
+            truncated: false,
+            matches_count: Some(n as u64),
+            elapsed: Duration::from_millis(900),
+            cache_hit: false,
+            fetched_at: Instant::now(),
+            filter: t.filter.clone(),
+            slices: None,
+            backfill: None,
+        }
+    }
+
+    #[test]
+    fn the_focus_narrows_every_view_and_clearing_brings_them_back() {
+        let mut m = model_with_rich_flows();
+        let t = &mut m.traffic;
+        assert_eq!(t.flows.len(), 30);
+        let crm = app("crm/prod");
+        t.set_focus(Focus::new(crm.clone(), keys()).with_direction(FocusDirection::In));
+        assert_eq!(t.flows.len(), 7);
+        assert!(t.flows.rows().iter().all(|r| r.dst_group == "crm/prod"));
+        assert!(!t.groups.is_empty() && t.groups.rows().iter().all(|g| g.dst == crm));
+        assert!(!t.mesh.is_empty() && t.mesh.rows().iter().all(|r| r.dst == crm));
+        assert!(t.treemap.groups.iter().all(|g| g.dst == crm));
+        assert!(
+            !t.blocked.is_empty() && t.blocked.rows().iter().all(|r| r.app == crm),
+            "flow 6 is blocked into crm/prod"
+        );
+        assert_eq!(t.cycle_focus_direction(), Some(FocusDirection::Out));
+        assert_eq!(t.flows.len(), 4);
+        assert_eq!(t.cycle_focus_direction(), Some(FocusDirection::Both));
+        assert_eq!(
+            t.flows.len(),
+            9,
+            "flows 3 and 4 are crm/prod to itself: once"
+        );
+        assert!(t.clear_focus());
+        assert_eq!(t.flows.len(), 30);
+        assert!(!t.clear_focus(), "nothing left to clear");
+        assert_eq!(t.cycle_focus_direction(), None);
+    }
+
+    #[test]
+    fn the_decision_filter_and_by_service_work_on_top_of_the_focus() {
+        let mut m = model_with_rich_flows();
+        let t = &mut m.traffic;
+        t.set_focus(Focus::new(app("crm/prod"), keys()));
+        t.apps_state.decisions = Decisions::BlockedOnly;
+        t.apps_state.by_service = true;
+        t.rebuild_pairs();
+        let rows: Vec<String> = t
+            .services
+            .rows()
+            .iter()
+            .map(|g| {
+                format!(
+                    "{}>{} {}",
+                    g.src.join("/"),
+                    g.dst.join("/"),
+                    g.service.clone().unwrap_or_default()
+                )
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            vec!["crm/dev>crm/prod 3306/tcp"],
+            "the one blocked flow of crm/prod"
+        );
+    }
+
+    #[test]
+    fn f_takes_the_source_then_the_destination_and_in_sections_the_destination_first() {
+        let mut m = model_with_flows();
+        let t = &mut m.traffic;
+        t.flows
+            .select_where(|r| r.flow.dst.display_name() == "fqdn-1.example");
+        assert_eq!(
+            t.row_apps(),
+            vec![app("shop/prod"), app("fqdn-1.example/-")]
+        );
+        assert_eq!(t.next_focus_app(), Some(app("shop/prod")));
+        t.set_focus(Focus::new(app("shop/prod"), keys()));
+        t.flows
+            .select_where(|r| r.flow.dst.display_name() == "fqdn-1.example");
+        assert_eq!(
+            t.next_focus_app(),
+            Some(app("fqdn-1.example/-")),
+            "a second F switches sides"
+        );
+        t.flows.select_where(|r| r.flow.num_connections == 310);
+        assert_eq!(
+            t.row_apps(),
+            vec![app("shop/prod")],
+            "a flow to itself has one app"
+        );
+        t.view = TrafficView::Blocked;
+        t.blocked.select_where(|r| !r.is_header());
+        assert_eq!(
+            t.row_apps()[0],
+            app("shop/prod"),
+            "Blocked is in: destination first"
+        );
+        t.blocked.select_where(|r| r.is_header());
+        assert_eq!(t.row_apps(), vec![app("shop/prod")], "a header is its app");
+        t.view = TrafficView::Mesh;
+        t.mesh.home();
+        assert_eq!(
+            t.row_apps().len(),
+            1 + usize::from(t.mesh.selected_item().is_some_and(|r| r.src != r.dst))
+        );
+        t.flows.set_rows(Vec::new());
+        t.view = TrafficView::Flows;
+        assert!(t.row_apps().is_empty());
+        assert_eq!(t.next_focus_app(), None);
+        assert_eq!(t.loaded_apps(), vec!["shop/prod"]);
+    }
+
+    #[test]
+    fn a_focus_on_a_truncated_result_is_partial_until_its_focused_query_is_loaded() {
+        let mut m = model_with_flows();
+        let t = &mut m.traffic;
+        t.data.as_mut().unwrap().truncated = true;
+        let f = Focus::new(app("shop/prod"), keys());
+        t.set_focus(f.clone());
+        assert!(t.focus_partial());
+        assert_eq!(t.focus_requery(), Some(f.clone()));
+        assert_eq!(
+            t.focus_meta().as_deref(),
+            Some("focus is partial: r re-queries shop/prod · both")
+        );
+        let focused = data_of(t, 2);
+        t.apply_focused(f.clone(), 2, focused);
+        assert!(!t.focus_partial());
+        assert_eq!(
+            t.focus_meta().as_deref(),
+            Some("focus shop/prod · both · 2 queries")
+        );
+        assert_eq!(t.loaded_flows().len(), 2);
+        assert_eq!(
+            t.focus_requery(),
+            Some(f.clone()),
+            "r refreshes the focused result"
+        );
+        assert_eq!(t.cycle_focus_direction(), Some(FocusDirection::In));
+        assert!(!t.focus_partial(), "a both result covers in");
+        assert!(t.clear_focus());
+        assert_eq!(t.loaded_flows().len(), 4, "the unfocused result is back");
+        assert!(t.data.as_ref().unwrap().truncated);
+        assert!(t.unfocused.is_none() && t.focus_result.is_none());
+    }
+
+    #[test]
+    fn a_focused_result_of_another_app_goes_back_first_and_window_keys_go_back_too() {
+        let mut m = model_with_flows();
+        let t = &mut m.traffic;
+        t.data.as_mut().unwrap().truncated = true;
+        let f = Focus::new(app("shop/prod"), keys()).with_direction(FocusDirection::In);
+        let focused = data_of(t, 1);
+        t.apply_focused(f, 1, focused);
+        assert_eq!(t.loaded_flows().len(), 1);
+        t.set_focus(Focus::new(app("unmanaged-nas/-"), keys()));
+        assert!(
+            t.unfocused.is_none(),
+            "another app: the unfocused result is back first"
+        );
+        assert_eq!(t.loaded_flows().len(), 4);
+        assert!(t.focus_partial(), "still truncated: partial");
+        assert!(!t.back_to_unfocused(), "nothing focused to go back from");
+        let f = Focus::new(app("shop/prod"), keys());
+        let focused = data_of(t, 2);
+        t.apply_focused(f, 2, focused);
+        assert!(t.back_to_unfocused());
+        assert_eq!(t.loaded_flows().len(), 4);
+        assert!(t.focus.is_some(), "the focus stays");
+        assert!(t.drop_focus(), "drop_focus reports the focus it dropped");
+        assert!(t.focus.is_none() && t.unfocused.is_none());
+    }
+
+    #[test]
+    fn queries_text_counts() {
+        assert_eq!(queries_text(1), "1 query");
+        assert_eq!(queries_text(2), "2 queries");
     }
 }
