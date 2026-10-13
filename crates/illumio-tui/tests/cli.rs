@@ -1988,7 +1988,9 @@ async fn traffic_groups_services_adds_the_service_to_each_pair() {
 #[tokio::test(flavor = "multi_thread")]
 async fn traffic_groups_by_in_out_both_with_show_and_app() {
     let server = MockServer::start().await;
-    mount_traffic(&server, 4).await;
+    // --by in, --by out (name-keyed app: unfocused), --by both, --by in
+    // --app shop/prod (focused: 1), --app shop/prod (pairs, focused: 2).
+    mount_traffic(&server, 6).await;
     let out = stdout_json(
         cmd(&server)
             .args(["traffic", "groups", "--window", "1h", "--by", "in"])
@@ -2017,9 +2019,14 @@ async fn traffic_groups_by_in_out_both_with_show_and_app() {
             .success(),
     );
     let sections = out["data"]["sections"].as_array().unwrap();
-    assert_eq!(sections.len(), 1);
+    assert_eq!(
+        sections.len(),
+        1,
+        "a name-keyed app keeps narrowing the sections"
+    );
     assert_eq!(sections[0]["direction"], "out");
     assert_eq!(sections[0]["totals"]["blocked"], 1);
+    assert!(out["meta"].get("queries").is_none(), "not a focused query");
     let table = cmd(&server)
         .args([
             "traffic", "groups", "--window", "1h", "--by", "both", "--table",
@@ -2035,22 +2042,230 @@ async fn traffic_groups_by_in_out_both_with_show_and_app() {
         text.contains("\n  ← ipl:Corp/-") && text.contains("\n  → "),
         "{text}"
     );
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "traffic",
+                "groups",
+                "--window",
+                "1h",
+                "--by",
+                "in",
+                "--app",
+                "shop/prod",
+            ])
+            .assert()
+            .success(),
+    );
+    let sections = out["data"]["sections"].as_array().unwrap();
+    assert_eq!(sections.len(), 1);
+    assert_eq!(
+        sections[0]["totals"]["connections"], 325,
+        "the same section, now from a focused query"
+    );
+    assert_eq!(out["meta"]["queries"], 1, "--by in focuses the query on in");
     let miss = cmd(&server)
         .args([
             "traffic", "groups", "--window", "1h", "--by", "in", "--app", "pos/PCI",
         ])
         .assert()
-        .success();
-    let out: serde_json::Value = serde_json::from_slice(&miss.get_output().stdout).unwrap();
-    assert_eq!(out["data"]["sections"], json!([]));
+        .code(2);
     let err = String::from_utf8_lossy(&miss.get_output().stderr);
-    assert!(err.contains("no app matches \"pos/PCI\""), "{err}");
+    assert!(err.contains(r#"unknown app \"pos/PCI\""#), "{err}");
+    let out = stdout_json(
+        cmd(&server)
+            .args(["traffic", "groups", "--window", "1h", "--app", "shop/prod"])
+            .assert()
+            .success(),
+    );
+    let pairs = out["data"]
+        .as_array()
+        .expect("--app without --by gives the pairs");
+    assert!(
+        pairs
+            .iter()
+            .all(|p| p["src"] == json!(["shop", "prod"]) || p["dst"] == json!(["shop", "prod"])),
+        "{pairs:?}"
+    );
+    assert_eq!(out["meta"]["queries"], 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn traffic_app_dry_run_prints_one_body_per_side() {
+    let server = MockServer::start().await;
+    mount_traffic(&server, 0).await;
+    let labels =
+        json!([{"label": {"href": "/orgs/5/labels/3"}}, {"label": {"href": "/orgs/5/labels/4"}}]);
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "traffic",
+                "query",
+                "--window",
+                "1h",
+                "--app",
+                "shop/prod",
+                "--dry-run",
+            ])
+            .assert()
+            .success(),
+    );
+    let bodies = out["data"].as_array().expect("one body per side");
+    assert_eq!(bodies.len(), 2);
+    assert_eq!(
+        bodies[0]["destinations"]["include"],
+        json!([labels.clone()])
+    );
+    assert_eq!(bodies[0]["sources"]["include"], json!([[]]));
+    assert_eq!(bodies[1]["sources"]["include"], json!([labels.clone()]));
+    assert_eq!(bodies[1]["destinations"]["include"], json!([[]]));
+    assert_eq!(out["meta"]["cache"], "none");
+    for (sub, dir, side) in [("groups", "in", "destinations"), ("mesh", "out", "sources")] {
+        let out = stdout_json(
+            cmd(&server)
+                .args([
+                    "traffic",
+                    sub,
+                    "--window",
+                    "1h",
+                    "--app",
+                    "shop/prod",
+                    "--direction",
+                    dir,
+                    "--dry-run",
+                ])
+                .assert()
+                .success(),
+        );
+        let bodies = out["data"].as_array().unwrap();
+        assert_eq!(bodies.len(), 1, "{sub} --direction {dir}");
+        assert_eq!(bodies[0][side]["include"], json!([labels.clone()]));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn traffic_app_spends_the_cap_on_the_app_and_counts_its_queries() {
+    let server = MockServer::start().await;
+    mount_traffic(&server, 4).await; // groups --direction in: 1; query (both): 2; query out: 1
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "traffic",
+                "groups",
+                "--window",
+                "1h",
+                "--app",
+                "shop/prod",
+                "--direction",
+                "in",
+            ])
+            .assert()
+            .success(),
+    );
+    let pairs = out["data"].as_array().unwrap();
+    assert_eq!(pairs.len(), 3, "only the flows into shop/prod: {pairs:?}");
+    assert!(pairs.iter().all(|p| p["dst"] == json!(["shop", "prod"])));
+    assert_eq!(out["meta"]["queries"], 1);
+    let out = stdout_json(
+        cmd(&server)
+            .args(["traffic", "query", "--window", "1h", "--app", "shop/prod"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(
+        out["data"].as_array().unwrap().len(),
+        4,
+        "both queries returned flow 0: it counts once"
+    );
+    assert_eq!(out["meta"]["queries"], 2);
+    let table = cmd(&server)
+        .args([
+            "traffic",
+            "query",
+            "--window",
+            "1h",
+            "--app",
+            "shop/prod",
+            "--direction",
+            "out",
+            "--table",
+        ])
+        .assert()
+        .success();
+    let err = String::from_utf8_lossy(&table.get_output().stderr);
+    assert!(
+        err.contains("· 1 query"),
+        "the meta line counts the query: {err}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn traffic_app_mistakes_exit_2_before_any_traffic_request() {
+    let server = MockServer::start().await;
+    mount_traffic(&server, 0).await;
     let err = cmd(&server)
-        .args(["traffic", "groups", "--window", "1h", "--app", "shop/prod"])
+        .args(["traffic", "groups", "--window", "1h", "--app", "shp/prod"])
         .assert()
         .code(2);
-    let err = String::from_utf8_lossy(&err.get_output().stderr);
-    assert!(err.contains("--app needs sections"), "{err}");
+    let err = String::from_utf8_lossy(&err.get_output().stderr).to_string();
+    assert!(
+        err.contains(r#"unknown app \"shp/prod\": no app=shp label (closest: shop)"#),
+        "{err}"
+    );
+    let err = cmd(&server)
+        .args([
+            "traffic",
+            "groups",
+            "--window",
+            "1h",
+            "--by",
+            "in",
+            "--app",
+            "shop/prod",
+            "--direction",
+            "in",
+        ])
+        .assert()
+        .code(2);
+    assert!(
+        String::from_utf8_lossy(&err.get_output().stderr)
+            .contains("--direction conflicts with --by")
+    );
+    cmd(&server)
+        .args(["traffic", "query", "--window", "1h", "--direction", "in"])
+        .assert()
+        .code(2);
+    let err = cmd(&server)
+        .args([
+            "traffic",
+            "query",
+            "--window",
+            "1h",
+            "--app",
+            "shop/prod",
+            "--backfill",
+        ])
+        .assert()
+        .code(2);
+    assert!(
+        String::from_utf8_lossy(&err.get_output().stderr)
+            .contains("--backfill does not combine with --app")
+    );
+    let err = cmd(&server)
+        .args([
+            "traffic",
+            "query",
+            "--window",
+            "1h",
+            "--app",
+            "unmanaged-nas/-",
+        ])
+        .assert()
+        .code(2);
+    assert!(
+        String::from_utf8_lossy(&err.get_output().stderr).contains("a - slot cannot be queried"),
+        "a name-keyed app without --by cannot focus a query"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

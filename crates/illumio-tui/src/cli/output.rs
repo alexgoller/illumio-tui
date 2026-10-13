@@ -63,6 +63,10 @@ pub struct Meta {
     /// truncated first query is replaced, so it does not count).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub slices: Option<u32>,
+    /// Traffic with `--app`: the Explorer queries the result took (one per
+    /// side: 2 for `both`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queries: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub write: Option<WriteMeta>,
 }
@@ -223,7 +227,7 @@ pub fn write_json<T: Serialize>(
     writeln!(out)
 }
 
-pub fn write_table<T: TableRows>(out: &mut impl Write, data: &T) -> std::io::Result<()> {
+pub fn write_table<T: TableRows + ?Sized>(out: &mut impl Write, data: &T) -> std::io::Result<()> {
     let headers = data.headers();
     let rows = data.rows();
     let table = render_table(&headers, &rows);
@@ -244,7 +248,10 @@ pub fn write_table<T: TableRows>(out: &mut impl Write, data: &T) -> std::io::Res
 }
 
 /// A table's full rows as CSV.
-pub fn write_table_csv<T: TableRows>(out: &mut impl Write, data: &T) -> std::io::Result<()> {
+pub fn write_table_csv<T: TableRows + ?Sized>(
+    out: &mut impl Write,
+    data: &T,
+) -> std::io::Result<()> {
     write_csv(out, &data.full_headers(), &data.full_rows())
 }
 
@@ -264,6 +271,9 @@ pub fn meta_line(meta: &Meta) -> String {
     }
     if let Some(n) = meta.slices {
         s.push_str(&format!(" · {n} slice{}", if n == 1 { "" } else { "s" }));
+    }
+    if let Some(n) = meta.queries {
+        s.push_str(&format!(" · {n} quer{}", if n == 1 { "y" } else { "ies" }));
     }
     if meta.truncated {
         s.push_str(" · WARNING: result truncated");
@@ -360,6 +370,7 @@ mod tests {
             window: None,
             covered: None,
             slices: None,
+            queries: None,
             write: Some(WriteMeta {
                 method: WriteMethod::Post,
                 path: "/orgs/5/labels".into(),

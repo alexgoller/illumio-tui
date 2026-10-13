@@ -84,6 +84,7 @@ fn emit<T: Serialize + TableRows>(global: &GlobalArgs, data: &T) -> Result<(), C
         window: None,
         covered: None,
         slices: None,
+        queries: None,
         write: None,
     };
     let mut out = std::io::stdout().lock();

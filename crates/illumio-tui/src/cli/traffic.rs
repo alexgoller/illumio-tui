@@ -12,10 +12,10 @@ use pce::models::{
 };
 use pce::traffic::{
     AppSection, BackfillRun, CONFIRM_MAX_RESULTS, Decisions, Direction, FilterExpr, FlowGroup,
-    MAX_SLICES, MAX_TRAFFIC_MAX_RESULTS, MeshColumns, MeshRow, Next, ResolvedFlow, Step,
-    TrafficQueryBuilder, app_header, app_sections, app_sections_both, compact_duration, coverage,
-    format_timestamp, group_by_labels, group_by_service, merge_flows, mesh, parse_window,
-    plan_backfill, resolve_actor, resolve_flows,
+    Focus, FocusDirection, MAX_SLICES, MAX_TRAFFIC_MAX_RESULTS, MeshColumns, MeshRow, Next,
+    ResolvedFlow, Step, TrafficQueryBuilder, app_header, app_sections, app_sections_both,
+    compact_duration, coverage, format_timestamp, group_by_labels, group_by_service, merge_flows,
+    mesh, parse_app, parse_window, plan_backfill, resolve_actor, resolve_flows,
 };
 use pce::{KeyOrder, NameIndex};
 use serde::Serialize;
@@ -93,6 +93,70 @@ impl From<ShowArg> for Decisions {
     }
 }
 
+/// `--direction`: which side of the flows `--app` is on.
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DirectionArg {
+    /// The app is the destination
+    In,
+    /// The app is the source
+    Out,
+    /// Either (two queries, merged)
+    Both,
+}
+
+impl From<DirectionArg> for FocusDirection {
+    fn from(d: DirectionArg) -> Self {
+        match d {
+            DirectionArg::In => FocusDirection::In,
+            DirectionArg::Out => FocusDirection::Out,
+            DirectionArg::Both => FocusDirection::Both,
+        }
+    }
+}
+
+/// `--app` / `--direction` against the keys the command groups by: the
+/// focus, and whether its labels go into the query. A name-keyed group
+/// (`unmanaged-nas/-`, `ipl:Corp/-`) has no labels to query by: with `--by`
+/// sections it keeps narrowing an unfocused query's sections, as before.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CliFocus {
+    pub focus: Focus,
+    pub query: bool,
+}
+
+/// The offline checks of `--app`: `--direction` with `--by` sections (the
+/// sections already choose a direction), `--backfill` with a focused query
+/// (its slices would not be focused). Without `--direction` the direction is
+/// `--by`'s (`in`, `out`), else `both`.
+pub fn cli_focus(
+    args: &FilterArgs,
+    keys: &[String],
+    by: ByArg,
+) -> Result<Option<CliFocus>, CliError> {
+    let Some(text) = &args.app else {
+        return Ok(None);
+    };
+    if args.direction.is_some() && by != ByArg::Pairs {
+        return Err(CliError::Args(
+            "--direction conflicts with --by: the sections already choose a direction".into(),
+        ));
+    }
+    let direction = match (args.direction, by) {
+        (Some(d), _) => d.into(),
+        (None, ByArg::In) => FocusDirection::In,
+        (None, ByArg::Out) => FocusDirection::Out,
+        (None, _) => FocusDirection::Both,
+    };
+    let focus = Focus::new(parse_app(text), keys.to_vec()).with_direction(direction);
+    let query = focus.is_label_group() || by == ByArg::Pairs;
+    if query && args.backfill {
+        return Err(CliError::Args(
+            "--backfill does not combine with --app: the slices would not be focused".into(),
+        ));
+    }
+    Ok(Some(CliFocus { focus, query }))
+}
+
 #[derive(Args, Debug, Clone, Default)]
 pub struct GroupsArgs {
     #[command(flatten)]
@@ -108,9 +172,6 @@ pub struct GroupsArgs {
     /// filters the query itself
     #[arg(long, value_enum, default_value_t)]
     pub show: ShowArg,
-    /// Sections only: keep this app's sections, e.g. pos/PCI
-    #[arg(long)]
-    pub app: Option<String>,
     /// Pairs only: one row per source group, destination group and service
     /// (port/proto), with a `service` column (sections are already per service)
     #[arg(long, conflicts_with = "by")]
@@ -185,6 +246,14 @@ pub struct FilterArgs {
     /// stderr names the --from/--to that continue
     #[arg(long, requires = "backfill", value_parser = clap::value_parser!(u32).range(1..=50))]
     pub max_slices: Option<u32>,
+    /// Focus on one app, a group of the label keys (--keys, else the profile's scope keys),
+    /// e.g. shop/prod: its labels go into the query, so the cap is spent on it
+    #[arg(long)]
+    pub app: Option<String>,
+    /// With --app: in (the app is the destination), out (the source) or both
+    /// (default; two queries, merged)
+    #[arg(long, value_enum, requires = "app")]
+    pub direction: Option<DirectionArg>,
 }
 
 /// RFC 3339, or a date; a date-only `--to` means 23:59:59 of that day.
@@ -351,6 +420,28 @@ impl TableRows for DryRun {
             .unwrap_or_default()
             .lines()
             .map(|l| vec![l.to_string()])
+            .collect()
+    }
+}
+
+/// `--dry-run` with `--app`: one request body per side, `in` first.
+#[derive(Debug, Serialize)]
+#[serde(transparent)]
+pub struct DryRuns(pub Vec<TrafficQuery>);
+
+impl TableRows for DryRuns {
+    fn headers(&self) -> Vec<&'static str> {
+        vec!["request body"]
+    }
+    fn rows(&self) -> Vec<Vec<String>> {
+        self.0
+            .iter()
+            .flat_map(|q| {
+                DryRun(q.clone())
+                    .rows()
+                    .into_iter()
+                    .chain(std::iter::once(vec![String::new()]))
+            })
             .collect()
     }
 }
@@ -671,14 +762,15 @@ pub fn peer_csv_row(
 
 /// `no app matches "pos/PCI"` when `--app` kept no section.
 pub fn app_miss(args: &GroupsArgs, s: &Sections) -> Option<String> {
-    args.app
+    args.filter
+        .app
         .as_ref()
         .filter(|_| s.sections.is_empty())
         .map(|a| format!("no app matches {a:?}"))
 }
 
-/// `--by`, `--show` and `--app` over the loaded flows: the sections, or
-/// `None` for `pairs` (see `pairs_for`). `--app` needs sections.
+/// `--by`, `--show` and `--app` over the loaded flows: the sections (only
+/// `--app`'s with it), or `None` for `pairs` (see `pairs_for`).
 pub fn sections_for(
     flows: &[ResolvedFlow],
     keys: &[String],
@@ -686,19 +778,12 @@ pub fn sections_for(
 ) -> Result<Option<Sections>, CliError> {
     let decisions = Decisions::from(args.show);
     let mut sections = match args.by {
-        ByArg::Pairs => {
-            if args.app.is_some() {
-                return Err(CliError::Args(
-                    "--app needs sections: add --by in, out or both".into(),
-                ));
-            }
-            return Ok(None);
-        }
+        ByArg::Pairs => return Ok(None),
         ByArg::In => app_sections(flows, keys, Direction::In, decisions),
         ByArg::Out => app_sections(flows, keys, Direction::Out, decisions),
         ByArg::Both => app_sections_both(flows, keys, decisions),
     };
-    if let Some(app) = &args.app {
+    if let Some(app) = &args.filter.app {
         sections.retain(|s| &s.app_text() == app);
     }
     Ok(Some(Sections {
@@ -737,6 +822,8 @@ struct Fetched {
     covered: Duration,
     /// `--backfill`: the queries merged.
     slices: Option<u32>,
+    /// `--app`: the Explorer queries the result took.
+    queries: Option<u32>,
 }
 
 impl Fetched {
@@ -744,6 +831,7 @@ impl Fetched {
         let mut m = ctx.meta(self.cache, self.truncated, self.window.clone());
         m.covered = Some(compact_duration(self.covered));
         m.slices = self.slices;
+        m.queries = self.queries;
         m
     }
 }
@@ -862,15 +950,23 @@ async fn backfill(
     }))
 }
 
-/// Builds and runs the query (cost guard, cache, one name index). A dry
-/// run prints the request body and returns `None`.
-async fn fetch(ctx: &Context, args: &FilterArgs) -> Result<Option<Fetched>, CliError> {
+/// Builds and runs the query (cost guard, cache, one name index): with a
+/// focused `--app`, one query per side through `Pce::focused_traffic`,
+/// after the app's labels are checked (an unknown one is exit 2 before any
+/// traffic request). A dry run prints the request body (with `--app`, the
+/// bodies) and returns `None`.
+async fn fetch(
+    ctx: &Context,
+    args: &FilterArgs,
+    focus: Option<&CliFocus>,
+) -> Result<Option<Fetched>, CliError> {
     let BuiltQuery { query: q, index } = build_query(ctx, args).await?;
     let window = Some(Window {
         start: q.start_date.clone(),
         end: q.end_date.clone(),
     });
-    if args.dry_run {
+    let focus = focus.filter(|f| f.query).map(|f| &f.focus);
+    if args.dry_run && focus.is_none() {
         ctx.emit(&DryRun(q), "none", false, window)?;
         return Ok(None);
     }
@@ -878,6 +974,40 @@ async fn fetch(ctx: &Context, args: &FilterArgs) -> Result<Option<Fetched>, CliE
         Some(idx) => idx,
         None => ctx.pce.name_index(ctx.cache_mode).await?,
     };
+    if let Some(focus) = focus {
+        let queries = focus.queries(&q, &idx).map_err(CliError::Args)?;
+        if args.dry_run {
+            let bodies = DryRuns(queries.into_iter().map(|(_, q)| q).collect());
+            ctx.emit(&bodies, "none", false, window)?;
+            return Ok(None);
+        }
+        let ft = ctx
+            .pce
+            .focused_traffic(
+                "focus",
+                focus,
+                &q,
+                &idx,
+                ctx.cache_mode,
+                &CancellationToken::new(),
+                None,
+            )
+            .await?;
+        let covered = if ft.truncated {
+            coverage(&ft.flows, q.window()).covered
+        } else {
+            q.window()
+        };
+        return Ok(Some(Fetched {
+            queries: Some(ft.query_count()),
+            cache: cache_label(ft.hit, ctx.cache_mode),
+            truncated: ft.truncated,
+            window,
+            covered,
+            slices: None,
+            flows: ft.flows,
+        }));
+    }
     let result = ctx
         .pce
         .traffic(&q, ctx.cache_mode, &CancellationToken::new(), None)
@@ -889,6 +1019,7 @@ async fn fetch(ctx: &Context, args: &FilterArgs) -> Result<Option<Fetched>, CliE
         window,
         covered: Duration::ZERO,
         slices: None,
+        queries: None,
     };
     // A complete result covers its window, whatever its rows' times.
     f.covered = if f.truncated {
@@ -919,7 +1050,13 @@ fn keys_or_profile(ctx: &Context, keys: &[String]) -> Vec<String> {
 }
 
 async fn query(ctx: &Context, args: &QueryArgs) -> Result<(), CliError> {
-    let Some(f) = fetch(ctx, &args.filter).await? else {
+    let keys = if args.group.is_empty() {
+        keys_or_profile(ctx, &[])
+    } else {
+        args.group.clone()
+    };
+    let focus = cli_focus(&args.filter, &keys, ByArg::Pairs)?;
+    let Some(f) = fetch(ctx, &args.filter, focus.as_ref()).await? else {
         return Ok(());
     };
     if args.blocked {
@@ -942,12 +1079,13 @@ async fn query(ctx: &Context, args: &QueryArgs) -> Result<(), CliError> {
 }
 
 async fn groups(ctx: &Context, args: &GroupsArgs) -> Result<(), CliError> {
+    let keys = keys_or_profile(ctx, &args.keys);
     // Bad flag combinations fail before any request.
     sections_for(&[], &[], args)?;
-    let Some(f) = fetch(ctx, &args.filter).await? else {
+    let focus = cli_focus(&args.filter, &keys, args.by)?;
+    let Some(f) = fetch(ctx, &args.filter, focus.as_ref()).await? else {
         return Ok(());
     };
-    let keys = keys_or_profile(ctx, &args.keys);
     match sections_for(&f.flows, &keys, args)? {
         Some(sections) => {
             if let Some(miss) = app_miss(args, &sections) {
@@ -964,10 +1102,11 @@ async fn groups(ctx: &Context, args: &GroupsArgs) -> Result<(), CliError> {
 }
 
 async fn mesh_cmd(ctx: &Context, args: &MeshArgs) -> Result<(), CliError> {
-    let Some(f) = fetch(ctx, &args.filter).await? else {
+    let keys = keys_or_profile(ctx, &args.keys);
+    let focus = cli_focus(&args.filter, &keys, ByArg::Pairs)?;
+    let Some(f) = fetch(ctx, &args.filter, focus.as_ref()).await? else {
         return Ok(());
     };
-    let keys = keys_or_profile(ctx, &args.keys);
     let cols = MeshColumns {
         user: !args.no_user,
         process: !args.no_process,
@@ -1101,7 +1240,7 @@ mod tests {
     fn by_parses_and_defaults_to_pairs_which_has_no_sections() {
         let a = groups_args(&[]);
         assert_eq!(
-            (a.by, a.show, a.app.as_deref()),
+            (a.by, a.show, a.filter.app.as_deref()),
             (ByArg::Pairs, ShowArg::All, None)
         );
         let flows = crate::tui::test_support::fixture_flows_rich();
@@ -1157,11 +1296,11 @@ mod tests {
             (s.sections[0].direction, s.sections[1].direction),
             (Direction::In, Direction::Out)
         );
-        let err =
-            sections_for(&flows, &app_env(), &groups_args(&["--app", "shop/prod"])).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "--app needs sections: add --by in, out or both"
+        assert!(
+            sections_for(&flows, &app_env(), &groups_args(&["--app", "shop/prod"]))
+                .unwrap()
+                .is_none(),
+            "--app without --by gives the pairs of the focused flows"
         );
         let a = groups_args(&["--show", "blocked"]);
         assert!(sections_for(&flows, &app_env(), &a).unwrap().is_none());

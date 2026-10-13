@@ -69,6 +69,7 @@ impl Context {
             window,
             covered: None,
             slices: None,
+            queries: None,
             write: None,
         }
     }
