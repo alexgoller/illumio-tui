@@ -160,7 +160,7 @@ illumio-tui 0.1.6</code></pre>
       <p>All five group flows by the same label keys: your profile's scope keys (<code>app,env</code> by default) until <code>g</code> opens the key picker, which also offers <em>all labels</em>.</p>
       <ul>
         <li><strong>Flows</strong>: each side's group and, on <code>Enter</code>, both label sets and the bytes.</li>
-        <li><strong>App-to-app</strong>: group pairs with allowed, potentially blocked and blocked counts; <code>Enter</code> drills into a pair's flows.</li>
+        <li><strong>App-to-app</strong>: group pairs with allowed, potentially blocked and blocked counts; <code>o</code> splits each pair by port/proto (one row per allow rule to write); <code>Enter</code> drills into a pair's flows.</li>
         <li><strong>Mesh</strong>: user, process, source, destination, service and destination process; <code>u</code> / <code>p</code> hide the user / process column and merge rows.</li>
         <li><strong>Blocked</strong>: blocked and potentially blocked flows by destination group and service.</li>
         <li><strong>Treemap</strong>: each source a box, its destinations tiles sized by connections (<code>b</code> for bytes) and coloured by decision; <code>hjkl</code> move, <code>Enter</code> zooms and drills.</li>
@@ -204,7 +204,7 @@ illumio-tui 0.1.6</code></pre>
       <h3>Explorer, without the clicking</h3>
       <p><code>traffic query</code> submits the PCE's asynchronous Explorer query, polls with backoff, downloads the result, flags truncation, and resolves every label href to <code>key=value</code>.</p>
       <p>Filters read like you think: <code>app=web</code>, <code>ip:10.0.0.5</code>, <code>ipl:NAME</code>, <code>wl:HOST</code>, <code>fqdn:NAME</code>. A comma means AND, repeating the flag means OR. Add <code>--exclude-src</code>, <code>--exclude-dst</code>, <code>--port</code>, <code>--proto</code>, <code>--process</code> and <code>--decision</code> as needed. An unknown label value fails locally, before the PCE sees anything.</p>
-      <p><code>--group app,env</code> folds flows into label pairs; <code>--blocked</code> keeps blocked and potentially blocked flows, grouped by destination group and port. <code>traffic groups</code> prints one row per source and destination group with connections, bytes and decisions; <code>traffic mesh</code> one row per user, process, source, destination, service and destination process, with <code>--no-user</code> and <code>--no-process</code> to merge. <code>--keys</code> picks the label keys (default: the profile's scope keys).</p>
+      <p><code>--group app,env</code> folds flows into label pairs; <code>--blocked</code> keeps blocked and potentially blocked flows, grouped by destination group and port. <code>traffic groups</code> prints one row per source and destination group with connections, bytes and decisions (<code>--services</code>: one per group pair and port/proto); <code>traffic mesh</code> one row per user, process, source, destination, service and destination process, with <code>--no-user</code> and <code>--no-process</code> to merge. <code>--keys</code> picks the label keys (default: the profile's scope keys).</p>
       <p><code>--impact</code> on <code>policy rules</code> counts the workloads each rule matches as providers and consumers, across the ruleset's scopes, label groups and exclusions, from one cached workload read; <code>iplists</code> gives every list its size.</p>
     </div>
     <div>
