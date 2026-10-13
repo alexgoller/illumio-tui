@@ -1911,6 +1911,81 @@ async fn traffic_groups_sum_bytes_and_honour_keys() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn traffic_groups_services_adds_the_service_to_each_pair() {
+    let server = MockServer::start().await;
+    mount_traffic(&server, 3).await; // --by with --services asks for nothing
+    let out = stdout_json(
+        cmd(&server)
+            .args(["traffic", "groups", "--window", "1h", "--services"])
+            .assert()
+            .success(),
+    );
+    let data = out["data"].as_array().unwrap();
+    assert_eq!(data.len(), 4);
+    assert_eq!(data[0]["src"], json!(["shop", "prod"]));
+    assert_eq!(data[0]["service"], "5432/tcp");
+    assert_eq!(data[0]["connections"], 310);
+    let nas = data
+        .iter()
+        .find(|g| g["src"] == json!(["unmanaged-nas", "-"]))
+        .unwrap();
+    assert_eq!(nas["service"], "icmp", "no port: just the protocol");
+    let table = cmd(&server)
+        .args([
+            "traffic",
+            "groups",
+            "--window",
+            "1h",
+            "--services",
+            "--table",
+        ])
+        .assert()
+        .success();
+    let text = String::from_utf8_lossy(&table.get_output().stdout).to_string();
+    let header: Vec<&str> = text.lines().next().unwrap().split_whitespace().collect();
+    assert_eq!(
+        header,
+        [
+            "src",
+            "dst",
+            "service",
+            "flows",
+            "conns",
+            "bytes",
+            "allowed",
+            "pot.blocked",
+            "blocked"
+        ]
+    );
+    assert!(text.contains("5432/tcp"), "{text}");
+    let text = csv_stdout(
+        &cmd(&server)
+            .args(["traffic", "groups", "--window", "1h", "--services", "--csv"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(
+        first_two(&text),
+        [
+            "src,dst,service,flows,conns,bytes,allowed,pot.blocked,blocked",
+            "shop/prod,shop/prod,5432/tcp,1,310,124000,1,0,0"
+        ]
+    );
+    cmd(&server)
+        .args([
+            "traffic",
+            "groups",
+            "--window",
+            "1h",
+            "--services",
+            "--by",
+            "in",
+        ])
+        .assert()
+        .code(2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn traffic_groups_by_in_out_both_with_show_and_app() {
     let server = MockServer::start().await;
     mount_traffic(&server, 4).await;

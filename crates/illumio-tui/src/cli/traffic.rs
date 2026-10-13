@@ -14,8 +14,8 @@ use pce::traffic::{
     AppSection, BackfillRun, CONFIRM_MAX_RESULTS, Decisions, Direction, FilterExpr, FlowGroup,
     MAX_SLICES, MAX_TRAFFIC_MAX_RESULTS, MeshColumns, MeshRow, Next, ResolvedFlow, Step,
     TrafficQueryBuilder, app_header, app_sections, app_sections_both, compact_duration, coverage,
-    format_timestamp, group_by_labels, merge_flows, mesh, parse_window, plan_backfill,
-    resolve_actor, resolve_flows,
+    format_timestamp, group_by_labels, group_by_service, merge_flows, mesh, parse_window,
+    plan_backfill, resolve_actor, resolve_flows,
 };
 use pce::{KeyOrder, NameIndex};
 use serde::Serialize;
@@ -110,6 +110,10 @@ pub struct GroupsArgs {
     /// Sections only: keep this app's sections, e.g. pos/PCI
     #[arg(long)]
     pub app: Option<String>,
+    /// Pairs only: one row per source group, destination group and service
+    /// (port/proto), with a `service` column (sections are already per service)
+    #[arg(long, conflicts_with = "by")]
+    pub services: bool,
 }
 
 #[derive(Args, Debug, Clone, Default)]
@@ -456,6 +460,39 @@ impl TableRows for Vec<FlowGroup> {
                 row
             })
             .collect()
+    }
+}
+
+/// `traffic groups --services`: the pairs split by service, a `service`
+/// column after `dst` (JSON: the pairs with a `service` field).
+#[derive(Debug, Serialize)]
+#[serde(transparent)]
+pub struct ServiceGroups(pub Vec<FlowGroup>);
+
+impl ServiceGroups {
+    fn with_service(&self, rows: Vec<Vec<String>>) -> Vec<Vec<String>> {
+        self.0
+            .iter()
+            .zip(rows)
+            .map(|(g, mut row)| {
+                row.insert(2, g.service.clone().unwrap_or_default());
+                row
+            })
+            .collect()
+    }
+}
+
+impl TableRows for ServiceGroups {
+    fn headers(&self) -> Vec<&'static str> {
+        let mut h = self.0.headers();
+        h.insert(2, "service");
+        h
+    }
+    fn rows(&self) -> Vec<Vec<String>> {
+        self.with_service(self.0.rows())
+    }
+    fn full_rows(&self) -> Vec<Vec<String>> {
+        self.with_service(self.0.full_rows())
     }
 }
 
@@ -906,6 +943,10 @@ async fn groups(ctx: &Context, args: &GroupsArgs) -> Result<(), CliError> {
             }
             ctx.emit_meta(&sections, &f.meta(ctx))
         }
+        None if args.services => ctx.emit_meta(
+            &ServiceGroups(group_by_service(&f.flows, &keys)),
+            &f.meta(ctx),
+        ),
         None => ctx.emit_meta(&group_by_labels(&f.flows, &keys), &f.meta(ctx)),
     }
 }
