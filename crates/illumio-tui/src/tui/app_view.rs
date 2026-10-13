@@ -2,13 +2,15 @@
 //! timeline, workloads and policy. Built from what is loaded plus at most
 //! two requests, each counted here. Pure: `update` fills it,
 //! `ui::widgets::app_overlay` draws it.
+use crate::tui::filter::TrafficFilter;
 use jiff::Timestamp;
 use pce::app::{AppPeer, AppPolicyRow, AppWorkload, WorkloadSummary, app_peers};
 use pce::models::PolicyScope;
 use pce::traffic::{
-    APPROX_BUCKETS, Direction, Focus, FocusDirection, ResolvedFlow, Timeline, approx_timeline,
-    equal_buckets,
+    APPROX_BUCKETS, Bucket, Direction, Focus, FocusDirection, ResolvedFlow, Timeline,
+    approx_timeline, equal_buckets, exact_timeline,
 };
+use tokio_util::sync::CancellationToken;
 
 /// The panels `Tab` moves between, in order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,6 +64,92 @@ pub enum Loadable<T> {
     Unavailable(String),
 }
 
+/// `t`: the exact blocked timeline of one app, direction, traffic filter
+/// and window, one bucket query (per side) at a time. Kept when stopped, so
+/// `t` resumes with the missing buckets only.
+#[derive(Debug, Clone)]
+pub struct ExactTimeline {
+    pub buckets: Vec<Bucket>,
+    /// Per bucket: blocked connections and whether its query hit the cap;
+    /// `None` until loaded.
+    pub counts: Vec<Option<(u64, bool)>>,
+    pub focus: Focus,
+    /// The filter the bucket queries are built from (`bucket_query`
+    /// replaces its range and decisions).
+    pub filter: TrafficFilter,
+    /// The bucket whose query is in flight, and that request's ticket: an
+    /// answer carrying another one is dropped.
+    pub running: Option<(usize, u64)>,
+    pub cancel: Option<CancellationToken>,
+    /// Derived from `buckets` and `counts` when a count lands, never per
+    /// frame.
+    pub timeline: Timeline,
+}
+
+impl ExactTimeline {
+    pub fn new(buckets: Vec<Bucket>, focus: Focus, filter: TrafficFilter) -> Self {
+        let counts = vec![None; buckets.len()];
+        let timeline = exact_timeline(&buckets, &counts);
+        Self {
+            buckets,
+            counts,
+            focus,
+            filter,
+            running: None,
+            cancel: None,
+            timeline,
+        }
+    }
+
+    /// Bucket `index`'s count (and whether its query hit the cap).
+    pub fn set(&mut self, index: usize, connections: u64, truncated: bool) {
+        if let Some(c) = self.counts.get_mut(index) {
+            *c = Some((connections, truncated));
+            self.timeline = exact_timeline(&self.buckets, &self.counts);
+        }
+    }
+
+    /// The oldest bucket without a count.
+    pub fn next_missing(&self) -> Option<usize> {
+        self.counts.iter().position(Option::is_none)
+    }
+
+    pub fn remaining(&self) -> usize {
+        self.counts.iter().filter(|c| c.is_none()).count()
+    }
+
+    pub fn loaded(&self) -> usize {
+        self.counts.len() - self.remaining()
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.running.is_some()
+    }
+
+    /// The same app, keys, direction, traffic filter and window (`bounds`
+    /// as the loaded result has them now).
+    pub fn is_for(
+        &self,
+        focus: &Focus,
+        filter: &TrafficFilter,
+        bounds: Option<(Timestamp, Timestamp)>,
+    ) -> bool {
+        let range = self.buckets.first().zip(self.buckets.last());
+        &self.focus == focus
+            && &self.filter == filter
+            && range.map(|(a, b)| (a.start, b.end)) == bounds
+    }
+
+    /// `Esc`: cancels the bucket in flight (its answer is then dropped);
+    /// whether one was.
+    pub fn stop(&mut self) -> bool {
+        if let Some(c) = self.cancel.take() {
+            c.cancel();
+        }
+        self.running.take().is_some()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AppView {
     pub focus: Focus,
@@ -93,6 +181,10 @@ pub struct AppView {
     pub requests: u32,
     /// Of those, the ones answered from the cache.
     pub cached: u32,
+    /// `t`: the exact timeline, once asked for.
+    pub exact: Option<ExactTimeline>,
+    /// The last exact-timeline request's ticket (never reused in a view).
+    pub ticket: u64,
 }
 
 impl AppView {
@@ -115,6 +207,8 @@ impl AppView {
             policy_scope: PolicyScope::Draft,
             requests: 0,
             cached: 0,
+            exact: None,
+            ticket: 0,
         }
     }
 
@@ -336,5 +430,63 @@ mod tests {
         assert_eq!(v.header_meta(), "2 req");
         v.cached = 2;
         assert_eq!(v.header_meta(), "2 req · cached");
+    }
+
+    #[test]
+    fn an_exact_run_walks_its_buckets_and_stopping_keeps_what_it_loaded() {
+        let m = model_with_window("24h");
+        let bounds = m.traffic.window_bounds();
+        let (s, e) = bounds.unwrap();
+        let focus = shop(FocusDirection::In);
+        let mut x = ExactTimeline::new(
+            pce::traffic::bucket_plan(s, e),
+            focus.clone(),
+            m.traffic.filter.clone(),
+        );
+        assert_eq!((x.buckets.len(), x.remaining(), x.loaded()), (24, 24, 0));
+        assert!(x.timeline.exact && x.timeline.partial);
+        assert_eq!(x.next_missing(), Some(0));
+        x.set(0, 3, false);
+        x.set(1, 0, true);
+        assert_eq!(x.next_missing(), Some(2));
+        assert_eq!((x.remaining(), x.loaded()), (22, 2));
+        assert_eq!(
+            x.timeline.loaded(),
+            2,
+            "the derived timeline follows each count"
+        );
+        assert!(x.timeline.truncated && x.timeline.buckets[1].truncated);
+        let token = CancellationToken::new();
+        x.running = Some((2, 7));
+        x.cancel = Some(token.clone());
+        assert!(x.is_running());
+        assert!(x.stop());
+        assert!(token.is_cancelled() && x.running.is_none());
+        assert!(!x.stop(), "nothing in flight");
+        assert!(x.timeline.partial);
+        assert!(x.is_for(&focus, &m.traffic.filter, bounds));
+        assert!(
+            !x.is_for(&shop(FocusDirection::Out), &m.traffic.filter, bounds),
+            "another direction"
+        );
+        let mut wider = m.traffic.filter.clone();
+        wider.window = "7d".into();
+        assert!(!x.is_for(&focus, &wider, bounds), "another filter");
+        let later = Some((
+            s,
+            e.checked_add(jiff::SignedDuration::from_hours(1)).unwrap(),
+        ));
+        assert!(
+            !x.is_for(&focus, &m.traffic.filter, later),
+            "the same filter run again: another window"
+        );
+        assert!(!x.is_for(&focus, &m.traffic.filter, None));
+    }
+
+    #[test]
+    fn a_new_view_has_no_exact_timeline() {
+        let v = AppView::new(shop(FocusDirection::Both), "24h".into(), 1);
+        assert!(v.exact.is_none());
+        assert_eq!(v.ticket, 0);
     }
 }
