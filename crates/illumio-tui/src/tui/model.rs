@@ -2088,9 +2088,10 @@ impl TrafficState {
     }
 
     /// The apps of the row under the cursor, in the order `F` takes them: a
-    /// section header its app; a peer row of `in` sections (App-to-app `in`,
-    /// Blocked) the destination, then the source; any other pair, flow,
-    /// Mesh row or treemap tile the source, then the destination. A flow
+    /// section header its app; a peer row its section's app, then the peer
+    /// (so the destination first in an inbound section, App-to-app `in`
+    /// and `both` or Blocked); any other pair, flow, Mesh row or treemap
+    /// tile the source, then the destination. A flow
     /// from an app to itself has one. Empty without a row (or on an `other
     /// (N)` tile).
     pub fn row_apps(&self) -> Vec<GroupKey> {
@@ -2122,18 +2123,9 @@ impl TrafficState {
         let Some(r) = self.section_table().and_then(|t| t.selected_item()) else {
             return Vec::new();
         };
-        let Some((direction, row)) = r.peer() else {
-            return vec![r.app.clone()];
-        };
-        let (src, dst) = match direction {
-            Direction::In => (row.peer.clone(), r.app.clone()),
-            Direction::Out => (r.app.clone(), row.peer.clone()),
-        };
-        let in_sections = self.view == TrafficView::Blocked || self.apps_state.by == By::In;
-        if in_sections {
-            vec![dst, src]
-        } else {
-            vec![src, dst]
+        match r.peer() {
+            Some((_, row)) => vec![r.app.clone(), row.peer.clone()],
+            None => vec![r.app.clone()],
         }
     }
 
@@ -5040,11 +5032,15 @@ mod focus_tests {
         t.blocked.select_where(|r| r.is_header());
         assert_eq!(t.row_apps(), vec![app("shop/prod")], "a header is its app");
         t.view = TrafficView::Mesh;
-        t.mesh.home();
+        t.mesh
+            .select_where(|r| r.dst.join("/") == "fqdn-1.example/-");
         assert_eq!(
-            t.row_apps().len(),
-            1 + usize::from(t.mesh.selected_item().is_some_and(|r| r.src != r.dst))
+            t.row_apps(),
+            vec![app("shop/prod"), app("fqdn-1.example/-")],
+            "a Mesh row: the source, then the destination"
         );
+        t.mesh.select_where(|r| r.src == r.dst);
+        assert_eq!(t.row_apps(), vec![app("shop/prod")], "to itself: one app");
         t.flows.set_rows(Vec::new());
         t.view = TrafficView::Flows;
         assert!(t.row_apps().is_empty());
@@ -5192,6 +5188,34 @@ mod focus_tests {
             d.coverage_meta().unwrap().starts_with("covers <1m of 24h"),
             "{:?}",
             d.coverage_meta()
+        );
+    }
+
+    #[test]
+    fn f_on_a_peer_row_of_both_sections_takes_its_sections_app_first() {
+        let mut m = model_with_flows();
+        let t = &mut m.traffic;
+        t.view = TrafficView::Aggregate;
+        t.apps_state.by = By::Both;
+        t.rebuild_sections();
+        let peer = |d: Direction, text: &'static str| {
+            move |r: &SectionRow| {
+                r.peer()
+                    .is_some_and(|(rd, p)| rd == d && p.peer_text() == text)
+            }
+        };
+        t.apps.select_where(peer(Direction::In, "unmanaged-nas/-"));
+        assert_eq!(
+            t.row_apps(),
+            vec![app("shop/prod"), app("unmanaged-nas/-")],
+            "an inbound section: its app (the destination) first"
+        );
+        t.apps
+            .select_where(peer(Direction::Out, "fqdn-1.example/-"));
+        assert_eq!(
+            t.row_apps(),
+            vec![app("shop/prod"), app("fqdn-1.example/-")],
+            "an outbound section: its app (the source) first"
         );
     }
 }

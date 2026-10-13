@@ -13491,4 +13491,61 @@ mod focus_tests {
         assert!(!m.traffic.is_running());
         assert_eq!(focused(&m).unwrap().1, FocusDirection::Out);
     }
+
+    #[test]
+    fn f_on_an_app_to_app_pair_takes_the_source_then_the_destination() {
+        let mut m = model_with_flows();
+        quiet(&mut m, key('v'));
+        assert_eq!(m.traffic.view, TrafficView::Aggregate);
+        assert_eq!(m.traffic.apps_state.by, By::Pairs);
+        let fqdn = |g: &pce::traffic::FlowGroup| g.dst.join("/") == "fqdn-1.example/-";
+        m.traffic.groups.select_where(fqdn);
+        quiet(&mut m, key('F'));
+        assert_eq!(focused(&m).unwrap().0, "shop/prod");
+        m.traffic.groups.select_where(fqdn);
+        quiet(&mut m, key('F'));
+        assert_eq!(
+            focused(&m).unwrap().0,
+            "fqdn-1.example/-",
+            "F again: the other side"
+        );
+    }
+
+    #[test]
+    fn f_on_a_mesh_row_takes_the_source_then_the_destination() {
+        let mut m = model_with_flows();
+        m.traffic.view = TrafficView::Mesh;
+        let nas = |r: &pce::traffic::MeshRow| r.src.join("/") == "unmanaged-nas/-";
+        m.traffic.mesh.select_where(nas);
+        quiet(&mut m, key('F'));
+        assert_eq!(focused(&m).unwrap().0, "unmanaged-nas/-");
+        m.traffic.mesh.select_where(nas);
+        quiet(&mut m, key('F'));
+        assert_eq!(focused(&m).unwrap().0, "shop/prod");
+    }
+
+    #[test]
+    fn f_on_a_treemap_tile_takes_its_source_group() {
+        let mut m = model_with_rich_flows();
+        m.traffic.view = TrafficView::Treemap;
+        let tm = &m.traffic.treemap;
+        let target = tm.current().expect("a tile under the cursor");
+        assert!(target.inner.is_none() && tm.zoom.is_none());
+        let label = tm.tile(target).label.clone();
+        assert!(!tm.tile(target).is_other(), "{label}");
+        quiet(&mut m, key('F'));
+        assert_eq!(
+            focused(&m).unwrap().0,
+            label,
+            "the outer tile is a source group"
+        );
+        assert!(
+            m.traffic
+                .treemap
+                .groups
+                .iter()
+                .all(|g| g.src.join("/") == label || g.dst.join("/") == label),
+            "the treemap is narrowed to it"
+        );
+    }
 }

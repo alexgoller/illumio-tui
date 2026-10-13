@@ -1459,14 +1459,14 @@ fn mesh_and_treemap_keep_the_truncated_marker() {
 fn traffic_focus_badge_80x24() {
     use illumio_tui::tui::commands::Command;
     use illumio_tui::tui::msg::Msg;
-    let mut m = model_with_flows();
+    let mut m = illumio_tui::tui::test_support::model_with_rich_flows();
     illumio_tui::tui::update(
         &mut m,
-        Msg::Command(Command::Focus(Some("shop/prod".into()))),
+        Msg::Command(Command::Focus(Some("crm/prod".into()))),
     );
     let out = render_to_string(&m, 80, 24);
-    assert!(out.contains("focus shop/prod · both"), "{out}");
-    assert!(out.contains("4 of 4 flows"), "{out}");
+    assert!(out.contains("focus crm/prod · both"), "{out}");
+    assert!(out.contains("9 of 30 flows"), "{out}");
     insta::assert_snapshot!("traffic_focus_badge_80x24", out);
 }
 

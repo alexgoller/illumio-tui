@@ -7,15 +7,15 @@ expression: out
 ╭ Filters ────────────────────────────────── window 24h · cap 1000 · unbounded ╮
 │window 24h  src *  dst *  svc *  decision all                                 │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭ Result ─────────────────────────── focus shop/prod · both · 4 flows · 3s ago ╮
-│4 of 4 flows allowed 2 pot.blocked 1 blocked 1  ▄▁▁▁▁▁▁▁▁▁█▄ █████████████████│
+╭ Result ─────────────────────────── focus crm/prod · both · 30 flows · 3s ago ╮
+│9 of 30 flows allowed 5 pot.blocked 2 blocked 1  █▁▁▁▁▄▄▁▄▄█▄ ████████████████│
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭ Flows ───────────────────────────────────────────────────────────────────────╮
 │  src            src group  dst            dst group  service   conns decision│
-│▸ host-1.example shop/prod  host-2.example shop/prod  5432/tcp    310 allowed │
-│  10.1.4.9       -/-        host-1.example shop/prod  8443/tcp     12 pot.blk │
-│  unmanaged-nas  -/-        host-2.example shop/prod  icmp          3 blocked │
-│  host-1.example shop/prod  fqdn-1.example -/-        443/tcp       5 allowed │
+│▸ shop-web-p.exa shop/prod  crm-web-p.exam crm/prod   443/tcp     150 allowed │
+│  crm-web-p.exam crm/prod   crm-db-p.examp crm/prod   3306/tcp    610 allowed │
+│  crm-web-p.exam crm/prod   crm-db-p.examp crm/prod   3306/tcp    240 allowed │
+│  crm-web-p.exam crm/prod   erp-api-p.exam erp/prod   8443/tcp     35 pot.blk │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭ Detail ───────────────────────────────────────────────────────── Enter shows ╮
 │select a flow and press Enter                                                 │
@@ -25,4 +25,4 @@ expression: out
 │                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-focus shop/pr f filter  r run  a auto  v view  g group  / search  : cmd  ? help
+focus crm/pro f filter  r run  a auto  v view  g group  / search  : cmd  ? help
