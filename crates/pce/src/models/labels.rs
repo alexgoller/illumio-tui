@@ -91,6 +91,11 @@ pub struct IpList {
 impl IpList {
     /// `10.1.0.0-10.1.255.255, *.corp.example`
     pub fn summary(&self) -> String {
+        self.entries().join(", ")
+    }
+
+    /// The ranges (`!` before an exclusion), then the FQDNs, one string each.
+    pub fn entries(&self) -> Vec<String> {
         let mut parts: Vec<String> = self
             .ip_ranges
             .iter()
@@ -107,7 +112,7 @@ impl IpList {
             })
             .collect();
         parts.extend(self.fqdns.iter().map(|f| f.fqdn.clone()));
-        parts.join(", ")
+        parts
     }
 }
 

@@ -3,7 +3,7 @@
 //! label-pair groups, the blocked summary or the mesh.
 use super::context::{Context, cache_label};
 use super::error::CliError;
-use super::output::{Meta, TableRows, Window};
+use super::output::{Meta, TableRows, Window, join_list};
 use clap::{Args, Subcommand, ValueEnum};
 use jiff::Timestamp;
 use jiff::civil::Date;
@@ -31,6 +31,17 @@ pub enum TrafficCmd {
     Groups(GroupsArgs),
     /// The mesh: user, process, source, destination, service, destination process
     Mesh(MeshArgs),
+}
+
+impl TrafficCmd {
+    /// The Explorer filter the subcommand runs.
+    pub fn filter(&self) -> &FilterArgs {
+        match self {
+            TrafficCmd::Query(a) => &a.filter,
+            TrafficCmd::Groups(a) => &a.filter,
+            TrafficCmd::Mesh(a) => &a.filter,
+        }
+    }
 }
 
 /// `traffic query`: the filter, then how to print the flows.
@@ -384,6 +395,21 @@ impl TableRows for FlowRows<'_> {
             })
             .collect()
     }
+    /// Every label (ignored keys too, as in JSON), one list entry each.
+    fn full_rows(&self) -> Vec<Vec<String>> {
+        let labels = |e: &pce::traffic::ResolvedEndpoint| {
+            join_list(e.labels.iter().map(|l| format!("{}={}", l.key, l.value)))
+        };
+        self.flows
+            .iter()
+            .zip(self.rows())
+            .map(|(f, mut row)| {
+                row[2] = labels(&f.src);
+                row[4] = labels(&f.dst);
+                row
+            })
+            .collect()
+    }
 }
 
 /// A bytes cell: `-` for every row when no row carried bytes.
@@ -421,6 +447,16 @@ impl TableRows for Vec<FlowGroup> {
             })
             .collect()
     }
+    /// `bytes` always a number (0 when no flow carried any).
+    fn full_rows(&self) -> Vec<Vec<String>> {
+        self.iter()
+            .zip(self.rows())
+            .map(|(g, mut row)| {
+                row[4] = g.bytes.to_string();
+                row
+            })
+            .collect()
+    }
 }
 
 impl TableRows for Vec<MeshRow> {
@@ -455,6 +491,20 @@ impl TableRows for Vec<MeshRow> {
                     bytes_cell(r.bytes, any),
                     r.dominant().as_str().to_string(),
                 ]
+            })
+            .collect()
+    }
+    /// Empty cells for no user or process, `bytes` always a number.
+    fn full_rows(&self) -> Vec<Vec<String>> {
+        let or_empty = |v: &Option<String>| v.clone().unwrap_or_default();
+        self.iter()
+            .zip(self.rows())
+            .map(|(r, mut row)| {
+                row[0] = or_empty(&r.user);
+                row[1] = or_empty(&r.process);
+                row[5] = or_empty(&r.dst_process);
+                row[8] = r.bytes.to_string();
+                row
             })
             .collect()
     }
@@ -526,6 +576,49 @@ impl TableRows for Sections {
             }
         }
         out
+    }
+    /// One row per peer, no header rows: the app and the direction are
+    /// columns, the host names lists beside their counts.
+    fn full_headers(&self) -> Vec<&'static str> {
+        vec![
+            "app",
+            "direction",
+            "peer",
+            "peer hosts",
+            "peer names",
+            "app hosts",
+            "app names",
+            "service",
+            "flows",
+            "conns",
+            "bytes",
+            "last seen",
+            "decision",
+        ]
+    }
+    fn full_rows(&self) -> Vec<Vec<String>> {
+        self.sections
+            .iter()
+            .flat_map(|s| {
+                s.rows.iter().map(|r| {
+                    vec![
+                        s.app_text(),
+                        s.direction.as_str().to_string(),
+                        r.peer_text(),
+                        r.peer_hosts.to_string(),
+                        join_list(&r.peer_names),
+                        r.app_hosts.to_string(),
+                        join_list(&r.app_names),
+                        r.service.clone(),
+                        r.flows.to_string(),
+                        r.connections.to_string(),
+                        r.bytes.to_string(),
+                        r.last_detected.clone().unwrap_or_default(),
+                        r.dominant().as_str().to_string(),
+                    ]
+                })
+            })
+            .collect()
     }
 }
 

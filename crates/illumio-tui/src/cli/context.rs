@@ -4,6 +4,7 @@ use super::GlobalArgs;
 use super::error::CliError;
 use super::output::{
     Meta, OutputFormat, TableRows, Window, WriteMeta, meta_line, write_json, write_table,
+    write_table_csv,
 };
 use crate::config::{self, Overrides};
 use pce::{CacheMode, Pce, PceClient};
@@ -41,7 +42,7 @@ impl Context {
         let resolved = config::resolve(&file, &overrides, &env)?;
         let pce = Pce::new(PceClient::new(resolved.client_config())?)
             .with_key_order(resolved.key_order());
-        let format = super::output::choose_format(global.json, global.table);
+        let format = super::output::choose_format(global.json, global.table, global.csv);
         let cache_mode = if global.no_cache {
             CacheMode::Bypass
         } else {
@@ -95,6 +96,10 @@ impl Context {
                 write_table(&mut out, data)?;
                 eprintln!("{}", meta_line(meta));
             }
+            OutputFormat::Csv => {
+                write_table_csv(&mut out, data)?;
+                eprintln!("{}", meta_line(meta));
+            }
         }
         Ok(())
     }
@@ -121,6 +126,10 @@ impl Context {
         let mut out = std::io::stdout().lock();
         match self.format {
             OutputFormat::Json => write_json(&mut out, data, &meta)?,
+            // `run` refuses `--csv` on writes before any request.
+            OutputFormat::Csv => {
+                return Err(CliError::Args("--csv: a write prints no table".into()));
+            }
             OutputFormat::Table => {
                 write_table(&mut out, data)?;
                 eprintln!("{}", meta_line(&meta));

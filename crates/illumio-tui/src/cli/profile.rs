@@ -2,7 +2,10 @@
 //! rewrites the config file.
 use super::GlobalArgs;
 use super::error::CliError;
-use super::output::{Meta, TableRows, choose_format, meta_line, write_json, write_table};
+use super::output::{
+    Meta, OutputFormat, TableRows, choose_format, meta_line, write_json, write_table,
+    write_table_csv,
+};
 use crate::config::{self, ConfigFile};
 use clap::Subcommand;
 use serde::Serialize;
@@ -43,6 +46,16 @@ impl TableRows for Vec<ProfileRow> {
             })
             .collect()
     }
+    /// `default` as `true`/`false`.
+    fn full_rows(&self) -> Vec<Vec<String>> {
+        self.iter()
+            .zip(self.rows())
+            .map(|(p, mut row)| {
+                row[3] = p.is_default.to_string();
+                row
+            })
+            .collect()
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -74,10 +87,14 @@ fn emit<T: Serialize + TableRows>(global: &GlobalArgs, data: &T) -> Result<(), C
         write: None,
     };
     let mut out = std::io::stdout().lock();
-    match choose_format(global.json, global.table) {
-        super::output::OutputFormat::Json => write_json(&mut out, data, &meta)?,
-        super::output::OutputFormat::Table => {
+    match choose_format(global.json, global.table, global.csv) {
+        OutputFormat::Json => write_json(&mut out, data, &meta)?,
+        OutputFormat::Table => {
             write_table(&mut out, data)?;
+            eprintln!("{}", meta_line(&meta));
+        }
+        OutputFormat::Csv => {
+            write_table_csv(&mut out, data)?;
             eprintln!("{}", meta_line(&meta));
         }
     }

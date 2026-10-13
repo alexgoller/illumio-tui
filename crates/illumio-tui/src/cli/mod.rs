@@ -60,6 +60,10 @@ pub struct GlobalArgs {
     /// Table output (default when stdout is a terminal)
     #[arg(long, global = true)]
     pub table: bool,
+    /// CSV output (RFC 4180, full columns) for list and report commands;
+    /// the meta line goes to stderr
+    #[arg(long, global = true, conflicts_with_all = ["json", "table"])]
+    pub csv: bool,
     /// Ignore cached responses
     #[arg(long, global = true)]
     pub no_cache: bool,
@@ -98,7 +102,42 @@ pub enum Command {
     Profile(profile::ProfileCmd),
 }
 
+/// The command's name for `--csv`'s refusal when it prints no table (a
+/// write, a single record, a dry run's request body); `None` when it does.
+fn csv_refusal(command: &Command) -> Option<&'static str> {
+    use policy::{PolicyCmd as P, RulesAction};
+    match command {
+        Command::Health => Some("health"),
+        Command::Labels(c) if c.action.is_some() => Some("labels add/update/delete"),
+        Command::Iplists(c) if c.action.is_some() => Some("iplists add/update/delete"),
+        Command::Services(c) if c.action.is_some() => Some("services add/update/delete"),
+        Command::Workloads(c) if c.action.is_some() => Some("workloads add/update/delete"),
+        Command::Policy(P::Rulesets(c)) if c.action.is_some() => {
+            Some("policy rulesets add/update/delete")
+        }
+        Command::Policy(P::Rules(c)) => match c.action {
+            Some(RulesAction::Impact(_)) => Some("policy rules impact"),
+            Some(_) => Some("policy rules add/update/delete"),
+            None => None,
+        },
+        Command::Policy(P::DenyRules(_)) => Some("policy deny-rules"),
+        Command::Policy(P::Provision(_)) => Some("policy provision"),
+        Command::Policy(P::Revert(_)) => Some("policy revert"),
+        Command::Traffic(t) if t.filter().dry_run => Some("traffic --dry-run"),
+        Command::Profile(profile::ProfileCmd::Use { .. }) => Some("profile use"),
+        _ => None,
+    }
+}
+
 pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
+    // Before any request: `--csv` only changes how a table is printed.
+    if global.csv
+        && let Some(name) = csv_refusal(&command)
+    {
+        return Err(CliError::Args(format!(
+            "--csv: {name} prints no table; use --json or --table"
+        )));
+    }
     if let Command::Profile(p) = &command {
         return profile::run(&global, p);
     }

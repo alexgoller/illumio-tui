@@ -2,7 +2,7 @@
 //! hrefs via the name index before querying.
 use super::context::{Context, cache_label};
 use super::error::CliError;
-use super::output::TableRows;
+use super::output::{TableRows, join_list};
 use super::write::{
     self, WriteFlags, label_in, parse_kv, resolve_labels, resolve_workload, run_plan,
 };
@@ -286,6 +286,10 @@ pub struct WorkloadRow {
     /// carries the `labels` array itself.
     #[serde(skip)]
     pub label_text: String,
+    /// CSV's `labels` cell: every label (ignored keys too, as in JSON) in
+    /// the key order, `; `-joined.
+    #[serde(skip)]
+    pub label_list: String,
 }
 
 impl WorkloadRow {
@@ -294,12 +298,24 @@ impl WorkloadRow {
         let a = workload.agent_status_view();
         Self {
             label_text: workload.label_text(order),
+            label_list: label_list(&workload, order),
             heartbeat_age_secs: workload.heartbeat_age(now).map(|d| d.as_secs()),
             sync_state: a.and_then(|a| a.sync_state),
             health,
             workload,
         }
     }
+}
+
+/// `app=shop; env=prod; role=web`: every label, keys in `order`, then by value.
+fn label_list(w: &Workload, order: &KeyOrder) -> String {
+    let mut parts: Vec<(&str, &str)> = w
+        .labels
+        .iter()
+        .filter_map(|l| Some((l.key.as_deref()?, l.value.as_deref().unwrap_or(""))))
+        .collect();
+    parts.sort_by(|a, b| order.cmp_kv(*a, *b));
+    join_list(parts.iter().map(|(k, v)| format!("{k}={v}")))
 }
 
 /// `45s`, `2m`, `3h`, `2d`; blank when the age is unknown.
@@ -346,6 +362,27 @@ impl TableRows for Vec<WorkloadRow> {
                     r.health.as_str().to_string(),
                     w.href.clone(),
                 ]
+            })
+            .collect()
+    }
+    /// The heartbeat age in seconds, as JSON's `heartbeat_age_secs`.
+    fn full_headers(&self) -> Vec<&'static str> {
+        let mut h = self.headers();
+        h[8] = "heartbeat_age_secs";
+        h
+    }
+    /// Every interface address and every label; the heartbeat in seconds.
+    fn full_rows(&self) -> Vec<Vec<String>> {
+        self.iter()
+            .zip(self.rows())
+            .map(|(r, mut row)| {
+                row[2] = join_list(r.workload.interfaces.iter().map(|i| &i.address));
+                row[3] = r.label_list.clone();
+                row[8] = r
+                    .heartbeat_age_secs
+                    .map(|s| s.to_string())
+                    .unwrap_or_default();
+                row
             })
             .collect()
     }

@@ -3,7 +3,7 @@
 //! provisioning changes (list, provision, revert).
 use super::context::{Context, cache_label};
 use super::error::CliError;
-use super::output::TableRows;
+use super::output::{TableRows, join_list};
 use super::write::{
     self, ActorToken, Lists, ServiceToken, WriteFlags, is_href, parse_actors, parse_scopes,
     parse_services, resolve_actors, resolve_scopes, resolve_services, run_plan, run_rule_plan,
@@ -417,6 +417,15 @@ impl TableRows for Vec<RuleSetView> {
             })
             .collect()
     }
+    fn full_rows(&self) -> Vec<Vec<String>> {
+        self.iter()
+            .zip(self.rows())
+            .map(|(r, mut row)| {
+                row[2] = join_list(&r.scopes);
+                row
+            })
+            .collect()
+    }
 }
 
 fn names<'a>(it: impl Iterator<Item = &'a str>) -> String {
@@ -463,6 +472,31 @@ impl TableRows for RulesOutput {
                     r.description.clone().unwrap_or_default(),
                     r.update_type.clone().unwrap_or_default(),
                 ]);
+                row
+            })
+            .collect()
+    }
+    /// Plus each rule's `href`, which the terminal has no room for.
+    fn full_headers(&self) -> Vec<&'static str> {
+        let mut h = self.headers();
+        h.push("href");
+        h
+    }
+    /// Actors and services one list entry each; no `-` for a rule
+    /// without impact; the rule's href last.
+    fn full_rows(&self) -> Vec<Vec<String>> {
+        self.rules
+            .iter()
+            .zip(self.rows())
+            .map(|(o, mut row)| {
+                let r = &o.rule;
+                row[2] = join_list(r.consumers.iter().map(|a| &a.name));
+                row[3] = join_list(r.providers.iter().map(|a| &a.name));
+                row[4] = join_list(r.services.iter().map(|s| &s.name));
+                if self.with_impact {
+                    row[5] = o.impact.as_ref().map(Impact::pc).unwrap_or_default();
+                }
+                row.push(r.href.clone());
                 row
             })
             .collect()
@@ -820,6 +854,31 @@ impl TableRows for Vec<PendingRow> {
                     .flatten()
                     .map(|d| format!("  {} {}", d.glyph(), d.text))
                     .collect()
+            })
+            .collect()
+    }
+    /// With `--diff`, a `diff` column in place of the lines under each row.
+    fn full_headers(&self) -> Vec<&'static str> {
+        let mut h = self.headers();
+        if self.iter().any(|p| p.diff.is_some()) {
+            h.push("diff");
+        }
+        h
+    }
+    fn full_rows(&self) -> Vec<Vec<String>> {
+        let diff = self.iter().any(|p| p.diff.is_some());
+        self.iter()
+            .zip(self.rows())
+            .map(|(p, mut row)| {
+                if diff {
+                    row.push(join_list(
+                        p.diff
+                            .iter()
+                            .flatten()
+                            .map(|d| format!("{} {}", d.glyph(), d.text)),
+                    ));
+                }
+                row
             })
             .collect()
     }

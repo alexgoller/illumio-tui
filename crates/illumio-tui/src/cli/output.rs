@@ -1,5 +1,6 @@
-//! The JSON envelope every command prints, and the table renderer shared
-//! with the TUI (same ratatui Table widget, drawn into an off-screen buffer).
+//! The JSON envelope every command prints, the table renderer shared with
+//! the TUI (same ratatui Table widget, drawn into an off-screen buffer), and
+//! the CSV writer `--csv` and the TUI's `:export` share.
 use pce::WriteMethod;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Rect};
@@ -11,10 +12,14 @@ use std::io::Write;
 pub enum OutputFormat {
     Json,
     Table,
+    Csv,
 }
 
-pub fn choose_format(json: bool, table: bool) -> OutputFormat {
-    if table {
+/// clap keeps the three flags exclusive.
+pub fn choose_format(json: bool, table: bool, csv: bool) -> OutputFormat {
+    if csv {
+        OutputFormat::Csv
+    } else if table {
         OutputFormat::Table
     } else if json || !std::io::IsTerminal::is_terminal(&std::io::stdout()) {
         OutputFormat::Json
@@ -77,6 +82,58 @@ pub trait TableRows {
     fn notes(&self) -> Vec<Vec<String>> {
         Vec::new()
     }
+    /// `--csv`'s header row: `headers()` unless the full rows add or
+    /// rename columns.
+    fn full_headers(&self) -> Vec<&'static str> {
+        self.headers()
+    }
+    /// `--csv`'s rows: every cell whole, where `rows()` abbreviates, folds
+    /// a list into a count or joins it for the eye (lists joined with `; `,
+    /// numbers plain, `None` empty).
+    fn full_rows(&self) -> Vec<Vec<String>> {
+        self.rows()
+    }
+}
+
+/// A list as one CSV cell.
+pub fn join_list<S: AsRef<str>>(items: impl IntoIterator<Item = S>) -> String {
+    items
+        .into_iter()
+        .map(|s| s.as_ref().to_string())
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// One RFC 4180 field: quoted only when it holds `,`, `"`, CR or LF.
+fn csv_field(s: &str) -> String {
+    if s.contains([',', '"', '\r', '\n']) {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
+/// One CSV record, without its line end.
+fn csv_record<'a>(cells: impl IntoIterator<Item = &'a str>) -> String {
+    cells
+        .into_iter()
+        .map(csv_field)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// RFC 4180 CSV: a header row, then one record per row; CRLF line ends,
+/// UTF-8 without BOM.
+pub fn write_csv(
+    out: &mut impl Write,
+    headers: &[&str],
+    rows: &[Vec<String>],
+) -> std::io::Result<()> {
+    write!(out, "{}\r\n", csv_record(headers.iter().copied()))?;
+    for r in rows {
+        write!(out, "{}\r\n", csv_record(r.iter().map(String::as_str)))?;
+    }
+    Ok(())
 }
 
 const MAX_COL: usize = 60;
@@ -186,7 +243,12 @@ pub fn write_table<T: TableRows>(out: &mut impl Write, data: &T) -> std::io::Res
     Ok(())
 }
 
-/// One line for stderr in table mode so stdout stays clean.
+/// A table's full rows as CSV.
+pub fn write_table_csv<T: TableRows>(out: &mut impl Write, data: &T) -> std::io::Result<()> {
+    write_csv(out, &data.full_headers(), &data.full_rows())
+}
+
+/// One line for stderr in table and CSV mode so stdout stays clean.
 pub fn meta_line(meta: &Meta) -> String {
     let kb = meta.bytes as f64 / 1024.0;
     let mut s = format!(
@@ -220,6 +282,71 @@ pub fn meta_line(meta: &Meta) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn csv(headers: &[&str], rows: &[Vec<String>]) -> String {
+        let mut out = Vec::new();
+        write_csv(&mut out, headers, rows).unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    #[test]
+    fn csv_quotes_only_commas_quotes_and_line_breaks() {
+        let rows = vec![vec![
+            "plain".to_string(),
+            "a,b".into(),
+            "say \"hi\"".into(),
+            "two\nlines".into(),
+            "cr\r".into(),
+            "semi; colon".into(),
+        ]];
+        assert_eq!(
+            csv(&["a", "b", "c", "d", "e", "f"], &rows),
+            "a,b,c,d,e,f\r\nplain,\"a,b\",\"say \"\"hi\"\"\",\"two\nlines\",\"cr\r\",semi; colon\r\n"
+        );
+    }
+
+    #[test]
+    fn csv_keeps_empty_cells_and_ends_every_line_with_crlf() {
+        let rows = vec![
+            vec![String::new(), "x".into(), String::new()],
+            vec!["1".into(), String::new(), "ü".into()],
+        ];
+        assert_eq!(csv(&["a", "b", "c"], &rows), "a,b,c\r\n,x,\r\n1,,ü\r\n");
+    }
+
+    #[test]
+    fn csv_without_rows_is_the_header_alone() {
+        assert_eq!(csv(&["key", "value"], &[]), "key,value\r\n");
+    }
+
+    #[test]
+    fn csv_has_no_bom() {
+        assert!(csv(&["h"], &[]).starts_with('h'));
+    }
+
+    #[test]
+    fn csv_flag_wins_the_format() {
+        assert_eq!(choose_format(false, false, true), OutputFormat::Csv);
+        assert_eq!(choose_format(false, true, false), OutputFormat::Table);
+        assert_eq!(choose_format(true, false, false), OutputFormat::Json);
+    }
+
+    #[test]
+    fn full_rows_default_to_the_table() {
+        struct T;
+        impl TableRows for T {
+            fn headers(&self) -> Vec<&'static str> {
+                vec!["a"]
+            }
+            fn rows(&self) -> Vec<Vec<String>> {
+                vec![vec!["1".into()]]
+            }
+        }
+        let mut out = Vec::new();
+        write_table_csv(&mut out, &T).unwrap();
+        assert_eq!(String::from_utf8(out).unwrap(), "a\r\n1\r\n");
+        assert_eq!(join_list(["a", "b"]), "a; b");
+    }
 
     #[test]
     fn meta_line_shows_the_write() {

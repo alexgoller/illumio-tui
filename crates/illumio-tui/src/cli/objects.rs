@@ -1,7 +1,7 @@
 //! Labels, label groups, IP lists, services: one cached list each.
 use super::context::{Context, cache_label};
 use super::error::CliError;
-use super::output::TableRows;
+use super::output::{TableRows, join_list};
 use super::write::{
     self, WriteFlags, parse_kv, resolve_ip_list, resolve_label, resolve_service, run_plan,
 };
@@ -144,6 +144,16 @@ impl TableRows for Vec<Label> {
     fn rows(&self) -> Vec<Vec<String>> {
         self.iter().map(label_row).collect()
     }
+    fn full_rows(&self) -> Vec<Vec<String>> {
+        self.iter().map(label_full_row).collect()
+    }
+}
+
+/// `label_row` with `deleted` as `true`/`false`.
+fn label_full_row(l: &Label) -> Vec<String> {
+    let mut row = label_row(l);
+    row[2] = l.is_deleted().to_string();
+    row
 }
 
 /// `key, value, deleted, href` of one label.
@@ -178,6 +188,21 @@ impl TableRows for Vec<LabelGroup> {
             })
             .collect()
     }
+    /// The member hrefs themselves, as JSON has them, not their counts.
+    fn full_rows(&self) -> Vec<Vec<String>> {
+        self.iter()
+            .map(|g| {
+                vec![
+                    g.name.clone(),
+                    g.key.clone(),
+                    join_list(g.labels.iter().map(|r| &r.href)),
+                    join_list(g.sub_groups.iter().map(|r| &r.href)),
+                    pending(&g.update_type),
+                    g.href.clone(),
+                ]
+            })
+            .collect()
+    }
 }
 
 /// An IP list as `iplists` prints it: the list as the PCE returned it plus
@@ -206,6 +231,26 @@ impl TableRows for Vec<IpListOut> {
             })
             .collect()
     }
+    /// `size` as the exact address count (`any (0.0.0.0/0)` when unbounded),
+    /// the ranges and FQDNs one list entry each.
+    fn full_rows(&self) -> Vec<Vec<String>> {
+        self.iter()
+            .map(|o| {
+                let size = if o.size.unbounded.is_some() {
+                    o.size.display()
+                } else {
+                    o.size.total().to_string()
+                };
+                vec![
+                    o.list.name.clone(),
+                    size,
+                    join_list(o.list.entries()),
+                    pending(&o.list.update_type),
+                    o.list.href.clone(),
+                ]
+            })
+            .collect()
+    }
 }
 
 impl TableRows for Vec<Service> {
@@ -218,6 +263,19 @@ impl TableRows for Vec<Service> {
                 vec![
                     s.name.clone(),
                     s.summary(),
+                    pending(&s.update_type),
+                    s.href.clone(),
+                ]
+            })
+            .collect()
+    }
+    /// One list entry per port; no `-` for a service without ports.
+    fn full_rows(&self) -> Vec<Vec<String>> {
+        self.iter()
+            .map(|s| {
+                vec![
+                    s.name.clone(),
+                    join_list(s.service_ports.iter().map(|p| p.display())),
                     pending(&s.update_type),
                     s.href.clone(),
                 ]
@@ -242,13 +300,20 @@ impl TableRows for Vec<LabelOut> {
     }
     fn rows(&self) -> Vec<Vec<String>> {
         self.iter()
-            .map(|o| {
-                let mut row = label_row(&o.label);
-                row.splice(2..2, [o.workloads.to_string(), o.rules.to_string()]);
-                row
-            })
+            .map(|o| label_out_row(o, label_row(&o.label)))
             .collect()
     }
+    fn full_rows(&self) -> Vec<Vec<String>> {
+        self.iter()
+            .map(|o| label_out_row(o, label_full_row(&o.label)))
+            .collect()
+    }
+}
+
+/// A label's row with its two counts after `value`.
+fn label_out_row(o: &LabelOut, mut row: Vec<String>) -> Vec<String> {
+    row.splice(2..2, [o.workloads.to_string(), o.rules.to_string()]);
+    row
 }
 
 /// Whether `l` passes the list flags (all of them; `--key`s are any of):

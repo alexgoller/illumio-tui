@@ -786,6 +786,30 @@ async fn policy_pending_diff_prints_the_lines_under_each_change() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn policy_pending_diff_csv_puts_the_lines_in_a_diff_column() {
+    let server = MockServer::start().await;
+    mount_pending_diff(&server).await;
+    let text = csv_stdout(
+        &cmd(&server)
+            .args(["policy", "pending", "--diff", "--csv"])
+            .assert()
+            .success(),
+    );
+    let lines: Vec<&str> = text.split("\r\n").collect();
+    assert_eq!(lines[0], "object_type,change_type,name,href,diff");
+    let corp = lines
+        .iter()
+        .find(|l| l.starts_with("ip_lists,"))
+        .expect(&text);
+    assert!(corp.contains(",+ name: Corp; "), "{corp}");
+    let fw = lines
+        .iter()
+        .find(|l| l.contains("/firewall_settings,"))
+        .expect(&text);
+    assert!(fw.ends_with(",  (no diff)"), "{fw}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn policy_pending_json_carries_diff_only_with_the_flag() {
     let server = MockServer::start().await;
     mount_pending_diff(&server).await;
@@ -1538,6 +1562,39 @@ fn profile_list_and_use_without_credentials() {
         .assert()
         .success()
         .stdout(predicate::str::contains("b.example"));
+    let csv = Command::cargo_bin("illumio-tui")
+        .unwrap()
+        .env_clear()
+        .args([
+            "--config",
+            cfg.to_str().unwrap(),
+            "profile",
+            "list",
+            "--csv",
+        ])
+        .assert()
+        .success();
+    let text = String::from_utf8_lossy(&csv.get_output().stdout).to_string();
+    assert_eq!(
+        text,
+        "name,host,org_id,default\r\na,a.example,1,false\r\nb,b.example,2,true\r\n"
+    );
+    // `profile use` prints a record, not a table: refused before the file is touched.
+    let before = std::fs::read_to_string(&cfg).unwrap();
+    Command::cargo_bin("illumio-tui")
+        .unwrap()
+        .env_clear()
+        .args([
+            "--config",
+            cfg.to_str().unwrap(),
+            "profile",
+            "use",
+            "a",
+            "--csv",
+        ])
+        .assert()
+        .code(2);
+    assert_eq!(std::fs::read_to_string(&cfg).unwrap(), before);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1990,5 +2047,189 @@ async fn traffic_groups_and_mesh_dry_runs_send_nothing() {
         assert_eq!(out["data"]["services"]["include"], json!([{"port": 443}]));
         assert_eq!(out["data"]["max_results"], 10_000);
         assert_eq!(out["meta"]["cache"], "none");
+    }
+}
+
+/// stdout of a `--csv` run, which must hold nothing but CSV: the meta line
+/// goes to stderr.
+fn csv_stdout(assert: &assert_cmd::assert::Assert) -> String {
+    let out = assert.get_output();
+    let text = String::from_utf8(out.stdout.clone()).expect("UTF-8");
+    assert!(!text.contains("api call"), "meta on stdout: {text}");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("api call"),
+        "meta on stderr"
+    );
+    assert!(text.ends_with("\r\n"), "CRLF line ends: {text:?}");
+    text
+}
+
+/// The first two CSV lines.
+fn first_two(text: &str) -> Vec<&str> {
+    text.split("\r\n").take(2).collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn workloads_csv_prints_full_cells_and_meta_on_stderr() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/workloads.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let text = csv_stdout(&cmd(&server).args(["workloads", "--csv"]).assert().success());
+    let lines = first_two(&text);
+    assert_eq!(
+        lines[0],
+        "hostname,name,ip,labels,enforcement,online,agent,sync,heartbeat_age_secs,health,href"
+    );
+    // The heartbeat age and the health follow real time.
+    let cells: Vec<&str> = lines[1].split(',').collect();
+    assert_eq!(
+        cells[..8],
+        [
+            "host-1.example",
+            "web01",
+            "10.0.1.10",
+            "app=shop; env=prod; role=web",
+            "full",
+            "true",
+            "active",
+            "applied"
+        ]
+    );
+    assert!(cells[8].parse::<u64>().is_ok(), "seconds: {}", cells[8]);
+    assert_eq!(cells[10], "/orgs/5/workloads/aaaa-1");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn object_lists_csv() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    let text = csv_stdout(&cmd(&server).args(["labels", "--csv"]).assert().success());
+    assert_eq!(
+        first_two(&text),
+        ["key,value,deleted,href", "role,web,false,/orgs/5/labels/1"]
+    );
+    let text = csv_stdout(&cmd(&server).args(["iplists", "--csv"]).assert().success());
+    assert!(
+        text.contains(",10.1.0.0-10.1.255.255; *.corp.example,"),
+        "{text}"
+    );
+    let text = csv_stdout(&cmd(&server).args(["services", "--csv"]).assert().success());
+    assert!(text.contains(",80/tcp; 443/tcp; 8000-8099/tcp,"), "{text}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn traffic_query_csv_lists_every_label() {
+    let server = MockServer::start().await;
+    mount_traffic(&server, 1).await;
+    let text = csv_stdout(
+        &cmd(&server)
+            .args(["traffic", "query", "--window", "1h", "--csv"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(
+        first_two(&text),
+        [
+            "last seen,src,src labels,dst,dst labels,service,conns,decision,process",
+            "2026-10-10T07:31:02Z,host-1.example,app=shop; env=prod; role=web,host-2.example,\
+             app=shop; env=prod; role=db,5432/tcp,310,allowed,postgres"
+        ]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn traffic_groups_and_blocked_csv_print_one_row_per_peer() {
+    let server = MockServer::start().await;
+    mount_traffic(&server, 2).await;
+    let header = "app,direction,peer,peer hosts,peer names,app hosts,app names,service,\
+                  flows,conns,bytes,last seen,decision";
+    let text = csv_stdout(
+        &cmd(&server)
+            .args(["traffic", "groups", "--window", "1h", "--by", "in", "--csv"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(
+        first_two(&text),
+        [
+            header,
+            "shop/prod,in,shop/prod,1,host-1.example,1,host-2.example,5432/tcp,1,310,124000,\
+             2026-10-10T07:31:02Z,allowed"
+        ]
+    );
+    let text = csv_stdout(
+        &cmd(&server)
+            .args(["traffic", "query", "--window", "1h", "--blocked", "--csv"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(
+        first_two(&text),
+        [
+            header,
+            "shop/prod,in,ipl:Corp/-,1,10.1.4.9,1,host-1.example,8443/tcp,1,12,0,\
+             2026-10-10T07:30:58Z,potentially_blocked"
+        ]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn csv_is_a_usage_error_with_json_table_and_where_there_is_no_table() {
+    let server = MockServer::start().await;
+    // Nothing may be asked of the PCE.
+    Mock::given(wiremock::matchers::any())
+        .respond_with(ResponseTemplate::new(500))
+        .expect(0)
+        .mount(&server)
+        .await;
+    for args in [
+        vec!["labels", "--csv", "--json"],
+        vec!["labels", "--csv", "--table"],
+    ] {
+        cmd(&server)
+            .args(&args)
+            .assert()
+            .code(2)
+            .stderr(predicate::str::contains("cannot be used with"));
+    }
+    for (args, name) in [
+        (vec!["health", "--csv"], "health"),
+        (
+            vec!["labels", "add", "app=x", "--dry-run", "--csv"],
+            "labels add/update/delete",
+        ),
+        (
+            vec!["policy", "provision", "--all", "--dry-run", "--csv"],
+            "policy provision",
+        ),
+        (
+            vec!["policy", "rules", "impact", "/orgs/5/x", "--csv"],
+            "policy rules impact",
+        ),
+        (
+            vec!["traffic", "query", "--window", "1h", "--dry-run", "--csv"],
+            "traffic --dry-run",
+        ),
+    ] {
+        let a = cmd(&server).args(&args).assert().code(2);
+        assert!(a.get_output().stdout.is_empty(), "{args:?}");
+        let err: Value = serde_json::from_slice(&a.get_output().stderr).unwrap();
+        assert_eq!(err["error"]["kind"], "args", "{args:?}");
+        assert!(
+            err["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains(&format!("--csv: {name} prints no table")),
+            "{err}"
+        );
     }
 }
