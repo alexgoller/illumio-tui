@@ -51,7 +51,7 @@ pub struct AppArgs {
     /// Match the active policy instead of the draft
     #[arg(long)]
     pub active: bool,
-    /// With --table or --csv: only this section (--csv needs one)
+    /// Only this section (JSON: `app`, `direction` and it; --csv needs one)
     #[arg(long, value_enum)]
     pub section: Option<SectionArg>,
     /// Confirm an expensive query (window > 7d or max_results > 10000)
@@ -61,8 +61,19 @@ pub struct AppArgs {
 
 #[derive(Debug, Serialize)]
 pub struct WorkloadsSection {
+    /// The workloads read hit its cap: the rows and the summary are partial.
+    pub truncated: bool,
     pub summary: WorkloadSummary,
     pub rows: Vec<AppWorkload>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PolicySection {
+    /// `draft`, or `active` with `--active`.
+    pub scope: PolicyScope,
+    /// The rulesets read hit its cap: rulesets may be missing.
+    pub truncated: bool,
+    pub rows: Vec<AppPolicyRow>,
 }
 
 #[derive(Debug, Serialize)]
@@ -72,7 +83,7 @@ pub struct AppReport {
     pub workloads: WorkloadsSection,
     pub inbound: Vec<AppPeer>,
     pub outbound: Vec<AppPeer>,
-    pub policy: Vec<AppPolicyRow>,
+    pub policy: PolicySection,
     pub timeline: Timeline,
 }
 
@@ -241,7 +252,11 @@ pub async fn run(ctx: &Context, args: &AppArgs) -> Result<(), CliError> {
     let report = AppReport {
         app: focus.app_text(),
         direction: d,
-        workloads: WorkloadsSection { summary, rows },
+        workloads: WorkloadsSection {
+            truncated: wl.truncated,
+            summary,
+            rows,
+        },
         inbound: if d == FocusDirection::Out {
             Vec::new()
         } else {
@@ -252,24 +267,31 @@ pub async fn run(ctx: &Context, args: &AppArgs) -> Result<(), CliError> {
         } else {
             app_peers(&fetched.flows, &focus, Direction::Out)
         },
-        policy: app_policy(&rs.value, &hrefs, &idx),
+        policy: PolicySection {
+            scope,
+            truncated: rs.truncated,
+            rows: app_policy(&rs.value, &hrefs, &idx),
+        },
         timeline: approx_timeline(&fetched.flows, &focus, &buckets),
     };
+    // `meta.truncated` is the traffic's; the workloads and the rulesets
+    // say so in their sections.
     let mut meta = fetched.meta(ctx);
-    meta.truncated |= wl.truncated || rs.truncated;
     let all_hit = fetched.cache == "hit" && wl.hit && rs.hit;
     meta.cache = cache_label(all_hit, ctx.cache_mode);
     let s = &report.workloads.summary;
     let (inbound, outbound) = (Peers(&report.inbound), Peers(&report.outbound));
-    let (policy, buckets) = (Policy(&report.policy), Buckets(&report.timeline));
+    let (policy, buckets) = (Policy(&report.policy.rows), Buckets(&report.timeline));
+    let cut = |t: bool| if t { " · truncated" } else { "" };
     let tables: Vec<(SectionArg, String, &dyn TableRows)> = vec![
         (
             SectionArg::Workloads,
             format!(
-                "workloads · {} · {} · VENs {}",
+                "workloads · {} · {} · VENs {}{}",
                 s.workloads,
                 s.enforcement.text(),
-                s.ven_text()
+                s.ven_text(),
+                cut(report.workloads.truncated)
             ),
             &report.workloads,
         ),
@@ -285,7 +307,12 @@ pub async fn run(ctx: &Context, args: &AppArgs) -> Result<(), CliError> {
         ),
         (
             SectionArg::Policy,
-            format!("policy · {}", report.policy.len()),
+            format!(
+                "policy · {} · {}{}",
+                report.policy.scope.segment(),
+                report.policy.rows.len(),
+                cut(report.policy.truncated)
+            ),
             &policy,
         ),
         (
@@ -311,5 +338,30 @@ pub async fn run(ctx: &Context, args: &AppArgs) -> Result<(), CliError> {
         .filter(|(sec, _, _)| args.section.is_none_or(|want| want == *sec))
         .map(|(_, title, table)| (title, table))
         .collect();
-    ctx.emit_report(&report, &chosen, &meta)
+    match args.section {
+        // JSON with --section: `app`, `direction` and that section only.
+        Some(sec) if ctx.format == OutputFormat::Json => {
+            let mut data =
+                serde_json::to_value(&report).map_err(|e| CliError::Other(e.to_string()))?;
+            if let Some(o) = data.as_object_mut() {
+                let keep = sec.key();
+                o.retain(|k, _| k == "app" || k == "direction" || k == keep);
+            }
+            ctx.emit_report(&data, &chosen, &meta)
+        }
+        _ => ctx.emit_report(&report, &chosen, &meta),
+    }
+}
+
+impl SectionArg {
+    /// The section's key in the envelope's `data`.
+    pub fn key(self) -> &'static str {
+        match self {
+            SectionArg::Workloads => "workloads",
+            SectionArg::Inbound => "inbound",
+            SectionArg::Outbound => "outbound",
+            SectionArg::Policy => "policy",
+            SectionArg::Timeline => "timeline",
+        }
+    }
 }

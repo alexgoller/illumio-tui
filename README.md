@@ -326,14 +326,16 @@ request (the labels are fetched, cached). `--backfill` does not combine with `--
 
 `illumio-tui app <app> [--direction in|out|both] [--window W] [--keys K] [--active]` prints one
 envelope for one app: `workloads` (`summary` with the enforcement breakdown and the VEN counts,
-`rows` with name, role, enforcement mode and VEN health), `inbound` and `outbound` (one row per
-peer group, service and decision), `policy` (rulesets by `reason`: `scope`, `all_workloads` or
-`rules`, with their rule counts) and `timeline` (`exact: false`: blocked flow records per
-bucket of the window, by last-detected time). It costs the focused traffic queries (one per
-side), one workloads read filtered by the app's labels and one rulesets read, all cached;
-`meta` counts them. `--table` prints each section under a title line; `--csv` prints one,
-chosen with `--section workloads|inbound|outbound|policy|timeline` (without it, exit 2 before
-any request).
+`rows` with name, role, enforcement mode and VEN health, `truncated` when the read hit its
+cap), `inbound` and `outbound` (one row per peer group, service and decision), `policy`
+(`scope` draft or active, `truncated`, and `rows`: rulesets by `reason`, `scope`,
+`all_workloads` or `rules`, with their rule counts) and `timeline` (`exact: false`: blocked
+flow records per bucket of the window, by last-detected time). It costs the focused traffic
+queries (one per side), one workloads read filtered by the app's labels and one rulesets read,
+all cached; `meta` counts them, and `meta.truncated` is the traffic's. `--section
+workloads|inbound|outbound|policy|timeline` keeps one section (JSON: `app`, `direction` and
+it); `--table` prints each section under a title line; `--csv` prints one and needs
+`--section` (without it, exit 2 before any request).
 
 `traffic query --blocked` prints the `--by in --show blocked`
 sections the same way. `mesh` gives one row per source user, source process, source group,

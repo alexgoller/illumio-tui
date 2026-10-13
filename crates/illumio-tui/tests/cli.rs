@@ -2660,6 +2660,21 @@ async fn csv_is_a_usage_error_with_json_table_and_where_there_is_no_table() {
     }
 }
 async fn mount_app(server: &MockServer, posts: u64) {
+    mount_app_counting(server, posts, None).await;
+}
+
+/// `mount_app`; `total` sets `X-Total-Count` on the workloads and rulesets
+/// answers (more than they hold: both reads are truncated).
+async fn mount_app_counting(server: &MockServer, posts: u64, total: Option<u64>) {
+    let answer = |body: &str| {
+        let r = ResponseTemplate::new(200)
+            .set_body_string(body)
+            .insert_header("Content-Type", "application/json");
+        match total {
+            Some(n) => r.insert_header("X-Total-Count", n.to_string().as_str()),
+            None => r,
+        }
+    };
     mount_traffic(server, posts).await;
     Mock::given(method("GET"))
         .and(path("/api/v2/orgs/5/workloads"))
@@ -2667,22 +2682,56 @@ async fn mount_app(server: &MockServer, posts: u64) {
             "labels",
             r#"[["/orgs/5/labels/3","/orgs/5/labels/4"]]"#,
         ))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_string(include_str!("../../../fixtures/workloads.json"))
-                .insert_header("Content-Type", "application/json"),
-        )
+        .respond_with(answer(include_str!("../../../fixtures/workloads.json")))
         .mount(server)
         .await;
     Mock::given(method("GET"))
         .and(path("/api/v2/orgs/5/sec_policy/draft/rule_sets"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_string(include_str!("../../../fixtures/rule_sets.json"))
-                .insert_header("Content-Type", "application/json"),
-        )
+        .respond_with(answer(include_str!("../../../fixtures/rule_sets.json")))
         .mount(server)
         .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn app_reports_truncated_workloads_and_rulesets_in_their_sections() {
+    let server = MockServer::start().await;
+    mount_app_counting(&server, 4, Some(50_000)).await;
+    let out = stdout_json(
+        cmd(&server)
+            .args(["app", "shop/prod", "--window", "1h"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"]["workloads"]["truncated"], true);
+    assert_eq!(out["data"]["policy"]["truncated"], true);
+    assert_eq!(out["meta"]["truncated"], false, "the traffic was complete");
+    let table = cmd(&server)
+        .args(["app", "shop/prod", "--window", "1h", "--table"])
+        .assert()
+        .success();
+    let text = String::from_utf8_lossy(&table.get_output().stdout).to_string();
+    assert!(text.contains("stale · truncated"), "{text}");
+    assert!(text.contains("policy · draft · 2 · truncated"), "{text}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn app_json_section_keeps_only_that_section() {
+    let server = MockServer::start().await;
+    mount_app(&server, 2).await;
+    let out = stdout_json(
+        cmd(&server)
+            .args(["app", "shop/prod", "--window", "1h", "--section", "policy"])
+            .assert()
+            .success(),
+    );
+    let keys: Vec<&str> = out["data"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(keys, vec!["app", "direction", "policy"]);
+    assert_eq!(out["data"]["policy"]["rows"].as_array().unwrap().len(), 2);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -2707,7 +2756,11 @@ async fn app_prints_one_envelope_with_every_section() {
     assert_eq!(d["inbound"].as_array().unwrap().len(), 3);
     assert_eq!(d["outbound"].as_array().unwrap().len(), 2);
     assert_eq!(d["inbound"][2]["decision"], "blocked");
-    let policy: Vec<(&str, &str)> = d["policy"]
+    assert_eq!(d["policy"]["scope"], "draft");
+    assert_eq!(d["policy"]["truncated"], false);
+    assert_eq!(d["workloads"]["truncated"], false);
+    assert_eq!(out["meta"]["truncated"], false);
+    let policy: Vec<(&str, &str)> = d["policy"]["rows"]
         .as_array()
         .unwrap()
         .iter()
@@ -2748,7 +2801,7 @@ async fn app_tables_and_csv_print_per_section() {
         "workloads · 2 · enforced 1 · visibility 1 · VENs",
         "inbound · 3",
         "outbound · 0",
-        "policy · 2",
+        "policy · draft · 2",
         "timeline · approx",
     ] {
         assert!(text.contains(s), "missing {s:?}:\n{text}");
