@@ -5048,7 +5048,8 @@ mod tests {
                 "blocked",
                 "allowed_conns",
                 "pot_blocked_conns",
-                "blocked_conns"
+                "blocked_conns",
+                "unknown_conns"
             ]
         );
         assert_eq!(rows.len(), m.traffic.services.len());
@@ -5111,7 +5112,8 @@ mod tests {
                 "blocked",
                 "allowed_conns",
                 "pot_blocked_conns",
-                "blocked_conns"
+                "blocked_conns",
+                "unknown_conns"
             ]
         );
         assert!(!rows.is_empty());
@@ -5912,6 +5914,7 @@ mod tests {
                 "potentially_blocked",
                 "0",
                 "12",
+                "0",
                 "0"
             ]
         );

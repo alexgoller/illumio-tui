@@ -451,11 +451,9 @@ mod tests {
         assert!(!rows.is_empty());
         for r in rows {
             let c = &r.conns;
-            // A flow of unknown decision counts in no decision.
-            let decided = r.allowed + r.potentially_blocked + r.blocked == r.flows;
             assert_eq!(
-                c.allowed_conns + c.pot_blocked_conns + c.blocked_conns == r.connections,
-                decided || r.connections == 0,
+                c.allowed_conns + c.pot_blocked_conns + c.blocked_conns + c.unknown_conns,
+                r.connections,
                 "{r:?}"
             );
             assert_eq!(c.blocked_conns > 0, r.blocked > 0, "{r:?}");

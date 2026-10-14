@@ -40,8 +40,9 @@ pub enum TrafficCmd {
     /// Label-pair groups of the query's flows (connections, bytes, decisions)
     ///
     /// Units: flows, allowed, pot.blocked and blocked count flow records; conns, bytes,
-    /// allowed_conns, pot_blocked_conns and blocked_conns are the lifetime counts of those
-    /// records, as in the PCE UI. The per-decision connection columns are in JSON and CSV.
+    /// allowed_conns, pot_blocked_conns, blocked_conns and unknown_conns are the lifetime
+    /// counts of those records, as in the PCE UI. The per-decision connection columns (they
+    /// sum to conns) are in JSON and CSV.
     Groups(GroupsArgs),
     /// The mesh: user, process, source, destination, service, destination process
     ///
@@ -584,7 +585,12 @@ fn bytes_cell(bytes: u64, any: bool) -> String {
 }
 
 /// The per-decision connection columns `--csv` adds to pairs and sections.
-pub const CONNS_BY_DECISION: [&str; 3] = ["allowed_conns", "pot_blocked_conns", "blocked_conns"];
+pub const CONNS_BY_DECISION: [&str; 4] = [
+    "allowed_conns",
+    "pot_blocked_conns",
+    "blocked_conns",
+    "unknown_conns",
+];
 
 impl TableRows for Vec<FlowGroup> {
     fn units(&self) -> Option<&'static str> {
@@ -819,7 +825,7 @@ impl TableRows for Sections {
 
 /// The CSV columns of app sections, one row per peer (`--csv` and the
 /// TUI's `:export`).
-pub const SECTION_CSV_HEADERS: [&str; 16] = [
+pub const SECTION_CSV_HEADERS: [&str; 17] = [
     "app",
     "direction",
     "peer",
@@ -836,6 +842,7 @@ pub const SECTION_CSV_HEADERS: [&str; 16] = [
     CONNS_BY_DECISION[0],
     CONNS_BY_DECISION[1],
     CONNS_BY_DECISION[2],
+    CONNS_BY_DECISION[3],
 ];
 
 /// One peer row of an app's section under `SECTION_CSV_HEADERS`.
@@ -861,6 +868,7 @@ pub fn peer_csv_row(
         r.conns.allowed_conns.to_string(),
         r.conns.pot_blocked_conns.to_string(),
         r.conns.blocked_conns.to_string(),
+        r.conns.unknown_conns.to_string(),
     ]
 }
 

@@ -324,7 +324,8 @@ traffic `--dry-run`) refuse it with exit 2 before any request.
 `traffic groups` and `traffic mesh` take the `traffic query` filter flags (and its dry run,
 cost guard and cache) and print the same envelope. `groups` gives one row per source and
 destination group (`src`, `dst`, `flows`, `connections`, `bytes`, `allowed`,
-`potentially_blocked`, `blocked`, `allowed_conns`, `pot_blocked_conns`, `blocked_conns`;
+`potentially_blocked`, `blocked`, `allowed_conns`, `pot_blocked_conns`, `blocked_conns`,
+`unknown_conns`;
 `--services` splits each pair by service and adds a
 `service` column and field, `5432/tcp` or `icmp`), or with `--by in|out|both` sections per app: a header row
 with the app's totals, then its peer groups and services indented (JSON
@@ -343,13 +344,14 @@ An app whose labels do not exist is exit 2 with the closest label values, before
 request (the labels are fetched, cached). `--backfill` does not combine with `--app`: raise `--max-results` instead.
 
 **Units.** `flows`, `allowed`, `pot.blocked` and `blocked` count flow records. `conns`
-(`connections`), `bytes` and the per-decision `allowed_conns`, `pot_blocked_conns` and
-`blocked_conns` are the **lifetime** counts of those records, as the PCE UI shows them:
+(`connections`), `bytes` and the per-decision `allowed_conns`, `pot_blocked_conns`,
+`blocked_conns` and `unknown_conns` (no decision reported; the four sum to `connections`)
+are the **lifetime** counts of those records, as the PCE UI shows them:
 Explorer returns every aggregate record whose lifetime overlaps the window, each with its whole
 lifetime's counters, not counts for the window alone. Tools that report connections per flow
 summary (workloader) therefore match `conns`, not `flows`. Every traffic table says so in the
 line above it; JSON and CSV carry the per-decision connections for pairs, `--services` and
-sections (sections: as the last three CSV columns).
+sections (sections: as the last four CSV columns).
 
 **Transmission.** `--transmission unicast|broadcast|multicast` (repeatable or comma-separated,
 on `traffic query`/`groups`/`mesh` and `app`) keeps the flows sent that way. Explorer can only

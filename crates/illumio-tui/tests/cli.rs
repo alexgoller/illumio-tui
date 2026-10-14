@@ -2083,8 +2083,8 @@ async fn traffic_groups_services_adds_the_service_to_each_pair() {
         first_two(&text),
         [
             "src,dst,service,flows,conns,bytes,allowed,pot.blocked,blocked,\
-             allowed_conns,pot_blocked_conns,blocked_conns",
-            "shop/prod,shop/prod,5432/tcp,1,310,124000,1,0,0,310,0,0"
+             allowed_conns,pot_blocked_conns,blocked_conns,unknown_conns",
+            "shop/prod,shop/prod,5432/tcp,1,310,124000,1,0,0,310,0,0,0"
         ]
     );
     cmd(&server)
@@ -2482,7 +2482,7 @@ async fn traffic_groups_show_filters_the_pairs_and_the_services() {
         lines.next(),
         Some(
             "src,dst,service,flows,conns,bytes,allowed,pot.blocked,blocked,\
-             allowed_conns,pot_blocked_conns,blocked_conns"
+             allowed_conns,pot_blocked_conns,blocked_conns,unknown_conns"
         )
     );
     let rows: Vec<&str> = lines.collect();
@@ -2857,7 +2857,7 @@ async fn traffic_groups_and_blocked_csv_print_one_row_per_peer() {
     let server = MockServer::start().await;
     mount_traffic(&server, 2).await;
     let header = "app,direction,peer,peer hosts,peer names,app hosts,app names,service,\
-                  flows,conns,bytes,last seen,decision,allowed_conns,pot_blocked_conns,blocked_conns";
+                  flows,conns,bytes,last seen,decision,allowed_conns,pot_blocked_conns,blocked_conns,unknown_conns";
     let text = csv_stdout(
         &cmd(&server)
             .args(["traffic", "groups", "--window", "1h", "--by", "in", "--csv"])
@@ -2869,7 +2869,7 @@ async fn traffic_groups_and_blocked_csv_print_one_row_per_peer() {
         [
             header,
             "shop/prod,in,shop/prod,1,host-1.example,1,host-2.example,5432/tcp,1,310,124000,\
-             2026-10-10T07:31:02Z,allowed,310,0,0"
+             2026-10-10T07:31:02Z,allowed,310,0,0,0"
         ]
     );
     let text = csv_stdout(
@@ -2883,7 +2883,7 @@ async fn traffic_groups_and_blocked_csv_print_one_row_per_peer() {
         [
             header,
             "shop/prod,in,ipl:Corp/-,1,10.1.4.9,1,host-1.example,8443/tcp,1,12,0,\
-             2026-10-10T07:30:58Z,potentially_blocked,0,12,0"
+             2026-10-10T07:30:58Z,potentially_blocked,0,12,0,0"
         ]
     );
 }

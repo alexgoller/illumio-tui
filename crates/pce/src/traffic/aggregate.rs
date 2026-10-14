@@ -40,31 +40,35 @@ pub(crate) fn tally(
 
 /// A group's connections split by decision: the lifetime counts of its
 /// flow records (`num_connections`), summed per decision. Flattened into
-/// JSON as `allowed_conns`, `pot_blocked_conns` and `blocked_conns`.
+/// JSON as `allowed_conns`, `pot_blocked_conns`, `blocked_conns` and
+/// `unknown_conns`; the four sum to the group's connections.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct ConnsByDecision {
     pub allowed_conns: u64,
     pub pot_blocked_conns: u64,
     pub blocked_conns: u64,
+    /// Flows the PCE reported without a decision.
+    pub unknown_conns: u64,
 }
 
 impl ConnsByDecision {
-    /// Adds one flow's connections to its decision (unknown counts in none).
+    /// Adds one flow's connections to its decision.
     pub fn add(&mut self, decision: PolicyDecision, connections: u64) {
         match decision {
             PolicyDecision::Allowed => self.allowed_conns += connections,
             PolicyDecision::PotentiallyBlocked => self.pot_blocked_conns += connections,
             PolicyDecision::Blocked => self.blocked_conns += connections,
-            PolicyDecision::Unknown => {}
+            PolicyDecision::Unknown => self.unknown_conns += connections,
         }
     }
 
-    /// The three counts as cells: allowed, potentially blocked, blocked.
-    pub fn cells(&self) -> [String; 3] {
+    /// The four counts as cells: allowed, potentially blocked, blocked, unknown.
+    pub fn cells(&self) -> [String; 4] {
         [
             self.allowed_conns.to_string(),
             self.pot_blocked_conns.to_string(),
             self.blocked_conns.to_string(),
+            self.unknown_conns.to_string(),
         ]
     }
 }
@@ -266,13 +270,13 @@ mod tests {
         ] {
             for g in &groups {
                 let c = &g.conns;
-                // A flow of unknown decision counts in no decision.
-                let decided = g.allowed + g.potentially_blocked + g.blocked == g.flows;
                 assert_eq!(
-                    c.allowed_conns + c.pot_blocked_conns + c.blocked_conns == g.connections,
-                    decided || g.connections == 0,
-                    "{g:?}"
+                    c.allowed_conns + c.pot_blocked_conns + c.blocked_conns + c.unknown_conns,
+                    g.connections,
+                    "the four sum to the connections: {g:?}"
                 );
+                let decided = g.allowed + g.potentially_blocked + g.blocked == g.flows;
+                assert_eq!(c.unknown_conns == 0, decided || g.connections == 0, "{g:?}");
                 assert_eq!(c.allowed_conns > 0, g.allowed > 0, "{g:?}");
                 assert_eq!(c.blocked_conns > 0, g.blocked > 0, "{g:?}");
             }
@@ -294,6 +298,7 @@ mod tests {
         assert_eq!(json["blocked_conns"], nas.connections);
         assert_eq!(json["allowed_conns"], 0);
         assert_eq!(json["pot_blocked_conns"], 0);
+        assert_eq!(json["unknown_conns"], 0);
         assert!(json.get("conns").is_none(), "flattened");
     }
 
