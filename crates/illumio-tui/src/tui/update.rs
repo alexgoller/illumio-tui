@@ -4096,9 +4096,11 @@ fn writes_refused(model: &mut Model) -> bool {
 /// ruleset hint, and the pick while the field is empty. Nothing for another
 /// overlay (a form closed meanwhile is gone). No request.
 fn refill_rule_form(model: &mut Model) {
-    let prefill = model.flow_prefill();
-    if prefill.rulesets.is_none() {
+    let Some(n) = model.draft_rulesets().map(<[_]>::len) else {
         return;
+    };
+    if model.status.text == FORM_DRAFTS_LOADING {
+        model.status = StatusLine::info(format!("{n} draft rulesets for the form"));
     }
     let mut overlay = std::mem::replace(&mut model.overlay, Overlay::None);
     if let Overlay::Form(form) = &mut overlay {
@@ -4131,9 +4133,12 @@ fn load_form_drafts(model: &mut Model) -> Vec<Cmd> {
             mode: CacheMode::Use,
         }]
     };
-    model.status = StatusLine::info("loading the draft rulesets for the form · 1 req");
+    model.status = StatusLine::info(FORM_DRAFTS_LOADING);
     cmds
 }
+
+/// The status line while a `w` form's draft rulesets load.
+const FORM_DRAFTS_LOADING: &str = "loading the draft rulesets for the form · 1 req";
 
 /// A create or update opens its form; a delete goes straight to planning.
 fn begin_edit(model: &mut Model, intent: EditIntent) -> Vec<Cmd> {
@@ -15162,7 +15167,12 @@ mod rule_form_ruleset_tests {
         // Keys while it loads send nothing more.
         assert!(update(&mut m, kc(KeyCode::Tab)).is_empty());
         assert!(update(&mut m, kc(KeyCode::BackTab)).is_empty());
+        assert_eq!(
+            m.status.text,
+            "loading the draft rulesets for the form · 1 req"
+        );
         assert!(update(&mut m, drafts_loaded(drafts())).is_empty());
+        assert_eq!(m.status.text, "2 draft rulesets for the form");
         let f = form(&m);
         assert_eq!(
             f.value("Ruleset"),
