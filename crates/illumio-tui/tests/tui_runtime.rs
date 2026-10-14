@@ -2506,3 +2506,104 @@ async fn opening_the_app_overlay_reads_workloads_and_rulesets_once() {
     assert!(matches!(&v.policy, Loadable::Loaded(rows) if rows.len() == 2));
     assert_eq!(model.busy, 0);
 }
+
+/// `D` end to end: the query once, then `D` re-evaluates it by its href
+/// (one PUT, a poll, one download; no POST), `D` clears with no request,
+/// and `D` again answers from the draft slot with no request. The PUT is
+/// not a write: nothing in the write audit, even with writes armed.
+#[tokio::test]
+async fn d_re_evaluates_our_query_once_and_then_answers_from_the_cache() {
+    use illumio_tui::tui::filter::TrafficFilter;
+    use illumio_tui::tui::msg::Msg;
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    const QHREF: &str = "/orgs/5/traffic_flows/async_queries/q-7";
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/traffic_flows/async_queries"))
+        .respond_with(
+            ResponseTemplate::new(202).set_body_json(json!({"href": QHREF, "status": "queued"})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "completed", "rules": "completed",
+            "result": {"href": format!("{QHREF}/download")}, "flows_count": 4
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path(format!("/api/v2{QHREF}/update_rules")))
+        .and(wiremock::matchers::query_param("limit", "50"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let mut flows: Vec<serde_json::Value> =
+        serde_json::from_str(include_str!("../../../fixtures/traffic_flows.json")).unwrap();
+    for f in &mut flows {
+        f["draft_policy_decision"] = json!("allowed");
+    }
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}/download")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(serde_json::to_string(&flows).unwrap())
+                .insert_header("Content-Type", "application/json"),
+        )
+        .mount(&server)
+        .await;
+    let pce = pce_for(&server);
+    let mut m = writes_model();
+    m.connection = Connection::Connected {
+        index: Some(pce.name_index(pce::CacheMode::Use).await.unwrap()),
+        index_age_secs: 0,
+    };
+    let audit = MemoryAudit::new();
+    let (mut rt, tx) = Runtime::with_writer(pce, m, tui_guard(audit.clone()));
+    tx.send(Msg::ApplyFilter(TrafficFilter::defaults("1h", 50)))
+        .unwrap();
+    let mut seen = Vec::new();
+    let keys = press(vec![
+        (800, ch('D')),
+        (800, ch('D')),
+        (100, ch('D')),
+        (300, ch('q')),
+    ]);
+    let model = run_loop(&mut rt, Box::pin(keys), &mut |m| {
+        if let Some(d) = &m.traffic.data {
+            seen.push(d.draft.is_some());
+        }
+    })
+    .await;
+    let data = model.traffic.data.as_ref().unwrap();
+    assert!(data.draft.is_some(), "the last D loaded the draft again");
+    assert_eq!(
+        data.draft.unwrap().fixed,
+        2,
+        "the blocked and pot.blocked flows"
+    );
+    assert!(seen.contains(&false) && seen.contains(&true));
+    let sent: Vec<String> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| {
+            format!(
+                "{} {}",
+                r.method,
+                r.url.path().trim_start_matches("/api/v2")
+            )
+        })
+        .filter(|s| s.contains("traffic_flows"))
+        .collect();
+    let posts = sent.iter().filter(|s| s.starts_with("POST")).count();
+    let puts = sent.iter().filter(|s| s.starts_with("PUT")).count();
+    let downloads = sent.iter().filter(|s| s.ends_with("/download")).count();
+    assert_eq!((posts, puts, downloads), (1, 1, 2), "{sent:?}");
+    assert!(audit.entries().is_empty(), "update_rules is not a write");
+    assert_eq!(model.busy, 0);
+}

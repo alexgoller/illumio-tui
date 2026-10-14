@@ -40,6 +40,23 @@ pub struct FocusedOutcome {
     pub queries: u32,
 }
 
+/// `D`'s answer: the result again with draft decisions, for the focused
+/// result of `focus` (`None`: the unfocused one).
+#[derive(Debug)]
+pub struct DraftOutcome {
+    pub outcome: QueryOutcome,
+    pub focus: Option<Focus>,
+}
+
+/// Why `D` brought no draft decisions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DraftFailure {
+    /// The PCE no longer holds the query to re-evaluate: running it again
+    /// is the way, after asking.
+    Gone(String),
+    Failed(String),
+}
+
 /// The app overlay's workloads: the PCE's answer to the label filter, and
 /// whether it came from the cache.
 #[derive(Debug)]
@@ -95,6 +112,11 @@ pub enum Msg {
     FocusedDone {
         seq: u64,
         result: Result<FocusedOutcome, String>,
+    },
+    /// The answer to `Cmd::RunDraft`.
+    DraftDone {
+        seq: u64,
+        result: Result<DraftOutcome, DraftFailure>,
     },
     /// Rulesets for `scope` with the cache age in seconds.
     RuleSetsLoaded {
@@ -167,6 +189,18 @@ pub enum Cmd {
         filter: TrafficFilter,
         focus: Focus,
         mode: CacheMode,
+        cancel: CancellationToken,
+    },
+    /// `D`: the result on screen evaluated against the draft policy:
+    /// `hrefs` (its async queries) re-evaluated without a new POST, or
+    /// with none the queries run again with the draft. `focus`: the
+    /// focused result's focus (one query per side). Answered with
+    /// `Msg::DraftDone`; the draft result is cached in its own slot.
+    RunDraft {
+        seq: u64,
+        filter: TrafficFilter,
+        focus: Option<Focus>,
+        hrefs: Vec<String>,
         cancel: CancellationToken,
     },
     LoadRuleSets {
@@ -266,6 +300,22 @@ impl PartialEq for Cmd {
                     ..
                 },
             ) => a == b && fa == fb && xa == xb && ma == mb,
+            (
+                Cmd::RunDraft {
+                    seq: a,
+                    filter: fa,
+                    focus: xa,
+                    hrefs: ha,
+                    ..
+                },
+                Cmd::RunDraft {
+                    seq: b,
+                    filter: fb,
+                    focus: xb,
+                    hrefs: hb,
+                    ..
+                },
+            ) => a == b && fa == fb && xa == xb && ha == hb,
             (
                 Cmd::LoadRuleSets {
                     scope: sa,

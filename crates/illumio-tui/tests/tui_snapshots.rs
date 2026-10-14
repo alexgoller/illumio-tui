@@ -1553,3 +1553,42 @@ fn app_overlay_workloads_error_80x24() {
     );
     insta::assert_snapshot!("app_overlay_workloads_error_80x24", out);
 }
+
+#[test]
+fn traffic_draft_flows_pairs_and_sections() {
+    use illumio_tui::tui::model::{By, TrafficView};
+    use illumio_tui::tui::test_support::{model_with_rich_flows, with_draft_loaded};
+    let mut m = with_draft_loaded(model_with_rich_flows());
+    let out = render_to_string(&m, 160, 48);
+    assert!(out.contains("draft ✓"), "{out}");
+    assert!(out.contains("blocked → allowed"), "{out}");
+    insta::assert_snapshot!("traffic_draft_flows_160x48", out);
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("→ block"), "{out}");
+    insta::assert_snapshot!("traffic_draft_flows_80x24", out);
+    m.traffic.view = TrafficView::Aggregate;
+    let out = render_to_string(&m, 120, 30);
+    assert!(out.contains("would allow"), "{out}");
+    insta::assert_snapshot!("traffic_draft_pairs_120x30", out);
+    insta::assert_snapshot!("traffic_draft_pairs_80x24", render_to_string(&m, 80, 24));
+    m.traffic.apps_state.by = By::In;
+    m.traffic.rebuild_sections();
+    let out = render_to_string(&m, 120, 30);
+    assert!(out.contains("draft allows"), "{out}");
+    insta::assert_snapshot!("traffic_draft_sections_in_120x30", out);
+    insta::assert_snapshot!(
+        "traffic_draft_sections_in_80x24",
+        render_to_string(&m, 80, 24)
+    );
+}
+
+#[test]
+fn app_overlay_draft_120x40() {
+    use illumio_tui::tui::test_support::with_draft_loaded;
+    let mut m = with_draft_loaded(with_policy(with_workloads(model_with_window("24h"))));
+    open_app(&mut m, "shop/prod");
+    let out = render_to_string(&m, 120, 40);
+    assert!(out.contains("draft: "), "{out}");
+    assert!(out.contains("blocked flows fixed"), "{out}");
+    insta::assert_snapshot!("app_overlay_draft_120x40", out);
+}

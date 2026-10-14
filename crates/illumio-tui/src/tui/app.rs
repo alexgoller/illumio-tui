@@ -8,7 +8,9 @@ use crate::tui::edit::{self, RulesetTarget, WriteIntent};
 use crate::tui::filter::TrafficFilter;
 use crate::tui::model::ObjectKind;
 use crate::tui::model::{Limits, Model, ProfileInfo, WRITES_OFF, WritesState};
-use crate::tui::msg::{Cmd, FocusedOutcome, Msg, ObjectsPayload, QueryOutcome};
+use crate::tui::msg::{
+    Cmd, DraftFailure, DraftOutcome, FocusedOutcome, Msg, ObjectsPayload, QueryOutcome,
+};
 use crate::tui::{update, view};
 use crossterm::event::{
     DisableFocusChange, DisableMouseCapture, EnableFocusChange, EnableMouseCapture, Event,
@@ -249,6 +251,96 @@ impl Runtime {
         });
     }
 
+    /// `D`: the result on screen against the draft policy (`Cmd::RunDraft`),
+    /// answered with `Msg::DraftDone`. Through the cache's draft slot.
+    fn run_draft(
+        &mut self,
+        seq: u64,
+        filter: TrafficFilter,
+        focus: Option<Focus>,
+        hrefs: Vec<String>,
+        cancel: CancellationToken,
+    ) {
+        self.model.busy += 1;
+        let (pce, tx) = self.task_ctx();
+        tokio::spawn(async move {
+            let (ptx, mut prx) = tokio::sync::mpsc::unbounded_channel();
+            let forward_tx = tx.clone();
+            let forward = tokio::spawn(async move {
+                while let Some(p) = prx.recv().await {
+                    let _ = forward_tx.send(Msg::QueryProgress { seq, progress: p });
+                }
+            });
+            let known = !hrefs.is_empty();
+            let result = async {
+                let query = filter.to_query(&pce, CacheMode::Use).await?;
+                let idx = pce.name_index(CacheMode::Use).await?;
+                let bounds = query
+                    .start_date
+                    .parse()
+                    .ok()
+                    .zip(query.end_date.parse().ok());
+                let outcome = match &focus {
+                    Some(f) => {
+                        let ft = pce
+                            .focused_traffic_eval(
+                                "focus",
+                                f,
+                                &query,
+                                &idx,
+                                Some(&hrefs),
+                                CacheMode::Use,
+                                &cancel,
+                                Some(&ptx),
+                            )
+                            .await?;
+                        QueryOutcome {
+                            flows: ft.flows,
+                            truncated: ft.truncated,
+                            incomplete: ft.incomplete,
+                            elapsed: ft.elapsed,
+                            hit: ft.hit,
+                            filter,
+                            bounds,
+                            hrefs: ft.hrefs,
+                        }
+                    }
+                    None => {
+                        let r = pce
+                            .traffic_draft(
+                                &query,
+                                hrefs.first().map(String::as_str),
+                                CacheMode::Use,
+                                &cancel,
+                                Some(&ptx),
+                            )
+                            .await?;
+                        QueryOutcome {
+                            flows: pce::traffic::resolve_flows(&r.value.flows, &idx),
+                            truncated: r.value.truncated,
+                            incomplete: r.value.incomplete,
+                            elapsed: r.value.elapsed,
+                            hit: r.hit,
+                            filter,
+                            bounds,
+                            hrefs: vec![r.value.query_href.clone()],
+                        }
+                    }
+                };
+                Ok::<_, pce::PceError>(DraftOutcome { outcome, focus })
+            }
+            .await
+            .map_err(|e| match e {
+                pce::PceError::NotFound { .. } if known => DraftFailure::Gone(e.to_string()),
+                e => DraftFailure::Failed(e.to_string()),
+            });
+            drop(ptx);
+            let _ = forward.await;
+            let _ = tx.send(Msg::DraftDone { seq, result });
+            let _ = tx.send(Msg::Stats(pce.stats()));
+        });
+    }
+
     /// Executes one side effect. Tasks report back over the channel and
     /// always finish with `Msg::Stats` so the header counters stay current.
     pub fn execute(&mut self, cmd: Cmd) {
@@ -391,6 +483,13 @@ impl Runtime {
                 mode,
                 cancel,
             } => self.run_focused(seq, filter, focus, mode, cancel),
+            Cmd::RunDraft {
+                seq,
+                filter,
+                focus,
+                hrefs,
+                cancel,
+            } => self.run_draft(seq, filter, focus, hrefs, cancel),
             Cmd::LoadRuleSets { scope, mode } => {
                 self.model.busy += 1;
                 let (pce, tx) = self.task_ctx();
@@ -584,6 +683,7 @@ impl Runtime {
                 | Msg::IndexFailed(_)
                 | Msg::QueryDone { .. }
                 | Msg::FocusedDone { .. }
+                | Msg::DraftDone { .. }
                 | Msg::RuleSetsLoaded { .. }
                 | Msg::DenyRulesLoaded { .. }
                 | Msg::PendingLoaded(_)

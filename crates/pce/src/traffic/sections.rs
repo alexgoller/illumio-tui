@@ -140,6 +140,14 @@ impl Totals {
         if self.potentially_blocked > 0 {
             s.push_str(&format!(" · {} pot.blocked", self.potentially_blocked));
         }
+        if let Some(d) = &self.draft {
+            if d.draft_allowed > 0 {
+                s.push_str(&format!(" · draft allows {}", d.draft_allowed));
+            }
+            if d.draft_blocked > 0 {
+                s.push_str(&format!(" · draft blocks {}", d.draft_blocked));
+            }
+        }
         s
     }
 
@@ -670,6 +678,10 @@ mod tests {
                 .sum()
         };
         assert_eq!(sum(|d| d.draft_allowed), fixed);
+        let t = s
+            .iter()
+            .find(|s| s.totals.draft.is_some_and(|d| d.draft_allowed > 0));
+        assert!(t.unwrap().totals.counts_text().contains(" · draft allows "));
         assert_eq!(sum(|d| d.draft_blocked), newly);
         let row = s
             .iter()

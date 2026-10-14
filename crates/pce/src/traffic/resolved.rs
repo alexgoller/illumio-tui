@@ -135,11 +135,14 @@ impl ResolvedFlow {
     /// The draft decision when its verdict is not the reported one: what
     /// the Flows view marks (`blocked → allowed`). Judged by class, so
     /// `allowed_across_boundary` on an allowed flow is no change; a value
-    /// of no known class always is.
+    /// of no known class is one unless it is the reported word.
     pub fn draft_change(&self) -> Option<&DraftDecision> {
         self.draft_policy_decision
             .as_ref()
-            .filter(|d| d.class() == PolicyDecision::Unknown || d.class() != self.policy_decision)
+            .filter(|d| match d.class() {
+                PolicyDecision::Unknown => d.as_str() != self.policy_decision.as_str(),
+                c => c != self.policy_decision,
+            })
     }
 }
 

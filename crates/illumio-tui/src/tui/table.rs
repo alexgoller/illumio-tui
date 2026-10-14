@@ -92,6 +92,16 @@ impl<T> TableView<T> {
         self
     }
 
+    /// Other columns (a view gaining or losing one): the sort stays when
+    /// its column still exists.
+    pub fn set_columns(&mut self, columns: Vec<Column<T>>) {
+        if self.sort.is_some_and(|(i, _)| i >= columns.len()) {
+            self.sort = None;
+        }
+        self.columns = columns;
+        self.apply();
+    }
+
     pub fn set_rows(&mut self, rows: Vec<T>) {
         self.rows = rows;
         self.apply();

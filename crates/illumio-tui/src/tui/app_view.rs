@@ -86,6 +86,9 @@ pub struct AppView {
     pub requests: u32,
     /// Of those, the ones answered from the cache.
     pub cached: u32,
+    /// With draft decisions loaded: the app's blocked or potentially
+    /// blocked flows (in the direction in force) the draft would allow.
+    pub draft_fixed: Option<u64>,
 }
 
 impl AppView {
@@ -107,6 +110,7 @@ impl AppView {
             policy_scope: PolicyScope::Draft,
             requests: 0,
             cached: 0,
+            draft_fixed: None,
         }
     }
 
@@ -125,6 +129,21 @@ impl AppView {
             app_peers(flows, &self.focus, Direction::Out)
         };
         self.partial = partial;
+        self.draft_fixed = flows
+            .iter()
+            .any(|f| f.draft_policy_decision.is_some())
+            .then(|| {
+                let app = |e| pce::traffic::group_key(e, &self.focus.keys) == self.focus.app;
+                flows
+                    .iter()
+                    .filter(|f| f.fixed_by_draft())
+                    .filter(|f| match d {
+                        FocusDirection::In => app(&f.dst),
+                        FocusDirection::Out => app(&f.src),
+                        FocusDirection::Both => app(&f.src) || app(&f.dst),
+                    })
+                    .count() as u64
+            });
         for p in AppPanel::ALL {
             let n = self.panel_len(p);
             self.cursor[p.index()] = self.cursor[p.index()].min(n.saturating_sub(1));
@@ -192,8 +211,13 @@ impl AppView {
 
     /// `2 req`, `· cached` once every request it sent came from the cache
     /// (or it sent none).
+    /// With draft decisions loaded, `draft: N blocked flows fixed` first.
     pub fn header_meta(&self) -> String {
-        let mut s = format!("{} req", self.requests);
+        let mut s = match self.draft_fixed {
+            Some(n) => format!("draft: {n} blocked flows fixed · "),
+            None => String::new(),
+        };
+        s.push_str(&format!("{} req", self.requests));
         if self.requests == 0 || self.cached >= self.requests {
             s.push_str(" · cached");
         }

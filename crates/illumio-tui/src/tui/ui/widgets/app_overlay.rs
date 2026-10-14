@@ -139,8 +139,11 @@ fn render_summary(v: &AppView, t: &Theme, f: &mut Frame, area: Rect) {
 fn peer_line<'a>(p: &AppPeer, cells: usize, t: &Theme) -> Line<'a> {
     let conns = compact_count(p.connections);
     let svc_w = 9;
-    let peer_w = cells.saturating_sub(svc_w + conns.len().max(5) + 4);
-    Line::from(Span::styled(
+    // With draft decisions: `+N` flows the draft would allow, `-N` block.
+    let draft = crate::tui::model::draft_short(p.draft.as_ref());
+    let draft_w = if p.draft.is_some() { 7 } else { 0 };
+    let peer_w = cells.saturating_sub(svc_w + conns.len().max(5) + 4 + draft_w);
+    let mut spans = vec![Span::styled(
         format!(
             "{} {} {} {:>5}",
             fit(&p.peer_text(), peer_w),
@@ -149,7 +152,18 @@ fn peer_line<'a>(p: &AppPeer, cells: usize, t: &Theme) -> Line<'a> {
             conns
         ),
         t.decision_style(p.decision),
-    ))
+    )];
+    if let Some(d) = &p.draft {
+        let style = if d.draft_allowed > 0 {
+            Style::new().fg(t.ok)
+        } else if d.draft_blocked > 0 {
+            Style::new().fg(t.bad)
+        } else {
+            t.dim_style()
+        };
+        spans.push(Span::styled(format!(" {:>6}", fit(&draft, 6)), style));
+    }
+    Line::from(spans)
 }
 
 fn render_peers(v: &AppView, side: AppPanel, t: &Theme, f: &mut Frame, area: Rect) {

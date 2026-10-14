@@ -69,6 +69,15 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ),
     ("Traffic  A", "app overlay: peers, policy, workloads"),
     (
+        "Traffic  D",
+        "draft decision per flow (PCE draft view; again: clear)",
+    ),
+    (
+        "",
+        "1 PUT on the query, polls, 1 download; no policy change",
+    ),
+    ("", "Esc cancels it; no known query: asks, then re-runs"),
+    (
         "Units",
         "flows: flow records; conns, bytes: their lifetime counts",
     ),
@@ -94,7 +103,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ),
     (
         "App-to-app d",
-        "decision filter: all · blocked · blocked only",
+        "decision filter: all · blocked · blocked only (· fixed by draft)",
     ),
     (
         "Sections Space / z",
@@ -1030,7 +1039,7 @@ pub fn screen_hint_more(screen: Screen, view: TrafficView) -> &'static str {
         (Screen::Traffic, TrafficView::Aggregate) => {
             "+/- window  ]/[ cap  x mode  o service  d decision"
         }
-        (Screen::Traffic, _) => "+/- window  ]/[ cap",
+        (Screen::Traffic, _) => "+/- window  ]/[ cap  D draft",
         _ => "",
     }
 }

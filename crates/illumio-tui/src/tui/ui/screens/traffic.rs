@@ -102,8 +102,12 @@ fn result_meta(model: &Model) -> String {
         QueryState::Idle => match &model.traffic.data {
             Some(d) => {
                 let auto = &model.traffic.auto;
+                let draft = d
+                    .draft
+                    .map(|s| format!("draft ✓ {} fixed · ", s.fixed))
+                    .unwrap_or_default();
                 format!(
-                    "{} · {}{}{}{}",
+                    "{} · {draft}{}{}{}{}",
                     d.count_text(),
                     if d.incomplete { "incomplete · " } else { "" },
                     bars::age_text(d.fetched_at.elapsed()),
@@ -188,8 +192,14 @@ fn render_flows(model: &Model, f: &mut Frame, area: Rect) {
     let title = unit_title(&title, &meta, area.width);
     let block = panel(&title, &meta, t, true);
     let theme = t.clone();
+    // A flow whose verdict the draft changes is drawn in its draft colour, bold.
     crate::tui::ui::widgets::table::render(f, area, &model.traffic.flows, t, block, &move |fl| {
-        theme.decision_style(fl.policy_decision)
+        match fl.draft_change() {
+            Some(d) => theme
+                .decision_style(d.class())
+                .add_modifier(ratatui::style::Modifier::BOLD),
+            None => theme.decision_style(fl.policy_decision),
+        }
     });
 }
 

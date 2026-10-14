@@ -58,7 +58,30 @@ pub fn fixture_flows() -> Vec<ResolvedFlow> {
     let raw: Vec<Flow> =
         serde_json::from_str(include_str!("../../../../fixtures/traffic_flows.json"))
             .expect("flows fixture");
-    resolve_flows(&raw, &fixture_index())
+    let mut flows = resolve_flows(&raw, &fixture_index());
+    // As `Pce::traffic` returns them: a reported result has no draft
+    // decision (the fixture's one is for the draft tests).
+    for f in &mut flows {
+        f.draft_policy_decision = None;
+    }
+    flows
+}
+
+/// `flows` after a draft re-evaluation: every other blocked or potentially
+/// blocked flow allowed in draft, every seventh allowed one (from the
+/// fourth) blocked, the rest at their decision.
+pub fn with_draft(mut flows: Vec<ResolvedFlow>) -> Vec<ResolvedFlow> {
+    use pce::models::{DraftDecision, PolicyDecision};
+    for (i, f) in flows.iter_mut().enumerate() {
+        f.draft_policy_decision = Some(match f.policy_decision {
+            PolicyDecision::Blocked | PolicyDecision::PotentiallyBlocked if i % 2 == 0 => {
+                DraftDecision::Allowed
+            }
+            PolicyDecision::Allowed if i % 7 == 3 => DraftDecision::Blocked,
+            d => DraftDecision::parse(d.as_str()),
+        });
+    }
+    flows
 }
 
 /// The 30-flow fixture (4 apps x 2 envs, roles, `loc`, `datacenter` on
@@ -425,4 +448,15 @@ pub fn revert_plan_of(n: usize) -> pce::write::Plan {
         },
         kind: pce::write::ObjectKind::Revert,
     }
+}
+
+/// `m` with its result re-evaluated by `with_draft`, as `D`'s answer
+/// leaves it: the draft decisions in the flows, the summary, the views.
+pub fn with_draft_loaded(mut m: Model) -> Model {
+    if let Some(d) = m.traffic.data.as_mut() {
+        d.flows = with_draft(std::mem::take(&mut d.flows));
+        d.draft = Some(pce::traffic::DraftSummary::of(&d.flows));
+    }
+    m.traffic.rebuild_views();
+    m
 }

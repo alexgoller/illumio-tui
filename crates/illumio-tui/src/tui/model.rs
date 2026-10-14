@@ -15,10 +15,10 @@ use pce::models::{
 };
 use pce::traffic::treemap::{Rect as TreemapRect, Tile, Weight, layout, layout_zoomed};
 use pce::traffic::{
-    AppSection, Decisions, Direction, FlowGroup, Focus, FocusDirection, GroupKey, MeshColumns,
-    MeshKey, MeshRow, PeerRow, ResolvedFlow, Totals, app_header, app_sections, app_sections_both,
-    apps_in, compact_count, group_by_labels, group_by_service, group_key, group_text, in_app,
-    in_peer, keys_or_default, keys_seen, mesh, mesh_key,
+    AppSection, Decisions, Direction, DraftCounts, FlowGroup, Focus, FocusDirection, GroupKey,
+    MeshColumns, MeshKey, MeshRow, PeerRow, ResolvedFlow, Totals, app_header, app_sections,
+    app_sections_both, apps_in, compact_count, group_by_labels, group_by_service, group_key,
+    group_text, in_app, in_peer, keys_or_default, keys_seen, mesh, mesh_key,
 };
 use pce::write::Plan;
 use pce::{
@@ -314,6 +314,14 @@ pub enum PendingAction {
     LoadLabelUsage,
     /// `r` on a partial focus past a cost threshold: one query per side.
     RunFocused(TrafficFilter, pce::traffic::Focus, pce::CacheMode),
+    /// `D` past a cost threshold, or without a query to re-evaluate: the
+    /// draft run for the result on screen (`filter`, the focused result's
+    /// focus), re-evaluating `hrefs` (empty: run the queries again).
+    RunDraft {
+        filter: TrafficFilter,
+        focus: Option<pce::traffic::Focus>,
+        hrefs: Vec<String>,
+    },
     /// `r` in the app overlay: the workloads and the rulesets again, past the cache.
     ReloadApp,
 }
@@ -329,6 +337,10 @@ pub enum QueryState {
         /// `r` on a partial focus: the focus this run was started for.
         /// Clearing or changing the focus cancels it.
         focus: Option<Focus>,
+        /// `D`: a draft re-evaluation of the result on screen. Any change
+        /// of that result (a new query, a focus change, a cap step, a
+        /// profile switch) or `Esc` cancels it.
+        draft: bool,
     },
     Failed(String),
 }
@@ -524,6 +536,148 @@ pub fn flow_columns() -> Vec<Column<FlowRow>> {
             full: None,
         },
     ]
+}
+
+/// The title of the column a view gains while draft decisions are loaded.
+pub const DRAFT_COLUMN: &str = "draft";
+
+/// A flow's draft cell: `blocked → allowed` (`pot.blocked → allowed`)
+/// where the draft changes the verdict, else the draft decision; empty
+/// without one.
+pub fn draft_flow_text(f: &ResolvedFlow) -> String {
+    let short = |d: &str| match d {
+        "potentially_blocked" => "pot.blocked".to_string(),
+        other => other.to_string(),
+    };
+    match (&f.draft_policy_decision, f.draft_change()) {
+        (_, Some(d)) => format!("{} → {}", short(f.policy_decision.as_str()), d.as_str()),
+        (Some(d), None) => d.as_str().to_string(),
+        (None, None) => String::new(),
+    }
+}
+
+/// The Flows view's `draft` column.
+pub fn draft_flow_column() -> Column<FlowRow> {
+    Column {
+        title: DRAFT_COLUMN,
+        width: 24,
+        cell: |f| draft_flow_text(&f.flow),
+        key: |f| {
+            SortKey::Text(
+                f.flow
+                    .draft_policy_decision
+                    .as_ref()
+                    .map(|d| d.as_str().to_string())
+                    .unwrap_or_default(),
+            )
+        },
+        right: false,
+        hide_below: 0,
+        // Below 120 columns only the changes: `→ allow`, `→ block`,
+        // `→ pot`; `·` where the draft keeps the verdict.
+        narrow: Some(
+            |f| match (&f.flow.draft_policy_decision, f.flow.draft_change()) {
+                (_, Some(d)) => format!(
+                    "→ {}",
+                    match d.class() {
+                        pce::models::PolicyDecision::Allowed => "allow",
+                        pce::models::PolicyDecision::Blocked => "block",
+                        pce::models::PolicyDecision::PotentiallyBlocked => "pot",
+                        pce::models::PolicyDecision::Unknown => "?",
+                    }
+                ),
+                (Some(_), None) => "·".into(),
+                (None, None) => String::new(),
+            },
+        ),
+        narrow_width: 7,
+        full_title: None,
+        full: Some(|f| {
+            f.flow
+                .draft_policy_decision
+                .as_ref()
+                .map(|d| d.as_str().to_string())
+                .unwrap_or_default()
+        }),
+    }
+}
+
+/// A draft cell that fits 20 columns: `2 would allow`, `1 would block`,
+/// with both `+2 allow -1 block`, `-` with neither.
+pub fn draft_counts_cell(d: Option<&DraftCounts>) -> String {
+    match d {
+        Some(c) if c.draft_allowed > 0 && c.draft_blocked > 0 => {
+            format!("+{} allow -{} block", c.draft_allowed, c.draft_blocked)
+        }
+        _ => DraftCounts::text(d),
+    }
+}
+
+/// App-to-app pairs' `draft` column: `2 would allow` (`draft_counts_cell`).
+pub fn draft_group_column() -> Column<FlowGroup> {
+    Column {
+        title: DRAFT_COLUMN,
+        width: 20,
+        cell: |g| draft_counts_cell(g.draft.as_ref()),
+        key: |g| SortKey::Num(g.draft.map_or(0, |d| d.draft_allowed)),
+        right: false,
+        // Below 100 columns the pairs have no room; `d` keeps `fixed by draft`.
+        hide_below: 100,
+        narrow: Some(|g| draft_short(g.draft.as_ref())),
+        narrow_width: 9,
+        full_title: None,
+        full: None,
+    }
+}
+
+/// `+2 -1`: would allow, would block; `-` with neither.
+pub fn draft_short(d: Option<&DraftCounts>) -> String {
+    match d {
+        None => String::new(),
+        Some(d) if d.draft_allowed == 0 && d.draft_blocked == 0 => "-".into(),
+        Some(d) => {
+            let mut parts = Vec::new();
+            if d.draft_allowed > 0 {
+                parts.push(format!("+{}", d.draft_allowed));
+            }
+            if d.draft_blocked > 0 {
+                parts.push(format!("-{}", d.draft_blocked));
+            }
+            parts.join(" ")
+        }
+    }
+}
+
+/// A sectioned table's `draft` column, on its peer rows.
+pub fn draft_section_column() -> Column<SectionRow> {
+    Column {
+        title: DRAFT_COLUMN,
+        width: 20,
+        cell: |r| r.with_row(|p| draft_counts_cell(p.draft.as_ref())),
+        key: no_sort,
+        right: false,
+        hide_below: 0,
+        narrow: Some(|r| r.with_row(|p| draft_short(p.draft.as_ref()))),
+        narrow_width: 9,
+        full_title: None,
+        full: None,
+    }
+}
+
+/// `cols`, plus `extra` at the end when `draft`.
+fn with_draft<T>(mut cols: Vec<Column<T>>, extra: Column<T>, draft: bool) -> Vec<Column<T>> {
+    if draft {
+        cols.push(extra);
+    }
+    cols
+}
+
+/// Whether `table` shows the draft column.
+fn shows_draft<T>(table: &TableView<T>) -> bool {
+    table
+        .columns
+        .last()
+        .is_some_and(|c| c.title == DRAFT_COLUMN)
 }
 
 /// `2026-10-10T07:31:02Z` -> `10-10 07:31:02`
@@ -1800,6 +1954,7 @@ impl TrafficState {
         }
         self.focus = Some(focus);
         self.cancel_stale_focused_run();
+        self.cancel_draft_run();
         self.rebuild_views();
     }
 
@@ -1809,6 +1964,9 @@ impl TrafficState {
         self.restore_unfocused();
         let had = self.focus.take().is_some();
         self.cancel_stale_focused_run();
+        if had {
+            self.cancel_draft_run();
+        }
         self.refresh_focused();
         had
     }
@@ -1826,6 +1984,8 @@ impl TrafficState {
         self.focus_result = None;
         match self.unfocused.take() {
             Some(d) => {
+                // Another result on screen: a draft run for the focused one is stale.
+                self.cancel_draft_run();
                 self.data = Some(d);
                 self.cap_from_data();
                 self.refresh_focused();
@@ -1853,6 +2013,7 @@ impl TrafficState {
         f.direction = f.direction.next();
         let d = f.direction;
         self.cancel_stale_focused_run();
+        self.cancel_draft_run();
         self.rebuild_views();
         Some(d)
     }
@@ -2095,6 +2256,7 @@ impl TrafficState {
     /// Recomputes every view from `data` with the keys in force. Pure;
     /// never requests.
     pub fn rebuild_views(&mut self) {
+        self.sync_draft_columns();
         self.keys = self.resolve_keys();
         self.refresh_focused();
         let (shown, tree, mesh_rows) = {
@@ -2117,6 +2279,34 @@ impl TrafficState {
         self.rebuild_pairs();
         self.rebuild_sections();
         self.relayout_treemap();
+    }
+
+    /// The `draft` columns while draft decisions are loaded, none
+    /// otherwise; `fixed by draft` falls back to `all` without them.
+    fn sync_draft_columns(&mut self) {
+        let draft = self.draft_loaded();
+        if !draft && self.apps_state.decisions == Decisions::FixedByDraft {
+            self.apps_state.decisions = Decisions::All;
+        }
+        if shows_draft(&self.flows) != draft {
+            self.flows
+                .set_columns(with_draft(flow_columns(), draft_flow_column(), draft));
+        }
+        if shows_draft(&self.groups) != draft {
+            self.groups
+                .set_columns(with_draft(group_columns(), draft_group_column(), draft));
+            self.services.set_columns(with_draft(
+                service_group_columns(),
+                draft_group_column(),
+                draft,
+            ));
+        }
+        if shows_draft(&self.apps) != draft {
+            self.apps
+                .set_columns(with_draft(app_columns(), draft_section_column(), draft));
+            self.blocked
+                .set_columns(with_draft(blocked_columns(), draft_section_column(), draft));
+        }
     }
 
     /// App-to-app's pairs, and by service while `o` is on (none while off),
@@ -2404,8 +2594,50 @@ impl TrafficState {
             status: "submitting".into(),
             cancel: cancel.clone(),
             focus: None,
+            draft: false,
         };
         (self.seq, cancel)
+    }
+
+    /// `start_query` for `D`: a draft re-evaluation of the result on
+    /// screen.
+    /// The run keeps no focus (that is for `r`'s focused re-queries): any
+    /// focus change cancels a draft run (`cancel_draft_run`).
+    pub fn start_draft_run(&mut self, now: Instant) -> (u64, CancellationToken) {
+        let started = self.start_query(now);
+        if let QueryState::Running { draft, .. } = &mut self.query {
+            *draft = true;
+        }
+        started
+    }
+
+    /// A `D` re-evaluation is on its way.
+    pub fn is_draft_running(&self) -> bool {
+        matches!(self.query, QueryState::Running { draft: true, .. })
+    }
+
+    /// Cancels a `D` re-evaluation in flight (its answer would land on a
+    /// result that changed); whether one was cancelled.
+    pub fn cancel_draft_run(&mut self) -> bool {
+        let running = self.is_draft_running();
+        if running {
+            self.cancel_query();
+        }
+        running
+    }
+
+    /// `D` on a result with draft decisions: back to the reported ones, no
+    /// request (the draft result stays cached for the next `D`).
+    pub fn clear_draft(&mut self) -> bool {
+        let Some(d) = self.data.as_mut().filter(|d| d.draft.is_some()) else {
+            return false;
+        };
+        for f in &mut d.flows {
+            f.draft_policy_decision = None;
+        }
+        d.draft = None;
+        self.rebuild_views();
+        true
     }
 
     /// `start_query` for `r` on a partial focus: the run remembers its

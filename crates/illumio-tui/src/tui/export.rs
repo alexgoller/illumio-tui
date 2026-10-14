@@ -6,7 +6,7 @@
 //! writes the file with `write`.
 use crate::cli::output::TableRows;
 use crate::cli::output::write_csv;
-use crate::cli::traffic::{SECTION_CSV_HEADERS, ServiceGroups, peer_csv_row};
+use crate::cli::traffic::{ServiceGroups, section_csv_headers, section_csv_row};
 use crate::tui::model::{Model, ObjectKind, PolicyPane, Screen, SectionRow, TrafficView};
 use crate::tui::table::TableView;
 use pce::traffic::FlowGroup;
@@ -52,14 +52,17 @@ pub fn current_table(model: &Model) -> Result<Csv, String> {
 /// Sectioned rows one row per peer, as `traffic groups --by ... --csv`
 /// prints them; the header rows are left out.
 fn sections(rows: &[SectionRow]) -> Csv {
+    let draft = rows
+        .iter()
+        .any(|r| r.peer().is_some_and(|(_, p)| p.draft.is_some()));
     let rows = rows
         .iter()
         .filter_map(|r| {
             let (direction, peer) = r.peer()?;
-            Some(peer_csv_row(&r.app, direction, peer))
+            Some(section_csv_row(&r.app, direction, peer, draft))
         })
         .collect();
-    (SECTION_CSV_HEADERS.to_vec(), rows)
+    (section_csv_headers(draft), rows)
 }
 
 /// The rows of `table` as shown (search and sort applied).

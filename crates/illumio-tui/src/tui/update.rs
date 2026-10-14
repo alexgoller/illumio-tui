@@ -10,7 +10,9 @@ use crate::tui::model::{
     PceUsage, PendingAction, PolicyPane, PolicyState, QueryState, Range, Screen, StatusLine,
     TrafficData, TrafficState, TrafficView, WritesState, queries_text, rule_line,
 };
-use crate::tui::msg::{Cmd, FocusedOutcome, Msg, ObjectsPayload, QueryOutcome};
+use crate::tui::msg::{
+    Cmd, DraftFailure, DraftOutcome, FocusedOutcome, Msg, ObjectsPayload, QueryOutcome,
+};
 use crate::tui::picker::{KeyPicker, PickerOutcome};
 use crate::tui::ui::widgets::overlay::{confirm_write_last_scroll, help_last_scroll};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -28,7 +30,10 @@ use std::time::Instant;
 pub const INCOMPLETE: &str = " · incomplete: a PCE region did not respond";
 
 pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
-    let traffic_answer = matches!(msg, Msg::QueryDone { .. } | Msg::FocusedDone { .. });
+    let traffic_answer = matches!(
+        msg,
+        Msg::QueryDone { .. } | Msg::FocusedDone { .. } | Msg::DraftDone { .. }
+    );
     let cmds = on_msg(model, msg);
     // A traffic answer that lands under the open app overlay (or one of its
     // prompts): its peers follow (no request).
@@ -225,6 +230,8 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::Command(c) => on_command(model, c),
         Msg::ApplyFilter(f) => {
             model.screen = Screen::Traffic;
+            // A new filter replaces the result: a draft run for it is stale.
+            model.traffic.cancel_draft_run();
             // Key auto-repeat on `t` would otherwise restart (and re-POST) the same query.
             if model.traffic.is_running() && model.traffic.filter == f {
                 model.status = StatusLine::info("query already running");
@@ -234,6 +241,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             start_query(model, f, CacheMode::Use)
         }
         Msg::RunNow => {
+            model.traffic.cancel_draft_run();
             if model.traffic.is_running() {
                 model.status = StatusLine::info("query already running");
                 return Vec::new();
@@ -356,6 +364,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             }
             Vec::new()
         }
+        Msg::DraftDone { seq, result } => draft_done(model, seq, result),
         Msg::RuleSetsLoaded { scope, result } => {
             // A reload a write asked for keeps the write's report. Taken before
             // the scope check: an ignored answer must not leave the flag set.
@@ -885,7 +894,8 @@ fn outcome_data(o: QueryOutcome) -> TrafficData {
         fetched_at: Instant::now(),
         filter: o.filter,
         range: o.bounds.map(|(start, end)| Range { start, end }),
-        hrefs: Vec::new(),
+        hrefs: o.hrefs,
+        // Only `D` loads draft decisions (`Msg::DraftDone`).
         draft: None,
     }
 }
@@ -946,12 +956,184 @@ fn refresh_running_status(model: &mut Model) {
 
 fn refresh_running_status_at(model: &mut Model, now: Instant) {
     if let QueryState::Running {
-        started, status, ..
+        started,
+        status,
+        draft,
+        ..
     } = &model.traffic.query
     {
         let secs = now.saturating_duration_since(*started).as_secs_f64();
-        model.status = StatusLine::info(format!("query running {secs:.1}s · {status}"));
+        model.status = StatusLine::info(if *draft {
+            format!("draft re-evaluation {secs:.1}s · {status} · Esc cancels")
+        } else {
+            format!("query running {secs:.1}s · {status}")
+        });
     }
+}
+
+/// What `D` costs per query: one PUT on the query (`update_rules`), status
+/// polls and one download; `fresh` adds the POST of a new run.
+fn draft_cost(queries: u32, fresh: bool) -> String {
+    let per = if fresh {
+        "1 POST, 1 PUT, polls and 1 download"
+    } else {
+        "1 PUT, polls and 1 download"
+    };
+    if queries > 1 {
+        format!("{per} per query, {}", queries_text(queries))
+    } else {
+        per.to_string()
+    }
+}
+
+/// `D`: the result on screen against the draft policy (the PCE's
+/// Explorer draft view; no policy changes), or back to the reported
+/// decisions when they are loaded (no request). A result whose async
+/// queries are known is re-evaluated without a new POST, through the cost
+/// guard; one without asks first, then runs its queries again with the
+/// draft as one action.
+fn draft_key(model: &mut Model) -> Vec<Cmd> {
+    let t = &mut model.traffic;
+    if t.is_draft_running() {
+        model.status = StatusLine::info("draft re-evaluation running · Esc cancels");
+        return Vec::new();
+    }
+    if t.is_running() {
+        model.status = StatusLine::info("query running: D once it is done");
+        return Vec::new();
+    }
+    if t.clear_draft() {
+        model.status = StatusLine::info("draft cleared: the reported decisions (no request)");
+        return Vec::new();
+    }
+    let Some(d) = t.data.as_ref() else {
+        model.status = StatusLine::info("no result to evaluate: r runs the query first");
+        return Vec::new();
+    };
+    let focus = t.focus_result.as_ref().map(|r| r.focus.clone());
+    let queries = t.focus_result.as_ref().map_or(1, |r| r.queries);
+    let filter = d.filter.clone();
+    let hrefs = d.hrefs.clone();
+    if hrefs.is_empty() || hrefs.len() != queries as usize {
+        model.overlay = Overlay::Confirm {
+            reason: format!(
+                "No query of this session to re-evaluate (a cached or dropped result). Run it again with the draft: {}? (y/n)",
+                draft_cost(queries, true)
+            ),
+            action: PendingAction::RunDraft {
+                filter,
+                focus,
+                hrefs: Vec::new(),
+            },
+        };
+        return Vec::new();
+    }
+    if let Some(reason) = filter.needs_confirmation() {
+        model.overlay = Overlay::Confirm {
+            reason: format!(
+                "{reason}. Re-evaluate against the draft policy anyway: {}? (y/n)",
+                draft_cost(queries, false)
+            ),
+            action: PendingAction::RunDraft {
+                filter,
+                focus,
+                hrefs,
+            },
+        };
+        return Vec::new();
+    }
+    start_draft(model, filter, focus, hrefs)
+}
+
+/// Starts `D`'s run, when the result it was asked for is still the one on
+/// screen (a confirm prompt may have stood in between).
+fn start_draft(
+    model: &mut Model,
+    filter: TrafficFilter,
+    focus: Option<Focus>,
+    hrefs: Vec<String>,
+) -> Vec<Cmd> {
+    let t = &mut model.traffic;
+    let on_screen = t.data.as_ref().is_some_and(|d| d.filter == filter)
+        && t.focus_result.as_ref().map(|r| &r.focus) == focus.as_ref();
+    if !on_screen || t.is_running() {
+        model.status = StatusLine::info("the result changed: D again re-evaluates it");
+        return Vec::new();
+    }
+    let (seq, cancel) = t.start_draft_run(Instant::now());
+    model.status = StatusLine::info("draft re-evaluation running · Esc cancels");
+    vec![Cmd::RunDraft {
+        seq,
+        filter,
+        focus,
+        hrefs,
+        cancel,
+    }]
+}
+
+/// `D`'s answer: the draft decisions into the result on screen, if it is
+/// still the one they were asked for (a late answer for a changed result
+/// is dropped by `seq`, and by the check here). A query the PCE dropped
+/// asks to run it again; any other failure leaves the plain result.
+fn draft_done(model: &mut Model, seq: u64, result: Result<DraftOutcome, DraftFailure>) -> Vec<Cmd> {
+    let t = &mut model.traffic;
+    if t.seq != seq {
+        return Vec::new(); // cancelled, or the result changed
+    }
+    t.query = QueryState::Idle;
+    match result {
+        Ok(DraftOutcome { outcome, focus }) => {
+            let current = t.focus_result.as_ref().map(|r| &r.focus);
+            let Some(d) = t
+                .data
+                .as_mut()
+                .filter(|d| d.filter == outcome.filter && current == focus.as_ref())
+            else {
+                model.status = StatusLine::info("draft answer dropped: the result changed");
+                return Vec::new();
+            };
+            let summary = pce::traffic::DraftSummary::of(&outcome.flows);
+            if d.hrefs != outcome.hrefs {
+                d.fetched_at = Instant::now(); // the queries ran again
+            }
+            d.flows = outcome.flows;
+            d.hrefs = outcome.hrefs;
+            d.truncated = outcome.truncated;
+            d.incomplete = outcome.incomplete;
+            d.cache_hit = outcome.hit;
+            d.draft = Some(summary);
+            t.rebuild_views();
+            model.status = StatusLine::info(format!(
+                "draft: {} blocked flows fixed · {} would be blocked · D clears{}",
+                summary.fixed,
+                summary.newly_blocked,
+                if outcome.hit { " (cached)" } else { "" }
+            ));
+        }
+        Err(DraftFailure::Gone(e)) => {
+            let filter = t.data.as_ref().map(|d| d.filter.clone());
+            let focus = t.focus_result.as_ref().map(|r| r.focus.clone());
+            let queries = t.focus_result.as_ref().map_or(1, |r| r.queries);
+            match filter {
+                Some(filter) if model.overlay == Overlay::None => {
+                    model.overlay = Overlay::Confirm {
+                        reason: format!(
+                            "The PCE no longer holds this query ({e}). Run it again with the draft: {}? (y/n)",
+                            draft_cost(queries, true)
+                        ),
+                        action: PendingAction::RunDraft {
+                            filter,
+                            focus,
+                            hrefs: Vec::new(),
+                        },
+                    };
+                }
+                _ => fail(model, "draft", &e, false),
+            }
+        }
+        Err(DraftFailure::Failed(e)) => fail(model, "draft", &e, false),
+    }
+    Vec::new()
 }
 
 fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
@@ -1088,6 +1270,11 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     PendingAction::RunFocused(f, focus, mode) => {
                         start_focused(model, f, focus, mode)
                     }
+                    PendingAction::RunDraft {
+                        filter,
+                        focus,
+                        hrefs,
+                    } => start_draft(model, filter, focus, hrefs),
                     PendingAction::ReloadApp => app_reload(model),
                 }
             }
@@ -1516,11 +1703,21 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         }
         return Vec::new();
     }
+    // Esc cancels a draft re-evaluation in flight first: the plain result stays.
+    if k.code == KeyCode::Esc && model.traffic.cancel_draft_run() {
+        model.status = StatusLine::info("draft re-evaluation cancelled");
+        return Vec::new();
+    }
     // With a focus set, Esc clears it first; today's Esc applies after.
     if k.code == KeyCode::Esc && model.traffic.focus.is_some() {
         model.traffic.clear_focus();
         model.status = StatusLine::info("focus cleared");
         return Vec::new();
+    }
+    // A key that changes the result goes first: a draft run for the old
+    // one is cancelled (Esc above cancels it alone).
+    if matches!(k.code, KeyCode::Char('+' | '-' | ']' | '[' | 'B' | 'r')) {
+        model.traffic.cancel_draft_run();
     }
     // With a focused result on screen the cap keys re-run the focused
     // query; the window keys (and the cap keys otherwise) work on the
@@ -1545,6 +1742,7 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             model.status = focus_status(&model.traffic);
         }
         KeyCode::Char('r') => return update(model, Msg::RunNow),
+        KeyCode::Char('D') => return draft_key(model),
         KeyCode::Char('+') => return widen_window(model),
         KeyCode::Char('B') => return backfill_key(model),
         KeyCode::Char('-') => return narrow_window(model),
@@ -2505,6 +2703,12 @@ fn narrow_window(model: &mut Model) -> Vec<Cmd> {
             r.start = start;
             d.filter.window = step.to_string();
             dropped = Some(before - d.flows.len());
+            // No longer what its async query returned: `D` cannot
+            // re-evaluate that query for it, and the draft counts shrink.
+            d.hrefs.clear();
+            if d.draft.is_some() {
+                d.draft = Some(pce::traffic::DraftSummary::of(&d.flows));
+            }
         }
     }
     t.rebuild_views();
@@ -8759,8 +8963,9 @@ mod tests {
     fn help_scrolls_to_its_last_line_and_reopens_at_the_top() {
         use crate::tui::ui::widgets::overlay::{HELP_LINES, help_last_scroll};
         let mut m = model_fixture(); // 80x24
-        assert_eq!(HELP_LINES.len(), 59);
+        assert_eq!(HELP_LINES.len(), 62);
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  A"));
+        assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  D"));
         assert!(
             !HELP_LINES.iter().any(|(k, _)| k.contains("App      t")),
             "the timeline is gone"
@@ -8789,7 +8994,7 @@ mod tests {
         );
         update(&mut m, key('?'));
         let last = help_last_scroll(24);
-        assert_eq!(last, 37, "59 lines, 22 rows inside the box");
+        assert_eq!(last, 40, "62 lines, 22 rows inside the box");
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app x / X"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app o"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app d"));
@@ -14183,5 +14388,367 @@ mod app_tests {
         assert!(
             matches!(&m.overlay, Overlay::AppPicker(p) if p.purpose == crate::tui::app_picker::AppPickerPurpose::Overlay)
         );
+    }
+}
+
+#[cfg(test)]
+mod draft_tests {
+    use super::*;
+    use crate::tui::model::{Model, Overlay, PendingAction, TrafficView};
+    use crate::tui::msg::{DraftFailure, DraftOutcome, FocusedOutcome};
+    use crate::tui::test_support::{model_with_rich_flows, with_draft};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use pce::traffic::{Decisions, Focus, FocusDirection};
+    use std::time::Duration;
+
+    const HREF: &str = "/orgs/1/traffic_flows/async_queries/q-1";
+
+    fn key(c: char) -> Msg {
+        Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))
+    }
+
+    fn esc() -> Msg {
+        Msg::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+    }
+
+    /// The rich fixture as the answer of our own query `HREF`.
+    fn model() -> Model {
+        let mut m = model_with_rich_flows();
+        m.traffic.data.as_mut().unwrap().hrefs = vec![HREF.into()];
+        m
+    }
+
+    /// The draft answer for the result on screen of `m`.
+    fn answer(m: &Model, seq: u64, hit: bool) -> Msg {
+        let d = m.traffic.data.as_ref().unwrap();
+        Msg::DraftDone {
+            seq,
+            result: Ok(DraftOutcome {
+                outcome: QueryOutcome {
+                    flows: with_draft(d.flows.clone()),
+                    truncated: d.truncated,
+                    incomplete: false,
+                    elapsed: Duration::from_millis(700),
+                    hit,
+                    filter: d.filter.clone(),
+                    bounds: None,
+                    hrefs: d.hrefs.clone(),
+                },
+                focus: m.traffic.focus_result.as_ref().map(|r| r.focus.clone()),
+            }),
+        }
+    }
+
+    /// `D` on `m`: the one `Cmd::RunDraft` it sends.
+    fn press_d(m: &mut Model) -> (u64, Vec<String>, Option<Focus>, CancellationToken) {
+        let cmds = update(m, key('D'));
+        let [
+            Cmd::RunDraft {
+                seq,
+                hrefs,
+                focus,
+                cancel,
+                ..
+            },
+        ] = cmds.as_slice()
+        else {
+            panic!("{cmds:?}")
+        };
+        (*seq, hrefs.clone(), focus.clone(), cancel.clone())
+    }
+
+    use tokio_util::sync::CancellationToken;
+
+    #[test]
+    fn d_with_a_known_query_sends_one_draft_run_and_no_new_query() {
+        let mut m = model();
+        let (seq, hrefs, focus, _) = press_d(&mut m);
+        assert_eq!(hrefs, vec![HREF.to_string()], "the PUT goes to our query");
+        assert_eq!(focus, None);
+        assert!(m.traffic.is_draft_running());
+        assert!(m.status.text.contains("Esc cancels"), "{}", m.status.text);
+        assert!(
+            update(&mut m, key('D')).is_empty(),
+            "a second D while it runs sends nothing"
+        );
+        let msg = answer(&m, seq, false);
+        assert!(update(&mut m, msg).is_empty());
+        assert!(m.traffic.draft_loaded());
+        let s = m.traffic.data.as_ref().unwrap().draft.unwrap();
+        assert!(s.fixed > 0 && s.newly_blocked > 0);
+        assert_eq!(
+            m.status.text,
+            format!(
+                "draft: {} blocked flows fixed · {} would be blocked · D clears",
+                s.fixed, s.newly_blocked
+            )
+        );
+        assert_eq!(m.traffic.flows.columns.last().unwrap().title, "draft");
+        assert_eq!(m.traffic.groups.columns.last().unwrap().title, "draft");
+        assert_eq!(m.traffic.apps.columns.last().unwrap().title, "draft");
+        let row = m
+            .traffic
+            .flows
+            .rows()
+            .iter()
+            .find(|r| r.flow.fixed_by_draft())
+            .unwrap();
+        let cell = crate::tui::model::draft_flow_text(&row.flow);
+        assert!(cell.ends_with(" → allowed"), "{cell}");
+    }
+
+    #[test]
+    fn d_again_clears_the_draft_with_no_request() {
+        let mut m = model();
+        let (seq, ..) = press_d(&mut m);
+        let msg = answer(&m, seq, false);
+        update(&mut m, msg);
+        m.traffic.apps_state.decisions = Decisions::FixedByDraft;
+        assert!(update(&mut m, key('D')).is_empty());
+        assert!(!m.traffic.draft_loaded());
+        assert!(
+            m.traffic
+                .loaded_flows()
+                .iter()
+                .all(|f| f.draft_policy_decision.is_none())
+        );
+        assert_eq!(m.traffic.flows.columns.last().unwrap().title, "decision");
+        assert_eq!(
+            m.traffic.apps_state.decisions,
+            Decisions::All,
+            "fixed by draft goes with the draft"
+        );
+        assert!(m.status.text.contains("no request"), "{}", m.status.text);
+    }
+
+    #[test]
+    fn d_without_a_known_query_asks_then_runs_it_again_with_the_draft() {
+        let mut m = model_with_rich_flows(); // no hrefs: a result we cannot re-evaluate
+        assert!(update(&mut m, key('D')).is_empty());
+        let Overlay::Confirm { reason, action } = m.overlay.clone() else {
+            panic!("{:?}", m.overlay)
+        };
+        assert!(
+            reason.contains("1 POST, 1 PUT, polls and 1 download"),
+            "{reason}"
+        );
+        assert!(matches!(&action, PendingAction::RunDraft { hrefs, .. } if hrefs.is_empty()));
+        let cmds = update(&mut m, key('y'));
+        assert!(
+            matches!(cmds.as_slice(), [Cmd::RunDraft { hrefs, .. }] if hrefs.is_empty()),
+            "{cmds:?}"
+        );
+        let mut m = model_with_rich_flows();
+        update(&mut m, key('D'));
+        assert!(update(&mut m, key('n')).is_empty(), "n sends nothing");
+        assert!(!m.traffic.is_running());
+    }
+
+    #[test]
+    fn d_past_a_cost_threshold_asks_first() {
+        let mut m = model();
+        let d = m.traffic.data.as_mut().unwrap();
+        d.filter.max_results = 25_000;
+        m.traffic.filter.max_results = 25_000;
+        assert!(update(&mut m, key('D')).is_empty());
+        let Overlay::Confirm { reason, .. } = m.overlay.clone() else {
+            panic!("{:?}", m.overlay)
+        };
+        assert!(reason.contains("1 PUT, polls and 1 download"), "{reason}");
+        assert!(matches!(
+            update(&mut m, key('y')).as_slice(),
+            [Cmd::RunDraft { .. }]
+        ));
+    }
+
+    #[test]
+    fn esc_cancels_a_draft_run_and_its_late_answer_is_dropped() {
+        let mut m = model();
+        let (seq, _, _, cancel) = press_d(&mut m);
+        assert!(update(&mut m, esc()).is_empty());
+        assert!(cancel.is_cancelled());
+        assert!(!m.traffic.is_running());
+        assert_eq!(m.status.text, "draft re-evaluation cancelled");
+        let msg = answer(&m, seq, false);
+        update(&mut m, msg);
+        assert!(!m.traffic.draft_loaded(), "the late answer is dropped");
+    }
+
+    #[test]
+    fn a_new_query_a_cap_step_or_a_profile_switch_drops_the_draft_answer() {
+        // A new query (`]` steps the cap and re-runs).
+        let mut m = model();
+        let (seq, _, _, cancel) = press_d(&mut m);
+        let cmds = update(&mut m, key(']'));
+        assert!(
+            matches!(cmds.as_slice(), [Cmd::RunQuery { .. }]),
+            "{cmds:?}"
+        );
+        assert!(cancel.is_cancelled());
+        let msg = answer(&m, seq, false);
+        update(&mut m, msg);
+        assert!(!m.traffic.draft_loaded());
+        // A profile switch.
+        let mut m = model();
+        let (seq, _, _, cancel) = press_d(&mut m);
+        m.reset_data();
+        assert!(cancel.is_cancelled());
+        let mut m2 = model();
+        let msg = answer(&m2, seq, false);
+        update(&mut m, msg);
+        assert!(!m.traffic.draft_loaded());
+        // The answer is checked against the result too, past the seq.
+        let (seq, ..) = press_d(&mut m2);
+        m2.traffic.data.as_mut().unwrap().filter.window = "2h".into();
+        let msg = Msg::DraftDone {
+            seq,
+            result: Ok(DraftOutcome {
+                outcome: QueryOutcome {
+                    flows: Vec::new(),
+                    truncated: false,
+                    incomplete: false,
+                    elapsed: Duration::ZERO,
+                    hit: false,
+                    filter: model().traffic.filter.clone(),
+                    bounds: None,
+                    hrefs: vec![HREF.into()],
+                },
+                focus: None,
+            }),
+        };
+        update(&mut m2, msg);
+        assert!(!m2.traffic.draft_loaded());
+        assert_eq!(m2.status.text, "draft answer dropped: the result changed");
+    }
+
+    #[test]
+    fn a_focus_change_cancels_a_draft_run() {
+        let mut m = model();
+        let (_, _, _, cancel) = press_d(&mut m);
+        update(
+            &mut m,
+            Msg::Command(Command::Focus(Some("crm/prod".into()))),
+        );
+        assert!(cancel.is_cancelled(), "setting a focus");
+        let mut m = model();
+        update(
+            &mut m,
+            Msg::Command(Command::Focus(Some("crm/prod".into()))),
+        );
+        let (_, _, _, cancel) = press_d(&mut m);
+        update(&mut m, key('X'));
+        assert!(cancel.is_cancelled(), "its direction");
+        let (_, _, _, cancel) = press_d(&mut m);
+        update(&mut m, esc());
+        assert!(cancel.is_cancelled(), "Esc first cancels the run");
+        assert!(m.traffic.focus.is_some(), "and leaves the focus");
+    }
+
+    #[test]
+    fn a_focused_result_is_re_evaluated_by_its_hrefs_per_side() {
+        let mut m = model();
+        let focus = Focus::new(
+            vec!["crm".into(), "prod".into()],
+            vec!["app".into(), "env".into()],
+        );
+        update(
+            &mut m,
+            Msg::Command(Command::Focus(Some("crm/prod".into()))),
+        );
+        let cmds = update(&mut m, key('r'));
+        let seq = match cmds.as_slice() {
+            [Cmd::RunFocused { seq, .. }] => *seq,
+            // A complete result needs no re-query: set the focused one directly.
+            _ => m.traffic.seq,
+        };
+        let d = m.traffic.data.as_ref().unwrap();
+        let hrefs = vec!["/q/in".to_string(), "/q/out".to_string()];
+        let outcome = QueryOutcome {
+            flows: d.flows[..10].to_vec(),
+            truncated: false,
+            incomplete: false,
+            elapsed: Duration::ZERO,
+            hit: false,
+            filter: m.traffic.filter.clone(),
+            bounds: None,
+            hrefs: hrefs.clone(),
+        };
+        m.traffic.seq = seq;
+        update(
+            &mut m,
+            Msg::FocusedDone {
+                seq,
+                result: Ok(FocusedOutcome {
+                    outcome,
+                    focus: focus.clone().with_direction(FocusDirection::Both),
+                    queries: 2,
+                }),
+            },
+        );
+        assert!(m.traffic.focus_result.is_some());
+        let (seq, sent, f, _) = press_d(&mut m);
+        assert_eq!(sent, hrefs);
+        assert_eq!(f.map(|f| f.app_text()), Some("crm/prod".into()));
+        let msg = answer(&m, seq, true);
+        update(&mut m, msg);
+        assert!(m.traffic.draft_loaded());
+        assert!(m.status.text.ends_with("(cached)"), "{}", m.status.text);
+    }
+
+    #[test]
+    fn a_dropped_query_asks_to_run_it_again_and_a_refusal_keeps_the_plain_result() {
+        let mut m = model();
+        let (seq, ..) = press_d(&mut m);
+        update(
+            &mut m,
+            Msg::DraftDone {
+                seq,
+                result: Err(DraftFailure::Gone("not found: q-1".into())),
+            },
+        );
+        let Overlay::Confirm { reason, action } = m.overlay.clone() else {
+            panic!("{:?}", m.overlay)
+        };
+        assert!(
+            reason.starts_with("The PCE no longer holds this query"),
+            "{reason}"
+        );
+        assert!(matches!(action, PendingAction::RunDraft { hrefs, .. } if hrefs.is_empty()));
+        let mut m = model();
+        let (seq, ..) = press_d(&mut m);
+        let n = m.traffic.loaded_flows().len();
+        update(
+            &mut m,
+            Msg::DraftDone {
+                seq,
+                result: Err(DraftFailure::Failed("the PCE refused it".into())),
+            },
+        );
+        assert!(!m.traffic.is_running() && !m.traffic.draft_loaded());
+        assert_eq!(m.traffic.loaded_flows().len(), n, "the plain result stays");
+        assert_eq!(m.status.text, "draft: the PCE refused it");
+    }
+
+    #[test]
+    fn the_decision_filter_offers_fixed_by_draft_only_with_draft_data() {
+        let mut m = model();
+        m.traffic.view = TrafficView::Aggregate;
+        for want in [Decisions::Blocked, Decisions::BlockedOnly, Decisions::All] {
+            update(&mut m, key('d'));
+            assert_eq!(m.traffic.apps_state.decisions, want);
+        }
+        let (seq, ..) = press_d(&mut m);
+        let msg = answer(&m, seq, false);
+        update(&mut m, msg);
+        for _ in 0..3 {
+            update(&mut m, key('d'));
+        }
+        assert_eq!(m.traffic.apps_state.decisions, Decisions::FixedByDraft);
+        assert_eq!(m.status.text, "decision fixed by draft");
+        let fixed = m.traffic.data.as_ref().unwrap().draft.unwrap().fixed;
+        let total: u64 = m.traffic.groups.rows().iter().map(|g| g.flows).sum();
+        assert_eq!(total, fixed, "the pairs count only the fixed flows");
+        update(&mut m, key('d'));
+        assert_eq!(m.traffic.apps_state.decisions, Decisions::All);
     }
 }
