@@ -1139,23 +1139,17 @@ async fn traffic_query_blocked_prints_sections_per_destination_and_counts_its_ho
     assert!(!text.contains("dst labels"), "{text}");
 }
 
-/// The Explorer query for `start..end` (06:00 to 08:00 on the fixture
-/// day), answered at its own href with `body` and `matches`; expected
-/// `times` times.
-async fn mount_range(
-    server: &MockServer,
-    (start, end): (&str, &str),
-    times: u64,
-    matches: u64,
-    body: String,
-) {
-    let href = format!("/orgs/5/traffic_flows/async_queries/q-{start}-{end}");
-    let ts = |t: &str| format!("2026-10-10T{t}:00Z");
+/// The 06:00 to 08:00 query at `cap`, answered at its own href with `body`
+/// and the status's `flows_count`; expected `times` times.
+async fn mount_cap(server: &MockServer, cap: u64, times: u64, flows_count: u64, body: String) {
+    let href = format!("/orgs/5/traffic_flows/async_queries/q-{cap}");
     Mock::given(method("POST"))
         .and(path("/api/v2/orgs/5/traffic_flows/async_queries"))
-        .and(body_partial_json(
-            json!({"start_date": ts(start), "end_date": ts(end)}),
-        ))
+        .and(body_partial_json(json!({
+            "start_date": "2026-10-10T06:00:00Z",
+            "end_date": "2026-10-10T08:00:00Z",
+            "max_results": cap
+        })))
         .respond_with(
             ResponseTemplate::new(202).set_body_json(json!({"href": href, "status": "queued"})),
         )
@@ -1167,7 +1161,9 @@ async fn mount_range(
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "status": "completed",
             "result": {"href": format!("{href}/download")},
-            "matches_count": matches
+            // A bounded raw count: never a total, never the cap signal.
+            "matches_count": 2 * flows_count,
+            "flows_count": flows_count
         })))
         .mount(server)
         .await;
@@ -1182,26 +1178,14 @@ async fn mount_range(
         .await;
 }
 
-/// The fixture flows last seen at `times`, each on its own port from `port`.
-fn flows_at(times: &[&str], port: u64) -> String {
-    let mut flows: Vec<Value> =
+/// `n` fixture flows, each on its own port from `port`.
+fn rows(n: usize, port: u64) -> String {
+    let one: Vec<Value> =
         serde_json::from_str(include_str!("../../../fixtures/traffic_flows.json")).unwrap();
-    flows.truncate(times.len());
-    for (i, (f, t)) in flows.iter_mut().zip(times).enumerate() {
-        f["timestamp_range"]["last_detected"] = json!(format!("2026-10-10T{t}:00Z"));
-        f["service"]["port"] = json!(port + i as u64);
-    }
-    serde_json::to_string(&flows).unwrap()
-}
-
-/// `n` flows all last seen at 08:00, each on its own port from `port`.
-#[allow(dead_code)] // used again by the cap-raise tests
-fn burst(n: u64, port: u64) -> String {
-    let one: Vec<Value> = serde_json::from_str(&flows_at(&["08:00"], 0)).unwrap();
     let flows: Vec<Value> = (0..n)
         .map(|i| {
             let mut f = one[0].clone();
-            f["service"]["port"] = json!(port + i);
+            f["service"]["port"] = json!(port + i as u64);
             f
         })
         .collect();
@@ -1209,7 +1193,6 @@ fn burst(n: u64, port: u64) -> String {
 }
 
 /// The `max_results` of every traffic query the server saw, in order.
-#[allow(dead_code)] // used again by the cap-raise tests
 async fn sent_caps(server: &MockServer) -> Vec<u64> {
     server
         .received_requests()
@@ -1223,14 +1206,6 @@ async fn sent_caps(server: &MockServer) -> Vec<u64> {
                 .unwrap()
         })
         .collect()
-}
-
-/// 06:00 to 08:00 at cap 4: four flows over the last hour, truncated. The
-/// rate fits 30m slices, so the walk is 07:30, 07:00, 06:30, 06:00.
-async fn mount_truncated_first(server: &MockServer, times: u64) {
-    mount_objects(server).await;
-    let first = flows_at(&["08:00", "07:40", "07:20", "07:00"], 1000);
-    mount_range(server, ("06:00", "08:00"), times, 4, first).await;
 }
 
 const BACKFILL_ARGS: [&str; 8] = [
@@ -1253,21 +1228,69 @@ fn ports(out: &Value) -> Vec<u64> {
         .collect()
 }
 
+/// Truncated at 4, truncated again at 10000: without `--yes` the climb
+/// stops there and stderr names the next cap.
 #[tokio::test(flavor = "multi_thread")]
-async fn traffic_backfill_walks_the_window_and_replaces_the_truncated_rows() {
+async fn traffic_backfill_climbs_to_10000_and_asks_for_yes_above() {
     let server = MockServer::start().await;
-    mount_truncated_first(&server, 1).await;
-    for (i, (s, e, last)) in [
-        ("07:30", "08:00", "07:50"),
-        ("07:00", "07:30", "07:10"),
-        ("06:30", "07:00", "06:45"),
-        ("06:00", "06:30", "06:15"),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        mount_range(&server, (s, e), 1, 1, flows_at(&[last], 5000 + i as u64)).await;
-    }
+    mount_objects(&server).await;
+    mount_cap(&server, 4, 1, 4, rows(4, 1000)).await;
+    mount_cap(&server, 10_000, 1, 10_000, rows(5, 2000)).await;
+    let a = cmd(&server)
+        .args(BACKFILL_ARGS)
+        .arg("--backfill")
+        .assert()
+        .success();
+    let err = String::from_utf8_lossy(&a.get_output().stderr).to_string();
+    assert!(err.contains("backfill raises the cap to 10000"), "{err}");
+    assert!(
+        err.contains("backfill stopped: truncated at cap 10000; a cap of 25000 needs --yes"),
+        "{err}"
+    );
+    let out = stdout_json(a);
+    assert_eq!(ports(&out), (2000..2005).collect::<Vec<_>>(), "replaced");
+    assert_eq!(out["meta"]["cap_steps"], json!([4, 10_000]));
+    assert_eq!(out["meta"]["cap"], 10_000);
+    assert_eq!(out["meta"]["truncated"], true);
+    assert!(out["meta"]["covered"].is_null(), "{}", out["meta"]);
+    assert_eq!(sent_caps(&server).await, vec![4, 10_000]);
+    server.verify().await;
+}
+
+/// With `--yes` the climb goes on until a result is complete; each answer
+/// replaces the last (nothing summed), and a complete one covers the window.
+#[tokio::test(flavor = "multi_thread")]
+async fn traffic_backfill_with_yes_climbs_until_complete() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    mount_cap(&server, 4, 1, 4, rows(4, 1000)).await;
+    mount_cap(&server, 10_000, 1, 10_000, rows(5, 2000)).await;
+    mount_cap(&server, 25_000, 1, 3, rows(3, 3000)).await;
+    mount_cap(&server, 50_000, 0, 3, rows(3, 4000)).await;
+    let out = stdout_json(
+        cmd(&server)
+            .args(BACKFILL_ARGS)
+            .args(["--backfill", "--yes"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(ports(&out), vec![3000, 3001, 3002]);
+    assert_eq!(out["meta"]["cap_steps"], json!([4, 10_000, 25_000]));
+    assert_eq!(out["meta"]["truncated"], false);
+    assert_eq!(out["meta"]["incomplete"], false);
+    assert_eq!(out["meta"]["covered"], "2h");
+    assert!(out["meta"].get("slices").is_none(), "{}", out["meta"]);
+    // Name index (4 lists) + 3 queries of POST, status, download.
+    assert_eq!(out["meta"]["api_calls"], 4 + 3 * 3);
+    server.verify().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn traffic_backfill_on_a_complete_result_sends_nothing_more() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    mount_cap(&server, 4, 1, 3, rows(3, 1000)).await;
+    mount_cap(&server, 10_000, 0, 3, rows(3, 2000)).await;
     let out = stdout_json(
         cmd(&server)
             .args(BACKFILL_ARGS)
@@ -1275,94 +1298,54 @@ async fn traffic_backfill_walks_the_window_and_replaces_the_truncated_rows() {
             .assert()
             .success(),
     );
-    assert_eq!(
-        ports(&out),
-        vec![5000, 5001, 5002, 5003],
-        "each slice's row, newest first; the truncated rows are gone"
-    );
-    assert_eq!(out["meta"]["slices"], 4);
+    assert_eq!(out["meta"]["cap_steps"], json!([4]));
     assert_eq!(out["meta"]["covered"], "2h");
-    assert_eq!(out["meta"]["truncated"], false);
-    assert_eq!(out["meta"]["window"]["start"], "2026-10-10T06:00:00Z");
-    // Name index (4 lists) + 5 queries of POST, status, download.
-    assert_eq!(out["meta"]["api_calls"], 4 + 5 * 3);
     server.verify().await;
 }
 
-/// The first 30m slice truncates: its range is fetched again in 15m halves;
-/// `--max-slices 3` ends the run there and stderr says where to continue.
 #[tokio::test(flavor = "multi_thread")]
-async fn traffic_backfill_halves_a_truncated_slice_and_stops_at_the_limit() {
+async fn max_slices_was_removed_and_exits_2_before_any_request() {
     let server = MockServer::start().await;
-    mount_truncated_first(&server, 1).await;
-    let full = flows_at(&["07:59", "07:50", "07:40", "07:31"], 6000);
-    mount_range(&server, ("07:30", "08:00"), 1, 9, full).await;
-    mount_range(
-        &server,
-        ("07:45", "08:00"),
-        1,
-        1,
-        flows_at(&["07:55"], 7000),
-    )
-    .await;
-    mount_range(
-        &server,
-        ("07:30", "07:45"),
-        1,
-        1,
-        flows_at(&["07:35"], 7100),
-    )
-    .await;
-    mount_range(
-        &server,
-        ("07:15", "07:30"),
-        0,
-        1,
-        flows_at(&["07:20"], 7200),
-    )
-    .await;
+    for extra in [
+        &["--max-slices", "3"][..],
+        &["--backfill", "--max-slices", "3"],
+        &["--max-slices"],
+    ] {
+        cmd(&server)
+            .args(BACKFILL_ARGS)
+            .args(extra)
+            .assert()
+            .code(2)
+            .stderr(predicate::str::contains(
+                "time slices were removed: --backfill raises the cap",
+            ));
+    }
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+/// A truncated result claims no span: `covered` is null and the table
+/// footer names the cap.
+#[tokio::test(flavor = "multi_thread")]
+async fn traffic_truncated_reports_no_coverage_and_names_the_cap() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    mount_cap(&server, 4, 2, 4, rows(4, 1000)).await;
+    let out = stdout_json(cmd(&server).args(BACKFILL_ARGS).assert().success());
+    assert_eq!(out["data"].as_array().unwrap().len(), 4);
+    assert!(out["meta"]["covered"].is_null(), "{}", out["meta"]);
+    assert_eq!(out["meta"]["truncated"], true);
+    assert!(out["meta"].get("cap_steps").is_none(), "{}", out["meta"]);
     let a = cmd(&server)
         .args(BACKFILL_ARGS)
-        .args(["--backfill", "--max-slices", "3"])
+        .arg("--table")
         .assert()
         .success();
     let err = String::from_utf8_lossy(&a.get_output().stderr).to_string();
     assert!(
-        err.contains(
-            "slice 2026-10-10T07:30:00Z to 2026-10-10T08:00:00Z truncated at 4: halved to 15m"
-        ),
+        err.contains("WARNING: result truncated, capped at 4; --backfill raises the cap"),
         "{err}"
     );
-    assert!(
-        err.contains(
-            "backfill stopped after 3 queries: 6 slices of 15m left; --from 2026-10-10T06:00:00Z --to 2026-10-10T07:30:00Z continues"
-        ),
-        "{err}"
-    );
-    let out = stdout_json(a);
-    assert_eq!(ports(&out), vec![7000, 7100]);
-    assert_eq!(out["meta"]["slices"], 2);
-    assert_eq!(out["meta"]["covered"], "30m");
-    assert_eq!(out["meta"]["truncated"], true);
-    assert_eq!(out["meta"]["api_calls"], 4 + 4 * 3);
-    server.verify().await;
-    // At most 50 per run.
-    cmd(&server)
-        .args(BACKFILL_ARGS)
-        .args(["--backfill", "--max-slices", "51"])
-        .assert()
-        .code(2);
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn traffic_without_backfill_reports_coverage_only() {
-    let server = MockServer::start().await;
-    mount_truncated_first(&server, 1).await;
-    let out = stdout_json(cmd(&server).args(BACKFILL_ARGS).assert().success());
-    assert_eq!(out["data"].as_array().unwrap().len(), 4);
-    assert_eq!(out["meta"]["covered"], "1h");
-    assert_eq!(out["meta"]["truncated"], true);
-    assert!(out["meta"].get("slices").is_none(), "{}", out["meta"]);
+    assert!(!err.contains("covers"), "{err}");
     server.verify().await;
 }
 

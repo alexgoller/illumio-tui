@@ -143,13 +143,12 @@ impl Runtime {
         (self.pce.clone(), tx)
     }
 
-    /// One Explorer query in the background: the last `filter.window`, or
-    /// the slice `bounds` for `+` (answered with `SliceDone`, not `QueryDone`).
+    /// One Explorer query in the background for the last `filter.window`,
+    /// answered with `QueryDone`.
     fn run_traffic(
         &mut self,
         seq: u64,
         filter: TrafficFilter,
-        bounds: Option<(jiff::Timestamp, jiff::Timestamp)>,
         mode: CacheMode,
         cancel: CancellationToken,
     ) {
@@ -164,14 +163,7 @@ impl Runtime {
                 }
             });
             let result = async {
-                let query = match bounds {
-                    Some((start, end)) => {
-                        filter
-                            .to_query_between(start, end, &pce, CacheMode::Use)
-                            .await?
-                    }
-                    None => filter.to_query(&pce, CacheMode::Use).await?,
-                };
+                let query = filter.to_query(&pce, CacheMode::Use).await?;
                 let cached = pce.traffic(&query, mode, &cancel, Some(&ptx)).await?;
                 let idx = pce.name_index(CacheMode::Use).await?;
                 let flows = pce::traffic::resolve_flows(&cached.value.flows, &idx);
@@ -194,12 +186,7 @@ impl Runtime {
             .map_err(|e| e.to_string());
             drop(ptx);
             let _ = forward.await;
-            let msg = if bounds.is_some() {
-                Msg::SliceDone { seq, result }
-            } else {
-                Msg::QueryDone { seq, result }
-            };
-            let _ = tx.send(msg);
+            let _ = tx.send(Msg::QueryDone { seq, result });
             let _ = tx.send(Msg::Stats(pce.stats()));
         });
     }
@@ -237,7 +224,6 @@ impl Runtime {
                     .ok()
                     .zip(query.end_date.parse().ok());
                 let queries = ft.query_count();
-                let coverage = ft.coverage;
                 Ok::<_, pce::PceError>(FocusedOutcome {
                     outcome: QueryOutcome {
                         flows: ft.flows,
@@ -250,7 +236,6 @@ impl Runtime {
                     },
                     focus,
                     queries,
-                    coverage,
                 })
             }
             .await
@@ -396,14 +381,7 @@ impl Runtime {
                 filter,
                 mode,
                 cancel,
-            } => self.run_traffic(seq, filter, None, mode, cancel),
-            Cmd::RunSlice {
-                seq,
-                filter,
-                start,
-                end,
-                cancel,
-            } => self.run_traffic(seq, filter, Some((start, end)), CacheMode::Use, cancel),
+            } => self.run_traffic(seq, filter, mode, cancel),
             Cmd::RunFocused {
                 seq,
                 filter,
@@ -660,7 +638,6 @@ impl Runtime {
                 | Msg::IndexLoaded { .. }
                 | Msg::IndexFailed(_)
                 | Msg::QueryDone { .. }
-                | Msg::SliceDone { .. }
                 | Msg::FocusedDone { .. }
                 | Msg::RuleSetsLoaded { .. }
                 | Msg::DenyRulesLoaded { .. }

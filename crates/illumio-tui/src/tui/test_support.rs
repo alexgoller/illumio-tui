@@ -115,7 +115,7 @@ pub fn model_with_window(window: &str) -> Model {
     let start = end.checked_sub(span).expect("start");
     if let Some(d) = m.traffic.data.as_mut() {
         d.filter = m.traffic.filter.clone();
-        d.slices = Some(crate::tui::model::Slices::new(start, end));
+        d.range = Some(crate::tui::model::Range { start, end });
     }
     m
 }
@@ -132,9 +132,7 @@ pub fn model_with_flows() -> Model {
         cache_hit: false,
         fetched_at: Instant::now() - Duration::from_secs(3),
         filter: m.traffic.filter.clone(),
-        slices: None,
-        backfill: None,
-        side_coverage: None,
+        range: None,
     });
     m.traffic.query = QueryState::Idle;
     m.traffic.auto.last_run = Some(Instant::now() - Duration::from_secs(3));

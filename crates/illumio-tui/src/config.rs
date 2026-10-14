@@ -7,8 +7,9 @@
 //! `[profiles.<name>.labels]` (or `ILLUMIO_SCOPE_KEYS`, `ILLUMIO_TIER_KEY`)
 //! names the label model the TUI writes rules in; its `ignore_keys` (or
 //! `ILLUMIO_IGNORE_KEYS`) hides housekeeping keys from label columns.
-//! `traffic_auto_backfill` (or `ILLUMIO_AUTO_BACKFILL`) lets the TUI fill a
-//! truncated traffic result without asking; off unless written down.
+//! `traffic_auto_backfill` (or `ILLUMIO_AUTO_BACKFILL`) lets the TUI re-run
+//! a truncated traffic result at a cap of 10000 without asking; off unless
+//! written down.
 //! The tool never writes secrets anywhere.
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -79,7 +80,7 @@ pub struct Limits {
     pub auto_refresh_min_seconds: Option<u64>,
     pub traffic_max_results: Option<u32>,
     pub traffic_default_window: Option<String>,
-    /// Start the traffic backfill after a truncated query without asking
+    /// Re-run a truncated traffic query below 10000 at 10000 without `B`
     /// (the user saying yes in advance, in writing).
     pub traffic_auto_backfill: Option<bool>,
 }
@@ -142,7 +143,7 @@ pub struct ResolvedConfig {
     pub traffic_max_results: u32,
     pub traffic_default_window: String,
     /// `traffic_auto_backfill` or `ILLUMIO_AUTO_BACKFILL`: a truncated
-    /// query with low coverage starts the backfill without the `y`.
+    /// query below 10000 is re-run at 10000 without `B`.
     pub traffic_auto_backfill: bool,
     pub writes: bool,
     /// Label keys a ruleset scope is made of, in order.

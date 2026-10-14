@@ -1,6 +1,6 @@
 //! The ladders the TUI steps the window (`+`/`-`) and the result cap
 //! (`]`/`[`) along. Pure: no clock, no network.
-use super::query::{MAX_TRAFFIC_MAX_RESULTS, parse_window};
+use super::query::{CONFIRM_MAX_RESULTS, MAX_TRAFFIC_MAX_RESULTS, parse_window};
 use std::time::Duration;
 
 /// Window steps, shortest first. A window between two steps snaps to the
@@ -53,6 +53,18 @@ pub fn next_cap(current: u32, start: u32) -> Option<u32> {
 /// The last rung below `current`; `None` at the bottom of the ladder.
 pub fn prev_cap(current: u32, start: u32) -> Option<u32> {
     cap_ladder(start).rev().find(|&c| c < current)
+}
+
+/// The cap a backfill re-runs a truncated window at: the confirmation
+/// threshold (10000) from below it, since every rung under it would be a
+/// query that asks nothing, then the next `CAP_STEPS` rung (25000, 50000,
+/// 100000, 200000). `None` at the hard maximum. Explorer cannot page a
+/// result, so a larger cap is the only way to more of the same window.
+pub fn backfill_cap(current: u32) -> Option<u32> {
+    if current < CONFIRM_MAX_RESULTS {
+        return Some(CONFIRM_MAX_RESULTS);
+    }
+    CAP_STEPS.into_iter().find(|&c| c > current)
 }
 
 #[cfg(test)]
@@ -135,5 +147,17 @@ mod tests {
         assert_eq!(prev_cap(20_000, 10_000), Some(10_000));
         assert_eq!(prev_cap(300_000, 10_000), Some(200_000));
         assert_eq!(next_cap(300_000, 10_000), None);
+    }
+
+    #[test]
+    fn backfill_jumps_to_10000_then_climbs_the_rungs() {
+        assert_eq!(backfill_cap(200), Some(10_000));
+        assert_eq!(backfill_cap(9_999), Some(10_000));
+        assert_eq!(backfill_cap(10_000), Some(25_000));
+        assert_eq!(backfill_cap(15_000), Some(25_000));
+        assert_eq!(backfill_cap(25_000), Some(50_000));
+        assert_eq!(backfill_cap(50_000), Some(100_000));
+        assert_eq!(backfill_cap(100_000), Some(200_000));
+        assert_eq!(backfill_cap(200_000), None);
     }
 }

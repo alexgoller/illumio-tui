@@ -11,11 +11,11 @@ use pce::models::{
     ActorMatch, PolicyDecision, ServiceMatch, TrafficQuery, WorkloadFilter, proto_number,
 };
 use pce::traffic::{
-    AppSection, BackfillRun, CONFIRM_MAX_RESULTS, Decisions, Direction, FilterExpr, FlowGroup,
-    Focus, FocusDirection, MAX_SLICES, MAX_TRAFFIC_MAX_RESULTS, MeshColumns, MeshRow, Next,
-    ResolvedFlow, Step, TrafficQueryBuilder, app_header, app_sections, app_sections_both,
-    compact_duration, coverage, format_timestamp, group_by_labels, group_by_service, merge_flows,
-    mesh, parse_app, parse_window, plan_backfill, resolve_actor, resolve_flows,
+    AppSection, CONFIRM_MAX_RESULTS, Decisions, Direction, FilterExpr, FlowGroup, Focus,
+    FocusDirection, MAX_TRAFFIC_MAX_RESULTS, MeshColumns, MeshRow, ResolvedFlow,
+    TrafficQueryBuilder, app_header, app_sections, app_sections_both, backfill_cap,
+    compact_duration, group_by_labels, group_by_service, mesh, parse_app, parse_window,
+    resolve_actor, resolve_flows,
 };
 use pce::{KeyOrder, NameIndex};
 use serde::Serialize;
@@ -126,7 +126,7 @@ pub struct CliFocus {
 
 /// The offline checks of `--app`: `--direction` with `--by` sections (the
 /// sections already choose a direction), `--backfill` with a focused query
-/// (its slices would not be focused). Without `--direction` the direction is
+/// (it re-runs the unfocused query). Without `--direction` the direction is
 /// `--by`'s (`in`, `out`), else `both`.
 pub fn cli_focus(
     args: &FilterArgs,
@@ -151,7 +151,7 @@ pub fn cli_focus(
     let query = focus.is_label_group() || by == ByArg::Pairs;
     if query && args.backfill {
         return Err(CliError::Args(
-            "--backfill does not combine with --app: the slices would not be focused".into(),
+            "--backfill does not combine with --app: raise --max-results instead".into(),
         ));
     }
     Ok(Some(CliFocus { focus, query }))
@@ -238,14 +238,14 @@ pub struct FilterArgs {
     /// Confirm an expensive query (window > 7d or max_results > 10000)
     #[arg(long)]
     pub yes: bool,
-    /// When the result is truncated, fetch the window again in slices that fit the cap
-    /// (raised if needed, past 10000 only with --yes), newest first; meta.slices counts them
+    /// When the result is truncated, re-run the same window at a larger cap until it is
+    /// complete: 10000, then 25000, 50000, 100000, 200000 (above 10000 only with --yes).
+    /// Each run replaces the last; meta.cap_steps lists the caps tried
     #[arg(long)]
     pub backfill: bool,
-    /// With --backfill: at most this many slice queries per run (1 to 50, default 50);
-    /// stderr names the --from/--to that continue
-    #[arg(long, requires = "backfill", value_parser = clap::value_parser!(u32).range(1..=50))]
-    pub max_slices: Option<u32>,
+    /// Removed: time slices gave wrong counts. Passing it exits 2
+    #[arg(long, hide = true, num_args = 0..=1)]
+    pub max_slices: Option<Option<String>>,
     /// Focus on one app, e.g. shop/prod: a group of the keys the command groups by (groups and
     /// mesh: --keys; query: --group; else the profile's scope keys). Its labels go into the
     /// query, so the cap is spent on it
@@ -309,6 +309,11 @@ pub async fn build_query(
     args: &FilterArgs,
     queries: u32,
 ) -> Result<BuiltQuery, CliError> {
+    if args.max_slices.is_some() {
+        return Err(CliError::Args(
+            "time slices were removed: --backfill raises the cap".into(),
+        ));
+    }
     let mut b = match (&args.from, &args.to) {
         (Some(f), Some(t)) => {
             TrafficQueryBuilder::between(parse_time(f, false)?, parse_time(t, true)?)
@@ -826,17 +831,21 @@ pub async fn run(ctx: &Context, cmd: &TrafficCmd) -> Result<(), CliError> {
     }
 }
 
-/// One query's flows (with `--backfill`, every slice's merged), resolved,
-/// and what the envelope reports about them.
+/// One query's flows (with `--backfill`, the last cap's), resolved, and
+/// what the envelope reports about them.
 pub(crate) struct Fetched {
     pub(crate) flows: Vec<ResolvedFlow>,
     pub(crate) cache: &'static str,
     pub(crate) truncated: bool,
+    /// A supercluster region did not respond.
+    pub(crate) incomplete: bool,
     pub(crate) window: Option<Window>,
-    /// How much of the window the flows cover.
-    pub(crate) covered: Duration,
-    /// `--backfill`: the queries merged.
-    pub(crate) slices: Option<u32>,
+    /// The window's length: what a complete result covers.
+    pub(crate) span: Duration,
+    /// The cap the flows were fetched at.
+    pub(crate) cap: u32,
+    /// `--backfill`: every cap tried, the first query's included.
+    pub(crate) cap_steps: Option<Vec<u32>>,
     /// `--app`: the Explorer queries the result took.
     pub(crate) queries: Option<u32>,
 }
@@ -844,132 +853,72 @@ pub(crate) struct Fetched {
 impl Fetched {
     pub(crate) fn meta(&self, ctx: &Context) -> Meta {
         let mut m = ctx.meta(self.cache, self.truncated, self.window.clone());
-        m.covered = Some(compact_duration(self.covered));
-        m.slices = self.slices;
+        // A complete result covers its window; a truncated one an unknown
+        // part of it, so it claims no span.
+        m.covered = Some((!self.truncated).then(|| compact_duration(self.span)));
+        m.cap = Some(self.cap);
+        m.cap_steps = self.cap_steps.clone();
+        m.incomplete = Some(self.incomplete);
         m.queries = self.queries;
         m
     }
 }
 
-/// What a backfill left: the slices merged, the covered span, and whether
-/// the window is still not fully covered (or a slice was cut).
-struct Backfilled {
-    slices: u32,
-    covered: Duration,
-    truncated: bool,
-}
-
-/// `--backfill` on a truncated result: the whole window again, newest
-/// first, in slices sized from the result's rate at the smallest cap that
-/// fits it in `MAX_SLICES` (up to the hard maximum, and past 10000 only
-/// with `--yes`). The first slice replaces the truncated rows (an unordered cut
-/// of the whole window), later ones merge. A truncated slice is dropped and
-/// its range fetched again in halves; one that truncates at 1m stops. At
-/// most `max` queries; the rest is reported on stderr. `None` when there
-/// is nothing to measure the rate on.
+/// `--backfill` on a truncated result: the same window again at the next
+/// cap (`backfill_cap`: 10000, then 25000 to 200000), each answer replacing
+/// the last, until one is complete or the next cap needs `--yes`. Explorer
+/// cannot page a result, so this is the only way to the rest of it.
 async fn backfill(
     ctx: &Context,
     args: &FilterArgs,
     q: &TrafficQuery,
     idx: &NameIndex,
-    flows: &mut Vec<ResolvedFlow>,
-) -> Result<Option<Backfilled>, CliError> {
-    let (Ok(start), Ok(end)) = (
-        q.start_date.parse::<Timestamp>(),
-        q.end_date.parse::<Timestamp>(),
-    ) else {
-        return Ok(None);
-    };
-    let window = q.window();
-    let cov = coverage(flows, window);
-    let max_cap = if args.yes {
+    f: &mut Fetched,
+) -> Result<(), CliError> {
+    let ceiling = if args.yes {
         MAX_TRAFFIC_MAX_RESULTS
     } else {
         CONFIRM_MAX_RESULTS
     };
-    let Some(plan) = plan_backfill(&cov, true, q.max_results, max_cap, window) else {
-        eprintln!("cannot measure coverage: no last-seen times");
-        return Ok(None);
-    };
-    if plan.cap > q.max_results {
-        eprintln!("backfill raises the cap to {}", plan.cap);
-    }
-    let max = args.max_slices.unwrap_or(MAX_SLICES);
-    let mut run = BackfillRun::new(plan.slice, start, end, max);
-    let mut slice_q = q.clone();
-    slice_q.max_results = plan.cap;
-    let mut slices = 0;
-    let mut cut = false;
-    loop {
-        let (s, e) = match run.next_slice() {
-            Next::Done => break,
-            Next::OverBudget { remaining } => {
-                eprintln!(
-                    "backfill stopped after {max} queries: {remaining} slices of {} left; \
-                     --from {} --to {} continues",
-                    compact_duration(run.slice),
-                    format_timestamp(start),
-                    format_timestamp(run.next_end)
-                );
-                break;
-            }
-            Next::Slice(s, e) => (s, e),
-        };
-        slice_q.start_date = format_timestamp(s);
-        slice_q.end_date = format_timestamp(e);
-        let r = ctx
-            .pce
-            .traffic(&slice_q, ctx.cache_mode, &CancellationToken::new(), None)
-            .await?;
-        let step = run.answered(r.truncated);
-        if let Step::Retry { slice } = step {
+    let mut q = q.clone();
+    let mut steps = vec![q.max_results];
+    while f.truncated {
+        let Some(next) = backfill_cap(q.max_results) else {
             eprintln!(
-                "slice {} to {} truncated at {}: halved to {}",
-                format_timestamp(s),
-                format_timestamp(e),
-                plan.cap,
-                compact_duration(slice)
+                "backfill stopped: truncated at the maximum cap of {MAX_TRAFFIC_MAX_RESULTS}; narrow the filter"
             );
-            continue;
-        }
-        let more = resolve_flows(&r.value.flows, idx);
-        if slices == 0 {
-            *flows = more;
-        } else {
-            merge_flows(flows, more);
-        }
-        slices += 1;
-        if step == Step::TooSmall {
-            cut = true;
-            if plan.cap < MAX_TRAFFIC_MAX_RESULTS {
-                eprintln!(
-                    "cap {} is too small for this PCE at 1m: raise --max-results (up to {MAX_TRAFFIC_MAX_RESULTS})",
-                    plan.cap
-                );
-            } else {
-                eprintln!(
-                    "cap {} is too small for this PCE at 1m: narrow the filter",
-                    plan.cap
-                );
-            }
+            break;
+        };
+        if next > ceiling {
+            eprintln!(
+                "backfill stopped: truncated at cap {}; a cap of {next} needs --yes",
+                q.max_results
+            );
             break;
         }
+        eprintln!("backfill raises the cap to {next}");
+        q.max_results = next;
+        let r = ctx
+            .pce
+            .traffic(&q, ctx.cache_mode, &CancellationToken::new(), None)
+            .await?;
+        steps.push(next);
+        f.flows = resolve_flows(&r.value.flows, idx);
+        f.cache = cache_label(r.hit, ctx.cache_mode);
+        f.truncated = r.truncated;
+        f.incomplete = r.value.incomplete;
+        f.cap = next;
     }
-    if slices == 0 {
-        return Ok(None); // nothing merged: the truncated result stays
-    }
-    Ok(Some(Backfilled {
-        slices,
-        covered: end.duration_since(run.next_end).unsigned_abs().min(window),
-        truncated: cut || run.next_end > start,
-    }))
+    f.cap_steps = Some(steps);
+    Ok(())
 }
 
 /// Builds and runs the query (cost guard, cache, one name index): with a
 /// focused `--app`, one query per side through `Pce::focused_traffic`,
 /// after the app's labels are checked (an unknown one is exit 2 before any
-/// traffic request). A dry run prints the request body (with `--app`, the
-/// bodies) and returns `None`.
+/// traffic request). An unfocused query is submitted while the name index
+/// loads, so the PCE computes meanwhile. A dry run prints the request body
+/// (with `--app`, the bodies) and returns `None`.
 pub(crate) async fn fetch(
     ctx: &Context,
     args: &FilterArgs,
@@ -988,11 +937,11 @@ pub(crate) async fn fetch(
         ctx.emit(&DryRun(q), "none", false, window)?;
         return Ok(None);
     }
-    let idx = match index {
-        Some(idx) => idx,
-        None => ctx.pce.name_index(ctx.cache_mode).await?,
-    };
     if let Some(focus) = focus {
+        let idx = match index {
+            Some(idx) => idx,
+            None => ctx.pce.name_index(ctx.cache_mode).await?,
+        };
         let queries = focus.queries(&q, &idx).map_err(CliError::Args)?;
         if args.dry_run {
             let bodies = DryRuns(queries.into_iter().map(|(_, q)| q).collect());
@@ -1011,50 +960,45 @@ pub(crate) async fn fetch(
                 None,
             )
             .await?;
-        // A truncated side covers less than the merged rows suggest.
-        let covered = match ft.coverage {
-            Some(c) if ft.truncated => c.covered.min(q.window()),
-            _ if ft.truncated => coverage(&ft.flows, q.window()).covered,
-            _ => q.window(),
-        };
         return Ok(Some(Fetched {
             queries: Some(ft.query_count()),
             cache: cache_label(ft.hit, ctx.cache_mode),
             truncated: ft.truncated,
+            incomplete: ft.incomplete,
             window,
-            covered,
-            slices: None,
+            span: q.window(),
+            cap: q.max_results,
+            cap_steps: None,
             flows: ft.flows,
         }));
     }
-    let result = ctx
-        .pce
-        .traffic(&q, ctx.cache_mode, &CancellationToken::new(), None)
-        .await?;
+    let cancel = CancellationToken::new();
+    let (result, idx) = match index {
+        Some(idx) => (
+            ctx.pce.traffic(&q, ctx.cache_mode, &cancel, None).await?,
+            idx,
+        ),
+        None => {
+            let (r, idx) = tokio::join!(
+                ctx.pce.traffic(&q, ctx.cache_mode, &cancel, None),
+                ctx.pce.name_index(ctx.cache_mode)
+            );
+            (r?, idx?)
+        }
+    };
     let mut f = Fetched {
         flows: resolve_flows(&result.value.flows, &idx),
         cache: cache_label(result.hit, ctx.cache_mode),
         truncated: result.truncated,
+        incomplete: result.value.incomplete,
         window,
-        covered: Duration::ZERO,
-        slices: None,
+        span: q.window(),
+        cap: q.max_results,
+        cap_steps: None,
         queries: None,
     };
-    // A complete result covers its window, whatever its rows' times.
-    f.covered = if f.truncated {
-        coverage(&f.flows, q.window()).covered
-    } else {
-        q.window()
-    };
     if args.backfill {
-        f.slices = Some(0);
-        if f.truncated
-            && let Some(b) = backfill(ctx, args, &q, &idx, &mut f.flows).await?
-        {
-            f.slices = Some(b.slices);
-            f.covered = b.covered;
-            f.truncated = b.truncated;
-        }
+        backfill(ctx, args, &q, &idx, &mut f).await?;
     }
     Ok(Some(f))
 }

@@ -7,8 +7,8 @@ expression: out
 ╭ Filters ───────────────────────────────────── window 1d · cap 30 · unbounded ╮
 │window 1d  src *  dst *  svc *  decision all                                  │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭ Result ───────────────────── 30 flows · covers 4m of 1d · truncated · 0s ago ╮
-│30 flows allowed 15 pot.blocked 7 blocked 7  ⚠ truncat██▅██▅██▅█▅▃ ███████████│
+╭ Result ─────────────────── 30 flows, capped at 30; B raises the cap · 0s ago ╮
+│30 flows allowed 15 pot.blocked 7 blocked 7  ⚠ truncat▅▄▂▂▂▃▄▃▃▄█▂ ███████████│
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭ Flows ───────────────────────────────────────────────────────────────────────╮
 │  src            src group  dst            dst group  service   conns decision│
@@ -25,4 +25,4 @@ expression: out
 │                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-cap 30 covers ~4 minutes of 1d: ] raises the cap, B backfills the window ? help
+30 flows, capped at 30; B raises the cap                                 ? help

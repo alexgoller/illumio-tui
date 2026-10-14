@@ -236,24 +236,18 @@ fn traffic_flows_160x48_with_detail() {
     insta::assert_snapshot!("traffic_flows_160x48_detail", out);
 }
 
-/// A truncated `1d` result whose flows span 4 minutes: the Result header
-/// says how much it covers.
+/// A truncated `1d` result names its cap and claims no time span; the
+/// status says what `B` does.
 #[test]
-fn traffic_coverage_header_80x24() {
+fn traffic_truncated_header_80x24() {
     use illumio_tui::tui::filter::TrafficFilter;
     use illumio_tui::tui::msg::{Msg, QueryOutcome};
     use illumio_tui::tui::test_support::{FIXTURE_END, fixture_flows_rich};
     use illumio_tui::tui::update;
     let mut m = model_fixture();
     let end: jiff::Timestamp = FIXTURE_END.parse().unwrap();
-    let mut flows = fixture_flows_rich();
+    let flows = fixture_flows_rich();
     let n = flows.len();
-    for (i, f) in flows.iter_mut().enumerate() {
-        let t = end
-            .checked_sub(jiff::Span::new().seconds((i * 240 / (n - 1)) as i64))
-            .unwrap();
-        f.last_detected = Some(pce::traffic::format_timestamp(t));
-    }
     let filter = TrafficFilter::defaults("1d", n as u32);
     update(&mut m, Msg::ApplyFilter(filter.clone()));
     let seq = m.traffic.seq;
@@ -273,23 +267,12 @@ fn traffic_coverage_header_80x24() {
             }),
         },
     );
-    assert!(
-        m.status.text.starts_with(&format!(
-            "cap {n} covers ~4 minutes of 1d: ] raises the cap"
-        )),
-        "{}",
-        m.status.text
-    );
+    let text = format!("{n} flows, capped at {n}; B raises the cap");
+    assert_eq!(m.status.text, text);
     let out = render_to_string(&m, 80, 24);
-    assert!(
-        out.contains(&format!("{n} flows · covers 4m of 1d · truncated")),
-        "{out}"
-    );
-    assert!(
-        out.lines().last().unwrap().contains("B backfills"),
-        "the warning outranks the key hints at 80 columns: {out}"
-    );
-    insta::assert_snapshot!("traffic_coverage_header_80x24", out);
+    assert!(out.contains(&text), "{out}");
+    assert!(!out.contains("covers"), "{out}");
+    insta::assert_snapshot!("traffic_truncated_header_80x24", out);
 }
 
 #[test]

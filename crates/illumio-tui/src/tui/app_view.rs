@@ -417,9 +417,7 @@ mod tests {
             cache_hit: false,
             fetched_at: std::time::Instant::now(),
             filter: m.traffic.filter.clone(),
-            slices: None,
-            backfill: None,
-            side_coverage: None,
+            range: None,
         };
         m.traffic.apply_focused(f.clone(), 2, data);
         assert!(!m.traffic.partial_for(&f), "a focused result covers it");

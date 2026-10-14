@@ -59,14 +59,20 @@ pub struct Meta {
     pub truncated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window: Option<Window>,
-    /// Traffic: how much of `window` the flows cover (`4m`; the window
-    /// itself when the result is complete).
+    /// Traffic: the window's length (`1d`) when the result is complete,
+    /// `null` when it is truncated (it covers an unknown part of it).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub covered: Option<String>,
-    /// Traffic with `--backfill`: the slices merged into the result (the
-    /// truncated first query is replaced, so it does not count).
+    pub covered: Option<Option<String>>,
+    /// Traffic: the cap the result was fetched at.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub slices: Option<u32>,
+    pub cap: Option<u32>,
+    /// Traffic with `--backfill`: every cap tried, in order, the first
+    /// query's included; the last one is the result's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cap_steps: Option<Vec<u32>>,
+    /// Traffic: a supercluster region did not respond, so rows are missing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub incomplete: Option<bool>,
     /// Traffic with `--app`: the Explorer queries the result took (one per
     /// side: 2 for `both`).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -275,11 +281,12 @@ pub fn meta_line(meta: &Meta) -> String {
         meta.cache,
         meta.elapsed_ms
     );
-    if let Some(c) = &meta.covered {
+    if let Some(Some(c)) = &meta.covered {
         s.push_str(&format!(" · covers {c}"));
     }
-    if let Some(n) = meta.slices {
-        s.push_str(&format!(" · {n} slice{}", if n == 1 { "" } else { "s" }));
+    if let Some(steps) = meta.cap_steps.as_ref().filter(|s| s.len() > 1) {
+        let caps: Vec<String> = steps.iter().map(u32::to_string).collect();
+        s.push_str(&format!(" · caps {}", caps.join(" → ")));
     }
     if let Some(n) = meta.queries {
         s.push_str(&format!(" · {}", pce::traffic::queries_text(n)));
@@ -289,8 +296,15 @@ pub fn meta_line(meta: &Meta) -> String {
         Some(u) => s.push_str(&format!(" · usage from {u}")),
         None => {}
     }
-    if meta.truncated {
-        s.push_str(" · WARNING: result truncated");
+    match (meta.truncated, meta.cap) {
+        (true, Some(cap)) => s.push_str(&format!(
+            " · WARNING: result truncated, capped at {cap}; --backfill raises the cap"
+        )),
+        (true, None) => s.push_str(" · WARNING: result truncated"),
+        _ => {}
+    }
+    if meta.incomplete == Some(true) {
+        s.push_str(" · WARNING: incomplete, a PCE region did not respond");
     }
     if let Some(w) = &meta.write {
         s.push_str(&format!(
@@ -383,7 +397,9 @@ mod tests {
             truncated: false,
             window: None,
             covered: None,
-            slices: None,
+            cap: None,
+            cap_steps: None,
+            incomplete: None,
             queries: None,
             write: Some(WriteMeta {
                 method: WriteMethod::Post,

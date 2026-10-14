@@ -35,8 +35,6 @@ pub struct FocusedOutcome {
     pub outcome: QueryOutcome,
     pub focus: Focus,
     pub queries: u32,
-    /// The least coverage of the truncated sides (`FocusedTraffic::coverage`).
-    pub coverage: Option<pce::traffic::Coverage>,
 }
 
 /// The app overlay's workloads: the PCE's answer to the label filter, and
@@ -99,11 +97,6 @@ pub enum Msg {
         progress: QueryProgress,
     },
     QueryDone {
-        seq: u64,
-        result: Result<QueryOutcome, String>,
-    },
-    /// The answer to `Cmd::RunSlice`: merged into the loaded flows.
-    SliceDone {
         seq: u64,
         result: Result<QueryOutcome, String>,
     },
@@ -181,15 +174,6 @@ pub enum Cmd {
         seq: u64,
         filter: TrafficFilter,
         mode: CacheMode,
-        cancel: CancellationToken,
-    },
-    /// `+`: the same filter for one older slice, `start` to `end` (the
-    /// loaded start), answered with `Msg::SliceDone`.
-    RunSlice {
-        seq: u64,
-        filter: TrafficFilter,
-        start: jiff::Timestamp,
-        end: jiff::Timestamp,
         cancel: CancellationToken,
     },
     /// `r` on a partial focus: `filter` with the app's labels on its side,
@@ -301,22 +285,6 @@ impl PartialEq for Cmd {
                     ..
                 },
             ) => a == b && fa == fb && ma == mb,
-            (
-                Cmd::RunSlice {
-                    seq: a,
-                    filter: fa,
-                    start: sa,
-                    end: ea,
-                    ..
-                },
-                Cmd::RunSlice {
-                    seq: b,
-                    filter: fb,
-                    start: sb,
-                    end: eb,
-                    ..
-                },
-            ) => a == b && fa == fb && sa == sb && ea == eb,
             (
                 Cmd::RunFocused {
                     seq: a,

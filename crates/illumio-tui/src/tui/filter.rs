@@ -137,15 +137,7 @@ impl TrafficFilter {
     }
 
     pub fn cost_hint(&self) -> String {
-        self.cost_hint_with_slices(1)
-    }
-
-    /// `cost_hint` with `· N slices` after the cap when `+` merged more than one.
-    pub fn cost_hint_with_slices(&self, slices: usize) -> String {
         let mut s = format!("window {} · cap {}", self.window, self.max_results);
-        if slices > 1 {
-            s.push_str(&format!(" · {slices} slices"));
-        }
         if self.is_unbounded() {
             s.push_str(" · unbounded");
         }
@@ -203,7 +195,7 @@ impl TrafficFilter {
             .await
     }
 
-    /// The same query for one slice, `start` to `end` (what `+` fetches).
+    /// The same query for `start` to `end` (an exact timeline's bucket).
     pub async fn to_query_between(
         &self,
         start: Timestamp,
@@ -404,11 +396,6 @@ mod tests {
         assert_eq!(f.window, "24h");
         assert!(f.is_unbounded());
         assert_eq!(f.cost_hint(), "window 24h · cap 1000 · unbounded");
-        assert_eq!(f.cost_hint_with_slices(1), f.cost_hint());
-        assert_eq!(
-            f.cost_hint_with_slices(3),
-            "window 24h · cap 1000 · 3 slices · unbounded"
-        );
         assert!(f.needs_confirmation().is_none());
         assert_eq!(f.summary(), "window 24h  src *  dst *  svc *  decision all");
     }
