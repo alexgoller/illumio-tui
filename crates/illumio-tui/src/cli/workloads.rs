@@ -45,6 +45,20 @@ pub struct WorkloadsArgs {
     /// Only workloads whose VEN is in warning, error or offline state (local filter)
     #[arg(long)]
     pub unhealthy: bool,
+    /// Only workloads whose VEN is offline: online false, or no heartbeat
+    /// for 15 minutes (local filter, the app's `o`)
+    #[arg(long)]
+    pub offline: bool,
+    /// Only workloads without a label for one of these keys (comma-separated);
+    /// alone, the profile's scope keys and tier key (local filter, the app's `u`)
+    #[arg(
+        long,
+        value_name = "KEYS",
+        num_args = 0..=1,
+        value_delimiter = ',',
+        default_missing_value = ""
+    )]
+    pub unlabeled: Option<Vec<String>>,
 }
 
 /// `workloads` lists by default; `add`, `update` and `delete` write
@@ -288,6 +302,9 @@ pub struct WorkloadRow {
     pub health: VenHealth,
     pub sync_state: Option<String>,
     pub heartbeat_age_secs: Option<u64>,
+    /// With `--unlabeled`: the keys checked that have no label.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub missing_labels: Option<Vec<String>>,
     /// The table's `labels` cell, keys in the profile's [`KeyOrder`]; JSON
     /// carries the `labels` array itself.
     #[serde(skip)]
@@ -308,9 +325,26 @@ impl WorkloadRow {
             heartbeat_age_secs: workload.heartbeat_age(now).map(|d| d.as_secs()),
             sync_state: a.and_then(|a| a.sync_state),
             enforcement: workload.enforcement().map(str::to_string),
+            missing_labels: None,
             health,
             workload,
         }
+    }
+}
+
+/// `--unlabeled`'s keys: the ones named (blanks dropped, repeats once),
+/// else `model` (the profile's scope keys, then its tier key).
+fn unlabeled_keys(named: &[String], model: &[String]) -> Vec<String> {
+    let mut keys: Vec<String> = Vec::new();
+    for k in named.iter().map(|k| k.trim()).filter(|k| !k.is_empty()) {
+        if !keys.iter().any(|x| x == k) {
+            keys.push(k.to_string());
+        }
+    }
+    if keys.is_empty() {
+        model.to_vec()
+    } else {
+        keys
     }
 }
 
@@ -326,8 +360,9 @@ fn compact_age(secs: Option<u64>) -> String {
 }
 
 impl TableRows for Vec<WorkloadRow> {
+    /// `missing` last when `--unlabeled` filled it.
     fn headers(&self) -> Vec<&'static str> {
-        vec![
+        let mut h = vec![
             "hostname",
             "name",
             "ip",
@@ -339,13 +374,18 @@ impl TableRows for Vec<WorkloadRow> {
             "heartbeat",
             "health",
             "href",
-        ]
+        ];
+        if self.iter().any(|r| r.missing_labels.is_some()) {
+            h.push("missing");
+        }
+        h
     }
     fn rows(&self) -> Vec<Vec<String>> {
+        let missing = self.iter().any(|r| r.missing_labels.is_some());
         self.iter()
             .map(|r| {
                 let w = &r.workload;
-                vec![
+                let mut row = vec![
                     w.hostname.clone().unwrap_or_default(),
                     w.name.clone().unwrap_or_default(),
                     w.primary_ip().unwrap_or("").to_string(),
@@ -357,7 +397,11 @@ impl TableRows for Vec<WorkloadRow> {
                     compact_age(r.heartbeat_age_secs),
                     r.health.as_str().to_string(),
                     w.href.clone(),
-                ]
+                ];
+                if missing {
+                    row.push(r.missing_labels.as_deref().unwrap_or_default().join(", "));
+                }
+                row
             })
             .collect()
     }
@@ -411,6 +455,16 @@ fn enforcement_query(
 
 pub async fn run(ctx: &Context, args: &WorkloadsArgs) -> Result<(), CliError> {
     let (enforcement_mode, managed) = enforcement_query(args.enforcement.as_deref(), args.managed)?;
+    // `online` is the PCE's flag; offline is the VEN health (a stale
+    // heartbeat too), so `--offline` is never sent as `online=false`.
+    if args.offline && args.online == Some(true) {
+        return Err(CliError::Args("--offline contradicts --online true".into()));
+    }
+    let order = ctx.config.key_order();
+    let unlabeled = args
+        .unlabeled
+        .as_deref()
+        .map(|named| unlabeled_keys(named, order.first()));
     let mut filter = WorkloadFilter {
         name: args.name.clone(),
         hostname: args.hostname.clone(),
@@ -442,11 +496,16 @@ pub async fn run(ctx: &Context, args: &WorkloadsArgs) -> Result<(), CliError> {
     }
     let c = ctx.pce.workloads(&filter, ctx.cache_mode).await?;
     let now = jiff::Timestamp::now();
-    let order = ctx.config.key_order();
     let rows: Vec<WorkloadRow> = c
         .value
         .into_iter()
-        .map(|w| WorkloadRow::new(w, now, &order))
+        .map(|w| {
+            let mut r = WorkloadRow::new(w, now, &order);
+            r.missing_labels = unlabeled
+                .as_deref()
+                .map(|keys| r.workload.missing_label_keys(keys));
+            r
+        })
         // The PCE filtered already; this holds the effective mode should it not.
         .filter(|r| {
             args.enforcement
@@ -460,8 +519,33 @@ pub async fn run(ctx: &Context, args: &WorkloadsArgs) -> Result<(), CliError> {
                     VenHealth::Warning | VenHealth::Error | VenHealth::Offline
                 )
         })
+        // `health` is `ven_health` at `now`: `Workload::is_offline`.
+        .filter(|r| !args.offline || r.health == VenHealth::Offline)
+        .filter(|r| r.missing_labels.as_ref().is_none_or(|m| !m.is_empty()))
         .collect();
-    ctx.emit(&rows, cache_label(c.hit, ctx.cache_mode), c.truncated, None)
+    let mut meta = ctx.meta(cache_label(c.hit, ctx.cache_mode), c.truncated, None);
+    meta.local_filter = local_filter(args.unhealthy, args.offline, unlabeled.as_deref());
+    ctx.emit_meta(&rows, &meta)
+}
+
+/// `meta.local_filter`: the filters applied here after the one request,
+/// as the app's filter line names them.
+fn local_filter(
+    unhealthy: bool,
+    offline: bool,
+    unlabeled: Option<&[String]>,
+) -> Option<Vec<String>> {
+    let mut out = Vec::new();
+    if unhealthy {
+        out.push("unhealthy".to_string());
+    }
+    if offline {
+        out.push("offline".to_string());
+    }
+    if let Some(keys) = unlabeled {
+        out.push(format!("unlabeled ({})", keys.join(", ")));
+    }
+    Some(out).filter(|o| !o.is_empty())
 }
 
 #[cfg(test)]
@@ -501,6 +585,22 @@ mod tests {
         let json = serde_json::to_value(&rows[0]).unwrap();
         assert_eq!(json["enforcement"], "full");
         assert_eq!(json["enforcement_mode"], "full");
+    }
+
+    #[test]
+    fn unlabeled_keys_default_to_the_label_model_and_local_filters_are_named() {
+        let model: Vec<String> = ["app", "env", "role"].map(String::from).to_vec();
+        // `--unlabeled` alone: clap's missing value is one blank.
+        assert_eq!(unlabeled_keys(&["".into()], &model), model);
+        assert_eq!(
+            unlabeled_keys(&[" env".into(), "os".into(), "env".into()], &model),
+            ["env", "os"]
+        );
+        assert_eq!(local_filter(false, false, None), None);
+        assert_eq!(
+            local_filter(true, true, Some(&model)).unwrap(),
+            ["unhealthy", "offline", "unlabeled (app, env, role)"]
+        );
     }
 
     #[test]

@@ -628,6 +628,93 @@ async fn workloads_report_ven_health_and_unhealthy_filter() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn workloads_offline_and_unlabeled_filter_locally_after_one_request() {
+    use wiremock::matchers::query_param_is_missing;
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    // No `online` sent: offline is the VEN health, a stale heartbeat too.
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .and(query_param_is_missing("online"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/workloads.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(4)
+        .mount(&server)
+        .await;
+    let hosts = |out: &Value| -> Vec<String> {
+        out["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["href"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let out = stdout_json(
+        cmd(&server)
+            .args(["workloads", "--unlabeled"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(
+        hosts(&out),
+        ["/orgs/5/workloads/aaaa-3", "/orgs/5/workloads/aaaa-4"]
+    );
+    assert_eq!(
+        out["data"][0]["missing_labels"],
+        json!(["app", "env", "role"])
+    );
+    assert_eq!(out["meta"]["api_calls"], 1);
+    assert_eq!(
+        out["meta"]["local_filter"],
+        json!(["unlabeled (app, env, role)"])
+    );
+    // Named keys; a workload with all of them is kept out.
+    let out = stdout_json(
+        cmd(&server)
+            .args(["workloads", "--unlabeled", "env,os"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(hosts(&out).len(), 4, "no workload has an os label");
+    assert_eq!(out["data"][0]["missing_labels"], json!(["os"]));
+    assert_eq!(out["meta"]["local_filter"], json!(["unlabeled (env, os)"]));
+    // Offline: the fixture's heartbeats are days old, so every VEN; never
+    // the workload without one.
+    let out = stdout_json(
+        cmd(&server)
+            .args(["workloads", "--offline"])
+            .assert()
+            .success(),
+    );
+    let rows = out["data"].as_array().unwrap();
+    assert!(rows.iter().all(|r| r["health"] == "offline"), "{rows:?}");
+    assert!(hosts(&out).contains(&"/orgs/5/workloads/aaaa-2".to_string()));
+    assert!(!hosts(&out).contains(&"/orgs/5/workloads/aaaa-3".to_string()));
+    assert!(
+        rows[0].get("missing_labels").is_none(),
+        "only with --unlabeled"
+    );
+    assert_eq!(out["meta"]["local_filter"], json!(["offline"]));
+    // Table: the missing column, and the meta line names the local filter.
+    cmd(&server)
+        .args(["workloads", "--unlabeled", "--table"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("missing").and(predicate::str::contains("app, env, role")))
+        .stderr(predicate::str::contains(
+            "filtered locally: unlabeled (app, env, role)",
+        ));
+    // A contradiction: no request (the mock expects exactly four).
+    cmd(&server)
+        .args(["workloads", "--offline", "--online", "true"])
+        .assert()
+        .code(2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn workloads_enforcement_filter_is_the_effective_mode() {
     use wiremock::matchers::query_param_is_missing;
     let server = MockServer::start().await;

@@ -89,6 +89,10 @@ pub struct Meta {
     /// them: our own counts).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<&'static str>,
+    /// `workloads`: the filters applied locally after the request
+    /// (`offline`, `unlabeled (app, env, role)`, `unhealthy`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_filter: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -308,6 +312,9 @@ pub fn meta_line(meta: &Meta) -> String {
         Some(u) => s.push_str(&format!(" · usage from {u}")),
         None => {}
     }
+    if let Some(f) = &meta.local_filter {
+        s.push_str(&format!(" · filtered locally: {}", f.join(", ")));
+    }
     match (meta.truncated, meta.cap) {
         (true, Some(cap)) => s.push_str(&format!(
             " · WARNING: result truncated, capped at {cap}; --backfill raises the cap"
@@ -421,6 +428,7 @@ mod tests {
                 audit: "x".into(),
             }),
             usage: None,
+            local_filter: None,
         };
         assert!(meta_line(&meta).contains("POST /orgs/5/labels → 201"));
     }
