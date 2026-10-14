@@ -2857,6 +2857,7 @@ async fn app_timeline_runs_one_blocked_only_query_per_bucket() {
     mount_app(&server, 1 + 12).await;
     let out = stdout_json(
         cmd(&server)
+            .env("ILLUMIO_TUI_TEST_FAST_MS", "10")
             .args([
                 "app",
                 "shop/prod",
@@ -2929,6 +2930,7 @@ async fn app_timeline_marks_capped_buckets_as_lower_bounds() {
     // A cap of 4 rows: every 4-row answer hit it.
     let out = stdout_json(
         cmd(&server)
+            .env("ILLUMIO_TUI_TEST_FAST_MS", "10")
             .args([
                 "app",
                 "shop/prod",

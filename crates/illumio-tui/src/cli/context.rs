@@ -41,8 +41,11 @@ impl Context {
             tls_verify: if global.insecure { Some(false) } else { None },
         };
         let resolved = config::resolve(&file, &overrides, &env)?;
-        let pce = Pce::new(PceClient::new(resolved.client_config())?)
-            .with_key_order(resolved.key_order());
+        let (client, poll) = test_speed(resolved.client_config());
+        let mut pce = Pce::new(PceClient::new(client)?).with_key_order(resolved.key_order());
+        if let Some(poll) = poll {
+            pce.set_poll_config(poll);
+        }
         let format = super::output::choose_format(global.json, global.table, global.csv);
         let cache_mode = if global.no_cache {
             CacheMode::Bypass
@@ -179,4 +182,35 @@ pub fn cache_label(hit: bool, mode: CacheMode) -> &'static str {
         (CacheMode::Use, true) => "hit",
         (CacheMode::Use, false) => "miss",
     }
+}
+
+/// The env var that speeds the CLI up in debug builds, for the CLI tests:
+/// the first traffic poll in ms (the default is 1 s) and no rate limit (the
+/// default is 2 requests a second).
+pub const TEST_FAST_ENV: &str = "ILLUMIO_TUI_TEST_FAST_MS";
+
+/// Debug builds only: with `ILLUMIO_TUI_TEST_FAST_MS` set, the client is not
+/// rate limited and the traffic poll starts at that many ms (its backoff
+/// capped at 5 times it). Release builds ignore it.
+#[cfg(debug_assertions)]
+fn test_speed(mut cfg: pce::ClientConfig) -> (pce::ClientConfig, Option<pce::traffic::PollConfig>) {
+    let ms = std::env::var(TEST_FAST_ENV)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok());
+    let Some(ms) = ms else {
+        return (cfg, None);
+    };
+    cfg.requests_per_second = 1000.0;
+    cfg.burst = 1000;
+    let poll = pce::traffic::PollConfig {
+        initial: std::time::Duration::from_millis(ms),
+        cap: std::time::Duration::from_millis(ms.saturating_mul(5)),
+        ..pce::traffic::PollConfig::default()
+    };
+    (cfg, Some(poll))
+}
+
+#[cfg(not(debug_assertions))]
+fn test_speed(cfg: pce::ClientConfig) -> (pce::ClientConfig, Option<pce::traffic::PollConfig>) {
+    (cfg, None)
 }
