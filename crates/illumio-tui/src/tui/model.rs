@@ -1722,8 +1722,18 @@ impl TrafficState {
             .is_some_and(|r| self.focus.as_ref() != Some(r));
         if stale {
             self.cancel_query();
+            self.cap_from_data();
         }
         stale
+    }
+
+    /// The filter's cap back to the result on screen: a focused cap step
+    /// that was cancelled, or left behind with its focused result, never
+    /// ran at the filter's cap.
+    fn cap_from_data(&mut self) {
+        if let Some(d) = &self.data {
+            self.filter.max_results = d.filter.max_results;
+        }
     }
 
     /// `F` / `:focus`: narrows every view to `focus`. A focused result of
@@ -1766,6 +1776,7 @@ impl TrafficState {
         match self.unfocused.take() {
             Some(d) => {
                 self.data = Some(d);
+                self.cap_from_data();
                 self.refresh_focused();
                 true
             }

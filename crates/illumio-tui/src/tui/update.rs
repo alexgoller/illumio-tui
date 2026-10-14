@@ -13239,6 +13239,33 @@ mod focus_tests {
     /// the next cap, one query per side, asking above 10000; the answer
     /// says how `B` goes on.
     #[test]
+    fn leaving_a_focus_puts_the_unfocused_cap_back() {
+        let mut m = model_with_flows();
+        m.traffic.data.as_mut().unwrap().truncated = true;
+        let unfocused_cap = m.traffic.data.as_ref().unwrap().filter.max_results;
+        quiet(&mut m, focus_cmd("shop/prod"));
+        let focus = m.traffic.focus.clone().unwrap();
+        let mut data = focused_data(&m, 2);
+        data.truncated = true;
+        m.traffic.apply_focused(focus, 2, data);
+        let _ = update(&mut m, key('B')); // a focused cap step in flight
+        assert_ne!(m.traffic.filter.max_results, unfocused_cap);
+        quiet(&mut m, kc(KeyCode::Esc)); // cancels it, the focus goes
+        assert_eq!(m.traffic.filter.max_results, unfocused_cap);
+        // `B` now offers the unfocused result's next rung, not "r first".
+        let cmds = update(&mut m, key('B'));
+        assert!(
+            !m.status.text.contains("nothing to backfill"),
+            "{}",
+            m.status.text
+        );
+        assert!(
+            !cmds.is_empty() || matches!(m.overlay, Overlay::Confirm { .. }),
+            "{cmds:?}"
+        );
+    }
+
+    #[test]
     fn b_and_brackets_raise_the_cap_of_a_focused_result() {
         let mut m = model_with_flows();
         m.traffic.data.as_mut().unwrap().truncated = true;
