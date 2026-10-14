@@ -3512,3 +3512,75 @@ async fn traffic_mesh_draft_counts_per_row_in_json_and_csv() {
         "{header}"
     );
 }
+
+/// `--backfill --draft`: the caps run plain; only the result kept (cap
+/// 10000) is re-evaluated, by its own href, with no new POST.
+#[tokio::test(flavor = "multi_thread")]
+async fn backfill_with_draft_re_evaluates_only_the_kept_rung_by_its_href() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    let kept = "/orgs/5/traffic_flows/async_queries/q-10000";
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{kept}")))
+        .respond_with(Ticking::new(json!({
+            "status": "completed", "rules": "completed",
+            "result": {"href": format!("{kept}/download")}, "flows_count": 3
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path(format!("/api/v2{kept}/update_rules")))
+        .and(query_param("limit", "10000"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let mut three: Vec<Value> = serde_json::from_str(&rows(3, 2000)).unwrap();
+    for f in &mut three {
+        f["draft_policy_decision"] = json!("blocked");
+    }
+    mount_cap(&server, 4, 1, 4, rows(4, 1000)).await;
+    mount_cap(
+        &server,
+        10_000,
+        1,
+        3,
+        serde_json::to_string(&three).unwrap(),
+    )
+    .await;
+    let out = stdout_json(
+        cmd(&server)
+            .args(BACKFILL_ARGS)
+            .args(["--backfill", "--draft"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["meta"]["cap_steps"], json!([4, 10_000]));
+    let puts: Vec<String> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.method.as_str() == "PUT")
+        .map(|r| r.url.path().trim_start_matches("/api/v2").to_string())
+        .collect();
+    assert_eq!(
+        puts,
+        vec![format!("{kept}/update_rules")],
+        "only the kept rung"
+    );
+    assert_eq!(
+        sent_caps(&server).await,
+        vec![4, 10_000],
+        "no POST for the draft"
+    );
+    assert!(
+        out["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|f| f["draft_policy_decision"] == "blocked")
+    );
+    assert_eq!(out["meta"]["draft"]["newly_blocked"], 3);
+    server.verify().await;
+}
