@@ -73,7 +73,7 @@ or a profile in `~/.config/illumio-tui/config.toml`:
     [profiles.prod.limits]
     traffic_max_results = 10000     # the starting traffic row cap (default 10000, at most 200000)
     traffic_default_window = "24h"
-    traffic_auto_backfill = false   # true: backfill a truncated result without asking (see TUI)
+    traffic_auto_backfill = false   # true: re-run a truncated result below 10000 at 10000 (see TUI)
 
 `PCE_TLS_VERIFY=false` skips certificate checks like `--insecure`; `ILLUMIO_PROFILE` picks
 the profile and `ILLUMIO_TUI_THEME` the TUI theme. `--env-file .env` loads a dotenv file for one run. Connection settings can
@@ -109,37 +109,25 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   `ip:` `ipl:` `wl:` `fqdn:` in src and dst (`wl:` hostnames only once the Workloads screen
   has loaded them), protocols and services as `port/proto`, the decision words and the
   window steps, never with a request. `+` / `-` step
-  the window along `1h 6h 12h 1d 2d 3d 1w 2w 4w 90d`: `+` fetches only the older slice and
-  merges it into what is on screen (a flow seen in both slices stays one row with the
-  connections and bytes added up; the header counts the slices), `-` drops the older flows
-  without a request. `r` after widening runs one query for the whole window and asks first
-  when that is expensive. A truncated result that covers under half its window says how much
-  in the Result header (`10000 flows · covers 25m of 24h · truncated`) and the status line,
-  with what `]` and `B` would do. Explorer rows are not time-ordered within the cap, so the
-  truncated rows say nothing reliable about any part of the window: `B` fetches the whole
-  window again, backwards from its end, in slices sized to fit the cap (the measured rate,
-  `0.8 × cap`, rounded down to 1m 5m 15m 30m 1h 2h 6h 12h 1d). When the cap cannot fit the
-  window in 50 slices, `B` proposes the smallest cap of the `]` ladder (up to 200000) that
-  can. It asks once, for example after 10000 flows covering 2h 30m of 24h (`backfill 1d in
-  12 slices of 2h at cap 10000: 12 queries (≥36 API calls)? y/n`) or 25 minutes of 24h (`cap
-  25000 exceeds 10000. raise the cap to 25000 and backfill 1d in 48 slices of 30m: 48 queries
-  (≥144 API calls)? y/n`): each query is at least a submit, a status poll and a download, and
-  a cap above 10000 is named as expensive first.
-  It then sends one slice at a time, newest first, and counts them in the header
-  (`slice 3 of 12`): the first slice replaces the truncated rows, later ones merge like `+`,
-  and the result stays marked truncated until the slices reach the window start. A slice that
-  still truncates is fetched again in halves (never below 1m); a 1m slice that truncates stops
-  the backfill (`] raises the cap`). A run sends at most 50 slices: when even a cap of
-  200000 needs more, `B` offers the newest 50 (`backfill the next 50 slices of 15m:
-  12h 30m of the remaining 1d, …; B again continues`). `Esc` stops after the running slice, and
-  `B` again continues where a run stopped. A backfill keeps auto-refresh off, the header shows
-  its real coverage and slice count (`1d · 12 slices`, or `covers 6h of 1d · 3 slices ·
-  truncated`), and `+` extends it by one slice of the same length.
-  The profile setting `traffic_auto_backfill = true` (or `ILLUMIO_AUTO_BACKFILL=1`) starts that
-  run right after a truncated, low-coverage query without the `y`, with the same limits,
-  progress and `Esc`: one run (at most 50 slices) per query, never chained, and a cap above
-  10000 is still asked. It is off by default because every request must be user-caused: setting
-  it is the user saying yes in advance, once, in writing. `]` / `[` step the result cap
+  the window along `1h 6h 12h 1d 2d 3d 1w 2w 4w 90d`: `+` re-runs the wider window as one
+  query (asking first when that is expensive), `-` drops the flows last seen before the new
+  start without a request. Explorer returns the stored aggregate records whose lifetime
+  overlaps the window, each with its own lifetime counters, so the rows of two windows are
+  never added up: a record seen twice (its flow plus `first_detected`) is one row, the later
+  version winning. A result is truncated when the PCE's `flows_count` reaches the cap (per
+  region on a supercluster); it then covers an unknown part of its window, so the Result
+  header claims no time span and says `10000 flows, capped at 10000; B raises the cap`.
+  Explorer cannot page a result, so `B` re-runs the same window at a larger cap, one query
+  whose answer replaces the truncated one: 10000 from below it (without asking), then
+  `25000 50000 100000 200000`, one rung per `B`, each above 10000 asked first (`cap 25000
+  exceeds 10000. Re-run the window at cap 25000 (1 query, replaces the 10000 flows capped at
+  10000)? y/n`), even when the last result proved there is more. A region that did not
+  respond marks the result `incomplete` in the header and the status line.
+  The profile setting `traffic_auto_backfill = true` (or `ILLUMIO_AUTO_BACKFILL=1`) re-runs a
+  truncated result below 10000 at 10000 right away, without `B`; one query per truncated
+  result, never chained, and never above 10000 (`B` asks as usual there). It is off by
+  default because every request must be user-caused: setting it is the user saying yes in
+  advance, once, in writing. `]` / `[` step the result cap
   (`500 1000 2000 5000 10000 25000 50000 100000 200000`; the profile's `traffic_max_results`
   is where it starts and a rung of its own; above 10000 asks first, and auto-refresh stays off
   for such a cap) and re-run the query. `v` cycles five
@@ -296,15 +284,18 @@ the API call and byte counters at all times.
 
 JSON output (default when piped) is `{"data": ..., "meta": {...}}` where
 `meta` reports API calls, bytes, cache status, truncation, and the query
-window; traffic commands add `meta.covered`, the span the flows' last-seen times cover
-(`"4m"`; the whole window when the result is complete). With `--backfill` (`query`, `groups`
-and `mesh`) a truncated result's window is fetched again in slices as the TUI's `B` does,
-newest first, one query at a time, the cap raised along the ladder (up to 200000) when
-the slices would not fit in 50 (past 10000 only with `--yes`, so one `--yes` on a
-`--backfill` run allows up to 50 slice queries of up to 200000 rows each); `meta.slices` counts the slices
-merged and `meta.api_calls` every request (at least 3 per query). A run sends at most
-`--max-slices` queries (1 to 50, default 50); when the window needs more, stderr names the
-`--from` / `--to` that continue and `meta.truncated` stays true. Errors go to stderr as JSON. Exit codes: 1 generic, 2 arguments or
+window; traffic commands add `meta.covered`, the window's length when the result is complete
+(`"1d"`) and `null` when it is truncated (it covers an unknown part of the window),
+`meta.cap` (the cap the result was fetched at) and `meta.incomplete` (a supercluster region
+did not respond). `meta.truncated` is `flows_count >= cap` from the PCE's own status, per
+region when there are regions; the status's `matches_count` is a bounded raw count, not a
+total, and is never reported. With `--backfill` (`query`, `groups` and `mesh`) a truncated
+result's window is re-run at a larger cap as the TUI's `B` does, each answer replacing the
+last, until one is complete: 10000 from below it, then 25000, 50000, 100000 and 200000 only
+with `--yes`; without it the run stops at 10000 and stderr names the next cap.
+`meta.cap_steps` lists every cap tried (`[200, 10000]`) and `meta.api_calls` every request
+(at least 3 per query). `--max-slices` was removed with time slices and exits 2.
+Errors go to stderr as JSON. Exit codes: 1 generic, 2 arguments or
 config, 3 auth, 4 PCE error, 5 rate limited, 6 write refused by the guard.
 
 `--csv` (beside `--table` and `--json`, exclusive with both) prints the same table as RFC 4180
@@ -349,7 +340,7 @@ into the query as destination includes (`--direction in`), source includes (`out
 direction is the sections' (`--direction` is then exit 2) and only the app's sections are kept;
 a name-keyed group such as `unmanaged-nas/-` keeps narrowing the sections of an unfocused query.
 An app whose labels do not exist is exit 2 with the closest label values, before any traffic
-request (the labels are fetched, cached). `--backfill` does not combine with `--app`.
+request (the labels are fetched, cached). `--backfill` does not combine with `--app`: raise `--max-results` instead.
 
 `illumio-tui app <app> [--direction in|out|both] [--window W] [--keys K] [--active]` prints one
 envelope for one app: `workloads` (`summary` with the enforcement breakdown, `unmanaged` for
@@ -691,9 +682,12 @@ them, and a scope or tier key is never ignored.
 Every request is user-caused, throttled (2/s), cached, and counted.
 Explorer queries default to a 24 h window and 10 000 rows; larger windows
 (> 7 d) or caps (> 10 000, at most 200 000) need `--yes`. `--dry-run` shows the request
-body without sending it. A traffic backfill sends nothing before `B` and `y` (or
-`--backfill`, or the written `traffic_auto_backfill` opt-in), never more than one slice at a
-time and at most 50 queries per run, each at least 3 API calls.
+body without sending it. A traffic backfill sends nothing before `B` (or `--backfill`, or
+the written `traffic_auto_backfill` opt-in) and is one query per cap rung, each at least 3 API
+calls; every rung above 10000 asks first (`y`, or `--yes`). Status polls start at 1 s and back
+off to at most 3 s; downloads are gzip-compressed. The CLI submits an unfocused query while it
+loads the object lists for name resolution, so the PCE computes meanwhile without extra
+requests.
 
 ## illumio-tui and workloader
 

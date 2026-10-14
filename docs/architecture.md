@@ -22,7 +22,12 @@
 4. `TrafficQuery::needs_confirmation` checks the window and row cap.
 5. `Pce::traffic` looks the exact body up in the cache, then calls
    `traffic::poll::run_traffic_query`: POST the query, sleep 1 s, poll,
-   back off ×1.5 to 10 s, download the result, flag truncation.
+   back off ×1.5 to 3 s, download the result (gzip, its own 300 s timeout),
+   and read truncation from the completed status (`traffic::poll::truncation`:
+   `flows_count >= cap`, per region on a supercluster; `incomplete` when a
+   region did not respond). Results from several queries are put together
+   only by `traffic::merge::merge_flows`: one row per record (flow plus
+   `first_detected`), the later version winning, nothing summed.
 6. `traffic::resolved::resolve_flows` replaces label hrefs with names.
 7. `Context::emit` prints the JSON envelope or a table; `meta` carries the
    call and byte counters from `PceClient::stats`.
@@ -62,12 +67,9 @@ One message, top to bottom: pressing `r` on Traffic.
 2. `update` handles it, marks the screen busy and returns `Cmd::RunQuery`.
 3. `app` spawns a task that runs `filter.to_query` and `pce.traffic`,
    sending `Msg::QueryProgress` while it polls and `Msg::QueryDone` at the end
-   (`+` sends `Cmd::RunSlice` instead: `filter.to_query_between` for the older
-   slice only, answered with `Msg::SliceDone` and appended to the loaded flows;
-   `B` sends the same `Cmd::RunSlice` once per backfill slice, the next only
-   after `SliceDone` for the previous one, walking `pce::traffic::BackfillRun`
-   from the window end back to the window start, the first slice replacing
-   the truncated rows; at most 50 slices per run).
+   (`+` and `]` / `[` send the same `Cmd::RunQuery` with the stepped window
+   or cap; `B` sends it at `pce::traffic::backfill_cap`, the answer replacing
+   the truncated result).
 4. `update` stores the result and calls `rebuild_views`, which derives the
    Flows, App-to-app (pairs, or sections per app), Mesh and Blocked tables and
    the treemap's tiles from the one result, grouped by the label keys in force.
