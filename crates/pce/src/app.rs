@@ -86,12 +86,15 @@ pub fn app_peers(flows: &[ResolvedFlow], focus: &Focus, side: Direction) -> Vec<
 }
 
 /// `full` → `enforced`, `visibility_only` → `visibility`; the panel's words.
+/// Takes the effective enforcement ([`Workload::enforcement`]), so a
+/// workload without a VEN is `unmanaged`.
 pub fn enforcement_word(mode: &str) -> &'static str {
     match mode {
         "full" => "enforced",
         "selective" => "selective",
         "visibility_only" => "visibility",
         "idle" => "idle",
+        "unmanaged" => "unmanaged",
         _ => "other",
     }
 }
@@ -102,6 +105,8 @@ pub struct EnforcementCounts {
     pub selective: usize,
     pub visibility: usize,
     pub idle: usize,
+    /// Workloads without a VEN, whatever `enforcement_mode` the PCE reports.
+    pub unmanaged: usize,
     pub other: usize,
 }
 
@@ -112,6 +117,7 @@ impl EnforcementCounts {
             "selective" => self.selective += 1,
             "visibility" => self.visibility += 1,
             "idle" => self.idle += 1,
+            "unmanaged" => self.unmanaged += 1,
             _ => self.other += 1,
         }
     }
@@ -124,6 +130,7 @@ impl EnforcementCounts {
             ("selective", self.selective),
             ("visibility", self.visibility),
             ("idle", self.idle),
+            ("unmanaged", self.unmanaged),
             ("other", self.other),
         ]
         .into_iter()
@@ -138,14 +145,18 @@ impl EnforcementCounts {
     }
 }
 
-/// One workload of the app: name, role (the tier key's label), enforcement
-/// mode as the PCE names it, VEN health.
+/// One workload of the app: name, role (the tier key's label), effective
+/// enforcement, the PCE's raw `enforcement_mode`, VEN health.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AppWorkload {
     pub href: String,
     pub name: String,
     pub role: Option<String>,
+    /// The effective enforcement: the PCE's mode, or `unmanaged` without a VEN.
     pub enforcement: String,
+    /// The PCE's `enforcement_mode` as reported (`visibility_only` for most
+    /// unmanaged workloads).
+    pub enforcement_mode: Option<String>,
     pub ven: VenHealth,
 }
 
@@ -209,7 +220,7 @@ pub fn app_workloads(
         .iter()
         .map(|w| {
             let ven = w.ven_health(now);
-            let enforcement = w.enforcement_mode.clone().unwrap_or_default();
+            let enforcement = w.enforcement().unwrap_or_default().to_string();
             s.workloads += 1;
             s.enforcement.count(&enforcement);
             match ven {
@@ -226,6 +237,7 @@ pub fn app_workloads(
                         .map(|x| x.value.clone())
                 }),
                 enforcement,
+                enforcement_mode: w.enforcement_mode.clone(),
                 ven,
             }
         })
@@ -449,6 +461,22 @@ mod tests {
         let (_, all_s) = app_workloads(&all, &index(), "role", now);
         assert_eq!(all_s.unmanaged, 1, "aaaa-3 has no VEN");
         assert_eq!(all_s.ven_text(), "2 active · 1 stale · 1 unmanaged");
+        // aaaa-3 reports `idle`; without a VEN it counts as unmanaged.
+        assert_eq!(all_s.enforcement.unmanaged, 1);
+        assert_eq!(all_s.enforcement.idle, 0);
+        assert_eq!(
+            all_s.enforcement.text(),
+            "enforced 1 · selective 1 · visibility 1 · unmanaged 1"
+        );
+        let (all_rows, _) = app_workloads(&all, &index(), "role", now);
+        let nas = all_rows.iter().find(|w| w.name == "unmanaged-nas").unwrap();
+        assert_eq!(nas.enforcement, "unmanaged");
+        assert_eq!(
+            nas.enforcement_mode.as_deref(),
+            Some("idle"),
+            "raw API value"
+        );
+        assert_eq!(enforcement_word("unmanaged"), "unmanaged");
         assert_eq!(enforcement_word("visibility_only"), "visibility");
         assert_eq!(EnforcementCounts::default().text(), "none");
     }

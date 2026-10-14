@@ -113,7 +113,14 @@ impl TableRows for WorkloadsSection {
             .collect()
     }
     fn full_headers(&self) -> Vec<&'static str> {
-        vec!["href", "name", "role", "enforcement_mode", "ven"]
+        vec![
+            "href",
+            "name",
+            "role",
+            "enforcement",
+            "enforcement_mode",
+            "ven",
+        ]
     }
     fn full_rows(&self) -> Vec<Vec<String>> {
         self.rows
@@ -124,6 +131,7 @@ impl TableRows for WorkloadsSection {
                     w.name.clone(),
                     w.role.clone().unwrap_or_default(),
                     w.enforcement.clone(),
+                    w.enforcement_mode.clone().unwrap_or_default(),
                     w.ven.as_str().to_string(),
                 ]
             })

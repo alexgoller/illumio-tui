@@ -2714,6 +2714,98 @@ async fn app_reports_truncated_workloads_and_rulesets_in_their_sections() {
     assert!(text.contains("policy · draft · 2 · truncated"), "{text}");
 }
 
+/// The fixture's workloads, with the unmanaged one in shop/prod and
+/// reporting `visibility_only`, as the PCE does for workloads without a VEN.
+fn workloads_with_unmanaged_in_shop() -> String {
+    let mut all: Value =
+        serde_json::from_str(include_str!("../../../fixtures/workloads.json")).unwrap();
+    all[2]["enforcement_mode"] = "visibility_only".into();
+    all[2]["labels"] = all[0]["labels"].clone();
+    all.to_string()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn app_counts_a_workload_without_a_ven_as_unmanaged_not_visibility() {
+    let server = MockServer::start().await;
+    // Three runs, each a traffic query and a timeline query.
+    mount_traffic(&server, 6).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(workloads_with_unmanaged_in_shop())
+                .insert_header("Content-Type", "application/json"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/sec_policy/draft/rule_sets"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/rule_sets.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .mount(&server)
+        .await;
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "app",
+                "shop/prod",
+                "--window",
+                "1h",
+                "--section",
+                "workloads",
+            ])
+            .assert()
+            .success(),
+    );
+    let w = &out["data"]["workloads"];
+    assert_eq!(w["summary"]["workloads"], 3);
+    assert_eq!(w["summary"]["enforcement"]["visibility"], 1, "{w}");
+    assert_eq!(w["summary"]["enforcement"]["unmanaged"], 1, "{w}");
+    let nas = w["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["name"] == "unmanaged-nas")
+        .unwrap();
+    assert_eq!(nas["enforcement"], "unmanaged");
+    assert_eq!(nas["enforcement_mode"], "visibility_only", "raw API value");
+    let table = cmd(&server)
+        .args(["app", "shop/prod", "--window", "1h", "--table"])
+        .assert()
+        .success();
+    let text = String::from_utf8_lossy(&table.get_output().stdout).to_string();
+    assert!(
+        text.contains("enforced 1 · visibility 1 · unmanaged 1"),
+        "{text}"
+    );
+    let csv = csv_stdout(
+        &cmd(&server)
+            .args([
+                "app",
+                "shop/prod",
+                "--window",
+                "1h",
+                "--section",
+                "workloads",
+                "--csv",
+            ])
+            .assert()
+            .success(),
+    );
+    let mut lines = csv.lines();
+    assert_eq!(
+        lines.next(),
+        Some("href,name,role,enforcement,enforcement_mode,ven")
+    );
+    assert!(
+        csv.contains("unmanaged-nas,web,unmanaged,visibility_only,unmanaged"),
+        "{csv}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn app_json_section_keeps_only_that_section() {
     let server = MockServer::start().await;
