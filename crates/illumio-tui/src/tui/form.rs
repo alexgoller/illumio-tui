@@ -528,6 +528,32 @@ pub fn clip(text: &str, width: usize) -> String {
     format!("{head}…")
 }
 
+/// `text` in up to `rows` lines of at most `width` characters, broken at
+/// spaces (a word longer than a line is broken); what does not fit ends in `…`.
+pub fn wrap_rows(text: &str, width: usize, rows: usize) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut rest = text.trim();
+    while !rest.is_empty() && lines.len() < rows {
+        if lines.len() + 1 == rows || rest.chars().count() <= width {
+            lines.push(clip(rest, width));
+            break;
+        }
+        let cut: String = rest.chars().take(width + 1).collect();
+        let at = cut.rfind(' ').filter(|&i| i > 0).unwrap_or_else(|| {
+            cut.char_indices()
+                .nth(width.max(1))
+                .map_or(cut.len(), |(i, _)| i)
+        });
+        let (line, tail) = rest.split_at(at);
+        lines.push(line.trim_end().to_string());
+        rest = tail.trim_start();
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
+}
+
 /// The end of `value` that fits in `width` cells, with `…` in front when the
 /// start is cut, so the cursor (always at the end) stays visible.
 pub fn visible_tail(value: &str, width: usize) -> String {
@@ -547,6 +573,23 @@ mod tests {
     use super::*;
     use crate::tui::edit::EditIntent;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    #[test]
+    fn wrap_rows_breaks_at_spaces_and_cuts_the_last_row() {
+        assert_eq!(wrap_rows("a short hint", 20, 2), vec!["a short hint"]);
+        assert_eq!(wrap_rows("", 20, 2), vec![""]);
+        assert_eq!(
+            wrap_rows("no ruleset covers app=shop: type a new name", 20, 2),
+            vec!["no ruleset covers", "app=shop: type a ne…"]
+        );
+        assert_eq!(
+            wrap_rows("abcdefghij klm", 5, 3),
+            vec!["abcde", "fghij", "klm"],
+            "a long word is broken"
+        );
+
+        assert_eq!(wrap_rows("one two three", 7, 1), vec!["one tw…"]);
+    }
 
     fn k(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)

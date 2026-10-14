@@ -860,6 +860,10 @@ pub fn new_ruleset_intent(
 }
 
 const RULESET_HINT: &str = "ruleset name or href";
+/// The Ruleset hint when the destination has no label under a scope key:
+/// nothing to find a ruleset by, nothing for `Ctrl-R` to scope one by.
+const NO_SCOPE_HINT: &str =
+    "the destination has no scope labels: name a ruleset (Ctrl-N) or its href";
 
 /// A label as an actor token; an unknown key or an awkward value keeps its href.
 fn label_token(l: &ResolvedLabel) -> String {
@@ -919,26 +923,39 @@ fn tokens_or_fallback(labels: Vec<&ResolvedLabel>, e: &ResolvedEndpoint) -> Stri
     }
 }
 
-/// The one live draft ruleset with a scope of exactly these labels (by
-/// href); `None` when none or several have one.
-fn ruleset_scoped(sets: &[RuleSet], scope: &[&ResolvedLabel]) -> Option<String> {
+/// The live draft rulesets with a scope that covers these labels: one of
+/// its scopes is made of labels only (no label group; the empty, global
+/// scope does not count) and each of them is among `scope`. Those scoped
+/// exactly like `scope` come first (`true`), then the broader ones, each in
+/// list order.
+fn rulesets_covering<'r>(
+    sets: &'r [RuleSet],
+    scope: &[&ResolvedLabel],
+) -> Vec<(&'r RuleSet, bool)> {
     let want: BTreeSet<&str> = scope.iter().map(|l| l.href.as_str()).collect();
-    let equal = |s: &Vec<Actor>| {
-        s.iter().all(|a| a.label.is_some())
-            && s.iter()
-                .filter_map(|a| a.label.as_ref().map(|r| r.href.as_str()))
-                .collect::<BTreeSet<_>>()
-                == want
+    // How a scope relates to `want`: `Some(true)` equal, `Some(false)` a
+    // part of it, `None` neither.
+    let fit = |s: &Vec<Actor>| -> Option<bool> {
+        let hrefs: Option<BTreeSet<&str>> = s
+            .iter()
+            .map(|a| a.label.as_ref().map(|r| r.href.as_str()))
+            .collect();
+        let hrefs = hrefs.filter(|h| !h.is_empty() && h.is_subset(&want))?;
+        Some(hrefs == want)
     };
-    let hits: Vec<&RuleSet> = sets
+    let mut hits: Vec<(&RuleSet, bool)> = sets
         .iter()
         .filter(|rs| rs.update_type.as_deref() != Some("delete"))
-        .filter(|rs| rs.scopes.iter().any(equal))
+        .filter_map(|rs| {
+            rs.scopes
+                .iter()
+                .filter_map(fit)
+                .max()
+                .map(|exact| (rs, exact))
+        })
         .collect();
-    match hits.as_slice() {
-        [one] => Some(one.name.clone()),
-        _ => None,
-    }
+    hits.sort_by_key(|(_, exact)| !exact);
+    hits
 }
 
 /// How the description names a side: its group (`shop/prod`) when the
@@ -1019,32 +1036,68 @@ fn flow_rule_fields(
 }
 
 /// A `w` form's ruleset by the destination's scope: the one to pre-fill
-/// (if any) and the Ruleset field's hint.
+/// (if any), the Ruleset field's hint, and the names of the rulesets whose
+/// scope covers the destination (best first; completion offers them first).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RulesetPick {
     pub name: Option<String>,
     pub hint: Cow<'static, str>,
+    pub covering: Vec<String>,
 }
 
-/// The ruleset whose scope is the destination's scope, among the loaded
-/// draft rulesets. A row grouped on keys that leave out part of the scope
-/// covers more than one scope: no ruleset is picked for it, the hint names
-/// the destination's.
+/// The ruleset found by the destination's scope among the loaded draft
+/// rulesets: the one scoped exactly like it, else the only one whose scope
+/// covers it; several leave the choice to the user. A row grouped on keys
+/// that leave out part of the scope spans scopes: nothing is picked for it.
 pub fn ruleset_pick(f: &ResolvedFlow, p: FlowPrefill) -> RulesetPick {
     let dst_scope = scope_of(&f.dst, p.scope_keys);
+    if dst_scope.is_empty() {
+        return RulesetPick {
+            name: None,
+            hint: Cow::Borrowed(NO_SCOPE_HINT),
+            covering: Vec::new(),
+        };
+    }
+    let scope = labels_tokens(&dst_scope);
+    let Some(sets) = p.rulesets else {
+        return RulesetPick {
+            name: None,
+            hint: Cow::Owned(format!("scope {scope} · loading rulesets")),
+            covering: Vec::new(),
+        };
+    };
+    let hits = rulesets_covering(sets, &dst_scope);
+    let covering: Vec<String> = hits.iter().map(|(rs, _)| rs.name.clone()).collect();
+    let exact: Vec<&str> = hits
+        .iter()
+        .filter(|(_, e)| *e)
+        .map(|(rs, _)| rs.name.as_str())
+        .collect();
     let covers_scope = p
         .group_keys
         .is_none_or(|keys| p.scope_keys.iter().all(|k| keys.contains(k)));
-    let hit = p.rulesets.and_then(|sets| ruleset_scoped(sets, &dst_scope));
-    let (name, hint) = match hit {
-        _ if dst_scope.is_empty() => (None, Cow::Borrowed(RULESET_HINT)),
-        Some(name) if covers_scope => (Some(name), Cow::Borrowed(RULESET_HINT)),
-        _ => (
-            None,
-            Cow::Owned(format!("scope {}", labels_tokens(&dst_scope))),
-        ),
+    let name = match (exact.as_slice(), covering.as_slice()) {
+        _ if !covers_scope => None,
+        ([one], _) => Some(one.to_string()),
+        ([], [one]) => Some(one.clone()),
+        _ => None,
     };
-    RulesetPick { name, hint }
+
+    let hint = match covering.len() {
+        _ if !covers_scope => Cow::Owned(format!("scope {scope}")),
+        0 => Cow::Owned(format!(
+            "no ruleset covers {scope}: type a new name, Ctrl-R creates it"
+        )),
+        1 => Cow::Borrowed(RULESET_HINT),
+        n => Cow::Owned(format!(
+            "{n} rulesets cover {scope}: Ctrl-N lists them first"
+        )),
+    };
+    RulesetPick {
+        name,
+        hint,
+        covering,
+    }
 }
 
 /// The draft rulesets arrived after a `w` form opened: its Ruleset hint
@@ -2779,7 +2832,7 @@ mod tests {
         no_scope.dst.labels.retain(|l| l.key == "role");
         let s = flow_form(&no_scope);
         assert_eq!(s.value("Ruleset"), "");
-        assert_eq!(s.fields[0].hint, RULESET_HINT);
+        assert_eq!(s.fields[0].hint, NO_SCOPE_HINT);
         assert_eq!(s.value("Providers"), "role=db");
         assert_eq!(s.value("Consumers"), "app=shop, env=prod, role=web");
         assert_eq!(s.value("Unscoped"), "y");
@@ -2799,7 +2852,10 @@ mod tests {
             "env",
             &[],
         );
-        assert_eq!(c.fields[0].hint, "scope app=shop");
+        assert_eq!(
+            c.fields[0].hint,
+            "no ruleset covers app=shop: type a new name, Ctrl-R creates it"
+        );
     }
 
     /// The `w` form for `flow` against an index that also holds `extra` services.
@@ -2918,7 +2974,10 @@ mod tests {
         sets.push(more.clone());
         let two = form_with(intent(), &["app", "env"], "role", &sets);
         assert_eq!(two.value("Ruleset"), "", "two match: the user chooses");
-        assert_eq!(two.fields[0].hint, "scope app=shop, env=prod");
+        assert_eq!(
+            two.fields[0].hint,
+            "2 rulesets cover app=shop, env=prod: Ctrl-N lists them first"
+        );
         // A ruleset pending deletion does not count.
         sets[2].update_type = Some("delete".into());
         let back = form_with(intent(), &["app", "env"], "role", &sets);
@@ -2926,7 +2985,114 @@ mod tests {
         // None matches: empty, the scope in the hint.
         let none = form_with(intent(), &["app", "env"], "role", &rule_sets()[1..]);
         assert_eq!(none.value("Ruleset"), "");
-        assert_eq!(none.fields[0].hint, "scope app=shop, env=prod");
+        assert_eq!(
+            none.fields[0].hint,
+            "no ruleset covers app=shop, env=prod: type a new name, Ctrl-R creates it"
+        );
+    }
+
+    /// A live draft ruleset `name` with these scopes (label hrefs; `g:` a
+    /// label group).
+    fn scoped(id: u32, name: &str, scopes: &[&[&str]]) -> RuleSet {
+        let scopes: Vec<Vec<Value>> = scopes
+            .iter()
+            .map(|s| {
+                s.iter()
+                    .map(|h| match h.strip_prefix("g:") {
+                        Some(g) => json!({"label_group": {"href": g}}),
+                        None => json!({"label": {"href": h}}),
+                    })
+                    .collect()
+            })
+            .collect();
+        serde_json::from_value(json!({
+            "href": format!("/orgs/5/sec_policy/draft/rule_sets/{id}"),
+            "name": name, "enabled": true, "scopes": scopes
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn the_ruleset_is_found_by_a_scope_that_covers_the_destination() {
+        // flows[1]'s destination: app=shop (3), env=prod (4), role=web (1).
+        let flows = crate::tui::test_support::fixture_flows();
+        let pick = |sets: &[RuleSet]| {
+            let f = form_with(
+                EditIntent::RuleFromFlow(Box::new(flows[1].clone())),
+                &["app", "env"],
+                "role",
+                sets,
+            );
+            (f.value("Ruleset").to_string(), f.fields[0].hint.to_string())
+        };
+        const APP: &str = "/orgs/5/labels/3";
+        const ENV: &str = "/orgs/5/labels/4";
+        let shop = scoped(1, "Shop", &[&[APP]]);
+        let prod = scoped(2, "Prod", &[&[ENV]]);
+        let exact = scoped(3, "Shop-Prod", &[&[APP, ENV]]);
+        let others = [
+            scoped(4, "Global", &[&[]]),
+            scoped(5, "Shop-EU", &[&[APP, "/orgs/5/labels/5"]]),
+            scoped(6, "Grouped", &[&[APP, "g:/orgs/5/label_groups/1"]]),
+        ];
+        // A ruleset scoped by part of the destination's scope covers it.
+        let mut sets = others.to_vec();
+        sets.push(shop.clone());
+        assert_eq!(pick(&sets), ("Shop".into(), RULESET_HINT.into()));
+        // Two cover it: none is picked, the hint counts them.
+        sets.push(prod.clone());
+        assert_eq!(
+            pick(&sets),
+            (
+                String::new(),
+                "2 rulesets cover app=shop, env=prod: Ctrl-N lists them first".into()
+            )
+        );
+        // One scoped exactly like it wins over the broader ones.
+        sets.push(exact.clone());
+        assert_eq!(
+            pick(&sets),
+            (
+                "Shop-Prod".into(),
+                "3 rulesets cover app=shop, env=prod: Ctrl-N lists them first".into()
+            )
+        );
+        // None covers it (the global scope, another location, a label
+        // group do not count): the hint says what to do.
+        assert_eq!(
+            pick(&others),
+            (
+                String::new(),
+                "no ruleset covers app=shop, env=prod: type a new name, Ctrl-R creates it".into()
+            )
+        );
+        // Not loaded yet: the scope, and that they are on their way.
+        let scope_keys = vec!["app".to_string(), "env".to_string()];
+        let loading = ruleset_pick(
+            &flows[1],
+            FlowPrefill {
+                scope_keys: &scope_keys,
+                tier_key: "role",
+                rulesets: None,
+                group_keys: None,
+            },
+        );
+        assert_eq!(loading.name, None);
+        assert_eq!(loading.hint, "scope app=shop, env=prod · loading rulesets");
+        assert_eq!(
+            ruleset_pick(
+                &flows[1],
+                FlowPrefill {
+                    scope_keys: &scope_keys,
+                    tier_key: "role",
+                    rulesets: Some(&[shop, prod, exact]),
+                    group_keys: None,
+                }
+            )
+            .covering,
+            vec!["Shop-Prod", "Shop", "Prod"],
+            "exact first, then the others in list order"
+        );
     }
 
     #[test]

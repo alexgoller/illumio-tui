@@ -10488,7 +10488,11 @@ mod tests {
         match &m.overlay {
             Overlay::Form(f) => {
                 assert_eq!(f.value("Ruleset"), "", "Shop-Prod is scoped by app and env");
-                assert_eq!(f.fields[0].hint, "scope app=shop");
+                assert_eq!(
+                    f.fields[0].hint,
+                    "no ruleset covers app=shop: type a new name, Ctrl-R creates it"
+                );
+
                 assert_eq!(f.value("Providers"), "env=prod");
             }
             other => panic!("{other:?}"),

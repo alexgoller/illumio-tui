@@ -7,7 +7,7 @@ expression: out
 ╭ Filters ────────────────────────────────── window 24h · cap 1000 · unbounded ╮
 │wind╭ Allow rule from flow ──────── Tab next · Enter review · Esc cancel ╮    │
 ╰────│▸ Ruleset*      ▏                                                   │────╯
-╭ Res│                scope app=shop, env=prod                            │ago ╮
+╭ Res│                scope app=shop, env=prod · loading rulesets         │ago ╮
 │4 fl│  Providers*    role=web                                            │████│
 ╰────│                app=web, group:Name, iplist:Corp, all, !env=dev     │────╯
 ╭ Flo│  Consumers*    iplist:Corp                                         │────╮

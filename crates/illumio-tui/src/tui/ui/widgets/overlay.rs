@@ -2,7 +2,7 @@
 use crate::tui::app_picker::AppPicker;
 use crate::tui::diff::{ObjectDiff, Sign};
 use crate::tui::filter::{FIELD_NAMES, FilterEditor};
-use crate::tui::form::{Form, clip, visible_tail};
+use crate::tui::form::{Form, clip, visible_tail, wrap_rows};
 use crate::tui::model::{Model, Screen, TrafficView, rule_kind_name};
 use crate::tui::picker::KeyPicker;
 use crate::tui::ui::layout::centered;
@@ -420,10 +420,29 @@ const FORM_LABEL_WIDTH: usize = 14;
 
 pub fn render_form(model: &Model, form: &Form, f: &mut Frame, area: Rect) {
     let t = &model.theme;
-    // Two rows per field (value, hint), the error row and the borders.
-    let r = centered(area, 70, (form.fields.len() as u16) * 2 + 3);
-    f.render_widget(Clear, r);
     let offer = form.ruleset_offer_armed();
+    // While Ctrl-R is armed the Ruleset hint says what it creates.
+    let hint_of = |field: &crate::tui::form::Field| match offer {
+        Some(o) if field.label == "Ruleset" => format!("Ctrl-R: create it, scoped {}", o.scope),
+        _ => field.hint.to_string(),
+    };
+    // Borders (2), the focus marker (2), the label column and the cursor (1).
+    let width = (centered(area, 70, 1).width as usize).saturating_sub(2 + 2 + FORM_LABEL_WIDTH + 1);
+    // A hint or the error longer than its row takes a second one.
+    let hints: Vec<Vec<String>> = form
+        .fields
+        .iter()
+        .map(|field| wrap_rows(&hint_of(field), width + 1, 2))
+        .collect();
+    let error = form
+        .error
+        .as_deref()
+        .map(|e| wrap_rows(&plain(e), width + 1 + 2 + FORM_LABEL_WIDTH, 2));
+    // A value row and its hint rows per field, the error rows and the borders.
+    let rows =
+        hints.iter().map(|h| 1 + h.len()).sum::<usize>() + error.as_ref().map_or(1, Vec::len) + 2;
+    let r = centered(area, 70, u16::try_from(rows).unwrap_or(u16::MAX));
+    f.render_widget(Clear, r);
     // A long title (a rule in a ruleset) would be cut by the full hint.
     let fits =
         |meta: &str| form.title.chars().count() + meta.chars().count() + 6 <= r.width as usize - 2;
@@ -438,8 +457,6 @@ pub fn render_form(model: &Model, form: &Form, f: &mut Frame, area: Rect) {
         None => "Enter review · Esc cancel",
     };
     let block = panel(&form.title, meta, t, true);
-    // Borders (2), the focus marker (2), the label column and the cursor (1).
-    let width = (r.width as usize).saturating_sub(2 + 2 + FORM_LABEL_WIDTH + 1);
     let mut lines: Vec<Line> = Vec::new();
     for (i, field) in form.fields.iter().enumerate() {
         let on = i == form.active;
@@ -464,39 +481,36 @@ pub fn render_form(model: &Model, form: &Form, f: &mut Frame, area: Rect) {
                 },
             ),
         ]));
-        // While completing, the candidates take the hint's row.
-        if let Some(strip) = form.completion_strip().filter(|_| on) {
-            lines.push(completion_line(&strip, 2 + FORM_LABEL_WIDTH, width + 1, t));
-            continue;
-        }
-        // While Ctrl-R is armed the Ruleset hint says what it creates.
-        let hint = match offer {
-            Some(o) if field.label == "Ruleset" => {
-                format!("Ctrl-R: create it, scoped {}", o.scope).into()
+        // While completing, the candidates take the hint's first row.
+        let strip = form.completion_strip().filter(|_| on);
+        for (n, hint) in hints[i].iter().enumerate() {
+            match &strip {
+                Some(s) if n == 0 => {
+                    lines.push(completion_line(s, 2 + FORM_LABEL_WIDTH, width + 1, t));
+                }
+                Some(_) => lines.push(Line::from("")),
+                None => lines.push(Line::from(Span::styled(
+                    format!("{:w$}{hint}", "", w = 2 + FORM_LABEL_WIDTH),
+                    t.dim_style(),
+                ))),
             }
-            _ => field.hint.clone(),
-        };
-        lines.push(Line::from(Span::styled(
-            format!(
-                "{:w$}{}",
-                "",
-                clip(&hint, width + 1),
-                w = 2 + FORM_LABEL_WIDTH
-            ),
-            t.dim_style(),
-        )));
+        }
     }
-    lines.push(match &form.error {
-        Some(e) => Line::from(Span::styled(plain(e), Style::new().fg(t.bad))),
-        None => Line::from(Span::styled(
+    match error {
+        Some(rows) => lines.extend(
+            rows.into_iter()
+                .map(|e| Line::from(Span::styled(e, Style::new().fg(t.bad)))),
+        ),
+        None => lines.push(Line::from(Span::styled(
             match (&form.alt, form.expanded) {
                 (None, _) => "* required",
                 (Some(_), false) => "* required · Ctrl-A all labels",
                 (Some(_), true) => "* required · Ctrl-A model view",
             },
             t.dim_style(),
-        )),
-    });
+        ))),
+    }
+
     f.render_widget(
         Paragraph::new(lines)
             .block(block)
