@@ -41,7 +41,7 @@ pub use sections::{
 };
 pub use steps::{CAP_STEPS, WINDOW_STEPS, next_cap, next_window, prev_cap, prev_window};
 pub use timeline::{
-    APPROX_BUCKETS, Bucket, SPIKE_MIN_BUCKETS, SPIKE_MULTIPLE, Spike, TIMELINE_CONFIRM_QUERIES,
-    Timeline, TimelineBucket, approx_timeline, blocked_connections, bucket_count, bucket_plan,
-    bucket_query, equal_buckets, exact_timeline, spike,
+    APPROX_BUCKETS, Bucket, MIN_BUCKET, SPIKE_MIN_BUCKETS, SPIKE_MULTIPLE, Spike,
+    TIMELINE_CONFIRM_QUERIES, Timeline, TimelineBucket, approx_timeline, blocked_connections,
+    bucket_count, bucket_plan, bucket_query, equal_buckets, exact_timeline, spike,
 };

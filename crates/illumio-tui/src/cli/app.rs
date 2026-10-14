@@ -59,7 +59,8 @@ pub struct AppArgs {
     #[arg(long, value_enum)]
     pub section: Option<SectionArg>,
     /// The exact blocked timeline: one blocked-only query per bucket and side (24x1h for 1d,
-    /// 28x6h for 1w, 30x1d for 30d, else 24), one at a time; above 24 queries needs --yes
+    /// 28x6h for 1w, 28x1d for 4w, 30x1d for 30d, else up to 24 of at least 5m: 1h is 12x5m),
+    /// one at a time; above 24 queries needs --yes
     #[arg(long)]
     pub timeline: bool,
     /// Confirm an expensive query (window > 7d, max_results > 10000, --timeline above 24 queries)

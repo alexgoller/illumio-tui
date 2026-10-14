@@ -20,14 +20,23 @@ pub const SPIKE_MULTIPLE: f64 = 3.0;
 /// With fewer non-zero buckets than this, no spike is named.
 pub const SPIKE_MIN_BUCKETS: usize = 4;
 
+/// The exact timeline's shortest bucket: a shorter window gets fewer
+/// buckets (1h: 12 of 5 minutes).
+pub const MIN_BUCKET: Duration = Duration::from_secs(300);
+
 /// The exact timeline's bucket count for a window: 24 (of 1h) for 1d, 28
-/// (of 6h) for 1w, 30 (of 1d) for 30d, else about 24 equal buckets.
+/// (of 6h) for 1w, 28 (of 1d) for 4w, 30 (of 1d) for 30d, else about 24
+/// equal buckets, none shorter than `MIN_BUCKET` (at least one).
 pub fn bucket_count(window: Duration) -> usize {
     match window.as_secs() {
         86_400 => 24,
         604_800 => 28,
+        2_419_200 => 28,
         2_592_000 => 30,
-        _ => APPROX_BUCKETS,
+        s => {
+            let fit = s / MIN_BUCKET.as_secs();
+            usize::try_from(fit.clamp(1, APPROX_BUCKETS as u64)).unwrap_or(APPROX_BUCKETS)
+        }
     }
 }
 
@@ -82,19 +91,25 @@ pub struct Spike {
     /// The bucket's query hit the cap: its count, so the multiple, is a
     /// lower bound (`x6+`).
     pub truncated: bool,
+    /// The timeline spans more than a day: a bucket shorter than a day is
+    /// named by its date and time.
+    #[serde(skip)]
+    pub multi_day: bool,
 }
 
 impl Spike {
-    /// `spike 09:00 (x6 median)`; a bucket of a day or more by its date
-    /// (`spike 10-04 (x3 median)`); a capped bucket `x6+`. UTC, like every
-    /// timestamp here.
+    /// `spike 09:00 (x6 median)` in a timeline of a day or less; `spike
+    /// 10-04 18:00` for a shorter bucket in a longer one; a bucket of a day
+    /// or more by its date (`spike 10-04 (x3 median)`); a capped bucket
+    /// `x6+`. UTC, like every timestamp here.
     pub fn text(&self) -> String {
         let day = self.end.duration_since(self.start) >= SignedDuration::from_hours(24);
-        let when = if day {
-            self.start.strftime("%m-%d").to_string()
-        } else {
-            self.start.strftime("%H:%M").to_string()
+        let format = match (day, self.multi_day) {
+            (true, _) => "%m-%d",
+            (false, true) => "%m-%d %H:%M",
+            (false, false) => "%H:%M",
         };
+        let when = self.start.strftime(format).to_string();
         let plus = if self.truncated { "+" } else { "" };
         format!("spike {when} (x{:.0}{plus} median)", self.multiple)
     }
@@ -152,12 +167,18 @@ pub struct Timeline {
 impl Timeline {
     /// `spike` from the loaded counts.
     pub fn with_spike(mut self) -> Self {
+        let multi_day = self
+            .buckets
+            .first()
+            .zip(self.buckets.last())
+            .is_some_and(|(a, b)| b.end.duration_since(a.start) > SignedDuration::from_hours(24));
         self.spike = spike(&self.counts()).map(|(i, multiple)| Spike {
             index: i,
             start: self.buckets[i].start,
             end: self.buckets[i].end,
             multiple,
             truncated: self.buckets[i].truncated,
+            multi_day,
         });
         self
     }
@@ -366,15 +387,40 @@ mod tests {
             month[0].end.duration_since(month[0].start),
             SignedDuration::from_hours(24)
         );
-        for odd in [5_400, 2 * 3_600, 90 * 86_400] {
+        let four_weeks = plan(28 * 86_400);
+        assert_eq!(four_weeks.len(), 28);
+        assert_eq!(
+            four_weeks[0].end.duration_since(four_weeks[0].start),
+            SignedDuration::from_hours(24),
+            "4w: 28 days"
+        );
+        for (odd, n) in [
+            (2 * 3_600, 24),
+            (3 * 86_400, 24),
+            (90 * 86_400, 24),
+            (5_400, 18),
+        ] {
             let p = plan(odd);
-            assert_eq!(p.len(), APPROX_BUCKETS, "{odd}s: about 24 equal buckets");
+            assert_eq!(p.len(), n, "{odd}s");
             assert_eq!(p.last().unwrap().end, end);
+            assert!(
+                p[0].end.duration_since(p[0].start) >= SignedDuration::from_mins(5),
+                "{odd}s: no bucket under 5 minutes"
+            );
         }
+        let hour = plan(3_600);
+        assert_eq!(hour.len(), 12, "1h: 12 buckets of 5 minutes");
+        assert_eq!(
+            hour[0].end.duration_since(hour[0].start),
+            SignedDuration::from_mins(5)
+        );
+        assert_eq!(plan(120).len(), 1, "a window under 5 minutes is one bucket");
         assert_eq!(bucket_count(Duration::from_secs(86_400)), 24);
         assert_eq!(bucket_count(Duration::from_secs(7 * 86_400)), 28);
+        assert_eq!(bucket_count(Duration::from_secs(28 * 86_400)), 28);
         assert_eq!(bucket_count(Duration::from_secs(30 * 86_400)), 30);
-        assert_eq!(bucket_count(Duration::from_secs(3_600)), 24);
+        assert_eq!(bucket_count(Duration::from_secs(3_600)), 12);
+        assert_eq!(bucket_count(Duration::from_secs(1_800)), 6);
         assert!(bucket_plan(end, end).is_empty());
     }
 
@@ -410,14 +456,25 @@ mod tests {
             end: ts("2026-10-09T15:00:00Z"),
             multiple: 6.2,
             truncated: false,
+            multi_day: false,
         };
-        assert_eq!(s.text(), "spike 14:00 (x6 median)");
+        assert_eq!(s.text(), "spike 14:00 (x6 median)", "a timeline of a day");
+        let week = Spike {
+            multi_day: true,
+            ..s
+        };
+        assert_eq!(
+            week.text(),
+            "spike 10-09 14:00 (x6 median)",
+            "an hour bucket in a longer timeline names its date"
+        );
         let d = Spike {
             index: 3,
             start: ts("2026-10-04T08:00:00Z"),
             end: ts("2026-10-05T08:00:00Z"),
             multiple: 3.0,
             truncated: true,
+            multi_day: true,
         };
         assert_eq!(
             d.text(),
@@ -511,5 +568,27 @@ mod tests {
         }
         .with_spike();
         assert_eq!(spiky.spike.map(|s| s.index), Some(4));
+    }
+
+    #[test]
+    fn the_spike_of_a_longer_timeline_carries_its_date() {
+        let start = ts("2026-10-03T08:00:00Z");
+        let week = bucket_plan(start, ts("2026-10-10T08:00:00Z"));
+        let mut counts = vec![Some((1, false)); week.len()];
+        counts[5] = Some((20, false));
+        let t = exact_timeline(&week, &counts);
+        assert_eq!(
+            t.spike.unwrap().text(),
+            "spike 10-04 14:00 (x20 median)",
+            "a 6h bucket of a week"
+        );
+        let day = bucket_plan(ts("2026-10-09T08:00:00Z"), ts("2026-10-10T08:00:00Z"));
+        let mut counts = vec![Some((1, false)); day.len()];
+        counts[6] = Some((20, false));
+        assert_eq!(
+            exact_timeline(&day, &counts).spike.unwrap().text(),
+            "spike 14:00 (x20 median)",
+            "a day: the time only"
+        );
     }
 }

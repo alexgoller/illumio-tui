@@ -2853,8 +2853,8 @@ async fn app_mistakes_exit_2_before_any_request() {
 #[tokio::test(flavor = "multi_thread")]
 async fn app_timeline_runs_one_blocked_only_query_per_bucket() {
     let server = MockServer::start().await;
-    // 1 focused query (in) for the peers, then 24 buckets of 1h/24, one side each.
-    mount_app(&server, 1 + 24).await;
+    // 1 focused query (in) for the peers, then 12 buckets of 5 minutes, one side each.
+    mount_app(&server, 1 + 12).await;
     let out = stdout_json(
         cmd(&server)
             .args([
@@ -2874,7 +2874,7 @@ async fn app_timeline_runs_one_blocked_only_query_per_bucket() {
     assert_eq!(t["partial"], false);
     assert_eq!(t["truncated"], false);
     let buckets = t["buckets"].as_array().unwrap();
-    assert_eq!(buckets.len(), 24);
+    assert_eq!(buckets.len(), 12, "1h: 12 buckets of 5 minutes");
     assert!(
         buckets
             .iter()
@@ -2882,7 +2882,7 @@ async fn app_timeline_runs_one_blocked_only_query_per_bucket() {
         "every bucket's answer holds the NAS flow's 3 blocked connections"
     );
     assert!(t.get("spike").is_none(), "a flat timeline has no spike");
-    assert_eq!(out["meta"]["queries"], 25);
+    assert_eq!(out["meta"]["queries"], 13);
     assert_eq!(out["meta"]["truncated"], false);
     let posts: Vec<Value> = server
         .received_requests()
@@ -2892,7 +2892,7 @@ async fn app_timeline_runs_one_blocked_only_query_per_bucket() {
         .filter(|r| r.method.as_str() == "POST")
         .map(|r| serde_json::from_slice(&r.body).unwrap())
         .collect();
-    assert_eq!(posts.len(), 25);
+    assert_eq!(posts.len(), 13);
     assert!(
         posts[0]["policy_decisions"] != json!(["blocked"]),
         "the peers' query keeps every decision"
@@ -2911,15 +2911,14 @@ async fn app_timeline_runs_one_blocked_only_query_per_bucket() {
     sorted.sort();
     assert_eq!(starts, sorted, "oldest bucket first, one at a time");
     sorted.dedup();
-    assert_eq!(sorted.len(), 24, "every bucket once");
+    assert_eq!(sorted.len(), 12, "every bucket once");
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn app_timeline_marks_capped_buckets_as_lower_bounds() {
     let server = MockServer::start().await;
-    mount_app(&server, 1 + 24).await;
-    // A cap of 4 rows: every 4-row answer hit it. (One run: each costs 25
-    // polled queries.)
+    mount_app(&server, 1 + 12).await;
+    // A cap of 4 rows: every 4-row answer hit it.
     let out = stdout_json(
         cmd(&server)
             .args([
@@ -2955,7 +2954,7 @@ async fn app_timeline_above_the_threshold_needs_yes_before_any_request() {
     let server = MockServer::start().await;
     mount_traffic_quiet(&server).await;
     for (args, queries) in [
-        (vec!["app", "shop/prod", "--window", "1h", "--timeline"], 48),
+        (vec!["app", "shop/prod", "--window", "2h", "--timeline"], 48),
         (vec!["app", "shop/prod", "--window", "1d", "--timeline"], 48),
         (
             vec![
