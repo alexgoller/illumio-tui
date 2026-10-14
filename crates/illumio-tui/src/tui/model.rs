@@ -3803,7 +3803,11 @@ fn enforcement_of(r: &WorkloadRowView) -> String {
     r.workload.enforcement().unwrap_or_default().to_string()
 }
 
+/// `-` without a VEN: nothing reports flows there, whatever the PCE says.
 fn visibility_of(r: &WorkloadRowView) -> String {
+    if r.workload.is_unmanaged() {
+        return "-".into();
+    }
     r.workload.visibility_level.clone().unwrap_or_default()
 }
 
@@ -3867,6 +3871,12 @@ pub fn workload_columns() -> Vec<Column<WorkloadRowView>> {
         Column {
             // Secondary: gives way to the health columns until the terminal is very wide.
             hide_below: 180,
+            // `:export` leaves the cell empty for nothing, as CSV does.
+            full: Some(|r| {
+                Some(visibility_of(r))
+                    .filter(|v| v != "-")
+                    .unwrap_or_default()
+            }),
             ..text_col("visibility", 13, visibility_of, |r| {
                 SortKey::Text(visibility_of(r))
             })
@@ -4794,6 +4804,29 @@ mod tests {
             sorted,
             vec!["env=prod role=db app=shop", "env=prod role=web app=aaa"]
         );
+    }
+
+    #[test]
+    fn workload_visibility_is_a_dash_without_a_ven() {
+        let mut m = crate::tui::test_support::model_with_workloads();
+        for w in &mut m.workloads.raw {
+            w.visibility_level = Some("flow_summary".into());
+        }
+        m.workloads.rebuild(&m.limits.key_order());
+        let t = &m.workloads.table;
+        let col = t
+            .columns
+            .iter()
+            .position(|c| c.title == "visibility")
+            .unwrap();
+        let cells: Vec<String> = t.rows().iter().map(|r| t.cell(r, col)).collect();
+        let nas = t
+            .rows()
+            .iter()
+            .position(|r| r.workload.is_unmanaged())
+            .unwrap();
+        assert_eq!(cells[nas], "-");
+        assert_eq!(cells[0], "flow_summary");
     }
 
     #[test]
