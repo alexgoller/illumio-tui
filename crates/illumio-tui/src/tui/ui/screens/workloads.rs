@@ -1,5 +1,5 @@
 //! Workloads screen: one table of workloads and an optional detail pane for
-//! the selected one (href, OS, VEN status, interfaces, labels).
+//! the selected one (href, OS, VEN status, enforcement, interfaces, labels).
 use crate::tui::model::{Model, WorkloadRowView};
 use crate::tui::ui::screens::objects::{DetailLine, clip, items};
 use crate::tui::ui::theme::Theme;
@@ -186,6 +186,7 @@ fn detail_lines(r: &WorkloadRowView) -> Vec<DetailLine> {
         (Some("os"), w.os_id.clone().unwrap_or_else(|| "-".into())),
         (Some("ven"), ven_detail(w, a.as_ref())),
         (Some("health"), r.health.as_str().to_string()),
+        (Some("enforce"), enforce_detail(w)),
     ];
     if let Some(a) = &a {
         let sync = a.sync_state.as_deref().unwrap_or("-");
@@ -220,6 +221,16 @@ fn detail_lines(r: &WorkloadRowView) -> Vec<DetailLine> {
         w.interfaces.iter().map(interface_text).collect(),
     ));
     out
+}
+
+/// The effective enforcement; for a workload without a VEN also the mode
+/// the PCE reports for it (`unmanaged · PCE reports visibility_only`).
+fn enforce_detail(w: &Workload) -> String {
+    let shown = w.enforcement().unwrap_or("-");
+    match w.enforcement_mode.as_deref() {
+        Some(raw) if raw != shown => format!("{shown} · PCE reports {raw}"),
+        _ => shown.to_string(),
+    }
 }
 
 /// `active · 23.2.31-3113 · up 16m`, or the `ven_text` fallback for unmanaged workloads.
@@ -285,4 +296,36 @@ fn health_bar(counts: [usize; 5], width: usize, t: &Theme) -> Vec<Span<'static>>
         .zip(colours)
         .map(|(&n, c)| Span::styled("█".repeat(n), Style::new().fg(c)))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pce::KeyOrder;
+
+    fn row(i: usize, raw: &str) -> WorkloadRowView {
+        let mut w: Vec<Workload> =
+            serde_json::from_str(include_str!("../../../../../../fixtures/workloads.json"))
+                .unwrap();
+        w[i].enforcement_mode = Some(raw.into());
+        let now: jiff::Timestamp = "2026-10-10T08:00:00Z".parse().unwrap();
+        WorkloadRowView::new(w.swap_remove(i), now, &KeyOrder::default())
+    }
+
+    fn enforce(r: &WorkloadRowView) -> String {
+        detail_lines(r)
+            .into_iter()
+            .find(|(h, _)| *h == Some("enforce"))
+            .map(|(_, b)| b)
+            .unwrap()
+    }
+
+    #[test]
+    fn detail_shows_the_effective_enforcement_and_what_the_pce_reports() {
+        assert_eq!(
+            enforce(&row(2, "visibility_only")),
+            "unmanaged · PCE reports visibility_only"
+        );
+        assert_eq!(enforce(&row(0, "full")), "full");
+    }
 }
