@@ -243,6 +243,11 @@ pub trait Completing {
     /// The shown candidate is a key or a prefix (`app=`, `group:`): the
     /// next `Ctrl-N` completes what follows it instead of cycling.
     fn completion_dives(&self) -> bool;
+    /// Candidates offered before the others, in this order, where they
+    /// match (a `w` form's rulesets that cover the destination).
+    fn preferred(&self) -> &[String] {
+        &[]
+    }
 }
 
 /// A candidate that only names what comes next: a key (`app=`, `!app=`,
@@ -309,9 +314,18 @@ pub struct Form {
     /// The completion being cycled; any key but `Ctrl-N`/`Ctrl-P` ends it.
     /// Boxed like `offers_ruleset`.
     pub completion: Option<Box<Completion>>,
-    /// A `w` form drafted from a grouped row: the keys its groups are made
-    /// of, kept to pick its ruleset again when the rulesets arrive.
-    pub flow_rows: Option<Box<Vec<String>>>,
+    /// A `w` form's ruleset choice; boxed like `offers_ruleset`.
+    pub flow: Option<Box<FlowRuleset>>,
+}
+
+/// What a `w` form keeps to choose its ruleset again when the draft
+/// rulesets arrive, and what completion offers first.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FlowRuleset {
+    /// Drafted from a grouped row: the keys its groups are made of.
+    pub group_keys: Option<Vec<String>>,
+    /// The rulesets whose scope covers the destination, best first.
+    pub covering: Vec<String>,
 }
 
 /// The ruleset `Ctrl-R` would create: the name the planner checked and the
@@ -347,7 +361,7 @@ impl Form {
             expanded: false,
             offers_ruleset: None,
             completion: None,
-            flow_rows: None,
+            flow: None,
         }
     }
 
@@ -512,6 +526,10 @@ impl Completing for Form {
         self.completion
             .as_ref()
             .is_some_and(|c| self.fields.get(c.field).is_some_and(|f| c.dives(f.kind)))
+    }
+
+    fn preferred(&self) -> &[String] {
+        self.flow.as_deref().map_or(&[], |f| f.covering.as_slice())
     }
 }
 

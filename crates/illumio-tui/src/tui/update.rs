@@ -888,8 +888,14 @@ fn complete_field(model: &Model, editor: &mut impl Completing, forward: bool) {
     };
     let rulesets = model.draft_rulesets().unwrap_or_default();
     let workloads = &model.workloads.raw;
-    let candidates =
+    let mut candidates =
         crate::tui::complete::complete(kind, &token, &earlier, idx, rulesets, workloads);
+    // A `w` form's rulesets that cover the destination first, best first.
+    if kind == crate::tui::form::FieldKind::Ruleset {
+        let preferred = editor.preferred();
+        candidates.sort_by_key(|c| preferred.iter().position(|p| p == c).unwrap_or(usize::MAX));
+    }
+
     if editor.start_completion(candidates) {
         if !forward {
             editor.cycle(false);
@@ -15132,5 +15138,41 @@ mod rule_form_ruleset_tests {
         }
         update(&mut m, ctrl('n'));
         assert_eq!(form(&m).value("Ruleset"), "Global-Infra", "inside the name");
+    }
+
+    #[test]
+    fn the_rulesets_that_cover_the_destination_complete_first() {
+        let (mut m, _) = w_form();
+        let label = |h: &str| serde_json::json!({"label": {"href": h}});
+        let mut sets = drafts();
+        // Listed before the ones that cover app=shop env=prod.
+        let mut first = sets[0].clone();
+        first.href = "/orgs/5/sec_policy/draft/rule_sets/103".into();
+        first.name = "A-Prod-EU".into();
+        first.scopes = vec![vec![
+            serde_json::from_value(label("/orgs/5/labels/4")).unwrap(),
+            serde_json::from_value(label("/orgs/5/labels/5")).unwrap(),
+        ]];
+        sets.insert(0, first);
+        let mut shop = sets[1].clone();
+        shop.href = "/orgs/5/sec_policy/draft/rule_sets/102".into();
+        shop.name = "Shop".into();
+        shop.scopes = vec![vec![
+            serde_json::from_value(label("/orgs/5/labels/3")).unwrap(),
+        ]];
+        sets.push(shop);
+        update(&mut m, drafts_loaded(sets));
+        assert_eq!(form(&m).value("Ruleset"), "Shop-Prod", "scoped exactly");
+        assert_eq!(
+            form(&m).fields[0].hint,
+            "2 rulesets cover app=shop, env=prod: Ctrl-N lists them first"
+        );
+        update(&mut m, ctrl('u'));
+        update(&mut m, ctrl('n'));
+        let Some(strip) = form(&m).completion_strip() else {
+            panic!("no completion")
+        };
+        let names: Vec<&str> = strip.iter().map(|(s, _)| s.as_str()).collect();
+        assert_eq!(names, ["Shop-Prod", "Shop", "A-Prod-EU", "Global-Infra"]);
     }
 }

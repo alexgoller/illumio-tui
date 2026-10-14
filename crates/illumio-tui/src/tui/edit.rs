@@ -6,7 +6,8 @@ use crate::tokens::{
     ActorToken, ServiceToken, actor_from_href_token, is_href, parse_scope_tokens,
     service_from_href_token, similar, split_kv, with_exclusion, with_similar,
 };
-use crate::tui::form::{Field, FieldKind, Form, RulesetOffer};
+use crate::tui::form::{Field, FieldKind, FlowRuleset, Form, RulesetOffer};
+
 use pce::models::{
     Actor, DenyRule, Fqdn, IngressService, Interface, IpList, Label, Rule, RuleSet, Service,
     Workload,
@@ -330,10 +331,13 @@ pub fn start(intent: EditIntent, index: Option<&NameIndex>, prefill: FlowPrefill
             Start::Plan(WriteIntent::DeleteDenyRule { href, name })
         }
         EditIntent::RuleFromFlow(f) => {
-            let (fields, alt) = flow_rule_fields(&f, idx, prefill);
+            let (fields, alt, covering) = flow_rule_fields(&f, idx, prefill);
             let mut form = Form::new("Allow rule from flow", fields, EditIntent::RuleFromFlow(f));
             form.alt = Some(alt);
-            form.flow_rows = prefill.group_keys.map(|k| Box::new(k.to_vec()));
+            form.flow = Some(Box::new(FlowRuleset {
+                group_keys: prefill.group_keys.map(<[String]>::to_vec),
+                covering,
+            }));
             Start::Form(form)
         }
     }
@@ -974,12 +978,13 @@ fn side_name(e: &ResolvedEndpoint, group_keys: Option<&[String]>) -> String {
 /// The `w` form in the label model: the ruleset whose scope is the
 /// destination's scope, the destination's tier as providers, the source's
 /// tier as consumers when it shares that scope (else its scope and tier,
-/// unscoped), on the flow's port. The alternates are every attached label.
+/// unscoped), on the flow's port. The alternates are every attached label;
+/// the rulesets that cover the destination come last.
 fn flow_rule_fields(
     f: &ResolvedFlow,
     idx: &NameIndex,
     p: FlowPrefill,
-) -> (Vec<Field>, Vec<(usize, String)>) {
+) -> (Vec<Field>, Vec<(usize, String)>, Vec<String>) {
     let dst_scope = scope_of(&f.dst, p.scope_keys);
     let src_scope = scope_of(&f.src, p.scope_keys);
     let same_scope = !dst_scope.is_empty()
@@ -1032,7 +1037,7 @@ fn flow_rule_fields(
         (1, endpoint_tokens(&f.dst).join(", ")),
         (2, endpoint_tokens(&f.src).join(", ")),
     ];
-    (fields, alt)
+    (fields, alt, pick.covering)
 }
 
 /// A `w` form's ruleset by the destination's scope: the one to pre-fill
@@ -1107,14 +1112,15 @@ pub fn refill_ruleset(form: &mut Form, p: FlowPrefill) {
     let EditIntent::RuleFromFlow(f) = &form.intent else {
         return;
     };
-    let keys = form.flow_rows.as_deref().map(Vec::as_slice);
+    let flow = form.flow.get_or_insert_default();
     let pick = ruleset_pick(
         f,
         FlowPrefill {
-            group_keys: keys,
+            group_keys: flow.group_keys.as_deref(),
             ..p
         },
     );
+    flow.covering = pick.covering;
     let Some(field) = form.fields.iter_mut().find(|x| x.label == "Ruleset") else {
         return;
     };
