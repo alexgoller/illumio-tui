@@ -68,23 +68,25 @@ pub struct Truncation {
 
 /// Reads the cap signal from a completed status. With `regions` (a
 /// supercluster, each region capped on its own) any region whose
-/// `flows_count` reaches `cap`; otherwise `flows_count >= cap`; without a
-/// `flows_count`, `rows >= cap`. `matches_count` is a bounded raw count
-/// (400 at a cap of 200, 4631 for a complete 4625), so it never decides.
+/// `flows_count` reaches `cap`, judged on the regions that report one;
+/// only when none does, the overall `flows_count >= cap`, and without that
+/// `rows >= cap`. A region that did not respond or reports no count makes
+/// the result `incomplete`. `matches_count` is a bounded raw count (400 at
+/// a cap of 200, 4631 for a complete 4625), so it never decides.
 pub fn truncation(status: &AsyncQueryStatus, rows: usize, cap: u32) -> Truncation {
     let cap = u64::from(cap);
     let regions = status.regions.as_deref().unwrap_or_default();
-    let counted = !regions.is_empty() && regions.iter().all(|r| r.flows_count.is_some());
-    let truncated = if counted {
-        regions
-            .iter()
-            .any(|r| r.flows_count.is_some_and(|n| n >= cap))
-    } else {
+    let counts: Vec<u64> = regions.iter().filter_map(|r| r.flows_count).collect();
+    let truncated = if counts.is_empty() {
         status.flows_count.unwrap_or(rows as u64) >= cap
+    } else {
+        counts.iter().any(|&n| n >= cap)
     };
     Truncation {
         truncated,
-        incomplete: regions.iter().any(|r| r.responded == Some(false)),
+        incomplete: regions
+            .iter()
+            .any(|r| r.responded == Some(false) || r.flows_count.is_none()),
     }
 }
 
@@ -251,9 +253,21 @@ mod tests {
         assert_eq!(truncation(&s, 16_815, 10_000), NO);
         s.regions.as_mut().unwrap()[1].flows_count = Some(10_000);
         assert_eq!(truncation(&s, 19_000, 10_000), CUT);
-        // A region without a count: the overall count decides.
+        // A region without a count: the counted ones decide, and the
+        // result is incomplete (not truncated) for the silent one.
         s.regions.as_mut().unwrap()[1].flows_count = None;
-        assert_eq!(truncation(&s, 16_815, 10_000), CUT);
+        assert_eq!(
+            truncation(&s, 16_815, 10_000),
+            Truncation {
+                truncated: false,
+                incomplete: true
+            }
+        );
+        // No region reports a count: the overall count decides.
+        for r in s.regions.as_mut().unwrap() {
+            r.flows_count = None;
+        }
+        assert!(truncation(&s, 16_815, 10_000).truncated);
     }
 
     #[test]

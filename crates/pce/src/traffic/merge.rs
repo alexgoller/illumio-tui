@@ -8,39 +8,6 @@ use super::resolved::{ResolvedEndpoint, ResolvedFlow};
 use crate::models::PolicyDecision;
 use std::collections::HashMap;
 
-/// What makes two flows the same connection for display: both sides
-/// (workload href, else IP), the service, the process and user, the
-/// decision and the direction. Not a merge key: one connection has a new
-/// record each time the PCE starts one (`record_key`).
-pub type FlowKey = (
-    Option<String>,
-    Option<String>,
-    Option<u16>,
-    String,
-    Option<String>,
-    Option<String>,
-    PolicyDecision,
-    Option<String>,
-);
-
-fn side(e: &ResolvedEndpoint) -> Option<String> {
-    e.workload_href.clone().or_else(|| e.ip.clone())
-}
-
-/// The flow identity without `first_detected`.
-pub fn flow_key(f: &ResolvedFlow) -> FlowKey {
-    (
-        side(&f.src),
-        side(&f.dst),
-        f.port,
-        f.proto.clone(),
-        f.process_name.clone(),
-        f.user_name.clone(),
-        f.policy_decision,
-        f.flow_direction.clone(),
-    )
-}
-
 /// One stored aggregate record: both sides by workload href and IP, the
 /// service, process, user, decision, direction and `first_detected`.
 pub type RecordKey = (
@@ -84,7 +51,9 @@ fn supersedes(new: &ResolvedFlow, old: &ResolvedFlow) -> bool {
 /// Appends `more` to `existing`, one row per record (`record_key`): a copy
 /// of a record already present replaces it in place when it is a later
 /// version (`supersedes`), else it is dropped. Nothing is summed. New
-/// records keep their order.
+/// records keep their order. `existing` is taken as already one row per
+/// record (one Explorer result, or an earlier merge): its own duplicates
+/// are not folded; the first copy is the one `more` is compared with.
 pub fn merge_flows(existing: &mut Vec<ResolvedFlow>, more: Vec<ResolvedFlow>) {
     let mut at: HashMap<RecordKey, usize> = HashMap::with_capacity(existing.len());
     for (i, f) in existing.iter().enumerate() {
@@ -199,7 +168,6 @@ mod tests {
         let mut loaded = vec![flow("/w/1", 443, 420)];
         merge_flows(&mut loaded, vec![yesterday]);
         assert_eq!(conns(&loaded), vec![420, 7]);
-        assert_eq!(flow_key(&loaded[0]), flow_key(&loaded[1]), "one flow");
     }
 
     #[test]
