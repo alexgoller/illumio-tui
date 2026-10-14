@@ -3203,7 +3203,10 @@ impl LabelRow {
     pub fn is_unused(&self, by_pce: bool) -> bool {
         let counted = |u: pce::LabelUsage| !u.is_used();
         if by_pce {
-            self.held_by.as_ref().is_some_and(|f| !f.is_used()) && self.usage.is_none_or(counted)
+            self.held_by
+                .as_ref()
+                .is_some_and(|f| f.decided() && !f.is_used())
+                && self.usage.is_none_or(counted)
         } else {
             self.usage.is_some_and(counted)
         }
@@ -3489,7 +3492,7 @@ pub enum PceUsage {
 impl PceUsage {
     /// From a `usage=true` answer: flags when every label has them.
     pub fn from_labels(labels: Vec<Label>) -> Self {
-        if !labels.iter().all(|l| l.usage.is_some()) {
+        if !labels.iter().all(|l| l.usage_flags().is_some()) {
             return Self::Unsupported;
         }
         Self::Flags(

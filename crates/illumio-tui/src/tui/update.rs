@@ -11933,6 +11933,27 @@ mod label_filter_tests {
     }
 
     #[test]
+    fn empty_usage_flags_are_no_flags_never_unused() {
+        let mut labels: Vec<pce::models::Label> =
+            serde_json::from_str(include_str!("../../../../fixtures/labels.json")).unwrap();
+        for l in &mut labels {
+            l.usage = Some(pce::models::LabelUsageFlags::default());
+        }
+        assert_eq!(
+            PceUsage::from_labels(labels.clone()),
+            PceUsage::Unsupported,
+            "an empty map says nothing: our counts decide"
+        );
+        let row = crate::tui::model::LabelRow {
+            label: labels[0].clone(),
+            usage: None,
+            held_by: Some(pce::models::LabelUsageFlags::default()),
+            in_keys: true,
+        };
+        assert!(!row.is_unused(true));
+    }
+
+    #[test]
     fn a_failed_usage_ask_turns_u_off_and_says_why() {
         let mut m = on_labels();
         update(&mut m, kc(KeyCode::Char('u')));

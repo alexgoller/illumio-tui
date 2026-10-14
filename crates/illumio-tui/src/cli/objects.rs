@@ -333,7 +333,7 @@ fn keep_label(l: &Label, args: &LabelsArgs, order: &KeyOrder) -> bool {
 fn unused_labels(labels: Vec<Label>, usage: &HashMap<String, LabelUsage>) -> Vec<LabelOut> {
     labels
         .into_iter()
-        .filter(|l| l.usage.as_ref().is_none_or(|u| !u.is_used()))
+        .filter(|l| l.usage_flags().is_none_or(|u| !u.is_used()))
         .filter_map(|label| {
             let u = usage.get(&label.href).copied().unwrap_or_default();
             (!u.is_used()).then_some(LabelOut {
@@ -350,7 +350,7 @@ fn unused_labels(labels: Vec<Label>, usage: &HashMap<String, LabelUsage>) -> Vec
 fn unused_by_pce(labels: Vec<Label>) -> Vec<LabelOut> {
     labels
         .into_iter()
-        .filter(|l| l.usage.as_ref().is_some_and(|u| !u.is_used()))
+        .filter(|l| l.usage_flags().is_some_and(|u| !u.is_used()))
         .map(|label| LabelOut {
             label,
             workloads: 0,
@@ -372,8 +372,9 @@ pub async fn labels(ctx: &Context, args: &LabelsArgs) -> Result<(), CliError> {
         ctx.pce.labels(ctx.cache_mode).await?
     };
     let order = ctx.config.key_order();
-    // A PCE that ignores `usage=true` returns labels without it.
-    let flagged = c.value.iter().all(|l| l.usage.is_some());
+    // A PCE that ignores `usage=true` returns labels without it (or with
+    // flags that say nothing): every label must carry flags that decide.
+    let flagged = c.value.iter().all(|l| l.usage_flags().is_some());
     let data: Vec<Label> = c
         .value
         .into_iter()
@@ -831,6 +832,14 @@ mod tests {
             "loc=eu: a pairing profile and a permission hold it"
         );
         assert!(unused_by_pce(fixture()).is_empty(), "no flags, no verdict");
+        let mut empty = flagged.clone();
+        for l in &mut empty {
+            l.usage = Some(pce::models::LabelUsageFlags::default());
+        }
+        assert!(
+            unused_by_pce(empty).is_empty(),
+            "an empty usage map is no flags, never unused"
+        );
         // Our counts say loc=eu is free; its flags say not.
         assert!(
             !hrefs(unused_labels(flagged, &HashMap::new())).contains(&"/orgs/5/labels/5".into())

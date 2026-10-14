@@ -18,7 +18,13 @@ pub struct Label {
     pub updated_at: Option<String>,
     /// What holds the label, as the PCE says: only with `usage=true`
     /// (`Pce::labels_with_usage`), and absent from a PCE that ignores it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Anything but a non-empty object reads as absent (`usage_flags`), so
+    /// an odd answer falls back instead of failing the whole list.
+    #[serde(
+        default,
+        deserialize_with = "usage_or_none",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub usage: Option<LabelUsageFlags>,
 }
 
@@ -33,7 +39,27 @@ pub struct Label {
 #[serde(transparent)]
 pub struct LabelUsageFlags(pub BTreeMap<String, serde_json::Value>);
 
+/// `usage` as flags when it is a non-empty object; anything else
+/// (`null`, `true`, `{}`, a list) is no flags at all.
+fn usage_or_none<'de, D>(d: D) -> Result<Option<LabelUsageFlags>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(match Value::deserialize(d)? {
+        Value::Object(m) => {
+            Some(LabelUsageFlags(m.into_iter().collect())).filter(LabelUsageFlags::decided)
+        }
+        _ => None,
+    })
+}
+
 impl LabelUsageFlags {
+    /// Whether the flags can tell used from unused: an empty map says
+    /// nothing, so it never makes a label unused.
+    pub fn decided(&self) -> bool {
+        !self.0.is_empty()
+    }
+
     /// The kinds holding the label, sorted. A flag counts unless it is
     /// `false`, `null` or `0`, so an unexpected value never hides a use.
     pub fn kinds(&self) -> Vec<&str> {
@@ -53,6 +79,11 @@ impl LabelUsageFlags {
 }
 
 impl Label {
+    /// The PCE's usage flags when they decide anything (`decided`).
+    pub fn usage_flags(&self) -> Option<&LabelUsageFlags> {
+        self.usage.as_ref().filter(|u| u.decided())
+    }
+
     pub fn display(&self) -> String {
         format!("{}={}", self.key, self.value)
     }
@@ -263,6 +294,28 @@ mod tests {
         let unused: LabelUsageFlags =
             serde_json::from_value(serde_json::json!({"ruleset": false, "zero": 0})).unwrap();
         assert!(!unused.is_used());
+    }
+
+    #[test]
+    fn usage_that_says_nothing_reads_as_no_flags_and_never_fails_the_list() {
+        let labels: Vec<Label> = serde_json::from_value(serde_json::json!([
+            {"href": "/orgs/5/labels/1", "key": "a", "usage": {}},
+            {"href": "/orgs/5/labels/2", "key": "b", "usage": true},
+            {"href": "/orgs/5/labels/3", "key": "c", "usage": null},
+            {"href": "/orgs/5/labels/4", "key": "d", "usage": ["workload"]},
+            {"href": "/orgs/5/labels/5", "key": "e", "usage": "yes"},
+            {"href": "/orgs/5/labels/6", "key": "f", "usage": {"workload": false}}
+        ]))
+        .unwrap();
+        let flags: Vec<bool> = labels.iter().map(|l| l.usage_flags().is_some()).collect();
+        assert_eq!(flags, vec![false, false, false, false, false, true]);
+        assert!(!LabelUsageFlags::default().decided());
+        // Built by hand, an empty map still decides nothing.
+        let empty = Label {
+            usage: Some(LabelUsageFlags::default()),
+            ..labels[5].clone()
+        };
+        assert!(empty.usage_flags().is_none());
     }
 
     #[test]
