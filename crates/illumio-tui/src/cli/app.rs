@@ -44,7 +44,9 @@ pub struct AppArgs {
     /// Row cap per traffic query, up to 200000 (default from profile; > 10000 needs --yes)
     #[arg(long)]
     pub max_results: Option<u32>,
-    /// Only flows sent this way: unicast, broadcast, multicast (repeatable; default all)
+    /// Only flows sent this way: unicast, broadcast, multicast (repeatable or comma-separated;
+    /// default all). Explorer excludes the other kinds on the destination side. workloader
+    /// counts unicast only by default: add --transmission unicast to compare
     #[arg(long, value_enum, value_delimiter = ',')]
     pub transmission: Vec<TransmissionArg>,
     /// Match the active policy instead of the draft

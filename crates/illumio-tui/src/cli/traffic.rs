@@ -333,9 +333,9 @@ fn parse_groups(values: &[String]) -> Result<Vec<Vec<FilterExpr>>, CliError> {
 
 /// The query plus the name index when filter resolution already loaded it,
 /// so `query()` never fetches the object lists twice in one command.
-pub struct BuiltQuery {
-    pub query: TrafficQuery,
-    pub index: Option<Arc<NameIndex>>,
+struct BuiltQuery {
+    query: TrafficQuery,
+    index: Option<Arc<NameIndex>>,
 }
 
 /// Builds the request body. Everything that can be checked offline (window,
@@ -344,7 +344,7 @@ pub struct BuiltQuery {
 /// something that needs resolving.
 /// `queries` is how many Explorer queries the body will run as (`--app
 /// --direction both`: 2); the guard's message names it.
-pub async fn build_query(
+async fn build_query(
     ctx: &Context,
     args: &FilterArgs,
     queries: u32,

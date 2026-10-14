@@ -2684,6 +2684,78 @@ async fn transmission_excludes_the_other_kinds_on_the_destination_side() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn transmission_joins_other_destination_excludes_on_both_focused_sides() {
+    let server = MockServer::start().await;
+    mount_traffic(&server, 0).await;
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "traffic",
+                "groups",
+                "--window",
+                "1h",
+                "--app",
+                "shop/prod",
+                "--direction",
+                "both",
+                "--exclude-dst",
+                "ip:10.0.0.1",
+                "--transmission",
+                "unicast",
+                "--dry-run",
+            ])
+            .assert()
+            .success(),
+    );
+    let bodies = out["data"].as_array().expect("one body per side");
+    assert_eq!(bodies.len(), 2);
+    for b in bodies {
+        assert_eq!(
+            b["destinations"]["exclude"],
+            json!([
+                {"ip_address": "10.0.0.1"},
+                {"transmission": "broadcast"},
+                {"transmission": "multicast"}
+            ]),
+            "{b}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn app_transmission_goes_into_every_focused_query() {
+    let server = MockServer::start().await;
+    mount_app(&server, 2).await;
+    cmd(&server)
+        .args([
+            "app",
+            "shop/prod",
+            "--window",
+            "1h",
+            "--transmission",
+            "unicast",
+        ])
+        .assert()
+        .success();
+    let posts: Vec<Value> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.method.as_str() == "POST")
+        .map(|r| serde_json::from_slice(&r.body).unwrap())
+        .collect();
+    assert_eq!(posts.len(), 2, "in and out");
+    for b in &posts {
+        assert_eq!(
+            b["destinations"]["exclude"],
+            json!([{"transmission": "broadcast"}, {"transmission": "multicast"}]),
+            "{b}"
+        );
+    }
+}
+
 /// stdout of a `--csv` run, which must hold nothing but CSV: the meta line
 /// goes to stderr.
 fn csv_stdout(assert: &assert_cmd::assert::Assert) -> String {
