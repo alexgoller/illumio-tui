@@ -193,6 +193,16 @@ fn traffic_filter_bar_and_editor_80x24() {
 }
 
 #[test]
+fn the_filter_bar_shows_a_narrowed_transmission_only() {
+    let mut m = model_fixture();
+    let out = render_to_string(&m, 120, 30);
+    assert!(!out.contains(" tx "), "every kind: not shown: {out}");
+    m.traffic.filter.transmission = vec![pce::models::Transmission::Unicast];
+    let out = render_to_string(&m, 120, 30);
+    assert!(out.contains("decision all  tx unicast"), "{out}");
+}
+
+#[test]
 fn traffic_filter_editor_completing_src_80x24() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use illumio_tui::tui::filter::FilterEditor;

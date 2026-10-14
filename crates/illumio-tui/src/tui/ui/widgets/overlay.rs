@@ -26,6 +26,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     (":", "command prompt: :traffic :policy :objects :workloads"),
     ("", ":events  :iplists  :filter <expr>  :window <dur>"),
     ("", ":profile <name>  :draft  :active  :help  :q"),
+    ("", ":unicast  unicast flows only (again: every kind)"),
     ("", ":focus <app>  (alone: a picker of the loaded apps)"),
     ("", ":app <app>  the app overlay (alone: the picker)"),
     ("", ":writes [on|off]  :export[!] <path>"),
@@ -67,6 +68,10 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "Esc clears; truncated: r re-queries the app (1-2 queries)",
     ),
     ("Traffic  A", "app overlay: peers, policy, workloads"),
+    (
+        "Units",
+        "flows: flow records; conns, bytes: their lifetime counts",
+    ),
     (
         "App      Tab j/k X Enter",
         "panel · row · direction · open (peer: its flows)",
@@ -399,7 +404,7 @@ pub fn render_filter_editor(model: &Model, e: &FilterEditor, f: &mut Frame, area
 }
 
 /// Label column width inside the filter editor.
-const FILTER_LABEL_WIDTH: usize = 12;
+const FILTER_LABEL_WIDTH: usize = 13;
 
 /// Label column width inside the form (the `*` of a required field included).
 const FORM_LABEL_WIDTH: usize = 14;

@@ -65,24 +65,32 @@ pub fn complete(
         }
         FieldKind::TrafficActors => filter_actors(token, &used_keys(earlier), idx, workloads),
         FieldKind::TrafficService => traffic_service(token, idx),
-        FieldKind::Decisions => {
-            // `all` stands alone: first or not at all.
-            let used: Vec<String> = earlier.iter().map(|e| e.trim().to_lowercase()).collect();
-            if used.iter().any(|u| u == "all") {
-                return Vec::new();
-            }
-            let words = DECISIONS
-                .into_iter()
-                .filter(|d| !used.iter().any(|u| u == d) && (used.is_empty() || *d != "all"))
-                .map(|d| (d.to_string(), d.to_string()));
-            ranked(token, words)
-        }
+        FieldKind::Decisions => word_list(token, earlier, &DECISIONS),
+        FieldKind::Transmission => word_list(
+            token,
+            earlier,
+            &["all", "unicast", "broadcast", "multicast"],
+        ),
         FieldKind::Window => window_steps(token),
     };
     let mut seen = std::collections::HashSet::new();
     out.retain(|c| seen.insert(c.clone()));
     out.truncate(MAX_CANDIDATES);
     out
+}
+
+/// The words of a comma list not listed yet; `all` stands alone: first or
+/// not at all.
+fn word_list(token: &str, earlier: &[String], words: &[&str]) -> Vec<String> {
+    let used: Vec<String> = earlier.iter().map(|e| e.trim().to_lowercase()).collect();
+    if used.iter().any(|u| u == "all") {
+        return Vec::new();
+    }
+    let words = words
+        .iter()
+        .filter(|d| !used.iter().any(|u| u == *d) && (used.is_empty() || **d != "all"))
+        .map(|d| (d.to_string(), d.to_string()));
+    ranked(token, words)
 }
 
 /// `(text matched, candidate)` pairs whose text starts with `needle`, then
@@ -784,6 +792,22 @@ mod tests {
         assert_eq!(ff(FieldKind::TrafficService, "u", &[], false), s(&["udp"]));
         assert!(ff(FieldKind::TrafficService, "443", &[], false).is_empty());
         assert!(ff(FieldKind::TrafficService, "443/t", &[], false).is_empty());
+    }
+
+    #[test]
+    fn transmission_offers_the_kinds_not_yet_listed() {
+        assert_eq!(
+            ff(FieldKind::Transmission, "", &[], false),
+            s(&["all", "unicast", "broadcast", "multicast"])
+        );
+        assert_eq!(
+            ff(FieldKind::Transmission, "m", &[], false),
+            s(&["multicast"])
+        );
+        assert_eq!(
+            ff(FieldKind::Transmission, "", &["unicast"], false),
+            s(&["broadcast", "multicast"])
+        );
     }
 
     #[test]

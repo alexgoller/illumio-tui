@@ -9,15 +9,15 @@ expression: "render_to_string(&m, 80, 24)"
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭ Result ────────────────────────────────────────────── no query yet · press r ╮
 │run ╭ Edit filter ──────────────────── Tab next · Enter run · Esc cancel ╮    │
-╰────│▸ window      24h▏                                                  │────╯
-╭ Flo│  source      app=shop,env=prod                                     │────╮
+╰────│▸ window       24h▏                                                 │────╯
+╭ Flo│  source       app=shop,env=prod                                    │────╮
 │no r│  destination                                                       │    │
-│    │  service     5432/tcp                                              │    │
-│    │  decisions   all                                                   │    │
-│    │  max results 1000                                                  │    │
-│    │                                                                    │    │
-╰────│window 24h · cap 1000                                               │────╯
-╭ Det│                                                                    │ows ╮
+│    │  service      5432/tcp                                             │    │
+│    │  decisions    all                                                  │    │
+│    │  transmission all                                                  │    │
+│    │  max results  1000                                                 │    │
+╰────│                                                                    │────╯
+╭ Det│window 24h · cap 1000                                               │ows ╮
 │sele│                                                                    │    │
 │    ╰────────────────────────────────────────────────────────────────────╯    │
 │                                                                              │

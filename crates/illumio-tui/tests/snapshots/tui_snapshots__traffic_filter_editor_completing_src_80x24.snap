@@ -8,16 +8,16 @@ expression: out
 │window 24h  src *  dst *  svc *  decision all                                 │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭ Res╭ Edit filter ──────────────────── Tab next · Enter run · Esc cancel ╮s r ╮
-│run │  window      24h                                                   │    │
-╰────│▸ source      env=prod, app=▏                                       │────╯
-╭ Flo│              app=  loc=  role=  ip:  ipl:  +8 more                 │────╮
+│run │  window       24h                                                  │    │
+╰────│▸ source       env=prod, app=▏                                      │────╯
+╭ Flo│               app=  loc=  role=  ip:  ipl:  +8 more                │────╮
 │no r│  destination                                                       │    │
 │    │  service                                                           │    │
-│    │  decisions   all                                                   │    │
-│    │  max results 1000                                                  │    │
-│    │                                                                    │    │
-╰────│window 24h · cap 1000                                               │────╯
-╭ Det│                                                                    │ows ╮
+│    │  decisions    all                                                  │    │
+│    │  transmission all                                                  │    │
+│    │  max results  1000                                                 │    │
+╰────│                                                                    │────╯
+╭ Det│window 24h · cap 1000                                               │ows ╮
 │sele│                                                                    │    │
 │    ╰────────────────────────────────────────────────────────────────────╯    │
 │                                                                              │

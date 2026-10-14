@@ -2,7 +2,7 @@
 //! cost hints (no network), and its conversion to a `TrafficQuery` (needs
 //! the name index, so it is async and runs in the runtime, not in `update`).
 use crate::tui::form::{Completing, Completion, FieldKind};
-use pce::models::{PolicyDecision, ServiceMatch, TrafficQuery, proto_number};
+use pce::models::{PolicyDecision, ServiceMatch, TrafficQuery, Transmission, proto_number};
 use pce::traffic::{
     CONFIRM_MAX_RESULTS, CONFIRM_WINDOW, FilterExpr, MAX_TRAFFIC_MAX_RESULTS, TrafficQueryBuilder,
     parse_window,
@@ -17,6 +17,8 @@ pub struct TrafficFilter {
     pub dst: String,
     pub service: String,
     pub decisions: Vec<PolicyDecision>,
+    /// The transmission kinds kept; empty: every kind (the default).
+    pub transmission: Vec<Transmission>,
     pub max_results: u32,
 }
 
@@ -60,6 +62,7 @@ impl TrafficFilter {
             dst: String::new(),
             service: String::new(),
             decisions: PolicyDecision::ALL.to_vec(),
+            transmission: Vec::new(),
             max_results,
         }
     }
@@ -135,6 +138,36 @@ impl TrafficFilter {
         decisions_text(&self.decisions)
     }
 
+    /// Whether the transmission is narrowed (not every kind).
+    pub fn has_transmission(&self) -> bool {
+        !self.transmission.is_empty()
+            && !Transmission::ALL
+                .iter()
+                .all(|t| self.transmission.contains(t))
+    }
+
+    /// `all`, or the kinds kept, as the editor and the filter bar show them.
+    pub fn transmission_text(&self) -> String {
+        if self.has_transmission() {
+            self.transmission
+                .iter()
+                .map(|t| t.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        } else {
+            "all".into()
+        }
+    }
+
+    /// `:unicast`: unicast only, or back to every kind when it already is.
+    pub fn toggle_unicast(&mut self) {
+        self.transmission = if self.transmission == [Transmission::Unicast] {
+            Vec::new()
+        } else {
+            vec![Transmission::Unicast]
+        };
+    }
+
     pub fn cost_hint(&self) -> String {
         let mut s = format!("window {} · cap {}", self.window, self.max_results);
         if self.is_unbounded() {
@@ -176,14 +209,18 @@ impl TrafficFilter {
             }
         };
         let decision = self.decisions_text();
-        format!(
+        let mut s = format!(
             "window {}  src {}  dst {}  svc {}  decision {}",
             self.window,
             or(&self.src),
             or(&self.dst),
             or(&self.service),
             decision
-        )
+        );
+        if self.has_transmission() {
+            s.push_str(&format!("  transmission {}", self.transmission_text()));
+        }
+        s
     }
 
     /// Resolves names through the facade's cached index and builds the query
@@ -212,33 +249,36 @@ impl TrafficFilter {
             b = b.service(m);
         }
         b.decisions(self.decisions.clone())
+            .transmission(&self.transmission)
             .max_results(self.max_results)
             .build()
     }
 }
 
-pub const FIELD_NAMES: [&str; 6] = [
+pub const FIELD_NAMES: [&str; 7] = [
     "window",
     "source",
     "destination",
     "service",
     "decisions",
+    "transmission",
     "max results",
 ];
 
 /// What `Ctrl-N` completes in each field, in the order of [`FIELD_NAMES`].
-pub const FIELD_KINDS: [FieldKind; 6] = [
+pub const FIELD_KINDS: [FieldKind; 7] = [
     FieldKind::Window,
     FieldKind::TrafficActors,
     FieldKind::TrafficActors,
     FieldKind::TrafficService,
     FieldKind::Decisions,
+    FieldKind::Transmission,
     FieldKind::Text,
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FilterEditor {
-    pub values: [String; 6],
+    pub values: [String; 7],
     pub active: usize,
     pub error: Option<String>,
     /// The completion being cycled; any key but `Ctrl-N`/`Ctrl-P` ends it.
@@ -255,6 +295,7 @@ impl FilterEditor {
                 f.dst.clone(),
                 f.service.clone(),
                 decisions,
+                f.transmission_text(),
                 f.max_results.to_string(),
             ],
             active: 0,
@@ -279,16 +320,30 @@ impl FilterEditor {
             }
             out
         };
-        let max_results = self.values[5]
+        let transmission_text = self.values[5].trim();
+        let mut transmission: Vec<Transmission> = Vec::new();
+        if !transmission_text.is_empty() && transmission_text != "all" {
+            for t in transmission_text.split(',').map(str::trim) {
+                let t: Transmission = t.parse().map_err(|e| format!("transmission: {e}"))?;
+                if !transmission.contains(&t) {
+                    transmission.push(t);
+                }
+            }
+        }
+        if Transmission::ALL.iter().all(|t| transmission.contains(t)) {
+            transmission.clear();
+        }
+        let max_results = self.values[6]
             .trim()
             .parse::<u32>()
-            .map_err(|_| format!("max results: not a number {:?}", self.values[5]))?;
+            .map_err(|_| format!("max results: not a number {:?}", self.values[6]))?;
         let f = TrafficFilter {
             window: self.values[0].trim().to_string(),
             src: self.values[1].trim().to_string(),
             dst: self.values[2].trim().to_string(),
             service: self.values[3].trim().to_string(),
             decisions,
+            transmission,
             max_results,
         };
         f.validate()?;
@@ -461,6 +516,40 @@ mod tests {
     }
 
     #[test]
+    fn transmission_round_trips_through_the_editor_and_shows_only_when_set() {
+        use pce::models::Transmission::{Broadcast, Multicast, Unicast};
+        let mut f = TrafficFilter::defaults("24h", 1000);
+        assert!(f.transmission.is_empty(), "the default is every kind");
+        assert_eq!(f.transmission_text(), "all");
+        assert!(!f.summary().contains("transmission"));
+        let mut e = FilterEditor::from_filter(&f);
+        assert_eq!(e.values[5], "all");
+        e.values[5] = "unicast".into();
+        let back = e.to_filter().unwrap();
+        assert_eq!(back.transmission, vec![Unicast]);
+        assert!(back.summary().ends_with("  transmission unicast"));
+        assert_eq!(FilterEditor::from_filter(&back).values[5], "unicast");
+        e.values[5] = "Broadcast, multicast, broadcast".into();
+        assert_eq!(
+            e.to_filter().unwrap().transmission,
+            vec![Broadcast, Multicast]
+        );
+        for all in ["", "all", "unicast,broadcast,multicast"] {
+            e.values[5] = all.into();
+            assert!(e.to_filter().unwrap().transmission.is_empty(), "{all:?}");
+        }
+        e.values[5] = "anycast".into();
+        assert!(e.to_filter().unwrap_err().contains("transmission"));
+        f.toggle_unicast();
+        assert_eq!(f.transmission, vec![Unicast]);
+        f.toggle_unicast();
+        assert!(f.transmission.is_empty());
+        f.transmission = vec![Broadcast];
+        f.toggle_unicast();
+        assert_eq!(f.transmission, vec![Unicast], "any other choice: unicast");
+    }
+
+    #[test]
     fn service_forms() {
         let mut f = TrafficFilter::defaults("1h", 50);
         assert_eq!(f.service_match().unwrap(), None);
@@ -531,18 +620,15 @@ mod tests {
         let back = e.to_filter().unwrap();
         assert_eq!(back.dst, "app=db");
         assert_eq!(back.decisions, vec![PolicyDecision::Blocked]);
-        e.active = 5;
-        e.values[5] = "x".into();
+        e.active = 6;
+        e.values[6] = "x".into();
         assert!(e.to_filter().unwrap_err().contains("max results"));
-        e.values[5] = "500".into();
+        e.values[6] = "500".into();
         e.values[4] = "allowed, maybe".into();
         assert!(e.to_filter().unwrap_err().contains("decision"));
-        e.prev();
-        e.prev();
-        e.prev();
-        e.prev();
-        e.prev();
-        e.prev();
+        for _ in 0..7 {
+            e.prev();
+        }
         assert_eq!(e.active, 0, "prev clamps at the first field");
     }
 }

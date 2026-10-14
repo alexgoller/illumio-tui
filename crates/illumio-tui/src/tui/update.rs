@@ -4084,6 +4084,12 @@ pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
                 }
             }
         }
+        Command::Unicast => {
+            // Through the cost guard like any filter change: one query.
+            let mut f = model.traffic.filter.clone();
+            f.toggle_unicast();
+            request_query(model, f)
+        }
         Command::Window(w) => {
             let mut f = model.traffic.filter.clone();
             f.window = w;
@@ -6130,6 +6136,26 @@ mod tests {
         update(&mut m, Msg::Command(Command::Window("never".into())));
         assert_eq!(m.status.kind, StatusKind::Error);
         assert_eq!(m.traffic.filter.window, "2h");
+    }
+
+    #[test]
+    fn unicast_toggles_the_transmission_and_runs_one_query() {
+        use crate::tui::commands::Command;
+        use pce::models::Transmission;
+        let mut m = model_fixture();
+        let cmds = update(&mut m, Msg::Command(Command::Unicast));
+        assert_eq!(m.traffic.filter.transmission, vec![Transmission::Unicast]);
+        let runs = cmds
+            .iter()
+            .filter(|c| matches!(c, Cmd::RunQuery { .. }))
+            .count();
+        assert_eq!(runs, 1, "one query, user-caused: {cmds:?}");
+        assert!(m.traffic.filter.summary().contains("transmission unicast"));
+        update(&mut m, Msg::Command(Command::Unicast));
+        assert!(
+            m.traffic.filter.transmission.is_empty(),
+            "again: every kind"
+        );
     }
 
     fn running(m: &Model) -> bool {
@@ -8722,7 +8748,7 @@ mod tests {
     fn help_scrolls_to_its_last_line_and_reopens_at_the_top() {
         use crate::tui::ui::widgets::overlay::{HELP_LINES, help_last_scroll};
         let mut m = model_fixture(); // 80x24
-        assert_eq!(HELP_LINES.len(), 57);
+        assert_eq!(HELP_LINES.len(), 59);
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  A"));
         assert!(
             !HELP_LINES.iter().any(|(k, _)| k.contains("App      t")),
@@ -8752,7 +8778,7 @@ mod tests {
         );
         update(&mut m, key('?'));
         let last = help_last_scroll(24);
-        assert_eq!(last, 35, "57 lines, 22 rows inside the box");
+        assert_eq!(last, 37, "59 lines, 22 rows inside the box");
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app x / X"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app o"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app d"));

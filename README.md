@@ -107,8 +107,11 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   `/` search; a filter that would be expensive asks for confirmation first. In the filter
   editor `Ctrl-N` / `Ctrl-P` complete like a form: labels, `ipl:` IP lists and the grammar's
   `ip:` `ipl:` `wl:` `fqdn:` in src and dst (`wl:` hostnames only once the Workloads screen
-  has loaded them), protocols and services as `port/proto`, the decision words and the
-  window steps, never with a request. `+` / `-` step
+  has loaded them), protocols and services as `port/proto`, the decision and transmission
+  words and the window steps, never with a request. The editor's `transmission` field
+  (`unicast`, `broadcast`, `multicast`, comma list; `all` by default) and `:unicast` (unicast
+  only; again: every kind, one query through the same cost guard) narrow the query by how
+  the flows were sent; the filter bar shows `tx unicast` while it is narrowed. `+` / `-` step
   the window along `1h 6h 12h 1d 2d 3d 1w 2w 4w 90d`: `+` re-runs the wider window as one
   query (asking first when that is expensive), `-` drops the flows last seen before the new
   start without a request. Explorer returns the stored aggregate records whose lifetime
@@ -347,6 +350,15 @@ lifetime's counters, not counts for the window alone. Tools that report connecti
 summary (workloader) therefore match `conns`, not `flows`. Every traffic table says so in the
 line above it; JSON and CSV carry the per-decision connections for pairs, `--services` and
 sections (sections: as the last three CSV columns).
+
+**Transmission.** `--transmission unicast|broadcast|multicast` (repeatable or comma-separated,
+on `traffic query`/`groups`/`mesh` and `app`) keeps the flows sent that way. Explorer can only
+exclude a transmission, on the destination side, so the other kinds go into the query as
+`destinations.exclude` entries (`{"transmission": "broadcast"}`, `{"transmission":
+"multicast"}` for `--transmission unicast`); a `--dry-run` shows them, and nothing is filtered
+locally. The default stays every kind, broadcast and multicast (mDNS, SSDP, NetBIOS, ...)
+included, as in the PCE UI. workloader excludes broadcast and multicast by default, so to
+compare counts with it add `--transmission unicast` (`:unicast` in the TUI).
 
 `illumio-tui app <app> [--direction in|out|both] [--window W] [--keys K] [--active]` prints one
 envelope for one app: `workloads` (`summary` with the enforcement breakdown, `unmanaged` for

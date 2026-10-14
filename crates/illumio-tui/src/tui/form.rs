@@ -54,6 +54,8 @@ pub enum FieldKind {
     TrafficService,
     /// A traffic filter's decisions, comma list.
     Decisions,
+    /// A traffic filter's transmission kinds, comma list.
+    Transmission,
     /// A traffic window (the whole field): the `+`/`-` step ladder.
     Window,
 }
@@ -62,7 +64,9 @@ impl FieldKind {
     /// The characters that end a token; none: the whole field is one token.
     fn separators(self) -> &'static [char] {
         match self {
-            Self::Labels | Self::Actors | Self::Services | Self::Decisions => &[','],
+            Self::Labels | Self::Actors | Self::Services | Self::Decisions | Self::Transmission => {
+                &[',']
+            }
             Self::Scope | Self::TrafficActors => &[',', '|'],
             Self::Text
             | Self::LabelKey
@@ -92,7 +96,9 @@ impl FieldKind {
             | Self::Ruleset
             | Self::TrafficService
             | Self::Window => Vec::new(),
-            Self::Labels | Self::Actors | Self::Services | Self::Decisions => tokens(head),
+            Self::Labels | Self::Actors | Self::Services | Self::Decisions | Self::Transmission => {
+                tokens(head)
+            }
             Self::Scope | Self::TrafficActors => tokens(head.rsplit('|').next().unwrap_or(head)),
         };
         Some((token.to_string(), earlier))

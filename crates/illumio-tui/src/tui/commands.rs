@@ -8,6 +8,9 @@ pub enum Command {
     IpLists,
     Filter(String),
     Window(String),
+    /// `:unicast`: the traffic filter keeps unicast flows only; again: every
+    /// transmission kind.
+    Unicast,
     /// `:focus <app>` narrows every traffic view to one app; `:focus` alone
     /// opens the picker.
     Focus(Option<String>),
@@ -82,6 +85,7 @@ pub fn parse(input: &str) -> Result<Command, String> {
                 })
             }
         }
+        "unicast" => no_arg(Command::Unicast),
         "draft" => no_arg(Command::Draft),
         "active" => no_arg(Command::Active),
         "q" | "quit" => no_arg(Command::Quit),
@@ -140,6 +144,8 @@ mod tests {
             }
         );
         assert_eq!(parse("draft").unwrap(), Command::Draft);
+        assert_eq!(parse("unicast").unwrap(), Command::Unicast);
+        assert!(parse("unicast now").is_err());
         assert_eq!(parse("active").unwrap(), Command::Active);
         assert_eq!(parse("q").unwrap(), Command::Quit);
         assert_eq!(parse("quit").unwrap(), Command::Quit);
