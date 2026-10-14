@@ -284,14 +284,16 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     model.traffic.unfocused = None;
                     model.traffic.focus_result = None;
                     let data = outcome_data(o);
-                    let (n, truncated, incomplete, cap, elapsed, hit) = (
-                        data.flows.len(),
-                        data.truncated,
-                        data.incomplete,
-                        data.filter.max_results,
-                        data.elapsed,
-                        data.cache_hit,
-                    );
+                    // The opt-in raises the cap only for a new filter or
+                    // window, never over a cap the user stepped to.
+                    let new_filter = model.traffic.data.as_ref().is_none_or(|p| {
+                        TrafficFilter {
+                            max_results: data.filter.max_results,
+                            ..p.filter.clone()
+                        } != data.filter
+                    });
+                    let (n, truncated, cap) =
+                        (data.flows.len(), data.truncated, data.filter.max_results);
                     model.traffic.data = Some(data);
                     model.traffic.drill = None;
                     model.traffic.treemap.zoom = None;
@@ -300,6 +302,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     model.traffic.query = QueryState::Idle;
                     model.traffic.auto.from_tick = false;
                     if truncated
+                        && new_filter
                         && model.limits.traffic_auto_backfill
                         && cap < pce::traffic::CONFIRM_MAX_RESULTS
                     {
@@ -311,20 +314,9 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         .as_ref()
                         .map(|f| format!(" · focus is partial: r re-queries {}", f.app_text()))
                         .unwrap_or_default();
-                    let missing = if incomplete { INCOMPLETE } else { "" };
-                    model.status = if truncated {
-                        StatusLine::warn(format!(
-                            "{n} flows, capped at {cap}; B raises the cap{missing}{focus_hint}"
-                        ))
-                    } else if incomplete {
-                        StatusLine::warn(format!("{n} flows{missing}{focus_hint}"))
-                    } else {
-                        StatusLine::info(format!(
-                            "{n} flows in {:.1}s{}",
-                            elapsed.as_secs_f64(),
-                            if hit { " (cached)" } else { "" }
-                        ))
-                    };
+                    if let Some(d) = model.traffic.data.as_ref() {
+                        model.status = result_status(d, &format!("{n} flows"), "", &focus_hint);
+                    }
                 }
                 Err(e) => {
                     model.traffic.query = QueryState::Failed(e.clone());
@@ -351,32 +343,14 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         return Vec::new();
                     }
                     let data = outcome_data(outcome);
-                    let (truncated, incomplete, cap, elapsed, hit) = (
-                        data.truncated,
-                        data.incomplete,
-                        data.filter.max_results,
-                        data.elapsed,
-                        data.cache_hit,
-                    );
                     let app = focus.app_text();
                     model.traffic.show_detail = false;
                     model.traffic.apply_focused(focus, queries, data);
                     let n = model.traffic.view_flows().len();
-                    let q = queries_text(queries);
-                    let missing = if incomplete { INCOMPLETE } else { "" };
-                    model.status = if truncated {
-                        StatusLine::warn(format!(
-                            "{n} flows for {app} · {q}, capped at {cap}; ] raises the cap{missing}"
-                        ))
-                    } else if incomplete {
-                        StatusLine::warn(format!("{n} flows for {app} · {q}{missing}"))
-                    } else {
-                        StatusLine::info(format!(
-                            "{n} flows for {app} in {:.1}s · {q}{}",
-                            elapsed.as_secs_f64(),
-                            if hit { " (cached)" } else { "" }
-                        ))
-                    };
+                    let q = format!(" · {}", queries_text(queries));
+                    if let Some(d) = model.traffic.data.as_ref() {
+                        model.status = result_status(d, &format!("{n} flows for {app}"), &q, "");
+                    }
                 }
                 Err(e) => {
                     model.traffic.query = QueryState::Failed(e.clone());
@@ -920,6 +894,27 @@ fn outcome_data(o: QueryOutcome) -> TrafficData {
         fetched_at: Instant::now(),
         filter: o.filter,
         range: o.bounds.map(|(start, end)| Range { start, end }),
+    }
+}
+
+/// The status line after a result: `head` (`1234 flows`, `12 flows for
+/// shop/prod`), then `queries` (` · 2 queries`, or empty) and the cap or
+/// the elapsed time; `hint` follows a warning.
+fn result_status(d: &TrafficData, head: &str, queries: &str, hint: &str) -> StatusLine {
+    let missing = if d.incomplete { INCOMPLETE } else { "" };
+    if d.truncated {
+        StatusLine::warn(format!(
+            "{head}{queries}, capped at {}; B raises the cap{missing}{hint}",
+            d.filter.max_results
+        ))
+    } else if d.incomplete {
+        StatusLine::warn(format!("{head}{queries}{missing}{hint}"))
+    } else {
+        StatusLine::info(format!(
+            "{head} in {:.1}s{queries}{}",
+            d.elapsed.as_secs_f64(),
+            if d.cache_hit { " (cached)" } else { "" }
+        ))
     }
 }
 
@@ -1538,7 +1533,14 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         model.status = StatusLine::info("focus cleared");
         return Vec::new();
     }
-    // The window, cap and backfill keys work on the unfocused result.
+    // With a focused result on screen the cap keys re-run the focused
+    // query; the window keys (and the cap keys otherwise) work on the
+    // unfocused result.
+    if let KeyCode::Char(c @ (']' | '[' | 'B')) = k.code
+        && let Some(cmds) = focused_cap_key(model, c)
+    {
+        return cmds;
+    }
     if matches!(k.code, KeyCode::Char('+' | '-' | ']' | '[' | 'B')) {
         model.traffic.back_to_unfocused();
     }
@@ -2597,6 +2599,9 @@ fn start_focused(
     focus: Focus,
     mode: CacheMode,
 ) -> Vec<Cmd> {
+    // The filter shows what runs, as for an unfocused query (a focused
+    // cap step changes its cap).
+    model.traffic.filter = filter.clone();
     let (seq, cancel) = model
         .traffic
         .start_focused_query(Instant::now(), focus.clone());
@@ -2683,6 +2688,57 @@ fn backfill_key(model: &mut Model) -> Vec<Cmd> {
         return Vec::new();
     }
     update(model, Msg::ApplyFilter(f))
+}
+
+/// `]`, `[` or `B` while a focused result covering the focus is on screen:
+/// the focused query again at the next (`]`, or `B` on a truncated result:
+/// `backfill_cap`) or previous cap, one query per side, through the cost
+/// guard. `None` when no such result is shown (the keys then act on the
+/// unfocused result).
+fn focused_cap_key(model: &mut Model, key: char) -> Option<Vec<Cmd>> {
+    let t = &model.traffic;
+    let focus = t.focus.clone()?;
+    if !t.focus_result.as_ref().is_some_and(|r| r.covers(&focus)) {
+        return None;
+    }
+    if t.is_running() {
+        model.status = StatusLine::info("query already running");
+        return Some(Vec::new());
+    }
+    let d = t.data.as_ref()?;
+    let old = d.filter.max_results;
+    let next = match key {
+        'B' if !d.truncated => {
+            model.status = StatusLine::info("nothing to backfill: the result is complete");
+            return Some(Vec::new());
+        }
+        'B' => pce::traffic::backfill_cap(old),
+        ']' => pce::traffic::next_cap(old, model.limits.traffic_max_results),
+        _ => pce::traffic::prev_cap(old, model.limits.traffic_max_results),
+    };
+    let Some(cap) = next else {
+        model.status = StatusLine::info(if key == '[' {
+            "cap already at the minimum".to_string()
+        } else {
+            format!("cap already at the maximum ({old}): narrow the filter")
+        });
+        return Some(Vec::new());
+    };
+    let mut f = d.filter.clone();
+    f.max_results = cap;
+    let n = d.flows.len();
+    if let Some(reason) = f.needs_confirmation() {
+        let q = queries_text(focus.direction.query_count());
+        model.overlay = Overlay::Confirm {
+            reason: format!(
+                "{reason}. Re-run {} at cap {cap} ({q}, replaces the {n} flows at cap {old})? y/n",
+                focus.app_text()
+            ),
+            action: PendingAction::RunFocused(f, focus, CacheMode::Use),
+        };
+        return Some(Vec::new());
+    }
+    Some(start_focused(model, f, focus, CacheMode::Use))
 }
 
 /// The profile's opt-in after a truncated result below 10000: the same
@@ -12617,6 +12673,25 @@ mod backfill_tests {
         quiet_answer(&mut m, 120, false);
     }
 
+    /// The opt-in never overrides a cap the user stepped down to.
+    #[test]
+    fn lowering_the_cap_under_the_opt_in_stays_at_the_lower_cap() {
+        let mut m = model_fixture();
+        m.limits.traffic_auto_backfill = true;
+        m.limits.traffic_max_results = 10_000;
+        quiet_answer(&mut m, 10_000, true);
+        let cmds = update(&mut m, key('['));
+        assert_eq!(cmds, vec![run_at(&m, 5000)], "exactly one query");
+        quiet_answer(&mut m, 5000, true);
+        assert_eq!(cap(&m), 5000);
+        assert!(!m.traffic.is_running());
+        assert!(m.status.text.contains("capped at 5000; B raises the cap"));
+        // `r` on the same filter does not raise it either.
+        assert_eq!(update(&mut m, key('r')).len(), 1);
+        quiet_answer(&mut m, 5000, true);
+        assert_eq!(cap(&m), 5000);
+    }
+
     #[test]
     fn a_late_answer_to_b_is_dropped_after_another_query() {
         let mut m = model_fixture();
@@ -12862,7 +12937,7 @@ mod filter_completion_tests {
 #[cfg(test)]
 mod focus_tests {
     use super::*;
-    use crate::tui::model::{Model, Overlay, TrafficView};
+    use crate::tui::model::{Model, Overlay, PendingAction, TrafficView};
     use crate::tui::msg::FocusedOutcome;
     use crate::tui::test_support::{model_fixture, model_with_flows, model_with_rich_flows};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -13160,6 +13235,88 @@ mod focus_tests {
         assert!(m.traffic.data.as_ref().unwrap().truncated);
     }
 
+    /// A focused result on screen: `B` and `]` re-run the focused query at
+    /// the next cap, one query per side, asking above 10000; the answer
+    /// says how `B` goes on.
+    #[test]
+    fn b_and_brackets_raise_the_cap_of_a_focused_result() {
+        let mut m = model_with_flows();
+        m.traffic.data.as_mut().unwrap().truncated = true;
+        quiet(&mut m, focus_cmd("shop/prod"));
+        let focus = m.traffic.focus.clone().unwrap();
+        let mut data = focused_data(&m, 2);
+        data.truncated = true;
+        m.traffic.apply_focused(focus.clone(), 2, data);
+        let cmds = update(&mut m, key('B'));
+        let [
+            Cmd::RunFocused {
+                filter,
+                focus: f,
+                mode,
+                ..
+            },
+        ] = cmds.as_slice()
+        else {
+            panic!("{cmds:?}")
+        };
+        assert_eq!((filter.max_results, *mode), (10_000, CacheMode::Use));
+        assert_eq!(f, &focus);
+        assert_eq!(m.traffic.filter.max_results, 10_000);
+        assert!(m.traffic.focus_result.is_some(), "still focused");
+        let outcome = QueryOutcome {
+            flows: m.traffic.loaded_flows().to_vec(),
+            truncated: true,
+            incomplete: false,
+            elapsed: Duration::from_millis(900),
+            hit: false,
+            filter: filter.clone(),
+            bounds: None,
+        };
+        let seq = m.traffic.seq;
+        quiet(
+            &mut m,
+            Msg::FocusedDone {
+                seq,
+                result: Ok(FocusedOutcome {
+                    outcome,
+                    focus: focus.clone(),
+                    queries: 2,
+                }),
+            },
+        );
+        assert_eq!(
+            m.status.text,
+            "2 flows for shop/prod · 2 queries, capped at 10000; B raises the cap"
+        );
+        let out = crate::tui::test_support::render_to_string(&m, 160, 40);
+        assert!(out.contains("capped at 10000; B raises the cap"), "{out}");
+        // Above 10000 the next rung asks, naming the queries; n changes nothing.
+        quiet(&mut m, key(']'));
+        match &m.overlay {
+            Overlay::Confirm {
+                reason,
+                action: PendingAction::RunFocused(f, _, CacheMode::Use),
+            } => {
+                assert_eq!(f.max_results, 25_000);
+                assert!(
+                    reason.starts_with(
+                        "cap 25000 exceeds 10000. Re-run shop/prod at cap 25000 (2 queries"
+                    ),
+                    "{reason}"
+                );
+            }
+            o => panic!("{o:?}"),
+        }
+        quiet(&mut m, key('n'));
+        assert_eq!(m.traffic.filter.max_results, 10_000);
+        quiet(&mut m, key('B'));
+        let cmds = update(&mut m, key('y'));
+        assert!(
+            matches!(cmds.as_slice(), [Cmd::RunFocused { filter, .. }] if filter.max_results == 25_000),
+            "{cmds:?}"
+        );
+    }
+
     #[test]
     fn a_stale_focused_answer_is_dropped() {
         let mut m = model_with_flows();
@@ -13261,7 +13418,7 @@ mod focus_tests {
         let f = m.traffic.focus.clone().unwrap();
         let data = focused_data(&m, 2);
         m.traffic.apply_focused(f, 2, data);
-        let _ = update(&mut m, key(']'));
+        let _ = update(&mut m, key('-'));
         assert!(m.traffic.unfocused.is_none() && m.traffic.focus_result.is_none());
         assert_eq!(m.traffic.loaded_flows().len(), 4);
         assert!(
