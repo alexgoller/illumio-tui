@@ -181,7 +181,8 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   without a request.
   `A` (or `:app shop/prod`) opens the app overlay for the row's app, at the focus direction
   (`X` cycles it there too): its workloads with their enforcement modes and VEN health
-  (`Workloads 14   enforced 9 · selective 2 · visibility 3`, `VENs 13 active · 1 stale`; active
+  (`Workloads 14   enforced 9 · selective 2 · visibility 3 · unmanaged 1`, `VENs 13 active · 1 stale`;
+  a workload without a VEN counts as unmanaged, not visibility; active
   is healthy or warning, stale is offline or error), its inbound and outbound peers by service
   and decision, blocked traffic over time (`approx`: flow records by last-detected time; `t`
   replaces it with the exact timeline: one blocked-only query per bucket and side, 24×1h for
@@ -229,7 +230,10 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   counts once that ruleset's deny rules have been loaded, and a truncated workload list is
   named in the header (`unused (workloads truncated)`).
 - **Workloads**: VEN health columns and a summary line, `h` unhealthy only, `H` sort by
-  severity, `t` / `T` jump to Traffic with the workload as source / destination.
+  severity, `t` / `T` jump to Traffic with the workload as source / destination. The
+  enforcement column is the effective one: a workload without a VEN is `unmanaged`, as in
+  the PCE UI, although the API reports it as `visibility_only`; the detail pane shows both
+  (`unmanaged · PCE reports visibility_only`).
 - **Events**: severity-coloured audit events, `f` edit severity / type / window, `S` sort by
   severity, `Enter` the event as JSON (`j` / `k` scroll a long one).
 
@@ -309,6 +313,14 @@ counts and their names. The meta line always goes to
 stderr, so a redirect holds only CSV. `--csv` sends the same requests as the table;
 `workloads`, `labels`, `label-groups`, `services`, `iplists`, `events`, `policy rulesets`,
 `policy rules`, `policy pending`, `traffic query`/`groups`/`mesh` and `profile list` take it.
+
+`workloads` shows the effective enforcement: `unmanaged` for a workload without a VEN, which
+the PCE reports as `visibility_only`, else the PCE's mode. JSON keeps the PCE's value in
+`enforcement_mode` and adds the effective one as `enforcement`; the table and CSV
+`enforcement` column is the effective one. `--enforcement` filters by it in the same request:
+`unmanaged` sends `managed=false`, a mode (`full`, `selective`, `visibility_only`, `idle`) adds
+`managed=true`, so `visibility_only` lists only workloads with a VEN; a `--managed` that
+contradicts it is exit 2.
 Commands that print no table (writes, `health`, `policy rules impact`, `profile use`, a
 traffic `--dry-run`) refuse it with exit 2 before any request.
 
@@ -333,8 +345,9 @@ An app whose labels do not exist is exit 2 with the closest label values, before
 request (the labels are fetched, cached). `--backfill` does not combine with `--app`.
 
 `illumio-tui app <app> [--direction in|out|both] [--window W] [--keys K] [--active]` prints one
-envelope for one app: `workloads` (`summary` with the enforcement breakdown and the VEN counts,
-`rows` with name, role, enforcement mode and VEN health, `truncated` when the read hit its
+envelope for one app: `workloads` (`summary` with the enforcement breakdown, `unmanaged` for
+workloads without a VEN, and the VEN counts, `rows` with name, role, `enforcement` (effective),
+`enforcement_mode` (as the PCE reports it) and VEN health, `truncated` when the read hit its
 cap), `inbound` and `outbound` (one row per peer group, service and decision), `policy`
 (`scope` draft or active, `truncated`, and `rows`: rulesets by `reason`, `scope`,
 `all_workloads` or `rules`, with their rule counts) and `timeline` (`exact: false`: blocked
