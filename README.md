@@ -111,7 +111,7 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   words and the window steps, never with a request. The editor's `transmission` field
   (`unicast`, `broadcast`, `multicast`, comma list; `all` by default) and `:unicast` (unicast
   only; again: every kind, one query through the same cost guard) narrow the query by how
-  the flows were sent; the filter bar shows `tx unicast` while it is narrowed. `+` / `-` step
+  the flows were sent; the filter bar's title shows it (`window 24h · cap 10000 · unicast`) while it is narrowed. `+` / `-` step
   the window along `1h 6h 12h 1d 2d 3d 1w 2w 4w 90d`: `+` re-runs the wider window as one
   query (asking first when that is expensive), `-` drops the flows last seen before the new
   start without a request. Explorer returns the stored aggregate records whose lifetime

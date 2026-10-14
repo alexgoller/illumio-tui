@@ -195,11 +195,17 @@ fn traffic_filter_bar_and_editor_80x24() {
 #[test]
 fn the_filter_bar_shows_a_narrowed_transmission_only() {
     let mut m = model_fixture();
-    let out = render_to_string(&m, 120, 30);
-    assert!(!out.contains(" tx "), "every kind: not shown: {out}");
+    let out = render_to_string(&m, 80, 24);
+    assert!(
+        out.contains("window 24h · cap 1000 · unbounded ╮"),
+        "every kind: not shown: {out}"
+    );
     m.traffic.filter.transmission = vec![pce::models::Transmission::Unicast];
-    let out = render_to_string(&m, 120, 30);
-    assert!(out.contains("decision all  tx unicast"), "{out}");
+    let out = render_to_string(&m, 80, 24);
+    assert!(
+        out.contains("window 24h · cap 1000 · unicast · unbounded ╮"),
+        "in the filter bar's title, whole at 80 columns: {out}"
+    );
 }
 
 #[test]

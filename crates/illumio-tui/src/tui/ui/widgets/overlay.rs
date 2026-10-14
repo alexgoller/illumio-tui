@@ -44,7 +44,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ),
     (
         "Traffic  f",
-        "edit filter: window src dst service decisions",
+        "edit filter: window src dst svc decision transmission",
     ),
     (
         "Traffic  + / -",

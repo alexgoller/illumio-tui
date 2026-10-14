@@ -170,6 +170,11 @@ impl TrafficFilter {
 
     pub fn cost_hint(&self) -> String {
         let mut s = format!("window {} · cap {}", self.window, self.max_results);
+        // A narrowed transmission (the default is every kind), where the
+        // filter bar's title shows it whole even at 80 columns.
+        if self.has_transmission() {
+            s.push_str(&format!(" · {}", self.transmission_text()));
+        }
         if self.is_unbounded() {
             s.push_str(" · unbounded");
         }
@@ -528,6 +533,10 @@ mod tests {
         let back = e.to_filter().unwrap();
         assert_eq!(back.transmission, vec![Unicast]);
         assert!(back.summary().ends_with("  transmission unicast"));
+        assert_eq!(
+            back.cost_hint(),
+            "window 24h · cap 1000 · unicast · unbounded"
+        );
         assert_eq!(FilterEditor::from_filter(&back).values[5], "unicast");
         e.values[5] = "Broadcast, multicast, broadcast".into();
         assert_eq!(

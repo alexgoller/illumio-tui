@@ -533,18 +533,6 @@ pub fn render_filter_bar(model: &Model, f: &mut Frame, area: Rect) {
         Span::styled("  decision ", t.dim_style()),
         Span::styled(decision, t.base()),
     ]);
-    // Shown only when narrowed (`:unicast`, the editor): the default is every kind.
-    let line = if fl.has_transmission() {
-        let mut spans = line.spans;
-        spans.push(Span::styled("  tx ", t.dim_style()));
-        spans.push(Span::styled(
-            fl.transmission_text(),
-            Style::new().fg(t.accent),
-        ));
-        Line::from(spans)
-    } else {
-        line
-    };
     f.render_widget(Paragraph::new(line).block(block).style(t.base()), area);
 }
 
