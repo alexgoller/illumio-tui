@@ -843,3 +843,198 @@ async fn any_write_drops_the_label_usage_but_not_the_plain_labels() {
     }
     assert_eq!(p.stats().calls, 4);
 }
+
+/// Every `METHOD path` the server saw, in order.
+async fn seen(server: &MockServer) -> Vec<String> {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| {
+            format!(
+                "{} {}",
+                r.method,
+                r.url.path().trim_start_matches("/api/v2")
+            )
+        })
+        .collect()
+}
+
+/// `update_rules` on any query of `names`, answered 204; their statuses
+/// report the rules completed.
+async fn mount_update_rules(server: &MockServer, names: &[&str]) {
+    for name in names {
+        let href = format!("/orgs/5/traffic_flows/async_queries/{name}");
+        Mock::given(method("PUT"))
+            .and(path(format!("/api/v2{href}/update_rules")))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(server)
+            .await;
+    }
+}
+
+/// A status that reports the rules completed: mounted before
+/// `mount_query`, so it answers first.
+async fn mount_rules_completed(server: &MockServer, name: &str) {
+    let href = format!("/orgs/5/traffic_flows/async_queries/{name}");
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{href}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "completed", "rules": "completed",
+            "result": format!("{href}/download")
+        })))
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn the_draft_result_has_its_own_cache_slot_tied_to_its_query() {
+    use pce::traffic::TrafficQueryBuilder;
+    use tokio_util::sync::CancellationToken;
+    let server = MockServer::start().await;
+    mount_rules_completed(&server, "q-main").await;
+    mount_query(
+        &server,
+        "q-main",
+        json!({"max_results": 700}),
+        include_str!("../../../fixtures/traffic_flows.json"),
+        1,
+    )
+    .await;
+    mount_update_rules(&server, &["q-main", "q-gone"]).await;
+    let mut p = pce_for(&server);
+    fast_poll(&mut p);
+    let q = TrafficQueryBuilder::between(
+        "2026-10-09T00:00:00Z".parse().unwrap(),
+        "2026-10-10T00:00:00Z".parse().unwrap(),
+    )
+    .max_results(700)
+    .build()
+    .unwrap();
+    let cancel = CancellationToken::new();
+    let plain = p.traffic(&q, CacheMode::Use, &cancel, None).await.unwrap();
+    let href = plain.value.query_href.clone();
+    let before = seen(&server).await.len();
+    let draft = p
+        .traffic_draft(&q, Some(&href), CacheMode::Use, &cancel, None)
+        .await
+        .unwrap();
+    assert!(!draft.hit);
+    assert_eq!(
+        seen(&server).await[before..],
+        [
+            format!("PUT {href}/update_rules"),
+            format!("GET {href}"),
+            format!("GET {href}/download"),
+        ],
+        "no POST: the known query is re-evaluated"
+    );
+    let calls = p.stats().calls;
+    let again = p
+        .traffic_draft(&q, Some(&href), CacheMode::Use, &cancel, None)
+        .await
+        .unwrap();
+    assert!(again.hit, "the draft slot answers");
+    assert!(
+        p.traffic(&q, CacheMode::Use, &cancel, None)
+            .await
+            .unwrap()
+            .hit,
+        "the reported result stays cached beside it"
+    );
+    assert_eq!(p.stats().calls, calls, "no request for either");
+    // Another run of the same body (a new href): its own draft, not the old one.
+    let other = "/orgs/5/traffic_flows/async_queries/q-gone";
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{other}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "completed", "rules": "completed",
+            "result": format!("{other}/download")
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{other}/download")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+    let r = p
+        .traffic_draft(&q, Some(other), CacheMode::Use, &cancel, None)
+        .await
+        .unwrap();
+    assert!(!r.hit && r.value.flows.is_empty());
+}
+
+#[tokio::test]
+async fn a_focused_draft_re_evaluates_each_side_without_a_post() {
+    use pce::traffic::{Focus, TrafficQueryBuilder};
+    use tokio_util::sync::CancellationToken;
+    let server = MockServer::start().await;
+    let flows = include_str!("../../../fixtures/traffic_flows.json");
+    let labels = shop_labels();
+    mount_rules_completed(&server, "q-in").await;
+    mount_rules_completed(&server, "q-out").await;
+    mount_query(
+        &server,
+        "q-in",
+        json!({"destinations": {"include": [labels.clone()]}}),
+        flows,
+        1,
+    )
+    .await;
+    mount_query(
+        &server,
+        "q-out",
+        json!({"sources": {"include": [labels]}}),
+        flows,
+        1,
+    )
+    .await;
+    mount_update_rules(&server, &["q-in", "q-out"]).await;
+    let mut p = pce_for(&server);
+    fast_poll(&mut p);
+    let idx = fixture_index();
+    let base = TrafficQueryBuilder::between(
+        "2026-10-09T00:00:00Z".parse().unwrap(),
+        "2026-10-10T00:00:00Z".parse().unwrap(),
+    )
+    .max_results(500)
+    .build()
+    .unwrap();
+    let both = Focus::new(
+        vec!["shop".into(), "prod".into()],
+        vec!["app".into(), "env".into()],
+    );
+    let cancel = CancellationToken::new();
+    let r = p
+        .focused_traffic("focus", &both, &base, &idx, CacheMode::Use, &cancel, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        r.hrefs,
+        vec![
+            "/orgs/5/traffic_flows/async_queries/q-in",
+            "/orgs/5/traffic_flows/async_queries/q-out"
+        ]
+    );
+    let before = seen(&server).await.len();
+    let d = p
+        .focused_traffic_eval(
+            "focus",
+            &both,
+            &base,
+            &idx,
+            Some(&r.hrefs),
+            CacheMode::Use,
+            &cancel,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(d.hrefs, r.hrefs);
+    let after = seen(&server).await;
+    let sent = &after[before..];
+    assert_eq!(sent.iter().filter(|s| s.starts_with("PUT")).count(), 2);
+    assert!(!sent.iter().any(|s| s.starts_with("POST")), "{sent:?}");
+}

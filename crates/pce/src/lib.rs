@@ -44,6 +44,17 @@ pub use client::{ApiResponse, ClientConfig, PceClient, StatsSnapshot, WriteMetho
 pub use error::{PceError, Result};
 pub use limiter::RateLimiter;
 
+/// How a traffic result's decisions are evaluated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Evaluation<'a> {
+    /// The reported decisions only.
+    Reported,
+    /// The draft policy decision too (`update_rules`): the query of ours at
+    /// `Some(href)` re-evaluated without a new POST, or with `None` the
+    /// query run and then re-evaluated.
+    Draft(Option<&'a str>),
+}
+
 /// Whether a read may be served from cache.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CacheMode {
@@ -370,13 +381,60 @@ impl Pce {
         cancel: &tokio_util::sync::CancellationToken,
         progress: Option<&tokio::sync::mpsc::UnboundedSender<traffic::QueryProgress>>,
     ) -> Result<Cached<traffic::TrafficResult>> {
-        let prefix = format!("traffic:{slot}:");
+        self.traffic_eval(slot, query, Evaluation::Reported, mode, cancel, progress)
+            .await
+    }
+
+    /// `traffic` with the draft policy decision (`Evaluation::Draft`), in
+    /// the `main` slot's draft cache.
+    pub async fn traffic_draft(
+        &self,
+        query: &models::TrafficQuery,
+        href: Option<&str>,
+        mode: CacheMode,
+        cancel: &tokio_util::sync::CancellationToken,
+        progress: Option<&tokio::sync::mpsc::UnboundedSender<traffic::QueryProgress>>,
+    ) -> Result<Cached<traffic::TrafficResult>> {
+        self.traffic_eval(
+            "main",
+            query,
+            Evaluation::Draft(href),
+            mode,
+            cancel,
+            progress,
+        )
+        .await
+    }
+
+    /// One query in slot `slot`, evaluated as `eval` says. A draft result
+    /// is cached apart from the reported one (`draft:<slot>:` plus the
+    /// body; one per slot), so clearing it needs no request and the
+    /// reported result stays. A draft result for a known query is reused
+    /// only for that same query (`query_href`): after a new run of the
+    /// body, its older draft result is not this one.
+    pub async fn traffic_eval(
+        &self,
+        slot: &str,
+        query: &models::TrafficQuery,
+        eval: Evaluation<'_>,
+        mode: CacheMode,
+        cancel: &tokio_util::sync::CancellationToken,
+        progress: Option<&tokio::sync::mpsc::UnboundedSender<traffic::QueryProgress>>,
+    ) -> Result<Cached<traffic::TrafficResult>> {
+        let prefix = match eval {
+            Evaluation::Reported => format!("traffic:{slot}:"),
+            Evaluation::Draft(_) => format!("draft:{slot}:"),
+        };
         let key = format!(
             "{prefix}{}",
             serde_json::to_string(query).map_err(|e| PceError::Invalid(e.to_string()))?
         );
         if mode == CacheMode::Use
             && let Some((value, age)) = self.cache.get::<traffic::TrafficResult>(&key)
+            && match eval {
+                Evaluation::Draft(Some(href)) => value.query_href == href,
+                _ => true,
+            }
         {
             let truncated = value.truncated;
             return Ok(Cached {
@@ -386,8 +444,20 @@ impl Pce {
                 truncated,
             });
         }
-        let result =
-            traffic::run_traffic_query(&self.client, query, &self.poll, cancel, progress).await?;
+        let result = match eval {
+            Evaluation::Reported => {
+                traffic::run_traffic_query(&self.client, query, &self.poll, cancel, progress)
+                    .await?
+            }
+            Evaluation::Draft(Some(href)) => {
+                traffic::evaluate_draft(&self.client, href, query, &self.poll, cancel, progress)
+                    .await?
+            }
+            Evaluation::Draft(None) => {
+                traffic::run_traffic_query_draft(&self.client, query, &self.poll, cancel, progress)
+                    .await?
+            }
+        };
         self.cache.invalidate_prefix(&prefix);
         self.cache
             .insert(&key, result.clone(), Duration::from_secs(24 * 3600));
@@ -416,6 +486,26 @@ impl Pce {
         cancel: &tokio_util::sync::CancellationToken,
         progress: Option<&tokio::sync::mpsc::UnboundedSender<traffic::QueryProgress>>,
     ) -> Result<traffic::FocusedTraffic> {
+        self.focused_traffic_eval(slot, focus, base, idx, None, mode, cancel, progress)
+            .await
+    }
+
+    /// `focused_traffic`, with the draft decision when `draft` is set: the
+    /// hrefs of the queries already run, by side (`in` first), each
+    /// re-evaluated without a new POST; a side without one (an empty
+    /// slice) is run and then re-evaluated.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn focused_traffic_eval(
+        &self,
+        slot: &str,
+        focus: &traffic::Focus,
+        base: &models::TrafficQuery,
+        idx: &NameIndex,
+        draft: Option<&[String]>,
+        mode: CacheMode,
+        cancel: &tokio_util::sync::CancellationToken,
+        progress: Option<&tokio::sync::mpsc::UnboundedSender<traffic::QueryProgress>>,
+    ) -> Result<traffic::FocusedTraffic> {
         let queries = focus.queries(base, idx).map_err(PceError::Invalid)?;
         let mut merged: Option<Vec<traffic::ResolvedFlow>> = None;
         let mut out = traffic::FocusedTraffic {
@@ -425,17 +515,24 @@ impl Pce {
             elapsed: Duration::ZERO,
             hit: true,
             queries: Vec::new(),
+            hrefs: Vec::new(),
         };
-        for (side, q) in queries {
+        for (i, (side, q)) in queries.into_iter().enumerate() {
+            let eval = match draft {
+                None => Evaluation::Reported,
+                Some(hrefs) => Evaluation::Draft(hrefs.get(i).map(String::as_str)),
+            };
             let r = self
-                .traffic_slot(
+                .traffic_eval(
                     &format!("{slot}:{}", side.as_str()),
                     &q,
+                    eval,
                     mode,
                     cancel,
                     progress,
                 )
                 .await?;
+            out.hrefs.push(r.value.query_href.clone());
             let flows = traffic::resolve_flows(&r.value.flows, idx);
             merged = Some(match merged.take() {
                 None => flows,

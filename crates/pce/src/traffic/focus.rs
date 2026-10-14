@@ -342,6 +342,9 @@ pub struct FocusedTraffic {
     pub hit: bool,
     /// The bodies sent (or reused), `in` first.
     pub queries: Vec<TrafficQuery>,
+    /// Their async query hrefs, in the same order: what a draft
+    /// re-evaluation of this result re-uses.
+    pub hrefs: Vec<String>,
 }
 
 impl FocusedTraffic {
