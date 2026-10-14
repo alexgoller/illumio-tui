@@ -3,6 +3,7 @@
 use crate::error::{PceError, Result};
 use crate::models::{
     ActorFilter, ActorMatch, PolicyDecision, ServiceFilter, ServiceMatch, TrafficQuery,
+    Transmission,
 };
 use jiff::{Span, Timestamp};
 use std::time::Duration;
@@ -45,8 +46,13 @@ impl TrafficQuery {
     }
 
     pub fn cost(&self) -> QueryCost {
-        let has_actor =
-            |f: &ActorFilter| f.include.iter().any(|g| !g.is_empty()) || !f.exclude.is_empty();
+        // A transmission exclude narrows by kind, not by actor.
+        let has_actor = |f: &ActorFilter| {
+            f.include.iter().any(|g| !g.is_empty())
+                || f.exclude
+                    .iter()
+                    .any(|m| !matches!(m, ActorMatch::Transmission { .. }))
+        };
         let unbounded = !has_actor(&self.sources)
             && !has_actor(&self.destinations)
             && self.services.include.is_empty();
@@ -90,6 +96,7 @@ pub struct TrafficQueryBuilder {
     destinations: ActorFilter,
     services: ServiceFilter,
     decisions: Vec<PolicyDecision>,
+    transmission: Vec<Transmission>,
     max_results: u32,
     query_name: String,
 }
@@ -103,6 +110,7 @@ impl TrafficQueryBuilder {
             destinations: ActorFilter::default(),
             services: ServiceFilter::default(),
             decisions: PolicyDecision::ALL.to_vec(),
+            transmission: Vec::new(),
             max_results: DEFAULT_TRAFFIC_MAX_RESULTS,
             query_name: "illumio-tui".into(),
         }
@@ -156,6 +164,14 @@ impl TrafficQueryBuilder {
         self
     }
 
+    /// Only flows sent as one of `kinds` (empty, or all three: every flow).
+    /// Explorer can only exclude a transmission, on the destination side,
+    /// so `build` excludes the other kinds there.
+    pub fn transmission(mut self, kinds: &[Transmission]) -> Self {
+        self.transmission = kinds.to_vec();
+        self
+    }
+
     pub fn max_results(mut self, n: u32) -> Self {
         self.max_results = n;
         self
@@ -189,6 +205,15 @@ impl TrafficQueryBuilder {
                 self.max_results
             )));
         }
+        if !self.transmission.is_empty() {
+            for t in Transmission::ALL {
+                if !self.transmission.contains(&t) {
+                    self.destinations
+                        .exclude
+                        .push(ActorMatch::Transmission { transmission: t });
+                }
+            }
+        }
         // The PCE returns nothing for `include: []`; `[[]]` means "no filter".
         self.sources.include.retain(|g| !g.is_empty());
         self.destinations.include.retain(|g| !g.is_empty());
@@ -221,6 +246,53 @@ mod tests {
 
     fn ts(s: &str) -> jiff::Timestamp {
         s.parse().unwrap()
+    }
+
+    #[test]
+    fn transmission_kinds_become_destination_excludes_of_the_others() {
+        use crate::models::Transmission::{Broadcast, Multicast, Unicast};
+        let q = |kinds: &[crate::models::Transmission]| {
+            let q = TrafficQueryBuilder::between(
+                ts("2026-10-01T00:00:00Z"),
+                ts("2026-10-02T00:00:00Z"),
+            )
+            .exclude_destination(ActorMatch::IpAddress {
+                ip_address: "10.0.0.1".into(),
+            })
+            .transmission(kinds)
+            .build()
+            .unwrap();
+            serde_json::to_value(&q).unwrap()
+        };
+        assert_eq!(
+            q(&[Unicast])["destinations"]["exclude"],
+            json!([
+                {"ip_address": "10.0.0.1"},
+                {"transmission": "broadcast"},
+                {"transmission": "multicast"}
+            ]),
+            "Explorer only excludes a transmission, on the destination side"
+        );
+        assert_eq!(
+            q(&[Broadcast, Multicast])["destinations"]["exclude"],
+            json!([{"ip_address": "10.0.0.1"}, {"transmission": "unicast"}])
+        );
+        for all in [
+            &[][..],
+            &[Unicast, Broadcast, Multicast],
+            &[Unicast, Unicast, Broadcast, Multicast],
+        ] {
+            assert_eq!(
+                q(all)["destinations"]["exclude"],
+                json!([{"ip_address": "10.0.0.1"}]),
+                "{all:?}: every kind, no filter"
+            );
+        }
+        assert_eq!(q(&[Unicast])["sources"]["exclude"], json!([]));
+        let unicast: crate::models::Transmission = "Unicast".parse().unwrap();
+        assert_eq!(unicast, Unicast);
+        assert!("anycast".parse::<crate::models::Transmission>().is_err());
+        assert_eq!(Multicast.as_str(), "multicast");
     }
 
     #[test]

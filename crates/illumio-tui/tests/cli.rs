@@ -2595,6 +2595,95 @@ async fn traffic_groups_and_mesh_dry_runs_send_nothing() {
     }
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn transmission_excludes_the_other_kinds_on_the_destination_side() {
+    let server = MockServer::start().await;
+    mount_traffic(&server, 1).await;
+    for sub in ["query", "groups", "mesh"] {
+        let out = stdout_json(
+            cmd(&server)
+                .args([
+                    "traffic",
+                    sub,
+                    "--window",
+                    "1h",
+                    "--transmission",
+                    "unicast",
+                    "--dry-run",
+                ])
+                .assert()
+                .success(),
+        );
+        assert_eq!(
+            out["data"]["destinations"]["exclude"],
+            json!([{"transmission": "broadcast"}, {"transmission": "multicast"}]),
+            "{sub}"
+        );
+        assert_eq!(out["data"]["sources"]["exclude"], json!([]), "{sub}");
+    }
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "traffic",
+                "query",
+                "--window",
+                "1h",
+                "--transmission",
+                "broadcast",
+                "--transmission",
+                "multicast",
+                "--dry-run",
+            ])
+            .assert()
+            .success(),
+    );
+    assert_eq!(
+        out["data"]["destinations"]["exclude"],
+        json!([{"transmission": "unicast"}]),
+        "repeatable"
+    );
+    let out = stdout_json(
+        cmd(&server)
+            .args(["traffic", "query", "--window", "1h", "--dry-run"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(
+        out["data"]["destinations"]["exclude"],
+        json!([]),
+        "the default is every transmission"
+    );
+    cmd(&server)
+        .args(["traffic", "query", "--transmission", "anycast", "--dry-run"])
+        .assert()
+        .code(2);
+    // A real run sends the same filter (one query, counted by the mock).
+    cmd(&server)
+        .args([
+            "traffic",
+            "groups",
+            "--window",
+            "1h",
+            "--transmission",
+            "unicast",
+        ])
+        .assert()
+        .success();
+    let posts: Vec<Value> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.method.as_str() == "POST")
+        .map(|r| serde_json::from_slice(&r.body).unwrap())
+        .collect();
+    assert_eq!(posts.len(), 1);
+    assert_eq!(
+        posts[0]["destinations"]["exclude"],
+        json!([{"transmission": "broadcast"}, {"transmission": "multicast"}])
+    );
+}
+
 /// stdout of a `--csv` run, which must hold nothing but CSV: the meta line
 /// goes to stderr.
 fn csv_stdout(assert: &assert_cmd::assert::Assert) -> String {

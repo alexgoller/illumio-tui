@@ -5,7 +5,7 @@
 use super::context::{Context, cache_label};
 use super::error::CliError;
 use super::output::{OutputFormat, TableRows};
-use super::traffic::{ByArg, DirectionArg, FilterArgs, cli_focus, fetch};
+use super::traffic::{ByArg, DirectionArg, FilterArgs, TransmissionArg, cli_focus, fetch};
 use clap::{Args, ValueEnum};
 use jiff::Timestamp;
 use pce::app::{
@@ -44,6 +44,9 @@ pub struct AppArgs {
     /// Row cap per traffic query, up to 200000 (default from profile; > 10000 needs --yes)
     #[arg(long)]
     pub max_results: Option<u32>,
+    /// Only flows sent this way: unicast, broadcast, multicast (repeatable; default all)
+    #[arg(long, value_enum, value_delimiter = ',')]
+    pub transmission: Vec<TransmissionArg>,
     /// Match the active policy instead of the draft
     #[arg(long)]
     pub active: bool,
@@ -195,6 +198,7 @@ pub async fn run(ctx: &Context, args: &AppArgs) -> Result<(), CliError> {
         yes: args.yes,
         app: Some(args.app.clone()),
         direction: args.direction,
+        transmission: args.transmission.clone(),
         ..FilterArgs::default()
     };
     let focus = cli_focus(&filter, &keys, ByArg::Pairs)?

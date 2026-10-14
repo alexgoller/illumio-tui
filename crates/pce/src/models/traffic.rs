@@ -8,11 +8,62 @@ use serde_json::{Map, Value};
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ActorMatch {
-    Label { label: Ref },
-    IpList { ip_list: Ref },
-    Workload { workload: Ref },
-    IpAddress { ip_address: String },
-    Fqdn { fqdn: String },
+    Label {
+        label: Ref,
+    },
+    IpList {
+        ip_list: Ref,
+    },
+    Workload {
+        workload: Ref,
+    },
+    IpAddress {
+        ip_address: String,
+    },
+    Fqdn {
+        fqdn: String,
+    },
+    /// Destination excludes only: `{"transmission": "broadcast"}`.
+    Transmission {
+        transmission: Transmission,
+    },
+}
+
+/// How a flow was sent. Explorer filters it as a destination exclude
+/// (`traffic_flows_transmission_param`); the flows it returns carry it as
+/// `transmission`, absent for unicast.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Transmission {
+    Unicast,
+    Broadcast,
+    Multicast,
+}
+
+impl Transmission {
+    pub const ALL: [Transmission; 3] = [
+        Transmission::Unicast,
+        Transmission::Broadcast,
+        Transmission::Multicast,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Transmission::Unicast => "unicast",
+            Transmission::Broadcast => "broadcast",
+            Transmission::Multicast => "multicast",
+        }
+    }
+}
+
+impl std::str::FromStr for Transmission {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Transmission::ALL
+            .into_iter()
+            .find(|t| t.as_str().eq_ignore_ascii_case(s.trim()))
+            .ok_or_else(|| format!("unknown transmission {s:?}; use unicast, broadcast, multicast"))
+    }
 }
 
 /// `include` is an OR of AND-groups; `exclude` is flat.
