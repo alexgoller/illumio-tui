@@ -407,11 +407,12 @@ impl Pce {
     }
 
     /// One query in slot `slot`, evaluated as `eval` says. A draft result
-    /// is cached apart from the reported one (`draft:<slot>:` plus the
-    /// body; one per slot), so clearing it needs no request and the
-    /// reported result stays. A draft result for a known query is reused
-    /// only for that same query (`query_href`): after a new run of the
-    /// body, its older draft result is not this one.
+    /// is cached apart from the reported one, under `draft:<slot>:` and the
+    /// async query it re-evaluated (one per slot): the same query again is
+    /// answered without a request, so clearing the draft and asking again
+    /// costs nothing, and the reported result stays. A query run fresh for
+    /// the draft (`Draft(None)`) is never answered from the cache (the user
+    /// asked for the run), and is cached under its new href.
     pub async fn traffic_eval(
         &self,
         slot: &str,
@@ -425,16 +426,17 @@ impl Pce {
             Evaluation::Reported => format!("traffic:{slot}:"),
             Evaluation::Draft(_) => format!("draft:{slot}:"),
         };
-        let key = format!(
-            "{prefix}{}",
-            serde_json::to_string(query).map_err(|e| PceError::Invalid(e.to_string()))?
-        );
+        let key = match eval {
+            Evaluation::Reported => Some(format!(
+                "{prefix}{}",
+                serde_json::to_string(query).map_err(|e| PceError::Invalid(e.to_string()))?
+            )),
+            Evaluation::Draft(Some(href)) => Some(format!("{prefix}{href}")),
+            Evaluation::Draft(None) => None,
+        };
         if mode == CacheMode::Use
-            && let Some((value, age)) = self.cache.get::<traffic::TrafficResult>(&key)
-            && match eval {
-                Evaluation::Draft(Some(href)) => value.query_href == href,
-                _ => true,
-            }
+            && let Some(key) = &key
+            && let Some((value, age)) = self.cache.get::<traffic::TrafficResult>(key)
         {
             let truncated = value.truncated;
             return Ok(Cached {
@@ -465,6 +467,7 @@ impl Pce {
                     .await?
             }
         };
+        let key = key.unwrap_or_else(|| format!("{prefix}{}", result.query_href));
         self.cache.invalidate_prefix(&prefix);
         self.cache
             .insert(&key, result.clone(), Duration::from_secs(24 * 3600));
