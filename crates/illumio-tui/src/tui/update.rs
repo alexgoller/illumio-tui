@@ -986,7 +986,7 @@ fn draft_cost(queries: u32, fresh: bool) -> String {
     let per = if fresh {
         "1 POST, 1 PUT, polls and 1 download"
     } else {
-        "1 PUT, polls and 1 download"
+        "1 status check, 1 PUT, polls and 1 download"
     };
     if queries > 1 {
         format!("{per} per query, {}", queries_text(queries))
@@ -14581,7 +14581,10 @@ mod draft_tests {
         let Overlay::Confirm { reason, .. } = m.overlay.clone() else {
             panic!("{:?}", m.overlay)
         };
-        assert!(reason.contains("1 PUT, polls and 1 download"), "{reason}");
+        assert!(
+            reason.contains("1 status check, 1 PUT, polls and 1 download"),
+            "{reason}"
+        );
         assert!(matches!(
             update(&mut m, key('y')).as_slice(),
             [Cmd::RunDraft { .. }]

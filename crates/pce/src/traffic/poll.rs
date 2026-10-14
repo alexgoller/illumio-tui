@@ -36,7 +36,7 @@ impl Default for PollConfig {
             cap: Duration::from_secs(3),
             grace: Duration::from_secs(30),
             download_timeout: Duration::from_secs(300),
-            max_wait: Duration::from_secs(600),
+            max_wait: Duration::from_secs(1800),
         }
     }
 }
@@ -248,7 +248,7 @@ fn wait_text(d: Duration) -> String {
 fn check_wait(since: Instant, poll: &PollConfig, what: &str) -> Result<()> {
     if since.elapsed() > poll.max_wait {
         return Err(PceError::QueryFailed(format!(
-            "{what} timed out after {}",
+            "{what} timed out after {} (the PCE may still finish it)",
             wait_text(poll.max_wait)
         )));
     }
@@ -472,7 +472,7 @@ mod tests {
 
     #[test]
     fn each_polling_stage_gives_up_after_10_minutes() {
-        assert_eq!(PollConfig::default().max_wait, Duration::from_secs(600));
+        assert_eq!(PollConfig::default().max_wait, Duration::from_secs(1800));
         assert_eq!(wait_text(Duration::from_secs(600)), "10 min");
         assert_eq!(wait_text(Duration::from_millis(30)), "0s");
     }
