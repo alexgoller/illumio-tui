@@ -232,8 +232,8 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
 - **Workloads**: VEN health columns and a summary line, `h` unhealthy only, `H` sort by
   severity, `t` / `T` jump to Traffic with the workload as source / destination. The
   enforcement column is the effective one: a workload without a VEN is `unmanaged`, as in
-  the PCE UI, whatever mode the API reports for it (often `visibility_only`); the detail pane shows both
-  (`unmanaged · PCE reports visibility_only`).
+  the PCE UI, whatever mode the API reports for it (often `visibility_only`); the detail pane's
+  health line shows both (`healthy · full`, `unmanaged · PCE reports visibility_only`).
 - **Events**: severity-coloured audit events, `f` edit severity / type / window, `S` sort by
   severity, `Enter` the event as JSON (`j` / `k` scroll a long one).
 

@@ -185,8 +185,7 @@ fn detail_lines(r: &WorkloadRowView) -> Vec<DetailLine> {
         (Some("href"), w.href.clone()),
         (Some("os"), w.os_id.clone().unwrap_or_else(|| "-".into())),
         (Some("ven"), ven_detail(w, a.as_ref())),
-        (Some("health"), r.health.as_str().to_string()),
-        (Some("enforce"), enforce_detail(w)),
+        (Some("health"), health_detail(r)),
     ];
     if let Some(a) = &a {
         let sync = a.sync_state.as_deref().unwrap_or("-");
@@ -223,13 +222,16 @@ fn detail_lines(r: &WorkloadRowView) -> Vec<DetailLine> {
     out
 }
 
-/// The effective enforcement; for a workload without a VEN also the mode
-/// the PCE reports for it (`unmanaged · PCE reports visibility_only`).
-fn enforce_detail(w: &Workload) -> String {
-    let shown = w.enforcement().unwrap_or("-");
-    match w.enforcement_mode.as_deref() {
-        Some(raw) if raw != shown => format!("{shown} · PCE reports {raw}"),
-        _ => shown.to_string(),
+/// VEN health and the effective enforcement (`healthy · full`); without a
+/// VEN, the mode the PCE reports for it (`unmanaged · PCE reports
+/// visibility_only`).
+fn health_detail(r: &WorkloadRowView) -> String {
+    let w = &r.workload;
+    let health = r.health.as_str();
+    match (w.is_unmanaged(), w.enforcement_mode.as_deref()) {
+        (true, Some(raw)) => format!("{health} · PCE reports {raw}"),
+        (true, None) => health.to_string(),
+        (false, mode) => format!("{health} · {}", mode.unwrap_or("-")),
     }
 }
 
@@ -312,20 +314,25 @@ mod tests {
         WorkloadRowView::new(w.swap_remove(i), now, &KeyOrder::default())
     }
 
-    fn enforce(r: &WorkloadRowView) -> String {
-        detail_lines(r)
+    fn health(r: &WorkloadRowView) -> String {
+        let lines = detail_lines(r);
+        assert!(lines.iter().all(|(h, _)| *h != Some("enforce")), "one line");
+        lines
             .into_iter()
-            .find(|(h, _)| *h == Some("enforce"))
+            .find(|(h, _)| *h == Some("health"))
             .map(|(_, b)| b)
             .unwrap()
     }
 
     #[test]
-    fn detail_shows_the_effective_enforcement_and_what_the_pce_reports() {
+    fn detail_health_line_carries_the_enforcement_and_what_the_pce_reports() {
         assert_eq!(
-            enforce(&row(2, "visibility_only")),
+            health(&row(2, "visibility_only")),
             "unmanaged · PCE reports visibility_only"
         );
-        assert_eq!(enforce(&row(0, "full")), "full");
+        assert_eq!(health(&row(0, "full")), "healthy · full");
+        let mut none = row(2, "x");
+        none.workload.enforcement_mode = None;
+        assert_eq!(health(&none), "unmanaged");
     }
 }
