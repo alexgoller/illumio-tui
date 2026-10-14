@@ -222,11 +222,16 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   and delete labels, services and IP lists. On the Labels tab `f` picks the keys shown (the
   `g` picker, with label counts), `/=pay` searches values only and `/app=pay` the values of
   one key, `i` shows or hides the profile's `ignore_keys` (hidden by default, counted in the
-  header: `key app,env · 212 of 4310 · 38 hidden`), and `u` keeps the labels no workload,
-  label group, ruleset scope or rule uses, counted in the policy scope the Policy screen has
-  loaded (draft by default, active once `d` toggles it); the `workloads` and `rules` columns
-  sort and show `-` until Workloads and Policy are loaded, and `u` asks before loading them.
-  A label used only by a deny rule the PCE serves through the per-ruleset fallback endpoint
+  header: `key app,env · 212 of 4310 · 38 hidden`), and `u` keeps the labels nothing holds,
+  as the PCE's own usage flags say: one `labels?usage=true` request (cached like the labels),
+  so pairing profiles, permissions, enforcement boundaries, container workload profiles,
+  virtual services and the rest count, not just workloads and rules. Once the flags are in,
+  the detail pane (and a `held by` column from 120 columns) names what holds each label. The
+  `workloads` and `rules` columns sort and show `-` until Workloads and Policy are loaded
+  (counted in the policy scope the Policy screen has loaded: draft by default, active once
+  `d` toggles it). A PCE that answers without usage flags falls back to those counts: `u`
+  then asks before loading Workloads and Policy, the header says `unused (workloads, rules
+  and scopes only)`, a deny rule the PCE serves through the per-ruleset fallback endpoint
   counts once that ruleset's deny rules have been loaded, and a truncated workload list is
   named in the header (`unused (workloads truncated)`).
 - **Workloads**: VEN health columns and a summary line, `h` unhealthy only, `H` sort by
@@ -250,7 +255,8 @@ decides whether it may write.
 Startup makes exactly five requests (health plus the four object lists). The first visit to
 Workloads and to Events costs one request each; going back to them costs none. The IP lists
 tab costs none within the cache TTL (15 minutes): the startup load already read them. Rule impact
-costs one workloads read on `i`, none when the list is cached. Everything else is caused by a key you press. The header shows
+costs one workloads read on `i`, none when the list is cached. `u` on the Labels tab costs one
+labels read with usage flags, none when it is cached. Everything else is caused by a key you press. The header shows
 the API call and byte counters at all times.
 
 ## CLI
@@ -376,10 +382,15 @@ name or `ipl:<list>`. `bytes` is `0` in JSON and `-` in tables when the PCE repo
 `labels` flags combine with AND: `--key` (repeatable, any of the keys) and `--value` match
 exactly, `--value-contains` is a case-insensitive substring, `--ignore-keys` hides the
 profile's `ignore_keys` (`--no-ignore-keys`, the default, keeps every key). `--unused` keeps
-the labels no workload, rule, ruleset scope or label group uses: it reads the workloads, the
-draft rulesets and the label groups (through the cache, counted in `meta`) and adds
-`workloads` and `rules` to each row; deny rules count when the ruleset carries them inline
-(no fallback reads). Without it the rows are unchanged.
+the labels nothing holds, as the PCE's own usage flags say: the one labels request asks for
+`usage=true`, so a label held only by a pairing profile, a permission, an enforcement
+boundary or a container workload profile is in use, and each row carries the PCE's `usage`
+object (every flag false) with `workloads` and `rules` at 0; `meta.usage` is `pce`. A PCE
+that answers without usage flags falls back to our own counts: it reads the workloads, the
+draft rulesets and the label groups (through the cache, counted in `meta`), deny rules count
+when the ruleset carries them inline (no fallback reads), and `meta.usage` (and the table's
+meta line) says `usage from workloads, rules and scopes only`. Without `--unused` the rows
+are unchanged.
 
 `--impact` on `policy rules <ruleset>` adds each rule's `impact` (JSON) or a `P/C` column
 (table): `providers` and `consumers` (workloads matched, unions over the ruleset's scopes),

@@ -286,7 +286,12 @@ are a projection of `ObjectsState.all_labels` (`rebuild_labels`: the `f`
 keys, `i` ignored keys, `u` unused only), and their `workloads` and `rules`
 counts come from `pce::label_usage` over the cached workloads, rulesets,
 fetched deny rules and label groups (`Model::recount_labels`, on each of
-those loads), so the counts cost no request.
+those loads), so the counts cost no request. What `u` keeps is decided by
+the PCE's own usage flags (`ObjectsState.pce_usage`, from one
+`Cmd::LoadLabelUsage`: `Pce::labels_with_usage`, `labels?usage=true`,
+cached apart from the plain list); the flags are a map, so kinds a newer
+PCE adds count too. A PCE that answers without them (`PceUsage::Unsupported`)
+leaves the decision to the counts above.
 
 The CLI's `--impact` costs one workloads read through the cache; on a write
 it runs after the guard and the plan and before the send, and its
