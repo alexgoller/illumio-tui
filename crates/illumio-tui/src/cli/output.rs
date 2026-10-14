@@ -77,6 +77,11 @@ pub struct Meta {
     /// side: 2 for `both`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub queries: Option<u32>,
+    /// Traffic with `--draft`: the draft re-evaluation ran, and how many
+    /// flow records the draft would allow (`fixed`) or block
+    /// (`newly_blocked`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub draft: Option<pce::traffic::DraftSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub write: Option<WriteMeta>,
     /// `labels --unused`: where label usage came from, `pce` (its own
@@ -408,6 +413,7 @@ mod tests {
             cap_steps: None,
             incomplete: None,
             queries: None,
+            draft: None,
             write: Some(WriteMeta {
                 method: WriteMethod::Post,
                 path: "/orgs/5/labels".into(),

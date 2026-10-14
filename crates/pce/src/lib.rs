@@ -446,8 +446,15 @@ impl Pce {
         }
         let result = match eval {
             Evaluation::Reported => {
-                traffic::run_traffic_query(&self.client, query, &self.poll, cancel, progress)
-                    .await?
+                let mut r =
+                    traffic::run_traffic_query(&self.client, query, &self.poll, cancel, progress)
+                        .await?;
+                // A draft decision is shown only when asked for: one left
+                // on a reported download is not this run's evaluation.
+                for f in &mut r.flows {
+                    f.draft_policy_decision = None;
+                }
+                r
             }
             Evaluation::Draft(Some(href)) => {
                 traffic::evaluate_draft(&self.client, href, query, &self.poll, cancel, progress)

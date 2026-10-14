@@ -19,6 +19,9 @@ pub struct AppPeer {
     pub flows: u64,
     pub connections: u64,
     pub bytes: u64,
+    /// What the draft policy would change, with draft decisions loaded.
+    #[serde(flatten)]
+    pub draft: Option<crate::traffic::DraftCounts>,
 }
 
 impl AppPeer {
@@ -72,6 +75,7 @@ pub fn app_peers(flows: &[ResolvedFlow], focus: &Focus, side: Direction) -> Vec<
                 flows: g.flows,
                 connections: g.connections,
                 bytes: g.bytes,
+                draft: g.draft,
             });
         }
     }

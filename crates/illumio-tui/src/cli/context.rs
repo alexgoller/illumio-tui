@@ -73,6 +73,7 @@ impl Context {
             cap_steps: None,
             incomplete: None,
             queries: None,
+            draft: None,
             write: None,
             usage: None,
         }

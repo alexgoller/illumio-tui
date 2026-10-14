@@ -13,7 +13,7 @@ use pce::app::{
     app_workload_filter, app_workloads, enforcement_word, label_hrefs, workload_in_app,
 };
 use pce::models::{PolicyScope, Workload};
-use pce::traffic::{Direction, FocusDirection};
+use pce::traffic::{Direction, DraftCounts, FocusDirection};
 use serde::Serialize;
 
 #[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,6 +58,10 @@ pub struct AppArgs {
     /// Confirm an expensive query (window > 7d, max_results > 10000)
     #[arg(long)]
     pub yes: bool,
+    /// Also each peer's flows the draft policy would allow or block (the PCE's Explorer draft
+    /// view: per query one PUT on that query and more polls; changes no policy)
+    #[arg(long)]
+    pub draft: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -137,23 +141,62 @@ impl TableRows for Peers<'_> {
     fn units(&self) -> Option<&'static str> {
         Some(super::traffic::UNITS_GROUPS)
     }
+    /// With draft decisions, a `draft` column (`DraftCounts::text`).
     fn headers(&self) -> Vec<&'static str> {
-        vec!["peer", "service", "decision", "flows", "conns", "bytes"]
+        let mut h = vec!["peer", "service", "decision", "flows", "conns", "bytes"];
+        if self.draft() {
+            h.push("draft");
+        }
+        h
     }
     fn rows(&self) -> Vec<Vec<String>> {
+        let draft = self.draft();
         self.0
             .iter()
             .map(|p| {
-                vec![
+                let mut row = vec![
                     p.peer_text(),
                     p.service.clone(),
                     p.decision.as_str().to_string(),
                     p.flows.to_string(),
                     p.connections.to_string(),
                     p.bytes.to_string(),
-                ]
+                ];
+                if draft {
+                    row.push(DraftCounts::text(p.draft.as_ref()));
+                }
+                row
             })
             .collect()
+    }
+    /// The table's, with the draft counts as numbers.
+    fn full_headers(&self) -> Vec<&'static str> {
+        let mut h = self.headers();
+        if self.draft() {
+            h.pop();
+            h.extend(super::traffic::DRAFT_COUNTS);
+        }
+        h
+    }
+    fn full_rows(&self) -> Vec<Vec<String>> {
+        let draft = self.draft();
+        self.0
+            .iter()
+            .zip(self.rows())
+            .map(|(p, mut row)| {
+                if draft {
+                    row.pop();
+                    row.extend(super::traffic::draft_cells(p.draft.as_ref()));
+                }
+                row
+            })
+            .collect()
+    }
+}
+
+impl Peers<'_> {
+    fn draft(&self) -> bool {
+        self.0.iter().any(|p| p.draft.is_some())
     }
 }
 
@@ -201,6 +244,7 @@ pub async fn run(ctx: &Context, args: &AppArgs) -> Result<(), CliError> {
         app: Some(args.app.clone()),
         direction: args.direction,
         transmission: args.transmission.clone(),
+        draft: args.draft,
         ..FilterArgs::default()
     };
     let focus = cli_focus(&filter, &keys, ByArg::Pairs)?

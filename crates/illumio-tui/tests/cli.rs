@@ -3233,3 +3233,231 @@ async fn app_mistakes_exit_2_before_any_request() {
     let err = cmd(&server).args(["app", "shp/prod"]).assert().code(2);
     assert!(String::from_utf8_lossy(&err.get_output().stderr).contains("closest: shop"));
 }
+
+// ---- `--draft`: the draft policy decision ----
+
+/// The fixture's flows after `update_rules`: the potentially blocked
+/// 8443/tcp flow is allowed in draft, the allowed 443/tcp one blocked.
+fn draft_flows() -> String {
+    let mut flows: Vec<Value> =
+        serde_json::from_str(include_str!("../../../fixtures/traffic_flows.json")).unwrap();
+    for f in &mut flows {
+        let draft = match (f["policy_decision"].as_str(), f["service"]["port"].as_u64()) {
+            (Some("potentially_blocked"), _) => "allowed",
+            (_, Some(443)) => "blocked",
+            (Some(d), _) => d,
+            _ => unreachable!(),
+        };
+        f["draft_policy_decision"] = json!(draft);
+    }
+    serde_json::to_string(&flows).unwrap()
+}
+
+/// `mount_traffic` for `--draft`: the status reports the rules completed,
+/// `update_rules` expects `puts` PUTs, the download carries draft decisions.
+async fn mount_traffic_draft(server: &MockServer, posts: u64, puts: u64) {
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "completed", "rules": "completed",
+            "result": {"href": format!("{QHREF}/download")}, "flows_count": 4
+        })))
+        .mount(server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path(format!("/api/v2{QHREF}/update_rules")))
+        .and(query_param("label_based_rules", "false"))
+        .and(query_param("offset", "0"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(puts)
+        .mount(server)
+        .await;
+    mount_traffic_body(server, posts, draft_flows()).await;
+}
+
+/// The traffic requests the server saw, in order (object lists left out).
+async fn traffic_sequence(server: &MockServer) -> Vec<String> {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| {
+            let q = r.url.query().map(|q| format!("?{q}")).unwrap_or_default();
+            format!(
+                "{} {}{q}",
+                r.method,
+                r.url.path().trim_start_matches("/api/v2")
+            )
+        })
+        .filter(|s| s.contains("traffic_flows"))
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn traffic_query_draft_runs_in_one_go_and_reports_what_the_draft_changes() {
+    let server = MockServer::start().await;
+    mount_traffic_draft(&server, 1, 1).await;
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "traffic",
+                "query",
+                "--window",
+                "1h",
+                "--max-results",
+                "200",
+                "--draft",
+            ])
+            .assert()
+            .success(),
+    );
+    assert_eq!(
+        traffic_sequence(&server).await,
+        vec![
+            "POST /orgs/5/traffic_flows/async_queries".to_string(),
+            format!("GET {QHREF}"),
+            format!("PUT {QHREF}/update_rules?label_based_rules=false&offset=0&limit=200"),
+            format!("GET {QHREF}"),
+            format!("GET {QHREF}/download"),
+        ],
+        "the PUT's limit is the query's cap; one download"
+    );
+    let flows = out["data"].as_array().unwrap();
+    let draft: Vec<&str> = flows
+        .iter()
+        .map(|f| f["draft_policy_decision"].as_str().unwrap())
+        .collect();
+    assert_eq!(draft, ["allowed", "allowed", "blocked", "blocked"]);
+    assert_eq!(
+        out["meta"]["draft"],
+        json!({"evaluated": true, "fixed": 1, "newly_blocked": 1})
+    );
+    // 4 object lists for the index, plus the 5 traffic requests.
+    assert_eq!(out["meta"]["api_calls"], 9);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn without_draft_there_is_no_put_and_no_meta_draft() {
+    let server = MockServer::start().await;
+    mount_traffic_draft(&server, 1, 0).await;
+    let out = stdout_json(
+        cmd(&server)
+            .args(["traffic", "query", "--window", "1h"])
+            .assert()
+            .success(),
+    );
+    assert!(out["meta"].get("draft").is_none(), "{}", out["meta"]);
+    assert!(
+        out["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|f| f["draft_policy_decision"].is_null()),
+        "a draft decision left on a reported download is not shown"
+    );
+    assert!(
+        !traffic_sequence(&server)
+            .await
+            .iter()
+            .any(|s| s.starts_with("PUT"))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn traffic_draft_tables_and_csv_carry_the_draft_columns() {
+    let server = MockServer::start().await;
+    mount_traffic_draft(&server, 3, 3).await;
+    let text = csv_stdout(
+        &cmd(&server)
+            .args(["traffic", "query", "--window", "1h", "--draft", "--csv"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(
+        text.lines().next(),
+        Some("last seen,src,src labels,dst,dst labels,service,conns,decision,draft,process")
+    );
+    assert!(text.contains(",potentially_blocked,allowed,"), "{text}");
+    let text = csv_stdout(
+        &cmd(&server)
+            .args(["traffic", "groups", "--window", "1h", "--draft", "--csv"])
+            .assert()
+            .success(),
+    );
+    let header = text.lines().next().unwrap();
+    assert!(
+        header.ends_with("unknown_conns,draft_allowed,draft_blocked"),
+        "{header}"
+    );
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "traffic", "groups", "--window", "1h", "--by", "in", "--draft",
+            ])
+            .assert()
+            .success(),
+    );
+    let rows: Vec<&Value> = out["data"]["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|s| s["rows"].as_array().unwrap())
+        .collect();
+    let allowed: u64 = rows
+        .iter()
+        .map(|r| r["draft_allowed"].as_u64().unwrap())
+        .sum();
+    let blocked: u64 = rows
+        .iter()
+        .map(|r| r["draft_blocked"].as_u64().unwrap())
+        .sum();
+    assert_eq!((allowed, blocked), (1, 1));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn app_draft_re_evaluates_each_side_and_marks_the_peers() {
+    let server = MockServer::start().await;
+    mount_traffic_draft(&server, 2, 2).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/workloads.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/sec_policy/draft/rule_sets"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/rule_sets.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .mount(&server)
+        .await;
+    let out = stdout_json(
+        cmd(&server)
+            .args(["app", "shop/prod", "--window", "1h", "--draft"])
+            .assert()
+            .success(),
+    );
+    let puts = traffic_sequence(&server)
+        .await
+        .iter()
+        .filter(|s| s.starts_with("PUT"))
+        .count();
+    assert_eq!(puts, 2, "one per side");
+    assert_eq!(out["meta"]["draft"]["evaluated"], true);
+    let peers: Vec<&Value> = out["data"]["inbound"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(out["data"]["outbound"].as_array().unwrap())
+        .collect();
+    assert!(
+        peers.iter().all(|p| p["draft_allowed"].is_u64()),
+        "{peers:?}"
+    );
+}

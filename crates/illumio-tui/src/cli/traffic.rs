@@ -12,8 +12,8 @@ use pce::models::{
     proto_number,
 };
 use pce::traffic::{
-    AppSection, CONFIRM_MAX_RESULTS, Decisions, Direction, FilterExpr, FlowGroup, Focus,
-    FocusDirection, MAX_TRAFFIC_MAX_RESULTS, MeshColumns, MeshRow, ResolvedFlow,
+    AppSection, CONFIRM_MAX_RESULTS, Decisions, Direction, DraftCounts, DraftSummary, FilterExpr,
+    FlowGroup, Focus, FocusDirection, MAX_TRAFFIC_MAX_RESULTS, MeshColumns, MeshRow, ResolvedFlow,
     TrafficQueryBuilder, app_header, app_sections, app_sections_both, backfill_cap,
     compact_duration, group_by_labels, group_by_service, mesh, parse_app, parse_window,
     resolve_actor, resolve_flows,
@@ -296,6 +296,11 @@ pub struct FilterArgs {
     /// (default; two queries, merged)
     #[arg(long, value_enum, requires = "app")]
     pub direction: Option<DirectionArg>,
+    /// Also the decision the draft policy would make for each flow (draft_policy_decision):
+    /// the PCE's own Explorer draft view. Per query one PUT on that query (update_rules), more
+    /// status polls, still one download; it changes no policy. JSON: meta.draft
+    #[arg(long)]
+    pub draft: bool,
 }
 
 /// RFC 3339, or a date; a date-only `--to` means 23:59:59 of that day.
@@ -527,12 +532,30 @@ impl Serialize for FlowRows<'_> {
     }
 }
 
+impl FlowRows<'_> {
+    /// Some flow carries a draft decision (`--draft`).
+    fn draft(&self) -> bool {
+        self.flows.iter().any(|f| f.draft_policy_decision.is_some())
+    }
+}
+
+/// The draft cell: the draft decision, `→ allowed` where it is not the
+/// reported one.
+pub fn draft_cell(f: &ResolvedFlow) -> String {
+    match (&f.draft_policy_decision, f.draft_change()) {
+        (_, Some(d)) => format!("→ {}", d.as_str()),
+        (Some(d), None) => d.as_str().to_string(),
+        (None, None) => String::new(),
+    }
+}
+
 impl TableRows for FlowRows<'_> {
     fn units(&self) -> Option<&'static str> {
         Some(UNITS_FLOWS)
     }
+    /// With draft decisions, a `draft` column after `decision`.
     fn headers(&self) -> Vec<&'static str> {
-        vec![
+        let mut h = vec![
             "last seen",
             "src",
             "src labels",
@@ -542,13 +565,18 @@ impl TableRows for FlowRows<'_> {
             "conns",
             "decision",
             "process",
-        ]
+        ];
+        if self.draft() {
+            h.insert(8, "draft");
+        }
+        h
     }
     fn rows(&self) -> Vec<Vec<String>> {
+        let draft = self.draft();
         self.flows
             .iter()
             .map(|f| {
-                vec![
+                let mut row = vec![
                     f.last_detected.clone().unwrap_or_default(),
                     f.src.display_name(),
                     f.src.label_text(self.order),
@@ -558,21 +586,34 @@ impl TableRows for FlowRows<'_> {
                     f.num_connections.to_string(),
                     f.policy_decision.as_str().to_string(),
                     f.process_name.clone().unwrap_or_default(),
-                ]
+                ];
+                if draft {
+                    row.insert(8, draft_cell(f));
+                }
+                row
             })
             .collect()
     }
-    /// Every label (ignored keys too, as in JSON), one list entry each.
+    /// Every label (ignored keys too, as in JSON), one list entry each;
+    /// the draft decision plain.
     fn full_rows(&self) -> Vec<Vec<String>> {
         let labels = |e: &pce::traffic::ResolvedEndpoint| {
             join_list(e.labels.iter().map(|l| format!("{}={}", l.key, l.value)))
         };
+        let draft = self.draft();
         self.flows
             .iter()
             .zip(self.rows())
             .map(|(f, mut row)| {
                 row[2] = labels(&f.src);
                 row[4] = labels(&f.dst);
+                if draft {
+                    row[8] = f
+                        .draft_policy_decision
+                        .as_ref()
+                        .map(|d| d.as_str().to_string())
+                        .unwrap_or_default();
+                }
                 row
             })
             .collect()
@@ -592,12 +633,46 @@ pub const CONNS_BY_DECISION: [&str; 4] = [
     "unknown_conns",
 ];
 
+/// The `--csv` columns `--draft` adds to pairs and sections (flow records).
+pub const DRAFT_COUNTS: [&str; 2] = ["draft_allowed", "draft_blocked"];
+
+/// `DRAFT_COUNTS`' cells: the counts, `0` for a row without draft data.
+pub fn draft_cells(d: Option<&DraftCounts>) -> [String; 2] {
+    let d = d.copied().unwrap_or_default();
+    [d.draft_allowed.to_string(), d.draft_blocked.to_string()]
+}
+
+fn groups_draft(groups: &[FlowGroup]) -> bool {
+    groups.iter().any(|g| g.draft.is_some())
+}
+
+fn group_cells(groups: &[FlowGroup]) -> Vec<Vec<String>> {
+    let any = groups.iter().any(|g| g.bytes > 0);
+    groups
+        .iter()
+        .map(|g| {
+            vec![
+                g.src.join("/"),
+                g.dst.join("/"),
+                g.flows.to_string(),
+                g.connections.to_string(),
+                bytes_cell(g.bytes, any),
+                g.allowed.to_string(),
+                g.potentially_blocked.to_string(),
+                g.blocked.to_string(),
+            ]
+        })
+        .collect()
+}
+
 impl TableRows for Vec<FlowGroup> {
     fn units(&self) -> Option<&'static str> {
         Some(UNITS_GROUPS)
     }
+    /// With draft decisions, a `draft` column: `2 would allow · 1 would
+    /// block` (flow records).
     fn headers(&self) -> Vec<&'static str> {
-        vec![
+        let mut h = vec![
             "src",
             "dst",
             "flows",
@@ -606,39 +681,47 @@ impl TableRows for Vec<FlowGroup> {
             "allowed",
             "pot.blocked",
             "blocked",
-        ]
+        ];
+        if groups_draft(self) {
+            h.push("draft");
+        }
+        h
     }
     fn rows(&self) -> Vec<Vec<String>> {
-        let any = self.iter().any(|g| g.bytes > 0);
+        let draft = groups_draft(self);
         self.iter()
-            .map(|g| {
-                vec![
-                    g.src.join("/"),
-                    g.dst.join("/"),
-                    g.flows.to_string(),
-                    g.connections.to_string(),
-                    bytes_cell(g.bytes, any),
-                    g.allowed.to_string(),
-                    g.potentially_blocked.to_string(),
-                    g.blocked.to_string(),
-                ]
+            .zip(group_cells(self))
+            .map(|(g, mut row)| {
+                if draft {
+                    row.push(DraftCounts::text(g.draft.as_ref()));
+                }
+                row
             })
             .collect()
     }
-    /// The table's, then the connections per decision.
+    /// The table's counts, then the connections per decision, then with
+    /// draft decisions `draft_allowed` and `draft_blocked`.
     fn full_headers(&self) -> Vec<&'static str> {
         let mut h = self.headers();
+        h.retain(|c| *c != "draft");
         h.extend(CONNS_BY_DECISION);
+        if groups_draft(self) {
+            h.extend(DRAFT_COUNTS);
+        }
         h
     }
     /// `bytes` always a number (0 when no flow carried any), then the
-    /// connections per decision.
+    /// connections per decision and the draft counts.
     fn full_rows(&self) -> Vec<Vec<String>> {
+        let draft = groups_draft(self);
         self.iter()
-            .zip(self.rows())
+            .zip(group_cells(self))
             .map(|(g, mut row)| {
                 row[4] = g.bytes.to_string();
                 row.extend(g.conns.cells());
+                if draft {
+                    row.extend(draft_cells(g.draft.as_ref()));
+                }
                 row
             })
             .collect()
@@ -756,8 +839,9 @@ impl TableRows for Sections {
     fn units(&self) -> Option<&'static str> {
         Some(UNITS_GROUPS)
     }
+    /// With draft decisions, a `draft` column (`DraftCounts::text`).
     fn headers(&self) -> Vec<&'static str> {
-        vec![
+        let mut h = vec![
             "app / peer",
             "peer hosts",
             "app hosts",
@@ -767,11 +851,16 @@ impl TableRows for Sections {
             "bytes",
             "last seen",
             "decision",
-        ]
+        ];
+        if self.draft() {
+            h.push("draft");
+        }
+        h
     }
     /// A header row is one cell: `render_table` prints it whole in the
     /// first column with the other cells empty.
     fn rows(&self) -> Vec<Vec<String>> {
+        let draft = self.draft();
         let any = self
             .sections
             .iter()
@@ -805,6 +894,9 @@ impl TableRows for Sections {
                         r.last_detected.clone().unwrap_or_default(),
                         r.dominant().as_str().to_string(),
                     ]);
+                    if draft && let Some(row) = out.last_mut() {
+                        row.push(DraftCounts::text(r.draft.as_ref()));
+                    }
                 }
             }
         }
@@ -813,14 +905,52 @@ impl TableRows for Sections {
     /// One row per peer, no header rows: the app and the direction are
     /// columns, the host names lists beside their counts.
     fn full_headers(&self) -> Vec<&'static str> {
-        SECTION_CSV_HEADERS.to_vec()
+        section_csv_headers(self.draft())
     }
     fn full_rows(&self) -> Vec<Vec<String>> {
+        let draft = self.draft();
         self.sections
             .iter()
-            .flat_map(|s| s.rows.iter().map(|r| peer_csv_row(&s.app, s.direction, r)))
+            .flat_map(|s| {
+                s.rows
+                    .iter()
+                    .map(move |r| section_csv_row(&s.app, s.direction, r, draft))
+            })
             .collect()
     }
+}
+
+impl Sections {
+    /// Some row carries draft counts (`--draft`).
+    fn draft(&self) -> bool {
+        self.sections
+            .iter()
+            .flat_map(|s| &s.rows)
+            .any(|r| r.draft.is_some())
+    }
+}
+
+/// `SECTION_CSV_HEADERS`, then with `draft` the `DRAFT_COUNTS`.
+pub fn section_csv_headers(draft: bool) -> Vec<&'static str> {
+    let mut h = SECTION_CSV_HEADERS.to_vec();
+    if draft {
+        h.extend(DRAFT_COUNTS);
+    }
+    h
+}
+
+/// `peer_csv_row`, then with `draft` the row's draft counts.
+pub fn section_csv_row(
+    app: &[String],
+    direction: Direction,
+    r: &pce::traffic::PeerRow,
+    draft: bool,
+) -> Vec<String> {
+    let mut row = peer_csv_row(app, direction, r);
+    if draft {
+        row.extend(draft_cells(r.draft.as_ref()));
+    }
+    row
 }
 
 /// The CSV columns of app sections, one row per peer (`--csv` and the
@@ -940,6 +1070,8 @@ pub(crate) struct Fetched {
     pub(crate) cap_steps: Option<Vec<u32>>,
     /// `--app`: the Explorer queries the result took.
     pub(crate) queries: Option<u32>,
+    /// `--draft`: what the draft decisions change.
+    pub(crate) draft: Option<DraftSummary>,
 }
 
 impl Fetched {
@@ -952,6 +1084,7 @@ impl Fetched {
         m.cap_steps = self.cap_steps.clone();
         m.incomplete = Some(self.incomplete);
         m.queries = self.queries;
+        m.draft = self.draft;
         m
     }
 }
@@ -960,19 +1093,22 @@ impl Fetched {
 /// cap (`backfill_cap`: 10000, then 25000 to 200000), each answer replacing
 /// the last, until one is complete or the next cap needs `--yes`. Explorer
 /// cannot page a result, so this is the only way to the rest of it.
+/// Returns the query of the result kept, and its async query href.
 async fn backfill(
     ctx: &Context,
     args: &FilterArgs,
     q: &TrafficQuery,
+    href: String,
     idx: &NameIndex,
     f: &mut Fetched,
-) -> Result<(), CliError> {
+) -> Result<(TrafficQuery, String), CliError> {
     let ceiling = if args.yes {
         MAX_TRAFFIC_MAX_RESULTS
     } else {
         CONFIRM_MAX_RESULTS
     };
     let mut q = q.clone();
+    let mut href = href;
     let mut steps = vec![q.max_results];
     while f.truncated {
         let Some(next) = backfill_cap(q.max_results) else {
@@ -995,6 +1131,7 @@ async fn backfill(
             .traffic(&q, ctx.cache_mode, &CancellationToken::new(), None)
             .await?;
         steps.push(next);
+        href = r.value.query_href.clone();
         f.flows = resolve_flows(&r.value.flows, idx);
         f.cache = cache_label(r.hit, ctx.cache_mode);
         f.truncated = r.truncated;
@@ -1002,7 +1139,7 @@ async fn backfill(
         f.cap = next;
     }
     f.cap_steps = Some(steps);
-    Ok(())
+    Ok((q, href))
 }
 
 /// Builds and runs the query (cost guard, cache, one name index): with a
@@ -1040,19 +1177,23 @@ pub(crate) async fn fetch(
             ctx.emit(&bodies, "none", false, window)?;
             return Ok(None);
         }
+        // `--draft`: each side run and then re-evaluated (no href known).
+        let none: &[String] = &[];
         let ft = ctx
             .pce
-            .focused_traffic(
+            .focused_traffic_eval(
                 "focus",
                 focus,
                 &q,
                 &idx,
+                args.draft.then_some(none),
                 ctx.cache_mode,
                 &CancellationToken::new(),
                 None,
             )
             .await?;
         return Ok(Some(Fetched {
+            draft: args.draft.then(|| DraftSummary::of(&ft.flows)),
             queries: Some(ft.query_count()),
             cache: cache_label(ft.hit, ctx.cache_mode),
             truncated: ft.truncated,
@@ -1065,17 +1206,23 @@ pub(crate) async fn fetch(
         }));
     }
     let cancel = CancellationToken::new();
+    // `--draft` in one go (POST, polls, PUT, polls, one download), except
+    // with `--backfill`: its caps run plain and only the result kept is
+    // re-evaluated, by its href.
+    let run = async {
+        if args.draft && !args.backfill {
+            ctx.pce
+                .traffic_draft(&q, None, ctx.cache_mode, &cancel, None)
+                .await
+        } else {
+            ctx.pce.traffic(&q, ctx.cache_mode, &cancel, None).await
+        }
+    };
     let (result, idx) = match index {
-        Some(idx) => (
-            ctx.pce.traffic(&q, ctx.cache_mode, &cancel, None).await?,
-            idx,
-        ),
+        Some(idx) => (run.await?, idx),
         // The first error stops the other: a failed name index drops the
         // traffic query's polls and download.
-        None => tokio::try_join!(
-            ctx.pce.traffic(&q, ctx.cache_mode, &cancel, None),
-            ctx.pce.name_index(ctx.cache_mode)
-        )?,
+        None => tokio::try_join!(run, ctx.pce.name_index(ctx.cache_mode))?,
     };
     let mut f = Fetched {
         flows: resolve_flows(&result.value.flows, &idx),
@@ -1087,9 +1234,23 @@ pub(crate) async fn fetch(
         cap: q.max_results,
         cap_steps: None,
         queries: None,
+        draft: None,
     };
     if args.backfill {
-        backfill(ctx, args, &q, &idx, &mut f).await?;
+        let (last, href) =
+            backfill(ctx, args, &q, result.value.query_href.clone(), &idx, &mut f).await?;
+        if args.draft {
+            let r = ctx
+                .pce
+                .traffic_draft(&last, Some(&href), ctx.cache_mode, &cancel, None)
+                .await?;
+            f.flows = resolve_flows(&r.value.flows, &idx);
+            f.truncated = r.truncated;
+            f.incomplete = r.value.incomplete;
+        }
+    }
+    if args.draft {
+        f.draft = Some(DraftSummary::of(&f.flows));
     }
     Ok(Some(f))
 }

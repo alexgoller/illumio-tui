@@ -87,6 +87,7 @@ fn emit<T: Serialize + TableRows>(global: &GlobalArgs, data: &T) -> Result<(), C
         cap_steps: None,
         incomplete: None,
         queries: None,
+        draft: None,
         write: None,
         usage: None,
     };
