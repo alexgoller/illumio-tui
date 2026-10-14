@@ -10,7 +10,7 @@ expression: out
 ╭ Result ─────────────────────────────────────────────────── 30 flows · 3s ago ╮
 │30 flows allowed 1╭ Group by ──────────────────────────────╮██████████████████│
 ╰──────────────────│[x] app                                 │──────────────────╯
-╭ Flows ───────────│[x] env                                 │──────────────────╮
+╭ Flows · conns: li│[x] env                                 │──────────────────╮
 │  src            s│[ ] role                                │e   conns decision│
 │▸ shop-web-p.exa s│[ ] datacenter      (seen in 11 flows)  │cp    420 allowed │
 │  shop-web-p.exa s│[ ] loc             (seen in 30 flows)  │cp    380 allowed │

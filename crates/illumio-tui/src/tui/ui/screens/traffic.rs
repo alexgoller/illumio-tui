@@ -185,11 +185,29 @@ fn render_flows(model: &Model, f: &mut Frame, area: Rect) {
         }
         None => TrafficView::Flows.title().to_string(),
     };
+    let title = unit_title(&title, &meta, area.width);
     let block = panel(&title, &meta, t, true);
     let theme = t.clone();
     crate::tui::ui::widgets::table::render(f, area, &model.traffic.flows, t, block, &move |fl| {
         theme.decision_style(fl.policy_decision)
     });
+}
+
+/// The count unit beside a traffic table's title, where it fits.
+pub const UNIT_HINT: &str = "conns: lifetime";
+
+/// `title · conns: lifetime` when the title, the hint and `meta` fit
+/// `width` (borders and padding included), else `title` alone: the unit
+/// never pushes the meta out.
+pub fn unit_title(title: &str, meta: &str, width: u16) -> String {
+    let w = |s: &str| Span::raw(s).width();
+    let with = format!("{title} · {UNIT_HINT}");
+    // Two corners, a space either side of each title, one gap between.
+    if w(&with) + w(meta) + 7 <= width as usize {
+        with
+    } else {
+        title.to_string()
+    }
 }
 
 /// The panel meta of App-to-app or Blocked: `in · blocked · keys app,env ·
@@ -222,7 +240,8 @@ fn render_sections(
     peer_style: &dyn Fn(&SectionRow) -> Style,
 ) {
     let t = &model.theme;
-    let block = panel(title, meta, t, true);
+    let title = unit_title(title, meta, area.width);
+    let block = panel(&title, meta, t, true);
     let accent = Style::new().fg(t.accent).add_modifier(Modifier::BOLD);
     crate::tui::ui::widgets::table::render_spanning(f, area, view, t, block, peer_style, &|r| {
         r.header_line().map(|l| (l, accent))
@@ -257,7 +276,8 @@ fn render_groups(model: &Model, f: &mut Frame, area: Rect) {
         "pairs"
     };
     let meta = view_meta(model, by, table);
-    let block = panel(TrafficView::Aggregate.title(), &meta, t, true);
+    let title = unit_title(TrafficView::Aggregate.title(), &meta, area.width);
+    let block = panel(&title, &meta, t, true);
     let theme = t.clone();
     crate::tui::ui::widgets::table::render(f, area, table, t, block, &move |g| {
         theme.decision_style(g.dominant())
@@ -274,7 +294,8 @@ fn render_mesh(model: &Model, f: &mut Frame, area: Rect) {
         if meta.is_empty() { "" } else { " · " },
         meta
     );
-    let block = panel(TrafficView::Mesh.title(), &meta, t, true);
+    let title = unit_title(TrafficView::Mesh.title(), &meta, area.width);
+    let block = panel(&title, &meta, t, true);
     let theme = t.clone();
     crate::tui::ui::widgets::table::render(f, area, &model.traffic.mesh, t, block, &move |r| {
         theme.decision_style(r.dominant())
@@ -542,6 +563,20 @@ mod tests {
 
     fn meta_text(spans: &[Span]) -> String {
         spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn the_unit_joins_the_title_only_where_it_fits() {
+        assert_eq!(unit_title("Flows", "", 80), "Flows · conns: lifetime");
+        let meta = "pairs · by service · keys app,env · Enter drills";
+        assert_eq!(unit_title("App-to-app", meta, 80), "App-to-app");
+        assert_eq!(
+            unit_title("App-to-app", meta, 120),
+            "App-to-app · conns: lifetime"
+        );
+        // Exactly full: 5 + 3 + 15 + 4 + 7 = 34.
+        assert_eq!(unit_title("Flows", "abcd", 34), "Flows · conns: lifetime");
+        assert_eq!(unit_title("Flows", "abcd", 33), "Flows");
     }
 
     #[test]

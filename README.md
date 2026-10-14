@@ -349,8 +349,9 @@ request (the labels are fetched, cached). `--backfill` does not combine with `--
 are the **lifetime** counts of those records, as the PCE UI shows them:
 Explorer returns every aggregate record whose lifetime overlaps the window, each with its whole
 lifetime's counters, not counts for the window alone. Tools that report connections per flow
-summary (workloader) therefore match `conns`, not `flows`. Every traffic table says so in the
-line above it; JSON and CSV carry the per-decision connections for pairs, `--services` and
+summary (workloader) therefore match `conns`, not `flows`. Every CLI traffic table says so in
+the line above it, and the TUI's traffic tables add `conns: lifetime` to their title where it
+fits; JSON and CSV carry the per-decision connections for pairs, `--services` and
 sections (sections: as the last four CSV columns).
 
 **Transmission.** `--transmission unicast|broadcast|multicast` (repeatable or comma-separated,

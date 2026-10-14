@@ -10,7 +10,7 @@ expression: out
 ╭ Result ──────────────────────────────────────────────────── 4 flows · 3s ago ╮
 │4 flows allowed 2 pot.blocked 1 blocked 1  ███████████████████████████████████│
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭ Flows ───────────────────────────────────────────────────────────────────────╮
+╭ Flows · conns: lifetime ─────────────────────────────────────────────────────╮
 │  src            src group  dst            dst group  service   conns decision│
 │▸ host-1.example shop/prod  host-2.example shop/prod  5432/tcp    310 allowed │
 │  10.1.4.9       -/-        host-1.example shop/prod  8443/tcp     12 pot.blk │
