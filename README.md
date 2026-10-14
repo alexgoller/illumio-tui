@@ -166,7 +166,9 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   result was truncated, the header says `focus is partial: r re-queries shop/prod` and `r`
   runs the query again with the app's labels on its side (two queries for `both`, merged
   without duplicates, through the same cost guard); `Esc` then puts the unfocused result back
-  without a request.
+  without a request. While that focused result is shown, `B` and `]` / `[` re-run the focused
+  query at the next or previous cap (one query per side, asking above 10000); `+` and `-` go
+  back to the unfocused result first.
   `A` (or `:app shop/prod`) opens the app overlay for the row's app, at the focus direction
   (`X` cycles it there too): its workloads with their enforcement modes and VEN health
   (`Workloads 14   enforced 9 · selective 2 · visibility 3 · unmanaged 1`, `VENs 13 active · 1 stale`;
@@ -283,7 +285,8 @@ the API call and byte counters at all times.
     illumio-tui profile use prod
 
 JSON output (default when piped) is `{"data": ..., "meta": {...}}` where
-`meta` reports API calls, bytes, cache status, truncation, and the query
+`meta` reports API calls, bytes (decompressed: downloads are gzip-compressed on the wire, so
+the transfer is smaller; the TUI header counts the same way), cache status, truncation, and the query
 window; traffic commands add `meta.covered`, the window's length when the result is complete
 (`"1d"`) and `null` when it is truncated (it covers an unknown part of the window),
 `meta.cap` (the cap the result was fetched at) and `meta.incomplete` (a supercluster region
