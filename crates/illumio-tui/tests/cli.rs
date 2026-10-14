@@ -3258,7 +3258,7 @@ fn draft_flows() -> String {
 async fn mount_traffic_draft(server: &MockServer, posts: u64, puts: u64) {
     Mock::given(method("GET"))
         .and(path(format!("/api/v2{QHREF}")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+        .respond_with(Ticking::new(json!({
             "status": "completed", "rules": "completed",
             "result": {"href": format!("{QHREF}/download")}, "flows_count": 4
         })))
@@ -3460,4 +3460,29 @@ async fn app_draft_re_evaluates_each_side_and_marks_the_peers() {
         peers.iter().all(|p| p["draft_allowed"].is_u64()),
         "{peers:?}"
     );
+}
+
+/// A status answer whose `updated_at` moves on every call, as the PCE's
+/// does while it works: a draft `completed` after the PUT is then new.
+struct Ticking {
+    body: serde_json::Value,
+    n: std::sync::atomic::AtomicU64,
+}
+
+impl Ticking {
+    fn new(body: serde_json::Value) -> Self {
+        Self {
+            body,
+            n: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+}
+
+impl wiremock::Respond for Ticking {
+    fn respond(&self, _: &wiremock::Request) -> ResponseTemplate {
+        let n = self.n.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let mut body = self.body.clone();
+        body["updated_at"] = json!(format!("2026-10-14T00:00:{:02}Z", n % 60));
+        ResponseTemplate::new(200).set_body_json(body)
+    }
 }

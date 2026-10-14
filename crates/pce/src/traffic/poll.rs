@@ -20,6 +20,10 @@ pub struct PollConfig {
     /// The result download's own timeout: a 200000-row result is hundreds
     /// of MB, far past the client's per-request timeout.
     pub download_timeout: Duration,
+    /// The longest each polling stage (the query, the draft re-evaluation)
+    /// waits before it gives up: a PCE that never finishes is not polled
+    /// forever. Cancelling still stops it at once.
+    pub max_wait: Duration,
 }
 
 impl Default for PollConfig {
@@ -32,6 +36,7 @@ impl Default for PollConfig {
             cap: Duration::from_secs(3),
             grace: Duration::from_secs(30),
             download_timeout: Duration::from_secs(300),
+            max_wait: Duration::from_secs(600),
         }
     }
 }
@@ -147,7 +152,7 @@ pub async fn evaluate_draft(
 ) -> Result<TrafficResult> {
     let started = Instant::now();
     let (result_href, done) = draft_stage(
-        client, query_href, query, false, poll, cancel, progress, started,
+        client, query_href, query, None, poll, cancel, progress, started,
     )
     .await?;
     finish(
@@ -195,7 +200,7 @@ async fn run(
             client,
             &query_href,
             query,
-            true,
+            Some(done),
             poll,
             cancel,
             progress,
@@ -229,6 +234,27 @@ async fn status(
     }
 }
 
+/// `10 min`, or `45s` below a minute.
+fn wait_text(d: Duration) -> String {
+    let s = d.as_secs();
+    if s >= 60 && s.is_multiple_of(60) {
+        format!("{} min", s / 60)
+    } else {
+        format!("{s}s")
+    }
+}
+
+/// `what` timed out once `since` is past `poll.max_wait`.
+fn check_wait(since: Instant, poll: &PollConfig, what: &str) -> Result<()> {
+    if since.elapsed() > poll.max_wait {
+        return Err(PceError::QueryFailed(format!(
+            "{what} timed out after {}",
+            wait_text(poll.max_wait)
+        )));
+    }
+    Ok(())
+}
+
 async fn pause(delay: &mut Duration, poll: &PollConfig, cancel: &CancellationToken) -> Result<()> {
     tokio::select! {
         () = cancel.cancelled() => return Err(PceError::Cancelled),
@@ -250,7 +276,9 @@ async fn wait_completed(
 ) -> Result<(String, AsyncQueryStatus)> {
     let mut delay = poll.initial;
     let mut completed_at: Option<Instant> = None;
+    let waiting = Instant::now();
     loop {
+        check_wait(waiting, poll, "the query")?;
         pause(&mut delay, poll, cancel).await?;
         let status = status(client, query_href, cancel).await?;
         let state = status.status.clone().unwrap_or_else(|| "unknown".into());
@@ -286,21 +314,33 @@ async fn wait_completed(
 }
 
 /// The `update_rules` PUT on a completed query, then polls with backoff
-/// until both the query and its `rules` are completed. `fresh`: the query
-/// was just submitted, so a 404 means the PCE does not offer
-/// `update_rules` rather than that the query is gone. A PCE that answers
-/// the PUT but never reports `rules` fails after `poll.grace`.
+/// until both the query and its `rules` are completed.
+///
+/// `before` is the query's status just before the PUT: the one that
+/// completed a fresh run, or (`None`, a query run earlier) one status GET
+/// made here, which also finds a dropped query before the PUT. After a
+/// repeat PUT the first polls can still show the previous evaluation's
+/// `completed`, so `completed` counts only once the evaluation is new: the
+/// query was not evaluated before, a state other than completed was seen
+/// since the PUT, or `updated_at` moved; a PCE that shows none of these is
+/// believed after `poll.grace`.
+///
+/// A fresh run's 404 means the PCE does not offer `update_rules` rather
+/// than that the query is gone. A PCE that answers the PUT but never
+/// reports `rules` fails after `poll.grace`; the stage gives up after
+/// `poll.max_wait`.
 #[allow(clippy::too_many_arguments)]
 async fn draft_stage(
     client: &PceClient,
     query_href: &str,
     query: &TrafficQuery,
-    fresh: bool,
+    before: Option<AsyncQueryStatus>,
     poll: &PollConfig,
     cancel: &CancellationToken,
     progress: Option<&UnboundedSender<QueryProgress>>,
     started: Instant,
 ) -> Result<(String, AsyncQueryStatus)> {
+    let fresh = before.is_some();
     let refused = |e: PceError| match e {
         PceError::NotFound { .. } if !fresh => e,
         PceError::Cancelled | PceError::Invalid(_) => e,
@@ -308,6 +348,11 @@ async fn draft_stage(
             "the PCE refused the draft re-evaluation (update_rules): {e}"
         )),
     };
+    let before = match before {
+        Some(b) => b,
+        None => status(client, query_href, cancel).await?,
+    };
+    let was_evaluated = before.rules_state() == Some("completed");
     report(
         progress,
         QueryProgress::Evaluating {
@@ -321,7 +366,9 @@ async fn draft_stage(
     }
     let asked = Instant::now();
     let mut delay = poll.initial;
+    let mut seen_unfinished = false;
     loop {
+        check_wait(asked, poll, "the draft re-evaluation")?;
         pause(&mut delay, poll, cancel).await?;
         let status = status(client, query_href, cancel).await?;
         let rules = status.rules_state().map(str::to_string);
@@ -338,9 +385,17 @@ async fn draft_stage(
                 status.message.unwrap_or_else(|| "no message".into())
             )));
         }
-        let completed = matches!(status.status.as_deref(), Some("completed" | "done"));
+        let completed = matches!(status.status.as_deref(), Some("completed" | "done"))
+            && rules.as_deref() == Some("completed");
+        if !completed {
+            seen_unfinished = true;
+        }
+        let new = !was_evaluated
+            || seen_unfinished
+            || (status.updated_at.is_some() && status.updated_at != before.updated_at)
+            || asked.elapsed() > poll.grace;
         match (&rules, &status.result) {
-            (Some(r), Some(res)) if r == "completed" && completed => {
+            (Some(_), Some(res)) if completed && new => {
                 return Ok((res.href().to_string(), status));
             }
             (None, _) if asked.elapsed() > poll.grace => {
@@ -414,6 +469,13 @@ mod tests {
         truncated: true,
         incomplete: false,
     };
+
+    #[test]
+    fn each_polling_stage_gives_up_after_10_minutes() {
+        assert_eq!(PollConfig::default().max_wait, Duration::from_secs(600));
+        assert_eq!(wait_text(Duration::from_secs(600)), "10 min");
+        assert_eq!(wait_text(Duration::from_millis(30)), "0s");
+    }
 
     #[test]
     fn polls_cap_at_3s_and_the_download_gets_300s() {

@@ -362,6 +362,10 @@ pub struct AsyncQueryStatus {
     /// A supercluster's per-region counts; each region is capped on its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub regions: Option<Vec<QueryRegion>>,
+    /// When the PCE last changed the query: a new `update_rules` run moves
+    /// it, which tells a fresh `completed` from the previous one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
     /// The draft re-evaluation's state after `update_rules` (`queued`,
     /// `working`, `completed`, `failed`); absent before. Kept as a value: an
     /// unexpected shape must not fail the poll.

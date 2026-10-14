@@ -538,11 +538,12 @@ async fn re_evaluating_a_known_query_sends_no_post() {
     assert_eq!(
         sequence(&server).await,
         vec![
+            format!("GET {QHREF}"),
             format!("PUT {QHREF}/update_rules"),
             format!("GET {QHREF}"),
-            format!("GET {QHREF}"),
             format!("GET {QHREF}/download"),
-        ]
+        ],
+        "the status before the PUT, then polls until the rules complete"
     );
 }
 
@@ -660,5 +661,93 @@ async fn failed_rules_are_an_error_and_cancel_stops_the_draft_polls() {
     };
     let r = evaluate_draft(&c, QHREF, &query(10), &cfg, &cancel, None).await;
     assert!(matches!(r, Err(PceError::Cancelled)), "{r:?}");
-    assert_eq!(c.stats().calls, 1, "the PUT, no poll after the cancel");
+    assert_eq!(
+        c.stats().calls,
+        2,
+        "the status before the PUT and the PUT, no poll after the cancel"
+    );
+}
+
+/// A repeat PUT: the first poll after it still shows the previous
+/// evaluation's `completed` (same `updated_at`); only the next one, whose
+/// `updated_at` moved, counts.
+#[tokio::test]
+async fn a_repeat_put_waits_past_the_old_completed_state() {
+    use pce::traffic::evaluate_draft;
+    let server = MockServer::start().await;
+    let at = |t: &str| completed(json!({"rules": "completed", "updated_at": t}));
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(at("2026-10-14T10:00:00Z")))
+        .up_to_n_times(2) // before the PUT, and the first poll after it
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(at("2026-10-14T10:05:00Z")))
+        .mount(&server)
+        .await;
+    mount_put(&server, "10", 202).await;
+    mount_draft_download(&server).await;
+    let c = client_for(&server);
+    let cfg = PollConfig {
+        grace: Duration::from_secs(30),
+        ..fast()
+    };
+    evaluate_draft(&c, QHREF, &query(10), &cfg, &CancellationToken::new(), None)
+        .await
+        .unwrap();
+    assert_eq!(
+        sequence(&server).await,
+        vec![
+            format!("GET {QHREF}"),
+            format!("PUT {QHREF}/update_rules"),
+            format!("GET {QHREF}"),
+            format!("GET {QHREF}"),
+            format!("GET {QHREF}/download"),
+        ],
+        "the stale completed is polled past"
+    );
+}
+
+#[tokio::test]
+async fn both_polling_stages_give_up_after_max_wait() {
+    use pce::traffic::evaluate_draft;
+    let cfg = PollConfig {
+        max_wait: Duration::from_millis(40),
+        ..fast()
+    };
+    let server = MockServer::start().await;
+    mount_submit(&server).await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "working"})))
+        .mount(&server)
+        .await;
+    let c = client_for(&server);
+    let e = run_traffic_query(&c, &query(10), &cfg, &CancellationToken::new(), None)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&e, PceError::QueryFailed(m) if m.starts_with("the query timed out after")),
+        "{e}"
+    );
+
+    let server = MockServer::start().await;
+    mount_put(&server, "10", 202).await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}")))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(completed(json!({"rules": "working"}))),
+        )
+        .mount(&server)
+        .await;
+    let c = client_for(&server);
+    let e = evaluate_draft(&c, QHREF, &query(10), &cfg, &CancellationToken::new(), None)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&e, PceError::QueryFailed(m) if m.starts_with("the draft re-evaluation timed out after")),
+        "{e}"
+    );
 }

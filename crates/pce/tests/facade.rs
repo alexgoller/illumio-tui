@@ -880,7 +880,7 @@ async fn mount_rules_completed(server: &MockServer, name: &str) {
     let href = format!("/orgs/5/traffic_flows/async_queries/{name}");
     Mock::given(method("GET"))
         .and(path(format!("/api/v2{href}")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+        .respond_with(Ticking::new(json!({
             "status": "completed", "rules": "completed",
             "result": format!("{href}/download")
         })))
@@ -924,11 +924,12 @@ async fn the_draft_result_has_its_own_cache_slot_tied_to_its_query() {
     assert_eq!(
         seen(&server).await[before..],
         [
+            format!("GET {href}"),
             format!("PUT {href}/update_rules"),
             format!("GET {href}"),
             format!("GET {href}/download"),
         ],
-        "no POST: the known query is re-evaluated"
+        "no POST: the known query's status, then it is re-evaluated"
     );
     let calls = p.stats().calls;
     let again = p
@@ -948,7 +949,7 @@ async fn the_draft_result_has_its_own_cache_slot_tied_to_its_query() {
     let other = "/orgs/5/traffic_flows/async_queries/q-gone";
     Mock::given(method("GET"))
         .and(path(format!("/api/v2{other}")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+        .respond_with(Ticking::new(json!({
             "status": "completed", "rules": "completed",
             "result": format!("{other}/download")
         })))
@@ -1037,4 +1038,29 @@ async fn a_focused_draft_re_evaluates_each_side_without_a_post() {
     let sent = &after[before..];
     assert_eq!(sent.iter().filter(|s| s.starts_with("PUT")).count(), 2);
     assert!(!sent.iter().any(|s| s.starts_with("POST")), "{sent:?}");
+}
+
+/// A status answer whose `updated_at` moves on every call, as the PCE's
+/// does while it works: a draft `completed` after the PUT is then new.
+struct Ticking {
+    body: serde_json::Value,
+    n: std::sync::atomic::AtomicU64,
+}
+
+impl Ticking {
+    fn new(body: serde_json::Value) -> Self {
+        Self {
+            body,
+            n: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+}
+
+impl wiremock::Respond for Ticking {
+    fn respond(&self, _: &wiremock::Request) -> ResponseTemplate {
+        let n = self.n.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let mut body = self.body.clone();
+        body["updated_at"] = json!(format!("2026-10-14T00:00:{:02}Z", n % 60));
+        ResponseTemplate::new(200).set_body_json(body)
+    }
 }
