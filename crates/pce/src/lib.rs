@@ -153,13 +153,14 @@ impl Pce {
 
     /// The labels with the PCE's own `usage` flags (`usage=true`): what
     /// holds each label, workloads and rules as much as pairing profiles,
-    /// permissions or enforcement boundaries. One request, cached apart
-    /// from `labels` (the PCE works harder for it); an older PCE that
-    /// ignores the parameter returns labels without `usage`.
+    /// permissions or enforcement boundaries. One request, cached under
+    /// `usage:`, which every write drops (a workload or rule write changes
+    /// what holds a label); an older PCE that ignores the parameter returns
+    /// labels without `usage`.
     pub async fn labels_with_usage(&self, mode: CacheMode) -> Result<Cached<Vec<models::Label>>> {
         let path = self.client.org_path("labels");
         self.cached_list(
-            "objects:labels",
+            "usage:labels",
             &path,
             vec![("usage", "true".into())],
             self.ttls.objects,

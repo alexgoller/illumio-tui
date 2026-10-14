@@ -60,15 +60,18 @@ pub enum ObjectKind {
 }
 
 impl ObjectKind {
+    /// The cache prefixes a write of this kind drops. Every kind drops
+    /// `usage:` (the PCE's label usage flags): a workload, rule or group
+    /// write changes what holds a label.
     pub fn cache_prefixes(self) -> &'static [&'static str] {
         match self {
             ObjectKind::Label
             | ObjectKind::LabelGroup
             | ObjectKind::IpList
-            | ObjectKind::Service => &["objects:"],
-            ObjectKind::Workload => &["workloads"],
-            ObjectKind::RuleSet | ObjectKind::Rule | ObjectKind::DenyRule => &["policy:"],
-            ObjectKind::Provision | ObjectKind::Revert => &["policy:", "objects:"],
+            | ObjectKind::Service => &["objects:", "usage:"],
+            ObjectKind::Workload => &["workloads", "usage:"],
+            ObjectKind::RuleSet | ObjectKind::Rule | ObjectKind::DenyRule => &["policy:", "usage:"],
+            ObjectKind::Provision | ObjectKind::Revert => &["policy:", "objects:", "usage:"],
         }
     }
 
@@ -554,20 +557,41 @@ mod tests {
 
     #[test]
     fn object_kind_prefixes_and_pending() {
-        assert_eq!(ObjectKind::Label.cache_prefixes(), &["objects:"]);
-        assert_eq!(ObjectKind::IpList.cache_prefixes(), &["objects:"]);
-        assert_eq!(ObjectKind::Workload.cache_prefixes(), &["workloads"]);
-        assert_eq!(ObjectKind::RuleSet.cache_prefixes(), &["policy:"]);
-        assert_eq!(ObjectKind::Rule.cache_prefixes(), &["policy:"]);
-        assert_eq!(ObjectKind::DenyRule.cache_prefixes(), &["policy:"]);
+        assert_eq!(ObjectKind::Label.cache_prefixes(), &["objects:", "usage:"]);
+        assert_eq!(ObjectKind::IpList.cache_prefixes(), &["objects:", "usage:"]);
+        assert_eq!(
+            ObjectKind::Workload.cache_prefixes(),
+            &["workloads", "usage:"]
+        );
+        assert_eq!(ObjectKind::RuleSet.cache_prefixes(), &["policy:", "usage:"]);
+        assert_eq!(ObjectKind::Rule.cache_prefixes(), &["policy:", "usage:"]);
+        assert_eq!(
+            ObjectKind::DenyRule.cache_prefixes(),
+            &["policy:", "usage:"]
+        );
         assert_eq!(
             ObjectKind::Provision.cache_prefixes(),
-            &["policy:", "objects:"]
+            &["policy:", "objects:", "usage:"]
         );
         assert_eq!(
             ObjectKind::Revert.cache_prefixes(),
-            &["policy:", "objects:"]
+            &["policy:", "objects:", "usage:"]
         );
+        // Label usage goes stale with any write: every kind drops it.
+        for k in [
+            ObjectKind::Label,
+            ObjectKind::LabelGroup,
+            ObjectKind::IpList,
+            ObjectKind::Service,
+            ObjectKind::Workload,
+            ObjectKind::RuleSet,
+            ObjectKind::Rule,
+            ObjectKind::DenyRule,
+            ObjectKind::Provision,
+            ObjectKind::Revert,
+        ] {
+            assert!(k.cache_prefixes().contains(&"usage:"), "{k:?}");
+        }
         assert!(ObjectKind::Revert.whole_policy() && ObjectKind::Provision.whole_policy());
         assert!(!ObjectKind::RuleSet.whole_policy());
         for k in [
