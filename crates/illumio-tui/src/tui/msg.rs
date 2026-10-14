@@ -26,6 +26,9 @@ pub struct QueryOutcome {
     pub filter: TrafficFilter,
     /// The `(start, end)` the query asked for; `None` if unparseable.
     pub bounds: Option<(jiff::Timestamp, jiff::Timestamp)>,
+    /// The async query hrefs behind the flows (one per query, `in` first
+    /// for a focused result): what `D` re-evaluates without a new POST.
+    pub hrefs: Vec<String>,
 }
 
 /// A focused re-query's answer: the merged flows (as one query's outcome),

@@ -280,6 +280,7 @@ fn traffic_truncated_header_80x24() {
                 hit: false,
                 filter,
                 bounds: Some((start, end)),
+                hrefs: Vec::new(),
             }),
         },
     );

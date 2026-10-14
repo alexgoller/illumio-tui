@@ -73,6 +73,46 @@ impl ConnsByDecision {
     }
 }
 
+/// What the draft policy would change in a group: flow records blocked or
+/// potentially blocked now that the draft allows (`draft_allowed`, "would
+/// allow"), and allowed ones it would block (`draft_blocked`). Present only
+/// when a flow of the group carries a draft decision; flattened into JSON.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct DraftCounts {
+    pub draft_allowed: u64,
+    pub draft_blocked: u64,
+}
+
+impl DraftCounts {
+    /// Counts `f` into `counts` when it carries a draft decision.
+    pub fn add(counts: &mut Option<DraftCounts>, f: &ResolvedFlow) {
+        if f.draft_policy_decision.is_some() {
+            let c = counts.get_or_insert_with(DraftCounts::default);
+            c.draft_allowed += u64::from(f.fixed_by_draft());
+            c.draft_blocked += u64::from(f.blocked_by_draft());
+        }
+    }
+
+    /// `+3 would allow · 1 would block`, or `-` with nothing to report.
+    pub fn text(counts: Option<&DraftCounts>) -> String {
+        let Some(c) = counts else {
+            return String::new();
+        };
+        let mut parts = Vec::new();
+        if c.draft_allowed > 0 {
+            parts.push(format!("{} would allow", c.draft_allowed));
+        }
+        if c.draft_blocked > 0 {
+            parts.push(format!("{} would block", c.draft_blocked));
+        }
+        if parts.is_empty() {
+            "-".into()
+        } else {
+            parts.join(" · ")
+        }
+    }
+}
+
 /// `keys`, or `app,env` when empty.
 pub fn keys_or_default(keys: &[String]) -> Vec<String> {
     if keys.is_empty() {
@@ -168,6 +208,9 @@ pub struct FlowGroup {
     /// Connections per decision.
     #[serde(flatten)]
     pub conns: ConnsByDecision,
+    /// What the draft policy would change, with draft decisions loaded.
+    #[serde(flatten)]
+    pub draft: Option<DraftCounts>,
 }
 
 impl FlowGroup {
@@ -231,8 +274,10 @@ fn group<'a>(
             potentially_blocked: 0,
             blocked: 0,
             conns: ConnsByDecision::default(),
+            draft: None,
         });
         g.flows += 1;
+        DraftCounts::add(&mut g.draft, f);
         g.connections += f.num_connections;
         g.bytes += f.bytes();
         tally(
@@ -259,6 +304,42 @@ mod tests {
 
     fn keys(k: &[&str]) -> Vec<String> {
         k.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn pairs_count_what_the_draft_would_allow_and_block() {
+        use crate::traffic::resolved::tests::rich_flows_draft;
+        let k = keys(&["app", "env"]);
+        assert!(
+            group_by_labels(&rich_flows(), &k)
+                .iter()
+                .all(|g| g.draft.is_none())
+        );
+        let f = rich_flows_draft();
+        for groups in [group_by_labels(&f, &k), group_by_service(&f, &k)] {
+            let total = |pick: fn(&DraftCounts) -> u64| -> u64 {
+                groups
+                    .iter()
+                    .map(|g| g.draft.as_ref().map_or(0, pick))
+                    .sum()
+            };
+            assert_eq!(
+                total(|d| d.draft_allowed),
+                f.iter().filter(|f| f.fixed_by_draft()).count() as u64
+            );
+            assert_eq!(
+                total(|d| d.draft_blocked),
+                f.iter().filter(|f| f.blocked_by_draft()).count() as u64
+            );
+            assert!(groups.iter().all(|g| g.draft.is_some()));
+        }
+        let c = DraftCounts {
+            draft_allowed: 2,
+            draft_blocked: 1,
+        };
+        assert_eq!(DraftCounts::text(Some(&c)), "2 would allow · 1 would block");
+        assert_eq!(DraftCounts::text(Some(&DraftCounts::default())), "-");
+        assert_eq!(DraftCounts::text(None), "");
     }
 
     #[test]

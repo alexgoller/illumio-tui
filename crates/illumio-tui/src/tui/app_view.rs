@@ -274,6 +274,8 @@ mod tests {
             fetched_at: std::time::Instant::now(),
             filter: m.traffic.filter.clone(),
             range: None,
+            hrefs: Vec::new(),
+            draft: None,
         };
         m.traffic.apply_focused(f.clone(), 2, data);
         assert!(!m.traffic.partial_for(&f), "a focused result covers it");

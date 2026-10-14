@@ -2,7 +2,9 @@
 //! `g` keys), inbound or outbound, one row per peer group and service.
 //! App-to-app's `in` / `out` / `both` states, the Blocked view and the CLI's
 //! `traffic groups --by` all read these. Pure; no requests.
-use super::aggregate::{ConnsByDecision, Dominant, dominant, group_key, keys_or_default, tally};
+use super::aggregate::{
+    ConnsByDecision, Dominant, DraftCounts, dominant, group_key, keys_or_default, tally,
+};
 use super::resolved::{ResolvedFlow, service_text};
 use crate::models::PolicyDecision;
 use serde::Serialize;
@@ -48,10 +50,14 @@ pub enum Decisions {
     Blocked,
     /// Blocked only.
     BlockedOnly,
+    /// Blocked or potentially blocked now, allowed under the draft policy
+    /// (`ResolvedFlow::fixed_by_draft`): only with draft decisions loaded.
+    FixedByDraft,
 }
 
 impl Decisions {
-    pub fn keeps(self, d: PolicyDecision) -> bool {
+    pub fn keeps(self, f: &ResolvedFlow) -> bool {
+        let d = f.policy_decision;
         match self {
             Decisions::All => true,
             Decisions::Blocked => matches!(
@@ -59,6 +65,7 @@ impl Decisions {
                 PolicyDecision::Blocked | PolicyDecision::PotentiallyBlocked
             ),
             Decisions::BlockedOnly => d == PolicyDecision::Blocked,
+            Decisions::FixedByDraft => f.fixed_by_draft(),
         }
     }
 
@@ -68,21 +75,17 @@ impl Decisions {
         if self == Decisions::All {
             return Cow::Borrowed(flows);
         }
-        Cow::Owned(
-            flows
-                .iter()
-                .filter(|f| self.keeps(f.policy_decision))
-                .cloned()
-                .collect(),
-        )
+        Cow::Owned(flows.iter().filter(|f| self.keeps(f)).cloned().collect())
     }
 
-    /// `all` → `blocked` → `blocked only` → `all`.
-    pub fn next(self) -> Self {
+    /// `all` → `blocked` → `blocked only` → `all`; with `draft` decisions
+    /// loaded, `fixed by draft` after `blocked only`.
+    pub fn next(self, draft: bool) -> Self {
         match self {
             Decisions::All => Decisions::Blocked,
             Decisions::Blocked => Decisions::BlockedOnly,
-            Decisions::BlockedOnly => Decisions::All,
+            Decisions::BlockedOnly if draft => Decisions::FixedByDraft,
+            Decisions::BlockedOnly | Decisions::FixedByDraft => Decisions::All,
         }
     }
 
@@ -91,6 +94,7 @@ impl Decisions {
             Decisions::All => "all",
             Decisions::Blocked => "blocked",
             Decisions::BlockedOnly => "blocked only",
+            Decisions::FixedByDraft => "fixed by draft",
         }
     }
 }
@@ -106,6 +110,9 @@ pub struct Totals {
     pub allowed: u64,
     pub potentially_blocked: u64,
     pub blocked: u64,
+    /// What the draft policy would change, with draft decisions loaded.
+    #[serde(flatten)]
+    pub draft: Option<DraftCounts>,
 }
 
 impl Totals {
@@ -143,6 +150,11 @@ impl Totals {
         self.allowed += r.allowed;
         self.potentially_blocked += r.potentially_blocked;
         self.blocked += r.blocked;
+        if let Some(d) = &r.draft {
+            let t = self.draft.get_or_insert_with(DraftCounts::default);
+            t.draft_allowed += d.draft_allowed;
+            t.draft_blocked += d.draft_blocked;
+        }
     }
 }
 
@@ -169,6 +181,9 @@ pub struct PeerRow {
     /// Connections per decision.
     #[serde(flatten)]
     pub conns: ConnsByDecision,
+    /// What the draft policy would change, with draft decisions loaded.
+    #[serde(flatten)]
+    pub draft: Option<DraftCounts>,
     /// Distinct display names on the app's side, at most `PEER_NAMES`
     /// (what Blocked shows as `dst name`).
     pub app_names: Vec<String>,
@@ -264,7 +279,7 @@ pub fn in_app(
     direction: Option<Direction>,
     decisions: Decisions,
 ) -> bool {
-    decisions.keeps(f.policy_decision)
+    decisions.keeps(f)
         && match direction {
             Some(d) => sides(f, keys, d).0 == app,
             None => group_key(&f.src, keys) == app || group_key(&f.dst, keys) == app,
@@ -282,7 +297,7 @@ pub fn in_peer(
     service: &str,
     decisions: Decisions,
 ) -> bool {
-    if !decisions.keeps(f.policy_decision) || service_text(f.port, &f.proto) != service {
+    if !decisions.keeps(f) || service_text(f.port, &f.proto) != service {
         return false;
     }
     let (a, p) = sides(f, keys, direction);
@@ -314,7 +329,7 @@ pub fn app_sections(
     let keys = keys_or_default(keys);
     type RowKey = (Vec<String>, String);
     let mut apps: BTreeMap<Vec<String>, BTreeMap<RowKey, (PeerRow, Seen)>> = BTreeMap::new();
-    for f in flows.iter().filter(|f| decisions.keeps(f.policy_decision)) {
+    for f in flows.iter().filter(|f| decisions.keeps(f)) {
         let (app, peer) = sides(f, &keys, direction);
         let (peer_ep, app_ep) = match direction {
             Direction::In => (&f.src, &f.dst),
@@ -339,6 +354,7 @@ pub fn app_sections(
                         potentially_blocked: 0,
                         blocked: 0,
                         conns: ConnsByDecision::default(),
+                        draft: None,
                         app_names: Vec::new(),
                         app_hosts: 0,
                         last_detected: None,
@@ -356,6 +372,7 @@ pub fn app_sections(
             &mut row.blocked,
         );
         row.conns.add(f.policy_decision, f.num_connections);
+        DraftCounts::add(&mut row.draft, f);
         let peer_name = peer_ep.display_name();
         push_capped(&mut row.peer_names, &peer_name);
         seen.peer_names.insert(peer_name);
@@ -472,6 +489,7 @@ mod tests {
             allowed: r.iter().map(|r| r.allowed).sum(),
             potentially_blocked: r.iter().map(|r| r.potentially_blocked).sum(),
             blocked: r.iter().map(|r| r.blocked).sum(),
+            draft: None,
         }
     }
 
@@ -623,9 +641,51 @@ mod tests {
             only.iter()
                 .all(|s| s.totals.allowed == 0 && s.totals.potentially_blocked == 0)
         );
-        assert_eq!(Decisions::All.next(), Decisions::Blocked);
-        assert_eq!(Decisions::BlockedOnly.next(), Decisions::All);
+        assert_eq!(Decisions::All.next(false), Decisions::Blocked);
+        assert_eq!(Decisions::BlockedOnly.next(false), Decisions::All);
         assert_eq!(Decisions::BlockedOnly.label(), "blocked only");
+        assert_eq!(Decisions::BlockedOnly.next(true), Decisions::FixedByDraft);
+        assert_eq!(Decisions::FixedByDraft.next(true), Decisions::All);
+        assert_eq!(Decisions::FixedByDraft.next(false), Decisions::All);
+    }
+
+    #[test]
+    fn draft_counts_per_row_and_section_and_the_fixed_by_draft_filter() {
+        use crate::traffic::resolved::tests::rich_flows_draft;
+        let plain = rich_flows();
+        let s = app_sections(&plain, &app_env(), Direction::In, Decisions::All);
+        assert!(s.iter().all(|s| s.totals.draft.is_none()));
+        assert!(s.iter().flat_map(|s| &s.rows).all(|r| r.draft.is_none()));
+        let json = serde_json::to_value(&s[0].rows[0]).unwrap();
+        assert!(json.get("draft_allowed").is_none(), "absent without draft");
+
+        let f = rich_flows_draft();
+        let fixed = f.iter().filter(|f| f.fixed_by_draft()).count() as u64;
+        let newly = f.iter().filter(|f| f.blocked_by_draft()).count() as u64;
+        assert!(fixed > 0 && newly > 0);
+        let s = app_sections(&f, &app_env(), Direction::In, Decisions::All);
+        let sum = |pick: fn(&DraftCounts) -> u64| -> u64 {
+            s.iter()
+                .map(|s| s.totals.draft.as_ref().map_or(0, pick))
+                .sum()
+        };
+        assert_eq!(sum(|d| d.draft_allowed), fixed);
+        assert_eq!(sum(|d| d.draft_blocked), newly);
+        let row = s
+            .iter()
+            .flat_map(|s| &s.rows)
+            .find(|r| r.draft.is_some())
+            .unwrap();
+        let json = serde_json::to_value(row).unwrap();
+        assert!(json["draft_allowed"].is_u64() && json["draft_blocked"].is_u64());
+        let kept = app_sections(&f, &app_env(), Direction::In, Decisions::FixedByDraft);
+        let n: u64 = kept.iter().map(|s| s.totals.flows).sum();
+        assert_eq!(n, fixed);
+        assert_eq!(
+            Decisions::FixedByDraft.kept(&plain).len(),
+            0,
+            "nothing is fixed without draft decisions"
+        );
     }
 
     #[test]

@@ -347,6 +347,12 @@ pub struct TrafficData {
     /// The time range the query asked for (`-` moves its start); `None`
     /// when the outcome carried no bounds.
     pub range: Option<Range>,
+    /// The async query hrefs behind the flows (`in` first when focused):
+    /// `D` re-evaluates them against the draft policy without a new POST.
+    /// Empty when unknown.
+    pub hrefs: Vec<String>,
+    /// `D` loaded the draft decisions into `flows`: what they change.
+    pub draft: Option<pce::traffic::DraftSummary>,
 }
 
 impl TrafficData {
@@ -1057,7 +1063,8 @@ pub enum RowKind {
         direction: Direction,
         /// Draw `←` / `→` before the peer (`both`).
         arrow: bool,
-        row: PeerRow,
+        /// Boxed: a peer row is far larger than a header.
+        row: Box<PeerRow>,
     },
 }
 
@@ -1172,7 +1179,7 @@ pub fn section_rows(
                     kind: RowKind::Peer {
                         direction: s.direction,
                         arrow: arrows,
-                        row: r.clone(),
+                        row: Box::new(r.clone()),
                     },
                     haystack: Arc::from(""),
                 })
@@ -1608,12 +1615,12 @@ impl Drill {
     pub fn matches(&self, f: &ResolvedFlow, keys: &[String]) -> bool {
         match self {
             Drill::Pair(src, dst, decisions) => {
-                decisions.keeps(f.policy_decision)
+                decisions.keeps(f)
                     && &group_key(&f.src, keys) == src
                     && &group_key(&f.dst, keys) == dst
             }
             Drill::Service(src, dst, service, decisions) => {
-                decisions.keeps(f.policy_decision)
+                decisions.keeps(f)
                     && &group_key(&f.src, keys) == src
                     && &group_key(&f.dst, keys) == dst
                     && &f.service_text() == service
@@ -2361,6 +2368,11 @@ impl TrafficState {
             TrafficView::Blocked => self.blocked.is_searching(),
             TrafficView::Treemap => false,
         }
+    }
+
+    /// `D` loaded draft decisions into the result on screen.
+    pub fn draft_loaded(&self) -> bool {
+        self.data.as_ref().is_some_and(|d| d.draft.is_some())
     }
 
     pub fn is_running(&self) -> bool {
@@ -4914,6 +4926,8 @@ mod focus_tests {
             fetched_at: Instant::now(),
             filter: t.filter.clone(),
             range: None,
+            hrefs: Vec::new(),
+            draft: None,
         }
     }
 

@@ -1182,6 +1182,7 @@ mod tests {
             potentially_blocked: 0,
             blocked: 0,
             conns: Default::default(),
+            draft: None,
         }
     }
 

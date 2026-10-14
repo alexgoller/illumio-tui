@@ -258,6 +258,25 @@ pub(crate) mod tests {
         resolve_flows(&raw, &rich_index())
     }
 
+    /// `rich_flows` after a draft re-evaluation: every other blocked or
+    /// potentially blocked flow is allowed in draft, every seventh allowed
+    /// one (from the fourth) blocked, the rest keep their decision.
+    pub(crate) fn rich_flows_draft() -> Vec<ResolvedFlow> {
+        use crate::models::DraftDecision;
+        let mut f = rich_flows();
+        for (i, x) in f.iter_mut().enumerate() {
+            let d = x.policy_decision;
+            x.draft_policy_decision = Some(match d {
+                PolicyDecision::Blocked | PolicyDecision::PotentiallyBlocked if i % 2 == 0 => {
+                    DraftDecision::Allowed
+                }
+                PolicyDecision::Allowed if i % 7 == 3 => DraftDecision::Blocked,
+                d => DraftDecision::parse(d.as_str()),
+            });
+        }
+        f
+    }
+
     pub(crate) fn flows() -> Vec<ResolvedFlow> {
         let raw: Vec<Flow> =
             serde_json::from_str(include_str!("../../../../fixtures/traffic_flows.json")).unwrap();

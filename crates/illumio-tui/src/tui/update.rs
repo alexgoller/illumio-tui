@@ -885,6 +885,8 @@ fn outcome_data(o: QueryOutcome) -> TrafficData {
         fetched_at: Instant::now(),
         filter: o.filter,
         range: o.bounds.map(|(start, end)| Range { start, end }),
+        hrefs: Vec::new(),
+        draft: None,
     }
 }
 
@@ -1594,7 +1596,7 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         }
         KeyCode::Char('d') if model.traffic.view == TrafficView::Aggregate => {
             let t = &mut model.traffic;
-            t.apps_state.decisions = t.apps_state.decisions.next();
+            t.apps_state.decisions = t.apps_state.decisions.next(t.draft_loaded());
             t.rebuild_pairs();
             t.rebuild_sections();
             model.status = StatusLine::info(format!("decision {}", t.apps_state.decisions.label()));
@@ -4020,8 +4022,7 @@ fn service_pair_rule_key(model: &mut Model) -> Vec<Cmd> {
     }
     let keys = t.effective_keys();
     let decisions = t.apps_state.decisions;
-    let Some(flow) = t.first_flow(|f| decisions.keeps(f.policy_decision) && g.contains(f, &keys))
-    else {
+    let Some(flow) = t.first_flow(|f| decisions.keeps(f) && g.contains(f, &keys)) else {
         model.status = StatusLine::warn("no row selected");
         return Vec::new();
     };
@@ -5403,6 +5404,7 @@ mod tests {
             hit: false,
             filter: m.traffic.filter.clone(),
             bounds: None,
+            hrefs: Vec::new(),
         };
         let seq = m.traffic.seq;
         quiet(
@@ -5453,6 +5455,7 @@ mod tests {
             hit: false,
             filter: f,
             bounds: None,
+            hrefs: Vec::new(),
         };
         update(
             &mut m,
@@ -5726,6 +5729,7 @@ mod tests {
             hit: false,
             filter: f,
             bounds: None,
+            hrefs: Vec::new(),
         };
         update(
             &mut m,
@@ -6201,6 +6205,7 @@ mod tests {
             hit: false,
             filter: f.clone(),
             bounds: None,
+            hrefs: Vec::new(),
         };
         update(
             &mut m,
@@ -6299,6 +6304,7 @@ mod tests {
             hit: false,
             filter: f,
             bounds: None,
+            hrefs: Vec::new(),
         };
         update(
             &mut m,
@@ -8233,6 +8239,7 @@ mod tests {
                     hit: false,
                     filter,
                     bounds: None,
+                    hrefs: Vec::new(),
                 }),
             },
         );
@@ -11665,6 +11672,7 @@ mod window_step_tests {
                 hit: false,
                 filter: m.traffic.filter.clone(),
                 bounds: Some((ago(hours), end())),
+                hrefs: Vec::new(),
             }),
         }
     }
@@ -12188,6 +12196,7 @@ mod app_sections_tests {
                     hit: false,
                     filter,
                     bounds: None,
+                    hrefs: Vec::new(),
                 }),
             },
         );
@@ -12305,6 +12314,7 @@ mod backfill_tests {
                     hit: false,
                     filter,
                     bounds: Some((end().checked_sub(Span::new().hours(24)).unwrap(), end())),
+                    hrefs: Vec::new(),
                 }),
             },
         )
@@ -12483,6 +12493,7 @@ mod backfill_tests {
                     hit: false,
                     filter: TrafficFilter::defaults("1d", 10_000),
                     bounds: None,
+                    hrefs: Vec::new(),
                 }),
             },
         );
@@ -12512,6 +12523,7 @@ mod backfill_tests {
                     hit: false,
                     filter: f,
                     bounds: None,
+                    hrefs: Vec::new(),
                 }),
             },
         );
@@ -12922,6 +12934,8 @@ mod focus_tests {
             fetched_at: Instant::now(),
             filter: m.traffic.filter.clone(),
             range: None,
+            hrefs: Vec::new(),
+            draft: None,
         }
     }
 
@@ -12964,6 +12978,7 @@ mod focus_tests {
             hit: false,
             filter: m.traffic.filter.clone(),
             bounds: None,
+            hrefs: Vec::new(),
         };
         let seq = m.traffic.seq;
         quiet(
@@ -13069,6 +13084,7 @@ mod focus_tests {
             hit: false,
             filter: filter.clone(),
             bounds: None,
+            hrefs: Vec::new(),
         };
         let seq = m.traffic.seq;
         quiet(
@@ -13131,6 +13147,7 @@ mod focus_tests {
             hit: false,
             filter: m.traffic.filter.clone(),
             bounds: None,
+            hrefs: Vec::new(),
         };
         let focus = m.traffic.focus.clone().unwrap();
         quiet(
@@ -13236,6 +13253,7 @@ mod focus_tests {
             hit: false,
             filter: m.traffic.filter.clone(),
             bounds: None,
+            hrefs: Vec::new(),
         };
         let _ = update(
             &mut m,
@@ -13276,6 +13294,7 @@ mod focus_tests {
             hit: false,
             filter: m.traffic.filter.clone(),
             bounds: None,
+            hrefs: Vec::new(),
         };
         quiet(
             m,
@@ -13831,6 +13850,7 @@ mod app_tests {
                     hit: false,
                     filter,
                     bounds: None,
+                    hrefs: Vec::new(),
                 }),
             },
         );
@@ -13886,6 +13906,7 @@ mod app_tests {
                 hit: false,
                 filter: m.traffic.filter.clone(),
                 bounds: None,
+                hrefs: Vec::new(),
             }),
         }
     }

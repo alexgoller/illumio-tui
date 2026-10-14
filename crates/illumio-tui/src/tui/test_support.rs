@@ -133,6 +133,8 @@ pub fn model_with_flows() -> Model {
         fetched_at: Instant::now() - Duration::from_secs(3),
         filter: m.traffic.filter.clone(),
         range: None,
+        hrefs: Vec::new(),
+        draft: None,
     });
     m.traffic.query = QueryState::Idle;
     m.traffic.auto.last_run = Some(Instant::now() - Duration::from_secs(3));

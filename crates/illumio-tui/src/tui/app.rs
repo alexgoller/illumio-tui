@@ -180,6 +180,7 @@ impl Runtime {
                     hit: cached.hit,
                     filter,
                     bounds,
+                    hrefs: vec![cached.value.query_href.clone()],
                 })
             }
             .await
@@ -233,6 +234,7 @@ impl Runtime {
                         hit: ft.hit,
                         filter,
                         bounds,
+                        hrefs: ft.hrefs,
                     },
                     focus,
                     queries,
