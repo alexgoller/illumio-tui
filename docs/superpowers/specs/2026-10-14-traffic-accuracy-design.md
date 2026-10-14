@@ -48,18 +48,11 @@ What this means for us:
    - `truncated` = any region's `flows_count >= cap` when there are regions, otherwise `flows_count >= cap`. When `flows_count` is missing, fall back to `rows >= cap`.
    - A region that did not respond sets a separate `incomplete` flag, shown in the header and in `meta`.
    - `matches_count` is never shown as a total and never summed.
-5. **The timeline is computed locally from one result (#22, replacing #21's per-bucket queries).**
-   - `overlap_timeline(flows, focus, buckets)` buckets each record by the overlap of [first_detected, last_detected] with the bucket.
-   - Series:
-     - **active** = distinct blocked flow identities, without `first_detected`, so a daily rollover isn't counted twice, that are active in the bucket.
-     - **new** = identities whose earliest `first_detected` falls in the bucket.
-   - Spikes are computed on **new**, using the existing rule (≥ 3× the median of the non-zero buckets, at least 4 such buckets). The first bucket is excluded as a baseline, because of the PCE's 00:00 UTC record rollover.
-   - No connection counts per bucket: Explorer can't split them by time.
-   - The overlay's timeline comes from the loaded result at 0 requests. It is marked approximate only when that result is truncated.
-   - `t` sends **one** blocked-only query for the window per side (2 for `both`), counted and cached, and it confirms only above 10k. It replaces the N-bucket run.
-   - Remove `TIMELINE_CONFIRM_QUERIES`, the bucket-run state, resume and per-bucket cache slots.
-   - The CLI's `app --timeline` sends that same single query. JSON buckets carry `{start, end, active, new}`, and `truncated` belongs to the timeline.
-   - Bucket plans (24×1h, 28×6h, 28×1d, 30×1d, ≤24 with a 5 min minimum) stay as display resolution.
+5. **The timeline is dropped (#22; Alex, 2026-10-14).** Explorer returns lifetime aggregates, so no honest view of blocked flows over time is possible.
+   - Remove from the app overlay: the timeline panel (approx and exact), `t`, and spikes. The overlay keeps its other panels, and the space goes to the inbound and outbound peers.
+   - Remove from the CLI: `app --timeline`, the `timeline` section, `TIMELINE_CONFIRM_QUERIES`, and the timeline cache slots.
+   - Remove `pce::traffic::timeline` and `Pce::timeline_bucket`, plus the docs and help that describe them.
+
 6. **Count units (#26).**
    - Every traffic table header and `--help` states the unit: `flows` counts flow records; `conns` and `bytes` are lifetime counts of those records.
    - `traffic groups` (pairs, `--services`, sections) gains per-decision connection columns, `allowed_conns`, `pot_blocked_conns` and `blocked_conns`, in JSON and CSV. In table mode, show them only when space allows.
@@ -79,7 +72,7 @@ What this means for us:
 These are breaking changes for v0.1.9:
 - `--max-slices` and `meta.slices` are removed.
 - The meaning of `meta.covered` changes.
-- The timeline JSON shape changes (`count` → `active`/`new`).
+- The app timeline is removed: `t`, `app --timeline` and the `timeline` section.
 - `--backfill` now means raising the cap.
 
 The release notes must spell all of this out.
@@ -89,13 +82,11 @@ The release notes must spell all of this out.
 - **Unit tests in `pce`:**
   - Merge dedupe: versions, tie, never summed.
   - Truncation from statuses: 4631/4625 at cap 10k is complete; 400/200 at cap 200 is truncated; a regions case; missing `flows_count`.
-  - `overlap_timeline` against a fixture built from the demo numbers. It must show the rollover in the first bucket and a 19:00-style spike on new flows.
   - Cap-raise steps.
 - **TUI:**
   - `B` asks above 10k and replaces the result.
   - No time-slice code paths remain.
   - The header for truncated vs complete results.
-  - `t` sends exactly one query per side, counted.
   - Late answers are guarded.
 - **CLI:**
   - `--backfill` with mocks: 10k truncated → asks for `--yes` → climbs.
@@ -106,10 +97,9 @@ The release notes must spell all of this out.
   - gzip: the client sends `Accept-Encoding: gzip`, and a gzipped mock body decodes.
 - **Read-only smoke on demo100** (no `--yes`, no `y`):
   - A 1-day query reports `truncated: false`.
-  - `app <app> --timeline` sends one query and shows a non-flat "new" series.
 
 ## Delivery
 
 Two issues, in order:
 - **A.** `pce` core: merge, truncation, coverage removal, backfill as cap raise (CLI and TUI), and speed. Closes #22 (backfill part), #23 and #28.
-- **B.** The timeline redesign (#22, timeline part), count units (#26) and the transmission filter (#27).
+- **B.** Remove the timeline (#22, timeline part), count units (#26) and the transmission filter (#27).
