@@ -3714,7 +3714,12 @@ fn workloads_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             KeyCode::Char(c @ ('h' | 'E' | 'm' | 'o' | 'u' | 'c')) => {
                 // Local filters over the loaded list: no request.
                 let order = model.limits.key_order();
+                if c == 'u' && !model.workloads.filters.unlabeled && order.first().is_empty() {
+                    model.status = StatusLine::info("no label model keys");
+                    return Vec::new();
+                }
                 let w = &mut model.workloads;
+                let href = w.table.selected_item().map(|r| r.workload.href.clone());
                 match c {
                     'h' => w.unhealthy_only = !w.unhealthy_only,
                     'E' => w.filters.next_enforcement(),
@@ -3727,7 +3732,14 @@ fn workloads_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     }
                 }
                 w.rebuild(&order);
+                // The same workload while it is still shown.
+                if let Some(href) = href {
+                    w.table.select_where(|r| r.workload.href == href);
+                }
                 w.show_detail &= w.table.selected_item().is_some();
+                // The filter line comes and goes: the page size with it.
+                let page = workloads_page(model);
+                model.workloads.table.ensure_visible(page);
                 return Vec::new();
             }
             KeyCode::Char('H') => {
@@ -7734,14 +7746,9 @@ mod tests {
         assert!(update(&mut m, key('h')).is_empty());
         assert_eq!(m.workloads.table.len(), 4);
         assert!(update(&mut m, key('H')).is_empty());
+        let t = &m.workloads.table;
         assert_eq!(
-            m.workloads
-                .table
-                .selected_item()
-                .unwrap()
-                .workload
-                .hostname
-                .as_deref(),
+            t.rows()[t.visible()[0]].workload.hostname.as_deref(),
             Some("host-2.example"),
             "worst health first"
         );
@@ -7797,6 +7804,112 @@ mod tests {
         assert_eq!(m.workloads.table.search_text(), "z");
         assert_eq!(m.stats.calls, calls, "no request");
         assert!(!m.quit);
+    }
+
+    /// 200 workloads, `host-NNN`: every tenth (from 5) without labels.
+    fn many_workloads() -> Model {
+        use crate::tui::test_support::model_with_workloads;
+        let mut m = model_with_workloads();
+        let base = m.workloads.raw[0].clone();
+        m.workloads.raw = (0..200)
+            .map(|i| {
+                let mut w = base.clone();
+                w.href = format!("/orgs/5/workloads/w{i:03}");
+                w.hostname = Some(format!("host-{i:03}"));
+                if i % 10 == 5 {
+                    w.labels.clear();
+                }
+                w
+            })
+            .collect();
+        m.workloads.rebuild(&m.limits.key_order());
+        update(&mut m, key('4'));
+        m
+    }
+
+    fn selected_host(m: &Model) -> String {
+        m.workloads
+            .table
+            .selected_item()
+            .unwrap()
+            .workload
+            .display_name()
+    }
+
+    #[test]
+    fn a_filter_that_shrinks_the_list_keeps_the_selected_row_in_view() {
+        use crate::tui::test_support::render_to_string;
+        let mut m = many_workloads();
+        for _ in 0..150 {
+            update(&mut m, key('j'));
+        }
+        assert_eq!(selected_host(&m), "host-150");
+        assert!(m.workloads.table.offset() > 100);
+        update(&mut m, key('u'));
+        let t = &m.workloads.table;
+        assert_eq!(t.len(), 20);
+        assert!(
+            t.offset() <= t.selected_pos(),
+            "{} > {}",
+            t.offset(),
+            t.selected_pos()
+        );
+        let host = selected_host(&m);
+        assert!(render_to_string(&m, 80, 24).contains(&host), "{host} drawn");
+    }
+
+    #[test]
+    fn a_filter_change_keeps_the_selected_workload_when_it_stays() {
+        use crate::tui::test_support::render_to_string;
+        let mut m = many_workloads();
+        for _ in 0..145 {
+            update(&mut m, key('j'));
+        }
+        assert_eq!(selected_host(&m), "host-145");
+        update(&mut m, key('u'));
+        assert_eq!(selected_host(&m), "host-145", "still shown: still selected");
+        assert!(render_to_string(&m, 80, 24).contains("host-145"));
+        update(&mut m, key('c'));
+        assert_eq!(selected_host(&m), "host-145");
+        assert!(render_to_string(&m, 80, 24).contains("host-145"));
+    }
+
+    #[test]
+    fn workload_search_skips_the_missing_column() {
+        let mut m = many_workloads();
+        update(&mut m, key('u'));
+        update(&mut m, key('/'));
+        for c in "role".chars() {
+            update(&mut m, key(c));
+        }
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        assert_eq!(
+            m.workloads.table.len(),
+            0,
+            "`role` is only in the missing column"
+        );
+        m.workloads.table.search_clear();
+        update(&mut m, key('/'));
+        for c in "host-01".chars() {
+            update(&mut m, key(c));
+        }
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        assert_eq!(selected_host(&m), "host-015", "other columns still match");
+    }
+
+    #[test]
+    fn u_without_label_model_keys_says_so() {
+        let mut m = many_workloads();
+        m.set_label_model(Vec::new(), String::new(), Vec::new());
+        assert!(update(&mut m, key('u')).is_empty());
+        assert!(!m.workloads.filters.unlabeled);
+        assert_eq!(m.status.text, "no label model keys");
     }
 
     #[test]

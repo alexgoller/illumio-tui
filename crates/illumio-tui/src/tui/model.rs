@@ -4126,6 +4126,7 @@ pub fn workload_columns() -> Vec<Column<WorkloadRowView>> {
         Column {
             // Names what `u` filters on; shown with `u` (`workload_columns_for`).
             hide_below: 200,
+            full: Some(|r| join_list(&r.missing)),
             ..text_col(
                 "missing",
                 18,
@@ -4134,6 +4135,23 @@ pub fn workload_columns() -> Vec<Column<WorkloadRowView>> {
             )
         },
     ]
+}
+
+/// The columns `/` searches: every one but `missing`, which names keys
+/// (`/role` would match every unlabeled row).
+static SEARCHED_COLUMNS: std::sync::LazyLock<Vec<Column<WorkloadRowView>>> =
+    std::sync::LazyLock::new(|| {
+        let mut cols = workload_columns();
+        cols.truncate(MISSING_COL);
+        cols
+    });
+
+/// The Workloads search: the default substring match minus `missing`.
+fn workload_matches(r: &WorkloadRowView, needle: &str) -> bool {
+    needle.is_empty()
+        || SEARCHED_COLUMNS
+            .iter()
+            .any(|c| (c.cell)(r).to_lowercase().contains(needle))
 }
 
 /// `E`'s steps after `all`: the effective enforcement ([`Workload::enforcement`]).
@@ -4227,7 +4245,7 @@ pub struct WorkloadsState {
 impl WorkloadsState {
     pub fn new(min_refresh: u64) -> Self {
         Self {
-            table: TableView::new(workload_columns()),
+            table: TableView::new(workload_columns()).with_matcher(workload_matches),
             raw: Vec::new(),
             truncated: false,
             error: None,
@@ -5251,6 +5269,8 @@ mod tests {
         let col = t.columns.iter().position(|c| c.title == "missing").unwrap();
         let cells: Vec<String> = t.rows().iter().map(|r| t.cell(r, col)).collect();
         assert_eq!(cells, ["role", "", "env, role", "env, role"]);
+        // `:export` joins them as every list cell: `; `.
+        assert_eq!(t.full_cells(&t.rows()[2])[col], "env; role");
         // Hidden at ordinary widths unless `u` is on.
         assert!(t.columns[col].hide_below > 180);
         m.workloads.filters.unlabeled = true;

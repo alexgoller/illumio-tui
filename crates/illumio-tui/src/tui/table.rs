@@ -314,6 +314,9 @@ impl<T> TableView<T> {
             self.offset = 0;
         } else {
             self.selected = self.selected.min(self.visible.len() - 1);
+            // Fewer rows can pull the selection above the scroll offset:
+            // never scroll past it, or the table draws empty.
+            self.offset = self.offset.min(self.selected);
         }
     }
 }
@@ -372,6 +375,21 @@ mod tests {
             },
         ]);
         v
+    }
+
+    #[test]
+    fn fewer_rows_never_leave_the_offset_past_the_selection() {
+        let mut v = view();
+        let many: Vec<R> = (0..100).map(|n| R { name: "r", n }).collect();
+        v.set_rows(many.clone());
+        for _ in 0..90 {
+            v.select_next();
+        }
+        v.ensure_visible(10);
+        assert_eq!(v.offset(), 81);
+        v.set_rows(many[..5].to_vec());
+        assert_eq!(v.selected_pos(), 4);
+        assert!(v.offset() <= v.selected_pos(), "{}", v.offset());
     }
 
     #[test]
