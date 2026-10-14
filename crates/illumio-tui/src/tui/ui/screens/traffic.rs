@@ -164,14 +164,10 @@ fn render_stats(model: &Model, f: &mut Frame, area: Rect) {
         .min(inner.width.saturating_sub(24) as usize) as u16;
     let cols = Layout::horizontal([Constraint::Length(left_w), Constraint::Min(10)]).split(inner);
     f.render_widget(Paragraph::new(Line::from(left)), cols[0]);
-    let bar = bars::decision_bar(a, p, b, cols[1].width.saturating_sub(12) as usize, t);
-    let spark = bars::sparkline(&bars::sparkline_buckets(shown, 12), 12);
-    let mut right = bar.spans;
-    right.insert(
-        0,
-        Span::styled(format!("{spark} "), Style::new().fg(t.accent)),
-    );
-    f.render_widget(Paragraph::new(Line::from(right)), cols[1]);
+    // No time sparkline: the flows are lifetime aggregates, so their
+    // last-detected times say nothing honest about traffic over time.
+    let bar = bars::decision_bar(a, p, b, cols[1].width as usize, t);
+    f.render_widget(Paragraph::new(bar), cols[1]);
 }
 
 fn render_flows(model: &Model, f: &mut Frame, area: Rect) {

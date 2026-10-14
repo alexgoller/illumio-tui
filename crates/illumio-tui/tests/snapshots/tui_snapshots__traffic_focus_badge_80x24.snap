@@ -8,7 +8,7 @@ expression: out
 │window 24h  src *  dst *  svc *  decision all                                 │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭ Result ─────────────────────────── focus crm/prod · both · 30 flows · 3s ago ╮
-│9 of 30 flows allowed 5 pot.blocked 2 blocked 1  █▁▁▁▁▄▄▁▄▄█▄ ████████████████│
+│9 of 30 flows allowed 5 pot.blocked 2 blocked 1  █████████████████████████████│
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭ Flows ───────────────────────────────────────────────────────────────────────╮
 │  src            src group  dst            dst group  service   conns decision│

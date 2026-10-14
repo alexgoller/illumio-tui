@@ -8,7 +8,7 @@ expression: out
 │window 24h  src *  dst *  svc *  decision all                                                                         │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭ Result ──────── focus is partial: r re-queries shop/prod · both · 4 flows, capped at 1000; B raises the cap · 3s ago ╮
-│4 of 4 flows allowed 2 pot.blocked 1 blocked 1  ⚠ truncated  ▄▁▁▁▁▁▁▁▁▁█▄ ████████████████████████████████████████████│
+│4 of 4 flows allowed 2 pot.blocked 1 blocked 1  ⚠ truncated  █████████████████████████████████████████████████████████│
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭ Flows ───────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │  src                 src group          dst                 dst group          service    conns   decision           │

@@ -1,7 +1,6 @@
-//! Small dense-stat widgets in the btop spirit: a stacked decision bar, a
-//! sparkline data helper and relative ages.
+//! Small dense-stat widgets in the btop spirit: a stacked decision bar and
+//! relative ages.
 use crate::tui::ui::theme::Theme;
-use pce::traffic::ResolvedFlow;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use std::time::Duration;
@@ -48,45 +47,6 @@ pub fn decision_bar(
     ])
 }
 
-/// `▁▂▃▅█`: `counts` scaled to the largest, one cell each, at most `width`
-/// (the newest buckets kept when they do not fit).
-pub fn sparkline(counts: &[u64], width: usize) -> String {
-    let max = counts.iter().copied().max().unwrap_or(0).max(1);
-    let skip = counts.len().saturating_sub(width);
-    counts
-        .iter()
-        .skip(skip)
-        .map(|&v| spark_cell(v, max))
-        .collect()
-}
-
-/// One sparkline cell: `v` scaled to `max` (at least 1).
-fn spark_cell(v: u64, max: u64) -> char {
-    let i = ((v * 7) / max.max(1)) as usize;
-    ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'][i.min(7)]
-}
-
-/// Flow counts per time bucket by `last_detected`, oldest bucket first.
-pub fn sparkline_buckets(flows: &[ResolvedFlow], buckets: usize) -> Vec<u64> {
-    let n = buckets.max(1);
-    let mut out = vec![0u64; n];
-    let ts: Vec<i64> = flows
-        .iter()
-        .filter_map(|f| f.last_detected.as_deref())
-        .filter_map(|s| s.parse::<jiff::Timestamp>().ok())
-        .map(|t| t.as_second())
-        .collect();
-    let (Some(&min), Some(&max)) = (ts.iter().min(), ts.iter().max()) else {
-        return out;
-    };
-    let span = (max - min).max(1);
-    for t in ts {
-        let i = (((t - min) * (n as i64 - 1)) / span) as usize;
-        out[i.min(n - 1)] += 1;
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,25 +57,6 @@ mod tests {
         assert_eq!(age_text(Duration::from_secs(3)), "3s ago");
         assert_eq!(age_text(Duration::from_secs(125)), "2m ago");
         assert_eq!(age_text(Duration::from_secs(7_300)), "2h ago");
-    }
-
-    #[test]
-    fn sparkline_keeps_the_newest_cells_that_fit() {
-        assert_eq!(sparkline(&[0, 1, 7], 2), "▂█");
-    }
-
-    #[test]
-    fn sparkline_buckets_by_last_detected() {
-        let flows = crate::tui::test_support::fixture_flows();
-        let b = sparkline_buckets(&flows, 4);
-        assert_eq!(b.len(), 4);
-        assert_eq!(
-            b.iter().sum::<u64>(),
-            4,
-            "every fixture flow has last_detected"
-        );
-        assert!(b[3] >= 1, "the newest flow lands in the last bucket: {b:?}");
-        assert!(sparkline_buckets(&[], 4).iter().all(|&x| x == 0));
     }
 
     #[test]
