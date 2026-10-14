@@ -132,12 +132,14 @@ impl ResolvedFlow {
                 .is_some_and(|d| is_blocked(d.class()))
     }
 
-    /// The draft decision when it is not the reported one: what the Flows
-    /// view marks (`blocked → allowed`).
+    /// The draft decision when its verdict is not the reported one: what
+    /// the Flows view marks (`blocked → allowed`). Judged by class, so
+    /// `allowed_across_boundary` on an allowed flow is no change; a value
+    /// of no known class always is.
     pub fn draft_change(&self) -> Option<&DraftDecision> {
         self.draft_policy_decision
             .as_ref()
-            .filter(|d| d.as_str() != self.policy_decision.as_str())
+            .filter(|d| d.class() == PolicyDecision::Unknown || d.class() != self.policy_decision)
     }
 }
 
@@ -304,6 +306,14 @@ pub(crate) mod tests {
         assert_eq!(f[b].draft_change(), Some(&D::Allowed));
         f[b].draft_policy_decision = Some(D::Blocked);
         assert_eq!(f[b].draft_change(), None, "the same decision is no change");
+        f[b].draft_policy_decision = Some(D::Other("blocked_by_override_deny".into()));
+        assert_eq!(f[b].draft_change(), None, "nor the same verdict, refined");
+        f[b].draft_policy_decision = Some(D::Other("new_value".into()));
+        assert!(
+            f[b].draft_change().is_some(),
+            "an unknown value always shows"
+        );
+        f[b].draft_policy_decision = Some(D::Blocked);
         assert_eq!(
             DraftSummary::of(&f),
             DraftSummary {
