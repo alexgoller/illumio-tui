@@ -2454,3 +2454,92 @@ async fn opening_the_app_overlay_reads_workloads_and_rulesets_once() {
     assert!(matches!(&v.policy, Loadable::Loaded(rows) if rows.len() == 2));
     assert_eq!(model.busy, 0);
 }
+
+#[tokio::test]
+async fn an_exact_timeline_runs_blocked_only_bucket_queries_one_at_a_time_and_stops_on_a_failure() {
+    use illumio_tui::tui::commands::Command;
+    use illumio_tui::tui::model::Overlay;
+    use illumio_tui::tui::msg::Msg;
+    use illumio_tui::tui::test_support::{model_with_window, with_policy, with_workloads};
+    use illumio_tui::tui::update::update;
+    use pce::traffic::{bucket_plan, format_timestamp};
+    use wiremock::matchers::body_partial_json;
+    let mut m = with_policy(with_workloads(model_with_window("24h")));
+    for msg in [
+        Msg::Command(Command::Focus(Some("shop/prod".into()))),
+        Msg::Key(KeyEvent::new(ch('X'), KeyModifiers::NONE)), // in
+        Msg::Command(Command::App(Some("shop/prod".into()))),
+    ] {
+        assert!(update(&mut m, msg).is_empty(), "opening costs nothing");
+    }
+    assert_eq!(m.overlay, Overlay::App);
+    let (start, end) = m.traffic.window_bounds().unwrap();
+    let b = bucket_plan(start, end)[0];
+
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    let href = "/orgs/5/traffic_flows/async_queries/q-b0";
+    // Bucket 0 only: blocked-only, the app on the destination side, the
+    // bucket's range. Bucket 1's body matches nothing (404): the run stops.
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/traffic_flows/async_queries"))
+        .and(body_partial_json(json!({
+            "start_date": format_timestamp(b.start),
+            "end_date": format_timestamp(b.end),
+            "policy_decisions": ["blocked"],
+            "destinations": {"include": [[{"label": {"href": "/orgs/5/labels/3"}}, {"label": {"href": "/orgs/5/labels/4"}}]]}
+        })))
+        .respond_with(
+            ResponseTemplate::new(202).set_body_json(json!({"href": href, "status": "queued"})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{href}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            json!({"status": "completed", "result": {"href": format!("{href}/download")}}),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{href}/download")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/traffic_flows.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .mount(&server)
+        .await;
+    let (mut rt, _tx) = Runtime::new(pce_for(&server), m);
+    let model = run_loop(
+        &mut rt,
+        Box::pin(press(vec![(100, ch('t')), (50, ch('y')), (1500, ch('j'))])),
+        &mut |_| {},
+    )
+    .await;
+    let v = model.app_view.as_ref().unwrap();
+    let x = v.exact.as_ref().expect("the exact run");
+    assert_eq!(
+        x.counts[0],
+        Some((3, false)),
+        "the NAS flow's 3 blocked connections"
+    );
+    assert_eq!(x.loaded(), 1);
+    assert!(x.running.is_none(), "the failed bucket stopped the run");
+    assert_eq!(v.requests, 2, "bucket 0 and bucket 1, one side each");
+    assert!(
+        model.status.text.starts_with("exact timeline stopped:"),
+        "{}",
+        model.status.text
+    );
+    let posts = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.method.as_str() == "POST")
+        .count();
+    assert_eq!(posts, 2, "one at a time, nothing retried");
+    assert_eq!(model.busy, 0);
+}

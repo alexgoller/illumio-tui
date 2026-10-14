@@ -522,6 +522,54 @@ impl Runtime {
                     let _ = tx.send(Msg::Stats(pce.stats()));
                 });
             }
+            Cmd::RunTimelineBucket {
+                seq,
+                ticket,
+                index,
+                filter,
+                focus,
+                start,
+                end,
+                cancel,
+            } => {
+                self.model.busy += 1;
+                let (pce, tx) = self.task_ctx();
+                tokio::spawn(async move {
+                    let result = async {
+                        let q = filter
+                            .to_query_between(start, end, &pce, CacheMode::Use)
+                            .await?;
+                        let base =
+                            pce::traffic::bucket_query(&q, &pce::traffic::Bucket { start, end });
+                        let idx = pce.name_index(CacheMode::Use).await?;
+                        let ft = pce
+                            .focused_traffic(
+                                &format!("timeline:{index}"),
+                                &focus,
+                                &base,
+                                &idx,
+                                CacheMode::Use,
+                                &cancel,
+                                None,
+                            )
+                            .await?;
+                        Ok::<_, pce::PceError>(crate::tui::msg::TimelineBucketOutcome {
+                            connections: pce::traffic::blocked_connections(&ft.flows),
+                            truncated: ft.truncated,
+                            hit: ft.hit,
+                        })
+                    }
+                    .await
+                    .map_err(|e| e.to_string());
+                    let _ = tx.send(Msg::TimelineBucketDone {
+                        seq,
+                        ticket,
+                        index,
+                        result,
+                    });
+                    let _ = tx.send(Msg::Stats(pce.stats()));
+                });
+            }
             Cmd::LoadEvents { filter, mode } => {
                 self.model.busy += 1;
                 let (pce, tx) = self.task_ctx();
@@ -599,6 +647,7 @@ impl Runtime {
                 | Msg::IpListsLoaded(_)
                 | Msg::WorkloadsLoaded(_)
                 | Msg::AppWorkloadsLoaded { .. }
+                | Msg::TimelineBucketDone { .. }
                 | Msg::EventsLoaded(_)
                 | Msg::ProfileSwitched(_)
                 | Msg::Planned(_)
