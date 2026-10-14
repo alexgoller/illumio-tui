@@ -539,16 +539,6 @@ impl FlowRows<'_> {
     }
 }
 
-/// The draft cell: the draft decision, `→ allowed` where it is not the
-/// reported one.
-pub fn draft_cell(f: &ResolvedFlow) -> String {
-    match (&f.draft_policy_decision, f.draft_change()) {
-        (_, Some(d)) => format!("→ {}", d.as_str()),
-        (Some(d), None) => d.as_str().to_string(),
-        (None, None) => String::new(),
-    }
-}
-
 impl TableRows for FlowRows<'_> {
     fn units(&self) -> Option<&'static str> {
         Some(UNITS_FLOWS)
@@ -588,7 +578,7 @@ impl TableRows for FlowRows<'_> {
                     f.process_name.clone().unwrap_or_default(),
                 ];
                 if draft {
-                    row.insert(8, draft_cell(f));
+                    row.insert(8, f.draft_text());
                 }
                 row
             })

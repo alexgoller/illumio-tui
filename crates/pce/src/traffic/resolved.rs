@@ -132,6 +132,21 @@ impl ResolvedFlow {
                 .is_some_and(|d| is_blocked(d.class()))
     }
 
+    /// The draft cell of the Flows view and the CLI table: `blocked →
+    /// allowed` (`pot.blocked → allowed`) where the draft changes the
+    /// verdict, else the draft decision; empty without one.
+    pub fn draft_text(&self) -> String {
+        let short = |d: &str| match d {
+            "potentially_blocked" => "pot.blocked".to_string(),
+            other => other.to_string(),
+        };
+        match (&self.draft_policy_decision, self.draft_change()) {
+            (_, Some(d)) => format!("{} → {}", short(self.policy_decision.as_str()), d.as_str()),
+            (Some(d), None) => d.as_str().to_string(),
+            (None, None) => String::new(),
+        }
+    }
+
     /// The draft decision when its verdict is not the reported one: what
     /// the Flows view marks (`blocked → allowed`). Judged by class, so
     /// `allowed_across_boundary` on an allowed flow is no change; a value
@@ -307,6 +322,9 @@ pub(crate) mod tests {
         assert!(f[b].fixed_by_draft() && f[p].fixed_by_draft());
         assert!(f[a].blocked_by_draft() && !f[a].fixed_by_draft());
         assert_eq!(f[b].draft_change(), Some(&D::Allowed));
+        assert_eq!(f[b].draft_text(), "blocked → allowed");
+        assert_eq!(f[p].draft_text(), "pot.blocked → allowed_across_boundary");
+        assert_eq!(rich_flows()[0].draft_text(), "", "no draft, no text");
         f[b].draft_policy_decision = Some(D::Blocked);
         assert_eq!(f[b].draft_change(), None, "the same decision is no change");
         f[b].draft_policy_decision = Some(D::Other("blocked_by_override_deny".into()));

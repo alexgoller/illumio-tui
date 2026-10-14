@@ -541,27 +541,12 @@ pub fn flow_columns() -> Vec<Column<FlowRow>> {
 /// The title of the column a view gains while draft decisions are loaded.
 pub const DRAFT_COLUMN: &str = "draft";
 
-/// A flow's draft cell: `blocked → allowed` (`pot.blocked → allowed`)
-/// where the draft changes the verdict, else the draft decision; empty
-/// without one.
-pub fn draft_flow_text(f: &ResolvedFlow) -> String {
-    let short = |d: &str| match d {
-        "potentially_blocked" => "pot.blocked".to_string(),
-        other => other.to_string(),
-    };
-    match (&f.draft_policy_decision, f.draft_change()) {
-        (_, Some(d)) => format!("{} → {}", short(f.policy_decision.as_str()), d.as_str()),
-        (Some(d), None) => d.as_str().to_string(),
-        (None, None) => String::new(),
-    }
-}
-
 /// The Flows view's `draft` column.
 pub fn draft_flow_column() -> Column<FlowRow> {
     Column {
         title: DRAFT_COLUMN,
         width: 24,
-        cell: |f| draft_flow_text(&f.flow),
+        cell: |f| f.flow.draft_text(),
         key: |f| {
             SortKey::Text(
                 f.flow

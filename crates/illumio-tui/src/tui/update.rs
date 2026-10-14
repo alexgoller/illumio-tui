@@ -14520,7 +14520,7 @@ mod draft_tests {
             .iter()
             .find(|r| r.flow.fixed_by_draft())
             .unwrap();
-        let cell = crate::tui::model::draft_flow_text(&row.flow);
+        let cell = row.flow.draft_text();
         assert!(cell.ends_with(" → allowed"), "{cell}");
     }
 
