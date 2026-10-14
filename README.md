@@ -245,6 +245,13 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   enforcement column is the effective one: a workload without a VEN is `unmanaged`, as in
   the PCE UI, whatever mode the API reports for it (often `visibility_only`); the detail pane's
   health line shows both (`healthy · full`, `unmanaged · PCE reports visibility_only`).
+  Local filters, no request, combined with `h` and `/`: `E` cycles the enforcement (all,
+  full, selective, visibility_only, idle, unmanaged), `m` managed / unmanaged, `o` offline
+  only (the VEN health: `online` false or no heartbeat for 15 minutes), `u` unlabeled (no
+  label for one of the profile's scope keys or its tier key; a `missing` column names them),
+  `c` clears them all. A filter line above the table names what is on and the count
+  (`enforcement selective · unlabeled (app, env, role) · 1 of 206`), and says the counts are
+  partial when the list was truncated.
 - **Events**: severity-coloured audit events, `f` edit severity / type / window, `S` sort by
   severity, `Enter` the event as JSON (`j` / `k` scroll a long one).
 
@@ -273,6 +280,8 @@ the API call and byte counters at all times.
     illumio-tui labels --key app --key env --value-contains pay --ignore-keys
     illumio-tui labels --unused --json
     illumio-tui workloads --label app=web --online true
+    illumio-tui workloads --unlabeled --json
+    illumio-tui workloads --offline --enforcement full
     illumio-tui policy rulesets
     illumio-tui policy rules "Web-DB"
     illumio-tui policy rules "Web-DB" --impact --json
@@ -336,7 +345,12 @@ the PCE reports with a mode of its own (often `visibility_only`), else the PCE's
 `enforcement` column is the effective one, and CSV appends `enforcement_mode`. `--enforcement` filters by it in the same request:
 `unmanaged` sends `managed=false`, a mode (`full`, `selective`, `visibility_only`, `idle`) adds
 `managed=true`, so `visibility_only` lists only workloads with a VEN; a `--managed` that
-contradicts it is exit 2.
+contradicts it is exit 2. `--offline` and `--unlabeled [keys]` filter the one read locally,
+as the app's `o` and `u` do: offline is the VEN health (so a stale heartbeat counts, which
+`--online false` would miss), unlabeled is a missing label for one of the keys
+(comma-separated; alone, the profile's scope keys and tier key). JSON adds `missing_labels`
+with `--unlabeled` (the table a `missing` column), and `meta.local_filter` names the local
+filters (`["offline", "unlabeled (app, env, role)"]`; the meta line `filtered locally: …`).
 Commands that print no table (writes, `health`, `policy rules impact`, `profile use`, a
 traffic `--dry-run`) refuse it with exit 2 before any request.
 
