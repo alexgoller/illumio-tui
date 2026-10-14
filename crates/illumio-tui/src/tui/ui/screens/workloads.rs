@@ -119,7 +119,7 @@ fn render_table(model: &Model, f: &mut Frame, area: Rect) {
             VenHealth::Error | VenHealth::Offline => Style::new().fg(theme.bad),
             VenHealth::Warning => Style::new().fg(theme.warn),
             VenHealth::Unmanaged => theme.dim_style(),
-            VenHealth::Healthy if r.workload.enforcement_mode.as_deref() == Some("idle") => {
+            VenHealth::Healthy if r.workload.enforcement() == Some("idle") => {
                 Style::new().fg(theme.bad)
             }
             VenHealth::Healthy => Style::default(),

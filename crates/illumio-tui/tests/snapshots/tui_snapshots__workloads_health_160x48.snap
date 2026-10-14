@@ -9,7 +9,7 @@ healthy 1 · warning 1 · error 0 · offline 1 · unmanaged 1  █████�
 │  hostname               name           ip              labels                      enforcement     online agent     health    heartbeat sync     ven         │
 │  host-1.example         web01          10.0.1.10       app=shop env=prod role=web  full            yes    active    healthy   2m ago    applied  23.2.31-3113│
 │▸ host-2.example                        10.0.2.20       app=shop env=prod role=db   visibility_only no     stopped   offline   2h ago    syncing  22.5.10-1   │
-│                         unmanaged-nas  10.0.3.30                                   idle            -      -         unmanaged                                │
+│                         unmanaged-nas  10.0.3.30                                   unmanaged       -      -         unmanaged                                │
 │  host-4.example         batch04        10.0.4.40                                   selective       yes    suspended warning   1m ago    applied  23.2.31-3113│
 │                                                                                                                                                              │
 │                                                                                                                                                              │

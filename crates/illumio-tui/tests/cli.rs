@@ -516,6 +516,8 @@ async fn workloads_report_ven_health_and_unhealthy_filter() {
     );
     assert_eq!(rows[1]["health"], "offline");
     assert_eq!(rows[2]["health"], "unmanaged");
+    assert_eq!(rows[2]["enforcement"], "unmanaged", "effective: no VEN");
+    assert_eq!(rows[2]["enforcement_mode"], "idle", "raw API value");
     assert!(
         matches!(
             rows[3]["health"].as_str(),
@@ -549,6 +551,77 @@ async fn workloads_report_ven_health_and_unhealthy_filter() {
         .assert()
         .success()
         .stdout(predicate::str::contains("health").and(predicate::str::contains("offline")));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn workloads_enforcement_filter_is_the_effective_mode() {
+    use wiremock::matchers::query_param_is_missing;
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    let body = workloads_with_unmanaged_in_shop();
+    // unmanaged: managed=false and no enforcement_mode.
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .and(query_param("managed", "false"))
+        .and(query_param_is_missing("enforcement_mode"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(body.clone())
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    // A mode: managed=true too, so workloads without a VEN stay out. The
+    // answer here still carries one (as a PCE ignoring the flag would);
+    // the local check drops it.
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .and(query_param("enforcement_mode", "visibility_only"))
+        .and(query_param("managed", "true"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(body)
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let names = |out: Value| -> Vec<String> {
+        out["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["href"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let out = stdout_json(
+        cmd(&server)
+            .args(["workloads", "--enforcement", "unmanaged"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(names(out), ["/orgs/5/workloads/aaaa-3"]);
+    let out = stdout_json(
+        cmd(&server)
+            .args(["workloads", "--enforcement", "visibility_only"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(names(out), ["/orgs/5/workloads/aaaa-2"]);
+    // A contradiction exits 2 without a request (the mocks expect one each).
+    let a = cmd(&server)
+        .args([
+            "workloads",
+            "--enforcement",
+            "unmanaged",
+            "--managed",
+            "true",
+        ])
+        .assert()
+        .code(2);
+    let err: Value = serde_json::from_slice(&a.get_output().stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "args");
 }
 
 #[tokio::test(flavor = "multi_thread")]

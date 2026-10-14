@@ -7,7 +7,7 @@ use super::write::{
     self, WriteFlags, label_in, parse_kv, resolve_labels, resolve_workload, run_plan,
 };
 use clap::{Args, Subcommand};
-use pce::models::{VenHealth, Workload, WorkloadFilter};
+use pce::models::{UNMANAGED, VenHealth, Workload, WorkloadFilter};
 use pce::write::{
     IfMissing, InterfaceSpec, LabelRemoval, LabelsPatch, WorkloadDraft, WorkloadPatch,
 };
@@ -28,7 +28,10 @@ pub struct WorkloadsArgs {
     /// Label key=value; repeat to AND several
     #[arg(long = "label")]
     pub labels: Vec<String>,
-    /// full | visibility_only | selective | idle
+    /// full | visibility_only | selective | idle | unmanaged. Effective
+    /// enforcement: unmanaged (no VEN) asks for managed=false; a mode also
+    /// asks for managed=true, as the PCE reports workloads without a VEN as
+    /// visibility_only
     #[arg(long)]
     pub enforcement: Option<String>,
     /// Only online (true) or offline (false) workloads
@@ -279,6 +282,10 @@ async fn workload_delete(ctx: &Context, a: &WorkloadDeleteArgs) -> Result<(), Cl
 pub struct WorkloadRow {
     #[serde(flatten)]
     pub workload: Workload,
+    /// The effective enforcement ([`Workload::enforcement`]): `unmanaged`
+    /// without a VEN, else the PCE's mode. JSON keeps the raw value in
+    /// `enforcement_mode`; the table and CSV `enforcement` cell is this one.
+    pub enforcement: Option<String>,
     pub health: VenHealth,
     pub sync_state: Option<String>,
     pub heartbeat_age_secs: Option<u64>,
@@ -301,6 +308,7 @@ impl WorkloadRow {
             label_list: join_list(workload.label_entries(order)),
             heartbeat_age_secs: workload.heartbeat_age(now).map(|d| d.as_secs()),
             sync_state: a.and_then(|a| a.sync_state),
+            enforcement: workload.enforcement().map(str::to_string),
             health,
             workload,
         }
@@ -343,7 +351,7 @@ impl TableRows for Vec<WorkloadRow> {
                     w.name.clone().unwrap_or_default(),
                     w.primary_ip().unwrap_or("").to_string(),
                     r.label_text.clone(),
-                    w.enforcement_mode.clone().unwrap_or_default(),
+                    r.enforcement.clone().unwrap_or_default(),
                     w.online.map(|b| b.to_string()).unwrap_or_default(),
                     w.agent_status().unwrap_or_default(),
                     r.sync_state.clone().unwrap_or_default(),
@@ -377,13 +385,35 @@ impl TableRows for Vec<WorkloadRow> {
     }
 }
 
+/// `--enforcement` (effective) and `--managed` as the PCE's
+/// `(enforcement_mode, managed)` query: `unmanaged` is `managed=false` with
+/// no mode; a mode adds `managed=true`, since the PCE reports workloads
+/// without a VEN as `visibility_only`. A contradiction is an argument error.
+fn enforcement_query(
+    enforcement: Option<&str>,
+    managed: Option<bool>,
+) -> Result<(Option<&str>, Option<bool>), CliError> {
+    match (enforcement, managed) {
+        (None, m) => Ok((None, m)),
+        (Some(UNMANAGED), Some(true)) => Err(CliError::Args(
+            "--enforcement unmanaged means no VEN; it contradicts --managed true".into(),
+        )),
+        (Some(UNMANAGED), _) => Ok((None, Some(false))),
+        (Some(mode), Some(false)) => Err(CliError::Args(format!(
+            "--enforcement {mode} needs a VEN; a workload without one is unmanaged (--enforcement unmanaged)"
+        ))),
+        (Some(mode), _) => Ok((Some(mode), Some(true))),
+    }
+}
+
 pub async fn run(ctx: &Context, args: &WorkloadsArgs) -> Result<(), CliError> {
+    let (enforcement_mode, managed) = enforcement_query(args.enforcement.as_deref(), args.managed)?;
     let mut filter = WorkloadFilter {
         name: args.name.clone(),
         hostname: args.hostname.clone(),
         ip_address: args.ip.clone(),
-        enforcement_mode: args.enforcement.clone(),
-        managed: args.managed,
+        enforcement_mode: enforcement_mode.map(str::to_string),
+        managed,
         online: args.online,
         labels: Vec::new(),
         max_results: args.max_results,
@@ -414,6 +444,12 @@ pub async fn run(ctx: &Context, args: &WorkloadsArgs) -> Result<(), CliError> {
         .value
         .into_iter()
         .map(|w| WorkloadRow::new(w, now, &order))
+        // The PCE filtered already; this holds the effective mode should it not.
+        .filter(|r| {
+            args.enforcement
+                .as_deref()
+                .is_none_or(|e| r.enforcement.as_deref() == Some(e))
+        })
         .filter(|r| {
             !args.unhealthy
                 || matches!(
@@ -431,6 +467,65 @@ mod tests {
 
     fn fixture() -> Vec<Workload> {
         serde_json::from_str(include_str!("../../../../fixtures/workloads.json")).unwrap()
+    }
+
+    #[test]
+    fn rows_show_the_effective_enforcement_and_json_keeps_the_raw_mode() {
+        let now: jiff::Timestamp = "2026-10-10T08:00:00Z".parse().unwrap();
+        let mut wls = fixture();
+        wls[2].enforcement_mode = Some("visibility_only".into());
+        let rows: Vec<WorkloadRow> = wls
+            .into_iter()
+            .map(|w| WorkloadRow::new(w, now, &KeyOrder::default()))
+            .collect();
+        let col = rows
+            .headers()
+            .iter()
+            .position(|h| *h == "enforcement")
+            .unwrap();
+        let shown: Vec<String> = rows.rows().into_iter().map(|r| r[col].clone()).collect();
+        assert_eq!(shown, ["full", "visibility_only", "unmanaged", "selective"]);
+        assert_eq!(rows.full_rows()[2][col], "unmanaged");
+        let json = serde_json::to_value(&rows[2]).unwrap();
+        assert_eq!(json["enforcement"], "unmanaged");
+        assert_eq!(json["enforcement_mode"], "visibility_only");
+        let json = serde_json::to_value(&rows[0]).unwrap();
+        assert_eq!(json["enforcement"], "full");
+        assert_eq!(json["enforcement_mode"], "full");
+    }
+
+    #[test]
+    fn the_enforcement_filter_is_effective() {
+        let q = |e: Option<&str>, m: Option<bool>| {
+            enforcement_query(e, m).map(|(e, m)| (e.map(str::to_string), m))
+        };
+        // unmanaged is no VEN: managed=false, no mode sent.
+        assert_eq!(q(Some("unmanaged"), None).unwrap(), (None, Some(false)));
+        assert_eq!(
+            q(Some("unmanaged"), Some(false)).unwrap(),
+            (None, Some(false))
+        );
+        // A mode keeps the unmanaged workloads (which report
+        // visibility_only) out: managed=true.
+        assert_eq!(
+            q(Some("visibility_only"), None).unwrap(),
+            (Some("visibility_only".into()), Some(true))
+        );
+        assert_eq!(
+            q(Some("full"), Some(true)).unwrap(),
+            (Some("full".into()), Some(true))
+        );
+        assert_eq!(q(None, None).unwrap(), (None, None));
+        assert_eq!(q(None, Some(false)).unwrap(), (None, Some(false)));
+        // Contradictions match nothing: an argument error, no request.
+        assert!(matches!(
+            q(Some("unmanaged"), Some(true)),
+            Err(CliError::Args(_))
+        ));
+        assert!(matches!(
+            q(Some("visibility_only"), Some(false)),
+            Err(CliError::Args(_))
+        ));
     }
 
     #[test]

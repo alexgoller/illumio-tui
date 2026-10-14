@@ -3798,8 +3798,9 @@ fn ip_of(r: &WorkloadRowView) -> String {
     r.workload.primary_ip().unwrap_or("").to_string()
 }
 
+/// The effective enforcement: `unmanaged` without a VEN, else the PCE's mode.
 fn enforcement_of(r: &WorkloadRowView) -> String {
-    r.workload.enforcement_mode.clone().unwrap_or_default()
+    r.workload.enforcement().unwrap_or_default().to_string()
 }
 
 fn visibility_of(r: &WorkloadRowView) -> String {
