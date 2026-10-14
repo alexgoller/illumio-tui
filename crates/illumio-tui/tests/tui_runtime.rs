@@ -752,6 +752,58 @@ async fn results_from_the_old_pce_are_ignored_after_a_switch() {
 }
 
 #[tokio::test]
+async fn a_label_usage_answer_from_the_old_pce_is_dropped_after_a_switch() {
+    use illumio_tui::cli::GlobalArgs;
+    use illumio_tui::tui::model::PceUsage;
+    use illumio_tui::tui::msg::Msg;
+    let a = MockServer::start().await;
+    let b = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/labels"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/labels_usage.json"))
+                .insert_header("Content-Type", "application/json")
+                .set_delay(Duration::from_millis(400)),
+        )
+        .expect(1)
+        .mount(&a)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/health"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .mount(&b)
+        .await;
+    mount_objects(&b).await;
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = two_profile_config(dir.path(), &b);
+    let global = GlobalArgs {
+        config: Some(cfg),
+        profile: Some("a".into()),
+        ..Default::default()
+    };
+    let (mut rt, tx) = Runtime::with_args(pce_for(&a), model(), global);
+    // `u` on the old PCE, answered slowly; the switch lands first.
+    rt.execute(Cmd::LoadLabelUsage(pce::CacheMode::Use));
+    tx.send(Msg::Command(illumio_tui::tui::commands::Command::Profile(
+        "b".into(),
+    )))
+    .unwrap();
+    let events = stream::once(async {
+        tokio::time::sleep(Duration::from_millis(900)).await;
+        Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
+    });
+    let model = run_loop(&mut rt, Box::pin(events), &mut |_| {}).await;
+    assert_eq!(model.profile.name, "b");
+    assert_eq!(
+        model.objects.pce_usage,
+        PceUsage::Unknown,
+        "the old PCE's flags must not land in the new profile"
+    );
+    assert_eq!(model.busy, 0);
+}
+
+#[tokio::test]
 async fn unparsable_env_file_fails_the_switch_without_echoing_it() {
     use illumio_tui::cli::GlobalArgs;
     use illumio_tui::tui::msg::Msg;
