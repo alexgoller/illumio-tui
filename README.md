@@ -30,11 +30,11 @@ archive per platform plus a `SHA256SUMS` file:
 | Windows x86_64 | `illumio-tui-<version>-x86_64-pc-windows-msvc.zip` |
 
 Download the archive for your platform and `SHA256SUMS`, then verify and
-install (example: macOS Apple Silicon, version 0.1.10):
+install (example: macOS Apple Silicon, version 0.1.11):
 
     sha256sum --check --ignore-missing SHA256SUMS      # macOS: shasum -a 256 -c --ignore-missing SHA256SUMS
-    tar -xzf illumio-tui-0.1.10-aarch64-apple-darwin.tar.gz
-    install -m 755 illumio-tui-0.1.10-aarch64-apple-darwin/illumio-tui ~/.local/bin/   # any directory on PATH
+    tar -xzf illumio-tui-0.1.11-aarch64-apple-darwin.tar.gz
+    install -m 755 illumio-tui-0.1.11-aarch64-apple-darwin/illumio-tui ~/.local/bin/   # any directory on PATH
     illumio-tui --version
 
 macOS may quarantine binaries downloaded with a browser; clear it with
@@ -47,7 +47,7 @@ the hash with `Get-FileHash illumio-tui-<version>-x86_64-pc-windows-msvc.zip`
 
 1. Bump `version` in `[workspace.package]` of the root `Cargo.toml` and run
    `cargo check` so `Cargo.lock` follows.
-2. Commit, then tag and push: `git tag v0.1.10 && git push --tags`.
+2. Commit, then tag and push: `git tag v0.1.11 && git push --tags`.
 
 The `Release` workflow builds all targets and publishes the release with
 generated notes; it fails if the tag does not match the Cargo version. Run it
