@@ -1,13 +1,18 @@
-//! Folds the flows of another time slice into the loaded ones, so the same
-//! connection seen in two slices stays one row (as one wider query would
-//! have returned it).
+//! The one rule for putting Explorer results together. Explorer returns
+//! stored aggregate records whose lifetime overlaps the window, each with
+//! lifetime counters, so the same record can come back from two queries
+//! (both sides of a focus, two windows). A record is its flow plus its
+//! `first_detected`; two copies of it are versions, and the later one
+//! supersedes the other. Counts are never added up.
 use super::resolved::{ResolvedEndpoint, ResolvedFlow};
 use crate::models::PolicyDecision;
 use std::collections::HashMap;
 
-/// What makes two flows the same row: both sides (workload href, else IP),
-/// the service, the process and user, the decision and the direction.
-pub(crate) type FlowKey = (
+/// What makes two flows the same connection for display: both sides
+/// (workload href, else IP), the service, the process and user, the
+/// decision and the direction. Not a merge key: one connection has a new
+/// record each time the PCE starts one (`record_key`).
+pub type FlowKey = (
     Option<String>,
     Option<String>,
     Option<u16>,
@@ -22,7 +27,8 @@ fn side(e: &ResolvedEndpoint) -> Option<String> {
     e.workload_href.clone().or_else(|| e.ip.clone())
 }
 
-pub(crate) fn flow_key(f: &ResolvedFlow) -> FlowKey {
+/// The flow identity without `first_detected`.
+pub fn flow_key(f: &ResolvedFlow) -> FlowKey {
     (
         side(&f.src),
         side(&f.dst),
@@ -35,44 +41,62 @@ pub(crate) fn flow_key(f: &ResolvedFlow) -> FlowKey {
     )
 }
 
-fn add(a: Option<u64>, b: Option<u64>) -> Option<u64> {
-    match (a, b) {
-        (None, None) => None,
-        _ => Some(a.unwrap_or(0) + b.unwrap_or(0)),
-    }
+/// One stored aggregate record: both sides by workload href and IP, the
+/// service, process, user, decision, direction and `first_detected`.
+pub type RecordKey = (
+    (Option<String>, Option<String>),
+    (Option<String>, Option<String>),
+    Option<u16>,
+    String,
+    Option<String>,
+    Option<String>,
+    PolicyDecision,
+    Option<String>,
+    Option<String>,
+);
+
+pub fn record_key(f: &ResolvedFlow) -> RecordKey {
+    let ep = |e: &ResolvedEndpoint| (e.workload_href.clone(), e.ip.clone());
+    (
+        ep(&f.src),
+        ep(&f.dst),
+        f.port,
+        f.proto.clone(),
+        f.process_name.clone(),
+        f.user_name.clone(),
+        f.policy_decision,
+        f.flow_direction.clone(),
+        f.first_detected.clone(),
+    )
 }
 
-/// The earlier (`later == false`) or later of two timestamps; one that does
-/// not parse loses to one that does.
-fn pick(a: Option<String>, b: Option<String>, later: bool) -> Option<String> {
-    let ts = |s: &Option<String>| s.as_deref().and_then(|s| s.parse::<jiff::Timestamp>().ok());
-    match (ts(&a), ts(&b)) {
-        (Some(x), Some(y)) if (later && y > x) || (!later && y < x) => b,
-        (Some(_), Some(_)) => a,
-        (None, Some(_)) => b,
-        _ => a.or(b),
-    }
+fn last_seen(f: &ResolvedFlow) -> Option<jiff::Timestamp> {
+    f.last_detected.as_deref()?.parse().ok()
 }
 
-/// Appends `more` to `existing`, folding each flow into an existing one with
-/// the same key: connections and bytes add up (a missing count counts as
-/// none), the earliest `first_detected` and latest `last_detected` win, the
-/// existing row's rules and other fields stay. New flows keep their order.
+/// Whether `new` is a later version of the same record than `old`: the
+/// later `last_detected` (one that does not parse loses), on a tie the
+/// larger `num_connections`. A full tie keeps `old`.
+fn supersedes(new: &ResolvedFlow, old: &ResolvedFlow) -> bool {
+    (last_seen(new), new.num_connections) > (last_seen(old), old.num_connections)
+}
+
+/// Appends `more` to `existing`, one row per record (`record_key`): a copy
+/// of a record already present replaces it in place when it is a later
+/// version (`supersedes`), else it is dropped. Nothing is summed. New
+/// records keep their order.
 pub fn merge_flows(existing: &mut Vec<ResolvedFlow>, more: Vec<ResolvedFlow>) {
-    let mut at: HashMap<FlowKey, usize> = HashMap::with_capacity(existing.len());
+    let mut at: HashMap<RecordKey, usize> = HashMap::with_capacity(existing.len());
     for (i, f) in existing.iter().enumerate() {
-        at.entry(flow_key(f)).or_insert(i);
+        at.entry(record_key(f)).or_insert(i);
     }
     for f in more {
-        let key = flow_key(&f);
+        let key = record_key(&f);
         match at.get(&key) {
             Some(&i) => {
-                let e = &mut existing[i];
-                e.num_connections += f.num_connections;
-                e.bytes_in = add(e.bytes_in, f.bytes_in);
-                e.bytes_out = add(e.bytes_out, f.bytes_out);
-                e.first_detected = pick(e.first_detected.take(), f.first_detected, false);
-                e.last_detected = pick(e.last_detected.take(), f.last_detected, true);
+                if supersedes(&f, &existing[i]) {
+                    existing[i] = f;
+                }
             }
             None => {
                 at.insert(key, existing.len());
@@ -106,37 +130,76 @@ mod tests {
             policy_decision: PolicyDecision::Allowed,
             draft_policy_decision: None,
             flow_direction: Some("outbound".into()),
-            first_detected: Some("2026-10-09T10:00:00Z".into()),
-            last_detected: Some("2026-10-09T11:00:00Z".into()),
+            first_detected: Some("2026-10-13T00:00:00Z".into()),
+            last_detected: Some("2026-10-13T11:00:00Z".into()),
             rules: vec!["/orgs/1/rule_sets/1/sec_rules/1".into()],
             bytes_in: None,
             bytes_out: Some(100),
         }
     }
 
+    fn conns(rows: &[ResolvedFlow]) -> Vec<u64> {
+        rows.iter().map(|f| f.num_connections).collect()
+    }
+
     #[test]
-    fn identical_flows_fold_into_one_row() {
+    fn the_same_record_twice_is_one_row_and_never_summed() {
+        // demo100: an hour inside a day returned the same records with the
+        // same lifetime counters as the day itself.
         let mut loaded = vec![flow("/w/1", 443, 420), flow("/w/2", 443, 5)];
-        let mut older = flow("/w/1", 443, 380);
-        older.first_detected = Some("2026-10-08T01:00:00Z".into());
-        older.last_detected = Some("2026-10-08T02:00:00Z".into());
-        older.bytes_in = Some(7);
-        older.bytes_out = None;
-        older.rules = vec!["other".into()];
-        merge_flows(&mut loaded, vec![older]);
-        assert_eq!(loaded.len(), 2);
-        let f = &loaded[0];
-        assert_eq!(f.num_connections, 800);
-        assert_eq!(f.bytes_in, Some(7), "None + Some = Some");
-        assert_eq!(f.bytes_out, Some(100));
-        assert_eq!(f.first_detected.as_deref(), Some("2026-10-08T01:00:00Z"));
-        assert_eq!(f.last_detected.as_deref(), Some("2026-10-09T11:00:00Z"));
-        assert_eq!(
-            f.rules,
-            vec!["/orgs/1/rule_sets/1/sec_rules/1"],
-            "existing rules kept"
+        merge_flows(
+            &mut loaded,
+            vec![flow("/w/1", 443, 420), flow("/w/2", 443, 5)],
         );
-        assert_eq!(loaded[1].num_connections, 5);
+        assert_eq!(conns(&loaded), vec![420, 5]);
+    }
+
+    #[test]
+    fn the_later_version_of_a_record_wins_wherever_it_comes_from() {
+        // The PCE can return an older version of an aggregate: the same
+        // first_detected, an earlier last_detected and a lower count.
+        let mut older = flow("/w/1", 443, 380);
+        older.last_detected = Some("2026-10-13T09:00:00Z".into());
+        older.rules = vec!["older".into()];
+        let newer = flow("/w/1", 443, 420);
+
+        let mut loaded = vec![older.clone(), flow("/w/2", 443, 5)];
+        merge_flows(&mut loaded, vec![newer.clone()]);
+        assert_eq!(conns(&loaded), vec![420, 5], "replaced in place");
+        assert_eq!(loaded[0].rules, newer.rules, "the whole later copy");
+
+        let mut loaded = vec![newer.clone()];
+        merge_flows(&mut loaded, vec![older]);
+        assert_eq!(conns(&loaded), vec![420], "an older copy is dropped");
+    }
+
+    #[test]
+    fn a_tie_on_last_seen_keeps_the_larger_count_then_the_existing_row() {
+        let mut loaded = vec![flow("/w/1", 443, 10)];
+        merge_flows(&mut loaded, vec![flow("/w/1", 443, 12)]);
+        assert_eq!(conns(&loaded), vec![12]);
+        let mut same = flow("/w/1", 443, 12);
+        same.rules = vec!["other".into()];
+        merge_flows(&mut loaded, vec![same]);
+        assert_eq!(loaded[0].rules, vec!["/orgs/1/rule_sets/1/sec_rules/1"]);
+        // A last_detected that does not parse is older than one that does.
+        let mut junk = flow("/w/1", 443, 99);
+        junk.last_detected = Some("junk".into());
+        merge_flows(&mut loaded, vec![junk]);
+        assert_eq!(conns(&loaded), vec![12]);
+    }
+
+    #[test]
+    fn another_first_detected_is_another_record() {
+        // The PCE starts new records at 00:00 UTC: yesterday's record of
+        // the same flow is a row of its own.
+        let mut yesterday = flow("/w/1", 443, 7);
+        yesterday.first_detected = Some("2026-10-12T00:00:00Z".into());
+        yesterday.last_detected = Some("2026-10-12T23:59:00Z".into());
+        let mut loaded = vec![flow("/w/1", 443, 420)];
+        merge_flows(&mut loaded, vec![yesterday]);
+        assert_eq!(conns(&loaded), vec![420, 7]);
+        assert_eq!(flow_key(&loaded[0]), flow_key(&loaded[1]), "one flow");
     }
 
     #[test]
@@ -153,6 +216,9 @@ mod tests {
         v.src = ep(Some("/w/9"), "10.0.0.1");
         variants.push(v);
         let mut v = base.clone();
+        v.src.ip = Some("10.9.9.9".into());
+        variants.push(v);
+        let mut v = base.clone();
         v.dst = ep(None, "10.0.0.3");
         variants.push(v);
         let mut v = base.clone();
@@ -167,6 +233,9 @@ mod tests {
         let mut v = base.clone();
         v.flow_direction = Some("inbound".into());
         variants.push(v);
+        let mut v = base.clone();
+        v.first_detected = None;
+        variants.push(v);
         let n = variants.len();
         let mut loaded = vec![base];
         merge_flows(&mut loaded, variants);
@@ -175,18 +244,7 @@ mod tests {
     }
 
     #[test]
-    fn a_side_is_its_href_else_its_ip() {
-        // Same href, different IP: one workload, one row.
-        let mut loaded = vec![flow("/w/1", 443, 1)];
-        let mut moved = flow("/w/1", 443, 2);
-        moved.src.ip = Some("10.9.9.9".into());
-        merge_flows(&mut loaded, vec![moved]);
-        assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded[0].num_connections, 3);
-    }
-
-    #[test]
-    fn duplicates_within_the_new_slice_fold_too_and_order_is_kept() {
+    fn duplicates_within_the_new_rows_fold_too_and_order_is_kept() {
         let mut loaded = vec![flow("/w/1", 443, 1)];
         merge_flows(
             &mut loaded,
@@ -202,32 +260,10 @@ mod tests {
             .collect();
         assert_eq!(
             rows,
-            vec![("/w/1".into(), 1), ("/w/2".into(), 5), ("/w/3".into(), 1)]
+            vec![("/w/1".into(), 1), ("/w/2".into(), 4), ("/w/3".into(), 1)]
         );
         let mut none = vec![];
         merge_flows(&mut none, vec![]);
         assert!(none.is_empty());
-    }
-
-    #[test]
-    fn unparseable_or_missing_times_lose() {
-        assert_eq!(
-            pick(None, Some("2026-10-08T01:00:00Z".into()), false).as_deref(),
-            Some("2026-10-08T01:00:00Z")
-        );
-        assert_eq!(
-            pick(
-                Some("junk".into()),
-                Some("2026-10-08T01:00:00Z".into()),
-                true
-            )
-            .as_deref(),
-            Some("2026-10-08T01:00:00Z")
-        );
-        assert_eq!(
-            pick(Some("2026-10-08T01:00:00Z".into()), None, true).as_deref(),
-            Some("2026-10-08T01:00:00Z")
-        );
-        assert_eq!(pick(None, None, true), None);
     }
 }

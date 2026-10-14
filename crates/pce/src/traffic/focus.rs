@@ -5,14 +5,14 @@
 //! `Pce::focused_traffic` runs the queries.
 use super::aggregate::{group_key, keys_or_default};
 use super::coverage::{Coverage, coverage};
-use super::merge::flow_key;
+use super::merge::merge_flows;
 use super::resolved::ResolvedFlow;
 use super::sections::Direction;
 use crate::models::{ActorMatch, Ref, TrafficQuery};
 use crate::resolve::NameIndex;
 use serde::Serialize;
 use std::borrow::Cow;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 /// The values of one group under the keys in force, in key order:
@@ -284,14 +284,13 @@ pub fn focus_flows<'a>(
     }
 }
 
-/// Two focused queries' flows as one result: `second`'s rows whose flow
-/// (both sides, service, process, user, decision, direction) `first`
-/// already holds are dropped, so a flow from the app to itself, which the
-/// `in` and the `out` query both return, counts once. Order: `first`, then
-/// the rest of `second`.
+/// Two focused queries' flows as one result, by the one merge rule
+/// (`merge_flows`): a record `first` already holds is not added again, so
+/// a flow from the app to itself, which the `in` and the `out` query both
+/// return, counts once, and a later version of it replaces the earlier.
+/// Order: `first`, then the rest of `second`.
 pub fn union_flows(mut first: Vec<ResolvedFlow>, second: Vec<ResolvedFlow>) -> Vec<ResolvedFlow> {
-    let seen: HashSet<_> = first.iter().map(flow_key).collect();
-    first.extend(second.into_iter().filter(|f| !seen.contains(&flow_key(f))));
+    merge_flows(&mut first, second);
     first
 }
 

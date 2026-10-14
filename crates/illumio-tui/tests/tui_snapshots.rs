@@ -236,50 +236,6 @@ fn traffic_flows_160x48_with_detail() {
     insta::assert_snapshot!("traffic_flows_160x48_detail", out);
 }
 
-#[test]
-fn traffic_merged_slices_80x24() {
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use illumio_tui::tui::msg::{Msg, QueryOutcome};
-    use illumio_tui::tui::test_support::model_with_window;
-    use illumio_tui::tui::update;
-    let mut m = model_with_window("1d");
-    let cmds = update(
-        &mut m,
-        Msg::Key(KeyEvent::new(KeyCode::Char('+'), KeyModifiers::NONE)),
-    );
-    let Some(illumio_tui::tui::Cmd::RunSlice { start, end, .. }) = cmds.first().cloned() else {
-        panic!("{cmds:?}");
-    };
-    let older = m.traffic.loaded_flows()[..3]
-        .iter()
-        .cloned()
-        .map(|mut f| {
-            f.last_detected = Some("2026-10-08T12:00:00Z".into());
-            f
-        })
-        .collect();
-    let seq = m.traffic.seq;
-    let filter = m.traffic.filter.clone();
-    update(
-        &mut m,
-        Msg::SliceDone {
-            seq,
-            result: Ok(QueryOutcome {
-                flows: older,
-                truncated: false,
-                matches_count: None,
-                elapsed: std::time::Duration::from_millis(900),
-                hit: false,
-                filter,
-                bounds: Some((start, end)),
-            }),
-        },
-    );
-    let out = render_to_string(&m, 80, 24);
-    assert!(out.contains("window 2d · cap 1000 · 2 slices"), "{out}");
-    insta::assert_snapshot!("traffic_merged_slices_80x24", out);
-}
-
 /// A truncated `1d` result whose flows span 4 minutes: the Result header
 /// says how much it covers.
 #[test]

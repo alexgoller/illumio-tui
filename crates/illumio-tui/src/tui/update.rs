@@ -12387,23 +12387,6 @@ mod window_step_tests {
     }
 
     #[test]
-    fn identical_flows_from_a_slice_fold_into_the_loaded_rows() {
-        let mut m = model_with_window("1d");
-        let loaded: Vec<ResolvedFlow> = m.traffic.loaded_flows().to_vec();
-        update(&mut m, key('+'));
-        let same = same_flows(&m, 3, "2026-10-08T12:00:00Z");
-        merge(&mut m, same, false, (ago(48), ago(24)));
-        let now = m.traffic.loaded_flows();
-        assert_eq!(now.len(), loaded.len(), "no new rows");
-        for (a, b) in loaded.iter().zip(now).take(3) {
-            assert_eq!(b.num_connections, 2 * a.num_connections);
-            assert_eq!(b.last_detected, a.last_detected, "the later one stays");
-            assert_eq!(b.first_detected.as_deref(), Some("2026-10-08T00:00:00Z"));
-        }
-        assert_eq!(now[3].num_connections, loaded[3].num_connections);
-    }
-
-    #[test]
     fn r_after_widening_confirms_the_whole_merged_window() {
         let mut m = model_with_window("1w");
         quiet(&mut m, key('+'));
