@@ -978,13 +978,12 @@ pub(crate) async fn fetch(
             ctx.pce.traffic(&q, ctx.cache_mode, &cancel, None).await?,
             idx,
         ),
-        None => {
-            let (r, idx) = tokio::join!(
-                ctx.pce.traffic(&q, ctx.cache_mode, &cancel, None),
-                ctx.pce.name_index(ctx.cache_mode)
-            );
-            (r?, idx?)
-        }
+        // The first error stops the other: a failed name index drops the
+        // traffic query's polls and download.
+        None => tokio::try_join!(
+            ctx.pce.traffic(&q, ctx.cache_mode, &cancel, None),
+            ctx.pce.name_index(ctx.cache_mode)
+        )?,
     };
     let mut f = Fetched {
         flows: resolve_flows(&result.value.flows, &idx),
