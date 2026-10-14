@@ -128,6 +128,10 @@ pub enum WriteIntent {
         name: String,
     },
     CreateRuleSet(RuleSetDraft),
+    /// `Ctrl-R` in a `w` form: planned only when no draft ruleset has the
+    /// name, checked with one fresh read at plan time; one that has it is
+    /// answered with `Plan::Noop` and its href.
+    CreateRuleSetIfMissing(RuleSetDraft),
     UpdateRuleSet {
         href: String,
         patch: RuleSetPatch,
@@ -184,6 +188,7 @@ impl WriteIntent {
             | WriteIntent::UpdateWorkload { .. }
             | WriteIntent::DeleteWorkload { .. } => pce::write::ObjectKind::Workload,
             WriteIntent::CreateRuleSet(_)
+            | WriteIntent::CreateRuleSetIfMissing(_)
             | WriteIntent::UpdateRuleSet { .. }
             | WriteIntent::DeleteRuleSet { .. } => pce::write::ObjectKind::RuleSet,
             WriteIntent::CreateRule { .. }
@@ -823,7 +828,9 @@ pub fn explain_unknown_ruleset(form: &Form, error: &str, scope_keys: &[String]) 
         return error.to_string();
     };
     let unknown = &error[..error.len() - rest.len()];
-    if scope.is_empty() {
+    if spans_scopes(form, scope_keys) {
+        format!("{unknown}{rest}; {SPANS_SCOPES}")
+    } else if scope.is_empty() {
         format!("{unknown}{rest}; {NO_SCOPE_TO_CREATE}")
     } else {
         format!(
@@ -845,7 +852,7 @@ pub fn new_ruleset_offer(
     scope_keys: &[String],
 ) -> Option<Box<RulesetOffer>> {
     unknown_ruleset_scope(form, error, scope_keys)
-        .filter(|(scope, _)| !scope.is_empty())
+        .filter(|(scope, _)| !scope.is_empty() && !spans_scopes(form, scope_keys))
         .map(|(scope, _)| {
             Box::new(RulesetOffer {
                 name: form.value("Ruleset").trim().to_string(),
@@ -868,6 +875,9 @@ pub fn new_ruleset_intent(
     if form.value("Ruleset").trim().is_empty() {
         return Err("type the new ruleset's name, then Ctrl-R".into());
     }
+    if spans_scopes(form, scope_keys) {
+        return Err(SPANS_SCOPES.into());
+    }
     let Some(WriteIntent::CreateRule {
         ruleset: RulesetTarget::Name(name),
         draft,
@@ -888,7 +898,31 @@ pub fn new_ruleset_intent(
         enabled: true,
         scopes: vec![scope],
     };
-    Ok((WriteIntent::CreateRuleSet(ruleset), draft))
+    Ok((WriteIntent::CreateRuleSetIfMissing(ruleset), draft))
+}
+
+/// A `w` form drafted from a row grouped on keys that leave out part of
+/// the scope: its flows span scopes, so no one ruleset scope fits them.
+fn spans_scopes(form: &Form, scope_keys: &[String]) -> bool {
+    form.flow
+        .as_deref()
+        .and_then(|f| f.group_keys.as_ref())
+        .is_some_and(|keys| !scope_keys.iter().all(|k| keys.contains(k)))
+}
+
+/// The Ruleset hint of a grouped row that spans scopes.
+const SPANS_SCOPES_HINT: &str = "the row spans scopes: name a ruleset (Ctrl-N)";
+
+/// Why `Ctrl-R` refuses a grouped row that spans scopes.
+const SPANS_SCOPES: &str = "this row groups flows of several scopes: Ctrl-R cannot scope one ruleset for them; name an existing ruleset (Ctrl-N)";
+
+/// The live draft rulesets named `name` (any case).
+pub fn rulesets_named<'s>(sets: &'s [RuleSet], name: &str) -> Vec<&'s RuleSet> {
+    let name = name.trim();
+    sets.iter()
+        .filter(|rs| rs.update_type.as_deref() != Some("delete"))
+        .filter(|rs| rs.name.eq_ignore_ascii_case(name))
+        .collect()
 }
 
 const RULESET_HINT: &str = "ruleset name or href";
@@ -1132,7 +1166,7 @@ pub fn ruleset_pick(f: &ResolvedFlow, p: FlowPrefill, idx: &NameIndex) -> Rulese
     };
 
     let hint = match covering.len() {
-        _ if !covers_scope => Cow::Owned(format!("scope {scope}")),
+        _ if !covers_scope => Cow::Borrowed(SPANS_SCOPES_HINT),
         0 => Cow::Owned(format!(
             "no ruleset covers {scope}: type a new name, Ctrl-R creates it"
         )),
@@ -3223,7 +3257,20 @@ mod tests {
         let app = vec!["app".to_string()];
         let f = grouped(&app);
         assert_eq!(f.value("Ruleset"), "");
-        assert_eq!(f.fields[0].hint, "scope app=shop, env=prod");
+        assert_eq!(f.fields[0].hint, SPANS_SCOPES_HINT);
+        // Ctrl-R cannot scope one ruleset for it, and says so.
+        let mut f = f;
+        set(&mut f, "Ruleset", "New-App");
+        assert_eq!(
+            new_ruleset_intent(&f, Some(&*fixture_index()), 5, &scope_keys).unwrap_err(),
+            SPANS_SCOPES
+        );
+        let e = r#"no ruleset named "New-App""#;
+        assert!(new_ruleset_offer(&f, e, &scope_keys).is_none());
+        assert_eq!(
+            explain_unknown_ruleset(&f, e, &scope_keys),
+            format!("{e}; {SPANS_SCOPES}")
+        );
         assert_eq!(f.value("Description"), "allow 10.1.4.9 to shop on 8443/tcp");
     }
 

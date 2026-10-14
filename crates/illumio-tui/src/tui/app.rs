@@ -817,6 +817,11 @@ async fn plan_intent(
         // The library's summary already names the workload.
         WriteIntent::DeleteWorkload { href, .. } => w.plan_delete_workload(&href).await?,
         WriteIntent::CreateRuleSet(d) => w.plan_create_rule_set(&d, IfMissing::Create).await?,
+        // The user's Ctrl-R: one fresh draft rulesets read finds a ruleset
+        // already named so (made since the form's list, or still loading).
+        WriteIntent::CreateRuleSetIfMissing(d) => {
+            w.plan_create_rule_set(&d, IfMissing::SkipExisting).await?
+        }
         WriteIntent::UpdateRuleSet { href, patch } => w.plan_update_rule_set(&href, &patch).await?,
         WriteIntent::DeleteRuleSet { href, name } => {
             named(w.plan_delete_rule_set(&href)?, "rule_set", &name)

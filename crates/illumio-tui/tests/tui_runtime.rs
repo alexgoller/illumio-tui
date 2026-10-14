@@ -1937,7 +1937,7 @@ async fn new_ruleset_session(
 ) -> (Model, Vec<(String, String, serde_json::Value)>, usize) {
     use illumio_tui::tui::model::Overlay;
     use illumio_tui::tui::test_support::model_with_flows;
-    mount_rule_sets(server, rule_sets_gets).await; // the name lookup + one reload per write
+    mount_rule_sets(server, rule_sets_gets).await; // the form's drafts + Ctrl-R's fresh check + one reload per write
     let ruleset = json!({
         "name": "New-App",
         "enabled": true,
@@ -2018,7 +2018,7 @@ async fn new_ruleset_session(
 #[tokio::test]
 async fn ctrl_r_creates_the_scoped_ruleset_then_the_rule_two_confirms_two_posts() {
     let server = MockServer::start().await;
-    let (model, confirms, audited) = new_ruleset_session(&server, 3, 'y').await;
+    let (model, confirms, audited) = new_ruleset_session(&server, 4, 'y').await;
     assert_eq!(
         confirms
             .iter()
@@ -2035,8 +2035,8 @@ async fn ctrl_r_creates_the_scoped_ruleset_then_the_rule_two_confirms_two_posts(
         "created /orgs/5/sec_policy/draft/rule_sets/102/sec_rules/1 (pending)"
     );
     assert_eq!(
-        model.stats.calls, 5,
-        "one rulesets GET for the name, two POSTs, one rulesets reload after each"
+        model.stats.calls, 6,
+        "the form's drafts (the name check reuses them), Ctrl-R's fresh check, two POSTs, one rulesets reload after each"
     );
     assert_eq!(writes_seen(&server).await, vec!["POST", "POST"]);
     assert_eq!(audited, 2);
@@ -2047,12 +2047,12 @@ async fn ctrl_r_creates_the_scoped_ruleset_then_the_rule_two_confirms_two_posts(
 #[tokio::test]
 async fn cancelling_the_rule_after_ctrl_r_sends_only_the_ruleset() {
     let server = MockServer::start().await;
-    let (model, confirms, audited) = new_ruleset_session(&server, 2, 'n').await;
+    let (model, confirms, audited) = new_ruleset_session(&server, 3, 'n').await;
     assert_eq!(confirms.len(), 2, "the rule's confirm was shown");
     assert_eq!(model.status.text, "cancelled, nothing sent");
     assert_eq!(
-        model.stats.calls, 3,
-        "the name lookup, the ruleset POST, its reload"
+        model.stats.calls, 4,
+        "the form's drafts, Ctrl-R's fresh check, the ruleset POST, its reload"
     );
     assert_eq!(writes_seen(&server).await, vec!["POST"]);
     assert_eq!(audited, 1);

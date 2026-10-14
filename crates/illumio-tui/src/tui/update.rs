@@ -785,8 +785,8 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     let mut cmds = reload_after_write(model, kind);
                     let rule_waits =
                         rule_after.is_some() && kind == pce::write::ObjectKind::RuleSet;
-                    if !rule_waits && model.overlay == Overlay::None {
-                        close_form(model);
+                    if !rule_waits {
+                        finish_form(model);
                     }
                     if let Some((draft, form)) = rule_after
                         && kind == pce::write::ObjectKind::RuleSet
@@ -803,6 +803,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     cmds
                 }
                 Ok(Outcome::Skipped { reason, .. }) => {
+                    finish_form(model);
                     model.status = StatusLine::info(format!("skipped: {reason}"));
                     Vec::new()
                 }
@@ -832,10 +833,27 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::Planned(result) => {
             model.writes.in_flight = false;
             let flow_form = model.traffic.rule_form.take();
-            // A ruleset `Ctrl-R` asked for keeps its rule only up to its confirm.
-            if !matches!(&result, Ok((Plan::Send { .. }, _))) || model.overlay != Overlay::None {
-                model.policy.rule_after_ruleset = None;
+            let mut rule_after = model.policy.rule_after_ruleset.take();
+            // The ruleset `Ctrl-R` asked for exists after all (the fresh read
+            // found it): the rule goes into it, through its own confirm.
+            if model.overlay == Overlay::None
+                && let Ok((Plan::Noop { existing_href, .. }, _)) = &result
+                && let Some((draft, form)) = rule_after.take()
+            {
+                let note = format!(
+                    "ruleset {:?} exists: adding the rule to it",
+                    form.value("Ruleset").trim()
+                );
+                model.status = StatusLine::info(note.clone());
+                model.policy.confirm_note = Some(note);
+                model.traffic.rule_form = Some(form);
+                model.writes.in_flight = true;
+                return vec![Cmd::PlanWrite(WriteIntent::CreateRule {
+                    ruleset: RulesetTarget::Href(existing_href.clone()),
+                    draft,
+                })];
             }
+            let note = model.policy.confirm_note.take();
             match result {
                 // Keys typed while the plan was on its way belong to the
                 // overlay they went to; a `y` there must not confirm this.
@@ -844,14 +862,20 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     model.status = StatusLine::warn("request discarded, nothing sent");
                 }
                 Ok((mut plan @ Plan::Send { .. }, kind)) => {
+                    // A ruleset `Ctrl-R` asked for keeps its rule up to its confirm.
+                    model.policy.rule_after_ruleset = rule_after;
                     if kind == pce::write::ObjectKind::Revert {
                         name_rulesets(&mut plan, &model.policy.raw);
                     }
                     model.policy.revert_typed.clear();
-                    model.status = StatusLine::info(if kind == pce::write::ObjectKind::Revert {
+                    let review = if kind == pce::write::ObjectKind::Revert {
                         "review the revert: type revert and Enter to send it, Esc cancels"
                     } else {
                         "review the request: y sends it, n cancels"
+                    };
+                    model.status = StatusLine::info(match note {
+                        Some(n) => format!("{n} · {review}"),
+                        None => review.to_string(),
                     });
                     model.overlay = Overlay::ConfirmWrite {
                         plan,
@@ -864,27 +888,23 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 // with nothing pending, an update whose fields already match
                 // (a stale form, a retyped entry), a create that exists.
                 Ok((Plan::Noop { reason, .. }, _)) => {
-                    if model.overlay == Overlay::None {
-                        close_form(model);
-                    }
+                    finish_form(model);
                     model.status = StatusLine::info(reason);
                 }
                 Err(e) => {
                     // A `w` form comes back with the planner's answer (an
-                    // unknown ruleset name lists similar ones), fields as typed.
-                    if let Some(mut f) = flow_form
+                    // unknown ruleset name lists similar ones, a name several
+                    // rulesets share lists them), fields as typed: the one
+                    // submitted, or the one `Ctrl-R` carried.
+                    let form = flow_form.or(rule_after.map(|(_, f)| f));
+                    if let Some(mut f) = form
                         && model.overlay == Overlay::None
                     {
                         // An unknown name: the error says what Ctrl-R creates
-                        // (or, without scope labels, what to do instead).
+                        // (or what to do instead); the hint row shows the offer.
                         let keys = &model.limits.scope_keys;
                         f.offers_ruleset = edit::new_ruleset_offer(&f, &e, keys);
                         let e = edit::explain_unknown_ruleset(&f, &e, keys);
-                        if let Some(o) = &f.offers_ruleset
-                            && let Some(field) = f.fields.iter_mut().find(|x| x.label == "Ruleset")
-                        {
-                            field.hint = format!("Ctrl-R: create it, scoped {}", o.scope).into();
-                        }
                         f.error = Some(e.clone());
                         model.overlay = Overlay::Form(f);
                         fail(model, "write", &e, false);
@@ -1459,9 +1479,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             }
             // The ruleset is planned now; the rule waits for its href. A
             // name a loaded draft ruleset has gets the rule instead.
-            FormEvent::NewRuleset => match model
-                .draft_rulesets()
-                .and_then(|sets| edit::ruleset_href_named(sets, form.value("Ruleset")).ok())
+            FormEvent::NewRuleset => match existing_ruleset(model, form.value("Ruleset"))
                 .map_or_else(
                     || {
                         edit::new_ruleset_intent(
@@ -1471,12 +1489,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                             &model.limits.scope_keys,
                         )
                     },
-                    |_| {
-                        Err(format!(
-                            "ruleset {:?} exists: Enter adds the rule to it",
-                            form.value("Ruleset").trim()
-                        ))
-                    },
+                    Err,
                 ) {
                 Ok((intent, draft)) => {
                     model.policy.rule_after_ruleset = Some((draft, form));
@@ -2555,6 +2568,38 @@ fn app_rule_key(model: &mut Model) -> Vec<Cmd> {
     let cmds = begin_edit(model, EditIntent::RuleFromFlow(Box::new(flow)));
     model.form_from_app = matches!(model.overlay, Overlay::Form(_));
     cmds
+}
+
+/// Why `Ctrl-R` must not create `name`: a loaded draft ruleset (any case)
+/// has it already, or several do. `None` when none does, or while the
+/// drafts are not loaded (the plan then reads them fresh).
+fn existing_ruleset(model: &Model, name: &str) -> Option<String> {
+    let hits = edit::rulesets_named(model.draft_rulesets()?, name);
+    let name = name.trim();
+    match hits.as_slice() {
+        [] => None,
+        [_] => Some(format!(
+            "ruleset {name:?} exists: Enter adds the rule to it"
+        )),
+        many => Some(format!(
+            "{name:?} names several rulesets: {}; use the href",
+            many.iter()
+                .map(|rs| rs.href.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+    }
+}
+
+/// The plan or write a form led to has ended: back where the form came
+/// from when nothing else is open (`close_form`); the way back is
+/// forgotten either way.
+fn finish_form(model: &mut Model) {
+    if model.overlay == Overlay::None {
+        close_form(model);
+    } else {
+        model.form_from_app = false;
+    }
 }
 
 /// A form is done, or the plan and confirm it led to: back to the app
@@ -5285,7 +5330,17 @@ mod tests {
     /// Consumers and Services, and the row.
     fn w_form_of_row(m: &mut Model) -> (String, String, String, pce::traffic::FlowGroup) {
         let row = m.traffic.services.selected_item().unwrap().clone();
-        assert!(update(m, key('w')).len() <= 1, "the draft rulesets, once");
+        // The draft rulesets, once: none while that load is on its way.
+        let loading = m.policy.loading;
+        let want = if loading {
+            Vec::new()
+        } else {
+            vec![Cmd::LoadRuleSets {
+                scope: PolicyScope::Draft,
+                mode: CacheMode::Use,
+            }]
+        };
+        assert_eq!(update(m, key('w')), want);
         let Overlay::Form(f) = &m.overlay else {
             panic!("{:?} {}", m.overlay, m.status.text)
         };
@@ -10664,7 +10719,7 @@ mod tests {
             other => panic!("{other:?}"),
         }
         let cmds = update(&mut m, ctrl_key('r'));
-        let [Cmd::PlanWrite(WriteIntent::CreateRuleSet(d))] = cmds.as_slice() else {
+        let [Cmd::PlanWrite(WriteIntent::CreateRuleSetIfMissing(d))] = cmds.as_slice() else {
             panic!("{cmds:?}")
         };
         assert_eq!(d.name, "New-App");
@@ -10757,7 +10812,7 @@ mod tests {
         }
         let cmds = update(&mut m, ctrl_key('r'));
         assert!(
-            matches!(cmds.as_slice(), [Cmd::PlanWrite(WriteIntent::CreateRuleSet(d))] if d.name == "New-AppX"),
+            matches!(cmds.as_slice(), [Cmd::PlanWrite(WriteIntent::CreateRuleSetIfMissing(d))] if d.name == "New-AppX"),
             "{cmds:?}"
         );
         assert!(m.policy.rule_after_ruleset.is_some());
@@ -14157,6 +14212,56 @@ mod app_tests {
     }
 
     #[test]
+    fn the_way_back_to_the_overlay_never_outlives_its_write() {
+        use crate::tui::test_support::label_post_plan;
+        let mut m = everything();
+        m.writes = WritesState::on();
+        quiet(&mut m, key('A'));
+        quiet(&mut m, key('j'));
+        quiet(&mut m, key('j'));
+        quiet(&mut m, key('w'));
+        let Overlay::Form(f) = &mut m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        for (label, value) in [("Ruleset", "Shop-Prod"), ("Services", "443/tcp")] {
+            f.fields
+                .iter_mut()
+                .find(|x| x.label == label)
+                .unwrap()
+                .value = value.into();
+        }
+        update(&mut m, kc(KeyCode::Enter));
+        quiet(
+            &mut m,
+            Msg::Planned(Ok((label_post_plan(), pce::write::ObjectKind::Rule))),
+        );
+        assert_eq!(update(&mut m, key('y')).len(), 1);
+        // Help opened while the write is on its way: it stays, the way back goes.
+        m.overlay = Overlay::Help;
+        update(
+            &mut m,
+            Msg::WriteDone {
+                kind: pce::write::ObjectKind::Rule,
+                method: Some(pce::WriteMethod::Post),
+                result: Ok(pce::write::Outcome::Skipped {
+                    existing_href: "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/9".into(),
+                    reason: "exists".into(),
+                }),
+            },
+        );
+        assert_eq!(m.overlay, Overlay::Help);
+        assert!(!m.form_from_app);
+        // A later provision's `n` closes to the screen, not the overlay.
+        m.overlay = Overlay::None;
+        quiet(
+            &mut m,
+            Msg::Planned(Ok((label_post_plan(), pce::write::ObjectKind::Provision))),
+        );
+        quiet(&mut m, key('n'));
+        assert_eq!(m.overlay, Overlay::None);
+    }
+
+    #[test]
     fn the_peer_panel_in_force_is_one_the_direction_shows() {
         let mut m = everything();
         m.writes = WritesState::on();
@@ -15401,15 +15506,15 @@ mod rule_form_ruleset_tests {
         update(&mut m, Msg::Planned(Err(e.into())));
         let want = r#"no ruleset named "New-App": Ctrl-R creates it scoped app=shop, env=prod; similar: Shop-Prod"#;
         assert_eq!(form(&m).error.as_deref(), Some(want));
-        assert_eq!(
-            form(&m).fields[0].hint,
-            "Ctrl-R: create it, scoped app=shop, env=prod"
+        assert!(
+            form(&m).ruleset_offer_armed().is_some(),
+            "the hint row shows the offer"
         );
         assert_eq!(m.status.text, format!("write: {want}"));
         // Ctrl-R plans the ruleset, the rule waits for it.
         let cmds = update(&mut m, ctrl('r'));
         assert!(
-            matches!(cmds.as_slice(), [Cmd::PlanWrite(WriteIntent::CreateRuleSet(d))] if d.name == "New-App"),
+            matches!(cmds.as_slice(), [Cmd::PlanWrite(WriteIntent::CreateRuleSetIfMissing(d))] if d.name == "New-App"),
             "{cmds:?}"
         );
         assert!(m.policy.rule_after_ruleset.is_some());
@@ -15422,8 +15527,120 @@ mod rule_form_ruleset_tests {
         }
         let cmds = update(&mut m, ctrl('r'));
         assert!(
-            matches!(cmds.as_slice(), [Cmd::PlanWrite(WriteIntent::CreateRuleSet(d))] if d.name == "Other"),
+            matches!(cmds.as_slice(), [Cmd::PlanWrite(WriteIntent::CreateRuleSetIfMissing(d))] if d.name == "Other"),
             "{cmds:?}"
         );
+    }
+
+    /// Ctrl-R on `name` in the `w` form; returns the commands.
+    fn ctrl_r_on(m: &mut Model, name: &str) -> Vec<Cmd> {
+        update(m, ctrl('u'));
+        for c in name.chars() {
+            update(m, key(c));
+        }
+        update(m, ctrl('r'))
+    }
+
+    #[test]
+    fn ctrl_r_on_a_ruleset_that_exists_adds_the_rule_to_it_instead() {
+        use crate::tui::edit::{RulesetTarget, WriteIntent};
+        use crate::tui::test_support::label_post_plan;
+        // The drafts still loading: the plan's fresh read decides.
+        let (mut m, _) = w_form();
+        let cmds = ctrl_r_on(&mut m, "Shop-Prod");
+        assert!(
+            matches!(
+                cmds.as_slice(),
+                [Cmd::PlanWrite(WriteIntent::CreateRuleSetIfMissing(_))]
+            ),
+            "{cmds:?}"
+        );
+        // It exists: the rule is planned into it, nothing is created.
+        let existing = "/orgs/5/sec_policy/draft/rule_sets/100";
+        let cmds = update(
+            &mut m,
+            Msg::Planned(Ok((
+                pce::write::Plan::Noop {
+                    existing_href: existing.into(),
+                    reason: "rule_set Shop-Prod exists".into(),
+                },
+                pce::write::ObjectKind::RuleSet,
+            ))),
+        );
+        assert!(
+            matches!(
+                cmds.as_slice(),
+                [Cmd::PlanWrite(WriteIntent::CreateRule { ruleset: RulesetTarget::Href(h), .. })]
+                    if h == existing
+            ),
+            "{cmds:?}"
+        );
+        assert_eq!(
+            m.status.text,
+            r#"ruleset "Shop-Prod" exists: adding the rule to it"#
+        );
+        assert!(m.writes.in_flight);
+        assert!(m.policy.rule_after_ruleset.is_none());
+        // Its confirm says so; nothing is sent before `y`.
+        update(
+            &mut m,
+            Msg::Planned(Ok((label_post_plan(), pce::write::ObjectKind::Rule))),
+        );
+        assert!(matches!(m.overlay, Overlay::ConfirmWrite { .. }));
+        assert_eq!(
+            m.status.text,
+            r#"ruleset "Shop-Prod" exists: adding the rule to it · review the request: y sends it, n cancels"#
+        );
+        // A stale list (the name made elsewhere since): the same path.
+        let (mut m, _) = w_form();
+        update(&mut m, drafts_loaded(drafts()));
+        let cmds = ctrl_r_on(&mut m, "Made-Elsewhere");
+        assert!(
+            matches!(cmds.as_slice(), [Cmd::PlanWrite(WriteIntent::CreateRuleSetIfMissing(d))] if d.name == "Made-Elsewhere"),
+            "{cmds:?}"
+        );
+        let cmds = update(
+            &mut m,
+            Msg::Planned(Ok((
+                pce::write::Plan::Noop {
+                    existing_href: "/orgs/5/sec_policy/draft/rule_sets/7".into(),
+                    reason: "rule_set Made-Elsewhere exists".into(),
+                },
+                pce::write::ObjectKind::RuleSet,
+            ))),
+        );
+        assert_eq!(cmds.len(), 1, "the rule, into rule_sets/7");
+    }
+
+    #[test]
+    fn ctrl_r_refuses_a_name_several_rulesets_share() {
+        let (mut m, _) = w_form();
+        let mut sets = drafts();
+        let mut twin = sets[0].clone();
+        twin.href = "/orgs/5/sec_policy/draft/rule_sets/102".into();
+        twin.name = "shop-prod".into();
+        sets.push(twin);
+        update(&mut m, drafts_loaded(sets));
+        // Loaded: refused without a request, both hrefs named.
+        assert!(ctrl_r_on(&mut m, "SHOP-PROD").is_empty());
+        assert_eq!(
+            form(&m).error.as_deref(),
+            Some(
+                r#""SHOP-PROD" names several rulesets: /orgs/5/sec_policy/draft/rule_sets/100, /orgs/5/sec_policy/draft/rule_sets/102; use the href"#
+            )
+        );
+        // One the list has: refused as existing.
+        assert!(ctrl_r_on(&mut m, "global-infra").is_empty());
+        assert_eq!(
+            form(&m).error.as_deref(),
+            Some(r#"ruleset "global-infra" exists: Enter adds the rule to it"#)
+        );
+        // Not loaded: the planner's own "several" refusal brings the form back.
+        let (mut m, _) = w_form();
+        assert_eq!(ctrl_r_on(&mut m, "Dup").len(), 1);
+        let e = r#""Dup" matches several rulesets: /a, /b"#;
+        update(&mut m, Msg::Planned(Err(e.into())));
+        assert_eq!(form(&m).error.as_deref(), Some(e));
+        assert_eq!(form(&m).value("Ruleset"), "Dup", "as typed");
     }
 }
