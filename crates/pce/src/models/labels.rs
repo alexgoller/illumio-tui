@@ -1,6 +1,8 @@
 //! Labels and the policy objects rules refer to by href.
 use super::common::{Ref, proto_name};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Label {
@@ -14,6 +16,38 @@ pub struct Label {
     pub created_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
+    /// What holds the label, as the PCE says: only with `usage=true`
+    /// (`Pce::labels_with_usage`), and absent from a PCE that ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<LabelUsageFlags>,
+}
+
+/// A label's `usage` object from `GET /labels?usage=true`: one flag per
+/// kind of object that can hold a label (`workload`, `rule`, `ruleset`,
+/// `label_group`, `pairing_profile`, `permission`, `enforcement_boundary`,
+/// `container_workload_profile`, `virtual_service`, ...). Kept as a map so
+/// kinds a newer PCE adds parse, count and print too.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct LabelUsageFlags(pub BTreeMap<String, serde_json::Value>);
+
+impl LabelUsageFlags {
+    /// The kinds holding the label, sorted. A flag counts unless it is
+    /// `false`, `null` or `0`, so an unexpected value never hides a use.
+    pub fn kinds(&self) -> Vec<&str> {
+        self.0
+            .iter()
+            .filter(|(_, v)| {
+                !matches!(v, Value::Bool(false) | Value::Null) && v.as_f64() != Some(0.0)
+            })
+            .map(|(k, _)| k.as_str())
+            .collect()
+    }
+
+    /// Whether anything holds the label; unused means every flag is false.
+    pub fn is_used(&self) -> bool {
+        !self.kinds().is_empty()
+    }
 }
 
 impl Label {
@@ -187,6 +221,46 @@ mod tests {
         assert!(deleted.is_deleted());
         assert_eq!(deleted.value, "");
         assert_eq!(deleted.display(), "app=");
+    }
+
+    #[test]
+    fn usage_flags_parse_and_unknown_kinds_are_kept() {
+        let labels: Vec<Label> =
+            serde_json::from_str(include_str!("../../../../fixtures/labels_usage.json")).unwrap();
+        let u = |i: usize| labels[i].usage.as_ref().unwrap();
+        assert_eq!(u(0).kinds(), vec!["rule", "workload"]);
+        assert_eq!(
+            u(4).kinds(),
+            vec!["pairing_profile", "permission"],
+            "held by what our own counts never read"
+        );
+        assert!(u(4).is_used());
+        assert!(!u(6).is_used() && u(6).kinds().is_empty());
+        let json = serde_json::to_value(&labels[6]).unwrap();
+        assert_eq!(
+            json["usage"]["a_kind_from_a_newer_pce"], false,
+            "an unknown kind survives a round trip"
+        );
+        // Without `usage=true` the field is absent and stays so.
+        let plain: Vec<Label> =
+            serde_json::from_str(include_str!("../../../../fixtures/labels.json")).unwrap();
+        assert!(plain.iter().all(|l| l.usage.is_none()));
+        assert!(
+            serde_json::to_value(&plain[0])
+                .unwrap()
+                .get("usage")
+                .is_none()
+        );
+        // A newer PCE's flag that is not a plain boolean: anything but
+        // false, null or 0 counts as a use, so it never hides one.
+        let odd: LabelUsageFlags = serde_json::from_value(serde_json::json!({
+            "rule": false, "zero": 0, "none": null, "count": 2, "detail": {"x": 1}
+        }))
+        .unwrap();
+        assert_eq!(odd.kinds(), vec!["count", "detail"]);
+        let unused: LabelUsageFlags =
+            serde_json::from_value(serde_json::json!({"rule": false, "zero": 0})).unwrap();
+        assert!(!unused.is_used());
     }
 
     #[test]

@@ -824,3 +824,37 @@ async fn a_timeline_bucket_counts_self_traffic_once_in_both_directions() {
     assert!(again.hit, "a repeated bucket is answered from its slot");
     assert_eq!(again.connections, 313);
 }
+
+#[tokio::test]
+async fn labels_with_usage_asks_for_usage_and_caches_apart_from_the_plain_list() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/labels"))
+        .and(query_param("usage", "true"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/labels_usage.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/labels"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/labels.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let p = pce_for(&server);
+    let with = p.labels_with_usage(CacheMode::Use).await.unwrap();
+    assert!(with.value.iter().all(|l| l.usage.is_some()));
+    assert!(p.labels_with_usage(CacheMode::Use).await.unwrap().hit);
+    let plain = p.labels(CacheMode::Use).await.unwrap();
+    assert!(!plain.hit, "the plain list is its own cache entry");
+    assert!(plain.value.iter().all(|l| l.usage.is_none()));
+    assert_eq!(p.stats().calls, 2);
+}
