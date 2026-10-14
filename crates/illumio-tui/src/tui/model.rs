@@ -4171,7 +4171,8 @@ pub struct WorkloadFilters {
     pub enforcement: Option<&'static str>,
     /// With a VEN (`true`) or without (`false`).
     pub managed: Option<bool>,
-    /// The VEN is offline ([`Workload::is_offline`]).
+    /// The VEN is offline: [`VenHealth::Offline`] (`online` false or a
+    /// stale heartbeat), as `workloads --offline`.
     pub offline: bool,
     /// Some label model key has no label ([`Workload::missing_label_keys`]).
     pub unlabeled: bool,
@@ -4206,7 +4207,7 @@ impl WorkloadFilters {
         let w = &v.workload;
         self.enforcement.is_none_or(|e| w.enforcement() == Some(e))
             && self.managed.is_none_or(|m| m != w.is_unmanaged())
-            // `health` is `ven_health` at the row's clock: `is_offline`.
+            // `health` is `ven_health` at the row's clock.
             && (!self.offline || v.health == VenHealth::Offline)
             && (!self.unlabeled || !v.missing.is_empty())
     }

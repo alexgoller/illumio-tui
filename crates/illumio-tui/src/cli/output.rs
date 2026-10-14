@@ -93,6 +93,10 @@ pub struct Meta {
     /// (`offline`, `unlabeled (app, env, role)`, `unhealthy`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_filter: Option<Vec<String>>,
+    /// Warnings about the arguments that did not stop the command (also
+    /// printed to stderr): `workloads --unlabeled` with an unknown key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warnings: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -429,6 +433,7 @@ mod tests {
             }),
             usage: None,
             local_filter: None,
+            warnings: None,
         };
         assert!(meta_line(&meta).contains("POST /orgs/5/labels → 201"));
     }

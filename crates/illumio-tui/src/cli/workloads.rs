@@ -332,6 +332,32 @@ impl WorkloadRow {
     }
 }
 
+/// A warning for each named `--unlabeled` key that is neither in the label
+/// `model` nor on any `seen` workload label: likely a typo, as every
+/// workload is then missing it. Keys match exactly, as label keys do;
+/// one that differs only in case is named.
+fn unknown_key_warnings(named: &[String], model: &[String], seen: &[&str]) -> Vec<String> {
+    named
+        .iter()
+        .filter(|k| !model.contains(k) && !seen.contains(&k.as_str()))
+        .map(|k| {
+            let near = model
+                .iter()
+                .map(String::as_str)
+                .chain(seen.iter().copied())
+                .find(|s| s.eq_ignore_ascii_case(k));
+            match near {
+                Some(n) => format!(
+                    "unknown label key {k}: not in the label model or on any workload; did you mean {n}?"
+                ),
+                None => format!(
+                    "unknown label key {k}: not in the label model or on any workload, so every workload is missing it"
+                ),
+            }
+        })
+        .collect()
+}
+
 /// `--unlabeled`'s keys: the ones named (blanks dropped, repeats once),
 /// else `model` (the profile's scope keys, then its tier key).
 fn unlabeled_keys(named: &[String], model: &[String]) -> Vec<String> {
@@ -425,6 +451,11 @@ impl TableRows for Vec<WorkloadRow> {
                     .heartbeat_age_secs
                     .map(|s| s.to_string())
                     .unwrap_or_default();
+                if let Some(m) = &r.missing_labels
+                    && let Some(cell) = row.last_mut()
+                {
+                    *cell = join_list(m);
+                }
                 row.push(r.workload.enforcement_mode.clone().unwrap_or_default());
                 row
             })
@@ -495,6 +526,20 @@ pub async fn run(ctx: &Context, args: &WorkloadsArgs) -> Result<(), CliError> {
         filter.labels = vec![hrefs];
     }
     let c = ctx.pce.workloads(&filter, ctx.cache_mode).await?;
+    let warnings = match &unlabeled {
+        Some(keys) if keys.as_slice() != order.first() => {
+            let seen: Vec<&str> = c
+                .value
+                .iter()
+                .flat_map(|w| w.labels.iter().filter_map(|l| l.key.as_deref()))
+                .collect();
+            unknown_key_warnings(keys, order.first(), &seen)
+        }
+        _ => Vec::new(),
+    };
+    for w in &warnings {
+        eprintln!("warning: {w}");
+    }
     let now = jiff::Timestamp::now();
     let rows: Vec<WorkloadRow> = c
         .value
@@ -519,12 +564,13 @@ pub async fn run(ctx: &Context, args: &WorkloadsArgs) -> Result<(), CliError> {
                     VenHealth::Warning | VenHealth::Error | VenHealth::Offline
                 )
         })
-        // `health` is `ven_health` at `now`: `Workload::is_offline`.
+        // Offline is the VEN health, as the app's `o`.
         .filter(|r| !args.offline || r.health == VenHealth::Offline)
         .filter(|r| r.missing_labels.as_ref().is_none_or(|m| !m.is_empty()))
         .collect();
     let mut meta = ctx.meta(cache_label(c.hit, ctx.cache_mode), c.truncated, None);
     meta.local_filter = local_filter(args.unhealthy, args.offline, unlabeled.as_deref());
+    meta.warnings = Some(warnings).filter(|w| !w.is_empty());
     ctx.emit_meta(&rows, &meta)
 }
 

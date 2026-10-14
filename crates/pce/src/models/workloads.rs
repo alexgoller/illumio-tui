@@ -309,13 +309,6 @@ impl Workload {
         Some(now.duration_since(hb).unsigned_abs())
     }
 
-    /// The VEN is offline: [`VenHealth::Offline`], so `online: false` or a
-    /// heartbeat older than [`HEARTBEAT_OFFLINE`]. A workload without a VEN
-    /// is never offline.
-    pub fn is_offline(&self, now: jiff::Timestamp) -> bool {
-        self.ven_health(now) == VenHealth::Offline
-    }
-
     pub fn ven_health(&self, now: jiff::Timestamp) -> VenHealth {
         if self.is_unmanaged() {
             return VenHealth::Unmanaged;
@@ -688,17 +681,19 @@ mod tests {
 
     #[test]
     fn offline_is_the_offline_ven_health() {
+        // The filters' offline (the app's `o`, `workloads --offline`).
         let w = fixture();
         let now: jiff::Timestamp = "2026-10-10T08:00:00Z".parse().unwrap();
-        let offline: Vec<bool> = w.iter().map(|x| x.is_offline(now)).collect();
+        let is_offline = |x: &Workload, t| x.ven_health(t) == VenHealth::Offline;
+        let offline: Vec<bool> = w.iter().map(|x| is_offline(x, now)).collect();
         assert_eq!(offline, [false, true, false, false]);
         // A stale heartbeat is offline though the PCE still says online.
         let later: jiff::Timestamp = "2026-10-10T09:00:00Z".parse().unwrap();
         assert_eq!(w[0].online, Some(true));
-        assert!(w[0].is_offline(later));
+        assert!(is_offline(&w[0], later));
         // Unmanaged is never offline: there is no VEN to be offline.
         let mut nas = w[2].clone();
         nas.online = Some(false);
-        assert!(!nas.is_offline(now));
+        assert!(!is_offline(&nas, now));
     }
 }

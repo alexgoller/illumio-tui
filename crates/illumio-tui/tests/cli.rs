@@ -641,7 +641,7 @@ async fn workloads_offline_and_unlabeled_filter_locally_after_one_request() {
                 .set_body_string(include_str!("../../../fixtures/workloads.json"))
                 .insert_header("Content-Type", "application/json"),
         )
-        .expect(4)
+        .expect(5)
         .mount(&server)
         .await;
     let hosts = |out: &Value| -> Vec<String> {
@@ -672,15 +672,31 @@ async fn workloads_offline_and_unlabeled_filter_locally_after_one_request() {
         json!(["unlabeled (app, env, role)"])
     );
     // Named keys; a workload with all of them is kept out.
-    let out = stdout_json(
-        cmd(&server)
-            .args(["workloads", "--unlabeled", "env,os"])
-            .assert()
-            .success(),
-    );
+    let a = cmd(&server)
+        .args(["workloads", "--unlabeled", "env,os,ENV"])
+        .assert()
+        .success();
+    let stderr = String::from_utf8_lossy(&a.get_output().stderr).to_string();
+    let out = stdout_json(a);
     assert_eq!(hosts(&out).len(), 4, "no workload has an os label");
-    assert_eq!(out["data"][0]["missing_labels"], json!(["os"]));
-    assert_eq!(out["meta"]["local_filter"], json!(["unlabeled (env, os)"]));
+    assert_eq!(out["data"][0]["missing_labels"], json!(["os", "ENV"]));
+    assert_eq!(
+        out["meta"]["local_filter"],
+        json!(["unlabeled (env, os, ENV)"])
+    );
+    // Keys match exactly, as label keys do everywhere; one that is neither
+    // in the label model nor on any workload is likely a typo.
+    let warnings = out["meta"]["warnings"].as_array().unwrap();
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+    assert!(
+        warnings[0]
+            .as_str()
+            .unwrap()
+            .contains("unknown label key os")
+    );
+    assert!(warnings[1].as_str().unwrap().contains("did you mean env"));
+    assert!(stderr.contains("unknown label key os"), "{stderr}");
+    assert!(out["meta"].get("warnings").is_some());
     // Offline: the fixture's heartbeats are days old, so every VEN; never
     // the workload without one.
     let out = stdout_json(
@@ -698,7 +714,18 @@ async fn workloads_offline_and_unlabeled_filter_locally_after_one_request() {
         "only with --unlabeled"
     );
     assert_eq!(out["meta"]["local_filter"], json!(["offline"]));
+    assert!(
+        out["meta"].get("warnings").is_none(),
+        "none without --unlabeled keys"
+    );
     // Table: the missing column, and the meta line names the local filter.
+    cmd(&server)
+        .args(["workloads", "--unlabeled", "--csv"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains(",missing,").and(predicate::str::contains("app; env; role")),
+        );
     cmd(&server)
         .args(["workloads", "--unlabeled", "--table"])
         .assert()
@@ -707,7 +734,7 @@ async fn workloads_offline_and_unlabeled_filter_locally_after_one_request() {
         .stderr(predicate::str::contains(
             "filtered locally: unlabeled (app, env, role)",
         ));
-    // A contradiction: no request (the mock expects exactly four).
+    // A contradiction: no request (the mock expects exactly five).
     cmd(&server)
         .args(["workloads", "--offline", "--online", "true"])
         .assert()

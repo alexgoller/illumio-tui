@@ -77,6 +77,7 @@ impl Context {
             write: None,
             usage: None,
             local_filter: None,
+            warnings: None,
         }
     }
 
