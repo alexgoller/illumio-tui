@@ -2503,6 +2503,7 @@ fn start_timeline(model: &mut Model, asked: u32) -> Vec<Cmd> {
     }
     let t = &model.traffic;
     let bounds = t.window_bounds();
+    let names = model.index().cloned();
     let Some(v) = model.app_view.as_mut() else {
         return Vec::new();
     };
@@ -2511,13 +2512,14 @@ fn start_timeline(model: &mut Model, asked: u32) -> Vec<Cmd> {
         .as_ref()
         .is_some_and(|e| e.is_for(&v.focus, &t.filter, bounds))
     {
-        let Some((start, end)) = bounds else {
+        let (Some((start, end)), Some(names)) = (bounds, names) else {
             return Vec::new();
         };
         v.exact = Some(ExactTimeline::new(
             pce::traffic::bucket_plan(start, end),
             v.focus.clone(),
             t.filter.clone(),
+            names,
         ));
     }
     next_timeline_bucket(model)
@@ -2556,6 +2558,8 @@ fn next_timeline_bucket(model: &mut Model) -> Vec<Cmd> {
         ticket: v.ticket,
         index,
         filter: e.filter.clone(),
+        base: e.base.clone(),
+        names: e.index.clone(),
         focus: e.focus.clone(),
         start: b.start,
         end: b.end,
@@ -2596,6 +2600,9 @@ fn timeline_bucket_done(
     let (loaded, total) = (e.loaded(), e.buckets.len());
     match result {
         Ok(o) => {
+            if e.base.is_none() {
+                e.base = o.base;
+            }
             e.set(index, o.connections, o.truncated);
             if o.hit {
                 v.cached += e.focus.direction.query_count();
@@ -15108,6 +15115,7 @@ mod timeline_tests {
             connections,
             truncated: false,
             hit: false,
+            base: None,
         })
     }
 
@@ -15541,6 +15549,7 @@ mod timeline_tests {
                     connections: 1,
                     truncated: i == 3,
                     hit: i < 2,
+                    base: None,
                 }),
             );
             cmds = update(&mut m, msg);
@@ -15561,5 +15570,145 @@ mod timeline_tests {
             "{}",
             m.status.text
         );
+    }
+
+    #[test]
+    fn the_base_query_and_the_index_are_resolved_once_per_run() {
+        let mut m = open("in");
+        quiet(&mut m, key('t'));
+        let cmds = update(&mut m, key('y'));
+        let [Cmd::RunTimelineBucket { base, names, .. }] = cmds.as_slice() else {
+            panic!("{cmds:?}")
+        };
+        assert!(base.is_none(), "the first bucket resolves the filter");
+        assert!(std::sync::Arc::ptr_eq(names, m.index().unwrap()));
+        let resolved = pce::traffic::TrafficQueryBuilder::between(
+            "2026-10-09T08:00:00Z".parse().unwrap(),
+            "2026-10-10T08:00:00Z".parse().unwrap(),
+        )
+        .build()
+        .unwrap();
+        let first = exact(&m).running.unwrap();
+        let msg = done(
+            &m,
+            first,
+            Ok(TimelineBucketOutcome {
+                connections: 1,
+                truncated: false,
+                hit: false,
+                base: Some(std::sync::Arc::new(resolved.clone())),
+            }),
+        );
+        let cmds = update(&mut m, msg);
+        let [Cmd::RunTimelineBucket { base, .. }] = cmds.as_slice() else {
+            panic!("{cmds:?}")
+        };
+        assert_eq!(
+            base.as_deref(),
+            Some(&resolved),
+            "every later bucket reuses it"
+        );
+        // Stopped, closed, reopened and resumed: still the same base.
+        quiet(&mut m, kc(KeyCode::Esc));
+        quiet(&mut m, kc(KeyCode::Esc));
+        quiet(&mut m, Msg::Command(Command::App(Some("shop/prod".into()))));
+        quiet(&mut m, key('t'));
+        let cmds = update(&mut m, key('y'));
+        let [Cmd::RunTimelineBucket { base, index, .. }] = cmds.as_slice() else {
+            panic!("{cmds:?}")
+        };
+        assert_eq!((*index, base.as_deref()), (1, Some(&resolved)));
+    }
+
+    #[test]
+    fn w_on_a_blocked_peer_stops_the_run_before_the_form() {
+        let mut m = open("in");
+        m.writes = crate::tui::model::WritesState::on();
+        quiet(&mut m, key('t'));
+        bucket(&update(&mut m, key('y')));
+        let token = exact(&m).cancel.clone().unwrap();
+        quiet(&mut m, key('w')); // shop/prod 5432/tcp: allowed, nothing to add
+        assert!(!token.is_cancelled(), "a refused w leaves the run going");
+        for _ in 0..3 {
+            quiet(&mut m, key('j')); // shop/dev 5432/tcp: blocked
+        }
+        let _form = update(&mut m, key('w'));
+        assert!(matches!(m.overlay, Overlay::Form(_)), "{:?}", m.overlay);
+        assert!(
+            token.is_cancelled(),
+            "the form replaces the overlay: stopped"
+        );
+        assert!(exact(&m).running.is_none());
+    }
+
+    #[test]
+    fn enter_on_a_workload_or_a_ruleset_stops_the_run() {
+        for (tabs, screen) in [(3, Screen::Workloads), (2, Screen::Policy)] {
+            let mut m = open("in");
+            quiet(&mut m, key('t'));
+            bucket(&update(&mut m, key('y')));
+            let token = exact(&m).cancel.clone().unwrap();
+            for _ in 0..tabs {
+                quiet(&mut m, kc(KeyCode::Tab));
+            }
+            let cmds = update(&mut m, kc(KeyCode::Enter));
+            assert!(
+                !cmds
+                    .iter()
+                    .any(|c| matches!(c, Cmd::RunTimelineBucket { .. })),
+                "{cmds:?}"
+            );
+            assert_eq!(m.overlay, Overlay::None);
+            assert_eq!(m.screen, screen);
+            assert!(token.is_cancelled(), "{screen:?}");
+            assert!(exact(&m).running.is_none());
+        }
+    }
+
+    #[test]
+    fn a_backfill_slice_that_widens_the_window_drops_the_run() {
+        let mut m = open("in");
+        quiet(&mut m, key('t'));
+        let first = bucket(&update(&mut m, key('y')));
+        let token = exact(&m).cancel.clone().unwrap();
+        let before = m.traffic.window_bounds().unwrap();
+        let earlier = before
+            .0
+            .checked_sub(jiff::SignedDuration::from_hours(1))
+            .unwrap();
+        let seq = m.traffic.seq;
+        let mut filter = m.traffic.filter.clone();
+        filter.window = "25h".into();
+        let cmds = update(
+            &mut m,
+            Msg::SliceDone {
+                seq,
+                result: Ok(QueryOutcome {
+                    flows: Vec::new(),
+                    truncated: false,
+                    matches_count: Some(0),
+                    elapsed: std::time::Duration::from_secs(1),
+                    hit: false,
+                    filter,
+                    bounds: Some((earlier, before.0)),
+                }),
+            },
+        );
+        assert_ne!(
+            m.traffic.window_bounds(),
+            Some(before),
+            "the slice widened it"
+        );
+        assert!(
+            !cmds
+                .iter()
+                .any(|c| matches!(c, Cmd::RunTimelineBucket { .. })),
+            "{cmds:?}"
+        );
+        assert!(token.is_cancelled());
+        assert!(m.app_view.as_ref().unwrap().exact.is_none());
+        let late = done(&m, first, ok(4));
+        quiet(&mut m, late);
+        assert!(m.app_view.as_ref().unwrap().exact.is_none(), "not revived");
     }
 }

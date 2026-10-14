@@ -10,6 +10,7 @@ use pce::traffic::{
     APPROX_BUCKETS, Bucket, Direction, Focus, FocusDirection, ResolvedFlow, Timeline,
     approx_timeline, equal_buckets, exact_timeline,
 };
+use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 /// The panels `Tab` moves between, in order.
@@ -77,6 +78,11 @@ pub struct ExactTimeline {
     /// The filter the bucket queries are built from (`bucket_query`
     /// replaces its range and decisions).
     pub filter: TrafficFilter,
+    /// `filter` resolved to a query body, once per run (by its first
+    /// bucket), then reused: a long run never resolves it again.
+    pub base: Option<Arc<pce::models::TrafficQuery>>,
+    /// The name index the run started with, reused for every bucket.
+    pub index: Arc<pce::NameIndex>,
     /// The bucket whose query is in flight, and that request's ticket: an
     /// answer carrying another one is dropped.
     pub running: Option<(usize, u64)>,
@@ -87,7 +93,12 @@ pub struct ExactTimeline {
 }
 
 impl ExactTimeline {
-    pub fn new(buckets: Vec<Bucket>, focus: Focus, filter: TrafficFilter) -> Self {
+    pub fn new(
+        buckets: Vec<Bucket>,
+        focus: Focus,
+        filter: TrafficFilter,
+        index: Arc<pce::NameIndex>,
+    ) -> Self {
         let counts = vec![None; buckets.len()];
         let timeline = exact_timeline(&buckets, &counts);
         Self {
@@ -95,6 +106,8 @@ impl ExactTimeline {
             counts,
             focus,
             filter,
+            base: None,
+            index,
             running: None,
             cancel: None,
             timeline,
@@ -442,7 +455,9 @@ mod tests {
             pce::traffic::bucket_plan(s, e),
             focus.clone(),
             m.traffic.filter.clone(),
+            m.index().cloned().unwrap(),
         );
+        assert!(x.base.is_none(), "resolved by the first bucket");
         assert_eq!((x.buckets.len(), x.remaining(), x.loaded()), (24, 24, 0));
         assert!(x.timeline.exact && x.timeline.partial);
         assert_eq!(x.next_missing(), Some(0));

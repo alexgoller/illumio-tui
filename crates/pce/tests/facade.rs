@@ -761,3 +761,66 @@ async fn traffic_slots_do_not_evict_each_other() {
         "and the main query left the focused slots alone"
     );
 }
+
+#[tokio::test]
+async fn a_timeline_bucket_counts_self_traffic_once_in_both_directions() {
+    use pce::traffic::{Bucket, Focus, TrafficQueryBuilder};
+    use tokio_util::sync::CancellationToken;
+    let server = MockServer::start().await;
+    // Flow 0 (shop/prod to itself, 310 connections) made blocked; both
+    // sides' queries return it, with the NAS flow (3, blocked).
+    let mut flows: Vec<serde_json::Value> =
+        serde_json::from_str(include_str!("../../../fixtures/traffic_flows.json")).unwrap();
+    flows[0]["policy_decision"] = json!("blocked");
+    let flows = serde_json::to_string(&flows).unwrap();
+    let labels = shop_labels();
+    let bucket = Bucket {
+        start: "2026-10-09T09:00:00Z".parse().unwrap(),
+        end: "2026-10-09T10:00:00Z".parse().unwrap(),
+    };
+    for (name, side) in [("b-in", "destinations"), ("b-out", "sources")] {
+        mount_query(
+            &server,
+            name,
+            json!({
+                side: {"include": [labels.clone()]},
+                "policy_decisions": ["blocked"],
+                "start_date": "2026-10-09T09:00:00Z",
+                "end_date": "2026-10-09T10:00:00Z",
+            }),
+            &flows,
+            1,
+        )
+        .await;
+    }
+    let mut p = pce_for(&server);
+    fast_poll(&mut p);
+    let idx = fixture_index();
+    let base = TrafficQueryBuilder::between(
+        "2026-10-09T00:00:00Z".parse().unwrap(),
+        "2026-10-10T00:00:00Z".parse().unwrap(),
+    )
+    .max_results(500)
+    .build()
+    .unwrap();
+    let both = Focus::new(
+        vec!["shop".into(), "prod".into()],
+        vec!["app".into(), "env".into()],
+    );
+    let cancel = CancellationToken::new();
+    let c = p
+        .timeline_bucket(3, &both, &base, &bucket, &idx, CacheMode::Use, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(
+        c.connections, 313,
+        "the self flow's 310 once, plus the NAS flow's 3"
+    );
+    assert_eq!((c.queries, c.hit, c.truncated), (2, false, false));
+    let again = p
+        .timeline_bucket(3, &both, &base, &bucket, &idx, CacheMode::Use, &cancel)
+        .await
+        .unwrap();
+    assert!(again.hit, "a repeated bucket is answered from its slot");
+    assert_eq!(again.connections, 313);
+}

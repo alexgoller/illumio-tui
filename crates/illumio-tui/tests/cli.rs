@@ -2903,6 +2903,14 @@ async fn app_timeline_runs_one_blocked_only_query_per_bucket() {
             .all(|b| b["policy_decisions"] == json!(["blocked"])),
         "bucket queries are blocked-only"
     );
+    let shop =
+        json!([[{"label": {"href": "/orgs/5/labels/3"}}, {"label": {"href": "/orgs/5/labels/4"}}]]);
+    assert!(
+        posts[1..]
+            .iter()
+            .all(|b| b["destinations"]["include"] == shop),
+        "bucket queries put the app's labels on its side (in: destinations)"
+    );
     let starts: Vec<&str> = posts[1..]
         .iter()
         .map(|b| b["start_date"].as_str().unwrap())

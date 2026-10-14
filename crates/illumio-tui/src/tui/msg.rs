@@ -49,12 +49,14 @@ pub struct AppWorkloadsPayload {
 
 /// One exact-timeline bucket's answer: the blocked connections the focus
 /// keeps, whether a query hit the cap (the count is then a lower bound),
-/// whether every query was a cache hit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// whether every query was a cache hit, and the run's base query when this
+/// bucket resolved it (the first one does).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TimelineBucketOutcome {
     pub connections: u64,
     pub truncated: bool,
     pub hit: bool,
+    pub base: Option<Arc<pce::models::TrafficQuery>>,
 }
 
 /// One object list with its cache age in seconds.
@@ -222,13 +224,17 @@ pub enum Cmd {
     },
     /// `t` in the app overlay: one bucket of the exact timeline, `start` to
     /// `end`, blocked only, the app's labels on its side(s) (one query per
-    /// side), in cache slot `timeline:{index}`. Answered with
-    /// `Msg::TimelineBucketDone` carrying `seq`, `ticket` and `index`.
+    /// side), in cache slot `timeline:{index}` (`Pce::timeline_bucket`).
+    /// `base` is the run's resolved query (`None`: this bucket resolves
+    /// `filter` and returns it); `names` the run's name index. Answered
+    /// with `Msg::TimelineBucketDone` carrying `seq`, `ticket` and `index`.
     RunTimelineBucket {
         seq: u64,
         ticket: u64,
         index: usize,
         filter: TrafficFilter,
+        base: Option<Arc<pce::models::TrafficQuery>>,
+        names: Arc<pce::NameIndex>,
         focus: Focus,
         start: jiff::Timestamp,
         end: jiff::Timestamp,
@@ -360,6 +366,7 @@ impl PartialEq for Cmd {
                     ticket: ta,
                     index: ia,
                     filter: fa,
+                    base: ba,
                     focus: xa,
                     start: sa,
                     end: ea,
@@ -370,12 +377,22 @@ impl PartialEq for Cmd {
                     ticket: tb,
                     index: ib,
                     filter: fb,
+                    base: bb,
                     focus: xb,
                     start: sb,
                     end: eb,
                     ..
                 },
-            ) => a == b && ta == tb && ia == ib && fa == fb && xa == xb && sa == sb && ea == eb,
+            ) => {
+                a == b
+                    && ta == tb
+                    && ia == ib
+                    && fa == fb
+                    && ba == bb
+                    && xa == xb
+                    && sa == sb
+                    && ea == eb
+            }
             (
                 Cmd::LoadEvents {
                     filter: fa,

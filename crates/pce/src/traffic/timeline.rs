@@ -264,6 +264,18 @@ pub fn blocked_connections(flows: &[ResolvedFlow]) -> u64 {
         .sum()
 }
 
+/// One exact-timeline bucket's answer (`Pce::timeline_bucket`): the
+/// blocked connections the focus keeps, whether a query hit the cap (the
+/// count is then a lower bound), whether every query came from the cache,
+/// and how many queries it took (one per side).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BucketCount {
+    pub connections: u64,
+    pub truncated: bool,
+    pub hit: bool,
+    pub queries: u32,
+}
+
 /// The exact timeline from per-bucket `(connections, truncated)`, `None`
 /// for a bucket not loaded yet (then `partial`); the spike over the loaded
 /// ones.

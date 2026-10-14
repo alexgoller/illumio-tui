@@ -16,8 +16,7 @@ use pce::app::{
 use pce::models::{PolicyScope, Workload};
 use pce::traffic::{
     APPROX_BUCKETS, Direction, FocusDirection, TIMELINE_CONFIRM_QUERIES, Timeline, approx_timeline,
-    blocked_connections, bucket_count, bucket_plan, bucket_query, equal_buckets, exact_timeline,
-    parse_window,
+    bucket_count, bucket_plan, equal_buckets, exact_timeline, parse_window,
 };
 use serde::Serialize;
 use tokio_util::sync::CancellationToken;
@@ -293,21 +292,21 @@ pub async fn run(ctx: &Context, args: &AppArgs) -> Result<(), CliError> {
         let plan = bounds.map(|(s, e)| bucket_plan(s, e)).unwrap_or_default();
         let mut counts = Vec::with_capacity(plan.len());
         for (i, b) in plan.iter().enumerate() {
-            let ft = ctx
+            let c = ctx
                 .pce
-                .focused_traffic(
-                    &format!("timeline:{i}"),
+                .timeline_bucket(
+                    i,
                     &focus,
-                    &bucket_query(&base, b),
+                    &base,
+                    b,
                     &idx,
                     ctx.cache_mode,
                     &CancellationToken::new(),
-                    None,
                 )
                 .await?;
-            bucket_queries += ft.query_count();
-            buckets_hit &= ft.hit;
-            counts.push(Some((blocked_connections(&ft.flows), ft.truncated)));
+            bucket_queries += c.queries;
+            buckets_hit &= c.hit;
+            counts.push(Some((c.connections, c.truncated)));
         }
         exact_timeline(&plan, &counts)
     } else {

@@ -1607,11 +1607,13 @@ fn app_overlay_exact(loaded: usize, capped: bool) -> illumio_tui::tui::model::Mo
     let mut m = app_overlay_model();
     let (start, end) = m.traffic.window_bounds().unwrap();
     let filter = m.traffic.filter.clone();
+    let names = m.index().cloned().unwrap();
     let v = m.app_view.as_mut().unwrap();
     let mut x = ExactTimeline::new(
         pce::traffic::bucket_plan(start, end),
         v.focus.clone(),
         filter,
+        names,
     );
     for i in 0..loaded {
         x.set(
