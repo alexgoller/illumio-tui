@@ -184,7 +184,12 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   (`Workloads 14   enforced 9 · selective 2 · visibility 3`, `VENs 13 active · 1 stale`;
   active is healthy or warning, stale is offline or error), its inbound and outbound peers by
   service and decision, blocked traffic over time (`approx`: flow records by last-detected
-  time), and the rulesets whose scope covers it (a global scope shows as `all`) or whose rules
+  time; `t` replaces it with the exact timeline: one blocked-only query per bucket and side,
+  24×1h for 1d, 28×6h for 1w, 30×1d for 30d, about 24 buckets otherwise, after asking with
+  the query count; one at a time, `Esc` stops and keeps what loaded, `t` resumes with the
+  missing buckets only; `X`, another window or app cancel it; a bucket whose query hit the cap
+  is a lower bound, drawn in the warning colour; both timelines name the worst spike, a bucket
+  at least 3× the median of the non-zero ones, given 4 or more), and the rulesets whose scope covers it (a global scope shows as `all`) or whose rules
   name its labels (draft or active, as on the Policy screen; its title says which). The traffic panels come from the
   loaded result; the workloads and the rulesets come from their screens when those are loaded,
   else one request each (cached), counted in the overlay's header. Reopening the same app sends
@@ -267,6 +272,7 @@ the API call and byte counters at all times.
     illumio-tui traffic groups --window 1h --app shop/prod --direction in
     illumio-tui app shop/prod --window 24h --json
     illumio-tui app shop/prod --direction in --csv --section inbound > inbound.csv
+    illumio-tui app shop/prod --window 24h --direction in --timeline --json
     illumio-tui traffic mesh --window 1h --no-user --json
     illumio-tui traffic query --window 30d --dry-run
     illumio-tui traffic query --window 24h --backfill --json
@@ -330,9 +336,14 @@ envelope for one app: `workloads` (`summary` with the enforcement breakdown and 
 cap), `inbound` and `outbound` (one row per peer group, service and decision), `policy`
 (`scope` draft or active, `truncated`, and `rows`: rulesets by `reason`, `scope`,
 `all_workloads` or `rules`, with their rule counts) and `timeline` (`exact: false`: blocked
-flow records per bucket of the window, by last-detected time). It costs the focused traffic
+flow records per bucket of the window, by last-detected time; `--timeline`: `exact: true`,
+blocked connections from one blocked-only query per bucket and side, run one at a time; a
+bucket whose query hit the cap has `truncated: true` and is a lower bound, as is the timeline
+then (`timeline.truncated`); either has `spike` when one bucket is at least 3× the median of
+the non-zero ones). `--timeline` above 24 queries (`both` over 1d is 48, a week 28 per side)
+needs `--yes`, checked before any request. It costs the focused traffic
 queries (one per side), one workloads read filtered by the app's labels and one rulesets read,
-all cached; `meta` counts them, and `meta.truncated` is the traffic's. `--section
+all cached, plus the bucket queries with `--timeline`; `meta` counts them, and `meta.truncated` is the traffic's. `--section
 workloads|inbound|outbound|policy|timeline` keeps one section (JSON: `app`, `direction` and
 it); `--table` prints each section under a title line; `--csv` prints one and needs
 `--section` (without it, exit 2 before any request).

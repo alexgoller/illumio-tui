@@ -288,3 +288,18 @@ Spec: docs/superpowers/specs/2026-10-11-traffic-views-design.md · Plan: docs/su
 - I2: label groups name the app through their sub-groups (`impact::group_members`).
 - I3: CLI `meta.truncated` is the traffic's; `workloads.truncated` and `policy {scope, truncated, rows}`.
 - Minors: rulesets answers carry `hit`; peers rebuilt under the reload prompt; policy panel tied to its draft/active scope; reload prompt counts its requests; shared display-width fit and sparkline; peers grouped by reference; exclusion-only scope is `scope`; Enter on a workload before its list opens it on arrival; `A` tests on pairs, Mesh, Treemap; `--section` filters JSON; status/hints separator.
+
+## App focus 3: exact timeline (plan docs/superpowers/plans/2026-10-13-app-focus-3-timeline.md)
+- [x] Task 1 pce timeline: bucket plan, spikes, bucket queries, exact timeline
+- [x] Task 2 TUI ExactTimeline state
+- [x] Task 3 t, the run, Esc, resume, runtime
+- [x] Task 4 drawing exact, partial, capped, spike
+- [x] Task 5 CLI --timeline / --yes
+- [x] Task 6 docs, help, smoke, gate
+
+## Review (App focus 3)
+- pce: `bucket_count` / `bucket_plan` (24×1h, 28×6h, 30×1d, else 24), `spike` (≥3× the median of the non-zero buckets, ≥4 of them, the earlier of ties), `Spike::text` (`spike 14:00 (x6 median)`, `x6+` on a capped bucket), `bucket_query` (blocked only), `blocked_connections`, `exact_timeline`; `Timeline` gains `truncated` (its own) and `spike` (both timelines).
+- TUI: `t` asks with the exact query count (buckets × sides; a resume names the remaining ones only; `y` asks again if the count changed); one `Cmd::RunTimelineBucket` at a time, each counted in the header (sides per bucket), cache hits counted; answers carry the overlay `seq` and a per-view `ticket`, so a stopped, replaced or earlier overlay's answer is dropped. `Esc` cancels the bucket in flight (second `Esc` closes); `X`, a new window or filter, another app, a profile switch, `Enter` and `w` cancel it; `r` waits; nothing runs while the overlay is not showing. The derived timeline is rebuilt when a count lands, never per frame. Drawn with missing buckets `·`, capped ones in the warning colour, `N capped+` in the panel meta, and the spike.
+- CLI: `app --timeline` (one blocked-only focused query per bucket and side, in slot `timeline:{i}`), `--yes` above 24 queries, checked before any request; `--timeline` with another `--section` is exit 2; `meta.queries` counts the buckets, `meta.truncated` stays the traffic's, `timeline.truncated` and per-bucket `truncated` mark lower bounds.
+- Tests: 1164 passing, workspace. `git diff main -- '*Cargo.toml' Cargo.lock` empty.
+- Smoke (demo100, read-only, no `--yes`, no `y`): `app pos/Staging --timeline --direction both` exit 2 "--timeline sends 48 queries (24 buckets x in and out ...)", nothing sent; `app pos/Staging --window 1h --max-results 200 --json`: approx timeline 24 buckets with `spike` {index 17, x6}, meta.queries 2, 14 api calls. No exact timeline was run. Nothing was written to any PCE.

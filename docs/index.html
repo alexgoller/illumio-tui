@@ -167,7 +167,7 @@ illumio-tui 0.1.7</code></pre>
       </ul>
       <p>Switching views, grouping, sorting and searching send nothing to the PCE. With writes armed, <code>w</code> turns a blocked flow into a draft allow rule.</p>
       <p><code>F</code> focuses every view on one app: <code>X</code> cycles its inbound, outbound or both directions, <code>Esc</code> clears it. On a truncated result, <code>r</code> re-queries just that app, with its labels in the query.</p>
-      <p><code>A</code> opens one screen for that app: inbound and outbound peers, its workloads with enforcement modes and VEN health, the rulesets that cover it, and blocked traffic over time. It reuses what is loaded and sends at most two requests, counted in its header.</p>
+      <p><code>A</code> opens one screen for that app: inbound and outbound peers, its workloads with enforcement modes and VEN health, the rulesets that cover it, and blocked traffic over time with its worst spike named; <code>t</code> loads the exact timeline, one blocked-only query per bucket, after asking how many. It reuses what is loaded and sends at most two requests, counted in its header.</p>
     </div>
   </div>
 </section>
@@ -207,7 +207,7 @@ illumio-tui 0.1.7</code></pre>
       <p><code>traffic query</code> submits the PCE's asynchronous Explorer query, polls with backoff, downloads the result, flags truncation, and resolves every label href to <code>key=value</code>.</p>
       <p>Filters read like you think: <code>app=web</code>, <code>ip:10.0.0.5</code>, <code>ipl:NAME</code>, <code>wl:HOST</code>, <code>fqdn:NAME</code>. A comma means AND, repeating the flag means OR. Add <code>--exclude-src</code>, <code>--exclude-dst</code>, <code>--port</code>, <code>--proto</code>, <code>--process</code> and <code>--decision</code> as needed. An unknown label value fails locally, before the PCE sees anything.</p>
       <p><code>--group app,env</code> folds flows into label pairs; <code>--blocked</code> keeps blocked and potentially blocked flows, grouped by destination group and port. <code>traffic groups</code> prints one row per source and destination group with connections, bytes and decisions (<code>--services</code>: one per group pair and port/proto); <code>traffic mesh</code> one row per user, process, source, destination, service and destination process, with <code>--no-user</code> and <code>--no-process</code> to merge. <code>--keys</code> picks the label keys (default: the profile's scope keys). <code>--app shop/prod --direction in</code> spends the cap on one app: its labels go into the query (two queries for <code>both</code>, merged).</p>
-      <p><code>illumio-tui app shop/prod</code> prints the same profile as one JSON envelope for agents: workloads and VENs, peers, policy and the blocked timeline; <code>--table</code> and <code>--csv --section</code> print it per section.</p>
+      <p><code>illumio-tui app shop/prod</code> prints the same profile as one JSON envelope for agents: workloads and VENs, peers, policy and the blocked timeline (<code>--timeline</code>: the exact one, with <code>--yes</code> above 24 queries); <code>--table</code> and <code>--csv --section</code> print it per section.</p>
       <p><code>--impact</code> on <code>policy rules</code> counts the workloads each rule matches as providers and consumers, across the ruleset's scopes, label groups and exclusions, from one cached workload read; <code>iplists</code> gives every list its size.</p>
     </div>
     <div>

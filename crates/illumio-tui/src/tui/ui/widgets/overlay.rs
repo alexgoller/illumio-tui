@@ -82,6 +82,11 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "draft allow rule · reload panels (asks) · back",
     ),
     (
+        "App      t",
+        "exact blocked timeline: 1 query per bucket and side (asks)",
+    ),
+    ("", "one at a time; Esc stops, t resumes; spike: 3x median"),
+    (
         "Traffic  Enter",
         "detail (flows) · drill into a row or section header",
     ),
