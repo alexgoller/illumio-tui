@@ -167,7 +167,7 @@ illumio-tui 0.1.7</code></pre>
       </ul>
       <p>Switching views, grouping, sorting and searching send nothing to the PCE. With writes armed, <code>w</code> turns a blocked flow into a draft allow rule.</p>
       <p><code>F</code> focuses every view on one app: <code>X</code> cycles its inbound, outbound or both directions, <code>Esc</code> clears it. On a truncated result, <code>r</code> re-queries just that app, with its labels in the query.</p>
-      <p><code>A</code> opens one screen for that app: inbound and outbound peers, its workloads with enforcement modes and VEN health, the rulesets that cover it, and blocked traffic over time with its worst spike named; <code>t</code> loads the exact timeline, one blocked-only query per bucket, after asking how many. It reuses what is loaded and sends at most two requests, counted in its header.</p>
+      <p><code>A</code> opens one screen for that app: inbound and outbound peers, its workloads with enforcement modes and VEN health, the rulesets that cover it, and blocked traffic over time with its worst spike named; <code>t</code> loads the exact timeline, one blocked-only query per bucket, after asking how many (1h: 12 buckets of 5 minutes, 1d: 24 of an hour). It reuses what is loaded; opening it sends at most two requests, and every request (the timeline's too) is counted in its header.</p>
     </div>
   </div>
 </section>

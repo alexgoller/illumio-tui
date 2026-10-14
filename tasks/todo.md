@@ -303,3 +303,13 @@ Spec: docs/superpowers/specs/2026-10-11-traffic-views-design.md · Plan: docs/su
 - CLI: `app --timeline` (one blocked-only focused query per bucket and side, in slot `timeline:{i}`), `--yes` above 24 queries, checked before any request; `--timeline` with another `--section` is exit 2; `meta.queries` counts the buckets, `meta.truncated` stays the traffic's, `timeline.truncated` and per-bucket `truncated` mark lower bounds.
 - Tests: 1164 passing, workspace. `git diff main -- '*Cargo.toml' Cargo.lock` empty.
 - Smoke (demo100, read-only, no `--yes`, no `y`): `app pos/Staging --timeline --direction both` exit 2 "--timeline sends 48 queries (24 buckets x in and out ...)", nothing sent; `app pos/Staging --window 1h --max-results 200 --json`: approx timeline 24 buckets with `spike` {index 17, x6}, meta.queries 2, 14 api calls. No exact timeline was run. Nothing was written to any PCE.
+
+### Review fixes (App focus 3)
+- I1: a spike in a timeline longer than a day names its date (`spike 10-04 14:00`); `%H:%M` only for a day or less.
+- M1: `Pce::timeline_bucket` (bucket query, `timeline:{i}` slot, blocked connections, truncated, hit, queries) used by the TUI runtime and the CLI.
+- M3: the TUI run resolves its base query once (the first bucket hands it back) and keeps the name index it started with; later and resumed buckets reuse both.
+- M2: debug-only `ILLUMIO_TUI_TEST_FAST_MS` (first poll in ms, no rate limit; release builds ignore it); the CLI test binary runs in about 9 s again (the two `--timeline` tests 1.5 s, were 21 s).
+- M4: tests for `w` and `Enter` on a workload or ruleset stopping a run, a widening backfill slice dropping it, self-traffic counted once with both directions, the CLI bucket bodies carrying the app's labels.
+- M5: docs wording and README re-wrap. `t` is not in the overlay's status hints: at 80 columns it would leave the status 13 columns, cutting the run's own progress line.
+- M6/M7: 4w is 28×1d; no bucket under 5 minutes (1h: 12×5m, 90m: 18, under 5m: 1).
+- Smoke (read-only): `--timeline --direction both` exit 2 (48 queries), nothing sent; `app pos/Staging --window 1h --max-results 200 --json` 24 approx buckets, no spike in this hour's data (field omitted), meta.queries 2, 14 api calls.
