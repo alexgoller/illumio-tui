@@ -4430,6 +4430,9 @@ pub struct Model {
     /// The app overlay's state while it is open (and after, until the next
     /// `A`: reopening rebuilds it).
     pub app_view: Option<AppView>,
+    /// The open form (or the plan and confirm it led to) was opened from
+    /// the app overlay: closing it returns there, not to the screen.
+    pub form_from_app: bool,
     /// The last app overlay's sequence number: answers of older ones are dropped.
     pub app_seq: u64,
     pub connection: Connection,
@@ -4497,6 +4500,7 @@ impl Model {
             workloads,
             events,
             app_view: None,
+            form_from_app: false,
             app_seq: 0,
             connection: Connection::Connecting,
             stats: StatsSnapshot { calls: 0, bytes: 0 },
@@ -4647,6 +4651,7 @@ impl Model {
         self.workloads = WorkloadsState::new(min);
         self.events = EventsState::new(min);
         self.app_view = None;
+        self.form_from_app = false;
         self.stats = StatsSnapshot { calls: 0, bytes: 0 };
         self.busy = 0;
         self.overlay = Overlay::None;

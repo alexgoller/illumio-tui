@@ -773,6 +773,11 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         model.policy.provisioned = Some(model.status.text.clone());
                     }
                     let mut cmds = reload_after_write(model, kind);
+                    let rule_waits =
+                        rule_after.is_some() && kind == pce::write::ObjectKind::RuleSet;
+                    if !rule_waits && model.overlay == Overlay::None {
+                        close_form(model);
+                    }
                     if let Some((draft, form)) = rule_after
                         && kind == pce::write::ObjectKind::RuleSet
                     {
@@ -795,6 +800,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 // text carries the advice) and reload to show the real state.
                 // A failed audit names its log in the error text.
                 Err(e) if is_unanswered(&e) => {
+                    model.form_from_app = false; // the error overlay takes over
                     let audited = !matches!(e, WriteError::AuditFailed { .. });
                     model.status = StatusLine::error(if audited {
                         "write not answered; reloading"
@@ -806,6 +812,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     reload_after_write(model, kind)
                 }
                 Err(e) => {
+                    model.form_from_app = false; // the error overlay takes over
                     model.status = StatusLine::error("write failed; nothing reloaded");
                     model.overlay = Overlay::Error(format!("write failed: {e}"));
                     Vec::new()
@@ -823,6 +830,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 // Keys typed while the plan was on its way belong to the
                 // overlay they went to; a `y` there must not confirm this.
                 Ok((Plan::Send { .. }, _)) if model.overlay != Overlay::None => {
+                    model.form_from_app = false;
                     model.status = StatusLine::warn("request discarded, nothing sent");
                 }
                 Ok((mut plan @ Plan::Send { .. }, kind)) => {
@@ -846,6 +854,9 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 // with nothing pending, an update whose fields already match
                 // (a stale form, a retyped entry), a create that exists.
                 Ok((Plan::Noop { reason, .. }, _)) => {
+                    if model.overlay == Overlay::None {
+                        close_form(model);
+                    }
                     model.status = StatusLine::info(reason);
                 }
                 Err(e) => {
@@ -868,6 +879,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         model.overlay = Overlay::Form(f);
                         fail(model, "write", &e, false);
                     } else {
+                        model.form_from_app = false;
                         fail(model, "write", &e, false);
                     }
                 }
@@ -1431,7 +1443,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 Vec::new()
             }
             FormEvent::Cancel => {
-                model.overlay = Overlay::None;
+                close_form(model);
                 model.status = StatusLine::info("cancelled, nothing sent");
                 Vec::new()
             }
@@ -1485,7 +1497,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                         vec![Cmd::PlanWrite(intent)]
                     }
                     Ok(None) => {
-                        model.overlay = Overlay::None;
+                        close_form(model);
                         model.status = StatusLine::info("no changes");
                         Vec::new()
                     }
@@ -1521,7 +1533,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     vec![Cmd::ExecuteWrite { plan, kind }]
                 }
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                    model.overlay = Overlay::None;
+                    close_form(model);
                     model.status = StatusLine::info("cancelled, nothing sent");
                     model.policy.rule_after_ruleset = None;
                     Vec::new()
@@ -2490,7 +2502,8 @@ fn app_enter(model: &mut Model) -> Vec<Cmd> {
 
 /// `w` on a blocked (or potentially blocked) peer row: the draft allow rule
 /// from one of the flows behind it, as `w` on a traffic row (writes armed).
-/// The form replaces the overlay; `A` reopens it with nothing sent.
+/// The form replaces the overlay; cancelling it, or the write done, comes
+/// back to the overlay with nothing sent.
 fn app_rule_key(model: &mut Model) -> Vec<Cmd> {
     if writes_refused(model) {
         return Vec::new();
@@ -2529,7 +2542,17 @@ fn app_rule_key(model: &mut Model) -> Vec<Cmd> {
         model.status = StatusLine::warn("no loaded flow behind this row");
         return Vec::new();
     };
-    begin_edit(model, EditIntent::RuleFromFlow(Box::new(flow)))
+    let cmds = begin_edit(model, EditIntent::RuleFromFlow(Box::new(flow)));
+    model.form_from_app = matches!(model.overlay, Overlay::Form(_));
+    cmds
+}
+
+/// A form is done, or the plan and confirm it led to: back to the app
+/// overlay it was opened from (its view is kept: no request), else to the
+/// screen behind it.
+fn close_form(model: &mut Model) {
+    let back = std::mem::take(&mut model.form_from_app) && model.app_view.is_some();
+    model.overlay = if back { Overlay::App } else { Overlay::None };
 }
 
 /// The overlay's policy panel from the rulesets that just arrived (`hit`:
@@ -4123,6 +4146,8 @@ fn begin_edit(model: &mut Model, intent: EditIntent) -> Vec<Cmd> {
 }
 
 fn begin_start(model: &mut Model, start: Start) -> Vec<Cmd> {
+    // `app_rule_key` sets it again for a form the app overlay opened.
+    model.form_from_app = false;
     match start {
         Start::Form(f) => {
             let flow = matches!(f.intent, EditIntent::RuleFromFlow(_));
@@ -14037,6 +14062,78 @@ mod app_tests {
         quiet(&mut m, key('j')); // unmanaged-nas/- icmp, blocked
         let _ = update(&mut m, key('w'));
         assert!(matches!(m.overlay, Overlay::Form(_)), "{:?}", m.overlay);
+    }
+
+    #[test]
+    fn a_w_form_from_the_overlay_returns_to_it_after_a_cancel_or_the_write() {
+        use crate::tui::test_support::label_post_plan;
+        let mut m = everything();
+        m.writes = WritesState::on();
+        quiet(&mut m, key('A'));
+        quiet(&mut m, key('j'));
+        quiet(&mut m, key('j')); // a blocked peer
+        let open = |m: &mut Model| {
+            quiet(m, key('w'));
+            let Overlay::Form(f) = &mut m.overlay else {
+                panic!("{:?}", m.overlay)
+            };
+            for (label, value) in [("Ruleset", "Shop-Prod"), ("Services", "443/tcp")] {
+                f.fields
+                    .iter_mut()
+                    .find(|x| x.label == label)
+                    .unwrap()
+                    .value = value.into();
+            }
+        };
+        // Esc in the form.
+        open(&mut m);
+        quiet(&mut m, kc(KeyCode::Esc));
+        assert_eq!(m.overlay, Overlay::App, "back, nothing sent");
+        assert_eq!(view(&m).panel, AppPanel::Inbound, "where it was");
+        // `n` on the confirm.
+        open(&mut m);
+        assert_eq!(update(&mut m, kc(KeyCode::Enter)).len(), 1);
+        let planned = || Msg::Planned(Ok((label_post_plan(), pce::write::ObjectKind::Rule)));
+        quiet(&mut m, planned());
+        assert!(matches!(m.overlay, Overlay::ConfirmWrite { .. }));
+        quiet(&mut m, key('n'));
+        assert_eq!(m.overlay, Overlay::App);
+        // The write done.
+        open(&mut m);
+        update(&mut m, kc(KeyCode::Enter));
+        quiet(&mut m, planned());
+        assert_eq!(update(&mut m, key('y')).len(), 1);
+        let requests_before = view(&m).requests;
+        update(
+            &mut m,
+            Msg::WriteDone {
+                kind: pce::write::ObjectKind::Rule,
+                method: Some(pce::WriteMethod::Post),
+                result: Ok(pce::write::Outcome::Written(pce::write::Written {
+                    href: "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/9".into(),
+                    pending: true,
+                    status: 201,
+                    object: serde_json::json!({}),
+                    dropped_fields: vec![],
+                    warnings: vec![],
+                })),
+            },
+        );
+        assert_eq!(m.overlay, Overlay::App);
+        assert_eq!(view(&m).requests, requests_before, "the view is cached");
+        // A form opened on Traffic still closes to the screen.
+        quiet(&mut m, kc(KeyCode::Esc));
+        m.traffic.view = TrafficView::Flows;
+        m.traffic.flows.select_where(|r| {
+            matches!(
+                r.flow.policy_decision,
+                PolicyDecision::Blocked | PolicyDecision::PotentiallyBlocked
+            )
+        });
+        quiet(&mut m, key('w'));
+        assert!(matches!(m.overlay, Overlay::Form(_)));
+        quiet(&mut m, kc(KeyCode::Esc));
+        assert_eq!(m.overlay, Overlay::None);
     }
 
     #[test]
