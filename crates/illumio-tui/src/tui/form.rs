@@ -309,6 +309,9 @@ pub struct Form {
     /// The completion being cycled; any key but `Ctrl-N`/`Ctrl-P` ends it.
     /// Boxed like `offers_ruleset`.
     pub completion: Option<Box<Completion>>,
+    /// A `w` form drafted from a grouped row: the keys its groups are made
+    /// of, kept to pick its ruleset again when the rulesets arrive.
+    pub flow_rows: Option<Box<Vec<String>>>,
 }
 
 /// The ruleset `Ctrl-R` would create: the name the planner checked and the
@@ -344,6 +347,7 @@ impl Form {
             expanded: false,
             offers_ruleset: None,
             completion: None,
+            flow_rows: None,
         }
     }
 

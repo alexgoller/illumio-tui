@@ -1883,7 +1883,7 @@ async fn ruleset_diff_fetches_the_active_rulesets_once() {
 async fn w_creates_a_rule_in_the_named_ruleset() {
     use illumio_tui::tui::test_support::model_with_flows;
     let server = MockServer::start().await;
-    mount_rule_sets(&server, 2).await; // the name lookup + the reload
+    mount_rule_sets(&server, 2).await; // the form's drafts (the name lookup reuses them) + the reload
     let body = json!({
         "enabled": true,
         "providers": [{"label": {"href": "/orgs/5/labels/1"}}],
@@ -1909,9 +1909,9 @@ async fn w_creates_a_rule_in_the_named_ruleset() {
     let mut m = model_with_flows();
     m.writes = WritesState::on();
     let (mut rt, _tx) = Runtime::with_writer(pce_for(&server), m, tui_guard(audit.clone()));
-    let mut keys = vec![(100, ch('j')), (50, ch('w'))]; // the potentially blocked flow
-    keys.extend(typed("Shop-Prod"));
-    keys.extend([(50, KeyCode::Enter), (300, ch('y')), (400, KeyCode::F(12))]);
+    // The potentially blocked flow; the drafts arrive and pick Shop-Prod.
+    let mut keys = vec![(100, ch('j')), (50, ch('w'))];
+    keys.extend([(300, KeyCode::Enter), (300, ch('y')), (400, KeyCode::F(12))]);
     let model = run_loop(&mut rt, Box::pin(press(keys)), &mut |_| {}).await;
     assert_eq!(
         model.status.text,
@@ -1919,7 +1919,7 @@ async fn w_creates_a_rule_in_the_named_ruleset() {
     );
     assert_eq!(
         model.stats.calls, 3,
-        "one rulesets GET for the name, the POST, one rulesets reload"
+        "one rulesets GET for the form (the name reuses it), the POST, one rulesets reload"
     );
     assert_eq!(writes_seen(&server).await, vec!["POST"]);
     assert_eq!(audit.entries().len(), 1);
@@ -1981,7 +1981,10 @@ async fn new_ruleset_session(
     let (mut rt, _tx) = Runtime::with_writer(pce_for(server), m, tui_guard(audit.clone()));
     let plain = |ms: u64, code: KeyCode| (ms, KeyEvent::new(code, KeyModifiers::NONE));
     let mut keys = vec![plain(100, ch('j')), plain(50, ch('w'))];
+    // The drafts arrive and pick Shop-Prod: cleared, a new name typed.
+    keys.push((300, KeyEvent::new(ch('u'), KeyModifiers::CONTROL)));
     keys.extend(typed("New-App").into_iter().map(|(ms, c)| plain(ms, c)));
+
     keys.extend([
         plain(50, KeyCode::Enter),
         (300, KeyEvent::new(ch('r'), KeyModifiers::CONTROL)),
@@ -2282,6 +2285,7 @@ async fn w_confirm_shows_the_impact_after_i_and_y_still_posts_once() {
     m.writes = WritesState::on();
     let raw = serde_json::from_str(include_str!("../../../fixtures/rule_sets.json")).unwrap();
     m.policy.set_rule_sets(raw, &fixture_index(), None);
+    m.policy.loaded_at = Some(std::time::Instant::now());
     let (mut rt, _tx) = Runtime::with_writer(pce_for(&server), m, tui_guard(audit.clone()));
     let keys = vec![
         (100, ch('j')), // the potentially blocked flow

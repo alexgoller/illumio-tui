@@ -365,6 +365,22 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             Vec::new()
         }
         Msg::DraftDone { seq, result } => draft_done(model, seq, result),
+        // A `w` form's own load while the Policy screen shows the active
+        // rulesets: held for forms, the screen's list untouched.
+        Msg::RuleSetsLoaded {
+            scope: PolicyScope::Draft,
+            result,
+        } if model.policy.form_drafts_loading && model.policy.scope != PolicyScope::Draft => {
+            model.policy.form_drafts_loading = false;
+            match result {
+                Ok((raw, _, _)) => {
+                    model.policy.form_drafts = Some(raw);
+                    refill_rule_form(model);
+                }
+                Err(e) => model.status = StatusLine::warn(format!("draft rulesets: {e}")),
+            }
+            Vec::new()
+        }
         Msg::RuleSetsLoaded { scope, result } => {
             // A reload a write asked for keeps the write's report. Taken before
             // the scope check: an ignored answer must not leave the flag set.
@@ -396,6 +412,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     model.objects.ip_lists.recount(&model.policy);
                     model.recount_labels();
                     model.refresh_confirm_impact();
+                    refill_rule_form(model);
                     if !quiet {
                         model.status = StatusLine::info(format!(
                             "{} rulesets ({})",
@@ -869,7 +886,7 @@ fn complete_field(model: &Model, editor: &mut impl Completing, forward: bool) {
     let Some((kind, token, earlier)) = editor.completion_request() else {
         return;
     };
-    let rulesets = model.flow_prefill().rulesets;
+    let rulesets = model.draft_rulesets().unwrap_or_default();
     let workloads = &model.workloads.raw;
     let candidates =
         crate::tui::complete::complete(kind, &token, &earlier, idx, rulesets, workloads);
@@ -3264,6 +3281,8 @@ fn reload_kind_after_write(model: &mut Model, kind: pce::write::ObjectKind) -> V
         pce::write::ObjectKind::RuleSet
         | pce::write::ObjectKind::Rule
         | pce::write::ObjectKind::DenyRule => {
+            // The next `w` form loads the changed drafts (one GET).
+            model.policy.form_drafts = None;
             if model.policy.scope != PolicyScope::Draft {
                 return Vec::new();
             }
@@ -3273,7 +3292,9 @@ fn reload_kind_after_write(model: &mut Model, kind: pce::write::ObjectKind) -> V
         // Provisioning changes both scopes and the pending list; a revert
         // changes the draft and the pending list.
         pce::write::ObjectKind::Provision | pce::write::ObjectKind::Revert => {
+            model.policy.form_drafts = None;
             model.policy.quiet_reload = true;
+
             let mut cmds = load_rule_sets(model, CacheMode::Bypass);
             model.policy.pending_loading = true;
             cmds.push(Cmd::LoadPending(CacheMode::Bypass));
@@ -4019,6 +4040,49 @@ fn writes_refused(model: &mut Model) -> bool {
     false
 }
 
+/// An open `w` form again from the draft rulesets that just arrived: its
+/// ruleset hint, and the pick while the field is empty. Nothing for another
+/// overlay (a form closed meanwhile is gone). No request.
+fn refill_rule_form(model: &mut Model) {
+    let prefill = model.flow_prefill();
+    if prefill.rulesets.is_none() {
+        return;
+    }
+    let mut overlay = std::mem::replace(&mut model.overlay, Overlay::None);
+    if let Overlay::Form(form) = &mut overlay {
+        edit::refill_ruleset(form, model.flow_prefill());
+    }
+    model.overlay = overlay;
+}
+
+/// A `w` form needs the draft rulesets: one load (cached) when they are
+/// neither held nor on their way. The Policy screen on the draft loads its
+/// own list (it shows it); on the active one the drafts are kept apart.
+fn load_form_drafts(model: &mut Model) -> Vec<Cmd> {
+    if !model.is_connected() || model.draft_rulesets().is_some() {
+        return Vec::new();
+    }
+    let cmds = if model.policy.scope == PolicyScope::Draft {
+        if model.policy.loading {
+            return Vec::new();
+        }
+        // Its answer must not replace the status line's form hint.
+        model.policy.quiet_reload = true;
+        load_rule_sets(model, CacheMode::Use)
+    } else {
+        if model.policy.form_drafts_loading {
+            return Vec::new();
+        }
+        model.policy.form_drafts_loading = true;
+        vec![Cmd::LoadRuleSets {
+            scope: PolicyScope::Draft,
+            mode: CacheMode::Use,
+        }]
+    };
+    model.status = StatusLine::info("loading the draft rulesets for the form · 1 req");
+    cmds
+}
+
 /// A create or update opens its form; a delete goes straight to planning.
 fn begin_edit(model: &mut Model, intent: EditIntent) -> Vec<Cmd> {
     let start = edit::start(
@@ -4032,8 +4096,13 @@ fn begin_edit(model: &mut Model, intent: EditIntent) -> Vec<Cmd> {
 fn begin_start(model: &mut Model, start: Start) -> Vec<Cmd> {
     match start {
         Start::Form(f) => {
+            let flow = matches!(f.intent, EditIntent::RuleFromFlow(_));
             model.overlay = Overlay::Form(f);
-            Vec::new()
+            if flow {
+                load_form_drafts(model)
+            } else {
+                Vec::new()
+            }
         }
         Start::Plan(w) => {
             model.status = StatusLine::info("planning…");
@@ -4717,7 +4786,7 @@ mod tests {
         quiet(&mut m, key('j'));
         let (_, peer) = m.traffic.blocked.selected_item().unwrap().peer().unwrap();
         let service = peer.service.clone();
-        assert!(update(&mut m, key('w')).is_empty(), "no request");
+        assert_eq!(update(&mut m, key('w')).len(), 1, "the draft rulesets");
         let Overlay::Form(f) = &m.overlay else {
             panic!("{:?}", m.overlay)
         };
@@ -4823,7 +4892,7 @@ mod tests {
         for _ in 0..pos {
             quiet(&mut m, key('j'));
         }
-        assert!(update(&mut m, key('w')).is_empty(), "no request");
+        assert_eq!(update(&mut m, key('w')).len(), 1, "the draft rulesets");
         let Overlay::Form(f) = &m.overlay else {
             panic!("{:?}", m.overlay)
         };
@@ -5143,7 +5212,7 @@ mod tests {
     /// Consumers and Services, and the row.
     fn w_form_of_row(m: &mut Model) -> (String, String, String, pce::traffic::FlowGroup) {
         let row = m.traffic.services.selected_item().unwrap().clone();
-        assert!(update(m, key('w')).is_empty(), "no request");
+        assert!(update(m, key('w')).len() <= 1, "the draft rulesets, once");
         let Overlay::Form(f) = &m.overlay else {
             panic!("{:?} {}", m.overlay, m.status.text)
         };
@@ -10376,7 +10445,7 @@ mod tests {
         assert_eq!(m.status.text, "this flow is allowed; nothing to add");
         assert_eq!(m.overlay, Overlay::None);
         update(&mut m, key('j'));
-        assert!(update(&mut m, key('w')).is_empty());
+        assert_eq!(update(&mut m, key('w')).len(), 1, "the draft rulesets");
         assert!(
             matches!(&m.overlay, Overlay::Form(f) if f.title == "Allow rule from flow"),
             "{:?}",
@@ -10401,6 +10470,7 @@ mod tests {
         let raw: Vec<pce::models::RuleSet> =
             serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
         m.policy.set_rule_sets(raw, &fixture_index(), None);
+        m.policy.loaded_at = Some(Instant::now());
         update(&mut m, key('j'));
         assert!(update(&mut m, key('w')).is_empty(), "no request");
         match &m.overlay {
@@ -11157,6 +11227,7 @@ mod tests {
         let raw: Vec<pce::models::RuleSet> =
             serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
         m.policy.set_rule_sets(raw, &fixture_index(), None);
+        m.policy.loaded_at = Some(Instant::now());
         assert!(update(&mut m, ctrl('n')).is_empty());
         assert_eq!(form_value(&m, "Ruleset"), "Global-Infra");
         // The active scope's rulesets are not draft names.
@@ -12450,7 +12521,7 @@ mod app_sections_tests {
             "select a peer row (a header holds a whole app)"
         );
         quiet(&mut m, key('j'));
-        quiet(&mut m, key('w'));
+        assert_eq!(update(&mut m, key('w')).len(), 1, "the draft rulesets");
         let Overlay::Form(f) = &m.overlay else {
             panic!("{:?}", m.overlay)
         };
@@ -14878,5 +14949,184 @@ mod draft_tests {
         assert_eq!(total, fixed, "the pairs count only the fixed flows");
         update(&mut m, key('d'));
         assert_eq!(m.traffic.apps_state.decisions, Decisions::All);
+    }
+}
+
+#[cfg(test)]
+mod rule_form_ruleset_tests {
+    //! Issue #30: a `w` form opened off the Policy screen's draft list.
+    use super::*;
+    use crate::tui::form::Form;
+    use crate::tui::model::{Model, WritesState};
+    use crate::tui::msg::{Cmd, Msg};
+    use crate::tui::test_support::model_with_flows;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn key(c: char) -> Msg {
+        Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))
+    }
+
+    fn ctrl(c: char) -> Msg {
+        Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL))
+    }
+
+    fn kc(code: KeyCode) -> Msg {
+        Msg::Key(KeyEvent::new(code, KeyModifiers::NONE))
+    }
+
+    fn drafts() -> Vec<pce::models::RuleSet> {
+        serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap()
+    }
+
+    fn drafts_loaded(raw: Vec<pce::models::RuleSet>) -> Msg {
+        Msg::RuleSetsLoaded {
+            scope: PolicyScope::Draft,
+            result: Ok((raw, 0, false)),
+        }
+    }
+
+    fn form(m: &Model) -> &Form {
+        match &m.overlay {
+            Overlay::Form(f) => f,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    const DRAFT_LOAD: Cmd = Cmd::LoadRuleSets {
+        scope: PolicyScope::Draft,
+        mode: CacheMode::Use,
+    };
+
+    /// `w` on the blocked flow (row 1, destination app=shop env=prod).
+    fn w_form() -> (Model, Vec<Cmd>) {
+        let mut m = model_with_flows();
+        m.writes = WritesState::on();
+        update(&mut m, key('j'));
+        let cmds = update(&mut m, key('w'));
+        (m, cmds)
+    }
+
+    #[test]
+    fn w_without_loaded_rulesets_loads_the_drafts_once_and_picks_the_scope() {
+        let (mut m, cmds) = w_form();
+        assert_eq!(cmds, vec![DRAFT_LOAD], "one cached load");
+        assert_eq!(form(&m).value("Ruleset"), "", "the form opens at once");
+        // Keys while it loads send nothing more.
+        assert!(update(&mut m, kc(KeyCode::Tab)).is_empty());
+        assert!(update(&mut m, kc(KeyCode::BackTab)).is_empty());
+        assert!(update(&mut m, drafts_loaded(drafts())).is_empty());
+        let f = form(&m);
+        assert_eq!(
+            f.value("Ruleset"),
+            "Shop-Prod",
+            "its scope covers the destination"
+        );
+        // Closed and opened again: the list is held, nothing is sent.
+        update(&mut m, kc(KeyCode::Esc));
+        assert!(update(&mut m, key('w')).is_empty());
+        assert_eq!(form(&m).value("Ruleset"), "Shop-Prod");
+    }
+
+    #[test]
+    fn the_policy_screen_on_active_keeps_its_list_and_the_form_gets_the_drafts() {
+        let mut m = model_with_flows();
+        m.writes = WritesState::on();
+        let mut active = drafts();
+        for rs in &mut active {
+            rs.href = rs.href.replace("/draft/", "/active/");
+            rs.name = format!("Active-{}", rs.name);
+        }
+        m.policy.scope = PolicyScope::Active;
+        m.policy.set_rule_sets(
+            active.clone(),
+            &crate::tui::test_support::fixture_index(),
+            None,
+        );
+        m.policy.loaded_at = Some(Instant::now());
+        update(&mut m, key('j'));
+        assert_eq!(update(&mut m, key('w')), vec![DRAFT_LOAD]);
+        assert!(!m.policy.loading, "the Policy screen is not reloading");
+        assert!(update(&mut m, drafts_loaded(drafts())).is_empty());
+        assert_eq!(form(&m).value("Ruleset"), "Shop-Prod");
+        assert_eq!(m.policy.scope, PolicyScope::Active);
+        assert_eq!(m.policy.raw, active, "the screen's list as chosen");
+        // Another form reuses the drafts; nothing is sent.
+        update(&mut m, kc(KeyCode::Esc));
+        assert!(update(&mut m, key('w')).is_empty());
+        // A rule write forgets them: the next form loads them again, once.
+        update(&mut m, kc(KeyCode::Esc));
+        reload_kind_after_write(&mut m, pce::write::ObjectKind::Rule);
+        assert_eq!(update(&mut m, key('w')), vec![DRAFT_LOAD]);
+        update(&mut m, kc(KeyCode::Esc));
+        assert!(update(&mut m, key('w')).is_empty(), "already on its way");
+    }
+
+    #[test]
+    fn a_late_answer_never_overwrites_what_was_typed_nor_reopens_a_closed_form() {
+        let (mut m, _) = w_form();
+        for c in "Mine".chars() {
+            update(&mut m, key(c));
+        }
+        update(&mut m, drafts_loaded(drafts()));
+        assert_eq!(form(&m).value("Ruleset"), "Mine", "as typed");
+        // Closed before the answer: it stays closed.
+        let (mut m, _) = w_form();
+        update(&mut m, kc(KeyCode::Esc));
+        update(&mut m, drafts_loaded(drafts()));
+        assert_eq!(m.overlay, Overlay::None);
+        // The same with the Policy screen on active.
+        let mut m = model_with_flows();
+        m.writes = WritesState::on();
+        m.policy.scope = PolicyScope::Active;
+        update(&mut m, key('j'));
+        assert_eq!(
+            update(&mut m, key('w')),
+            vec![DRAFT_LOAD],
+            "the drafts only"
+        );
+        update(&mut m, kc(KeyCode::Esc));
+        update(&mut m, drafts_loaded(drafts()));
+        assert_eq!(m.overlay, Overlay::None);
+        assert!(m.policy.form_drafts.is_some(), "held for the next form");
+    }
+
+    #[test]
+    fn ruleset_names_complete_once_the_list_arrives_after_the_form_opened() {
+        let (mut m, _) = w_form();
+        update(&mut m, ctrl('u'));
+        update(&mut m, key('o'));
+        assert!(update(&mut m, ctrl('n')).is_empty());
+        assert_eq!(form(&m).value("Ruleset"), "o", "nothing loaded yet");
+        let mut sets = drafts();
+        let mut other = sets[0].clone();
+        other.href = "/orgs/5/sec_policy/draft/rule_sets/102".into();
+        other.name = "Shop-Dev".into();
+        other.scopes.clear();
+        sets.push(other);
+        update(&mut m, drafts_loaded(sets));
+        assert_eq!(form(&m).value("Ruleset"), "o", "typed: kept");
+        // Case-insensitive substring, Ctrl-N cycles and wraps.
+        update(&mut m, ctrl('u'));
+        for c in "SHOP".chars() {
+            update(&mut m, key(c));
+        }
+        assert!(update(&mut m, ctrl('n')).is_empty());
+        assert_eq!(form(&m).value("Ruleset"), "Shop-Prod");
+        update(&mut m, ctrl('n'));
+        assert_eq!(form(&m).value("Ruleset"), "Shop-Dev");
+        update(&mut m, ctrl('n'));
+        assert_eq!(form(&m).value("Ruleset"), "Shop-Prod");
+        update(&mut m, kc(KeyCode::Esc));
+        assert_eq!(
+            form(&m).value("Ruleset"),
+            "SHOP",
+            "Esc puts the typed text back"
+        );
+        update(&mut m, ctrl('u'));
+        for c in "infra".chars() {
+            update(&mut m, key(c));
+        }
+        update(&mut m, ctrl('n'));
+        assert_eq!(form(&m).value("Ruleset"), "Global-Infra", "inside the name");
     }
 }

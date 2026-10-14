@@ -24,12 +24,12 @@ use std::collections::BTreeSet;
 
 /// What a `w` form is pre-filled from besides the flow: the label model
 /// (rulesets scoped by `scope_keys`, tiers selected by `tier_key`) and the
-/// draft rulesets already loaded (empty when none are). Never a request.
+/// draft rulesets already loaded (`None` while they are not). Never a request.
 #[derive(Debug, Clone, Copy)]
 pub struct FlowPrefill<'a> {
     pub scope_keys: &'a [String],
     pub tier_key: &'a str,
-    pub rulesets: &'a [RuleSet],
+    pub rulesets: Option<&'a [RuleSet]>,
     /// `w` on an App-to-app pair by service: the keys its groups are made
     /// of. Providers and consumers are then the row's groups (each side's
     /// labels under these keys), not one flow's tier.
@@ -333,6 +333,7 @@ pub fn start(intent: EditIntent, index: Option<&NameIndex>, prefill: FlowPrefill
             let (fields, alt) = flow_rule_fields(&f, idx, prefill);
             let mut form = Form::new("Allow rule from flow", fields, EditIntent::RuleFromFlow(f));
             form.alt = Some(alt);
+            form.flow_rows = prefill.group_keys.map(|k| Box::new(k.to_vec()));
             Start::Form(form)
         }
     }
@@ -988,22 +989,10 @@ fn flow_rule_fields(
         };
         (providers, consumers)
     };
-    // A row grouped on keys that leave out part of the scope covers more
-    // than one scope: no ruleset is picked for it, the hint names the
-    // destination's.
-    let covers_scope = p
-        .group_keys
-        .is_none_or(|keys| p.scope_keys.iter().all(|k| keys.contains(k)));
-    let (ruleset, hint) = match ruleset_scoped(p.rulesets, &dst_scope) {
-        _ if dst_scope.is_empty() => (String::new(), Cow::Borrowed(RULESET_HINT)),
-        Some(name) if covers_scope => (name, Cow::Borrowed(RULESET_HINT)),
-        _ => (
-            String::new(),
-            Cow::Owned(format!("scope {}", labels_tokens(&dst_scope))),
-        ),
-    };
+    let pick = ruleset_pick(f, p);
     let fields = vec![
-        Field::new("Ruleset", ruleset, hint, true).kind(FieldKind::Ruleset),
+        Field::new("Ruleset", pick.name.unwrap_or_default(), pick.hint, true)
+            .kind(FieldKind::Ruleset),
         Field::new("Providers", providers, ACTORS_HINT, true).kind(FieldKind::Actors),
         Field::new("Consumers", consumers, ACTORS_HINT, true).kind(FieldKind::Actors),
         Field::new("Services", flow_services_text(f, idx), SERVICES_HINT, true)
@@ -1027,6 +1016,61 @@ fn flow_rule_fields(
         (2, endpoint_tokens(&f.src).join(", ")),
     ];
     (fields, alt)
+}
+
+/// A `w` form's ruleset by the destination's scope: the one to pre-fill
+/// (if any) and the Ruleset field's hint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RulesetPick {
+    pub name: Option<String>,
+    pub hint: Cow<'static, str>,
+}
+
+/// The ruleset whose scope is the destination's scope, among the loaded
+/// draft rulesets. A row grouped on keys that leave out part of the scope
+/// covers more than one scope: no ruleset is picked for it, the hint names
+/// the destination's.
+pub fn ruleset_pick(f: &ResolvedFlow, p: FlowPrefill) -> RulesetPick {
+    let dst_scope = scope_of(&f.dst, p.scope_keys);
+    let covers_scope = p
+        .group_keys
+        .is_none_or(|keys| p.scope_keys.iter().all(|k| keys.contains(k)));
+    let hit = p.rulesets.and_then(|sets| ruleset_scoped(sets, &dst_scope));
+    let (name, hint) = match hit {
+        _ if dst_scope.is_empty() => (None, Cow::Borrowed(RULESET_HINT)),
+        Some(name) if covers_scope => (Some(name), Cow::Borrowed(RULESET_HINT)),
+        _ => (
+            None,
+            Cow::Owned(format!("scope {}", labels_tokens(&dst_scope))),
+        ),
+    };
+    RulesetPick { name, hint }
+}
+
+/// The draft rulesets arrived after a `w` form opened: its Ruleset hint
+/// again, and the pick when the field is still empty (what the user typed
+/// stays). Other forms are left alone.
+pub fn refill_ruleset(form: &mut Form, p: FlowPrefill) {
+    let EditIntent::RuleFromFlow(f) = &form.intent else {
+        return;
+    };
+    let keys = form.flow_rows.as_deref().map(Vec::as_slice);
+    let pick = ruleset_pick(
+        f,
+        FlowPrefill {
+            group_keys: keys,
+            ..p
+        },
+    );
+    let Some(field) = form.fields.iter_mut().find(|x| x.label == "Ruleset") else {
+        return;
+    };
+    field.hint = pick.hint;
+    if field.value.trim().is_empty()
+        && let Some(name) = pick.name
+    {
+        field.value = name;
+    }
 }
 
 /// The Ruleset field of a `w` form: an href, checked without a request, or
@@ -1758,7 +1802,7 @@ mod tests {
     const NO_PREFILL: FlowPrefill<'static> = FlowPrefill {
         scope_keys: &[],
         tier_key: "role",
-        rulesets: &[],
+        rulesets: None,
         group_keys: None,
     };
 
@@ -1772,7 +1816,7 @@ mod tests {
         let prefill = FlowPrefill {
             scope_keys: &scope_keys,
             tier_key: tier,
-            rulesets: sets,
+            rulesets: Some(sets),
             group_keys: None,
         };
         form_for(intent, Some(&*fixture_index()), prefill).expect("a create or update intent")
@@ -2768,7 +2812,7 @@ mod tests {
         let prefill = FlowPrefill {
             scope_keys: &[],
             tier_key: "role",
-            rulesets: &[],
+            rulesets: None,
             group_keys: None,
         };
         form_for(
@@ -2893,7 +2937,7 @@ mod tests {
             let prefill = FlowPrefill {
                 scope_keys: &scope_keys,
                 tier_key: "role",
-                rulesets: &rule_sets(),
+                rulesets: Some(&rule_sets()),
                 group_keys: Some(keys),
             };
             let intent = EditIntent::RuleFromFlow(Box::new(flows[1].clone()));

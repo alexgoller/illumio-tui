@@ -2963,6 +2963,12 @@ pub struct PolicyState {
     /// it once that write is done, dropped by any failure or cancel.
     /// The form comes along so a failed rule plan can reopen it.
     pub rule_after_ruleset: Option<(pce::write::RuleDraft, crate::tui::form::Form)>,
+    /// The draft rulesets a `w` form reads while this screen shows the
+    /// active ones (its own list stays what the user chose); `None` until a
+    /// form loads them, and again after a policy write.
+    pub form_drafts: Option<Vec<RuleSet>>,
+    /// That load is on its way: a second form does not send another.
+    pub form_drafts_loading: bool,
     pub auto: AutoRefresh,
 }
 
@@ -3000,6 +3006,8 @@ impl PolicyState {
             provisioned: None,
             revert_typed: String::new(),
             rule_after_ruleset: None,
+            form_drafts: None,
+            form_drafts_loading: false,
             auto: AutoRefresh::new(min_refresh),
         }
     }
@@ -4554,17 +4562,23 @@ impl Model {
         self.objects.rebuild_labels(&self.limits.key_order());
     }
 
+    /// The loaded draft rulesets: the Policy screen's list when it shows
+    /// the draft, else the ones a `w` form loaded; `None` while neither is.
+    pub fn draft_rulesets(&self) -> Option<&[RuleSet]> {
+        if self.policy.scope == PolicyScope::Draft {
+            self.policy.loaded_at.map(|_| self.policy.raw.as_slice())
+        } else {
+            self.policy.form_drafts.as_deref()
+        }
+    }
+
     /// What a `w` form is pre-filled from: the profile's label model and
-    /// the draft rulesets the Policy screen loaded (none for the active scope).
+    /// the loaded draft rulesets ([`Self::draft_rulesets`]).
     pub fn flow_prefill(&self) -> crate::tui::edit::FlowPrefill<'_> {
         crate::tui::edit::FlowPrefill {
             scope_keys: &self.limits.scope_keys,
             tier_key: &self.limits.tier_key,
-            rulesets: if self.policy.scope == PolicyScope::Draft {
-                &self.policy.raw
-            } else {
-                &[]
-            },
+            rulesets: self.draft_rulesets(),
             group_keys: None,
         }
     }
