@@ -700,24 +700,34 @@ service is the flow's `port/proto`. The form opens at once; when the draft
 rulesets are not loaded yet (the Policy screen never opened, or showing the
 active ones) it sends one draft rulesets read, cached, and none when they are
 held. The Policy screen keeps showing the scope you chose. The ruleset is
-found by the destination's scope (its labels under the scope keys): the one
-scoped exactly like it, else the only one whose scope covers it (a ruleset
-scoped `app=shop` covers `app=shop, env=prod`; the global scope and scopes
-with label groups do not count). When the answer arrives after you typed a
-name, your name stays. Several matches leave the field empty and the hint
-counts them (`2 rulesets cover app=shop, env=prod: Ctrl-N lists them
-first`); none says `no ruleset covers app=shop, env=prod: type a new name,
-Ctrl-R creates it`. `Ctrl-N` completes ruleset names from the drafts (any
-case, anywhere in the name; again cycles), the covering ones first. Type the
-ruleset's name or href; a name is checked at submit (the cached draft read),
-and an unknown name brings the form back with `no ruleset named "X": Ctrl-R
-creates it scoped app=shop, env=prod` and similar names. `Ctrl-R` (listed
-under the form) creates the typed ruleset scoped like the destination (its
-own confirm and POST), then plans the rule into it for a second confirm;
-cancelling either sends nothing more. A name the loaded drafts already have
-is refused (Enter adds the rule to it). When the destination has no scope
-labels there is nothing to scope a new ruleset by: name an existing one or
-create it on the Policy screen.
+found by the destination's scope: the one scoped exactly like its labels
+under the scope keys, else the only one whose scope covers it. A scope
+covers the destination when each of its labels is one the destination has,
+under any key (`app=shop` covers `app=shop, env=prod`; `app=shop, env=prod,
+loc=eu` covers a destination with `loc=eu`), and a label group counts when
+one of its members is; the global scope does not count. When the answer
+arrives after you typed a name, your name stays. Several matches leave the
+field empty and the hint counts them (`2 rulesets cover app=shop, env=prod:
+Ctrl-N lists them first`); none says `no ruleset covers app=shop, env=prod:
+type a new name, Ctrl-R creates it`. `Ctrl-N` completes ruleset names from
+the drafts (any case, anywhere in the name; again cycles), the covering ones
+first; `Tab` on part of a name completes it too, and a second `Tab` keeps
+the shown name and moves on (on an empty field or an exact name `Tab` just
+moves on). Type the ruleset's name or href; a name is checked at submit (the
+cached draft read), and an unknown name brings the form back with `no
+ruleset named "X": Ctrl-R creates it scoped app=shop, env=prod` and similar
+names. `Ctrl-R` (listed under the form) creates the typed ruleset scoped like
+the destination (its own confirm and POST), then plans the rule into it for
+a second confirm; cancelling either sends nothing more. It reads the draft
+rulesets once more, fresh, when planning: if a ruleset of that name exists
+after all (made elsewhere, or the form's list was still loading), nothing is
+created and the rule goes into it, through its confirm (`ruleset "X" exists:
+adding the rule to it`). A name the loaded drafts already have is refused at
+once (Enter adds the rule to it), as is one several rulesets share (use the
+href). When the destination has no scope labels, or the row (a pair by
+service grouped on part of the scope) spans scopes, there is nothing to
+scope one new ruleset by: name an existing one or create it on the Policy
+screen.
 
 ### Label model
 

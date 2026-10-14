@@ -129,7 +129,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ),
     (
         "w form   Ruleset",
-        "found by the destination's scope · Ctrl-N names",
+        "found by the destination's scope · Tab/Ctrl-N names",
     ),
     (
         "w form   Ctrl-A Ctrl-R",
@@ -512,8 +512,8 @@ pub fn render_form(model: &Model, form: &Form, f: &mut Frame, area: Rect) {
         None => lines.push(Line::from(Span::styled(
             match (&form.alt, form.expanded) {
                 _ if !matches!(form.intent, EditIntent::RuleFromFlow(_)) => "* required",
-                (_, false) => "* required · Ctrl-R new ruleset · Ctrl-A all labels",
-                (_, true) => "* required · Ctrl-R new ruleset · Ctrl-A model view",
+                (_, false) => "* required · Ctrl-N names · Ctrl-R new ruleset · Ctrl-A all labels",
+                (_, true) => "* required · Ctrl-N names · Ctrl-R new ruleset · Ctrl-A model view",
             },
             t.dim_style(),
         ))),

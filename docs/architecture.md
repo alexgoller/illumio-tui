@@ -220,7 +220,9 @@ loaded draft rulesets, `Model::draft_rulesets`, via `Model::flow_prefill`)
 and fills providers with the destination's tier, consumers with the source's
 tier (same scope) or its scope and tier (unscoped), and the ruleset by
 `edit::ruleset_pick`: the draft ruleset scoped exactly like the destination,
-else the only one with a label-only scope that is part of it (by label href).
+else the only one whose scope covers it: each label is one the destination
+has (any key) and each label group has a member it has
+(`pce::impact::group_members`); a group match is never exact.
 The drafts are the Policy screen's list when it shows the draft, else
 `PolicyState.form_drafts`; when neither is held `begin_start` sends one
 cached `LoadRuleSets { Draft }` (the Policy screen's own load when it is on
@@ -232,7 +234,9 @@ plans the typed name as a new ruleset; when the plan says a typed name is
 unknown, `edit::explain_unknown_ruleset` adds what `Ctrl-R` creates and
 `Form.offers_ruleset` (a `RulesetOffer` of the checked name and the scope)
 shows it in the Ruleset hint row and the panel keys while the field still
-holds that name. `Ctrl-R` plans `CreateRuleSet` scoped like the destination and
+holds that name. `Ctrl-R` plans `CreateRuleSetIfMissing` (planned with
+`IfMissing::SkipExisting`: one fresh draft read; a `Plan::Noop` sends the
+waiting rule into the existing href instead) scoped like the destination and
 keeps the rule and the form in `PolicyState.rule_after_ruleset`; the
 ruleset's `WriteDone(Ok)` plans `CreateRule` into the new href (a second
 confirm, the form back in `TrafficState.rule_form` so a failed plan reopens

@@ -4,7 +4,7 @@ use crate::tui::app_view::{AppPanel, AppView, Loadable};
 use crate::tui::commands::{self, Command};
 use crate::tui::edit::{self, EditIntent, RulesetTarget, Start, WriteIntent};
 use crate::tui::filter::{FilterEditor, TrafficFilter};
-use crate::tui::form::{Completing, FormEvent};
+use crate::tui::form::{Completing, FieldKind, Form, FormEvent};
 use crate::tui::model::{
     By, Connection, Dir, Drill, EventsFilterEdit, Model, ObjectKind, ObjectsState, Overlay,
     PceUsage, PendingAction, PolicyPane, PolicyState, QueryState, Range, Screen, StatusLine,
@@ -925,28 +925,52 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
 /// the last candidate). A shown key (`app=`) or prefix (`group:`, `wl:`)
 /// completes what follows it on `Ctrl-N`. Without an index, or for a text
 /// field, nothing happens. Never a request.
-fn complete_field(model: &Model, editor: &mut impl Completing, forward: bool) {
-    let dives = forward && editor.completion_dives();
-    if editor.completing() && !dives {
-        editor.cycle(forward);
-        return;
-    }
+/// The candidates for the active field's current token, best first;
+/// none without an index or for a text field. Never a request.
+fn field_candidates(model: &Model, editor: &impl Completing) -> Vec<String> {
     let Some(idx) = model.index() else {
-        return;
+        return Vec::new();
     };
     let Some((kind, token, earlier)) = editor.completion_request() else {
-        return;
+        return Vec::new();
     };
     let rulesets = model.draft_rulesets().unwrap_or_default();
     let workloads = &model.workloads.raw;
     let mut candidates =
         crate::tui::complete::complete(kind, &token, &earlier, idx, rulesets, workloads);
     // A `w` form's rulesets that cover the destination first, best first.
-    if kind == crate::tui::form::FieldKind::Ruleset {
+    if kind == FieldKind::Ruleset {
         let preferred = editor.preferred();
         candidates.sort_by_key(|c| preferred.iter().position(|p| p == c).unwrap_or(usize::MAX));
     }
+    candidates
+}
 
+/// `Tab` in a Ruleset field completes instead of moving on: the field holds
+/// text that is no draft ruleset's exact name (any case) and some name
+/// matches it. Empty or exact text, or an open completion (`Tab` then keeps
+/// the shown name and moves on), leaves `Tab` to the form.
+fn tab_completes(model: &Model, form: &Form) -> bool {
+    let Some(field) = form.fields.get(form.active) else {
+        return false;
+    };
+    let text = field.value.trim();
+    field.kind == FieldKind::Ruleset
+        && form.completion.is_none()
+        && !text.is_empty()
+        && !model
+            .draft_rulesets()
+            .is_some_and(|sets| !edit::rulesets_named(sets, text).is_empty())
+        && !field_candidates(model, form).is_empty()
+}
+
+fn complete_field(model: &Model, editor: &mut impl Completing, forward: bool) {
+    let dives = forward && editor.completion_dives();
+    if editor.completing() && !dives {
+        editor.cycle(forward);
+        return;
+    }
+    let candidates = field_candidates(model, editor);
     if editor.start_completion(candidates) {
         if !forward {
             editor.cycle(false);
@@ -1464,6 +1488,13 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 && matches!(k.code, KeyCode::Char('n' | 'p')) =>
         {
             complete_field(model, &mut form, k.code == KeyCode::Char('n'));
+            model.overlay = Overlay::Form(form);
+            Vec::new()
+        }
+        Overlay::Form(mut form)
+            if k.code == KeyCode::Tab && k.modifiers.is_empty() && tab_completes(model, &form) =>
+        {
+            complete_field(model, &mut form, true);
             model.overlay = Overlay::Form(form);
             Vec::new()
         }
@@ -15642,5 +15673,48 @@ mod rule_form_ruleset_tests {
         update(&mut m, Msg::Planned(Err(e.into())));
         assert_eq!(form(&m).error.as_deref(), Some(e));
         assert_eq!(form(&m).value("Ruleset"), "Dup", "as typed");
+    }
+
+    #[test]
+    fn tab_in_the_ruleset_field_completes_a_partial_name_and_then_moves_on() {
+        let (mut m, _) = w_form();
+        update(&mut m, drafts_loaded(drafts()));
+        // An exact name: Tab moves on.
+        assert_eq!(form(&m).value("Ruleset"), "Shop-Prod");
+        update(&mut m, kc(KeyCode::Tab));
+        assert_eq!(form(&m).active, 1);
+        update(&mut m, kc(KeyCode::BackTab));
+        // A partial name: Tab completes, the strip shows, the field stays.
+        update(&mut m, ctrl('u'));
+        for c in "prod".chars() {
+            update(&mut m, key(c));
+        }
+        assert!(update(&mut m, kc(KeyCode::Tab)).is_empty());
+        let f = form(&m);
+        assert_eq!((f.active, f.value("Ruleset")), (0, "Shop-Prod"));
+        assert!(f.completion.is_some());
+        // Again: keeps the shown name and moves on.
+        update(&mut m, kc(KeyCode::Tab));
+        let f = form(&m);
+        assert_eq!((f.active, f.value("Ruleset")), (1, "Shop-Prod"));
+        assert!(f.completion.is_none());
+        // No name matches, or nothing typed: Tab moves on.
+        for text in ["zzz", ""] {
+            update(&mut m, kc(KeyCode::BackTab));
+            update(&mut m, ctrl('u'));
+            for c in text.chars() {
+                update(&mut m, key(c));
+            }
+            update(&mut m, kc(KeyCode::Tab));
+            assert_eq!((form(&m).active, form(&m).value("Ruleset")), (1, text));
+        }
+        // An exact name in another case: moves on too.
+        update(&mut m, kc(KeyCode::BackTab));
+        update(&mut m, ctrl('u'));
+        for c in "global-infra".chars() {
+            update(&mut m, key(c));
+        }
+        update(&mut m, kc(KeyCode::Tab));
+        assert_eq!(form(&m).active, 1);
     }
 }
