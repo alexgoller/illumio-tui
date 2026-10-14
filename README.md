@@ -188,6 +188,22 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   on a ruleset opens it on the Policy screen; `w` drafts an allow rule from a blocked peer
   (writes on; the form replaces the overlay and `A` brings it back); `r` reloads the panels
   after asking; `Esc` returns.
+  `D` shows, next to each flow's reported decision, the one the **draft** policy would make,
+  so you can check whether your draft rules fix the blocked flows before provisioning. It is
+  the PCE's own Explorer draft view: the PCE re-evaluates the result's own async query
+  (`PUT …/update_rules` on that query, then status polls and one download; no new POST) and
+  **changes no policy**. The PUT is on the query resource illumio-tui created, so it needs no
+  armed writes and is not in the write audit. Above 10000 rows or a 7 d window it asks first;
+  a focused result is re-evaluated per side. When the query is no longer known (the PCE
+  dropped it), `D` asks, then runs the query again with the draft (one POST, one PUT, polls and
+  one download per query). While it runs, `Esc` cancels it; a new query, a focus change, a
+  window or cap step or `:profile` cancels it too. With draft decisions loaded the Result
+  header says `draft ✓ N fixed`; Flows gains a `draft` column (`blocked → allowed`, the row in
+  its draft colour; below 120 columns `→ allow`); App-to-app pairs and sections a `draft`
+  column (`2 would allow`, `1 would block`) and the section headers `draft allows N`; the app
+  overlay `+N` / `-N` per peer and `draft: N blocked flows fixed`; and `d` gains a `fixed by
+  draft` step (blocked or potentially blocked now, allowed in draft). `D` again goes back to the
+  reported decisions with no request, and the next `D` answers from the draft cache.
 - **Policy**: `d` toggle draft / active, `p` pending changes (`Enter` on one shows its diff against active), `Tab` switch panes, `Enter` rule
   detail, or on a ruleset load its deny rules. Rules are listed in evaluation order: override
   deny, allow, deny. With writes on, `n` / `e` / `x` create, edit and delete rulesets and rules
@@ -353,6 +369,20 @@ summary (workloader) therefore match `conns`, not `flows`. Every CLI traffic tab
 the line above it, and the TUI's traffic tables add `conns: lifetime` to their title where it
 fits; JSON and CSV carry the per-decision connections for pairs, `--services` and
 sections (sections: as the last four CSV columns).
+
+**Draft decision.** `--draft` (on `traffic query`/`groups`/`mesh` and `app`) also asks for
+each flow's decision under the draft policy, the PCE's own Explorer draft view: after the
+query completes, one `PUT <query>/update_rules?label_based_rules=false&offset=0&limit=<cap>`
+(empty body) on that query, status polls until its `rules` are completed, then the one download
+(with `--app`, per side; with `--backfill`, only the result kept is re-evaluated). It changes no
+policy: the PUT re-evaluates the query resource illumio-tui created, so it needs no armed writes
+and is not in the write audit. Every flow then carries `draft_policy_decision` (`allowed`,
+`potentially_blocked`, `blocked`, or what the PCE sends, such as `allowed_across_boundary`,
+`blocked_by_boundary` or `blocked_by_override_deny`), `meta.draft` is `{"evaluated": true,
+"fixed": N, "newly_blocked": M}` (flow records: blocked or potentially blocked now and allowed
+in draft; allowed now and not in draft), pairs, sections and app peers carry `draft_allowed` and
+`draft_blocked` (flow records), the tables a `draft` column and the CSVs `draft_allowed` and
+`draft_blocked`. A PCE that refuses `update_rules` is a clear error.
 
 **Transmission.** `--transmission unicast|broadcast|multicast` (repeatable or comma-separated,
 on `traffic query`/`groups`/`mesh` and `app`) keeps the flows sent that way. Explorer can only
@@ -702,7 +732,9 @@ Explorer queries default to a 24 h window and 10 000 rows; larger windows
 (> 7 d) or caps (> 10 000, at most 200 000) need `--yes`. `--dry-run` shows the request
 body without sending it. A traffic backfill sends nothing before `B` (or `--backfill`, or
 the written `traffic_auto_backfill` opt-in) and is one query per cap rung, each at least 3 API
-calls; every rung above 10000 asks first (`y`, or `--yes`). Status polls start at 1 s and back
+calls; every rung above 10000 asks first (`y`, or `--yes`). A draft re-evaluation (`D`,
+`--draft`) is one PUT on our own query plus polls and one download per query, never without
+`D` or `--draft`, and cached. Status polls start at 1 s and back
 off to at most 3 s; downloads are gzip-compressed. The CLI submits an unfocused query while it
 loads the object lists for name resolution, so the PCE computes meanwhile without extra
 requests.
