@@ -127,7 +127,14 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "Filter   Ctrl-N Ctrl-P",
         "complete the filter fields · cycle back",
     ),
-    ("w form   Ctrl-A Ctrl-R", "all labels · new ruleset"),
+    (
+        "w form   Ruleset",
+        "found by the destination's scope · Ctrl-N names",
+    ),
+    (
+        "w form   Ctrl-A Ctrl-R",
+        "all labels · create the typed ruleset",
+    ),
     ("Policy   d", "toggle draft / active"),
     ("Policy   p", "pending changes"),
     (

@@ -216,20 +216,30 @@ whose fields already match) is an info status, never a request.
 The `w` pre-fill follows the profile's label model (`Limits.scope_keys`,
 `Limits.tier_key`, from `[profiles.<name>.labels]` or `ILLUMIO_SCOPE_KEYS` /
 `ILLUMIO_TIER_KEY`): `edit::start` takes a `FlowPrefill` (those keys and the
-loaded draft rulesets, `Model::flow_prefill`) and fills providers with the
-destination's tier, consumers with the source's tier (same scope) or its
-scope and tier (unscoped), and the ruleset with the one loaded draft ruleset
-whose scope is the destination's (by label href); nothing is requested.
-`Form.alt` holds every attached label for `Ctrl-A`. When the plan says the
-typed name is unknown and the destination has a scope, the form offers
-`Ctrl-R` (`Form.offers_ruleset`, a `RulesetOffer` of the checked name and the
-scope, shown in the Ruleset hint row and the panel keys while the field still
-holds that name): it plans `CreateRuleSet` scoped like the destination and
+loaded draft rulesets, `Model::draft_rulesets`, via `Model::flow_prefill`)
+and fills providers with the destination's tier, consumers with the source's
+tier (same scope) or its scope and tier (unscoped), and the ruleset by
+`edit::ruleset_pick`: the draft ruleset scoped exactly like the destination,
+else the only one with a label-only scope that is part of it (by label href).
+The drafts are the Policy screen's list when it shows the draft, else
+`PolicyState.form_drafts`; when neither is held `begin_start` sends one
+cached `LoadRuleSets { Draft }` (the Policy screen's own load when it is on
+the draft), and `RuleSetsLoaded` calls `edit::refill_ruleset` on an open `w`
+form (`Form.flow` keeps a grouped row's keys and the covering names that
+`Ctrl-N` offers first). A policy write drops `form_drafts`.
+`Form.alt` holds every attached label for `Ctrl-A`. `Ctrl-R` in a `w` form
+plans the typed name as a new ruleset; when the plan says a typed name is
+unknown, `edit::explain_unknown_ruleset` adds what `Ctrl-R` creates and
+`Form.offers_ruleset` (a `RulesetOffer` of the checked name and the scope)
+shows it in the Ruleset hint row and the panel keys while the field still
+holds that name. `Ctrl-R` plans `CreateRuleSet` scoped like the destination and
 keeps the rule and the form in `PolicyState.rule_after_ruleset`; the
 ruleset's `WriteDone(Ok)` plans `CreateRule` into the new href (a second
 confirm, the form back in `TrafficState.rule_form` so a failed plan reopens
 it), and any failure, cancel or profile switch drops it. Both writes
-reload the draft rulesets.
+reload the draft rulesets. A `w` form the app overlay opened sets
+`Model.form_from_app`: `close_form` (cancel, `n` on the confirm, nothing to
+send, the write done) returns to `Overlay::App`.
 
 `Enter` on a pending ruleset reads the draft rulesets (cached) and the active
 ones (one GET, five minutes); `diff::rule_set_diff_for` lists name,

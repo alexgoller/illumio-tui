@@ -2,12 +2,12 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ Keys ───────────────────────────────── 41-62 of 62 · j/k scroll · Esc closes ╮
-│Treemap  hjkl Enter b    move · zoom, then drill · conns/bytes · Esc out      │
+╭ Keys ───────────────────────────────── 42-63 of 63 · j/k scroll · Esc closes ╮
 │Traffic  w               draft allow rule from a blocked flow or row (writes) │
 │Form     Ctrl-N Ctrl-P   complete from the index · cycle back                 │
 │Filter   Ctrl-N Ctrl-P   complete the filter fields · cycle back              │
-│w form   Ctrl-A Ctrl-R   all labels · new ruleset                             │
+│w form   Ruleset         found by the destination's scope · Ctrl-N names      │
+│w form   Ctrl-A Ctrl-R   all labels · create the typed ruleset                │
 │Policy   d               toggle draft / active                                │
 │Policy   p               pending changes                                      │
 │Policy   Tab / Enter     pane · rule detail · on a ruleset: load deny rules   │

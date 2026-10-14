@@ -186,7 +186,8 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   again). `:app` also opens an app that has labels but no flows in the window. `Tab` moves
   between panels; `Enter` on a peer focuses that pair in Flows, on a workload opens its detail,
   on a ruleset opens it on the Policy screen; `w` drafts an allow rule from a blocked peer
-  (writes on; the form replaces the overlay and `A` brings it back); `r` reloads the panels
+  (writes on; the form replaces the overlay, and cancelling it or the write done comes back
+  to the overlay without a request); `r` reloads the panels
   after asking; `Esc` returns.
   `D` shows, next to each flow's reported decision, the one the **draft** policy would make,
   so you can check whether your draft rules fix the blocked flows before provisioning. It is
@@ -695,16 +696,28 @@ tier (`app=crm, env=prod, role=web`) with Unscoped `y`; an endpoint without
 the label asked for falls back to `workload:<href>`, else its IP lists, else
 `all`. Other dimensions (`loc`, your own keys) are not pre-filled: `Ctrl-A`
 swaps in every attached label and back (what you typed is kept). The
-service is the flow's `port/proto`. The ruleset is pre-filled when exactly
-one loaded draft ruleset is scoped like the destination; otherwise the hint
-names that scope (`scope app=shop, env=prod`). Type the ruleset's name or
-href; a name costs one draft ruleset read at submit, and an unknown name
-brings the form back with similar names. When the destination has a scope,
-the form offers `Ctrl-R` (the Ruleset hint says `Ctrl-R: create it, scoped
-…`): it creates the ruleset under that name scoped like the destination (its
+service is the flow's `port/proto`. The form opens at once; when the draft
+rulesets are not loaded yet (the Policy screen never opened, or showing the
+active ones) it sends one draft rulesets read, cached, and none when they are
+held. The Policy screen keeps showing the scope you chose. The ruleset is
+found by the destination's scope (its labels under the scope keys): the one
+scoped exactly like it, else the only one whose scope covers it (a ruleset
+scoped `app=shop` covers `app=shop, env=prod`; the global scope and scopes
+with label groups do not count). When the answer arrives after you typed a
+name, your name stays. Several matches leave the field empty and the hint
+counts them (`2 rulesets cover app=shop, env=prod: Ctrl-N lists them
+first`); none says `no ruleset covers app=shop, env=prod: type a new name,
+Ctrl-R creates it`. `Ctrl-N` completes ruleset names from the drafts (any
+case, anywhere in the name; again cycles), the covering ones first. Type the
+ruleset's name or href; a name is checked at submit (the cached draft read),
+and an unknown name brings the form back with `no ruleset named "X": Ctrl-R
+creates it scoped app=shop, env=prod` and similar names. `Ctrl-R` (listed
+under the form) creates the typed ruleset scoped like the destination (its
 own confirm and POST), then plans the rule into it for a second confirm;
-cancelling either sends nothing more. Editing the name withdraws the offer
-(press Enter to check the new name first).
+cancelling either sends nothing more. A name the loaded drafts already have
+is refused (Enter adds the rule to it). When the destination has no scope
+labels there is nothing to scope a new ruleset by: name an existing one or
+create it on the Policy screen.
 
 ### Label model
 
