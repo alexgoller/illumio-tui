@@ -743,6 +743,15 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     } else {
                         StatusLine::warn(text)
                     };
+                    // The draft policy (or a workload's scope) may have
+                    // changed: draft decisions on screen are stale, and the
+                    // runtime dropped the cached ones; `D` asks the PCE again.
+                    if model.traffic.drop_draft() {
+                        model.status = StatusLine {
+                            text: format!("{} · draft cleared: D re-evaluates", model.status.text),
+                            ..model.status.clone()
+                        };
+                    }
                     if kind.whole_policy() {
                         model.policy.provisioned = Some(model.status.text.clone());
                     }
@@ -1082,7 +1091,11 @@ fn draft_done(model: &mut Model, seq: u64, result: Result<DraftOutcome, DraftFai
     }
     t.query = QueryState::Idle;
     match result {
-        Ok(DraftOutcome { outcome, focus }) => {
+        Ok(DraftOutcome {
+            outcome,
+            focus,
+            age,
+        }) => {
             let current = t.focus_result.as_ref().map(|r| &r.focus);
             let Some(d) = t
                 .data
@@ -1094,7 +1107,9 @@ fn draft_done(model: &mut Model, seq: u64, result: Result<DraftOutcome, DraftFai
             };
             let summary = pce::traffic::DraftSummary::of(&outcome.flows);
             if d.hrefs != outcome.hrefs {
-                d.fetched_at = Instant::now(); // the queries ran again
+                // The queries ran again: a new result, at its own time range.
+                d.fetched_at = Instant::now();
+                d.range = outcome.bounds.map(|(start, end)| Range { start, end });
             }
             d.flows = outcome.flows;
             d.hrefs = outcome.hrefs;
@@ -1107,7 +1122,14 @@ fn draft_done(model: &mut Model, seq: u64, result: Result<DraftOutcome, DraftFai
                 "draft: {} blocked flows fixed · {} would be blocked · D clears{}",
                 summary.fixed,
                 summary.newly_blocked,
-                if outcome.hit { " (cached)" } else { "" }
+                if outcome.hit {
+                    format!(
+                        " (cached {})",
+                        crate::tui::ui::widgets::bars::age_text(age).trim_end_matches(" ago")
+                    )
+                } else {
+                    String::new()
+                }
             ));
         }
         Err(DraftFailure::Gone(e)) => {
@@ -14435,6 +14457,11 @@ mod draft_tests {
                     hrefs: d.hrefs.clone(),
                 },
                 focus: m.traffic.focus_result.as_ref().map(|r| r.focus.clone()),
+                age: if hit {
+                    Duration::from_secs(40)
+                } else {
+                    Duration::ZERO
+                },
             }),
         }
     }
@@ -14614,6 +14641,7 @@ mod draft_tests {
                     hrefs: vec![HREF.into()],
                 },
                 focus: None,
+                age: Duration::ZERO,
             }),
         };
         update(&mut m2, msg);
@@ -14692,7 +14720,7 @@ mod draft_tests {
         let msg = answer(&m, seq, true);
         update(&mut m, msg);
         assert!(m.traffic.draft_loaded());
-        assert!(m.status.text.ends_with("(cached)"), "{}", m.status.text);
+        assert!(m.status.text.ends_with("(cached 40s)"), "{}", m.status.text);
     }
 
     #[test]
@@ -14727,6 +14755,72 @@ mod draft_tests {
         assert!(!m.traffic.is_running() && !m.traffic.draft_loaded());
         assert_eq!(m.traffic.loaded_flows().len(), n, "the plain result stays");
         assert_eq!(m.status.text, "draft: the PCE refused it");
+    }
+
+    #[test]
+    fn a_write_drops_the_draft_and_the_next_d_asks_the_pce() {
+        let mut m = model();
+        let (seq, ..) = press_d(&mut m);
+        let msg = answer(&m, seq, false);
+        update(&mut m, msg);
+        assert!(m.traffic.draft_loaded());
+        m.writes.in_flight = true;
+        update(
+            &mut m,
+            Msg::WriteDone {
+                kind: pce::write::ObjectKind::Rule,
+                method: Some(pce::WriteMethod::Delete),
+                result: Ok(pce::write::Outcome::Written(pce::write::Written {
+                    href: "/orgs/1/sec_policy/draft/rule_sets/1/sec_rules/2".into(),
+                    pending: true,
+                    status: 204,
+                    object: serde_json::Value::Null,
+                    dropped_fields: vec![],
+                    warnings: vec![],
+                })),
+            },
+        );
+        assert!(!m.traffic.draft_loaded());
+        assert!(
+            m.status.text.ends_with("draft cleared: D re-evaluates"),
+            "{}",
+            m.status.text
+        );
+        let (_, hrefs, ..) = press_d(&mut m);
+        assert_eq!(hrefs, vec![HREF.to_string()], "D runs again, not a clear");
+    }
+
+    #[test]
+    fn a_draft_re_run_takes_the_new_time_range() {
+        let mut m = model_with_rich_flows(); // no hrefs: D re-runs the query
+        update(&mut m, key('D'));
+        let cmds = update(&mut m, key('y'));
+        let [Cmd::RunDraft { seq, .. }] = cmds.as_slice() else {
+            panic!("{cmds:?}")
+        };
+        let end: jiff::Timestamp = "2026-10-11T00:00:00Z".parse().unwrap();
+        let start: jiff::Timestamp = "2026-10-10T00:00:00Z".parse().unwrap();
+        let d = m.traffic.data.as_ref().unwrap();
+        let msg = Msg::DraftDone {
+            seq: *seq,
+            result: Ok(DraftOutcome {
+                outcome: QueryOutcome {
+                    flows: with_draft(d.flows.clone()),
+                    truncated: false,
+                    incomplete: false,
+                    elapsed: Duration::ZERO,
+                    hit: false,
+                    filter: d.filter.clone(),
+                    bounds: Some((start, end)),
+                    hrefs: vec!["/orgs/1/traffic_flows/async_queries/new".into()],
+                },
+                focus: None,
+                age: Duration::ZERO,
+            }),
+        };
+        update(&mut m, msg);
+        let r = m.traffic.data.as_ref().unwrap().range.unwrap();
+        assert_eq!((r.start, r.end), (start, end));
     }
 
     #[test]

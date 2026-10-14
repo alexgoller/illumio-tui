@@ -2607,3 +2607,111 @@ async fn d_re_evaluates_our_query_once_and_then_answers_from_the_cache() {
     assert!(audit.entries().is_empty(), "update_rules is not a write");
     assert_eq!(model.busy, 0);
 }
+
+/// The query, `D` (one PUT), a rule delete, then `D` again: the write
+/// dropped the draft on screen and the cached draft, so the second `D`
+/// asks the PCE again (a second PUT on the same query, no new POST).
+#[tokio::test]
+async fn d_after_a_rule_write_re_evaluates_again() {
+    use illumio_tui::tui::filter::TrafficFilter;
+    use illumio_tui::tui::msg::Msg;
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    const QHREF: &str = "/orgs/5/traffic_flows/async_queries/q-8";
+    const RULE: &str = "/orgs/5/sec_policy/draft/rule_sets/1/sec_rules/2";
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/traffic_flows/async_queries"))
+        .respond_with(
+            ResponseTemplate::new(202).set_body_json(json!({"href": QHREF, "status": "queued"})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "completed", "rules": "completed",
+            "result": {"href": format!("{QHREF}/download")}, "flows_count": 4
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path(format!("/api/v2{QHREF}/update_rules")))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(2)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}/download")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/traffic_flows.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path(format!("/api/v2{RULE}")))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/sec_policy/draft/rule_sets"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/rule_sets.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .mount(&server)
+        .await;
+    let pce = pce_for(&server);
+    let mut m = writes_model();
+    m.connection = Connection::Connected {
+        index: Some(pce.name_index(pce::CacheMode::Use).await.unwrap()),
+        index_age_secs: 0,
+    };
+    let audit = MemoryAudit::new();
+    let guard = tui_guard(audit.clone());
+    let plan = pce.writer(&guard).plan_delete_rule(RULE).unwrap();
+    let (mut rt, tx) = Runtime::with_writer(pce, m, tui_guard(audit.clone()));
+    tx.send(Msg::ApplyFilter(TrafficFilter::defaults("1h", 50)))
+        .unwrap();
+    let first = run_loop(
+        &mut rt,
+        Box::pin(press(vec![(800, ch('D')), (800, KeyCode::F(12))])),
+        &mut |_| {},
+    )
+    .await;
+    assert!(first.traffic.draft_loaded(), "the first D loaded the draft");
+    rt.model = first;
+    rt.execute(Cmd::ExecuteWrite {
+        plan,
+        kind: pce::write::ObjectKind::Rule,
+    });
+    let model = run_loop(
+        &mut rt,
+        Box::pin(press(vec![
+            (600, KeyCode::F(12)),
+            (100, ch('D')),
+            (800, ch('q')),
+        ])),
+        &mut |m| {
+            if m.status.text.contains("deleted") {
+                assert!(!m.traffic.draft_loaded(), "the write dropped the draft");
+            }
+        },
+    )
+    .await;
+    assert!(model.traffic.draft_loaded(), "the second D loaded it again");
+    let sent: Vec<String> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.method.to_string())
+        .filter(|m| m != "GET")
+        .collect();
+    assert_eq!(sent, vec!["POST", "PUT", "DELETE", "PUT"]);
+    assert_eq!(audit.entries().len(), 1, "only the rule delete is audited");
+}

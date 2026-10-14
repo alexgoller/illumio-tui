@@ -62,16 +62,23 @@ pub enum ObjectKind {
 impl ObjectKind {
     /// The cache prefixes a write of this kind drops. Every kind drops
     /// `usage:` (the PCE's label usage flags): a workload, rule or group
-    /// write changes what holds a label.
+    /// write changes what holds a label. Every write that can change how
+    /// the draft policy decides a flow drops `draft:` (the draft traffic
+    /// results): the draft objects, provision and revert, and a workload
+    /// (its labels place it in scopes). A label write changes no decision.
     pub fn cache_prefixes(self) -> &'static [&'static str] {
         match self {
-            ObjectKind::Label
-            | ObjectKind::LabelGroup
-            | ObjectKind::IpList
-            | ObjectKind::Service => &["objects:", "usage:"],
-            ObjectKind::Workload => &["workloads", "usage:"],
-            ObjectKind::RuleSet | ObjectKind::Rule | ObjectKind::DenyRule => &["policy:", "usage:"],
-            ObjectKind::Provision | ObjectKind::Revert => &["policy:", "objects:", "usage:"],
+            ObjectKind::Label => &["objects:", "usage:"],
+            ObjectKind::LabelGroup | ObjectKind::IpList | ObjectKind::Service => {
+                &["objects:", "usage:", "draft:"]
+            }
+            ObjectKind::Workload => &["workloads", "usage:", "draft:"],
+            ObjectKind::RuleSet | ObjectKind::Rule | ObjectKind::DenyRule => {
+                &["policy:", "usage:", "draft:"]
+            }
+            ObjectKind::Provision | ObjectKind::Revert => {
+                &["policy:", "objects:", "usage:", "draft:"]
+            }
         }
     }
 
@@ -558,25 +565,49 @@ mod tests {
     #[test]
     fn object_kind_prefixes_and_pending() {
         assert_eq!(ObjectKind::Label.cache_prefixes(), &["objects:", "usage:"]);
-        assert_eq!(ObjectKind::IpList.cache_prefixes(), &["objects:", "usage:"]);
+        assert_eq!(
+            ObjectKind::IpList.cache_prefixes(),
+            &["objects:", "usage:", "draft:"]
+        );
         assert_eq!(
             ObjectKind::Workload.cache_prefixes(),
-            &["workloads", "usage:"]
+            &["workloads", "usage:", "draft:"]
         );
-        assert_eq!(ObjectKind::RuleSet.cache_prefixes(), &["policy:", "usage:"]);
-        assert_eq!(ObjectKind::Rule.cache_prefixes(), &["policy:", "usage:"]);
+        assert_eq!(
+            ObjectKind::RuleSet.cache_prefixes(),
+            &["policy:", "usage:", "draft:"]
+        );
+        assert_eq!(
+            ObjectKind::Rule.cache_prefixes(),
+            &["policy:", "usage:", "draft:"]
+        );
         assert_eq!(
             ObjectKind::DenyRule.cache_prefixes(),
-            &["policy:", "usage:"]
+            &["policy:", "usage:", "draft:"]
         );
         assert_eq!(
             ObjectKind::Provision.cache_prefixes(),
-            &["policy:", "objects:", "usage:"]
+            &["policy:", "objects:", "usage:", "draft:"]
         );
         assert_eq!(
             ObjectKind::Revert.cache_prefixes(),
-            &["policy:", "objects:", "usage:"]
+            &["policy:", "objects:", "usage:", "draft:"]
         );
+        // Every pending kind can change a draft decision: it drops the
+        // draft traffic results.
+        for k in [
+            ObjectKind::LabelGroup,
+            ObjectKind::IpList,
+            ObjectKind::Service,
+            ObjectKind::RuleSet,
+            ObjectKind::Rule,
+            ObjectKind::DenyRule,
+        ] {
+            assert!(
+                k.pending() && k.cache_prefixes().contains(&"draft:"),
+                "{k:?}"
+            );
+        }
         // Label usage goes stale with any write: every kind drops it.
         for k in [
             ObjectKind::Label,

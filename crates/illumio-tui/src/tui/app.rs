@@ -280,7 +280,7 @@ impl Runtime {
                     .parse()
                     .ok()
                     .zip(query.end_date.parse().ok());
-                let outcome = match &focus {
+                let (outcome, age) = match &focus {
                     Some(f) => {
                         let ft = pce
                             .focused_traffic_eval(
@@ -294,7 +294,8 @@ impl Runtime {
                                 Some(&ptx),
                             )
                             .await?;
-                        QueryOutcome {
+                        let age = ft.age;
+                        let o = QueryOutcome {
                             flows: ft.flows,
                             truncated: ft.truncated,
                             incomplete: ft.incomplete,
@@ -303,7 +304,8 @@ impl Runtime {
                             filter,
                             bounds,
                             hrefs: ft.hrefs,
-                        }
+                        };
+                        (o, age)
                     }
                     None => {
                         let r = pce
@@ -315,7 +317,7 @@ impl Runtime {
                                 Some(&ptx),
                             )
                             .await?;
-                        QueryOutcome {
+                        let o = QueryOutcome {
                             flows: pce::traffic::resolve_flows(&r.value.flows, &idx),
                             truncated: r.value.truncated,
                             incomplete: r.value.incomplete,
@@ -324,10 +326,15 @@ impl Runtime {
                             filter,
                             bounds,
                             hrefs: vec![r.value.query_href.clone()],
-                        }
+                        };
+                        (o, r.age)
                     }
                 };
-                Ok::<_, pce::PceError>(DraftOutcome { outcome, focus })
+                Ok::<_, pce::PceError>(DraftOutcome {
+                    outcome,
+                    focus,
+                    age,
+                })
             }
             .await
             .map_err(|e| match e {

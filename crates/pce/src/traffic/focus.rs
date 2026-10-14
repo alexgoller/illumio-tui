@@ -345,6 +345,8 @@ pub struct FocusedTraffic {
     /// Their async query hrefs, in the same order: what a draft
     /// re-evaluation of this result re-uses.
     pub hrefs: Vec<String>,
+    /// The oldest cache age among the answers (zero when all were fresh).
+    pub age: Duration,
 }
 
 impl FocusedTraffic {

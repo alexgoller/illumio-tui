@@ -2626,6 +2626,23 @@ impl TrafficState {
         running
     }
 
+    /// After a write: draft decisions on screen (and on the unfocused
+    /// result kept aside) are dropped, and a draft run in flight is
+    /// cancelled, since the draft policy they came from may have changed.
+    /// Whether anything was dropped. No request.
+    pub fn drop_draft(&mut self) -> bool {
+        let running = self.cancel_draft_run();
+        let mut dropped = false;
+        if let Some(d) = self.unfocused.as_mut().filter(|d| d.draft.is_some()) {
+            for f in &mut d.flows {
+                f.draft_policy_decision = None;
+            }
+            d.draft = None;
+            dropped = true;
+        }
+        self.clear_draft() || dropped || running
+    }
+
     /// `D` on a result with draft decisions: back to the reported ones, no
     /// request (the draft result stays cached for the next `D`).
     pub fn clear_draft(&mut self) -> bool {

@@ -46,6 +46,9 @@ pub struct FocusedOutcome {
 pub struct DraftOutcome {
     pub outcome: QueryOutcome,
     pub focus: Option<Focus>,
+    /// How old the draft answer is when the cache gave it (the oldest
+    /// side's for a focused result); zero for a fresh one.
+    pub age: Duration,
 }
 
 /// Why `D` brought no draft decisions.

@@ -93,6 +93,10 @@ impl Default for CacheTtls {
 
 pub const DEFAULT_MAX_RESULTS: u32 = 10_000;
 
+/// How long a draft traffic result is reused: draft policy changes outside
+/// this tool must show soon.
+pub const DRAFT_TTL: Duration = Duration::from_secs(120);
+
 /// The facade: typed, cached reads on top of one [`PceClient`].
 pub struct Pce {
     client: PceClient,
@@ -468,9 +472,15 @@ impl Pce {
             }
         };
         let key = key.unwrap_or_else(|| format!("{prefix}{}", result.query_href));
+        // A reported result stands until the filter changes or `r`; a draft
+        // one for 2 minutes, so draft edits made elsewhere (the PCE UI) show
+        // soon. Our own writes drop it at once (`ObjectKind::cache_prefixes`).
+        let ttl = match eval {
+            Evaluation::Reported => Duration::from_secs(24 * 3600),
+            Evaluation::Draft(_) => DRAFT_TTL,
+        };
         self.cache.invalidate_prefix(&prefix);
-        self.cache
-            .insert(&key, result.clone(), Duration::from_secs(24 * 3600));
+        self.cache.insert(&key, result.clone(), ttl);
         let truncated = result.truncated;
         Ok(Cached {
             value: result,
@@ -526,6 +536,7 @@ impl Pce {
             hit: true,
             queries: Vec::new(),
             hrefs: Vec::new(),
+            age: Duration::ZERO,
         };
         for (i, (side, q)) in queries.into_iter().enumerate() {
             let eval = match draft {
@@ -543,6 +554,7 @@ impl Pce {
                 )
                 .await?;
             out.hrefs.push(r.value.query_href.clone());
+            out.age = out.age.max(r.age);
             let flows = traffic::resolve_flows(&r.value.flows, idx);
             merged = Some(match merged.take() {
                 None => flows,
