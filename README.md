@@ -668,6 +668,17 @@ body without sending it. A traffic backfill sends nothing before `B` and `y` (or
 `--backfill`, or the written `traffic_auto_backfill` opt-in), never more than one slice at a
 time and at most 50 queries per run, each at least 3 API calls.
 
+## illumio-tui and workloader
+
+[workloader](https://github.com/brian1917/workloader) is the established
+batch tool for the PCE, and the two are meant to be used together.
+illumio-tui is for interactive analysis: exploring traffic and policy with a
+customer, finding blocked flows and drafting the rules they need, reviewing one
+app, and giving scripts and AI agents a JSON CLI that counts every request.
+For bulk import and export, automated labelling (hostnames, subnets, clouds,
+vCenter), VEN lifecycle, rule and port usage reports, and running one command
+across many PCEs, use workloader. illumio-tui does not plan to cover those.
+
 ## Development
 
     cargo test --workspace
