@@ -43,6 +43,19 @@ pub fn assert_no_secret(assert: &assert_cmd::assert::Assert) {
 }
 
 #[test]
+fn traffic_help_states_the_count_units() {
+    for sub in ["query", "groups", "mesh"] {
+        let out = Command::cargo_bin("illumio-tui")
+            .unwrap()
+            .args(["traffic", sub, "--help"])
+            .assert()
+            .success();
+        let text = String::from_utf8_lossy(&out.get_output().stdout).to_string();
+        assert!(text.contains("lifetime counts"), "{sub}: {text}");
+    }
+}
+
+#[test]
 fn every_flag_has_help_text() {
     for args in [
         vec!["--help"],
@@ -1102,7 +1115,8 @@ async fn traffic_query_blocked_prints_sections_per_destination_and_counts_its_ho
         .assert()
         .success();
     let text = String::from_utf8_lossy(&table.get_output().stdout).to_string();
-    let header = text.lines().next().unwrap();
+    // The unit line, then the column header.
+    let header = text.lines().nth(1).unwrap();
     let cols: Vec<&str> = header
         .split("  ")
         .map(str::trim)
@@ -1125,8 +1139,8 @@ async fn traffic_query_blocked_prints_sections_per_destination_and_counts_its_ho
     );
     let lines: Vec<&str> = text.lines().collect();
     assert!(
-        lines[2].starts_with("shop/prod ")
-            && lines[2].ends_with("in · 2 groups · 27 conns · 1 blocked · 2 pot.blocked"),
+        lines[3].starts_with("shop/prod ")
+            && lines[3].ends_with("in · 2 groups · 27 conns · 1 blocked · 2 pot.blocked"),
         "a header row: {text}"
     );
     let row = lines
@@ -1961,6 +1975,9 @@ async fn traffic_groups_sum_bytes_and_honour_keys() {
     assert_eq!(data[0]["bytes"], 124_000);
     assert_eq!(data[1]["src"], json!(["ipl:Corp", "-"]));
     assert_eq!(data[1]["bytes"], 0, "no byte counts: 0 in JSON");
+    assert_eq!(data[0]["allowed_conns"], 310, "connections per decision");
+    assert_eq!(data[0]["pot_blocked_conns"], 0);
+    assert_eq!(data[0]["blocked_conns"], 0);
     assert_eq!(out["meta"]["cache"], "miss");
     assert_eq!(out["meta"]["truncated"], false);
     let table = cmd(&server)
@@ -1970,7 +1987,16 @@ async fn traffic_groups_sum_bytes_and_honour_keys() {
         .assert()
         .success();
     let text = String::from_utf8_lossy(&table.get_output().stdout).to_string();
-    let header = text.lines().next().unwrap();
+    assert_eq!(
+        text.lines().next(),
+        Some("flows: flow records · conns, bytes: lifetime counts of those records"),
+        "the unit above the table"
+    );
+    let header = text.lines().nth(1).unwrap();
+    assert!(
+        !header.contains("_conns"),
+        "the table keeps its width: {header}"
+    );
     for h in [
         "src",
         "dst",
@@ -2010,6 +2036,15 @@ async fn traffic_groups_services_adds_the_service_to_each_pair() {
         .find(|g| g["src"] == json!(["unmanaged-nas", "-"]))
         .unwrap();
     assert_eq!(nas["service"], "icmp", "no port: just the protocol");
+    assert_eq!(
+        (
+            &nas["allowed_conns"],
+            &nas["pot_blocked_conns"],
+            &nas["blocked_conns"]
+        ),
+        (&json!(0), &json!(0), &nas["connections"]),
+        "per-decision connections"
+    );
     let table = cmd(&server)
         .args([
             "traffic",
@@ -2022,7 +2057,7 @@ async fn traffic_groups_services_adds_the_service_to_each_pair() {
         .assert()
         .success();
     let text = String::from_utf8_lossy(&table.get_output().stdout).to_string();
-    let header: Vec<&str> = text.lines().next().unwrap().split_whitespace().collect();
+    let header: Vec<&str> = text.lines().nth(1).unwrap().split_whitespace().collect();
     assert_eq!(
         header,
         [
@@ -2047,8 +2082,9 @@ async fn traffic_groups_services_adds_the_service_to_each_pair() {
     assert_eq!(
         first_two(&text),
         [
-            "src,dst,service,flows,conns,bytes,allowed,pot.blocked,blocked",
-            "shop/prod,shop/prod,5432/tcp,1,310,124000,1,0,0"
+            "src,dst,service,flows,conns,bytes,allowed,pot.blocked,blocked,\
+             allowed_conns,pot_blocked_conns,blocked_conns",
+            "shop/prod,shop/prod,5432/tcp,1,310,124000,1,0,0,310,0,0"
         ]
     );
     cmd(&server)
@@ -2444,7 +2480,10 @@ async fn traffic_groups_show_filters_the_pairs_and_the_services() {
     let mut lines = text.lines();
     assert_eq!(
         lines.next(),
-        Some("src,dst,service,flows,conns,bytes,allowed,pot.blocked,blocked")
+        Some(
+            "src,dst,service,flows,conns,bytes,allowed,pot.blocked,blocked,\
+             allowed_conns,pot_blocked_conns,blocked_conns"
+        )
     );
     let rows: Vec<&str> = lines.collect();
     assert!(!rows.is_empty(), "{text}");
@@ -2510,7 +2549,8 @@ async fn traffic_mesh_places_processes_by_direction_and_drops_hidden_columns() {
         .assert()
         .success();
     let text = String::from_utf8_lossy(&table.get_output().stdout).to_string();
-    let header = text.lines().next().unwrap();
+    // The unit line, then the column header.
+    let header = text.lines().nth(1).unwrap();
     for h in [
         "src",
         "dst",
@@ -2656,7 +2696,7 @@ async fn traffic_groups_and_blocked_csv_print_one_row_per_peer() {
     let server = MockServer::start().await;
     mount_traffic(&server, 2).await;
     let header = "app,direction,peer,peer hosts,peer names,app hosts,app names,service,\
-                  flows,conns,bytes,last seen,decision";
+                  flows,conns,bytes,last seen,decision,allowed_conns,pot_blocked_conns,blocked_conns";
     let text = csv_stdout(
         &cmd(&server)
             .args(["traffic", "groups", "--window", "1h", "--by", "in", "--csv"])
@@ -2668,7 +2708,7 @@ async fn traffic_groups_and_blocked_csv_print_one_row_per_peer() {
         [
             header,
             "shop/prod,in,shop/prod,1,host-1.example,1,host-2.example,5432/tcp,1,310,124000,\
-             2026-10-10T07:31:02Z,allowed"
+             2026-10-10T07:31:02Z,allowed,310,0,0"
         ]
     );
     let text = csv_stdout(
@@ -2682,7 +2722,7 @@ async fn traffic_groups_and_blocked_csv_print_one_row_per_peer() {
         [
             header,
             "shop/prod,in,ipl:Corp/-,1,10.1.4.9,1,host-1.example,8443/tcp,1,12,0,\
-             2026-10-10T07:30:58Z,potentially_blocked"
+             2026-10-10T07:30:58Z,potentially_blocked,0,12,0"
         ]
     );
 }

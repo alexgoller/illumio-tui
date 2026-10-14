@@ -2,7 +2,7 @@
 //! `g` keys), inbound or outbound, one row per peer group and service.
 //! App-to-app's `in` / `out` / `both` states, the Blocked view and the CLI's
 //! `traffic groups --by` all read these. Pure; no requests.
-use super::aggregate::{Dominant, dominant, group_key, keys_or_default, tally};
+use super::aggregate::{ConnsByDecision, Dominant, dominant, group_key, keys_or_default, tally};
 use super::resolved::{ResolvedFlow, service_text};
 use crate::models::PolicyDecision;
 use serde::Serialize;
@@ -157,12 +157,18 @@ pub struct PeerRow {
     pub peer_hosts: usize,
     /// `5432/tcp`, or `icmp`.
     pub service: String,
+    /// Flow records.
     pub flows: u64,
+    /// The records' lifetime connection counts, summed.
     pub connections: u64,
     pub bytes: u64,
+    /// Flow records per decision.
     pub allowed: u64,
     pub potentially_blocked: u64,
     pub blocked: u64,
+    /// Connections per decision.
+    #[serde(flatten)]
+    pub conns: ConnsByDecision,
     /// Distinct display names on the app's side, at most `PEER_NAMES`
     /// (what Blocked shows as `dst name`).
     pub app_names: Vec<String>,
@@ -332,6 +338,7 @@ pub fn app_sections(
                         allowed: 0,
                         potentially_blocked: 0,
                         blocked: 0,
+                        conns: ConnsByDecision::default(),
                         app_names: Vec::new(),
                         app_hosts: 0,
                         last_detected: None,
@@ -348,6 +355,7 @@ pub fn app_sections(
             &mut row.potentially_blocked,
             &mut row.blocked,
         );
+        row.conns.add(f.policy_decision, f.num_connections);
         let peer_name = peer_ep.display_name();
         push_capped(&mut row.peer_names, &peer_name);
         seen.peer_names.insert(peer_name);
@@ -434,6 +442,26 @@ mod tests {
 
     fn app_env() -> Vec<String> {
         keys(&["app", "env"])
+    }
+
+    #[test]
+    fn peer_rows_count_connections_per_decision() {
+        let sections = app_sections_both(&rich_flows(), &app_env(), Decisions::All);
+        let rows: Vec<&PeerRow> = sections.iter().flat_map(|s| &s.rows).collect();
+        assert!(!rows.is_empty());
+        for r in rows {
+            let c = &r.conns;
+            // A flow of unknown decision counts in no decision.
+            let decided = r.allowed + r.potentially_blocked + r.blocked == r.flows;
+            assert_eq!(
+                c.allowed_conns + c.pot_blocked_conns + c.blocked_conns == r.connections,
+                decided || r.connections == 0,
+                "{r:?}"
+            );
+            assert_eq!(c.blocked_conns > 0, r.blocked > 0, "{r:?}");
+            let json = serde_json::to_value(r).unwrap();
+            assert_eq!(json["blocked_conns"], c.blocked_conns);
+        }
     }
 
     fn sum(s: &AppSection) -> Totals {

@@ -23,13 +23,29 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
+/// The unit line above a grouped traffic table, and `--help`'s.
+pub const UNITS_GROUPS: &str =
+    "flows: flow records · conns, bytes: lifetime counts of those records";
+/// The unit line above a table of flow records.
+pub const UNITS_FLOWS: &str = "one row per flow record · conns: its lifetime count";
+
 #[derive(Subcommand, Debug)]
 pub enum TrafficCmd {
     /// Run an Explorer traffic query
+    ///
+    /// Each row is one flow record, an aggregate the PCE keeps: its conns (and bytes) are
+    /// lifetime counts of that record, as in the PCE UI, not counts for the window.
     Query(QueryArgs),
     /// Label-pair groups of the query's flows (connections, bytes, decisions)
+    ///
+    /// Units: flows, allowed, pot.blocked and blocked count flow records; conns, bytes,
+    /// allowed_conns, pot_blocked_conns and blocked_conns are the lifetime counts of those
+    /// records, as in the PCE UI. The per-decision connection columns are in JSON and CSV.
     Groups(GroupsArgs),
     /// The mesh: user, process, source, destination, service, destination process
+    ///
+    /// Units: flows counts flow records; conns and bytes are the lifetime counts of those
+    /// records, as in the PCE UI.
     Mesh(MeshArgs),
 }
 
@@ -480,6 +496,9 @@ impl Serialize for FlowRows<'_> {
 }
 
 impl TableRows for FlowRows<'_> {
+    fn units(&self) -> Option<&'static str> {
+        Some(UNITS_FLOWS)
+    }
     fn headers(&self) -> Vec<&'static str> {
         vec![
             "last seen",
@@ -533,7 +552,13 @@ fn bytes_cell(bytes: u64, any: bool) -> String {
     if any { bytes.to_string() } else { "-".into() }
 }
 
+/// The per-decision connection columns `--csv` adds to pairs and sections.
+pub const CONNS_BY_DECISION: [&str; 3] = ["allowed_conns", "pot_blocked_conns", "blocked_conns"];
+
 impl TableRows for Vec<FlowGroup> {
+    fn units(&self) -> Option<&'static str> {
+        Some(UNITS_GROUPS)
+    }
     fn headers(&self) -> Vec<&'static str> {
         vec![
             "src",
@@ -563,12 +588,20 @@ impl TableRows for Vec<FlowGroup> {
             })
             .collect()
     }
-    /// `bytes` always a number (0 when no flow carried any).
+    /// The table's, then the connections per decision.
+    fn full_headers(&self) -> Vec<&'static str> {
+        let mut h = self.headers();
+        h.extend(CONNS_BY_DECISION);
+        h
+    }
+    /// `bytes` always a number (0 when no flow carried any), then the
+    /// connections per decision.
     fn full_rows(&self) -> Vec<Vec<String>> {
         self.iter()
             .zip(self.rows())
             .map(|(g, mut row)| {
                 row[4] = g.bytes.to_string();
+                row.extend(g.conns.cells());
                 row
             })
             .collect()
@@ -595,8 +628,16 @@ impl ServiceGroups {
 }
 
 impl TableRows for ServiceGroups {
+    fn units(&self) -> Option<&'static str> {
+        Some(UNITS_GROUPS)
+    }
     fn headers(&self) -> Vec<&'static str> {
         let mut h = self.0.headers();
+        h.insert(2, "service");
+        h
+    }
+    fn full_headers(&self) -> Vec<&'static str> {
+        let mut h = self.0.full_headers();
         h.insert(2, "service");
         h
     }
@@ -609,6 +650,9 @@ impl TableRows for ServiceGroups {
 }
 
 impl TableRows for Vec<MeshRow> {
+    fn units(&self) -> Option<&'static str> {
+        Some(UNITS_GROUPS)
+    }
     fn headers(&self) -> Vec<&'static str> {
         vec![
             "user",
@@ -672,6 +716,9 @@ pub struct Sections {
 }
 
 impl TableRows for Sections {
+    fn units(&self) -> Option<&'static str> {
+        Some(UNITS_GROUPS)
+    }
     fn headers(&self) -> Vec<&'static str> {
         vec![
             "app / peer",
@@ -741,7 +788,7 @@ impl TableRows for Sections {
 
 /// The CSV columns of app sections, one row per peer (`--csv` and the
 /// TUI's `:export`).
-pub const SECTION_CSV_HEADERS: [&str; 13] = [
+pub const SECTION_CSV_HEADERS: [&str; 16] = [
     "app",
     "direction",
     "peer",
@@ -755,6 +802,9 @@ pub const SECTION_CSV_HEADERS: [&str; 13] = [
     "bytes",
     "last seen",
     "decision",
+    CONNS_BY_DECISION[0],
+    CONNS_BY_DECISION[1],
+    CONNS_BY_DECISION[2],
 ];
 
 /// One peer row of an app's section under `SECTION_CSV_HEADERS`.
@@ -777,6 +827,9 @@ pub fn peer_csv_row(
         r.bytes.to_string(),
         r.last_detected.clone().unwrap_or_default(),
         r.dominant().as_str().to_string(),
+        r.conns.allowed_conns.to_string(),
+        r.conns.pot_blocked_conns.to_string(),
+        r.conns.blocked_conns.to_string(),
     ]
 }
 
@@ -1089,6 +1142,7 @@ mod tests {
             allowed: 1,
             potentially_blocked: 0,
             blocked: 0,
+            conns: Default::default(),
         }
     }
 

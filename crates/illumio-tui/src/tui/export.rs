@@ -28,9 +28,10 @@ pub fn current_table(model: &Model) -> Result<Csv, String> {
                 (TrafficView::Treemap, _) => {
                     return Err("the treemap has no table to export".into());
                 }
-                // App-to-app by pairs; by service (`o`) as `traffic groups --services --csv`.
+                // App-to-app by pairs as `traffic groups --csv`; by service (`o`) as
+                // `traffic groups --services --csv`.
                 (_, None) if t.apps_state.by_service => service_pairs(&t.services),
-                (_, None) => t.groups.export(),
+                (_, None) => pairs(&t.groups),
             }
         }
         Screen::Policy => match model.policy.pane {
@@ -61,17 +62,27 @@ fn sections(rows: &[SectionRow]) -> Csv {
     (SECTION_CSV_HEADERS.to_vec(), rows)
 }
 
-/// The pairs by service as shown (search and sort applied), in the
-/// columns of `traffic groups --services --csv`: every decision count,
-/// where the screen shows the dominant one.
+/// The rows of `table` as shown (search and sort applied).
+fn shown(table: &TableView<FlowGroup>) -> Vec<FlowGroup> {
+    table
+        .visible()
+        .iter()
+        .map(|&i| table.rows()[i].clone())
+        .collect()
+}
+
+/// The pairs as shown, in the columns of `traffic groups --csv`: bytes
+/// whole and the connections per decision, whatever the screen shows.
+fn pairs(table: &TableView<FlowGroup>) -> Csv {
+    let shown = shown(table);
+    (shown.full_headers(), shown.full_rows())
+}
+
+/// The pairs by service as shown, in the columns of `traffic groups
+/// --services --csv`: every decision count, where the screen shows the
+/// dominant one.
 fn service_pairs(table: &TableView<FlowGroup>) -> Csv {
-    let shown = ServiceGroups(
-        table
-            .visible()
-            .iter()
-            .map(|&i| table.rows()[i].clone())
-            .collect(),
-    );
+    let shown = ServiceGroups(shown(table));
     (shown.full_headers(), shown.full_rows())
 }
 

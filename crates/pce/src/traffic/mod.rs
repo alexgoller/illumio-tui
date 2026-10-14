@@ -14,8 +14,9 @@ pub mod steps;
 pub mod treemap;
 
 pub use aggregate::{
-    Dominant, FlowGroup, compact_count, dominant, group_by_labels, group_by_service,
-    group_by_service_refs, group_key, group_text, group_values, keys_or_default, keys_seen,
+    ConnsByDecision, Dominant, FlowGroup, compact_count, dominant, group_by_labels,
+    group_by_service, group_by_service_refs, group_key, group_text, group_values, keys_or_default,
+    keys_seen,
 };
 pub use duration::compact_duration;
 pub use filter::{FilterExpr, resolve_actor};

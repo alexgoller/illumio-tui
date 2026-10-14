@@ -4614,7 +4614,8 @@ mod tests {
         assert_eq!(
             titles,
             [
-                "src", "dst", "service", "flows", "conns", "bytes", "decision"
+                "src", "dst", "service", "flows", "conns", "bytes", "decision", "allow.c", "pot.c",
+                "block.c"
             ]
         );
         let tuples = t.services.rows();
@@ -5038,7 +5039,10 @@ mod tests {
                 "bytes",
                 "allowed",
                 "pot.blocked",
-                "blocked"
+                "blocked",
+                "allowed_conns",
+                "pot_blocked_conns",
+                "blocked_conns"
             ]
         );
         assert_eq!(rows.len(), m.traffic.services.len());
@@ -5064,9 +5068,47 @@ mod tests {
         assert_eq!(line[8], mixed.blocked.to_string(), "blocked counted");
         assert_eq!(line[6], mixed.allowed.to_string());
 
+        assert_eq!(line[11], mixed.conns.blocked_conns.to_string());
+
         // On screen: the compact decision column.
         let titles: Vec<&str> = m.traffic.services.columns.iter().map(|c| c.title).collect();
-        assert_eq!(titles.last(), Some(&"decision"));
+        assert!(titles.contains(&"decision"));
+    }
+
+    #[test]
+    fn export_of_pairs_is_traffic_groups_csv() {
+        use crate::cli::output::TableRows;
+        use crate::tui::test_support::model_with_rich_flows;
+        let mut m = model_with_rich_flows();
+        m.traffic.view = TrafficView::Aggregate;
+        m.traffic.rebuild_views();
+        let (_, _, headers, rows) = export_cmd(&mut m, "export p.csv");
+        let shown: Vec<pce::traffic::FlowGroup> = m
+            .traffic
+            .groups
+            .visible()
+            .iter()
+            .map(|&i| m.traffic.groups.rows()[i].clone())
+            .collect();
+        assert_eq!(headers, shown.full_headers(), "the CLI's --csv header");
+        assert_eq!(rows, shown.full_rows(), "the CLI's --csv rows");
+        assert_eq!(
+            headers,
+            [
+                "src",
+                "dst",
+                "flows",
+                "conns",
+                "bytes",
+                "allowed",
+                "pot.blocked",
+                "blocked",
+                "allowed_conns",
+                "pot_blocked_conns",
+                "blocked_conns"
+            ]
+        );
+        assert!(!rows.is_empty());
     }
 
     fn on_treemap(w: u16, h: u16) -> Model {
@@ -5861,7 +5903,10 @@ mod tests {
                 "12",
                 "0",
                 "2026-10-10T07:30:58Z",
-                "potentially_blocked"
+                "potentially_blocked",
+                "0",
+                "12",
+                "0"
             ]
         );
         update(&mut m, key('z'));

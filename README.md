@@ -321,7 +321,8 @@ traffic `--dry-run`) refuse it with exit 2 before any request.
 `traffic groups` and `traffic mesh` take the `traffic query` filter flags (and its dry run,
 cost guard and cache) and print the same envelope. `groups` gives one row per source and
 destination group (`src`, `dst`, `flows`, `connections`, `bytes`, `allowed`,
-`potentially_blocked`, `blocked`; `--services` splits each pair by service and adds a
+`potentially_blocked`, `blocked`, `allowed_conns`, `pot_blocked_conns`, `blocked_conns`;
+`--services` splits each pair by service and adds a
 `service` column and field, `5432/tcp` or `icmp`), or with `--by in|out|both` sections per app: a header row
 with the app's totals, then its peer groups and services indented (JSON
 `{"sections": [{app, direction, rows, totals}]}`); `--show blocked|blocked-only` counts only
@@ -337,6 +338,15 @@ direction is the sections' (`--direction` is then exit 2) and only the app's sec
 a name-keyed group such as `unmanaged-nas/-` keeps narrowing the sections of an unfocused query.
 An app whose labels do not exist is exit 2 with the closest label values, before any traffic
 request (the labels are fetched, cached). `--backfill` does not combine with `--app`: raise `--max-results` instead.
+
+**Units.** `flows`, `allowed`, `pot.blocked` and `blocked` count flow records. `conns`
+(`connections`), `bytes` and the per-decision `allowed_conns`, `pot_blocked_conns` and
+`blocked_conns` are the **lifetime** counts of those records, as the PCE UI shows them:
+Explorer returns every aggregate record whose lifetime overlaps the window, each with its whole
+lifetime's counters, not counts for the window alone. Tools that report connections per flow
+summary (workloader) therefore match `conns`, not `flows`. Every traffic table says so in the
+line above it; JSON and CSV carry the per-decision connections for pairs, `--services` and
+sections (sections: as the last three CSV columns).
 
 `illumio-tui app <app> [--direction in|out|both] [--window W] [--keys K] [--active]` prints one
 envelope for one app: `workloads` (`summary` with the enforcement breakdown, `unmanaged` for

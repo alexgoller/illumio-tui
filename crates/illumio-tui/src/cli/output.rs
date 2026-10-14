@@ -96,6 +96,10 @@ pub struct Envelope<'a, T: Serialize> {
 pub trait TableRows {
     fn headers(&self) -> Vec<&'static str>;
     fn rows(&self) -> Vec<Vec<String>>;
+    /// A line printed above the table (not in CSV): what its counts count.
+    fn units(&self) -> Option<&'static str> {
+        None
+    }
     /// Full-width lines printed under each row, outside the column layout
     /// (so never clipped). Empty, or one entry per row.
     fn notes(&self) -> Vec<Vec<String>> {
@@ -246,6 +250,9 @@ pub fn write_table<T: TableRows + ?Sized>(out: &mut impl Write, data: &T) -> std
     let headers = data.headers();
     let rows = data.rows();
     let table = render_table(&headers, &rows);
+    if let Some(u) = data.units() {
+        writeln!(out, "{u}")?;
+    }
     let notes = data.notes();
     if notes.iter().all(Vec::is_empty) {
         return writeln!(out, "{table}");

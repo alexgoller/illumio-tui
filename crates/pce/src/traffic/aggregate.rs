@@ -38,6 +38,37 @@ pub(crate) fn tally(
     }
 }
 
+/// A group's connections split by decision: the lifetime counts of its
+/// flow records (`num_connections`), summed per decision. Flattened into
+/// JSON as `allowed_conns`, `pot_blocked_conns` and `blocked_conns`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct ConnsByDecision {
+    pub allowed_conns: u64,
+    pub pot_blocked_conns: u64,
+    pub blocked_conns: u64,
+}
+
+impl ConnsByDecision {
+    /// Adds one flow's connections to its decision (unknown counts in none).
+    pub fn add(&mut self, decision: PolicyDecision, connections: u64) {
+        match decision {
+            PolicyDecision::Allowed => self.allowed_conns += connections,
+            PolicyDecision::PotentiallyBlocked => self.pot_blocked_conns += connections,
+            PolicyDecision::Blocked => self.blocked_conns += connections,
+            PolicyDecision::Unknown => {}
+        }
+    }
+
+    /// The three counts as cells: allowed, potentially blocked, blocked.
+    pub fn cells(&self) -> [String; 3] {
+        [
+            self.allowed_conns.to_string(),
+            self.pot_blocked_conns.to_string(),
+            self.blocked_conns.to_string(),
+        ]
+    }
+}
+
 /// `keys`, or `app,env` when empty.
 pub fn keys_or_default(keys: &[String]) -> Vec<String> {
     if keys.is_empty() {
@@ -120,13 +151,19 @@ pub struct FlowGroup {
     /// (`group_by_service`); `None` for a plain pair.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service: Option<String>,
+    /// Flow records.
     pub flows: u64,
+    /// The records' lifetime connection counts, summed.
     pub connections: u64,
     /// Bytes in plus out over the group's flows; 0 when none reported any.
     pub bytes: u64,
+    /// Flow records per decision.
     pub allowed: u64,
     pub potentially_blocked: u64,
     pub blocked: u64,
+    /// Connections per decision.
+    #[serde(flatten)]
+    pub conns: ConnsByDecision,
 }
 
 impl FlowGroup {
@@ -189,6 +226,7 @@ fn group<'a>(
             allowed: 0,
             potentially_blocked: 0,
             blocked: 0,
+            conns: ConnsByDecision::default(),
         });
         g.flows += 1;
         g.connections += f.num_connections;
@@ -199,6 +237,7 @@ fn group<'a>(
             &mut g.potentially_blocked,
             &mut g.blocked,
         );
+        g.conns.add(f.policy_decision, f.num_connections);
     }
     let mut out: Vec<FlowGroup> = map.into_values().collect();
     out.sort_by(|a, b| {
@@ -216,6 +255,46 @@ mod tests {
 
     fn keys(k: &[&str]) -> Vec<String> {
         k.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn groups_count_connections_per_decision_and_serialize_them_flat() {
+        let k = keys(&["app", "env"]);
+        for groups in [
+            group_by_labels(&rich_flows(), &k),
+            group_by_service(&rich_flows(), &k),
+        ] {
+            for g in &groups {
+                let c = &g.conns;
+                // A flow of unknown decision counts in no decision.
+                let decided = g.allowed + g.potentially_blocked + g.blocked == g.flows;
+                assert_eq!(
+                    c.allowed_conns + c.pot_blocked_conns + c.blocked_conns == g.connections,
+                    decided || g.connections == 0,
+                    "{g:?}"
+                );
+                assert_eq!(c.allowed_conns > 0, g.allowed > 0, "{g:?}");
+                assert_eq!(c.blocked_conns > 0, g.blocked > 0, "{g:?}");
+            }
+        }
+        let groups = group_by_labels(&flows(), &k);
+        let nas = groups
+            .iter()
+            .find(|g| g.src == vec!["unmanaged-nas", "-"])
+            .unwrap();
+        assert_eq!(
+            (
+                nas.conns.allowed_conns,
+                nas.conns.pot_blocked_conns,
+                nas.conns.blocked_conns
+            ),
+            (0, 0, nas.connections)
+        );
+        let json = serde_json::to_value(nas).unwrap();
+        assert_eq!(json["blocked_conns"], nas.connections);
+        assert_eq!(json["allowed_conns"], 0);
+        assert_eq!(json["pot_blocked_conns"], 0);
+        assert!(json.get("conns").is_none(), "flattened");
     }
 
     #[test]

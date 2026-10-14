@@ -129,6 +129,9 @@ impl TableRows for WorkloadsSection {
 struct Peers<'a>(&'a [AppPeer]);
 
 impl TableRows for Peers<'_> {
+    fn units(&self) -> Option<&'static str> {
+        Some(super::traffic::UNITS_GROUPS)
+    }
     fn headers(&self) -> Vec<&'static str> {
         vec!["peer", "service", "decision", "flows", "conns", "bytes"]
     }

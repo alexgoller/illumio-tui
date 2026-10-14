@@ -802,8 +802,52 @@ pub fn mesh_columns(cols: MeshColumns) -> Vec<Column<MeshRow>> {
     out
 }
 
+/// The connections per decision (lifetime counts of the flow records),
+/// shown from 140 columns: `traffic groups`' `allowed_conns`,
+/// `pot_blocked_conns` and `blocked_conns`.
+fn conns_by_decision_columns() -> [Column<FlowGroup>; 3] {
+    [
+        Column {
+            title: "allow.c",
+            width: 8,
+            cell: |g| g.conns.allowed_conns.to_string(),
+            key: |g| SortKey::Num(g.conns.allowed_conns),
+            right: true,
+            hide_below: 140,
+            narrow: None,
+            narrow_width: 0,
+            full_title: Some("allowed_conns"),
+            full: None,
+        },
+        Column {
+            title: "pot.c",
+            width: 8,
+            cell: |g| g.conns.pot_blocked_conns.to_string(),
+            key: |g| SortKey::Num(g.conns.pot_blocked_conns),
+            right: true,
+            hide_below: 140,
+            narrow: None,
+            narrow_width: 0,
+            full_title: Some("pot_blocked_conns"),
+            full: None,
+        },
+        Column {
+            title: "block.c",
+            width: 8,
+            cell: |g| g.conns.blocked_conns.to_string(),
+            key: |g| SortKey::Num(g.conns.blocked_conns),
+            right: true,
+            hide_below: 140,
+            narrow: None,
+            narrow_width: 0,
+            full_title: Some("blocked_conns"),
+            full: None,
+        },
+    ]
+}
+
 pub fn group_columns() -> Vec<Column<FlowGroup>> {
-    vec![
+    let mut cols: Vec<Column<FlowGroup>> = vec![
         Column {
             title: "src",
             width: 26,
@@ -888,7 +932,9 @@ pub fn group_columns() -> Vec<Column<FlowGroup>> {
             full_title: None,
             full: None,
         },
-    ]
+    ];
+    cols.extend(conns_by_decision_columns());
+    cols
 }
 
 /// App-to-app `pairs` by service (`o`): one row per source group,
@@ -941,6 +987,7 @@ pub fn service_group_columns() -> Vec<Column<FlowGroup>> {
         },
     ];
     cols.extend(tail);
+    cols.extend(conns_by_decision_columns());
     cols
 }
 

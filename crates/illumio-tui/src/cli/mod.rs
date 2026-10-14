@@ -92,7 +92,10 @@ pub enum Command {
     Events(events::EventsArgs),
     /// List workloads; add, update or delete an unmanaged one
     Workloads(workloads::WorkloadsCmd),
-    /// One app: workloads and VENs, inbound and outbound peers, policy, blocked traffic over time
+    /// One app: workloads and VENs, inbound and outbound peers, policy
+    ///
+    /// Peers: flows counts flow records; conns and bytes are the lifetime counts of those
+    /// records, as in the PCE UI.
     App(app::AppArgs),
     /// Rulesets, rules, deny rules, pending changes, provisioning
     #[command(subcommand)]

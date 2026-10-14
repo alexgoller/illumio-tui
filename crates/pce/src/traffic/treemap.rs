@@ -328,6 +328,7 @@ mod tests {
             allowed: 1,
             potentially_blocked: 0,
             blocked: 0,
+            conns: Default::default(),
         }
     }
 
