@@ -835,25 +835,33 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             let flow_form = model.traffic.rule_form.take();
             let mut rule_after = model.policy.rule_after_ruleset.take();
             // The ruleset `Ctrl-R` asked for exists after all (the fresh read
-            // found it): the rule goes into it, through its own confirm.
+            // found it): nothing is created; the form comes back naming it,
+            // and Enter adds the rule to it through its own confirm.
             if model.overlay == Overlay::None
                 && let Ok((Plan::Noop { existing_href, .. }, _)) = &result
-                && let Some((draft, form)) = rule_after.take()
+                && let Some((_, mut form)) = rule_after.take()
             {
-                let note = format!(
-                    "ruleset {:?} exists: adding the rule to it",
-                    form.value("Ruleset").trim()
+                let rs = model
+                    .draft_rulesets()
+                    .and_then(|sets| sets.iter().find(|rs| &rs.href == existing_href));
+                let name = rs.map_or_else(
+                    || form.value("Ruleset").trim().to_string(),
+                    |rs| rs.name.clone(),
                 );
-                model.status = StatusLine::info(note.clone());
-                model.policy.confirm_note = Some(note);
-                model.traffic.rule_form = Some(form);
-                model.writes.in_flight = true;
-                return vec![Cmd::PlanWrite(WriteIntent::CreateRule {
-                    ruleset: RulesetTarget::Href(existing_href.clone()),
-                    draft,
-                })];
+                let empty = pce::NameIndex::default();
+                let idx = model.index().cloned();
+                let note =
+                    edit::existing_ruleset_note(&form, &name, rs, idx.as_deref().unwrap_or(&empty));
+                if let Some(field) = form.fields.iter_mut().find(|x| x.label == "Ruleset") {
+                    field.value = name;
+                    field.hint = note.clone().into();
+                }
+                form.offers_ruleset = None;
+                form.error = Some(note.clone());
+                model.overlay = Overlay::Form(form);
+                model.status = StatusLine::info(note);
+                return Vec::new();
             }
-            let note = model.policy.confirm_note.take();
             match result {
                 // Keys typed while the plan was on its way belong to the
                 // overlay they went to; a `y` there must not confirm this.
@@ -873,10 +881,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     } else {
                         "review the request: y sends it, n cancels"
                     };
-                    model.status = StatusLine::info(match note {
-                        Some(n) => format!("{n} · {review}"),
-                        None => review.to_string(),
-                    });
+                    model.status = StatusLine::info(review);
                     model.overlay = Overlay::ConfirmWrite {
                         plan,
                         kind,
@@ -15572,13 +15577,22 @@ mod rule_form_ruleset_tests {
         update(m, ctrl('r'))
     }
 
+    fn exists(href: &str, name: &str) -> Msg {
+        Msg::Planned(Ok((
+            pce::write::Plan::Noop {
+                existing_href: href.into(),
+                reason: format!("rule_set {name} exists"),
+            },
+            pce::write::ObjectKind::RuleSet,
+        )))
+    }
+
     #[test]
-    fn ctrl_r_on_a_ruleset_that_exists_adds_the_rule_to_it_instead() {
+    fn ctrl_r_on_a_ruleset_that_exists_brings_the_form_back_naming_it() {
         use crate::tui::edit::{RulesetTarget, WriteIntent};
-        use crate::tui::test_support::label_post_plan;
         // The drafts still loading: the plan's fresh read decides.
         let (mut m, _) = w_form();
-        let cmds = ctrl_r_on(&mut m, "Shop-Prod");
+        let cmds = ctrl_r_on(&mut m, "shop-prod");
         assert!(
             matches!(
                 cmds.as_slice(),
@@ -15586,61 +15600,65 @@ mod rule_form_ruleset_tests {
             ),
             "{cmds:?}"
         );
-        // It exists: the rule is planned into it, nothing is created.
+        // The list arrives meanwhile; the planner finds the name: nothing
+        // is created or chained, the form is back with its scope.
+        update(&mut m, drafts_loaded(drafts()));
         let existing = "/orgs/5/sec_policy/draft/rule_sets/100";
-        let cmds = update(
-            &mut m,
-            Msg::Planned(Ok((
-                pce::write::Plan::Noop {
-                    existing_href: existing.into(),
-                    reason: "rule_set Shop-Prod exists".into(),
-                },
-                pce::write::ObjectKind::RuleSet,
-            ))),
-        );
+        assert!(update(&mut m, exists(existing, "shop-prod")).is_empty());
+        assert!(!m.writes.in_flight);
+        assert!(m.policy.rule_after_ruleset.is_none());
+        let note =
+            r#"ruleset "Shop-Prod" exists (scope app=shop, env=prod): Enter adds the rule to it"#;
+        let f = form(&m);
+        assert_eq!(f.value("Ruleset"), "Shop-Prod", "its own name");
+        assert_eq!(f.error.as_deref(), Some(note));
+        assert_eq!(f.fields[0].hint, note);
+        assert_eq!(f.value("Consumers"), "iplist:Corp", "the rest as typed");
+        assert_eq!(m.status.text, note);
+        // Enter plans the rule into it as usual.
+        let cmds = update(&mut m, kc(KeyCode::Enter));
         assert!(
             matches!(
                 cmds.as_slice(),
-                [Cmd::PlanWrite(WriteIntent::CreateRule { ruleset: RulesetTarget::Href(h), .. })]
-                    if h == existing
+                [Cmd::PlanWrite(WriteIntent::CreateRule { ruleset: RulesetTarget::Name(n), .. })]
+                    if n == "Shop-Prod"
             ),
             "{cmds:?}"
         );
-        assert_eq!(
-            m.status.text,
-            r#"ruleset "Shop-Prod" exists: adding the rule to it"#
-        );
-        assert!(m.writes.in_flight);
-        assert!(m.policy.rule_after_ruleset.is_none());
-        // Its confirm says so; nothing is sent before `y`.
-        update(
-            &mut m,
-            Msg::Planned(Ok((label_post_plan(), pce::write::ObjectKind::Rule))),
-        );
-        assert!(matches!(m.overlay, Overlay::ConfirmWrite { .. }));
-        assert_eq!(
-            m.status.text,
-            r#"ruleset "Shop-Prod" exists: adding the rule to it · review the request: y sends it, n cancels"#
-        );
-        // A stale list (the name made elsewhere since): the same path.
+        // One that does not cover the destination says so. The held list
+        // lacks it when Ctrl-R is pressed (stale), and has it by the answer.
+        let label = |h: &str| -> pce::models::Actor {
+            serde_json::from_value(serde_json::json!({"label": {"href": h}})).unwrap()
+        };
+        let mut eu = drafts()[0].clone();
+        eu.href = "/orgs/5/sec_policy/draft/rule_sets/7".into();
+        eu.name = "Shop-EU".into();
+        eu.scopes = vec![vec![label("/orgs/5/labels/3"), label("/orgs/5/labels/5")]];
         let (mut m, _) = w_form();
         update(&mut m, drafts_loaded(drafts()));
-        let cmds = ctrl_r_on(&mut m, "Made-Elsewhere");
-        assert!(
-            matches!(cmds.as_slice(), [Cmd::PlanWrite(WriteIntent::CreateRuleSetIfMissing(d))] if d.name == "Made-Elsewhere"),
-            "{cmds:?}"
-        );
-        let cmds = update(
+        assert_eq!(ctrl_r_on(&mut m, "Shop-EU").len(), 1);
+        m.policy.raw.push(eu);
+        update(
             &mut m,
-            Msg::Planned(Ok((
-                pce::write::Plan::Noop {
-                    existing_href: "/orgs/5/sec_policy/draft/rule_sets/7".into(),
-                    reason: "rule_set Made-Elsewhere exists".into(),
-                },
-                pce::write::ObjectKind::RuleSet,
-            ))),
+            exists("/orgs/5/sec_policy/draft/rule_sets/7", "Shop-EU"),
         );
-        assert_eq!(cmds.len(), 1, "the rule, into rule_sets/7");
+        assert_eq!(
+            form(&m).error.as_deref(),
+            Some(
+                r#"ruleset "Shop-EU" exists (scope app=shop, loc=eu): Enter adds the rule to it · it does not cover this flow's destination"#
+            )
+        );
+        // Not in the held list: the name as typed, no scope.
+        let (mut m, _) = w_form();
+        ctrl_r_on(&mut m, "Made-Elsewhere");
+        update(
+            &mut m,
+            exists("/orgs/5/sec_policy/draft/rule_sets/9", "Made-Elsewhere"),
+        );
+        assert_eq!(
+            form(&m).error.as_deref(),
+            Some(r#"ruleset "Made-Elsewhere" exists: Enter adds the rule to it"#)
+        );
     }
 
     #[test]

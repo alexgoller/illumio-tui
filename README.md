@@ -721,8 +721,10 @@ the destination (its own confirm and POST), then plans the rule into it for
 a second confirm; cancelling either sends nothing more. It reads the draft
 rulesets once more, fresh, when planning: if a ruleset of that name exists
 after all (made elsewhere, or the form's list was still loading), nothing is
-created and the rule goes into it, through its confirm (`ruleset "X" exists:
-adding the rule to it`). A name the loaded drafts already have is refused at
+created: the form comes back as you typed it with that name and its scope
+(`ruleset "X" exists (scope app=crm, env=prod): Enter adds the rule to it`,
+plus `· it does not cover this flow's destination` when it does not), and
+Enter plans the rule into it with its own confirm. A name the loaded drafts already have is refused at
 once (Enter adds the rule to it), as is one several rulesets share (use the
 href). When the destination has no scope labels, or the row (a pair by
 service grouped on part of the scope) spans scopes, there is nothing to

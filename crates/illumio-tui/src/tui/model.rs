@@ -2969,9 +2969,7 @@ pub struct PolicyState {
     pub form_drafts: Option<Vec<RuleSet>>,
     /// That load is on its way: a second form does not send another.
     pub form_drafts_loading: bool,
-    /// Said in front of the next confirm's review line (`Ctrl-R` found its
-    /// ruleset exists: the rule goes into it).
-    pub confirm_note: Option<String>,
+
     pub auto: AutoRefresh,
 }
 
@@ -3011,7 +3009,6 @@ impl PolicyState {
             rule_after_ruleset: None,
             form_drafts: None,
             form_drafts_loading: false,
-            confirm_note: None,
             auto: AutoRefresh::new(min_refresh),
         }
     }

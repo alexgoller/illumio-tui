@@ -235,8 +235,9 @@ unknown, `edit::explain_unknown_ruleset` adds what `Ctrl-R` creates and
 `Form.offers_ruleset` (a `RulesetOffer` of the checked name and the scope)
 shows it in the Ruleset hint row and the panel keys while the field still
 holds that name. `Ctrl-R` plans `CreateRuleSetIfMissing` (planned with
-`IfMissing::SkipExisting`: one fresh draft read; a `Plan::Noop` sends the
-waiting rule into the existing href instead) scoped like the destination and
+`IfMissing::SkipExisting`: one fresh draft read; a `Plan::Noop` reopens
+the form on the existing name, `edit::existing_ruleset_note` naming its
+scope) scoped like the destination and
 keeps the rule and the form in `PolicyState.rule_after_ruleset`; the
 ruleset's `WriteDone(Ok)` plans `CreateRule` into the new href (a second
 confirm, the form back in `TrafficState.rule_form` so a failed plan reopens

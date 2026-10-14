@@ -916,6 +916,42 @@ const SPANS_SCOPES_HINT: &str = "the row spans scopes: name a ruleset (Ctrl-N)";
 /// Why `Ctrl-R` refuses a grouped row that spans scopes.
 const SPANS_SCOPES: &str = "this row groups flows of several scopes: Ctrl-R cannot scope one ruleset for them; name an existing ruleset (Ctrl-N)";
 
+/// What a `w` form says when `Ctrl-R`'s ruleset exists after all (the
+/// plan's fresh read found `name`): its scope as label names when the
+/// loaded drafts hold it (`rs`), and whether that scope covers the flow's
+/// destination; Enter then adds the rule to it.
+pub fn existing_ruleset_note(
+    form: &Form,
+    name: &str,
+    rs: Option<&RuleSet>,
+    idx: &NameIndex,
+) -> String {
+    let scope = rs.map(|rs| {
+        rs.scopes
+            .iter()
+            .map(|s| actor_tokens(s, idx).join(", "))
+            .collect::<Vec<_>>()
+            .join(" | ")
+    });
+    let mut note = match scope {
+        Some(s) if !s.is_empty() => {
+            format!("ruleset {name:?} exists (scope {s}): Enter adds the rule to it")
+        }
+        Some(_) => format!("ruleset {name:?} exists (global scope): Enter adds the rule to it"),
+        None => format!("ruleset {name:?} exists: Enter adds the rule to it"),
+    };
+    if let (Some(rs), EditIntent::RuleFromFlow(f)) = (rs, &form.intent) {
+        let dst_scope: Vec<&ResolvedLabel> = f.dst.labels.iter().collect();
+        let global = rs.scopes.iter().any(Vec::is_empty);
+        if !global
+            && rulesets_covering(std::slice::from_ref(rs), &f.dst, &dst_scope, idx).is_empty()
+        {
+            note.push_str(" · it does not cover this flow's destination");
+        }
+    }
+    note
+}
+
 /// The live draft rulesets named `name` (any case).
 pub fn rulesets_named<'s>(sets: &'s [RuleSet], name: &str) -> Vec<&'s RuleSet> {
     let name = name.trim();
