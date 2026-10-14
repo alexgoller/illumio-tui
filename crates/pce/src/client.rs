@@ -163,9 +163,20 @@ impl PceClient {
         api_path: &str,
         query: &[(&str, String)],
     ) -> Result<ApiResponse<T>> {
+        self.get_with_timeout(api_path, query, self.timeout).await
+    }
+
+    /// `get` with its own timeout for the whole request, body included
+    /// (a large traffic download).
+    pub async fn get_with_timeout<T: DeserializeOwned>(
+        &self,
+        api_path: &str,
+        query: &[(&str, String)],
+        timeout: Duration,
+    ) -> Result<ApiResponse<T>> {
         let url = self.url_for(api_path);
-        let build = || self.http.get(url.clone()).query(query);
-        let (status, headers, bytes) = self.send(build, true).await?;
+        let build = || self.http.get(url.clone()).query(query).timeout(timeout);
+        let (status, headers, bytes) = self.send(build, true, timeout).await?;
         Self::decode(api_path, status, &headers, &bytes)
     }
 
@@ -188,7 +199,7 @@ impl PceClient {
             }
             r
         };
-        let (status, hdrs, bytes) = self.send(build, false).await?;
+        let (status, hdrs, bytes) = self.send(build, false, self.timeout).await?;
         Self::decode(api_path, status, &hdrs, &bytes)
     }
 
@@ -219,7 +230,7 @@ impl PceClient {
                 None => r,
             }
         };
-        let (status, headers, bytes) = self.send(build, false).await?;
+        let (status, headers, bytes) = self.send(build, false, self.timeout).await?;
         match status.as_u16() {
             400 | 406 | 409 | 422 => Err(PceError::Rejected {
                 status: status.as_u16(),
@@ -229,7 +240,12 @@ impl PceClient {
         }
     }
 
-    async fn send<F>(&self, build: F, retry: bool) -> Result<(StatusCode, HeaderMap, bytes::Bytes)>
+    async fn send<F>(
+        &self,
+        build: F,
+        retry: bool,
+        timeout: Duration,
+    ) -> Result<(StatusCode, HeaderMap, bytes::Bytes)>
     where
         F: Fn() -> reqwest::RequestBuilder,
     {
@@ -244,10 +260,10 @@ impl PceClient {
                     Some(self.credentials.expose_secret()),
                 )
                 .header(ACCEPT, HeaderValue::from_static("application/json"));
-            let resp = req.send().await.map_err(|e| self.map_reqwest(e))?;
+            let resp = req.send().await.map_err(|e| map_reqwest(e, timeout))?;
             let status = resp.status();
             let headers = resp.headers().clone();
-            let bytes = resp.bytes().await.map_err(|e| self.map_reqwest(e))?;
+            let bytes = resp.bytes().await.map_err(|e| map_reqwest(e, timeout))?;
             self.stats
                 .bytes
                 .fetch_add(bytes.len() as u64, Ordering::Relaxed);
@@ -323,14 +339,6 @@ impl PceClient {
         })
     }
 
-    fn map_reqwest(&self, e: reqwest::Error) -> PceError {
-        if e.is_timeout() {
-            PceError::Timeout(self.timeout)
-        } else {
-            PceError::Network(e.to_string())
-        }
-    }
-
     fn pause_for(&self, d: Duration) {
         let mut p = self.paused_until.lock().expect("pause mutex poisoned");
         let until = Instant::now() + d;
@@ -399,6 +407,14 @@ fn pce_error_message(bytes: &[u8]) -> String {
     }
     let text = String::from_utf8_lossy(bytes);
     text.chars().take(500).collect()
+}
+
+fn map_reqwest(e: reqwest::Error, timeout: Duration) -> PceError {
+    if e.is_timeout() {
+        PceError::Timeout(timeout)
+    } else {
+        PceError::Network(e.to_string())
+    }
 }
 
 #[cfg(test)]

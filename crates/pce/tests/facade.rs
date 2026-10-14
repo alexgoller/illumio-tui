@@ -342,6 +342,7 @@ async fn traffic_is_cached_by_query_and_filters_resolve() {
         factor: 1.5,
         cap: Duration::from_millis(5),
         grace: Duration::from_millis(100),
+        ..Default::default()
     });
     let groups = vec![vec![
         FilterExpr::parse("app=shop").unwrap(),
@@ -417,6 +418,7 @@ async fn only_the_latest_traffic_result_is_cached() {
         factor: 1.5,
         cap: Duration::from_millis(5),
         grace: Duration::from_millis(100),
+        ..Default::default()
     });
     let bounds = || {
         TrafficQueryBuilder::between(
@@ -555,6 +557,7 @@ fn fast_poll(p: &mut Pce) {
         factor: 1.5,
         cap: Duration::from_millis(5),
         grace: Duration::from_millis(100),
+        ..Default::default()
     });
 }
 

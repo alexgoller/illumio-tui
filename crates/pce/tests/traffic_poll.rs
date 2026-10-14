@@ -33,6 +33,7 @@ fn fast() -> PollConfig {
         factor: 1.5,
         cap: Duration::from_millis(5),
         grace: Duration::from_millis(200),
+        ..Default::default()
     }
 }
 
@@ -302,4 +303,53 @@ fn fixture_rows_keep_unknown_fields() {
     )
     .unwrap();
     assert_eq!(with_extra.extra["new_field"]["a"], 1);
+}
+
+/// The download has its own timeout: a slow body past the client's
+/// per-request timeout still arrives.
+#[tokio::test]
+async fn the_download_outlasts_the_client_timeout() {
+    let server = MockServer::start().await;
+    mount_submit(&server).await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            json!({"status": "completed", "result": format!("{QHREF}/download"), "flows_count": 4}),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}/download")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/traffic_flows.json"))
+                .insert_header("Content-Type", "application/json")
+                .set_delay(Duration::from_millis(400)),
+        )
+        .mount(&server)
+        .await;
+    let url = url::Url::parse(&server.uri()).unwrap();
+    let mut cfg = ClientConfig::new(
+        url.host_str().unwrap(),
+        5,
+        Credentials::new("key", "secret"),
+    );
+    cfg.scheme = "http".into();
+    cfg.port = url.port().unwrap();
+    cfg.requests_per_second = 1000.0;
+    cfg.burst = 1000;
+    cfg.timeout = Duration::from_millis(150);
+    let c = PceClient::new(cfg).unwrap();
+    let slow = PollConfig {
+        download_timeout: Duration::from_secs(5),
+        ..fast()
+    };
+    let r = run_traffic_query(&c, &query(1000), &slow, &CancellationToken::new(), None)
+        .await
+        .unwrap();
+    assert_eq!(
+        r.flows.len(),
+        4,
+        "a 400 ms body under a 150 ms client timeout"
+    );
 }

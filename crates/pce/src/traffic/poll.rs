@@ -17,15 +17,21 @@ pub struct PollConfig {
     pub cap: Duration,
     /// How long to keep polling after `completed` arrives without a result.
     pub grace: Duration,
+    /// The result download's own timeout: a 200000-row result is hundreds
+    /// of MB, far past the client's per-request timeout.
+    pub download_timeout: Duration,
 }
 
 impl Default for PollConfig {
+    /// Polls at 1 s, then ×1.5 up to 3 s: a finished query waits at most
+    /// 3 s for its next status GET.
     fn default() -> Self {
         Self {
             initial: Duration::from_secs(1),
             factor: 1.5,
-            cap: Duration::from_secs(10),
+            cap: Duration::from_secs(3),
             grace: Duration::from_secs(30),
+            download_timeout: Duration::from_secs(300),
         }
     }
 }
@@ -160,7 +166,7 @@ pub async fn run_traffic_query(
     report(progress, QueryProgress::Downloading);
     let flows: Vec<Flow> = tokio::select! {
         () = cancel.cancelled() => return Err(PceError::Cancelled),
-        r = client.get(&result_href, &[]) => r?.body,
+        r = client.get_with_timeout(&result_href, &[], poll.download_timeout) => r?.body,
     };
     let rows = flows.len();
     let t = truncation(&done, rows, query.max_results);
@@ -204,6 +210,16 @@ mod tests {
         truncated: true,
         incomplete: false,
     };
+
+    #[test]
+    fn polls_cap_at_3s_and_the_download_gets_300s() {
+        let p = PollConfig::default();
+        assert_eq!(
+            (p.initial, p.factor, p.cap),
+            (Duration::from_secs(1), 1.5, Duration::from_secs(3))
+        );
+        assert_eq!(p.download_timeout, Duration::from_secs(300));
+    }
 
     #[test]
     fn the_demo_statuses() {
