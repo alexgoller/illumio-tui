@@ -1,6 +1,7 @@
 //! Modal overlays drawn on top of the current screen: help and the `:` prompt.
 use crate::tui::app_picker::AppPicker;
 use crate::tui::diff::{ObjectDiff, Sign};
+use crate::tui::edit::EditIntent;
 use crate::tui::filter::{FIELD_NAMES, FilterEditor};
 use crate::tui::form::{Form, clip, visible_tail, wrap_rows};
 use crate::tui::model::{Model, Screen, TrafficView, rule_kind_name};
@@ -503,9 +504,9 @@ pub fn render_form(model: &Model, form: &Form, f: &mut Frame, area: Rect) {
         ),
         None => lines.push(Line::from(Span::styled(
             match (&form.alt, form.expanded) {
-                (None, _) => "* required",
-                (Some(_), false) => "* required · Ctrl-A all labels",
-                (Some(_), true) => "* required · Ctrl-A model view",
+                _ if !matches!(form.intent, EditIntent::RuleFromFlow(_)) => "* required",
+                (_, false) => "* required · Ctrl-R new ruleset · Ctrl-A all labels",
+                (_, true) => "* required · Ctrl-R new ruleset · Ctrl-A model view",
             },
             t.dim_style(),
         ))),

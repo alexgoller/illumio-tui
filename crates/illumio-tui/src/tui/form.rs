@@ -307,8 +307,8 @@ pub struct Form {
     pub alt: Option<Vec<(usize, String)>>,
     /// The alternates are shown (`Ctrl-A` was pressed an odd number of times).
     pub expanded: bool,
-    /// `Ctrl-R` creates this ruleset (a `w` form whose name the planner did
-    /// not know); armed while the Ruleset field still holds that name.
+    /// The planner did not know this ruleset name (a `w` form): while the
+    /// Ruleset field still holds it, its hint says what `Ctrl-R` creates.
     /// Boxed: `Overlay::Form` stays within clippy's variant-size budget.
     pub offers_ruleset: Option<Box<RulesetOffer>>,
     /// The completion being cycled; any key but `Ctrl-N`/`Ctrl-P` ends it.
@@ -336,8 +336,6 @@ pub struct RulesetOffer {
     pub scope: String,
 }
 
-const NAME_CHANGED: &str = "the ruleset name changed; press Enter to check it first";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormEvent {
     Continue,
@@ -345,7 +343,7 @@ pub enum FormEvent {
     Submit,
     /// Esc: close without a request.
     Cancel,
-    /// Ctrl-R where the form offers it: create the ruleset it names.
+    /// Ctrl-R in a `w` form: create the ruleset it names, then the rule.
     NewRuleset,
 }
 
@@ -454,11 +452,8 @@ impl Form {
                 }
             }
             KeyCode::Char('a') if ctrl => self.swap_alternates(),
-            KeyCode::Char('r') if ctrl && self.offers_ruleset.is_some() => {
-                if self.ruleset_offer_armed().is_some() {
-                    return FormEvent::NewRuleset;
-                }
-                self.error = Some(NAME_CHANGED.into());
+            KeyCode::Char('r') if ctrl && matches!(self.intent, EditIntent::RuleFromFlow(_)) => {
+                return FormEvent::NewRuleset;
             }
             KeyCode::Char('u') if ctrl => {
                 if let Some(f) = self.fields.get_mut(self.active) {
@@ -737,25 +732,28 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_r_fires_only_for_the_offered_name() {
+    fn ctrl_r_asks_for_a_new_ruleset_in_a_w_form_only() {
         let mut f = flow_like();
-        assert_eq!(f.on_key(ctrl('r')), FormEvent::Continue, "no offer");
+        assert_eq!(f.on_key(ctrl('r')), FormEvent::Continue, "not a w form");
         assert_eq!(f.error, None);
+        let flow = crate::tui::test_support::fixture_flows()[1].clone();
+        f.intent = EditIntent::RuleFromFlow(Box::new(flow));
+        // A new name typed: no Enter needed first.
+        f.fields[0].value = "New-App".into();
+        assert_eq!(f.on_key(ctrl('r')), FormEvent::NewRuleset);
+        // The planner's offer shows while the field holds its name; an
+        // edit changes the hint back, Ctrl-R still asks for the new name.
         f.fields[0].value = " new-app ".into();
         f.offers_ruleset = Some(Box::new(RulesetOffer {
             name: "New-App".into(),
             scope: "app=shop, env=prod".into(),
         }));
         assert!(f.ruleset_offer_armed().is_some(), "trimmed, any case");
-        assert_eq!(f.on_key(ctrl('r')), FormEvent::NewRuleset);
         f.active = 0;
         f.on_key(k(KeyCode::Char('2')));
         assert!(f.ruleset_offer_armed().is_none(), "an edit disarms it");
-        assert_eq!(f.on_key(ctrl('r')), FormEvent::Continue);
-        assert_eq!(
-            f.error.as_deref(),
-            Some("the ruleset name changed; press Enter to check it first")
-        );
+        assert_eq!(f.on_key(ctrl('r')), FormEvent::NewRuleset);
+        assert_eq!(f.error, None);
     }
 
     fn actors_form(value: &str) -> Form {

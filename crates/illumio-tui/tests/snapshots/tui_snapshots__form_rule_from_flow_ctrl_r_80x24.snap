@@ -20,9 +20,9 @@ expression: out
 ╭ Det│                y or n                                              │ows ╮
 │sele│  Unscoped*     y                                                   │    │
 │    │                y: consumers outside the ruleset's scope            │    │
-│    │no ruleset named "New-App"; similar: Shop-Prod                      │    │
+│    │no ruleset named "New-App": Ctrl-R creates it scoped app=shop,      │    │
+│    │env=prod; similar: Shop-Prod                                        │    │
 │    ╰────────────────────────────────────────────────────────────────────╯    │
-│                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ready         f filter  r run  a auto  v view  g group  / search  : cmd  ? help

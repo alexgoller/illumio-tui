@@ -854,13 +854,22 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     if let Some(mut f) = flow_form
                         && model.overlay == Overlay::None
                     {
-                        // An unknown name with a scoped destination offers Ctrl-R.
-                        f.offers_ruleset =
-                            edit::new_ruleset_offer(&f, &e, &model.limits.scope_keys);
+                        // An unknown name: the error says what Ctrl-R creates
+                        // (or, without scope labels, what to do instead).
+                        let keys = &model.limits.scope_keys;
+                        f.offers_ruleset = edit::new_ruleset_offer(&f, &e, keys);
+                        let e = edit::explain_unknown_ruleset(&f, &e, keys);
+                        if let Some(o) = &f.offers_ruleset
+                            && let Some(field) = f.fields.iter_mut().find(|x| x.label == "Ruleset")
+                        {
+                            field.hint = format!("Ctrl-R: create it, scoped {}", o.scope).into();
+                        }
                         f.error = Some(e.clone());
                         model.overlay = Overlay::Form(f);
+                        fail(model, "write", &e, false);
+                    } else {
+                        fail(model, "write", &e, false);
                     }
-                    fail(model, "write", &e, false);
                 }
             }
             Vec::new()
@@ -1426,13 +1435,27 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 model.status = StatusLine::info("cancelled, nothing sent");
                 Vec::new()
             }
-            // The ruleset is planned now; the rule waits for its href.
-            FormEvent::NewRuleset => match edit::new_ruleset_intent(
-                &form,
-                model.index().map(|i| i.as_ref()),
-                model.profile.org_id,
-                &model.limits.scope_keys,
-            ) {
+            // The ruleset is planned now; the rule waits for its href. A
+            // name a loaded draft ruleset has gets the rule instead.
+            FormEvent::NewRuleset => match model
+                .draft_rulesets()
+                .and_then(|sets| edit::ruleset_href_named(sets, form.value("Ruleset")).ok())
+                .map_or_else(
+                    || {
+                        edit::new_ruleset_intent(
+                            &form,
+                            model.index().map(|i| i.as_ref()),
+                            model.profile.org_id,
+                            &model.limits.scope_keys,
+                        )
+                    },
+                    |_| {
+                        Err(format!(
+                            "ruleset {:?} exists: Enter adds the rule to it",
+                            form.value("Ruleset").trim()
+                        ))
+                    },
+                ) {
                 Ok((intent, draft)) => {
                     model.policy.rule_after_ruleset = Some((draft, form));
                     model.overlay = Overlay::None;
@@ -10527,9 +10550,10 @@ mod tests {
         assert!(m.traffic.rule_form.is_some());
         let e = r#"no ruleset named "Shop"; similar: Shop-Prod"#;
         assert!(update(&mut m, Msg::Planned(Err(e.into()))).is_empty());
+        let e = r#"no ruleset named "Shop": Ctrl-R creates it scoped app=shop, env=prod; similar: Shop-Prod"#;
         match &m.overlay {
             Overlay::Form(f) => {
-                assert_eq!(f.error.as_deref(), Some(e), "the planner's text only");
+                assert_eq!(f.error.as_deref(), Some(e), "the planner's text and Ctrl-R");
                 let offer = f.offers_ruleset.as_ref().expect("Ctrl-N is offered");
                 assert_eq!(
                     (offer.name.as_str(), offer.scope.as_str()),
@@ -10584,7 +10608,12 @@ mod tests {
         unknown_ruleset_form(&mut m);
         match &m.overlay {
             Overlay::Form(f) => {
-                assert_eq!(f.error.as_deref(), Some(r#"no ruleset named "New-App""#));
+                assert_eq!(
+                    f.error.as_deref(),
+                    Some(
+                        r#"no ruleset named "New-App": Ctrl-R creates it scoped app=shop, env=prod"#
+                    )
+                );
                 assert!(f.ruleset_offer_armed().is_some());
             }
             other => panic!("{other:?}"),
@@ -10671,24 +10700,22 @@ mod tests {
     }
 
     #[test]
-    fn editing_the_ruleset_name_disarms_ctrl_r() {
+    fn editing_the_ruleset_name_disarms_the_offer_and_ctrl_r_takes_the_new_name() {
+        use crate::tui::edit::WriteIntent;
         use crate::tui::test_support::model_with_flows;
         let mut m = writes_on(model_with_flows());
         unknown_ruleset_form(&mut m);
         update(&mut m, key('X'));
         match &m.overlay {
-            Overlay::Form(f) => assert!(f.ruleset_offer_armed().is_none(), "the hint reverts"),
+            Overlay::Form(f) => assert!(f.ruleset_offer_armed().is_none(), "the offer ends"),
             other => panic!("{other:?}"),
         }
-        assert!(update(&mut m, ctrl_key('r')).is_empty(), "nothing planned");
-        match &m.overlay {
-            Overlay::Form(f) => assert_eq!(
-                f.error.as_deref(),
-                Some("the ruleset name changed; press Enter to check it first")
-            ),
-            other => panic!("{other:?}"),
-        }
-        assert!(m.policy.rule_after_ruleset.is_none());
+        let cmds = update(&mut m, ctrl_key('r'));
+        assert!(
+            matches!(cmds.as_slice(), [Cmd::PlanWrite(WriteIntent::CreateRuleSet(d))] if d.name == "New-AppX"),
+            "{cmds:?}"
+        );
+        assert!(m.policy.rule_after_ruleset.is_some());
     }
 
     #[test]
@@ -10735,14 +10762,20 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_r_is_offered_only_for_an_unknown_name_and_a_scoped_destination() {
+    fn ctrl_r_says_what_it_needs_a_name_and_a_scoped_destination() {
         use crate::tui::test_support::model_with_flows;
-        // Ctrl-R on a fresh form does nothing.
+        // Ctrl-R on a fresh form without a name: what to type.
         let mut m = writes_on(model_with_flows());
         update(&mut m, key('j'));
         update(&mut m, key('w'));
         assert!(update(&mut m, ctrl_key('r')).is_empty());
-        assert!(matches!(m.overlay, Overlay::Form(_)));
+        match &m.overlay {
+            Overlay::Form(f) => assert_eq!(
+                f.error.as_deref(),
+                Some("type the new ruleset's name, then Ctrl-R")
+            ),
+            other => panic!("{other:?}"),
+        }
         // Another planner error is shown as it is, without the offer.
         let mut m = writes_on(model_with_flows());
         update(&mut m, key('j'));
@@ -10753,22 +10786,29 @@ mod tests {
         update(&mut m, enter());
         update(&mut m, Msg::Planned(Err("authentication failed".into())));
         match &m.overlay {
-            Overlay::Form(f) => assert_eq!(f.error.as_deref(), Some("authentication failed")),
-            other => panic!("{other:?}"),
-        }
-        assert!(update(&mut m, ctrl_key('r')).is_empty());
-        assert!(m.policy.rule_after_ruleset.is_none());
-        // A destination without scope labels: the plain unknown-name error.
-        let mut m = writes_on(model_with_flows());
-        m.limits.scope_keys = vec!["site".into()];
-        unknown_ruleset_form(&mut m);
-        match &m.overlay {
             Overlay::Form(f) => {
-                assert_eq!(f.error.as_deref(), Some(r#"no ruleset named "New-App""#))
+                assert_eq!(f.error.as_deref(), Some("authentication failed"));
+                assert!(f.offers_ruleset.is_none());
             }
             other => panic!("{other:?}"),
         }
+        // A destination without scope labels: what to do instead.
+        let mut m = writes_on(model_with_flows());
+        m.limits.scope_keys = vec!["site".into()];
+        unknown_ruleset_form(&mut m);
+        let instead = "the destination has no scope labels to scope a new ruleset by: name an existing one (Ctrl-N) or create it on Policy";
+        match &m.overlay {
+            Overlay::Form(f) => assert_eq!(
+                f.error.as_deref(),
+                Some(format!(r#"no ruleset named "New-App"; {instead}"#).as_str())
+            ),
+            other => panic!("{other:?}"),
+        }
         assert!(update(&mut m, ctrl_key('r')).is_empty());
+        match &m.overlay {
+            Overlay::Form(f) => assert_eq!(f.error.as_deref(), Some(instead)),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]
@@ -15174,5 +15214,58 @@ mod rule_form_ruleset_tests {
         };
         let names: Vec<&str> = strip.iter().map(|(s, _)| s.as_str()).collect();
         assert_eq!(names, ["Shop-Prod", "Shop", "A-Prod-EU", "Global-Infra"]);
+    }
+
+    #[test]
+    fn a_new_name_is_created_with_ctrl_r_and_the_refusal_names_it() {
+        use crate::tui::edit::WriteIntent;
+        let (mut m, _) = w_form();
+        update(&mut m, drafts_loaded(drafts()));
+        // An existing name: Ctrl-R refuses without a request.
+        assert!(update(&mut m, ctrl('r')).is_empty());
+        assert_eq!(
+            form(&m).error.as_deref(),
+            Some(r#"ruleset "Shop-Prod" exists: Enter adds the rule to it"#)
+        );
+        // No name: says what to type.
+        update(&mut m, ctrl('u'));
+        assert!(update(&mut m, ctrl('r')).is_empty());
+        assert_eq!(
+            form(&m).error.as_deref(),
+            Some("type the new ruleset's name, then Ctrl-R")
+        );
+        // Enter on a new name: the planner's refusal names Ctrl-R and the scope.
+        for c in "New-App".chars() {
+            update(&mut m, key(c));
+        }
+        assert_eq!(update(&mut m, kc(KeyCode::Enter)).len(), 1);
+        let e = r#"no ruleset named "New-App"; similar: Shop-Prod"#;
+        update(&mut m, Msg::Planned(Err(e.into())));
+        let want = r#"no ruleset named "New-App": Ctrl-R creates it scoped app=shop, env=prod; similar: Shop-Prod"#;
+        assert_eq!(form(&m).error.as_deref(), Some(want));
+        assert_eq!(
+            form(&m).fields[0].hint,
+            "Ctrl-R: create it, scoped app=shop, env=prod"
+        );
+        assert_eq!(m.status.text, format!("write: {want}"));
+        // Ctrl-R plans the ruleset, the rule waits for it.
+        let cmds = update(&mut m, ctrl('r'));
+        assert!(
+            matches!(cmds.as_slice(), [Cmd::PlanWrite(WriteIntent::CreateRuleSet(d))] if d.name == "New-App"),
+            "{cmds:?}"
+        );
+        assert!(m.policy.rule_after_ruleset.is_some());
+        // Typed straight away, no Enter first: the same.
+        let (mut m, _) = w_form();
+        update(&mut m, drafts_loaded(drafts()));
+        update(&mut m, ctrl('u'));
+        for c in "Other".chars() {
+            update(&mut m, key(c));
+        }
+        let cmds = update(&mut m, ctrl('r'));
+        assert!(
+            matches!(cmds.as_slice(), [Cmd::PlanWrite(WriteIntent::CreateRuleSet(d))] if d.name == "Other"),
+            "{cmds:?}"
+        );
     }
 }

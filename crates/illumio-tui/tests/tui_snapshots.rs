@@ -1073,7 +1073,9 @@ fn rule_from_flow_form_80x24() {
 
 #[test]
 fn rule_from_flow_form_offering_ctrl_r_80x24() {
-    use illumio_tui::tui::edit::{EditIntent, form_for, new_ruleset_offer};
+    use illumio_tui::tui::edit::{
+        EditIntent, explain_unknown_ruleset, form_for, new_ruleset_offer,
+    };
     use illumio_tui::tui::model::Overlay;
     use illumio_tui::tui::test_support::{fixture_flows, fixture_index};
     let mut m = model_with_flows();
@@ -1088,7 +1090,7 @@ fn rule_from_flow_form_offering_ctrl_r_80x24() {
     form.fields[0].value = "New-App".into();
     let e = r#"no ruleset named "New-App"; similar: Shop-Prod"#;
     form.offers_ruleset = new_ruleset_offer(&form, e, &m.limits.scope_keys);
-    form.error = Some(e.into());
+    form.error = Some(explain_unknown_ruleset(&form, e, &m.limits.scope_keys));
     m.overlay = Overlay::Form(form);
     let out = render_to_string(&m, 80, 24);
     assert!(
@@ -1097,6 +1099,7 @@ fn rule_from_flow_form_offering_ctrl_r_80x24() {
     );
     assert!(out.contains("Ctrl-R new ruleset"), "{out}");
     assert!(out.contains("similar: Shop-Prod"), "{out}");
+    assert!(out.contains("Ctrl-R creates it scoped"), "{out}");
     insta::assert_snapshot!("form_rule_from_flow_ctrl_r_80x24", out);
     m.set_theme("light");
     insta::assert_snapshot!(

@@ -797,22 +797,45 @@ fn unknown_ruleset(name: &str) -> String {
     format!("no ruleset named {name:?}")
 }
 
-/// The scope of a `w` form's destination, when the form names a ruleset
-/// (not an href) that `error` says does not exist.
-fn unknown_ruleset_scope<'f>(
+/// The scope of a `w` form's destination (empty without scope labels) and
+/// the rest of `error` after "no ruleset named …" (`; similar: …` or
+/// nothing), when the form names a ruleset (not an href) that `error` says
+/// does not exist.
+fn unknown_ruleset_scope<'f, 'e>(
     form: &'f Form,
-    error: &str,
+    error: &'e str,
     scope_keys: &[String],
-) -> Option<Vec<&'f ResolvedLabel>> {
+) -> Option<(Vec<&'f ResolvedLabel>, &'e str)> {
     let EditIntent::RuleFromFlow(f) = &form.intent else {
         return None;
     };
     let name = form.value("Ruleset").trim();
-    let unknown = unknown_ruleset(name);
-    let names_it = error == unknown || error.starts_with(&format!("{unknown};"));
-    let scope = scope_of(&f.dst, scope_keys);
-    (!is_href(name) && names_it && !scope.is_empty()).then_some(scope)
+    let rest = error.strip_prefix(&unknown_ruleset(name))?;
+    let names_it = rest.is_empty() || rest.starts_with(';');
+    (!is_href(name) && names_it).then(|| (scope_of(&f.dst, scope_keys), rest))
 }
+
+/// The planner's answer to a `w` form's unknown ruleset name with what to
+/// do: `Ctrl-R` creates it scoped like the destination, or, without scope
+/// labels, name an existing one. Any other error as it is.
+pub fn explain_unknown_ruleset(form: &Form, error: &str, scope_keys: &[String]) -> String {
+    let Some((scope, rest)) = unknown_ruleset_scope(form, error, scope_keys) else {
+        return error.to_string();
+    };
+    let unknown = &error[..error.len() - rest.len()];
+    if scope.is_empty() {
+        format!("{unknown}{rest}; {NO_SCOPE_TO_CREATE}")
+    } else {
+        format!(
+            "{unknown}: Ctrl-R creates it scoped {}{rest}",
+            labels_tokens(&scope)
+        )
+    }
+}
+
+/// Why `Ctrl-R` cannot create a ruleset for a destination without scope
+/// labels, and what to do instead.
+const NO_SCOPE_TO_CREATE: &str = "the destination has no scope labels to scope a new ruleset by: name an existing one (Ctrl-N) or create it on Policy";
 
 /// What `Ctrl-R` offers when a `w` form's ruleset name is unknown and the
 /// destination has a scope: that name, scoped like the destination.
@@ -821,12 +844,14 @@ pub fn new_ruleset_offer(
     error: &str,
     scope_keys: &[String],
 ) -> Option<Box<RulesetOffer>> {
-    unknown_ruleset_scope(form, error, scope_keys).map(|scope| {
-        Box::new(RulesetOffer {
-            name: form.value("Ruleset").trim().to_string(),
-            scope: labels_tokens(&scope),
+    unknown_ruleset_scope(form, error, scope_keys)
+        .filter(|(scope, _)| !scope.is_empty())
+        .map(|(scope, _)| {
+            Box::new(RulesetOffer {
+                name: form.value("Ruleset").trim().to_string(),
+                scope: labels_tokens(&scope),
+            })
         })
-    })
 }
 
 /// `Ctrl-R`: the ruleset the form names, scoped like the destination, and
@@ -840,6 +865,9 @@ pub fn new_ruleset_intent(
     let EditIntent::RuleFromFlow(f) = &form.intent else {
         return Err("Ctrl-R creates a ruleset from a w form only".into());
     };
+    if form.value("Ruleset").trim().is_empty() {
+        return Err("type the new ruleset's name, then Ctrl-R".into());
+    }
     let Some(WriteIntent::CreateRule {
         ruleset: RulesetTarget::Name(name),
         draft,
@@ -852,7 +880,7 @@ pub fn new_ruleset_intent(
         .map(|l| ActorRef::new(ActorKind::Label, l.href.clone()))
         .collect();
     if scope.is_empty() {
-        return Err("the destination has no scope labels to scope a ruleset by".into());
+        return Err(NO_SCOPE_TO_CREATE.into());
     }
     let ruleset = RuleSetDraft {
         name,

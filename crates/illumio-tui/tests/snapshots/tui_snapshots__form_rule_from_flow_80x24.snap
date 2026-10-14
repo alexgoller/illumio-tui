@@ -20,7 +20,7 @@ expression: out
 ╭ Det│                y or n                                              │ows ╮
 │sele│  Unscoped*     y                                                   │    │
 │    │                y: consumers outside the ruleset's scope            │    │
-│    │* required · Ctrl-A all labels                                      │    │
+│    │* required · Ctrl-R new ruleset · Ctrl-A all labels                 │    │
 │    ╰────────────────────────────────────────────────────────────────────╯    │
 │                                                                              │
 │                                                                              │
