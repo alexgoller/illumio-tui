@@ -296,8 +296,12 @@ impl Workload {
     }
 
     pub fn ven_health(&self, now: jiff::Timestamp) -> VenHealth {
-        let Some(a) = self.agent_status_view() else {
+        if self.is_unmanaged() {
             return VenHealth::Unmanaged;
+        }
+        // Managed, but the PCE says nothing about the VEN: not healthy.
+        let Some(a) = self.agent_status_view() else {
+            return VenHealth::Warning;
         };
         if self.online == Some(false) {
             return VenHealth::Offline;
@@ -437,6 +441,26 @@ mod tests {
         let mut none = w[0].clone();
         none.enforcement_mode = None;
         assert_eq!(none.enforcement(), None);
+    }
+
+    #[test]
+    fn ven_health_and_enforcement_share_one_unmanaged_predicate() {
+        let w = fixture();
+        let now: jiff::Timestamp = "2026-10-10T08:00:00Z".parse().unwrap();
+        // managed: true without an agent status: a VEN we know nothing of.
+        let mut blind = w[0].clone();
+        blind.agent = Some(serde_json::json!({"href": "/orgs/5/agents/9"}));
+        assert!(!blind.is_unmanaged());
+        assert_eq!(blind.ven_health(now), VenHealth::Warning);
+        assert_eq!(blind.enforcement(), Some("full"));
+        blind.agent = None;
+        assert_eq!(blind.ven_health(now), VenHealth::Warning);
+        // managed: false wins over a stray agent status.
+        let mut stray = w[0].clone();
+        stray.managed = Some(false);
+        assert!(stray.is_unmanaged());
+        assert_eq!(stray.ven_health(now), VenHealth::Unmanaged);
+        assert_eq!(stray.enforcement(), Some(UNMANAGED));
     }
 
     #[test]

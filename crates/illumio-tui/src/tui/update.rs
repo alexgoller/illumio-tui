@@ -4438,6 +4438,8 @@ fn workloads_edit_key(model: &mut Model, c: char) -> Vec<Cmd> {
         model.status = StatusLine::warn("no row selected");
         return Vec::new();
     };
+    // The write guard's test (pce::write::workloads::require_unmanaged), not
+    // Workload::is_unmanaged: offer an edit only where the write would pass.
     if w.managed != Some(false) || w.ven.is_some() {
         model.status = StatusLine::warn("only unmanaged workloads can be edited here");
         return Vec::new();

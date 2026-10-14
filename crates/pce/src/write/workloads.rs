@@ -279,6 +279,9 @@ fn ambiguous(needle: &str, hits: &[Workload]) -> WriteError {
     ))
 }
 
+/// Stricter than [`Workload::is_unmanaged`] on purpose: a write needs the
+/// PCE to say `managed: false` with no VEN attached, never an inference from
+/// a missing agent status (which only decides what is displayed).
 fn require_unmanaged(w: &Workload) -> Result<(), WriteError> {
     let who = w
         .hostname
