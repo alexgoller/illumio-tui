@@ -250,6 +250,20 @@ impl Workload {
         parts
     }
 
+    /// The `keys` (the label model: scope keys, then the tier key) this
+    /// workload has no label for, in `keys` order: what makes it unlabeled.
+    pub fn missing_label_keys(&self, keys: &[String]) -> Vec<String> {
+        keys.iter()
+            .filter(|k| {
+                !self
+                    .labels
+                    .iter()
+                    .any(|l| l.key.as_deref() == Some(k.as_str()))
+            })
+            .cloned()
+            .collect()
+    }
+
     pub fn label_hrefs(&self) -> Vec<&str> {
         self.labels.iter().map(|l| l.href.as_str()).collect()
     }
@@ -293,6 +307,13 @@ impl Workload {
     pub fn heartbeat_age(&self, now: jiff::Timestamp) -> Option<Duration> {
         let hb = parse_ts(self.agent_status_view()?.last_heartbeat.as_deref()?)?;
         Some(now.duration_since(hb).unsigned_abs())
+    }
+
+    /// The VEN is offline: [`VenHealth::Offline`], so `online: false` or a
+    /// heartbeat older than [`HEARTBEAT_OFFLINE`]. A workload without a VEN
+    /// is never offline.
+    pub fn is_offline(&self, now: jiff::Timestamp) -> bool {
+        self.ven_health(now) == VenHealth::Offline
     }
 
     pub fn ven_health(&self, now: jiff::Timestamp) -> VenHealth {
@@ -644,5 +665,40 @@ mod tests {
         let mut bare = w[0].clone();
         bare.agent = Some(serde_json::json!({"href": "/orgs/5/agents/9"}));
         assert_eq!(bare.agent_status_view(), None);
+    }
+
+    #[test]
+    fn missing_label_keys_names_the_model_keys_without_a_label() {
+        let w = fixture();
+        let keys: Vec<String> = ["app", "env", "role"].map(String::from).to_vec();
+        assert!(w[0].missing_label_keys(&keys).is_empty());
+        assert_eq!(w[2].missing_label_keys(&keys), ["app", "env", "role"]);
+        let mut no_env = w[0].clone();
+        no_env.labels.retain(|l| l.key.as_deref() != Some("env"));
+        assert_eq!(no_env.missing_label_keys(&keys), ["env"]);
+        // A label without a resolved key fills none.
+        no_env.labels.push(WorkloadLabel {
+            href: "/orgs/5/labels/99".into(),
+            key: None,
+            value: Some("prod".into()),
+        });
+        assert_eq!(no_env.missing_label_keys(&keys), ["env"]);
+        assert!(w[2].missing_label_keys(&[]).is_empty());
+    }
+
+    #[test]
+    fn offline_is_the_offline_ven_health() {
+        let w = fixture();
+        let now: jiff::Timestamp = "2026-10-10T08:00:00Z".parse().unwrap();
+        let offline: Vec<bool> = w.iter().map(|x| x.is_offline(now)).collect();
+        assert_eq!(offline, [false, true, false, false]);
+        // A stale heartbeat is offline though the PCE still says online.
+        let later: jiff::Timestamp = "2026-10-10T09:00:00Z".parse().unwrap();
+        assert_eq!(w[0].online, Some(true));
+        assert!(w[0].is_offline(later));
+        // Unmanaged is never offline: there is no VEN to be offline.
+        let mut nas = w[2].clone();
+        nas.online = Some(false);
+        assert!(!nas.is_offline(now));
     }
 }
