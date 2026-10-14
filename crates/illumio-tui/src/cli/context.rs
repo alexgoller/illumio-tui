@@ -189,15 +189,16 @@ pub fn cache_label(hit: bool, mode: CacheMode) -> &'static str {
 /// default is 2 requests a second).
 pub const TEST_FAST_ENV: &str = "ILLUMIO_TUI_TEST_FAST_MS";
 
-/// Debug builds only: with `ILLUMIO_TUI_TEST_FAST_MS` set, the client is not
-/// rate limited and the traffic poll starts at that many ms (its backoff
-/// capped at 5 times it). Release builds ignore it.
+/// Debug builds only: with `ILLUMIO_TUI_TEST_FAST_MS` set and a loopback
+/// host (the tests' mock PCE), the client is not rate limited and the traffic
+/// poll starts at that many ms (its backoff capped at 5 times it). A real PCE
+/// is never sped up; release builds ignore it.
 #[cfg(debug_assertions)]
 fn test_speed(mut cfg: pce::ClientConfig) -> (pce::ClientConfig, Option<pce::traffic::PollConfig>) {
     let ms = std::env::var(TEST_FAST_ENV)
         .ok()
         .and_then(|v| v.parse::<u64>().ok());
-    let Some(ms) = ms else {
+    let Some(ms) = ms.filter(|_| is_loopback(&cfg.host)) else {
         return (cfg, None);
     };
     cfg.requests_per_second = 1000.0;
@@ -210,7 +211,52 @@ fn test_speed(mut cfg: pce::ClientConfig) -> (pce::ClientConfig, Option<pce::tra
     (cfg, Some(poll))
 }
 
+/// `localhost`, `127.0.0.0/8` or `::1`, with or without a scheme or port.
+#[cfg(debug_assertions)]
+fn is_loopback(host: &str) -> bool {
+    let h = host
+        .trim_start_matches("https://")
+        .trim_start_matches("http://");
+    let h = h.split('/').next().unwrap_or(h);
+    let h = match h.strip_prefix('[') {
+        Some(rest) => rest.split(']').next().unwrap_or(rest),
+        None if h.matches(':').count() == 1 => h.split(':').next().unwrap_or(h),
+        None => h,
+    };
+    h.eq_ignore_ascii_case("localhost")
+        || h.parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
 #[cfg(not(debug_assertions))]
 fn test_speed(cfg: pce::ClientConfig) -> (pce::ClientConfig, Option<pce::traffic::PollConfig>) {
     (cfg, None)
+}
+
+#[cfg(all(test, debug_assertions))]
+mod test_speed_tests {
+    use super::is_loopback;
+
+    #[test]
+    fn only_a_loopback_host_is_sped_up() {
+        for h in [
+            "127.0.0.1",
+            "localhost",
+            "::1",
+            "[::1]:8443",
+            "http://127.0.0.1:9000",
+            "127.0.0.1:443",
+        ] {
+            assert!(is_loopback(h), "{h}");
+        }
+        for h in [
+            "demo100.illum.io",
+            "10.0.0.1",
+            "https://pce.example.com:8443",
+            "localhost.evil.com",
+            "1.2.3.4:443",
+        ] {
+            assert!(!is_loopback(h), "{h}");
+        }
+    }
 }
