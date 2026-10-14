@@ -438,6 +438,9 @@ impl Pce {
             Evaluation::Draft(Some(href)) => Some(format!("{prefix}{href}")),
             Evaluation::Draft(None) => None,
         };
+        // Before the request: a write that invalidates the slot while this
+        // run is on its way makes its answer stale, and it is not stored.
+        let mark = self.cache.mark();
         if mode == CacheMode::Use
             && let Some(key) = &key
             && let Some((value, age)) = self.cache.get::<traffic::TrafficResult>(key)
@@ -479,8 +482,8 @@ impl Pce {
             Evaluation::Reported => Duration::from_secs(24 * 3600),
             Evaluation::Draft(_) => DRAFT_TTL,
         };
-        self.cache.invalidate_prefix(&prefix);
-        self.cache.insert(&key, result.clone(), ttl);
+        self.cache
+            .replace_if_fresh(&prefix, &key, result.clone(), ttl, mark);
         let truncated = result.truncated;
         Ok(Cached {
             value: result,

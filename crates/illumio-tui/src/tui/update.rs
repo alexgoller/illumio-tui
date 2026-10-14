@@ -785,14 +785,15 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     } else {
                         StatusLine::warn(text)
                     };
+                    // The pending reload shows the write's own report.
+                    if kind.whole_policy() {
+                        model.policy.provisioned = Some(model.status.text.clone());
+                    }
                     // The draft policy (or a workload's scope) may have
                     // changed: the draft decisions on screen are evaluated again.
                     let rule_waits =
                         rule_after.is_some() && kind == pce::write::ObjectKind::RuleSet;
                     let redraft = redraft_after_write(model, from_flow, rule_waits);
-                    if kind.whole_policy() {
-                        model.policy.provisioned = Some(model.status.text.clone());
-                    }
                     let mut cmds = reload_after_write(model, kind);
                     cmds.extend(redraft);
                     if !rule_waits {
@@ -1216,20 +1217,31 @@ fn draft_ask(filter: &TrafficFilter, hrefs: &[String], queries: u32) -> Option<D
 /// the Traffic `w` form (`from_flow`). One re-evaluation per write, never
 /// while a query runs or where `D` would ask first: the status then says
 /// `D` re-evaluates. `waits`: a ruleset whose rule is still to come
-/// (`Ctrl-R`) only drops them; the rule's write evaluates.
+/// (`Ctrl-R`) changes no decision; the rule's write evaluates.
 fn redraft_after_write(model: &mut Model, from_flow: bool, waits: bool) -> Vec<Cmd> {
+    if waits {
+        return Vec::new();
+    }
+    // Only the result on screen counts, not the unfocused one kept aside.
+    let shown = model.traffic.draft_loaded() || model.traffic.is_draft_running();
     let dropped = model.traffic.drop_draft();
     let t = &model.traffic;
-    if !waits
-        && (dropped || from_flow)
+    if (shown || from_flow)
         && !t.is_running()
         && let Some(target) = draft_target(t)
         && draft_ask(&target.filter, &target.hrefs, target.queries).is_none()
     {
         let write = model.status.clone();
         let cmds = start_draft(model, target.filter, target.focus, target.hrefs);
+        // `Esc` cancels it on the Traffic screen only (a form opened from
+        // the app overlay goes back to it).
+        let run = if model.screen != Screen::Traffic || model.form_from_app {
+            "draft re-evaluation running · Esc on Traffic cancels".to_string()
+        } else {
+            model.status.text.clone()
+        };
         model.status = StatusLine {
-            text: format!("{} · {}", write.text, model.status.text),
+            text: format!("{} · {run}", write.text),
             ..write
         };
         return cmds;
@@ -14531,6 +14543,63 @@ mod app_tests {
     }
 
     #[test]
+    fn a_w_write_from_the_overlay_returns_to_it_with_one_draft_run() {
+        use crate::tui::test_support::rule_post_plan;
+        let mut m = everything();
+        m.traffic.data.as_mut().unwrap().hrefs =
+            vec!["/orgs/5/traffic_flows/async_queries/q-1".into()];
+        m.writes = WritesState::on();
+        quiet(&mut m, key('A'));
+        quiet(&mut m, key('j'));
+        quiet(&mut m, key('j')); // a blocked peer
+        quiet(&mut m, key('w'));
+        let Overlay::Form(f) = &mut m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        for (label, value) in [("Ruleset", "Shop-Prod"), ("Services", "443/tcp")] {
+            f.fields
+                .iter_mut()
+                .find(|x| x.label == label)
+                .unwrap()
+                .value = value.into();
+        }
+        assert_eq!(update(&mut m, kc(KeyCode::Enter)).len(), 1);
+        quiet(
+            &mut m,
+            Msg::Planned(Ok((rule_post_plan(), pce::write::ObjectKind::Rule))),
+        );
+        assert_eq!(update(&mut m, key('y')).len(), 1);
+        let cmds = update(
+            &mut m,
+            Msg::WriteDone {
+                kind: pce::write::ObjectKind::Rule,
+                method: Some(pce::WriteMethod::Post),
+                result: Ok(pce::write::Outcome::Written(pce::write::Written {
+                    href: "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/9".into(),
+                    pending: true,
+                    status: 201,
+                    object: serde_json::json!({}),
+                    dropped_fields: vec![],
+                    warnings: vec![],
+                })),
+            },
+        );
+        let runs = cmds
+            .iter()
+            .filter(|c| matches!(c, Cmd::RunDraft { .. }))
+            .count();
+        assert_eq!(runs, 1, "{cmds:?}");
+        assert_eq!(m.overlay, Overlay::App, "back to the overlay");
+        assert!(
+            m.status
+                .text
+                .ends_with("draft re-evaluation running · Esc on Traffic cancels"),
+            "{}",
+            m.status.text
+        );
+    }
+
+    #[test]
     fn the_way_back_to_the_overlay_never_outlives_its_write() {
         use crate::tui::test_support::label_post_plan;
         let mut m = everything();
@@ -15561,6 +15630,99 @@ mod draft_tests {
     }
 
     #[test]
+    fn a_draft_only_on_the_result_kept_aside_is_dropped_not_evaluated() {
+        let mut m = model();
+        let (seq, ..) = press_d(&mut m);
+        let msg = answer(&m, seq, false);
+        update(&mut m, msg);
+        // The drafted result kept aside, a plain one on screen.
+        m.traffic.unfocused = m.traffic.data.take();
+        m.traffic.data = model().traffic.data;
+        m.writes.in_flight = true;
+        let cmds = update(&mut m, written());
+        assert!(redrafts(&cmds).is_empty(), "{cmds:?}");
+        assert!(m.traffic.unfocused.as_ref().unwrap().draft.is_none());
+        assert!(
+            m.status.text.ends_with("draft cleared: D re-evaluates"),
+            "{}",
+            m.status.text
+        );
+    }
+
+    #[test]
+    fn a_write_off_the_traffic_screen_says_where_esc_cancels() {
+        let mut m = model();
+        let (seq, ..) = press_d(&mut m);
+        let msg = answer(&m, seq, false);
+        update(&mut m, msg);
+        m.screen = crate::tui::model::Screen::Policy;
+        m.writes.in_flight = true;
+        let cmds = update(&mut m, written());
+        assert_eq!(redrafts(&cmds).len(), 1, "{cmds:?}");
+        assert!(
+            m.status
+                .text
+                .ends_with(" · draft re-evaluation running · Esc on Traffic cancels"),
+            "{}",
+            m.status.text
+        );
+    }
+
+    #[test]
+    fn a_provision_evaluates_the_draft_and_keeps_its_own_report_for_the_pending_list() {
+        let mut m = model();
+        let (seq, ..) = press_d(&mut m);
+        let msg = answer(&m, seq, false);
+        update(&mut m, msg);
+        m.policy.provision_counts = Some("rule_sets=1".into());
+        m.writes.in_flight = true;
+        let cmds = update(
+            &mut m,
+            Msg::WriteDone {
+                kind: pce::write::ObjectKind::Provision,
+                method: Some(pce::WriteMethod::Post),
+                result: Ok(pce::write::Outcome::Written(pce::write::Written {
+                    href: "/orgs/1/sec_policy/7".into(),
+                    pending: false,
+                    status: 201,
+                    object: serde_json::Value::Null,
+                    dropped_fields: vec![],
+                    warnings: vec![],
+                })),
+            },
+        );
+        assert_eq!(redrafts(&cmds).len(), 1, "{cmds:?}");
+        assert_eq!(
+            m.policy.provisioned.as_deref(),
+            Some("provisioned /orgs/1/sec_policy/7: rule_sets=1")
+        );
+        assert!(m.status.text.contains("draft re-evaluation running"));
+    }
+
+    #[test]
+    fn an_unanswered_write_reloads_but_evaluates_nothing() {
+        let mut m = model();
+        let (seq, ..) = press_d(&mut m);
+        let msg = answer(&m, seq, false);
+        update(&mut m, msg);
+        m.policy.write_from_flow = true;
+        m.writes.in_flight = true;
+        let cmds = update(
+            &mut m,
+            Msg::WriteDone {
+                kind: pce::write::ObjectKind::Rule,
+                method: Some(pce::WriteMethod::Delete),
+                result: Err(pce::write::WriteError::Unanswered(pce::PceError::Timeout(
+                    Duration::from_secs(30),
+                ))),
+            },
+        );
+        assert!(!cmds.is_empty(), "it reloads");
+        assert!(redrafts(&cmds).is_empty(), "{cmds:?}");
+        assert!(!m.policy.write_from_flow, "taken");
+    }
+
+    #[test]
     fn a_draft_re_run_takes_the_new_time_range() {
         let mut m = model_with_rich_flows(); // no hrefs: D re-runs the query
         update(&mut m, key('D'));
@@ -16267,11 +16429,12 @@ mod rule_form_ruleset_tests {
         assert!(!m.traffic.is_running());
     }
 
-    #[test]
-    fn ctrl_r_evaluates_the_draft_after_the_rule_not_the_ruleset() {
+    /// A drafted result, Ctrl-R on a new name, and its ruleset written: the
+    /// rule's plan is on its way.
+    fn ctrl_r_ruleset_written() -> Model {
         use crate::tui::edit::WriteIntent;
-        use crate::tui::test_support::rule_post_plan;
-        let mut m = w_form_on_query();
+        use crate::tui::test_support::with_draft_loaded;
+        let mut m = with_draft_loaded(w_form_on_query());
         assert_eq!(ctrl_r_on(&mut m, "New-App").len(), 1);
         let ruleset = pce::write::Plan::Send {
             request: pce::write::WriteRequest {
@@ -16291,9 +16454,28 @@ mod rule_form_ruleset_tests {
                 .any(|c| matches!(c, Cmd::PlanWrite(WriteIntent::CreateRule { .. }))),
             "{cmds:?}"
         );
+        m
+    }
+
+    #[test]
+    fn ctrl_r_evaluates_the_draft_after_the_rule_not_the_ruleset() {
+        use crate::tui::test_support::rule_post_plan;
+        let mut m = ctrl_r_ruleset_written();
         assert!(!m.traffic.is_running());
+        assert!(
+            m.traffic.draft_loaded(),
+            "an empty ruleset changes no decision"
+        );
         let cmds = send(&mut m, rule_post_plan(), pce::write::ObjectKind::Rule, RULE);
         assert_eq!(redrafts(&cmds), 1, "{cmds:?}");
-        assert!(m.traffic.is_draft_running());
+        assert!(m.traffic.is_draft_running() && !m.traffic.draft_loaded());
+        // A cancelled rule confirm keeps the draft on screen, nothing sent.
+        let mut m = ctrl_r_ruleset_written();
+        update(
+            &mut m,
+            Msg::Planned(Ok((rule_post_plan(), pce::write::ObjectKind::Rule))),
+        );
+        assert!(update(&mut m, key('n')).is_empty());
+        assert!(m.traffic.draft_loaded() && !m.traffic.is_running());
     }
 }

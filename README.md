@@ -205,13 +205,18 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   overlay `+N` / `-N` per peer and `draft: N blocked flows fixed`; Mesh a `draft` column too; and
   `d` gains a `fixed by draft` step (blocked or potentially blocked now, allowed in draft). `D` again goes back to the
   reported decisions with no request, and the next `D` answers from the draft cache (kept 2
-  minutes, its age in the status line). A successful write drops the draft decisions and the
-  cache, and evaluates the result on screen against the draft again (the same run as `D`: one
-  PUT per query, `… · draft re-evaluation running · Esc cancels`) when draft decisions were on
-  screen or running, or the rule came from the `w` form. That is one run per write: none after
-  a failed or cancelled write, the ruleset `Ctrl-R` creates first (only after its rule), while
-  a query runs, or where `D` would ask first (no query of this session, a large window or
-  cap): the status then says `draft cleared: D re-evaluates`.
+  minutes, its age in the status line). A successful write drops the draft decisions (a
+  rule, ruleset, label group, IP list, service, workload, provision or revert write also drops
+  the cached draft; a label write leaves it) and
+  runs `D`'s evaluation once more on its own, when draft decisions were on the result on
+  screen or running, or the rule came from the `w` form: one PUT per query, or none when the
+  cached draft still stands; `… · draft re-evaluation running · Esc cancels` (`Esc on
+  Traffic cancels` from another screen or the app overlay). A draft run still on its way
+  when a write lands is cancelled and its answer is not cached. One run per write, and none
+  after a failed, unanswered or cancelled write, after the ruleset `Ctrl-R` creates first
+  (the draft stays on screen until its rule is written), while a query runs, or where `D`
+  would ask first (no query of this session behind the result, a large window or cap); if
+  draft decisions were dropped, the status then says `draft cleared: D re-evaluates`.
 - **Policy**: `d` toggle draft / active, `p` pending changes (`Enter` on one shows its diff against active), `Tab` switch panes, `Enter` rule
   detail, or on a ruleset load its deny rules. Rules are listed in evaluation order: override
   deny, allow, deny. With writes on, `n` / `e` / `x` create, edit and delete rulesets and rules
@@ -755,7 +760,8 @@ screen.
 
 After the rule is written, the flows on screen are evaluated against the draft
 once (as `D` does: one PUT per query), so the flow shows `blocked → allowed`
-straight away; see `D` above for when it does not run on its own.
+straight away, also when the form came from the app overlay. It does not run on
+its own where `D` would ask first or while a query runs; see `D` above.
 
 ### Label model
 

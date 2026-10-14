@@ -967,6 +967,60 @@ async fn the_draft_result_has_its_own_cache_slot_tied_to_its_query() {
     assert!(!r.hit && r.value.flows.is_empty());
 }
 
+/// A write that drops the draft slot while a draft run is on its way: the
+/// run's answer (read before the write) is not stored, so the run after
+/// the write asks the PCE again instead of serving it.
+#[tokio::test]
+async fn a_draft_answer_overtaken_by_a_write_is_not_cached() {
+    use pce::traffic::TrafficQueryBuilder;
+    use tokio_util::sync::CancellationToken;
+    let server = MockServer::start().await;
+    let href = "/orgs/5/traffic_flows/async_queries/q-race";
+    mount_rules_completed(&server, "q-race").await;
+    mount_update_rules(&server, &["q-race"]).await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{href}/download")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/traffic_flows.json"))
+                .insert_header("Content-Type", "application/json")
+                .set_delay(Duration::from_millis(400)),
+        )
+        .mount(&server)
+        .await;
+    let mut p = pce_for(&server);
+    fast_poll(&mut p);
+    let q = TrafficQueryBuilder::between(
+        "2026-10-09T00:00:00Z".parse().unwrap(),
+        "2026-10-10T00:00:00Z".parse().unwrap(),
+    )
+    .max_results(700)
+    .build()
+    .unwrap();
+    let cancel = CancellationToken::new();
+    let (run, ()) = tokio::join!(
+        p.traffic_draft(&q, Some(href), CacheMode::Use, &cancel, None),
+        async {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            p.invalidate("draft:");
+        }
+    );
+    assert!(!run.unwrap().hit);
+    let puts = |seen: &[String]| seen.iter().filter(|s| s.starts_with("PUT")).count();
+    assert_eq!(puts(&seen(&server).await), 1);
+    let again = p
+        .traffic_draft(&q, Some(href), CacheMode::Use, &cancel, None)
+        .await
+        .unwrap();
+    assert!(!again.hit, "the stale answer was not stored");
+    assert_eq!(puts(&seen(&server).await), 2, "asked again");
+    let third = p
+        .traffic_draft(&q, Some(href), CacheMode::Use, &cancel, None)
+        .await
+        .unwrap();
+    assert!(third.hit, "an answer no write overtook is cached");
+}
+
 #[tokio::test]
 async fn a_focused_draft_re_evaluates_each_side_without_a_post() {
     use pce::traffic::{Focus, TrafficQueryBuilder};
