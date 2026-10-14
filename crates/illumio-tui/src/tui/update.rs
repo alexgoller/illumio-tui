@@ -1,6 +1,6 @@
 //! Pure state transitions. Never performs I/O; returns `Cmd`s instead.
 use crate::tui::app_picker::{AppPicker, AppPickerOutcome, AppPickerPurpose};
-use crate::tui::app_view::{AppPanel, AppView, ExactTimeline, Loadable};
+use crate::tui::app_view::{AppPanel, AppView, Loadable};
 use crate::tui::commands::{self, Command};
 use crate::tui::edit::{self, EditIntent, RulesetTarget, Start, WriteIntent};
 use crate::tui::filter::{FilterEditor, TrafficFilter};
@@ -10,9 +10,7 @@ use crate::tui::model::{
     PceUsage, PendingAction, PolicyPane, PolicyState, QueryState, Range, Screen, StatusLine,
     TrafficData, TrafficState, TrafficView, WritesState, queries_text, rule_line,
 };
-use crate::tui::msg::{
-    Cmd, FocusedOutcome, Msg, ObjectsPayload, QueryOutcome, TimelineBucketOutcome,
-};
+use crate::tui::msg::{Cmd, FocusedOutcome, Msg, ObjectsPayload, QueryOutcome};
 use crate::tui::picker::{KeyPicker, PickerOutcome};
 use crate::tui::ui::widgets::overlay::{confirm_write_last_scroll, help_last_scroll};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -24,7 +22,6 @@ use pce::write::{
 };
 use pce::{CacheMode, RuleKind, WriteMethod};
 use std::time::Instant;
-use tokio_util::sync::CancellationToken;
 
 /// The status and header note for a result a supercluster region did not
 /// answer.
@@ -34,13 +31,12 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
     let traffic_answer = matches!(msg, Msg::QueryDone { .. } | Msg::FocusedDone { .. });
     let cmds = on_msg(model, msg);
     // A traffic answer that lands under the open app overlay (or one of its
-    // prompts): its peers and timeline follow (no request), and an exact
-    // timeline of another window is dropped.
+    // prompts): its peers follow (no request).
     let app_open = matches!(
         model.overlay,
         Overlay::App
             | Overlay::Confirm {
-                action: PendingAction::ReloadApp | PendingAction::AppTimeline(_),
+                action: PendingAction::ReloadApp,
                 ..
             }
     );
@@ -471,12 +467,6 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             }
             Vec::new()
         }
-        Msg::TimelineBucketDone {
-            seq,
-            ticket,
-            index,
-            result,
-        } => timeline_bucket_done(model, seq, ticket, index, result),
         Msg::WorkloadsLoaded(result) => {
             model.workloads.loading = false;
             match result {
@@ -1096,16 +1086,12 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                         start_focused(model, f, focus, mode)
                     }
                     PendingAction::ReloadApp => app_reload(model),
-                    PendingAction::AppTimeline(asked) => start_timeline(model, asked),
                 }
             }
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                 model.overlay = Overlay::None;
                 model.status = StatusLine::info("cancelled");
-                if matches!(
-                    action,
-                    PendingAction::ReloadApp | PendingAction::AppTimeline(_)
-                ) {
+                if matches!(action, PendingAction::ReloadApp) {
                     model.overlay = Overlay::App;
                 }
                 Vec::new()
@@ -1990,30 +1976,17 @@ fn open_app(model: &mut Model, focus: Focus) -> Vec<Cmd> {
     let window = model.traffic.filter.window.clone();
     let (mut v, reused) = match model.app_view.take() {
         Some(mut v) if v.focus.same_app(&focus) => {
-            // A run the overlay was closed under never goes on by itself:
-            // `t` resumes it.
-            if let Some(e) = v.exact.as_mut() {
-                e.stop();
-            }
             v.focus = focus.clone();
             v.window = window;
             (v, true)
         }
-        old => {
-            if let Some(mut e) = old.and_then(|v| v.exact) {
-                e.stop();
-            }
+        _ => {
             model.app_seq += 1;
             (AppView::new(focus.clone(), window, model.app_seq), false)
         }
     };
     let t = &model.traffic;
-    v.rebuild_traffic(
-        t.flows_for(&focus),
-        t.window_bounds(),
-        t.partial_for(&focus),
-    );
-    drop_stale_timeline(&mut v, t);
+    v.rebuild_traffic(t.flows_for(&focus), t.partial_for(&focus));
     let idx = model.index().cloned();
     v.label_hrefs = idx
         .as_ref()
@@ -2088,71 +2061,36 @@ fn open_app(model: &mut Model, focus: Focus) -> Vec<Cmd> {
     cmds
 }
 
-/// The overlay's peers and timeline again from the loaded flows: after
-/// `X`, and when a traffic answer lands while it is open. No request.
+/// The overlay's peers again from the loaded flows: after `X`, and when a
+/// traffic answer lands while it is open. No request.
 fn rebuild_app_traffic(model: &mut Model) {
     let t = &model.traffic;
     if let Some(v) = model.app_view.as_mut() {
         let focus = v.focus.clone();
-        v.rebuild_traffic(
-            t.flows_for(&focus),
-            t.window_bounds(),
-            t.partial_for(&focus),
-        );
-        if drop_stale_timeline(v, t) {
-            model.status = StatusLine::info(
-                "exact timeline stopped: the direction, filter or window changed; t starts over",
-            );
-        }
+        v.rebuild_traffic(t.flows_for(&focus), t.partial_for(&focus));
     }
 }
 
-/// An exact timeline of another direction, filter or window than the view
-/// now shows is stopped and dropped (its counts are not this view's);
-/// whether a bucket was in flight.
-fn drop_stale_timeline(v: &mut AppView, t: &TrafficState) -> bool {
-    let stale = v
-        .exact
-        .as_ref()
-        .is_some_and(|e| !e.is_for(&v.focus, &t.filter, t.window_bounds()));
-    if !stale {
-        return false;
-    }
-    v.exact.take().is_some_and(|mut e| e.stop())
-}
-
-/// The overlay's keys: `Esc` / `q` stop an exact run, else close, `Tab` /
-/// `BackTab` panels, `j` / `k` rows, `X` direction, `t` asks for the exact
-/// timeline, `Enter` opens, `w` drafts a rule, `r` asks to reload. Only `r`
-/// and `t` (after `y`) and `Enter` (on another screen) can send.
+/// The overlay's keys: `Esc` / `q` close, `Tab` / `BackTab` panels, `j` /
+/// `k` rows, `X` direction, `Enter` opens, `w` drafts a rule, `r` asks to
+/// reload. Only `r` (after `y`) and `Enter` (on another screen) can send.
 fn app_overlay_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     let Some(v) = model.app_view.as_mut() else {
         model.overlay = Overlay::None;
         return Vec::new();
     };
     match k.code {
-        KeyCode::Esc | KeyCode::Char('q') => {
-            // The first stops an exact run in flight, the next one closes.
-            if stop_timeline(model) {
-                return Vec::new();
-            }
-            model.overlay = Overlay::None;
-        }
+        KeyCode::Esc | KeyCode::Char('q') => model.overlay = Overlay::None,
         KeyCode::Tab => v.panel = v.panel.next(),
         KeyCode::BackTab => v.panel = v.panel.prev(),
         KeyCode::Down | KeyCode::Char('j') => v.move_cursor(1),
         KeyCode::Up | KeyCode::Char('k') => v.move_cursor(-1),
         KeyCode::Char('X') => {
-            // The exact counts were for the old direction: dropped.
             v.focus.direction = v.focus.direction.next();
             rebuild_app_traffic(model);
         }
-        KeyCode::Char('t') => timeline_key(model),
         KeyCode::Enter => return app_enter(model),
         KeyCode::Char('w') => return app_rule_key(model),
-        KeyCode::Char('r') if v.exact.as_ref().is_some_and(ExactTimeline::is_running) => {
-            model.status = StatusLine::info("exact timeline running · Esc stops it first");
-        }
         KeyCode::Char('r') => app_reload_key(model),
         _ => {}
     }
@@ -2230,7 +2168,6 @@ fn app_enter(model: &mut Model) -> Vec<Cmd> {
             };
             let service = p.service.clone();
             let focus = v.focus.clone();
-            stop_timeline(model);
             model.overlay = Overlay::None;
             model.screen = Screen::Traffic;
             let t = &mut model.traffic;
@@ -2245,7 +2182,6 @@ fn app_enter(model: &mut Model) -> Vec<Cmd> {
             let Some(href) = v.selected_workload().map(|w| w.href.clone()) else {
                 return Vec::new();
             };
-            stop_timeline(model);
             model.overlay = Overlay::None;
             let cmds = switch(model, Screen::Workloads);
             let w = &mut model.workloads;
@@ -2266,7 +2202,6 @@ fn app_enter(model: &mut Model) -> Vec<Cmd> {
             let Some(href) = v.selected_policy().map(|r| r.href.clone()) else {
                 return Vec::new();
             };
-            stop_timeline(model);
             model.overlay = Overlay::None;
             // Select first, so the deny-rules fallback `switch` fires is
             // for this ruleset, not the row selected before.
@@ -2325,7 +2260,6 @@ fn app_rule_key(model: &mut Model) -> Vec<Cmd> {
         model.status = StatusLine::warn("no loaded flow behind this row");
         return Vec::new();
     };
-    stop_timeline(model); // the form replaces the overlay
     begin_edit(model, EditIntent::RuleFromFlow(Box::new(flow)))
 }
 
@@ -2350,247 +2284,6 @@ fn refresh_app_policy(model: &mut Model, scope: PolicyScope, outcome: Result<boo
         (Err(e), _, _) => v.policy = Loadable::Failed(e.to_string()),
         _ => v.policy = Loadable::Unavailable("the name index is not loaded".into()),
     }
-}
-
-/// What `t` would run now: `(queries, buckets, kept)`, the buckets the
-/// exact timeline of this view still lacks (all of a new bucket plan when
-/// it has none), or why nothing can run. Sends nothing.
-fn timeline_need(model: &Model) -> Result<(u32, usize, usize), StatusLine> {
-    let Some(v) = model.app_view.as_ref() else {
-        return Err(StatusLine::info("no app overlay"));
-    };
-    let app = v.focus.app_text();
-    if model.index().is_none() {
-        return Err(StatusLine::info(
-            "no exact timeline: the name index is not loaded yet",
-        ));
-    }
-    if v.label_hrefs.is_none() {
-        return Err(StatusLine::info(format!(
-            "no exact timeline: {app} is not a label group"
-        )));
-    }
-    if v.exact.as_ref().is_some_and(ExactTimeline::is_running) {
-        return Err(StatusLine::info("exact timeline running · Esc stops"));
-    }
-    let t = &model.traffic;
-    let bounds = t.window_bounds();
-    let (remaining, kept) = match v
-        .exact
-        .as_ref()
-        .filter(|e| e.is_for(&v.focus, &t.filter, bounds))
-    {
-        Some(e) => (e.remaining(), e.loaded()),
-        None => {
-            let Some((start, end)) = bounds else {
-                return Err(StatusLine::info(
-                    "no exact timeline: no time range in this result; r runs the query first",
-                ));
-            };
-            (pce::traffic::bucket_plan(start, end).len(), 0)
-        }
-    };
-    if remaining == 0 {
-        return Err(StatusLine::info(format!(
-            "exact timeline loaded: {kept} buckets"
-        )));
-    }
-    let per = u32::try_from(remaining).unwrap_or(u32::MAX);
-    Ok((
-        per.saturating_mul(v.focus.direction.query_count()),
-        remaining,
-        kept,
-    ))
-}
-
-/// `t` in the overlay: asks to load the exact timeline's missing buckets,
-/// naming the exact query count (buckets × sides); a resumed run names the
-/// remaining ones only. Sends nothing itself.
-fn timeline_key(model: &mut Model) {
-    let (queries, remaining, kept) = match timeline_need(model) {
-        Ok(n) => n,
-        Err(status) => {
-            model.status = status;
-            return;
-        }
-    };
-    let Some(v) = model.app_view.as_ref() else {
-        return;
-    };
-    let per = if v.focus.direction == FocusDirection::Both {
-        " × in and out"
-    } else {
-        ""
-    };
-    let kept = match kept {
-        0 => String::new(),
-        1 => "; 1 loaded bucket is kept".to_string(),
-        n => format!("; {n} loaded buckets are kept"),
-    };
-    model.overlay = Overlay::Confirm {
-        reason: format!(
-            "Exact timeline of {}: {} ({remaining} bucket{}{per}), one at a time; Esc stops{kept}. Run? (y/n)",
-            v.focus.app_text(),
-            queries_text(queries),
-            if remaining == 1 { "" } else { "s" }
-        ),
-        action: PendingAction::AppTimeline(queries),
-    };
-}
-
-/// `y` on the `t` prompt: the run starts when it still costs the `asked`
-/// queries (else the prompt asks again with the new count). A new bucket
-/// plan when this view has none for its direction, filter and window.
-fn start_timeline(model: &mut Model, asked: u32) -> Vec<Cmd> {
-    model.overlay = Overlay::App;
-    match timeline_need(model) {
-        Err(status) => {
-            model.status = status;
-            return Vec::new();
-        }
-        Ok((queries, ..)) if queries != asked => {
-            timeline_key(model);
-            return Vec::new();
-        }
-        Ok(_) => {}
-    }
-    let t = &model.traffic;
-    let bounds = t.window_bounds();
-    let names = model.index().cloned();
-    let Some(v) = model.app_view.as_mut() else {
-        return Vec::new();
-    };
-    if !v
-        .exact
-        .as_ref()
-        .is_some_and(|e| e.is_for(&v.focus, &t.filter, bounds))
-    {
-        let (Some((start, end)), Some(names)) = (bounds, names) else {
-            return Vec::new();
-        };
-        v.exact = Some(ExactTimeline::new(
-            pce::traffic::bucket_plan(start, end),
-            v.focus.clone(),
-            t.filter.clone(),
-            names,
-        ));
-    }
-    next_timeline_bucket(model)
-}
-
-/// The next missing bucket's query (one per side, counted in the header),
-/// or the end of the run.
-fn next_timeline_bucket(model: &mut Model) -> Vec<Cmd> {
-    let Some(v) = model.app_view.as_mut() else {
-        return Vec::new();
-    };
-    let Some(e) = v.exact.as_mut() else {
-        return Vec::new();
-    };
-    let total = e.buckets.len();
-    let Some(index) = e.next_missing() else {
-        let tl = &e.timeline;
-        let mut text = format!("exact timeline loaded: {total} buckets");
-        if let Some(s) = &tl.spike {
-            text.push_str(&format!(" · {}", s.text()));
-        }
-        let capped = tl.buckets.iter().filter(|b| b.truncated).count();
-        if capped > 0 {
-            text.push_str(&format!(" · {capped} capped (lower bounds)"));
-        }
-        model.status = StatusLine::info(text);
-        return Vec::new();
-    };
-    v.ticket += 1;
-    let cancel = CancellationToken::new();
-    e.running = Some((index, v.ticket));
-    e.cancel = Some(cancel.clone());
-    let b = e.buckets[index];
-    let cmd = Cmd::RunTimelineBucket {
-        seq: v.seq,
-        ticket: v.ticket,
-        index,
-        filter: e.filter.clone(),
-        base: e.base.clone(),
-        names: e.index.clone(),
-        focus: e.focus.clone(),
-        start: b.start,
-        end: b.end,
-        cancel,
-    };
-    v.requests += e.focus.direction.query_count();
-    model.status = StatusLine::info(format!(
-        "exact timeline: bucket {} of {total} · Esc stops",
-        index + 1
-    ));
-    vec![cmd]
-}
-
-/// One bucket's answer. Only the request in flight for this overlay counts:
-/// an earlier overlay's, a stopped run's or a replaced run's answer is
-/// dropped. The next bucket follows only while the overlay is showing; a
-/// failure stops the run (nothing retries on its own).
-fn timeline_bucket_done(
-    model: &mut Model,
-    seq: u64,
-    ticket: u64,
-    index: usize,
-    result: Result<TimelineBucketOutcome, String>,
-) -> Vec<Cmd> {
-    let showing = model.overlay == Overlay::App;
-    let Some(v) = model.app_view.as_mut().filter(|v| v.seq == seq) else {
-        return Vec::new(); // an earlier overlay's answer
-    };
-    let Some(e) = v
-        .exact
-        .as_mut()
-        .filter(|e| e.running == Some((index, ticket)))
-    else {
-        return Vec::new(); // stopped or replaced: dropped
-    };
-    e.running = None;
-    e.cancel = None;
-    let (loaded, total) = (e.loaded(), e.buckets.len());
-    match result {
-        Ok(o) => {
-            if e.base.is_none() {
-                e.base = o.base;
-            }
-            e.set(index, o.connections, o.truncated);
-            if o.hit {
-                v.cached += e.focus.direction.query_count();
-            }
-            if showing {
-                return next_timeline_bucket(model);
-            }
-            model.status = StatusLine::info(format!(
-                "exact timeline stopped: the overlay closed; {} of {total} buckets kept; t resumes",
-                loaded + 1
-            ));
-        }
-        Err(err) => {
-            model.status = StatusLine::error(format!(
-                "exact timeline stopped: {err}; {loaded} of {total} buckets kept; t resumes"
-            ));
-        }
-    }
-    Vec::new()
-}
-
-/// Stops an exact run in flight (its answer is dropped); whether one was.
-fn stop_timeline(model: &mut Model) -> bool {
-    let Some(e) = model.app_view.as_mut().and_then(|v| v.exact.as_mut()) else {
-        return false;
-    };
-    if !e.stop() {
-        return false;
-    }
-    model.status = StatusLine::info(format!(
-        "exact timeline stopped: {} of {} buckets (partial); t resumes",
-        e.loaded(),
-        e.buckets.len()
-    ));
-    true
 }
 
 fn start_focused(
@@ -8984,9 +8677,12 @@ mod tests {
     fn help_scrolls_to_its_last_line_and_reopens_at_the_top() {
         use crate::tui::ui::widgets::overlay::{HELP_LINES, help_last_scroll};
         let mut m = model_fixture(); // 80x24
-        assert_eq!(HELP_LINES.len(), 59);
+        assert_eq!(HELP_LINES.len(), 57);
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  A"));
-        assert!(HELP_LINES.iter().any(|(k, _)| *k == "App      t"));
+        assert!(
+            !HELP_LINES.iter().any(|(k, _)| k.contains("App      t")),
+            "the timeline is gone"
+        );
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  F / X"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  + / -"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  B"));
@@ -9011,7 +8707,7 @@ mod tests {
         );
         update(&mut m, key('?'));
         let last = help_last_scroll(24);
-        assert_eq!(last, 37, "59 lines, 22 rows inside the box");
+        assert_eq!(last, 35, "57 lines, 22 rows inside the box");
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app x / X"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app o"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app d"));
@@ -13963,6 +13659,16 @@ mod app_tests {
     }
 
     #[test]
+    fn t_in_the_overlay_does_nothing_now_the_timeline_is_gone() {
+        let mut m = everything();
+        quiet(&mut m, key('A'));
+        let before = m.status.text.clone();
+        assert!(update(&mut m, key('t')).is_empty(), "no request");
+        assert_eq!(m.overlay, Overlay::App, "no prompt");
+        assert_eq!(m.status.text, before);
+    }
+
+    #[test]
     fn answers_fill_the_panels_and_stale_ones_are_dropped() {
         let mut m = model_with_flows();
         let _ = update(&mut m, key('A'));
@@ -14381,660 +14087,5 @@ mod app_tests {
         assert!(
             matches!(&m.overlay, Overlay::AppPicker(p) if p.purpose == crate::tui::app_picker::AppPickerPurpose::Overlay)
         );
-    }
-}
-
-#[cfg(test)]
-mod timeline_tests {
-    use super::*;
-    use crate::tui::app_view::ExactTimeline;
-    use crate::tui::model::{Model, Overlay};
-    use crate::tui::msg::TimelineBucketOutcome;
-    use crate::tui::test_support::{model_with_window, with_policy, with_workloads};
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
-    fn key(c: char) -> Msg {
-        Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))
-    }
-
-    fn kc(code: KeyCode) -> Msg {
-        Msg::Key(KeyEvent::new(code, KeyModifiers::NONE))
-    }
-
-    #[track_caller]
-    fn quiet(m: &mut Model, msg: Msg) {
-        assert_eq!(update(m, msg), Vec::<Cmd>::new());
-    }
-
-    /// The rich flows in a known 24h window, workloads and rulesets
-    /// loaded, the overlay open on shop/prod at `direction`: 0 requests.
-    fn open(direction: &str) -> Model {
-        let mut m = with_policy(with_workloads(model_with_window("24h")));
-        if direction != "both" {
-            quiet(
-                &mut m,
-                Msg::Command(Command::Focus(Some("shop/prod".into()))),
-            );
-            quiet(&mut m, key('X')); // in
-            if direction == "out" {
-                quiet(&mut m, key('X'));
-            }
-        }
-        quiet(&mut m, Msg::Command(Command::App(Some("shop/prod".into()))));
-        assert_eq!(m.overlay, Overlay::App);
-        assert_eq!(m.app_view.as_ref().unwrap().requests, 0);
-        m
-    }
-
-    /// The one bucket query `cmds` holds: `(index, ticket)`. Panics on
-    /// anything else, so no command goes uncounted.
-    #[track_caller]
-    fn bucket(cmds: &[Cmd]) -> (usize, u64) {
-        match cmds {
-            [Cmd::RunTimelineBucket { index, ticket, .. }] => (*index, *ticket),
-            other => panic!("{other:?}"),
-        }
-    }
-
-    fn ok(connections: u64) -> Result<TimelineBucketOutcome, String> {
-        Ok(TimelineBucketOutcome {
-            connections,
-            truncated: false,
-            hit: false,
-            base: None,
-        })
-    }
-
-    fn done(
-        m: &Model,
-        (index, ticket): (usize, u64),
-        result: Result<TimelineBucketOutcome, String>,
-    ) -> Msg {
-        Msg::TimelineBucketDone {
-            seq: m.app_view.as_ref().unwrap().seq,
-            ticket,
-            index,
-            result,
-        }
-    }
-
-    /// Answers the bucket in flight with `connections`; the commands the
-    /// answer returns.
-    fn answer(m: &mut Model, connections: u64) -> Vec<Cmd> {
-        let running = exact(m).running.expect("a bucket in flight");
-        let msg = done(m, running, ok(connections));
-        update(m, msg)
-    }
-
-    fn exact(m: &Model) -> &ExactTimeline {
-        m.app_view
-            .as_ref()
-            .unwrap()
-            .exact
-            .as_ref()
-            .expect("an exact run")
-    }
-
-    fn requests(m: &Model) -> u32 {
-        m.app_view.as_ref().unwrap().requests
-    }
-
-    fn reason(m: &Model) -> String {
-        match &m.overlay {
-            Overlay::Confirm {
-                reason,
-                action: PendingAction::AppTimeline(_),
-            } => reason.clone(),
-            other => panic!("{other:?}"),
-        }
-    }
-
-    #[test]
-    fn t_asks_with_the_query_count_and_y_runs_one_bucket_at_a_time() {
-        let mut m = open("both");
-        quiet(&mut m, key('t'));
-        assert_eq!(
-            reason(&m),
-            "Exact timeline of shop/prod: 48 queries (24 buckets × in and out), one at a time; Esc stops. Run? (y/n)"
-        );
-        assert!(
-            m.app_view.as_ref().unwrap().exact.is_none(),
-            "asking creates nothing"
-        );
-        let cmds = update(&mut m, key('y'));
-        assert_eq!(m.overlay, Overlay::App);
-        let [
-            Cmd::RunTimelineBucket {
-                index,
-                start,
-                end,
-                focus,
-                filter,
-                ..
-            },
-        ] = cmds.as_slice()
-        else {
-            panic!("{cmds:?}")
-        };
-        assert_eq!(*index, 0);
-        let (s, _) = m.traffic.window_bounds().unwrap();
-        assert_eq!(*start, s);
-        assert_eq!(
-            end.duration_since(*start),
-            jiff::SignedDuration::from_hours(1)
-        );
-        assert_eq!(focus.app_text(), "shop/prod");
-        assert_eq!(focus.direction, FocusDirection::Both);
-        assert_eq!(filter, &m.traffic.filter);
-        assert_eq!(requests(&m), 2, "one bucket, two sides");
-        assert_eq!(
-            bucket(&answer(&mut m, 4)).0,
-            1,
-            "the next bucket follows the answer"
-        );
-        assert_eq!(exact(&m).counts[0], Some((4, false)));
-        assert_eq!(requests(&m), 4);
-    }
-
-    #[test]
-    fn one_direction_names_one_query_per_bucket() {
-        let mut m = open("out");
-        quiet(&mut m, key('t'));
-        assert_eq!(
-            reason(&m),
-            "Exact timeline of shop/prod: 24 queries (24 buckets), one at a time; Esc stops. Run? (y/n)"
-        );
-    }
-
-    #[test]
-    fn the_last_answer_ends_the_run_and_t_then_sends_nothing() {
-        let mut m = open("in");
-        quiet(&mut m, key('t'));
-        let mut cmds = update(&mut m, key('y'));
-        for i in 0..24 {
-            assert_eq!(bucket(&cmds).0, i);
-            cmds = answer(&mut m, if i == 6 { 12 } else { 1 });
-        }
-        assert!(cmds.is_empty(), "24 of 24: done");
-        assert_eq!(requests(&m), 24, "one side: one query per bucket");
-        let t = &exact(&m).timeline;
-        assert!(!t.partial);
-        assert_eq!(
-            t.spike.as_ref().map(|s| (s.index, s.multiple)),
-            Some((6, 12.0))
-        );
-        assert!(
-            m.status
-                .text
-                .starts_with("exact timeline loaded: 24 buckets · spike"),
-            "{}",
-            m.status.text
-        );
-        quiet(&mut m, key('t'));
-        assert_eq!(m.overlay, Overlay::App, "nothing left to ask about");
-    }
-
-    #[test]
-    fn esc_stops_the_run_and_a_late_answer_is_dropped() {
-        let mut m = open("in");
-        quiet(&mut m, key('t'));
-        let first = bucket(&update(&mut m, key('y')));
-        let second = bucket(&answer(&mut m, 2));
-        let token = exact(&m).cancel.clone().unwrap();
-        quiet(&mut m, kc(KeyCode::Esc));
-        assert!(token.is_cancelled(), "Esc cancels the bucket in flight");
-        assert_eq!(
-            m.overlay,
-            Overlay::App,
-            "the first Esc stops the run, not the overlay"
-        );
-        assert!(exact(&m).running.is_none());
-        assert_eq!(
-            m.status.text,
-            "exact timeline stopped: 1 of 24 buckets (partial); t resumes"
-        );
-        let late = done(&m, second, ok(9));
-        quiet(&mut m, late);
-        assert_eq!(
-            exact(&m).counts[1],
-            None,
-            "the cancelled bucket's answer is dropped"
-        );
-        let again = done(&m, first, ok(9));
-        quiet(&mut m, again);
-        assert_eq!(
-            exact(&m).counts[0],
-            Some((2, false)),
-            "an answered bucket stays"
-        );
-        assert_eq!(requests(&m), 2);
-        quiet(&mut m, kc(KeyCode::Esc));
-        assert_eq!(m.overlay, Overlay::None, "the second Esc closes");
-    }
-
-    #[test]
-    fn a_cancelled_answer_never_reaches_the_resumed_run() {
-        let mut m = open("in");
-        quiet(&mut m, key('t'));
-        let first = bucket(&update(&mut m, key('y')));
-        quiet(&mut m, kc(KeyCode::Esc));
-        quiet(&mut m, key('t'));
-        let resumed = bucket(&update(&mut m, key('y')));
-        assert_eq!(resumed.0, first.0, "the same bucket again");
-        assert_ne!(resumed.1, first.1, "under a new ticket");
-        // The cancelled request reports its cancellation late.
-        let late = done(&m, first, Err("cancelled".into()));
-        quiet(&mut m, late);
-        assert_eq!(exact(&m).running, Some(resumed), "the resumed run goes on");
-        assert_eq!(bucket(&answer(&mut m, 1)).0, 1);
-    }
-
-    #[test]
-    fn t_resumes_with_the_missing_buckets_even_after_reopening() {
-        let mut m = open("in");
-        quiet(&mut m, key('t'));
-        bucket(&update(&mut m, key('y')));
-        bucket(&answer(&mut m, 2));
-        bucket(&answer(&mut m, 3));
-        quiet(&mut m, kc(KeyCode::Esc)); // stop
-        quiet(&mut m, kc(KeyCode::Esc)); // close
-        quiet(&mut m, Msg::Command(Command::App(Some("shop/prod".into()))));
-        assert_eq!(
-            exact(&m).loaded(),
-            2,
-            "the loaded buckets survive reopening"
-        );
-        quiet(&mut m, key('t'));
-        assert_eq!(
-            reason(&m),
-            "Exact timeline of shop/prod: 22 queries (22 buckets), one at a time; Esc stops; 2 loaded buckets are kept. Run? (y/n)"
-        );
-        let before = requests(&m);
-        assert_eq!(bucket(&update(&mut m, key('y'))).0, 2);
-        assert_eq!(requests(&m) - before, 1);
-    }
-
-    #[test]
-    fn y_asks_again_when_the_count_changed_under_the_prompt() {
-        let mut m = open("in");
-        quiet(&mut m, key('t'));
-        // A prompt for fewer queries than `t` would now send.
-        m.overlay = Overlay::Confirm {
-            reason: "stale".into(),
-            action: PendingAction::AppTimeline(5),
-        };
-        quiet(&mut m, key('y'));
-        assert!(reason(&m).contains("24 queries"), "{:?}", m.overlay);
-        assert!(m.app_view.as_ref().unwrap().exact.is_none());
-    }
-
-    #[test]
-    fn n_sends_nothing_and_returns_to_the_overlay() {
-        let mut m = open("both");
-        quiet(&mut m, key('t'));
-        quiet(&mut m, key('n'));
-        assert_eq!(m.overlay, Overlay::App);
-        assert_eq!(requests(&m), 0);
-        assert!(m.app_view.as_ref().unwrap().exact.is_none());
-    }
-
-    #[test]
-    fn a_failed_bucket_stops_the_run_and_keeps_the_rest() {
-        let mut m = open("in");
-        quiet(&mut m, key('t'));
-        bucket(&update(&mut m, key('y')));
-        let second = bucket(&answer(&mut m, 2));
-        let failed = done(&m, second, Err("HTTP 503".into()));
-        quiet(&mut m, failed);
-        assert!(exact(&m).running.is_none());
-        assert_eq!(exact(&m).loaded(), 1);
-        assert_eq!(
-            m.status.text,
-            "exact timeline stopped: HTTP 503; 1 of 24 buckets kept; t resumes"
-        );
-        quiet(&mut m, key('t'));
-        assert!(reason(&m).contains("23 queries"), "{:?}", m.overlay);
-    }
-
-    #[test]
-    fn x_cancels_the_run_and_shows_the_approx_timeline_for_the_new_direction() {
-        let mut m = open("in");
-        quiet(&mut m, key('t'));
-        bucket(&update(&mut m, key('y')));
-        let second = bucket(&answer(&mut m, 2));
-        let token = exact(&m).cancel.clone().unwrap();
-        quiet(&mut m, key('X'));
-        assert!(token.is_cancelled());
-        let v = m.app_view.as_ref().unwrap();
-        assert!(v.exact.is_none(), "the exact counts were for in");
-        assert!(
-            m.status.text.starts_with("exact timeline stopped"),
-            "{}",
-            m.status.text
-        );
-        let late = done(&m, second, ok(9));
-        quiet(&mut m, late);
-        assert!(m.app_view.as_ref().unwrap().exact.is_none(), "not revived");
-    }
-
-    #[test]
-    fn a_new_window_under_the_overlay_cancels_the_run() {
-        let mut m = open("in");
-        quiet(&mut m, key('t'));
-        bucket(&update(&mut m, key('y')));
-        let token = exact(&m).cancel.clone().unwrap();
-        let (s, e) = m.traffic.window_bounds().unwrap();
-        let later = jiff::SignedDuration::from_hours(1);
-        let seq = m.traffic.seq;
-        let filter = m.traffic.filter.clone();
-        let cmds = update(
-            &mut m,
-            Msg::QueryDone {
-                seq,
-                result: Ok(QueryOutcome {
-                    flows: crate::tui::test_support::fixture_flows(),
-                    truncated: false,
-                    incomplete: false,
-                    elapsed: std::time::Duration::from_secs(1),
-                    hit: false,
-                    filter,
-                    bounds: Some((s.checked_add(later).unwrap(), e.checked_add(later).unwrap())),
-                }),
-            },
-        );
-        assert!(
-            !cmds
-                .iter()
-                .any(|c| matches!(c, Cmd::RunTimelineBucket { .. })),
-            "{cmds:?}"
-        );
-        assert!(token.is_cancelled(), "the old window's bucket is cancelled");
-        assert!(m.app_view.as_ref().unwrap().exact.is_none());
-    }
-
-    #[test]
-    fn closing_or_switching_the_overlay_never_revives_the_run() {
-        // An overlay closed under the run (here an error overlay over it):
-        // the answer is kept, nothing more is sent.
-        let mut m = open("in");
-        quiet(&mut m, key('t'));
-        bucket(&update(&mut m, key('y')));
-        m.overlay = Overlay::Error("boom".into());
-        let cmds = answer(&mut m, 2);
-        assert!(cmds.is_empty(), "{cmds:?}");
-        assert_eq!(m.overlay, Overlay::Error("boom".into()), "not reopened");
-        assert!(exact(&m).running.is_none());
-        assert_eq!(exact(&m).loaded(), 1);
-        // Another app: the old overlay's in-flight bucket is cancelled and
-        // its answer dropped.
-        let mut m = open("both");
-        quiet(&mut m, key('t'));
-        let first = bucket(&update(&mut m, key('y')));
-        let old_seq = m.app_view.as_ref().unwrap().seq;
-        let token = exact(&m).cancel.clone().unwrap();
-        m.overlay = Overlay::None;
-        let _switch = update(&mut m, Msg::Command(Command::App(Some("crm/prod".into()))));
-        assert!(token.is_cancelled(), "switching apps cancels the old run");
-        assert_ne!(m.app_view.as_ref().unwrap().seq, old_seq);
-        quiet(
-            &mut m,
-            Msg::TimelineBucketDone {
-                seq: old_seq,
-                ticket: first.1,
-                index: first.0,
-                result: ok(5),
-            },
-        );
-        assert!(m.app_view.as_ref().unwrap().exact.is_none());
-    }
-
-    #[test]
-    fn reopening_the_same_app_stops_a_run_left_going() {
-        let mut m = open("in");
-        quiet(&mut m, key('t'));
-        let first = bucket(&update(&mut m, key('y')));
-        let token = exact(&m).cancel.clone().unwrap();
-        m.overlay = Overlay::None; // closed under the run
-        quiet(&mut m, Msg::Command(Command::App(Some("shop/prod".into()))));
-        assert!(token.is_cancelled());
-        let late = done(&m, first, ok(5));
-        quiet(&mut m, late);
-        assert_eq!(
-            exact(&m).loaded(),
-            0,
-            "a stopped bucket's answer is dropped"
-        );
-    }
-
-    #[test]
-    fn a_profile_switch_cancels_the_bucket_in_flight() {
-        let mut m = open("in");
-        quiet(&mut m, key('t'));
-        bucket(&update(&mut m, key('y')));
-        let token = exact(&m).cancel.clone().unwrap();
-        m.reset_data();
-        assert!(token.is_cancelled());
-        assert!(m.app_view.is_none());
-    }
-
-    #[test]
-    fn enter_stops_a_run_before_leaving_and_r_waits_for_it() {
-        let mut m = open("in");
-        quiet(&mut m, key('t'));
-        bucket(&update(&mut m, key('y')));
-        quiet(&mut m, key('r'));
-        assert_eq!(
-            m.overlay,
-            Overlay::App,
-            "no reload prompt while a run is going"
-        );
-        assert!(m.status.text.contains("Esc stops"), "{}", m.status.text);
-        let token = exact(&m).cancel.clone().unwrap();
-        quiet(&mut m, kc(KeyCode::Enter)); // the first inbound peer: to Flows
-        assert_eq!(m.overlay, Overlay::None);
-        assert!(token.is_cancelled());
-        assert!(exact(&m).running.is_none());
-    }
-
-    #[test]
-    fn a_group_without_labels_has_no_exact_timeline() {
-        let mut m = open("in");
-        m.app_view.as_mut().unwrap().label_hrefs = None;
-        quiet(&mut m, key('t'));
-        assert!(
-            m.status.text.contains("is not a label group"),
-            "{}",
-            m.status.text
-        );
-        assert_eq!(m.overlay, Overlay::App);
-    }
-
-    #[test]
-    fn t_while_running_asks_nothing() {
-        let mut m = open("in");
-        quiet(&mut m, key('t'));
-        bucket(&update(&mut m, key('y')));
-        quiet(&mut m, key('t'));
-        assert_eq!(m.overlay, Overlay::App);
-        assert_eq!(m.status.text, "exact timeline running · Esc stops");
-    }
-
-    #[test]
-    fn the_overlay_counts_every_bucket_query_and_cache_hits() {
-        let mut m = open("both");
-        let mut all: Vec<Cmd> = Vec::new();
-        quiet(&mut m, key('t'));
-        let mut cmds = update(&mut m, key('y'));
-        for i in 0..24 {
-            all.extend(cmds.iter().cloned());
-            let running = exact(&m).running.unwrap();
-            let msg = done(
-                &m,
-                running,
-                Ok(TimelineBucketOutcome {
-                    connections: 1,
-                    truncated: i == 3,
-                    hit: i < 2,
-                    base: None,
-                }),
-            );
-            cmds = update(&mut m, msg);
-        }
-        all.extend(cmds.iter().cloned());
-        let sent = all
-            .iter()
-            .filter(|c| matches!(c, Cmd::RunTimelineBucket { .. }))
-            .count() as u32;
-        assert_eq!(all.len() as u32, sent, "only bucket queries: {all:?}");
-        assert_eq!(sent, 24, "one per bucket, one at a time");
-        let v = m.app_view.as_ref().unwrap();
-        assert_eq!(v.requests, sent * 2, "two sides per bucket, all counted");
-        assert_eq!(v.cached, 4, "two buckets from the cache, two sides each");
-        assert!(exact(&m).timeline.buckets[3].truncated);
-        assert!(
-            m.status.text.contains("1 capped (lower bounds)"),
-            "{}",
-            m.status.text
-        );
-    }
-
-    #[test]
-    fn the_base_query_and_the_index_are_resolved_once_per_run() {
-        let mut m = open("in");
-        quiet(&mut m, key('t'));
-        let cmds = update(&mut m, key('y'));
-        let [Cmd::RunTimelineBucket { base, names, .. }] = cmds.as_slice() else {
-            panic!("{cmds:?}")
-        };
-        assert!(base.is_none(), "the first bucket resolves the filter");
-        assert!(std::sync::Arc::ptr_eq(names, m.index().unwrap()));
-        let resolved = pce::traffic::TrafficQueryBuilder::between(
-            "2026-10-09T08:00:00Z".parse().unwrap(),
-            "2026-10-10T08:00:00Z".parse().unwrap(),
-        )
-        .build()
-        .unwrap();
-        let first = exact(&m).running.unwrap();
-        let msg = done(
-            &m,
-            first,
-            Ok(TimelineBucketOutcome {
-                connections: 1,
-                truncated: false,
-                hit: false,
-                base: Some(std::sync::Arc::new(resolved.clone())),
-            }),
-        );
-        let cmds = update(&mut m, msg);
-        let [Cmd::RunTimelineBucket { base, .. }] = cmds.as_slice() else {
-            panic!("{cmds:?}")
-        };
-        assert_eq!(
-            base.as_deref(),
-            Some(&resolved),
-            "every later bucket reuses it"
-        );
-        // Stopped, closed, reopened and resumed: still the same base.
-        quiet(&mut m, kc(KeyCode::Esc));
-        quiet(&mut m, kc(KeyCode::Esc));
-        quiet(&mut m, Msg::Command(Command::App(Some("shop/prod".into()))));
-        quiet(&mut m, key('t'));
-        let cmds = update(&mut m, key('y'));
-        let [Cmd::RunTimelineBucket { base, index, .. }] = cmds.as_slice() else {
-            panic!("{cmds:?}")
-        };
-        assert_eq!((*index, base.as_deref()), (1, Some(&resolved)));
-    }
-
-    #[test]
-    fn w_on_a_blocked_peer_stops_the_run_before_the_form() {
-        let mut m = open("in");
-        m.writes = crate::tui::model::WritesState::on();
-        quiet(&mut m, key('t'));
-        bucket(&update(&mut m, key('y')));
-        let token = exact(&m).cancel.clone().unwrap();
-        quiet(&mut m, key('w')); // shop/prod 5432/tcp: allowed, nothing to add
-        assert!(!token.is_cancelled(), "a refused w leaves the run going");
-        for _ in 0..3 {
-            quiet(&mut m, key('j')); // shop/dev 5432/tcp: blocked
-        }
-        let _form = update(&mut m, key('w'));
-        assert!(matches!(m.overlay, Overlay::Form(_)), "{:?}", m.overlay);
-        assert!(
-            token.is_cancelled(),
-            "the form replaces the overlay: stopped"
-        );
-        assert!(exact(&m).running.is_none());
-    }
-
-    #[test]
-    fn enter_on_a_workload_or_a_ruleset_stops_the_run() {
-        for (tabs, screen) in [(3, Screen::Workloads), (2, Screen::Policy)] {
-            let mut m = open("in");
-            quiet(&mut m, key('t'));
-            bucket(&update(&mut m, key('y')));
-            let token = exact(&m).cancel.clone().unwrap();
-            for _ in 0..tabs {
-                quiet(&mut m, kc(KeyCode::Tab));
-            }
-            let cmds = update(&mut m, kc(KeyCode::Enter));
-            assert!(
-                !cmds
-                    .iter()
-                    .any(|c| matches!(c, Cmd::RunTimelineBucket { .. })),
-                "{cmds:?}"
-            );
-            assert_eq!(m.overlay, Overlay::None);
-            assert_eq!(m.screen, screen);
-            assert!(token.is_cancelled(), "{screen:?}");
-            assert!(exact(&m).running.is_none());
-        }
-    }
-
-    #[test]
-    fn a_traffic_answer_that_widens_the_window_drops_the_run() {
-        let mut m = open("in");
-        quiet(&mut m, key('t'));
-        let first = bucket(&update(&mut m, key('y')));
-        let token = exact(&m).cancel.clone().unwrap();
-        let before = m.traffic.window_bounds().unwrap();
-        let earlier = before
-            .0
-            .checked_sub(jiff::SignedDuration::from_hours(1))
-            .unwrap();
-        let seq = m.traffic.seq;
-        let mut filter = m.traffic.filter.clone();
-        filter.window = "25h".into();
-        let cmds = update(
-            &mut m,
-            Msg::QueryDone {
-                seq,
-                result: Ok(QueryOutcome {
-                    flows: Vec::new(),
-                    truncated: false,
-                    incomplete: false,
-                    elapsed: std::time::Duration::from_secs(1),
-                    hit: false,
-                    filter,
-                    bounds: Some((earlier, before.1)),
-                }),
-            },
-        );
-        assert_ne!(
-            m.traffic.window_bounds(),
-            Some(before),
-            "the answer widened it"
-        );
-        assert!(
-            !cmds
-                .iter()
-                .any(|c| matches!(c, Cmd::RunTimelineBucket { .. })),
-            "{cmds:?}"
-        );
-        assert!(token.is_cancelled());
-        assert!(m.app_view.as_ref().unwrap().exact.is_none());
-        let late = done(&m, first, ok(4));
-        quiet(&mut m, late);
-        assert!(m.app_view.as_ref().unwrap().exact.is_none(), "not revived");
     }
 }

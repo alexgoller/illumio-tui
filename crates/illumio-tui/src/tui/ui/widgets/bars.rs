@@ -61,7 +61,7 @@ pub fn sparkline(counts: &[u64], width: usize) -> String {
 }
 
 /// One sparkline cell: `v` scaled to `max` (at least 1).
-pub fn spark_cell(v: u64, max: u64) -> char {
+fn spark_cell(v: u64, max: u64) -> char {
     let i = ((v * 7) / max.max(1)) as usize;
     ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'][i.min(7)]
 }
@@ -97,6 +97,11 @@ mod tests {
         assert_eq!(age_text(Duration::from_secs(3)), "3s ago");
         assert_eq!(age_text(Duration::from_secs(125)), "2m ago");
         assert_eq!(age_text(Duration::from_secs(7_300)), "2h ago");
+    }
+
+    #[test]
+    fn sparkline_keeps_the_newest_cells_that_fit() {
+        assert_eq!(sparkline(&[0, 1, 7], 2), "▂█");
     }
 
     #[test]

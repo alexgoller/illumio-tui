@@ -361,8 +361,7 @@ impl Pce {
     /// runs twice until invalidated. Each slot keeps exactly one result set
     /// (a long TTL stands in for "until the filter changes or the user
     /// refreshes"): the unfocused result (`main`), the focused ones
-    /// (`focus:in`, `focus:out`) and a timeline's buckets do not evict
-    /// each other.
+    /// (`focus:in`, `focus:out`) do not evict each other.
     pub async fn traffic_slot(
         &self,
         slot: &str,
@@ -454,41 +453,6 @@ impl Pce {
             .filter(|f| focus.keeps(f))
             .collect();
         Ok(out)
-    }
-
-    /// One bucket of the exact blocked timeline: `base` narrowed to
-    /// `bucket` and blocked flows (`bucket_query`), run as `focus`'s queries
-    /// in cache slot `timeline:{index}` (so a resumed or repeated bucket is a
-    /// cache hit), counted with `blocked_connections`. `base` and `idx` are
-    /// resolved once per run by the caller: nothing else is fetched here.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn timeline_bucket(
-        &self,
-        index: usize,
-        focus: &traffic::Focus,
-        base: &models::TrafficQuery,
-        bucket: &traffic::Bucket,
-        idx: &NameIndex,
-        mode: CacheMode,
-        cancel: &tokio_util::sync::CancellationToken,
-    ) -> Result<traffic::BucketCount> {
-        let ft = self
-            .focused_traffic(
-                &format!("timeline:{index}"),
-                focus,
-                &traffic::bucket_query(base, bucket),
-                idx,
-                mode,
-                cancel,
-                None,
-            )
-            .await?;
-        Ok(traffic::BucketCount {
-            connections: traffic::blocked_connections(&ft.flows),
-            truncated: ft.truncated,
-            hit: ft.hit,
-            queries: ft.query_count(),
-        })
     }
 
     /// Resolves filter expressions (OR of AND-groups) to actor matches,

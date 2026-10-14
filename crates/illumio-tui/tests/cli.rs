@@ -2806,7 +2806,7 @@ fn workloads_with_unmanaged_in_shop() -> String {
 #[tokio::test(flavor = "multi_thread")]
 async fn app_counts_a_workload_without_a_ven_as_unmanaged_not_visibility() {
     let server = MockServer::start().await;
-    // Three runs, each a traffic query and a timeline query.
+    // Three runs, each two focused traffic queries (in and out).
     mount_traffic(&server, 6).await;
     Mock::given(method("GET"))
         .and(path("/api/v2/orgs/5/workloads"))
@@ -2941,8 +2941,7 @@ async fn app_prints_one_envelope_with_every_section() {
         policy,
         vec![("Shop-Prod", "scope"), ("Global-Infra", "all_workloads")]
     );
-    assert_eq!(d["timeline"]["exact"], false);
-    assert_eq!(d["timeline"]["buckets"].as_array().unwrap().len(), 24);
+    assert!(d.get("timeline").is_none(), "the timeline was removed");
     assert_eq!(out["meta"]["queries"], 2);
     assert_eq!(
         out["meta"]["api_calls"],
@@ -2973,10 +2972,10 @@ async fn app_tables_and_csv_print_per_section() {
         "inbound · 3",
         "outbound · 0",
         "policy · draft · 2",
-        "timeline · approx",
     ] {
         assert!(text.contains(s), "missing {s:?}:\n{text}");
     }
+    assert!(!text.contains("timeline"), "{text}");
     let csv = cmd(&server)
         .args([
             "app",
@@ -3015,163 +3014,21 @@ async fn app_mistakes_exit_2_before_any_request() {
         .args(["app", "shop/prod", "--window", "30d"])
         .assert()
         .code(2);
-    let server = MockServer::start().await;
-    mount_app(&server, 0).await;
-    let err = cmd(&server).args(["app", "shp/prod"]).assert().code(2);
-    assert!(String::from_utf8_lossy(&err.get_output().stderr).contains("closest: shop"));
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn app_timeline_runs_one_blocked_only_query_per_bucket() {
-    let server = MockServer::start().await;
-    // 1 focused query (in) for the peers, then 12 buckets of 5 minutes, one side each.
-    mount_app(&server, 1 + 12).await;
-    let out = stdout_json(
-        cmd(&server)
-            .env("ILLUMIO_TUI_TEST_FAST_MS", "10")
-            .args([
-                "app",
-                "shop/prod",
-                "--window",
-                "1h",
-                "--direction",
-                "in",
-                "--timeline",
-            ])
-            .assert()
-            .success(),
-    );
-    let t = &out["data"]["timeline"];
-    assert_eq!(t["exact"], true);
-    assert_eq!(t["partial"], false);
-    assert_eq!(t["truncated"], false);
-    let buckets = t["buckets"].as_array().unwrap();
-    assert_eq!(buckets.len(), 12, "1h: 12 buckets of 5 minutes");
-    assert!(
-        buckets
-            .iter()
-            .all(|b| b["count"] == 3 && b["truncated"] == false),
-        "every bucket's answer holds the NAS flow's 3 blocked connections"
-    );
-    assert!(t.get("spike").is_none(), "a flat timeline has no spike");
-    assert_eq!(out["meta"]["queries"], 13);
-    assert_eq!(out["meta"]["truncated"], false);
-    let posts: Vec<Value> = server
-        .received_requests()
-        .await
-        .unwrap()
-        .iter()
-        .filter(|r| r.method.as_str() == "POST")
-        .map(|r| serde_json::from_slice(&r.body).unwrap())
-        .collect();
-    assert_eq!(posts.len(), 13);
-    assert!(
-        posts[0]["policy_decisions"] != json!(["blocked"]),
-        "the peers' query keeps every decision"
-    );
-    assert!(
-        posts[1..]
-            .iter()
-            .all(|b| b["policy_decisions"] == json!(["blocked"])),
-        "bucket queries are blocked-only"
-    );
-    let shop =
-        json!([[{"label": {"href": "/orgs/5/labels/3"}}, {"label": {"href": "/orgs/5/labels/4"}}]]);
-    assert!(
-        posts[1..]
-            .iter()
-            .all(|b| b["destinations"]["include"] == shop),
-        "bucket queries put the app's labels on its side (in: destinations)"
-    );
-    let starts: Vec<&str> = posts[1..]
-        .iter()
-        .map(|b| b["start_date"].as_str().unwrap())
-        .collect();
-    let mut sorted = starts.clone();
-    sorted.sort();
-    assert_eq!(starts, sorted, "oldest bucket first, one at a time");
-    sorted.dedup();
-    assert_eq!(sorted.len(), 12, "every bucket once");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn app_timeline_marks_capped_buckets_as_lower_bounds() {
-    let server = MockServer::start().await;
-    mount_app(&server, 1 + 12).await;
-    // A cap of 4 rows: every 4-row answer hit it.
-    let out = stdout_json(
-        cmd(&server)
-            .env("ILLUMIO_TUI_TEST_FAST_MS", "10")
-            .args([
-                "app",
-                "shop/prod",
-                "--window",
-                "1h",
-                "--direction",
-                "out",
-                "--max-results",
-                "4",
-                "--timeline",
-            ])
-            .assert()
-            .success(),
-    );
-    let t = &out["data"]["timeline"];
-    assert_eq!(
-        t["truncated"], true,
-        "the timeline says it is a lower bound"
-    );
-    assert!(
-        t["buckets"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|b| b["truncated"] == true)
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn app_timeline_above_the_threshold_needs_yes_before_any_request() {
-    let server = MockServer::start().await;
-    mount_traffic_quiet(&server).await;
-    for (args, queries) in [
-        (vec!["app", "shop/prod", "--window", "2h", "--timeline"], 48),
-        (vec!["app", "shop/prod", "--window", "1d", "--timeline"], 48),
-        (
-            vec![
-                "app",
-                "shop/prod",
-                "--window",
-                "7d",
-                "--direction",
-                "in",
-                "--timeline",
-            ],
-            28,
-        ),
+    // The timeline was removed: its flag and its section are unknown to clap.
+    for args in [
+        vec!["app", "shop/prod", "--section", "timeline"],
+        vec!["app", "shop/prod", "--timeline"],
     ] {
         let err = cmd(&server).args(&args).assert().code(2);
         let err = String::from_utf8_lossy(&err.get_output().stderr).to_string();
         assert!(
-            err.contains(&format!("--timeline sends {queries} queries")) && err.contains("--yes"),
+            err.contains("invalid value 'timeline'")
+                || err.contains("unexpected argument '--timeline'"),
             "{args:?}: {err}"
         );
     }
-    let err = cmd(&server)
-        .args([
-            "app",
-            "shop/prod",
-            "--direction",
-            "in",
-            "--timeline",
-            "--section",
-            "policy",
-        ])
-        .assert()
-        .code(2);
-    let err = String::from_utf8_lossy(&err.get_output().stderr).to_string();
-    assert!(
-        err.contains("--timeline only adds to the timeline section"),
-        "{err}"
-    );
+    let server = MockServer::start().await;
+    mount_app(&server, 0).await;
+    let err = cmd(&server).args(["app", "shp/prod"]).assert().code(2);
+    assert!(String::from_utf8_lossy(&err.get_output().stderr).contains("closest: shop"));
 }

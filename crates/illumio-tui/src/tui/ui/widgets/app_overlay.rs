@@ -1,6 +1,6 @@
 //! The app overlay (`A` / `:app`): one app on one screen, btop style. A
 //! summary of its workloads and VENs, inbound and outbound peers side by
-//! side, blocked traffic over time, then its policy and its workloads.
+//! side, then its policy and its workloads.
 use crate::tui::app_view::{AppPanel, AppView, Loadable};
 use crate::tui::model::Model;
 use crate::tui::ui::theme::Theme;
@@ -14,9 +14,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 
-use crate::tui::ui::widgets::bars::{spark_cell, sparkline};
 use crate::tui::ui::widgets::table::{clip_width, fit as fit_cells};
-use pce::traffic::{Timeline, TimelineBucket};
 
 /// Display width, as ratatui measures it.
 fn width(s: &str) -> usize {
@@ -83,11 +81,11 @@ pub fn render_app(model: &Model, f: &mut Frame, area: Rect) {
     let outer = panel(&title, &meta, t, true).style(t.base());
     let inner = outer.inner(body);
     f.render_widget(outer, body);
+    // The peers get the larger share: they are what the overlay is for.
     let rows = Layout::vertical([
         Constraint::Length(2),
-        Constraint::Min(4),
-        Constraint::Length(3),
-        Constraint::Min(4),
+        Constraint::Fill(3),
+        Constraint::Fill(2),
     ])
     .split(inner);
     render_summary(v, t, f, rows[0]);
@@ -95,9 +93,8 @@ pub fn render_app(model: &Model, f: &mut Frame, area: Rect) {
         Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(rows[1]);
     render_peers(v, AppPanel::Inbound, t, f, peers[0]);
     render_peers(v, AppPanel::Outbound, t, f, peers[1]);
-    render_timeline(v, t, f, rows[2]);
     let lower =
-        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(rows[3]);
+        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(rows[2]);
     render_policy(v, t, f, lower[0]);
     render_workloads(v, t, f, lower[1]);
 }
@@ -199,94 +196,6 @@ fn render_peers(v: &AppView, side: AppPanel, t: &Theme, f: &mut Frame, area: Rec
         ),
         inner,
     );
-}
-
-/// The exact timeline's cells: loaded buckets scaled to the largest, in
-/// the blocked colour; a capped one (a lower bound) in the warning colour;
-/// a missing one `·`. At most `width`, the newest kept.
-pub fn exact_sparkline(buckets: &[TimelineBucket], width: usize, t: &Theme) -> Vec<Span<'static>> {
-    let max = buckets.iter().filter_map(|b| b.count).max().unwrap_or(0);
-    let skip = buckets.len().saturating_sub(width);
-    buckets
-        .iter()
-        .skip(skip)
-        .map(|b| match b.count {
-            None => Span::styled("·", t.dim_style()),
-            Some(v) => {
-                let colour = if b.truncated { t.warn } else { t.bad };
-                Span::styled(spark_cell(v, max).to_string(), Style::new().fg(colour))
-            }
-        })
-        .collect()
-}
-
-/// The panel's meta for an exact timeline: running, partial or complete,
-/// and how many buckets are lower bounds.
-fn exact_meta(tl: &Timeline, running: bool) -> String {
-    let (loaded, total) = (tl.loaded(), tl.buckets.len());
-    let mut meta = if running {
-        format!("exact · {loaded}/{total} · Esc stops")
-    } else if tl.partial {
-        format!("exact · partial {loaded}/{total} · t resumes")
-    } else {
-        format!("exact · {total} buckets")
-    };
-    let capped = tl.buckets.iter().filter(|b| b.truncated).count();
-    if capped > 0 {
-        meta.push_str(&format!(" · {capped} capped+"));
-    }
-    meta
-}
-
-/// The blocked timeline: the exact one once `t` loaded any of it (complete,
-/// partial or running), else the approximate one from the loaded flows,
-/// labelled `approx` with `t: exact`. Either names its worst spike. Every
-/// value is derived when the data changes, never here.
-fn render_timeline(v: &AppView, t: &Theme, f: &mut Frame, area: Rect) {
-    let exact = v.exact.as_ref();
-    let meta = exact
-        .map(|e| exact_meta(&e.timeline, e.is_running()))
-        .unwrap_or_default();
-    let block = panel("Blocked over time", &meta, t, false);
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-    let spike = |tl: &Timeline| {
-        tl.spike
-            .as_ref()
-            .map(|s| Span::styled(format!("  {}", s.text()), Style::new().fg(t.bad)))
-    };
-    if let Some(e) = exact {
-        let tl = &e.timeline;
-        let tail = spike(tl).or_else(|| {
-            (tl.loaded() > 0 && tl.is_quiet())
-                .then(|| Span::styled("  nothing blocked", t.dim_style()))
-        });
-        let room = (inner.width as usize).saturating_sub(tail.as_ref().map_or(0, Span::width));
-        let mut spans = exact_sparkline(&tl.buckets, room, t);
-        spans.extend(tail);
-        f.render_widget(Paragraph::new(Line::from(spans)), inner);
-        return;
-    }
-    let Some(tl) = &v.timeline else {
-        f.render_widget(note("no time range in this result", t), inner);
-        return;
-    };
-    if tl.is_quiet() {
-        f.render_widget(
-            note("no blocked flows in the window · approx · t: exact", t),
-            inner,
-        );
-        return;
-    }
-    let mut tail: Vec<Span> = spike(tl).into_iter().collect();
-    tail.push(Span::styled("  approx · t: exact", t.dim_style()));
-    let room = (inner.width as usize).saturating_sub(tail.iter().map(Span::width).sum());
-    let mut spans = vec![Span::styled(
-        sparkline(&tl.counts(), room),
-        Style::new().fg(t.bad),
-    )];
-    spans.extend(tail);
-    f.render_widget(Paragraph::new(Line::from(spans)), inner);
 }
 
 fn render_policy(v: &AppView, t: &Theme, f: &mut Frame, area: Rect) {
@@ -413,7 +322,6 @@ fn render_workloads(v: &AppView, t: &Theme, f: &mut Frame, area: Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::ui::theme::Theme;
 
     #[test]
     fn fit_pads_and_cuts_by_display_width() {
@@ -422,62 +330,5 @@ mod tests {
         assert_eq!(width(&wide), 4, "{wide:?}");
         assert!(wide.starts_with("日…"), "{wide:?}");
         assert_eq!(fit("abc", 0), "");
-        assert_eq!(sparkline(&[0, 1, 7], 2), "▂█", "the newest two");
-    }
-
-    fn b(count: Option<u64>, truncated: bool) -> TimelineBucket {
-        TimelineBucket {
-            start: "2026-10-10T00:00:00Z".parse().unwrap(),
-            end: "2026-10-10T01:00:00Z".parse().unwrap(),
-            count,
-            truncated,
-        }
-    }
-
-    #[test]
-    fn exact_sparkline_dots_the_missing_buckets_and_warns_on_capped_ones() {
-        let t = Theme::from_name("dark");
-        let spans = exact_sparkline(
-            &[b(Some(1), false), b(None, false), b(Some(8), true)],
-            10,
-            &t,
-        );
-        let text: String = spans.iter().map(|s| s.content.to_string()).collect();
-        assert_eq!(text, "▁·█");
-        assert_eq!(spans[0].style.fg, Some(t.bad));
-        assert_eq!(spans[1].style, t.dim_style());
-        assert_eq!(
-            spans[2].style.fg,
-            Some(t.warn),
-            "a capped bucket is a lower bound"
-        );
-        let newest = exact_sparkline(
-            &[b(Some(1), false), b(None, false), b(Some(8), true)],
-            2,
-            &t,
-        );
-        assert_eq!(newest.len(), 2, "the newest buckets that fit");
-    }
-
-    #[test]
-    fn exact_meta_says_running_partial_complete_and_capped() {
-        let buckets = pce::traffic::equal_buckets(
-            "2026-10-10T00:00:00Z".parse().unwrap(),
-            "2026-10-10T04:00:00Z".parse().unwrap(),
-            4,
-        );
-        let part = pce::traffic::exact_timeline(&buckets, &[Some((1, false)), None, None, None]);
-        assert_eq!(exact_meta(&part, true), "exact · 1/4 · Esc stops");
-        assert_eq!(exact_meta(&part, false), "exact · partial 1/4 · t resumes");
-        let full = pce::traffic::exact_timeline(
-            &buckets,
-            &[
-                Some((1, false)),
-                Some((1, true)),
-                Some((1, false)),
-                Some((1, false)),
-            ],
-        );
-        assert_eq!(exact_meta(&full, false), "exact · 4 buckets · 1 capped+");
     }
 }

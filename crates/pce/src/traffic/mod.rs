@@ -11,7 +11,6 @@ pub mod query;
 pub mod resolved;
 pub mod sections;
 pub mod steps;
-pub mod timeline;
 pub mod treemap;
 
 pub use aggregate::{
@@ -40,9 +39,4 @@ pub use sections::{
 };
 pub use steps::{
     CAP_STEPS, WINDOW_STEPS, backfill_cap, next_cap, next_window, prev_cap, prev_window,
-};
-pub use timeline::{
-    APPROX_BUCKETS, Bucket, BucketCount, MIN_BUCKET, SPIKE_MIN_BUCKETS, SPIKE_MULTIPLE, Spike,
-    TIMELINE_CONFIRM_QUERIES, Timeline, TimelineBucket, approx_timeline, blocked_connections,
-    bucket_count, bucket_plan, bucket_query, equal_buckets, exact_timeline, spike,
 };

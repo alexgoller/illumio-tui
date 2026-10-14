@@ -41,11 +41,8 @@ impl Context {
             tls_verify: if global.insecure { Some(false) } else { None },
         };
         let resolved = config::resolve(&file, &overrides, &env)?;
-        let (client, poll) = test_speed(resolved.client_config());
-        let mut pce = Pce::new(PceClient::new(client)?).with_key_order(resolved.key_order());
-        if let Some(poll) = poll {
-            pce.set_poll_config(poll);
-        }
+        let pce = Pce::new(PceClient::new(resolved.client_config())?)
+            .with_key_order(resolved.key_order());
         let format = super::output::choose_format(global.json, global.table, global.csv);
         let cache_mode = if global.no_cache {
             CacheMode::Bypass
@@ -184,82 +181,5 @@ pub fn cache_label(hit: bool, mode: CacheMode) -> &'static str {
         (CacheMode::Bypass, _) => "bypass",
         (CacheMode::Use, true) => "hit",
         (CacheMode::Use, false) => "miss",
-    }
-}
-
-/// The env var that speeds the CLI up in debug builds, for the CLI tests:
-/// the first traffic poll in ms (the default is 1 s) and no rate limit (the
-/// default is 2 requests a second).
-pub const TEST_FAST_ENV: &str = "ILLUMIO_TUI_TEST_FAST_MS";
-
-/// Debug builds only: with `ILLUMIO_TUI_TEST_FAST_MS` set and a loopback
-/// host (the tests' mock PCE), the client is not rate limited and the traffic
-/// poll starts at that many ms (its backoff capped at 5 times it). A real PCE
-/// is never sped up; release builds ignore it.
-#[cfg(debug_assertions)]
-fn test_speed(mut cfg: pce::ClientConfig) -> (pce::ClientConfig, Option<pce::traffic::PollConfig>) {
-    let ms = std::env::var(TEST_FAST_ENV)
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok());
-    let Some(ms) = ms.filter(|_| is_loopback(&cfg.host)) else {
-        return (cfg, None);
-    };
-    cfg.requests_per_second = 1000.0;
-    cfg.burst = 1000;
-    let poll = pce::traffic::PollConfig {
-        initial: std::time::Duration::from_millis(ms),
-        cap: std::time::Duration::from_millis(ms.saturating_mul(5)),
-        ..pce::traffic::PollConfig::default()
-    };
-    (cfg, Some(poll))
-}
-
-/// `localhost`, `127.0.0.0/8` or `::1`, with or without a scheme or port.
-#[cfg(debug_assertions)]
-fn is_loopback(host: &str) -> bool {
-    let h = host
-        .trim_start_matches("https://")
-        .trim_start_matches("http://");
-    let h = h.split('/').next().unwrap_or(h);
-    let h = match h.strip_prefix('[') {
-        Some(rest) => rest.split(']').next().unwrap_or(rest),
-        None if h.matches(':').count() == 1 => h.split(':').next().unwrap_or(h),
-        None => h,
-    };
-    h.eq_ignore_ascii_case("localhost")
-        || h.parse::<std::net::IpAddr>()
-            .is_ok_and(|ip| ip.is_loopback())
-}
-
-#[cfg(not(debug_assertions))]
-fn test_speed(cfg: pce::ClientConfig) -> (pce::ClientConfig, Option<pce::traffic::PollConfig>) {
-    (cfg, None)
-}
-
-#[cfg(all(test, debug_assertions))]
-mod test_speed_tests {
-    use super::is_loopback;
-
-    #[test]
-    fn only_a_loopback_host_is_sped_up() {
-        for h in [
-            "127.0.0.1",
-            "localhost",
-            "::1",
-            "[::1]:8443",
-            "http://127.0.0.1:9000",
-            "127.0.0.1:443",
-        ] {
-            assert!(is_loopback(h), "{h}");
-        }
-        for h in [
-            "demo100.illum.io",
-            "10.0.0.1",
-            "https://pce.example.com:8443",
-            "localhost.evil.com",
-            "1.2.3.4:443",
-        ] {
-            assert!(!is_loopback(h), "{h}");
-        }
     }
 }

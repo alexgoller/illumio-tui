@@ -1,12 +1,11 @@
 //! `illumio-tui app <app>`: one app's profile in one envelope: its
 //! workloads (enforcement and VEN health), its inbound and outbound peers
-//! by service and decision, the policy that covers it, and blocked traffic
-//! over time (approximate: from the flows' last-detected times; exact with
-//! `--timeline`: one blocked-only query per bucket and side).
+//! by service and decision, and the policy that covers it. Explorer returns
+//! lifetime aggregates, so there is no traffic-over-time view.
 use super::context::{Context, cache_label};
 use super::error::CliError;
 use super::output::{OutputFormat, TableRows};
-use super::traffic::{BuiltQuery, ByArg, DirectionArg, FilterArgs, build_query, cli_focus, fetch};
+use super::traffic::{ByArg, DirectionArg, FilterArgs, cli_focus, fetch};
 use clap::{Args, ValueEnum};
 use jiff::Timestamp;
 use pce::app::{
@@ -14,12 +13,8 @@ use pce::app::{
     app_workload_filter, app_workloads, enforcement_word, label_hrefs, workload_in_app,
 };
 use pce::models::{PolicyScope, Workload};
-use pce::traffic::{
-    APPROX_BUCKETS, Direction, FocusDirection, TIMELINE_CONFIRM_QUERIES, Timeline, approx_timeline,
-    bucket_count, bucket_plan, equal_buckets, exact_timeline, parse_window,
-};
+use pce::traffic::{Direction, FocusDirection};
 use serde::Serialize;
-use tokio_util::sync::CancellationToken;
 
 #[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SectionArg {
@@ -31,8 +26,6 @@ pub enum SectionArg {
     Outbound,
     /// The rulesets covering the app
     Policy,
-    /// Blocked traffic over time
-    Timeline,
 }
 
 #[derive(Args, Debug, Clone, Default)]
@@ -57,12 +50,7 @@ pub struct AppArgs {
     /// Only this section (JSON: `app`, `direction` and it; --csv needs one)
     #[arg(long, value_enum)]
     pub section: Option<SectionArg>,
-    /// The exact blocked timeline: one blocked-only query per bucket and side (24x1h for 1d,
-    /// 28x6h for 1w, 28x1d for 4w, 30x1d for 30d, else up to 24 of at least 5m: 1h is 12x5m),
-    /// one at a time; above 24 queries needs --yes
-    #[arg(long)]
-    pub timeline: bool,
-    /// Confirm an expensive query (window > 7d, max_results > 10000, --timeline above 24 queries)
+    /// Confirm an expensive query (window > 7d, max_results > 10000)
     #[arg(long)]
     pub yes: bool,
 }
@@ -92,7 +80,6 @@ pub struct AppReport {
     pub inbound: Vec<AppPeer>,
     pub outbound: Vec<AppPeer>,
     pub policy: PolicySection,
-    pub timeline: Timeline,
 }
 
 impl TableRows for WorkloadsSection {
@@ -188,60 +175,11 @@ impl TableRows for Policy<'_> {
     }
 }
 
-struct Buckets<'a>(&'a Timeline);
-
-impl TableRows for Buckets<'_> {
-    fn headers(&self) -> Vec<&'static str> {
-        vec!["start", "end", "count", "truncated"]
-    }
-    fn rows(&self) -> Vec<Vec<String>> {
-        self.0
-            .buckets
-            .iter()
-            .map(|b| {
-                vec![
-                    pce::traffic::format_timestamp(b.start),
-                    pce::traffic::format_timestamp(b.end),
-                    b.count.map(|c| c.to_string()).unwrap_or_default(),
-                    b.truncated.to_string(),
-                ]
-            })
-            .collect()
-    }
-}
-
 pub async fn run(ctx: &Context, args: &AppArgs) -> Result<(), CliError> {
     if ctx.format == OutputFormat::Csv && args.section.is_none() {
         return Err(CliError::Args(
-            "--csv prints one table: add --section workloads|inbound|outbound|policy|timeline"
-                .into(),
+            "--csv prints one table: add --section workloads|inbound|outbound|policy".into(),
         ));
-    }
-    // The bucket queries' count, checked before any request.
-    let sides = args
-        .direction
-        .map_or(FocusDirection::Both, FocusDirection::from)
-        .query_count();
-    if args.timeline {
-        if args.section.is_some_and(|s| s != SectionArg::Timeline) {
-            return Err(CliError::Args(
-                "--timeline only adds to the timeline section: drop --section or use --section timeline"
-                    .into(),
-            ));
-        }
-        let window = args
-            .window
-            .clone()
-            .unwrap_or_else(|| ctx.config.traffic_default_window.clone());
-        let buckets = u32::try_from(bucket_count(parse_window(&window)?)).unwrap_or(u32::MAX);
-        let queries = buckets.saturating_mul(sides);
-        if queries > TIMELINE_CONFIRM_QUERIES && !args.yes {
-            return Err(CliError::Args(format!(
-                "--timeline sends {} ({buckets} buckets{}, one at a time; more than {TIMELINE_CONFIRM_QUERIES}): re-run with --yes to confirm",
-                pce::traffic::queries_text(queries),
-                if sides == 2 { " x in and out" } else { "" },
-            )));
-        }
     }
     let keys = if args.keys.is_empty() {
         ctx.config.scope_keys.clone()
@@ -281,45 +219,6 @@ pub async fn run(ctx: &Context, args: &AppArgs) -> Result<(), CliError> {
         .cloned()
         .collect();
     let (rows, summary) = app_workloads(&mine, &idx, &ctx.config.tier_key, Timestamp::now());
-    let bounds = fetched.window.as_ref().and_then(|w| {
-        Some((
-            w.start.parse::<Timestamp>().ok()?,
-            w.end.parse::<Timestamp>().ok()?,
-        ))
-    });
-    let buckets = bounds
-        .map(|(s, e)| equal_buckets(s, e, APPROX_BUCKETS))
-        .unwrap_or_default();
-    // --timeline: each bucket's blocked-only focused query (per side), one
-    // at a time, each in its own cache slot; a capped bucket is a lower
-    // bound (its `truncated`, and the timeline's).
-    let mut bucket_queries = 0u32;
-    let mut buckets_hit = true;
-    let timeline = if args.timeline {
-        let BuiltQuery { query: base, .. } = build_query(ctx, &filter, sides).await?;
-        let plan = bounds.map(|(s, e)| bucket_plan(s, e)).unwrap_or_default();
-        let mut counts = Vec::with_capacity(plan.len());
-        for (i, b) in plan.iter().enumerate() {
-            let c = ctx
-                .pce
-                .timeline_bucket(
-                    i,
-                    &focus,
-                    &base,
-                    b,
-                    &idx,
-                    ctx.cache_mode,
-                    &CancellationToken::new(),
-                )
-                .await?;
-            bucket_queries += c.queries;
-            buckets_hit &= c.hit;
-            counts.push(Some((c.connections, c.truncated)));
-        }
-        exact_timeline(&plan, &counts)
-    } else {
-        approx_timeline(&fetched.flows, &focus, &buckets)
-    };
     let d = focus.direction;
     let report = AppReport {
         app: focus.app_text(),
@@ -344,18 +243,15 @@ pub async fn run(ctx: &Context, args: &AppArgs) -> Result<(), CliError> {
             truncated: rs.truncated,
             rows: app_policy(&rs.value, &hrefs, &idx),
         },
-        timeline,
     };
     // `meta.truncated` is the traffic's; the workloads and the rulesets
     // say so in their sections.
-    // `meta.queries` counts every Explorer query, the buckets' too.
     let mut meta = fetched.meta(ctx);
-    meta.queries = Some(meta.queries.unwrap_or(0) + bucket_queries);
-    let all_hit = fetched.cache == "hit" && wl.hit && rs.hit && buckets_hit;
+    let all_hit = fetched.cache == "hit" && wl.hit && rs.hit;
     meta.cache = cache_label(all_hit, ctx.cache_mode);
     let s = &report.workloads.summary;
     let (inbound, outbound) = (Peers(&report.inbound), Peers(&report.outbound));
-    let (policy, buckets) = (Policy(&report.policy.rows), Buckets(&report.timeline));
+    let policy = Policy(&report.policy.rows);
     let cut = |t: bool| if t { " · truncated" } else { "" };
     let tables: Vec<(SectionArg, String, &dyn TableRows)> = vec![
         (
@@ -389,34 +285,6 @@ pub async fn run(ctx: &Context, args: &AppArgs) -> Result<(), CliError> {
             ),
             &policy,
         ),
-        (
-            SectionArg::Timeline,
-            format!(
-                "timeline · {} · blocked {}{}{}",
-                if report.timeline.exact {
-                    "exact"
-                } else {
-                    "approx"
-                },
-                if report.timeline.exact {
-                    "connections"
-                } else {
-                    "flow records"
-                },
-                report
-                    .timeline
-                    .spike
-                    .as_ref()
-                    .map(|s| format!(" · {}", s.text()))
-                    .unwrap_or_default(),
-                if report.timeline.truncated {
-                    " · truncated (capped buckets are lower bounds)"
-                } else {
-                    ""
-                }
-            ),
-            &buckets,
-        ),
     ];
     let chosen: Vec<(String, &dyn TableRows)> = tables
         .into_iter()
@@ -446,7 +314,6 @@ impl SectionArg {
             SectionArg::Inbound => "inbound",
             SectionArg::Outbound => "outbound",
             SectionArg::Policy => "policy",
-            SectionArg::Timeline => "timeline",
         }
     }
 }

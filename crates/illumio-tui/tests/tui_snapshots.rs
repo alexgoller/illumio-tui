@@ -1466,13 +1466,15 @@ fn app_overlay_80x24() {
         "VENs  1 active · 1 stale",
         "Inbound",
         "Outbound",
-        "Blocked over time",
-        "approx · t: exact",
         "RS Shop-Prod",
         "host-1.example",
     ] {
         assert!(out.contains(s), "missing {s:?}:\n{out}");
     }
+    assert!(
+        !out.contains("Blocked over time") && !out.contains("approx"),
+        "the timeline panel is gone: {out}"
+    );
     insta::assert_snapshot!("app_overlay_80x24", out);
 }
 
@@ -1495,10 +1497,6 @@ fn app_overlay_loading_80x24() {
     open_app(&mut m, "shop/prod");
     let out = render_to_string(&m, 80, 24);
     assert!(out.contains("2 req") && out.contains("loading"), "{out}");
-    assert!(
-        out.contains("no time range"),
-        "model_with_flows has no range: {out}"
-    );
     insta::assert_snapshot!("app_overlay_loading_80x24", out);
 }
 
@@ -1537,69 +1535,4 @@ fn app_overlay_workloads_error_80x24() {
         "the policy panel still renders: {out}"
     );
     insta::assert_snapshot!("app_overlay_workloads_error_80x24", out);
-}
-
-/// `app_overlay_model` with an exact run of `loaded` buckets (of 24), a
-/// spike at bucket 6, bucket 2 capped by `capped`.
-fn app_overlay_exact(loaded: usize, capped: bool) -> illumio_tui::tui::model::Model {
-    use illumio_tui::tui::app_view::ExactTimeline;
-    let mut m = app_overlay_model();
-    let (start, end) = m.traffic.window_bounds().unwrap();
-    let filter = m.traffic.filter.clone();
-    let names = m.index().cloned().unwrap();
-    let v = m.app_view.as_mut().unwrap();
-    let mut x = ExactTimeline::new(
-        pce::traffic::bucket_plan(start, end),
-        v.focus.clone(),
-        filter,
-        names,
-    );
-    for i in 0..loaded {
-        x.set(
-            i,
-            if i == 6 { 12 } else { 1 + (i as u64 % 2) },
-            capped && i == 2,
-        );
-    }
-    v.exact = Some(x);
-    v.requests = 2 * loaded as u32;
-    m
-}
-
-#[test]
-fn app_overlay_exact_80x24() {
-    let m = app_overlay_exact(24, false);
-    let out = render_to_string(&m, 80, 24);
-    assert!(
-        out.contains("spike 14:00 (x6 median)"),
-        "bucket 6 starts 14:00 UTC, 12 over a median of 2: {out}"
-    );
-    assert!(out.contains("exact · 24 buckets"), "{out}");
-    assert!(
-        !out.contains("approx"),
-        "the exact timeline replaces the approximate one: {out}"
-    );
-    assert!(out.contains("48 req"), "{out}");
-    insta::assert_snapshot!("app_overlay_exact_80x24", out);
-}
-
-#[test]
-fn app_overlay_exact_partial_80x24() {
-    let m = app_overlay_exact(9, true);
-    let out = render_to_string(&m, 80, 24);
-    assert!(
-        out.contains("exact · partial 9/24 · t resumes · 1 capped+"),
-        "{out}"
-    );
-    assert!(out.contains("·"), "the missing buckets are dotted: {out}");
-    insta::assert_snapshot!("app_overlay_exact_partial_80x24", out);
-}
-
-#[test]
-fn app_overlay_exact_running_80x24() {
-    let mut m = app_overlay_exact(3, false);
-    let x = m.app_view.as_mut().unwrap().exact.as_mut().unwrap();
-    x.running = Some((3, 1));
-    let out = render_to_string(&m, 80, 24);
-    assert!(out.contains("exact · 3/24 · Esc stops"), "{out}");
 }

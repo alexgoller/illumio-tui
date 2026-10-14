@@ -513,63 +513,6 @@ impl Runtime {
                     let _ = tx.send(Msg::Stats(pce.stats()));
                 });
             }
-            Cmd::RunTimelineBucket {
-                seq,
-                ticket,
-                index,
-                filter,
-                base,
-                names,
-                focus,
-                start,
-                end,
-                cancel,
-            } => {
-                self.model.busy += 1;
-                let (pce, tx) = self.task_ctx();
-                tokio::spawn(async move {
-                    let result = async {
-                        // The run's first bucket resolves the filter once.
-                        let (base, fresh) = match base {
-                            Some(q) => (q, false),
-                            None => (
-                                Arc::new(
-                                    filter
-                                        .to_query_between(start, end, &pce, CacheMode::Use)
-                                        .await?,
-                                ),
-                                true,
-                            ),
-                        };
-                        let c = pce
-                            .timeline_bucket(
-                                index,
-                                &focus,
-                                &base,
-                                &pce::traffic::Bucket { start, end },
-                                &names,
-                                CacheMode::Use,
-                                &cancel,
-                            )
-                            .await?;
-                        Ok::<_, pce::PceError>(crate::tui::msg::TimelineBucketOutcome {
-                            connections: c.connections,
-                            truncated: c.truncated,
-                            hit: c.hit,
-                            base: fresh.then_some(base),
-                        })
-                    }
-                    .await
-                    .map_err(|e| e.to_string());
-                    let _ = tx.send(Msg::TimelineBucketDone {
-                        seq,
-                        ticket,
-                        index,
-                        result,
-                    });
-                    let _ = tx.send(Msg::Stats(pce.stats()));
-                });
-            }
             Cmd::LoadEvents { filter, mode } => {
                 self.model.busy += 1;
                 let (pce, tx) = self.task_ctx();
@@ -647,7 +590,6 @@ impl Runtime {
                 | Msg::LabelUsageLoaded(_)
                 | Msg::WorkloadsLoaded(_)
                 | Msg::AppWorkloadsLoaded { .. }
-                | Msg::TimelineBucketDone { .. }
                 | Msg::EventsLoaded(_)
                 | Msg::ProfileSwitched(_)
                 | Msg::Planned(_)

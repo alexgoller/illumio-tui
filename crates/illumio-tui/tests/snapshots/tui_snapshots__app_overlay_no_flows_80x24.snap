@@ -13,10 +13,10 @@ expression: out
 ││                                     ││                                     ││
 ││                                     ││                                     ││
 ││                                     ││                                     ││
+││                                     ││                                     ││
+││                                     ││                                     ││
+││                                     ││                                     ││
 │╰─────────────────────────────────────╯╰─────────────────────────────────────╯│
-│╭ Blocked over time ─────────────────────────────────────────────────────────╮│
-││no blocked flows in the window · approx · t: exact                          ││
-│╰────────────────────────────────────────────────────────────────────────────╯│
 │╭ Policy · draft ─────────────────────╮╭ Workloads ──────────────────────────╮│
 ││RS Shop-Prod                  4 rules││host-1.example   web     enforced   ●││
 ││RS Global-Infra          1 rule · all││host-2.example   db      visibility ●││

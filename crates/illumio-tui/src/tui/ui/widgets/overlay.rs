@@ -66,10 +66,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "",
         "Esc clears; truncated: r re-queries the app (1-2 queries)",
     ),
-    (
-        "Traffic  A",
-        "app overlay: peers, blocked over time, policy, workloads",
-    ),
+    ("Traffic  A", "app overlay: peers, policy, workloads"),
     (
         "App      Tab j/k X Enter",
         "panel · row · direction · open (peer: its flows)",
@@ -78,11 +75,6 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "App      w r Esc",
         "draft allow rule · reload panels (asks) · back",
     ),
-    (
-        "App      t",
-        "exact blocked timeline: 1 query per bucket and side (asks)",
-    ),
-    ("", "one at a time; Esc stops, t resumes; spike: 3x median"),
     (
         "Traffic  Enter",
         "detail (flows) · drill into a row or section header",

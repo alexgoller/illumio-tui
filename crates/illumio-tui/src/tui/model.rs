@@ -316,9 +316,6 @@ pub enum PendingAction {
     RunFocused(TrafficFilter, pce::traffic::Focus, pce::CacheMode),
     /// `r` in the app overlay: the workloads and the rulesets again, past the cache.
     ReloadApp,
-    /// `t` in the app overlay: the exact timeline's missing buckets, as many
-    /// queries as the prompt named (`y` asks again when that changed).
-    AppTimeline(u32),
 }
 
 #[derive(Debug)]
@@ -4318,10 +4315,6 @@ impl Model {
         self.objects.hide_ignored = !self.limits.ignore_keys.is_empty();
         self.workloads = WorkloadsState::new(min);
         self.events = EventsState::new(min);
-        // An exact timeline's bucket in flight is the old PCE's: cancelled.
-        if let Some(e) = self.app_view.as_mut().and_then(|v| v.exact.as_mut()) {
-            e.stop();
-        }
         self.app_view = None;
         self.stats = StatsSnapshot { calls: 0, bytes: 0 };
         self.busy = 0;

@@ -2,7 +2,6 @@
 //! cost hints (no network), and its conversion to a `TrafficQuery` (needs
 //! the name index, so it is async and runs in the runtime, not in `update`).
 use crate::tui::form::{Completing, Completion, FieldKind};
-use jiff::Timestamp;
 use pce::models::{PolicyDecision, ServiceMatch, TrafficQuery, proto_number};
 use pce::traffic::{
     CONFIRM_MAX_RESULTS, CONFIRM_WINDOW, FilterExpr, MAX_TRAFFIC_MAX_RESULTS, TrafficQueryBuilder,
@@ -192,18 +191,6 @@ impl TrafficFilter {
     pub async fn to_query(&self, pce: &Pce, mode: CacheMode) -> pce::Result<TrafficQuery> {
         let window = self.window_duration().map_err(pce::PceError::Invalid)?;
         self.build(TrafficQueryBuilder::last(window)?, pce, mode)
-            .await
-    }
-
-    /// The same query for `start` to `end` (an exact timeline's bucket).
-    pub async fn to_query_between(
-        &self,
-        start: Timestamp,
-        end: Timestamp,
-        pce: &Pce,
-        mode: CacheMode,
-    ) -> pce::Result<TrafficQuery> {
-        self.build(TrafficQueryBuilder::between(start, end), pce, mode)
             .await
     }
 

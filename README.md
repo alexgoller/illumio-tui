@@ -174,13 +174,7 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   (`Workloads 14   enforced 9 · selective 2 · visibility 3 · unmanaged 1`, `VENs 13 active · 1 stale`;
   a workload without a VEN counts as unmanaged, not visibility; active
   is healthy or warning, stale is offline or error), its inbound and outbound peers by service
-  and decision, blocked traffic over time (`approx`: flow records by last-detected time; `t`
-  replaces it with the exact timeline: one blocked-only query per bucket and side, 24×1h for
-  1d, 28×6h for 1w, 28×1d for 4w, 30×1d for 30d, else about 24 buckets of at least 5 minutes
-  (1h: 12×5m), after asking with the query count; one at a time, `Esc` stops and keeps what
-  loaded, `t` resumes with the missing buckets only; `X`, another window or app cancel it; a
-  bucket whose query hit the cap is a lower bound, drawn in the warning colour; both timelines
-  name the worst spike, a bucket at least 3× the median of the non-zero ones, given 4 or more),
+  and decision (flows count flow records; conns and bytes are those records' lifetime counts),
   and the rulesets whose scope covers it (a global scope shows as `all`) or whose rules name
   its labels (draft or active, as on the Policy screen; its title says which). The traffic
   panels come from the loaded result; the workloads and the rulesets come from their screens
@@ -275,7 +269,6 @@ the API call and byte counters at all times.
     illumio-tui traffic groups --window 1h --app shop/prod --direction in
     illumio-tui app shop/prod --window 24h --json
     illumio-tui app shop/prod --direction in --csv --section inbound > inbound.csv
-    illumio-tui app shop/prod --window 24h --direction in --timeline --json
     illumio-tui traffic mesh --window 1h --no-user --json
     illumio-tui traffic query --window 30d --dry-run
     illumio-tui traffic query --window 24h --backfill --json
@@ -351,16 +344,13 @@ workloads without a VEN, and the VEN counts, `rows` with name, role, `enforcemen
 `enforcement_mode` (as the PCE reports it) and VEN health, `truncated` when the read hit its
 cap), `inbound` and `outbound` (one row per peer group, service and decision), `policy`
 (`scope` draft or active, `truncated`, and `rows`: rulesets by `reason`, `scope`,
-`all_workloads` or `rules`, with their rule counts) and `timeline` (`exact: false`: blocked
-flow records per bucket of the window, by last-detected time; `--timeline`: `exact: true`,
-blocked connections from one blocked-only query per bucket and side, run one at a time; a
-bucket whose query hit the cap has `truncated: true` and is a lower bound, as is the timeline
-then (`timeline.truncated`); either has `spike` when one bucket is at least 3× the median of
-the non-zero ones). `--timeline` above 24 queries (`both` over 1d is 48, a week 28 per side)
-needs `--yes`, checked before any request. It costs the focused traffic
+`all_workloads` or `rules`, with their rule counts). There is no timeline: Explorer returns
+aggregate records with lifetime counters, so no honest count over time can be built from them
+(the `--timeline` flag, the `timeline` section and the overlay's `t` were removed in 0.1.9).
+It costs the focused traffic
 queries (one per side), one workloads read filtered by the app's labels and one rulesets read,
-all cached, plus the bucket queries with `--timeline`; `meta` counts them, and `meta.truncated` is the traffic's. `--section
-workloads|inbound|outbound|policy|timeline` keeps one section (JSON: `app`, `direction` and
+all cached; `meta` counts them, and `meta.truncated` is the traffic's. `--section
+workloads|inbound|outbound|policy` keeps one section (JSON: `app`, `direction` and
 it); `--table` prints each section under a title line; `--csv` prints one and needs
 `--section` (without it, exit 2 before any request).
 
