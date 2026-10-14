@@ -377,6 +377,19 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             if !std::mem::take(&mut model.policy.form_drafts_loading) {
                 model.policy.quiet_reload = false;
             }
+            // Read before a policy write that changed them: dropped. A `w`
+            // form waiting for them asks again (once); else the next form.
+            if std::mem::take(&mut model.policy.form_drafts_stale) {
+                let waiting = matches!(
+                    &model.overlay,
+                    Overlay::Form(f) if matches!(f.intent, EditIntent::RuleFromFlow(_))
+                );
+                return if waiting {
+                    load_form_drafts(model)
+                } else {
+                    Vec::new()
+                };
+            }
             match result {
                 Ok((raw, _, _)) => {
                     model.policy.form_drafts = Some(raw);
@@ -394,6 +407,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             // the next form may ask again.
             if scope == PolicyScope::Draft {
                 model.policy.form_drafts_loading = false;
+                model.policy.form_drafts_stale = false;
             }
             if scope != model.policy.scope {
                 return Vec::new(); // the user toggled draft/active meanwhile
@@ -3113,6 +3127,7 @@ fn policy_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     PolicyScope::Active => PolicyScope::Draft,
                 };
                 model.policy.form_drafts_loading = false;
+                model.policy.form_drafts_stale = false;
                 model.policy.clear();
                 model.objects.ip_lists.recount(&model.policy);
                 return load_rule_sets(model, CacheMode::Use);
@@ -3409,6 +3424,13 @@ fn reload_usage_with_labels(model: &mut Model) -> Option<Cmd> {
     Some(Cmd::LoadLabelUsage(CacheMode::Bypass))
 }
 
+/// A policy write changed the drafts: the held ones go, and the answer to
+/// a form's load still on its way (read before the write) is dropped.
+fn forget_form_drafts(model: &mut Model) {
+    model.policy.form_drafts = None;
+    model.policy.form_drafts_stale = model.policy.form_drafts_loading;
+}
+
 /// The reload of the written kind's own list.
 fn reload_kind_after_write(model: &mut Model, kind: pce::write::ObjectKind) -> Vec<Cmd> {
     match kind {
@@ -3426,7 +3448,7 @@ fn reload_kind_after_write(model: &mut Model, kind: pce::write::ObjectKind) -> V
         | pce::write::ObjectKind::Rule
         | pce::write::ObjectKind::DenyRule => {
             // The next `w` form loads the changed drafts (one GET).
-            model.policy.form_drafts = None;
+            forget_form_drafts(model);
             if model.policy.scope != PolicyScope::Draft {
                 return Vec::new();
             }
@@ -3436,7 +3458,7 @@ fn reload_kind_after_write(model: &mut Model, kind: pce::write::ObjectKind) -> V
         // Provisioning changes both scopes and the pending list; a revert
         // changes the draft and the pending list.
         pce::write::ObjectKind::Provision | pce::write::ObjectKind::Revert => {
-            model.policy.form_drafts = None;
+            forget_form_drafts(model);
             model.policy.quiet_reload = true;
 
             let mut cmds = load_rule_sets(model, CacheMode::Bypass);
@@ -4501,6 +4523,7 @@ fn show_policy(model: &mut Model, scope: PolicyScope) -> Vec<Cmd> {
         }
         model.policy.scope = scope;
         model.policy.form_drafts_loading = false;
+        model.policy.form_drafts_stale = false;
         model.policy.clear();
     }
     switch(model, Screen::Policy)
@@ -15734,5 +15757,38 @@ mod rule_form_ruleset_tests {
         }
         update(&mut m, kc(KeyCode::Tab));
         assert_eq!(form(&m).active, 1);
+    }
+
+    #[test]
+    fn a_policy_write_drops_the_answer_of_a_form_load_still_on_its_way() {
+        let mut m = model_with_flows();
+        m.writes = WritesState::on();
+        m.policy.scope = PolicyScope::Active;
+        update(&mut m, key('j'));
+        assert_eq!(update(&mut m, key('w')), vec![DRAFT_LOAD]);
+        update(&mut m, kc(KeyCode::Esc));
+        // A rule written meanwhile: the answer on its way is from before it.
+        reload_kind_after_write(&mut m, pce::write::ObjectKind::Rule);
+        assert!(update(&mut m, drafts_loaded(drafts())).is_empty());
+        assert!(m.policy.form_drafts.is_none(), "dropped");
+        assert!(!m.policy.form_drafts_loading && !m.policy.form_drafts_stale);
+        // The next form loads them again, and keeps that answer.
+        assert_eq!(update(&mut m, key('w')), vec![DRAFT_LOAD]);
+        update(&mut m, drafts_loaded(drafts()));
+        assert!(m.policy.form_drafts.is_some());
+        assert_eq!(form(&m).value("Ruleset"), "Shop-Prod");
+        // A form open while the dropped answer lands asks again, once.
+        update(&mut m, kc(KeyCode::Esc));
+        m.policy.form_drafts = None;
+        assert_eq!(update(&mut m, key('w')), vec![DRAFT_LOAD]);
+        reload_kind_after_write(&mut m, pce::write::ObjectKind::Rule);
+        assert_eq!(update(&mut m, drafts_loaded(drafts())), vec![DRAFT_LOAD]);
+        assert!(m.policy.form_drafts_loading && !m.policy.form_drafts_stale);
+        update(&mut m, drafts_loaded(drafts()));
+        assert_eq!(form(&m).value("Ruleset"), "Shop-Prod");
+        // Without a load on its way, a write drops nothing later.
+        update(&mut m, kc(KeyCode::Esc));
+        reload_kind_after_write(&mut m, pce::write::ObjectKind::Rule);
+        assert!(!m.policy.form_drafts_stale);
     }
 }

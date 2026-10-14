@@ -2969,6 +2969,9 @@ pub struct PolicyState {
     pub form_drafts: Option<Vec<RuleSet>>,
     /// That load is on its way: a second form does not send another.
     pub form_drafts_loading: bool,
+    /// A policy write forgot the drafts while that load was on its way:
+    /// its answer, read before the write, is dropped.
+    pub form_drafts_stale: bool,
 
     pub auto: AutoRefresh,
 }
@@ -3009,6 +3012,7 @@ impl PolicyState {
             rule_after_ruleset: None,
             form_drafts: None,
             form_drafts_loading: false,
+            form_drafts_stale: false,
             auto: AutoRefresh::new(min_refresh),
         }
     }
