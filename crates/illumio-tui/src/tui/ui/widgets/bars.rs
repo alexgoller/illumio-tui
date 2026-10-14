@@ -56,11 +56,14 @@ pub fn sparkline(counts: &[u64], width: usize) -> String {
     counts
         .iter()
         .skip(skip)
-        .map(|&v| {
-            let i = ((v * 7) / max) as usize;
-            ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'][i.min(7)]
-        })
+        .map(|&v| spark_cell(v, max))
         .collect()
+}
+
+/// One sparkline cell: `v` scaled to `max` (at least 1).
+pub fn spark_cell(v: u64, max: u64) -> char {
+    let i = ((v * 7) / max.max(1)) as usize;
+    ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'][i.min(7)]
 }
 
 /// Flow counts per time bucket by `last_detected`, oldest bucket first.
