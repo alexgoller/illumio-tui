@@ -1,7 +1,7 @@
 //! Labels, label groups, IP lists, services: one cached list each.
 use super::context::{Context, cache_label};
 use super::error::CliError;
-use super::output::{TableRows, join_list};
+use super::output::{TableRows, USAGE_FROM_COUNTS, join_list};
 use super::write::{
     self, WriteFlags, parse_kv, resolve_ip_list, resolve_label, resolve_service, run_plan,
 };
@@ -361,8 +361,6 @@ fn unused_by_pce(labels: Vec<Label>) -> Vec<LabelOut> {
 
 /// `Meta::usage` when the PCE's usage flags decided.
 const USAGE_PCE: &str = "pce";
-/// `Meta::usage` for a PCE without usage flags: our own counts.
-const USAGE_LOCAL: &str = "workloads, rules and scopes only";
 
 pub async fn labels(ctx: &Context, args: &LabelsArgs) -> Result<(), CliError> {
     // `--unused` asks for the PCE's usage flags in the one labels request.
@@ -404,7 +402,7 @@ pub async fn labels(ctx: &Context, args: &LabelsArgs) -> Result<(), CliError> {
     let usage = label_usage(&w.value, &sets.value, [], &groups.value);
     let truncated = c.truncated || w.truncated || sets.truncated || groups.truncated;
     let mut meta = ctx.meta(cache, truncated, None);
-    meta.usage = Some(USAGE_LOCAL);
+    meta.usage = Some(USAGE_FROM_COUNTS);
     ctx.emit_meta(&unused_labels(data, &usage), &meta)
 }
 

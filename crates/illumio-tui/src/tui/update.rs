@@ -4306,6 +4306,7 @@ fn label_usage_loaded(
 
 /// What `u` shows in the status line once on.
 fn unused_status(o: &ObjectsState) -> StatusLine {
+    use crate::cli::output::USAGE_FROM_COUNTS;
     let n = o.labels.len();
     match (&o.pce_usage, &o.label_usage, o.usage_truncated) {
         (PceUsage::Flags(_), ..) => StatusLine::info(format!("{n} unused labels")),
@@ -4319,7 +4320,7 @@ fn unused_status(o: &ObjectsState) -> StatusLine {
             "{n} unused labels; the workload list is truncated, some may be in use"
         )),
         (PceUsage::Unsupported, Some(_), false) => StatusLine::info(format!(
-            "{n} unused labels (usage from workloads, rules and scopes only)"
+            "{n} unused labels (usage from {USAGE_FROM_COUNTS})"
         )),
     }
 }

@@ -3212,11 +3212,15 @@ impl LabelRow {
         }
     }
 
-    /// The `held by` cell: the PCE's kinds, `-` before they are known.
+    /// The PCE's kinds holding the label, comma-joined; `None` before they
+    /// are known.
+    pub fn held_by_kinds(&self) -> Option<String> {
+        self.held_by.as_ref().map(|f| f.kinds().join(","))
+    }
+
+    /// The `held by` cell: `held_by_kinds`, `-` before they are known.
     pub fn held_by_text(&self) -> String {
-        self.held_by
-            .as_ref()
-            .map_or_else(|| "-".into(), |f| f.kinds().join(","))
+        self.held_by_kinds().unwrap_or_else(|| "-".into())
     }
 }
 
@@ -3328,12 +3332,7 @@ pub fn label_columns() -> Vec<Column<LabelRow>> {
             narrow: None,
             narrow_width: 0,
             full_title: None,
-            full: Some(|l| {
-                l.held_by
-                    .as_ref()
-                    .map(|f| f.kinds().join(","))
-                    .unwrap_or_default()
-            }),
+            full: Some(|l| l.held_by_kinds().unwrap_or_default()),
         },
         Column {
             title: "deleted",

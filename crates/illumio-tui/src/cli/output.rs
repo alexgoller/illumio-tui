@@ -44,6 +44,10 @@ pub struct WriteMeta {
     pub audit: String,
 }
 
+/// Where label usage came from when the PCE has no usage flags: our own
+/// counts. `labels --unused` (meta) and the TUI's `u` (header, status) say it.
+pub const USAGE_FROM_COUNTS: &str = "workloads, rules and scopes only";
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Meta {
     pub profile: String,

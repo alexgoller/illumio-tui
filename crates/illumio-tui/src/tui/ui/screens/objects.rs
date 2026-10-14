@@ -160,17 +160,16 @@ fn label_filter_meta(o: &ObjectsState, shown: usize, total: usize) -> String {
         parts.push(format!("key {}", o.label_keys.join(",")));
     }
     if o.unused_only {
-        parts.push(
-            match (&o.pce_usage, &o.label_usage, o.usage_truncated) {
-                (PceUsage::Flags(_), ..) => "unused",
-                (PceUsage::Unknown, ..) | (PceUsage::Unsupported, None, _) => "unused: loading",
-                (PceUsage::Unsupported, Some(_), true) => "unused (workloads truncated)",
-                (PceUsage::Unsupported, Some(_), false) => {
-                    "unused (workloads, rules and scopes only)"
-                }
+        parts.push(match (&o.pce_usage, &o.label_usage, o.usage_truncated) {
+            (PceUsage::Flags(_), ..) => "unused".to_string(),
+            (PceUsage::Unknown, ..) | (PceUsage::Unsupported, None, _) => {
+                "unused: loading".to_string()
             }
-            .to_string(),
-        );
+            (PceUsage::Unsupported, Some(_), true) => "unused (workloads truncated)".to_string(),
+            (PceUsage::Unsupported, Some(_), false) => {
+                format!("unused ({})", crate::cli::output::USAGE_FROM_COUNTS)
+            }
+        });
     }
     parts.push(format!("{shown} of {total}"));
     if o.ignored_hidden > 0 {
