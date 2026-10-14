@@ -2612,11 +2612,11 @@ async fn d_re_evaluates_our_query_once_and_then_answers_from_the_cache() {
     assert_eq!(model.busy, 0);
 }
 
-/// The query, `D` (one PUT), a rule delete, then `D` again: the write
-/// dropped the draft on screen and the cached draft, so the second `D`
-/// asks the PCE again (a second PUT on the same query, no new POST).
+/// The query, `D` (one PUT), then a rule delete: the write dropped the
+/// draft on screen and the cached draft, and evaluates the result again
+/// on its own, once (a second PUT on the same query, no new POST).
 #[tokio::test]
-async fn d_after_a_rule_write_re_evaluates_again() {
+async fn a_rule_write_re_evaluates_the_draft_on_screen_once() {
     use illumio_tui::tui::filter::TrafficFilter;
     use illumio_tui::tui::msg::Msg;
     let server = MockServer::start().await;
@@ -2695,11 +2695,7 @@ async fn d_after_a_rule_write_re_evaluates_again() {
     });
     let model = run_loop(
         &mut rt,
-        Box::pin(press(vec![
-            (600, KeyCode::F(12)),
-            (100, ch('D')),
-            (800, ch('q')),
-        ])),
+        Box::pin(press(vec![(600, KeyCode::F(12)), (800, ch('q'))])),
         &mut |m| {
             if m.status.text.contains("deleted") {
                 assert!(!m.traffic.draft_loaded(), "the write dropped the draft");
@@ -2707,7 +2703,7 @@ async fn d_after_a_rule_write_re_evaluates_again() {
         },
     )
     .await;
-    assert!(model.traffic.draft_loaded(), "the second D loaded it again");
+    assert!(model.traffic.draft_loaded(), "the write loaded it again");
     let sent: Vec<String> = server
         .received_requests()
         .await

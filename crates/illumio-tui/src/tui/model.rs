@@ -2963,6 +2963,11 @@ pub struct PolicyState {
     /// it once that write is done, dropped by any failure or cancel.
     /// The form comes along so a failed rule plan can reopen it.
     pub rule_after_ruleset: Option<(pce::write::RuleDraft, crate::tui::form::Form)>,
+    /// The plan on its confirm came from a Traffic `w` form (or the rule
+    /// or ruleset its `Ctrl-R` chained): its written answer evaluates the
+    /// result on screen against the draft. Set by every plan to send,
+    /// taken by every write's answer.
+    pub write_from_flow: bool,
     /// The draft rulesets a `w` form reads while this screen shows the
     /// active ones (its own list stays what the user chose); `None` until a
     /// form loads them, and again after a policy write.
@@ -3010,6 +3015,7 @@ impl PolicyState {
             provisioned: None,
             revert_typed: String::new(),
             rule_after_ruleset: None,
+            write_from_flow: false,
             form_drafts: None,
             form_drafts_loading: false,
             form_drafts_stale: false,

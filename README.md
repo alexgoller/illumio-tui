@@ -205,8 +205,13 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   overlay `+N` / `-N` per peer and `draft: N blocked flows fixed`; Mesh a `draft` column too; and
   `d` gains a `fixed by draft` step (blocked or potentially blocked now, allowed in draft). `D` again goes back to the
   reported decisions with no request, and the next `D` answers from the draft cache (kept 2
-  minutes, its age in the status line). A write drops the draft decisions and the cache: the
-  next `D` asks the PCE again.
+  minutes, its age in the status line). A successful write drops the draft decisions and the
+  cache, and evaluates the result on screen against the draft again (the same run as `D`: one
+  PUT per query, `… · draft re-evaluation running · Esc cancels`) when draft decisions were on
+  screen or running, or the rule came from the `w` form. That is one run per write: none after
+  a failed or cancelled write, the ruleset `Ctrl-R` creates first (only after its rule), while
+  a query runs, or where `D` would ask first (no query of this session, a large window or
+  cap): the status then says `draft cleared: D re-evaluates`.
 - **Policy**: `d` toggle draft / active, `p` pending changes (`Enter` on one shows its diff against active), `Tab` switch panes, `Enter` rule
   detail, or on a ruleset load its deny rules. Rules are listed in evaluation order: override
   deny, allow, deny. With writes on, `n` / `e` / `x` create, edit and delete rulesets and rules
@@ -748,6 +753,10 @@ service grouped on part of the scope) spans scopes, there is nothing to
 scope one new ruleset by: name an existing one or create it on the Policy
 screen.
 
+After the rule is written, the flows on screen are evaluated against the draft
+once (as `D` does: one PUT per query), so the flow shows `blocked → allowed`
+straight away; see `D` above for when it does not run on its own.
+
 ### Label model
 
 Rulesets are scoped by `app` and `env`, rules select tiers by `role`. Other
@@ -779,7 +788,7 @@ body without sending it. A traffic backfill sends nothing before `B` (or `--back
 the written `traffic_auto_backfill` opt-in) and is one query per cap rung, each at least 3 API
 calls; every rung above 10000 asks first (`y`, or `--yes`). A draft re-evaluation (`D`,
 `--draft`) is one PUT on our own query plus polls and one download per query, never without
-`D` or `--draft`, and cached. Status polls start at 1 s and back
+`D`, `--draft` or a successful write of yours (one run per write), and cached. Status polls start at 1 s and back
 off to at most 3 s; downloads are gzip-compressed. The CLI submits an unfocused query while it
 loads the object lists for name resolution, so the PCE computes meanwhile without extra
 requests.
