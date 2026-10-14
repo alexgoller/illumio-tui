@@ -3659,6 +3659,41 @@ fn is_unanswered(e: &WriteError) -> bool {
 /// One reload of the written kind's table, past the cache (the writer
 /// already invalidated it).
 fn reload_after_write(model: &mut Model, kind: pce::write::ObjectKind) -> Vec<Cmd> {
+    let mut cmds = reload_kind_after_write(model, kind);
+    cmds.extend(usage_after_write(model));
+    cmds
+}
+
+/// Any write may change what holds a label (a workload's labels, a rule's
+/// actors, a group's members): the PCE's usage flags are forgotten, and
+/// with `u` on asked for again, past the cache. A PCE without flags stays so.
+fn usage_after_write(model: &mut Model) -> Vec<Cmd> {
+    let o = &mut model.objects;
+    if o.pce_usage == PceUsage::Unsupported {
+        return Vec::new();
+    }
+    o.pce_usage = PceUsage::Unknown;
+    o.rebuild_labels(&model.limits.key_order());
+    if !o.unused_only {
+        return Vec::new();
+    }
+    o.pce_usage_loading = true;
+    vec![Cmd::LoadLabelUsage(CacheMode::Bypass)]
+}
+
+/// `r` on the Labels tab while the PCE's flags are held: they are read
+/// again with the labels, past the cache.
+fn reload_usage_with_labels(model: &mut Model) -> Option<Cmd> {
+    let o = &mut model.objects;
+    if !matches!(o.pce_usage, PceUsage::Flags(_)) || o.pce_usage_loading {
+        return None;
+    }
+    o.pce_usage_loading = true;
+    Some(Cmd::LoadLabelUsage(CacheMode::Bypass))
+}
+
+/// The reload of the written kind's own list.
+fn reload_kind_after_write(model: &mut Model, kind: pce::write::ObjectKind) -> Vec<Cmd> {
     match kind {
         pce::write::ObjectKind::Label => load_objects(model, ObjectKind::Labels, CacheMode::Bypass),
         // Nothing writes label groups yet; the tab has no reload of its own.
@@ -4108,7 +4143,11 @@ fn objects_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     model.status = StatusLine::info(format!("{} already loading", kind.title()));
                 } else {
                     model.objects.auto.rearm();
-                    return load_objects(model, kind, CacheMode::Bypass);
+                    let mut cmds = load_objects(model, kind, CacheMode::Bypass);
+                    if kind == ObjectKind::Labels {
+                        cmds.extend(reload_usage_with_labels(model));
+                    }
+                    return cmds;
                 }
                 return Vec::new();
             }
@@ -11930,6 +11969,96 @@ mod label_filter_tests {
                 ..
             }
         ));
+    }
+
+    /// A successful write of `kind`.
+    fn wrote(kind: pce::write::ObjectKind) -> Msg {
+        Msg::WriteDone {
+            kind,
+            method: Some(pce::WriteMethod::Put),
+            result: Ok(pce::write::Outcome::Written(pce::write::Written {
+                href: "/orgs/5/workloads/1".into(),
+                pending: false,
+                status: 200,
+                object: serde_json::json!({"href": "/orgs/5/workloads/1"}),
+                dropped_fields: vec![],
+                warnings: vec![],
+            })),
+        }
+    }
+
+    #[test]
+    fn a_write_forgets_the_usage_flags_and_u_asks_again_past_the_cache() {
+        use crate::tui::test_support::render_to_string;
+        let mut m = on_labels();
+        update(&mut m, kc(KeyCode::Char('u')));
+        update(&mut m, usage_answer());
+        assert_eq!(m.objects.labels.len(), 1);
+
+        // A workload write: the flags go, `u` on asks again, counted.
+        let cmds = update(&mut m, wrote(pce::write::ObjectKind::Workload));
+        assert!(
+            cmds.contains(&Cmd::LoadLabelUsage(pce::CacheMode::Bypass)),
+            "{cmds:?}"
+        );
+        assert_eq!(m.objects.pce_usage, PceUsage::Unknown);
+        assert!(m.objects.pce_usage_loading && m.objects.unused_only);
+        assert_eq!(m.objects.labels.len(), 6, "undecided until the answer");
+        assert!(render_to_string(&m, 100, 24).contains("unused: loading"));
+        update(&mut m, usage_answer());
+        assert_eq!(m.objects.labels.len(), 1);
+
+        // `u` off: a rule write forgets the flags but asks for nothing.
+        press(&mut m, KeyCode::Char('u'));
+        let cmds = update(&mut m, wrote(pce::write::ObjectKind::Rule));
+        assert!(
+            !cmds.iter().any(|c| matches!(c, Cmd::LoadLabelUsage(_))),
+            "{cmds:?}"
+        );
+        assert_eq!(m.objects.pce_usage, PceUsage::Unknown);
+        assert!(m.objects.labels.rows().iter().all(|r| r.held_by.is_none()));
+
+        // A PCE without flags stays so: nothing to forget, nothing to ask.
+        let mut m = older_pce(on_labels());
+        let cmds = update(&mut m, wrote(pce::write::ObjectKind::Label));
+        assert_eq!(m.objects.pce_usage, PceUsage::Unsupported);
+        assert!(!cmds.iter().any(|c| matches!(c, Cmd::LoadLabelUsage(_))));
+    }
+
+    #[test]
+    fn r_on_the_labels_tab_reads_held_flags_again() {
+        let mut m = on_labels();
+        let r = |m: &mut Model| update(m, kc(KeyCode::Char('r')));
+        assert_eq!(
+            r(&mut m),
+            vec![Cmd::LoadObjects {
+                kind: ObjectKind::Labels,
+                mode: pce::CacheMode::Bypass
+            }],
+            "no flags held: the labels alone"
+        );
+        let labels = m.objects.all_labels.clone();
+        update(
+            &mut m,
+            Msg::ObjectsLoaded {
+                kind: ObjectKind::Labels,
+                result: Ok(crate::tui::msg::ObjectsPayload::Labels(labels, 0)),
+            },
+        );
+        update(&mut m, kc(KeyCode::Char('u')));
+        update(&mut m, usage_answer());
+        press(&mut m, KeyCode::Char('u'));
+        assert_eq!(
+            r(&mut m),
+            vec![
+                Cmd::LoadObjects {
+                    kind: ObjectKind::Labels,
+                    mode: pce::CacheMode::Bypass
+                },
+                Cmd::LoadLabelUsage(pce::CacheMode::Bypass)
+            ]
+        );
+        assert!(m.objects.pce_usage_loading);
     }
 
     #[test]
