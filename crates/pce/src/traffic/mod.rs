@@ -27,7 +27,8 @@ pub use focus::{
 pub use merge::{RecordKey, merge_flows, record_key};
 pub use mesh::{MeshColumns, MeshKey, MeshRow, mesh, mesh_key, process_sides};
 pub use poll::{
-    PollConfig, QueryProgress, TrafficResult, Truncation, run_traffic_query, truncation,
+    PollConfig, QueryProgress, TrafficResult, Truncation, evaluate_draft, run_traffic_query,
+    run_traffic_query_draft, truncation,
 };
 pub use query::{
     CONFIRM_MAX_RESULTS, CONFIRM_WINDOW, DEFAULT_TRAFFIC_MAX_RESULTS, DEFAULT_WINDOW,

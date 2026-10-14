@@ -263,6 +263,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 *status = match progress {
                     QueryProgress::Submitted { .. } => "submitted".into(),
                     QueryProgress::Polling { status, .. } => format!("polling ({status})"),
+                    QueryProgress::Evaluating { rules, .. } => format!("draft ({rules})"),
                     QueryProgress::Downloading => "downloading".into(),
                     QueryProgress::Done { rows } => format!("done, {rows} rows"),
                 };

@@ -38,10 +38,23 @@ impl Default for PollConfig {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum QueryProgress {
-    Submitted { href: String },
-    Polling { status: String, elapsed: Duration },
+    Submitted {
+        href: String,
+    },
+    Polling {
+        status: String,
+        elapsed: Duration,
+    },
+    /// The draft re-evaluation: `requested`, then the status's `rules`
+    /// state (`pending` while it has none).
+    Evaluating {
+        rules: String,
+        elapsed: Duration,
+    },
     Downloading,
-    Done { rows: usize },
+    Done {
+        rows: usize,
+    },
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -96,9 +109,65 @@ fn report(progress: Option<&UnboundedSender<QueryProgress>>, p: QueryProgress) {
     }
 }
 
+/// Runs one query: POST, polls until completed, the download.
 pub async fn run_traffic_query(
     client: &PceClient,
     query: &TrafficQuery,
+    poll: &PollConfig,
+    cancel: &CancellationToken,
+    progress: Option<&UnboundedSender<QueryProgress>>,
+) -> Result<TrafficResult> {
+    run(client, query, false, poll, cancel, progress).await
+}
+
+/// `run_traffic_query` with the draft policy decision: POST, polls until
+/// completed, the `update_rules` PUT, polls until its rules are
+/// completed, then one download carrying `draft_policy_decision`.
+pub async fn run_traffic_query_draft(
+    client: &PceClient,
+    query: &TrafficQuery,
+    poll: &PollConfig,
+    cancel: &CancellationToken,
+    progress: Option<&UnboundedSender<QueryProgress>>,
+) -> Result<TrafficResult> {
+    run(client, query, true, poll, cancel, progress).await
+}
+
+/// Re-evaluates a completed query of ours (`query_href`, run with `query`)
+/// against the draft policy, without a new POST: the `update_rules` PUT,
+/// polls until its rules are completed, the download. A query the PCE no
+/// longer holds is `PceError::NotFound`.
+pub async fn evaluate_draft(
+    client: &PceClient,
+    query_href: &str,
+    query: &TrafficQuery,
+    poll: &PollConfig,
+    cancel: &CancellationToken,
+    progress: Option<&UnboundedSender<QueryProgress>>,
+) -> Result<TrafficResult> {
+    let started = Instant::now();
+    let (result_href, done) = draft_stage(
+        client, query_href, query, false, poll, cancel, progress, started,
+    )
+    .await?;
+    finish(
+        client,
+        query_href,
+        query,
+        result_href,
+        done,
+        poll,
+        cancel,
+        progress,
+        started,
+    )
+    .await
+}
+
+async fn run(
+    client: &PceClient,
+    query: &TrafficQuery,
+    draft: bool,
     poll: &PollConfig,
     cancel: &CancellationToken,
     progress: Option<&UnboundedSender<QueryProgress>>,
@@ -119,18 +188,71 @@ pub async fn run_traffic_query(
             href: query_href.clone(),
         },
     );
+    let (mut result_href, mut done) =
+        wait_completed(client, &query_href, poll, cancel, progress, started).await?;
+    if draft {
+        (result_href, done) = draft_stage(
+            client,
+            &query_href,
+            query,
+            true,
+            poll,
+            cancel,
+            progress,
+            started,
+        )
+        .await?;
+    }
+    finish(
+        client,
+        &query_href,
+        query,
+        result_href,
+        done,
+        poll,
+        cancel,
+        progress,
+        started,
+    )
+    .await
+}
 
+/// One status GET, cancellable.
+async fn status(
+    client: &PceClient,
+    query_href: &str,
+    cancel: &CancellationToken,
+) -> Result<AsyncQueryStatus> {
+    tokio::select! {
+        () = cancel.cancelled() => Err(PceError::Cancelled),
+        r = client.get(query_href, &[]) => Ok(r?.body),
+    }
+}
+
+async fn pause(delay: &mut Duration, poll: &PollConfig, cancel: &CancellationToken) -> Result<()> {
+    tokio::select! {
+        () = cancel.cancelled() => return Err(PceError::Cancelled),
+        () = tokio::time::sleep(*delay) => {}
+    }
+    *delay =
+        Duration::from_secs_f64((delay.as_secs_f64() * poll.factor).min(poll.cap.as_secs_f64()));
+    Ok(())
+}
+
+/// Polls with backoff until the query is completed with a result href.
+async fn wait_completed(
+    client: &PceClient,
+    query_href: &str,
+    poll: &PollConfig,
+    cancel: &CancellationToken,
+    progress: Option<&UnboundedSender<QueryProgress>>,
+    started: Instant,
+) -> Result<(String, AsyncQueryStatus)> {
     let mut delay = poll.initial;
     let mut completed_at: Option<Instant> = None;
-    let (result_href, done) = loop {
-        tokio::select! {
-            () = cancel.cancelled() => return Err(PceError::Cancelled),
-            () = tokio::time::sleep(delay) => {}
-        }
-        let status: AsyncQueryStatus = tokio::select! {
-            () = cancel.cancelled() => return Err(PceError::Cancelled),
-            r = client.get(&query_href, &[]) => r?.body,
-        };
+    loop {
+        pause(&mut delay, poll, cancel).await?;
+        let status = status(client, query_href, cancel).await?;
         let state = status.status.clone().unwrap_or_else(|| "unknown".into());
         report(
             progress,
@@ -146,7 +268,7 @@ pub async fn run_traffic_query(
                 ));
             }
             "completed" | "done" => match &status.result {
-                Some(r) => break (r.href().to_string(), status),
+                Some(r) => return Ok((r.href().to_string(), status)),
                 None => {
                     // Known PCE race: completed before the result href exists.
                     let since = *completed_at.get_or_insert_with(Instant::now);
@@ -160,11 +282,91 @@ pub async fn run_traffic_query(
             },
             _ => {}
         }
-        delay = Duration::from_secs_f64(
-            (delay.as_secs_f64() * poll.factor).min(poll.cap.as_secs_f64()),
-        );
-    };
+    }
+}
 
+/// The `update_rules` PUT on a completed query, then polls with backoff
+/// until both the query and its `rules` are completed. `fresh`: the query
+/// was just submitted, so a 404 means the PCE does not offer
+/// `update_rules` rather than that the query is gone. A PCE that answers
+/// the PUT but never reports `rules` fails after `poll.grace`.
+#[allow(clippy::too_many_arguments)]
+async fn draft_stage(
+    client: &PceClient,
+    query_href: &str,
+    query: &TrafficQuery,
+    fresh: bool,
+    poll: &PollConfig,
+    cancel: &CancellationToken,
+    progress: Option<&UnboundedSender<QueryProgress>>,
+    started: Instant,
+) -> Result<(String, AsyncQueryStatus)> {
+    let refused = |e: PceError| match e {
+        PceError::NotFound { .. } if !fresh => e,
+        PceError::Cancelled | PceError::Invalid(_) => e,
+        e => PceError::QueryFailed(format!(
+            "the PCE refused the draft re-evaluation (update_rules): {e}"
+        )),
+    };
+    report(
+        progress,
+        QueryProgress::Evaluating {
+            rules: "requested".into(),
+            elapsed: started.elapsed(),
+        },
+    );
+    tokio::select! {
+        () = cancel.cancelled() => return Err(PceError::Cancelled),
+        r = client.update_query_rules(query_href, query.max_results) => r.map_err(refused)?,
+    }
+    let asked = Instant::now();
+    let mut delay = poll.initial;
+    loop {
+        pause(&mut delay, poll, cancel).await?;
+        let status = status(client, query_href, cancel).await?;
+        let rules = status.rules_state().map(str::to_string);
+        report(
+            progress,
+            QueryProgress::Evaluating {
+                rules: rules.clone().unwrap_or_else(|| "pending".into()),
+                elapsed: started.elapsed(),
+            },
+        );
+        if status.status.as_deref() == Some("failed") || rules.as_deref() == Some("failed") {
+            return Err(PceError::QueryFailed(format!(
+                "draft re-evaluation failed: {}",
+                status.message.unwrap_or_else(|| "no message".into())
+            )));
+        }
+        let completed = matches!(status.status.as_deref(), Some("completed" | "done"));
+        match (&rules, &status.result) {
+            (Some(r), Some(res)) if r == "completed" && completed => {
+                return Ok((res.href().to_string(), status));
+            }
+            (None, _) if asked.elapsed() > poll.grace => {
+                return Err(PceError::QueryFailed(format!(
+                    "the PCE did not start the draft re-evaluation within {:?} (no rules state)",
+                    poll.grace
+                )));
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The download of a completed (or re-evaluated) query.
+#[allow(clippy::too_many_arguments)]
+async fn finish(
+    client: &PceClient,
+    query_href: &str,
+    query: &TrafficQuery,
+    result_href: String,
+    done: AsyncQueryStatus,
+    poll: &PollConfig,
+    cancel: &CancellationToken,
+    progress: Option<&UnboundedSender<QueryProgress>>,
+    started: Instant,
+) -> Result<TrafficResult> {
     report(progress, QueryProgress::Downloading);
     let flows: Vec<Flow> = tokio::select! {
         () = cancel.cancelled() => return Err(PceError::Cancelled),
@@ -178,7 +380,7 @@ pub async fn run_traffic_query(
         flows_count: done.flows_count,
         truncated: t.truncated,
         incomplete: t.incomplete,
-        query_href,
+        query_href: query_href.to_string(),
         elapsed: started.elapsed(),
     })
 }
