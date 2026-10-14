@@ -3486,3 +3486,29 @@ impl wiremock::Respond for Ticking {
         ResponseTemplate::new(200).set_body_json(body)
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn traffic_mesh_draft_counts_per_row_in_json_and_csv() {
+    let server = MockServer::start().await;
+    mount_traffic_draft(&server, 2, 2).await;
+    let out = stdout_json(
+        cmd(&server)
+            .args(["traffic", "mesh", "--window", "1h", "--draft"])
+            .assert()
+            .success(),
+    );
+    let rows = out["data"].as_array().unwrap();
+    let sum = |k: &str| -> u64 { rows.iter().map(|r| r[k].as_u64().unwrap()).sum() };
+    assert_eq!((sum("draft_allowed"), sum("draft_blocked")), (1, 1));
+    let text = csv_stdout(
+        &cmd(&server)
+            .args(["traffic", "mesh", "--window", "1h", "--draft", "--csv"])
+            .assert()
+            .success(),
+    );
+    let header = text.lines().next().unwrap();
+    assert!(
+        header.ends_with("decision,draft_allowed,draft_blocked"),
+        "{header}"
+    );
+}

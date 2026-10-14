@@ -201,9 +201,11 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   header says `draft ✓ N fixed`; Flows gains a `draft` column (`blocked → allowed`, the row in
   its draft colour; below 120 columns `→ allow`); App-to-app pairs and sections a `draft`
   column (`2 would allow`, `1 would block`) and the section headers `draft allows N`; the app
-  overlay `+N` / `-N` per peer and `draft: N blocked flows fixed`; and `d` gains a `fixed by
+  overlay `+N` / `-N` per peer, Mesh a `draft` column too and `draft: N blocked flows fixed`; and `d` gains a `fixed by
   draft` step (blocked or potentially blocked now, allowed in draft). `D` again goes back to the
-  reported decisions with no request, and the next `D` answers from the draft cache.
+  reported decisions with no request, and the next `D` answers from the draft cache (kept 2
+  minutes, its age in the status line). A write drops the draft decisions and the cache: the
+  next `D` asks the PCE again.
 - **Policy**: `d` toggle draft / active, `p` pending changes (`Enter` on one shows its diff against active), `Tab` switch panes, `Enter` rule
   detail, or on a ruleset load its deny rules. Rules are listed in evaluation order: override
   deny, allow, deny. With writes on, `n` / `e` / `x` create, edit and delete rulesets and rules
@@ -380,9 +382,10 @@ and is not in the write audit. Every flow then carries `draft_policy_decision` (
 `potentially_blocked`, `blocked`, or what the PCE sends, such as `allowed_across_boundary`,
 `blocked_by_boundary` or `blocked_by_override_deny`), `meta.draft` is `{"evaluated": true,
 "fixed": N, "newly_blocked": M}` (flow records: blocked or potentially blocked now and allowed
-in draft; allowed now and not in draft), pairs, sections and app peers carry `draft_allowed` and
+in draft; allowed now and not in draft), pairs, sections, mesh rows and app peers carry `draft_allowed` and
 `draft_blocked` (flow records), the tables a `draft` column and the CSVs `draft_allowed` and
-`draft_blocked`. A PCE that refuses `update_rules` is a clear error.
+`draft_blocked`. A PCE that refuses `update_rules` is a clear error. Each polling stage, the query and the draft
+re-evaluation, gives up after 10 minutes.
 
 **Transmission.** `--transmission unicast|broadcast|multicast` (repeatable or comma-separated,
 on `traffic query`/`groups`/`mesh` and `app`) keeps the flows sent that way. Explorer can only

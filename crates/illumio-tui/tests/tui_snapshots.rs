@@ -1580,6 +1580,10 @@ fn traffic_draft_flows_pairs_and_sections() {
         "traffic_draft_sections_in_80x24",
         render_to_string(&m, 80, 24)
     );
+    m.traffic.view = TrafficView::Mesh;
+    let out = render_to_string(&m, 120, 30);
+    assert!(out.contains("would block"), "{out}");
+    insta::assert_snapshot!("traffic_draft_mesh_120x30", out);
 }
 
 #[test]

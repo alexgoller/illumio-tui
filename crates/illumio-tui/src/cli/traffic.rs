@@ -642,6 +642,10 @@ pub fn draft_cells(d: Option<&DraftCounts>) -> [String; 2] {
     [d.draft_allowed.to_string(), d.draft_blocked.to_string()]
 }
 
+fn mesh_draft(rows: &[MeshRow]) -> bool {
+    rows.iter().any(|r| r.draft.is_some())
+}
+
 fn groups_draft(groups: &[FlowGroup]) -> bool {
     groups.iter().any(|g| g.draft.is_some())
 }
@@ -773,8 +777,9 @@ impl TableRows for Vec<MeshRow> {
     fn units(&self) -> Option<&'static str> {
         Some(UNITS_GROUPS)
     }
+    /// With draft decisions, a `draft` column (`DraftCounts::text`).
     fn headers(&self) -> Vec<&'static str> {
-        vec![
+        let mut h = vec![
             "user",
             "process",
             "src",
@@ -785,14 +790,29 @@ impl TableRows for Vec<MeshRow> {
             "conns",
             "bytes",
             "decision",
-        ]
+        ];
+        if mesh_draft(self) {
+            h.push("draft");
+        }
+        h
+    }
+    /// The table's, with the draft counts as `draft_allowed` and
+    /// `draft_blocked` numbers.
+    fn full_headers(&self) -> Vec<&'static str> {
+        let mut h = self.headers();
+        if mesh_draft(self) {
+            h.pop();
+            h.extend(DRAFT_COUNTS);
+        }
+        h
     }
     fn rows(&self) -> Vec<Vec<String>> {
+        let draft = mesh_draft(self);
         let any = self.iter().any(|r| r.bytes > 0);
         let or_dash = |v: &Option<String>| v.clone().unwrap_or_else(|| "-".into());
         self.iter()
             .map(|r| {
-                vec![
+                let mut row = vec![
                     or_dash(&r.user),
                     or_dash(&r.process),
                     r.src.join("/"),
@@ -803,12 +823,18 @@ impl TableRows for Vec<MeshRow> {
                     r.connections.to_string(),
                     bytes_cell(r.bytes, any),
                     r.dominant().as_str().to_string(),
-                ]
+                ];
+                if draft {
+                    row.push(DraftCounts::text(r.draft.as_ref()));
+                }
+                row
             })
             .collect()
     }
-    /// Empty cells for no user or process, `bytes` always a number.
+    /// Empty cells for no user or process, `bytes` always a number, the
+    /// draft counts as numbers.
     fn full_rows(&self) -> Vec<Vec<String>> {
+        let draft = mesh_draft(self);
         let or_empty = |v: &Option<String>| v.clone().unwrap_or_default();
         self.iter()
             .zip(self.rows())
@@ -817,6 +843,10 @@ impl TableRows for Vec<MeshRow> {
                 row[1] = or_empty(&r.process);
                 row[5] = or_empty(&r.dst_process);
                 row[8] = r.bytes.to_string();
+                if draft {
+                    row.pop();
+                    row.extend(draft_cells(r.draft.as_ref()));
+                }
                 row
             })
             .collect()
@@ -1366,6 +1396,7 @@ mod tests {
             allowed: 0,
             potentially_blocked: 1,
             blocked: 0,
+            draft: None,
         };
         assert_eq!(
             vec![row].rows()[0],

@@ -1,7 +1,7 @@
 //! The mesh: flows grouped by who talked to whom on which service, with
 //! the user and the processes on each side, like the Illumio UI's mesh.
 //! Pure; no requests.
-use super::aggregate::{Dominant, dominant, group_key, keys_or_default, tally};
+use super::aggregate::{Dominant, DraftCounts, dominant, group_key, keys_or_default, tally};
 use super::resolved::{ResolvedFlow, service_text};
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -27,6 +27,10 @@ pub struct MeshRow {
     pub allowed: u64,
     pub potentially_blocked: u64,
     pub blocked: u64,
+    /// What the draft policy would change, with draft decisions loaded
+    /// (`draft_allowed`, `draft_blocked` in JSON).
+    #[serde(flatten)]
+    pub draft: Option<DraftCounts>,
 }
 
 /// Which optional columns take part in the grouping.
@@ -145,8 +149,10 @@ pub fn mesh(flows: &[ResolvedFlow], keys: &[String], cols: MeshColumns) -> Vec<M
             allowed: 0,
             potentially_blocked: 0,
             blocked: 0,
+            draft: None,
         });
         row.flows += 1;
+        DraftCounts::add(&mut row.draft, f);
         row.connections += f.num_connections;
         row.bytes += f.bytes();
         tally(
@@ -182,6 +188,36 @@ mod tests {
         user: true,
         process: true,
     };
+
+    #[test]
+    fn mesh_rows_count_what_the_draft_would_change() {
+        use crate::traffic::resolved::tests::{rich_flows, rich_flows_draft};
+        let k = vec!["app".to_string(), "env".to_string()];
+        let all = MeshColumns {
+            user: true,
+            process: true,
+        };
+        assert!(
+            mesh(&rich_flows(), &k, all)
+                .iter()
+                .all(|r| r.draft.is_none())
+        );
+        let f = rich_flows_draft();
+        let rows = mesh(&f, &k, all);
+        let sum = |pick: fn(&DraftCounts) -> u64| -> u64 {
+            rows.iter().map(|r| r.draft.as_ref().map_or(0, pick)).sum()
+        };
+        assert_eq!(
+            sum(|d| d.draft_allowed),
+            f.iter().filter(|f| f.fixed_by_draft()).count() as u64
+        );
+        assert_eq!(
+            sum(|d| d.draft_blocked),
+            f.iter().filter(|f| f.blocked_by_draft()).count() as u64
+        );
+        let json = serde_json::to_value(&rows[0]).unwrap();
+        assert!(json["draft_allowed"].is_u64() && json["draft_blocked"].is_u64());
+    }
 
     #[test]
     fn the_direction_places_the_process_on_its_side() {

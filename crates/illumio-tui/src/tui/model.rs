@@ -664,6 +664,23 @@ pub fn draft_section_column() -> Column<SectionRow> {
     }
 }
 
+/// The Mesh view's `draft` column (`draft_counts_cell`).
+pub fn draft_mesh_column() -> Column<MeshRow> {
+    Column {
+        title: DRAFT_COLUMN,
+        width: 20,
+        cell: |r| draft_counts_cell(r.draft.as_ref()),
+        key: |r| SortKey::Num(r.draft.map_or(0, |d| d.draft_allowed)),
+        right: false,
+        // Below 100 columns the mesh has no room; `D` is in the Result header.
+        hide_below: 100,
+        narrow: Some(|r| draft_short(r.draft.as_ref())),
+        narrow_width: 9,
+        full_title: None,
+        full: None,
+    }
+}
+
 /// `cols`, plus `extra` at the end when `draft`.
 fn with_draft<T>(mut cols: Vec<Column<T>>, extra: Column<T>, draft: bool) -> Vec<Column<T>> {
     if draft {
@@ -2298,6 +2315,13 @@ impl TrafficState {
             self.services.set_columns(with_draft(
                 service_group_columns(),
                 draft_group_column(),
+                draft,
+            ));
+        }
+        if shows_draft(&self.mesh) != draft {
+            self.mesh.set_columns(with_draft(
+                mesh_columns(self.mesh_cols),
+                draft_mesh_column(),
                 draft,
             ));
         }
