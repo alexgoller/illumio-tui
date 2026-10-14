@@ -345,8 +345,9 @@ fn unused_labels(labels: Vec<Label>, usage: &HashMap<String, LabelUsage>) -> Vec
         .collect()
 }
 
-/// The labels whose PCE usage flags are all false. Their `workload` and
-/// `rule` flags are false too, so both counts are zero without a read.
+/// The labels whose PCE usage flags are all false. Nothing is counted:
+/// `workloads` and `rules` are 0 because the `workload` and `ruleset`
+/// flags are false (README, `labels --unused`).
 fn unused_by_pce(labels: Vec<Label>) -> Vec<LabelOut> {
     labels
         .into_iter()

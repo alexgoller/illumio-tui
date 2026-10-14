@@ -385,7 +385,9 @@ profile's `ignore_keys` (`--no-ignore-keys`, the default, keeps every key). `--u
 the labels nothing holds, as the PCE's own usage flags say: the one labels request asks for
 `usage=true`, so a label held only by a pairing profile, a permission, an enforcement
 boundary or a container workload profile is in use, and each row carries the PCE's `usage`
-object (every flag false) with `workloads` and `rules` at 0; `meta.usage` is `pce`. A PCE
+object (every flag false); `meta.usage` is `pce`. In this mode nothing is counted: the rows'
+`workloads` and `rules` are 0 because the PCE's `workload` and `ruleset` flags are false, not
+from reading workloads or rulesets, so the command stays at one request. A PCE
 that answers without usage flags falls back to our own counts: it reads the workloads, the
 draft rulesets and the label groups (through the cache, counted in `meta`), deny rules count
 when the ruleset carries them inline (no fallback reads), and `meta.usage` (and the table's
