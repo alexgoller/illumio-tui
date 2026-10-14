@@ -203,6 +203,35 @@ impl PceClient {
         Self::decode(api_path, status, &hdrs, &bytes)
     }
 
+    /// Asks the PCE to re-evaluate one of our own Explorer results against
+    /// the draft policy: `PUT <query href>/update_rules?label_based_rules=
+    /// false&offset=0&limit=<limit>` with an empty body, as the PCE UI's
+    /// draft view and workloader do. After it, the query's status gains
+    /// `rules` and its download carries `draft_policy_decision`.
+    ///
+    /// Why this is not a write: it changes no policy and no object but the
+    /// async query resource this client created (the PCE stores the draft
+    /// decisions with that result). So it goes through the read client,
+    /// needs no armed writes and is not in the write audit, like the POST
+    /// that created the query. It is kept narrow on purpose so that it can
+    /// never become a general PUT: `query_href` must be exactly
+    /// `/orgs/<this org>/traffic_flows/async_queries/<id>`, checked by
+    /// component before any request, and the path and query string are
+    /// fixed. Never retried (one PUT per user action), counted like every
+    /// request.
+    pub async fn update_query_rules(&self, query_href: &str, limit: u32) -> Result<()> {
+        let href = async_query_href(query_href, self.org_id)?;
+        let url = self.url_for(&format!("{href}/update_rules"));
+        let query = [
+            ("label_based_rules", "false".to_string()),
+            ("offset", "0".to_string()),
+            ("limit", limit.to_string()),
+        ];
+        let build = || self.http.put(url.clone()).query(&query);
+        let (status, headers, bytes) = self.send(build, false, self.timeout).await?;
+        Self::decode::<serde_json::Value>(&href, status, &headers, &bytes).map(|_| ())
+    }
+
     /// Sends one mutation. Never retried: a 429 or 503 comes back as an
     /// error, because a repeated write could apply a change twice. 400, 406,
     /// 409 and 422 map to [`PceError::Rejected`]; a 204 or empty body decodes
@@ -355,6 +384,32 @@ impl PceClient {
     }
 }
 
+/// `href` when it is exactly `/orgs/<org_id>/traffic_flows/async_queries/
+/// <id>` (an id of letters, digits, `-` and `_`), else `PceError::Invalid`.
+/// By component, never by substring: `..`, extra segments, a query string
+/// or another org are refused.
+pub fn async_query_href(href: &str, org_id: u64) -> Result<String> {
+    let bad = || PceError::Invalid(format!("not an async traffic query href: {href:?}"));
+    let parts: Vec<&str> = href.split('/').collect();
+    let [empty, orgs, org, tf, aq, id] = parts.as_slice() else {
+        return Err(bad());
+    };
+    let id_ok = !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if !empty.is_empty()
+        || *orgs != "orgs"
+        || *org != org_id.to_string()
+        || *tf != "traffic_flows"
+        || *aq != "async_queries"
+        || !id_ok
+    {
+        return Err(bad());
+    }
+    Ok(href.to_string())
+}
+
 /// Parses `Retry-After` when it is a number of seconds. HTTP-date values
 /// are ignored (caller falls back to computed backoff).
 pub fn parse_retry_after(headers: &HeaderMap) -> Option<Duration> {
@@ -438,6 +493,72 @@ mod write_tests {
         cfg.requests_per_second = 1000.0;
         cfg.burst = 1000;
         PceClient::new(cfg).unwrap()
+    }
+
+    #[test]
+    fn async_query_hrefs_are_checked_by_component() {
+        let ok = "/orgs/5/traffic_flows/async_queries/0d6d2f0c-aa_1";
+        assert_eq!(async_query_href(ok, 5).unwrap(), ok);
+        for bad in [
+            "/orgs/6/traffic_flows/async_queries/q1",
+            "/orgs/5/traffic_flows/async_queries/",
+            "/orgs/5/traffic_flows/async_queries/q1/download",
+            "/orgs/5/traffic_flows/async_queries/..",
+            "/orgs/5/traffic_flows/async_queries/q1?x=1",
+            "/orgs/5/labels/7",
+            "orgs/5/traffic_flows/async_queries/q1",
+            "/orgs/5/sec_policy/draft/rule_sets/1",
+            "/orgs/5/traffic_flows/async_queries/q%2F1",
+        ] {
+            assert!(async_query_href(bad, 5).is_err(), "{bad}");
+        }
+    }
+
+    #[tokio::test]
+    async fn update_query_rules_puts_once_with_no_body_and_refuses_other_hrefs() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .and(path(
+                "/api/v2/orgs/5/traffic_flows/async_queries/q-1/update_rules",
+            ))
+            .and(wiremock::matchers::query_param(
+                "label_based_rules",
+                "false",
+            ))
+            .and(wiremock::matchers::query_param("offset", "0"))
+            .and(wiremock::matchers::query_param("limit", "2500"))
+            .and(wiremock::matchers::body_string(""))
+            .respond_with(ResponseTemplate::new(202))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let c = client_for(&server);
+        c.update_query_rules("/orgs/5/traffic_flows/async_queries/q-1", 2500)
+            .await
+            .unwrap();
+        assert_eq!(c.stats().calls, 1);
+        let e = c
+            .update_query_rules("/orgs/5/labels/7", 2500)
+            .await
+            .unwrap_err();
+        assert!(matches!(e, PceError::Invalid(_)), "{e}");
+        assert_eq!(c.stats().calls, 1, "refused before any request");
+    }
+
+    #[tokio::test]
+    async fn update_query_rules_is_not_retried_and_reports_a_refusal() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .respond_with(ResponseTemplate::new(503).set_body_string("busy"))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let c = client_for(&server);
+        let e = c
+            .update_query_rules("/orgs/5/traffic_flows/async_queries/q-1", 10)
+            .await
+            .unwrap_err();
+        assert!(matches!(e, PceError::Server { status: 503, .. }), "{e}");
     }
 
     #[tokio::test]
