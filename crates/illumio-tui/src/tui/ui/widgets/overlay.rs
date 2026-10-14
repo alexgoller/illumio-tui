@@ -173,7 +173,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "Workloads E m o u c",
         "enforcement · managed · offline · unlabeled · clear",
     ),
-    ("", "local filters: combine with h and /, no request"),
+    ("", "local, no request; c clears them and h, not /"),
     (
         "Events   f / Enter / S",
         "filter · event as JSON · sort by severity",

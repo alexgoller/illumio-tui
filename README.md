@@ -249,9 +249,9 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   full, selective, visibility_only, idle, unmanaged), `m` managed / unmanaged, `o` offline
   only (the VEN health: `online` false or no heartbeat for 15 minutes), `u` unlabeled (no
   label for one of the profile's scope keys or its tier key; a `missing` column names them),
-  `c` clears them all. A filter line above the table names what is on and the count
-  (`enforcement selective · unlabeled (app, env, role) · 1 of 206`), and says the counts are
-  partial when the list was truncated.
+  `c` clears them and `h` (not the `/` search). A filter line above the table names what is
+  on and the count (`enforcement selective · unlabeled (app, env, role) · 1 of 206`), and
+  says the counts are partial when the list was truncated.
 - **Events**: severity-coloured audit events, `f` edit severity / type / window, `S` sort by
   severity, `Enter` the event as JSON (`j` / `k` scroll a long one).
 
@@ -348,9 +348,12 @@ the PCE reports with a mode of its own (often `visibility_only`), else the PCE's
 contradicts it is exit 2. `--offline` and `--unlabeled [keys]` filter the one read locally,
 as the app's `o` and `u` do: offline is the VEN health (so a stale heartbeat counts, which
 `--online false` would miss), unlabeled is a missing label for one of the keys
-(comma-separated; alone, the profile's scope keys and tier key). JSON adds `missing_labels`
+(comma-separated, matched exactly; alone, the profile's scope keys and tier key; a key that
+is neither in the label model nor on any workload is warned about on stderr and in
+`meta.warnings`). JSON adds `missing_labels`
 with `--unlabeled` (the table a `missing` column), and `meta.local_filter` names the local
-filters (`["offline", "unlabeled (app, env, role)"]`; the meta line `filtered locally: …`).
+filters (`["offline", "unlabeled (app, env, role)"]`; the meta line `filtered locally: …`). CSV joins
+the `missing` keys with `; `, as its other lists.
 Commands that print no table (writes, `health`, `policy rules impact`, `profile use`, a
 traffic `--dry-run`) refuse it with exit 2 before any request.
 
