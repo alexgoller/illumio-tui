@@ -345,7 +345,8 @@ pub enum QueryState {
 pub struct TrafficData {
     pub flows: Vec<ResolvedFlow>,
     pub truncated: bool,
-    pub matches_count: Option<u64>,
+    /// A supercluster region did not respond: rows are missing.
+    pub incomplete: bool,
     pub elapsed: Duration,
     pub cache_hit: bool,
     /// When the first slice arrived: the Result header's age. A merged
@@ -5106,7 +5107,7 @@ mod focus_tests {
         TrafficData {
             flows: t.loaded_flows()[..n].to_vec(),
             truncated: false,
-            matches_count: Some(n as u64),
+            incomplete: false,
             elapsed: Duration::from_millis(900),
             cache_hit: false,
             fetched_at: Instant::now(),

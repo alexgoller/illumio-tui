@@ -19,7 +19,8 @@ use tokio_util::sync::CancellationToken;
 pub struct QueryOutcome {
     pub flows: Vec<ResolvedFlow>,
     pub truncated: bool,
-    pub matches_count: Option<u64>,
+    /// A supercluster region did not respond.
+    pub incomplete: bool,
     pub elapsed: Duration,
     pub hit: bool,
     pub filter: TrafficFilter,

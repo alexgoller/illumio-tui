@@ -94,7 +94,6 @@ pub fn model_with_rich_flows() -> Model {
     let mut m = model_with_flows();
     let flows = fixture_flows_rich();
     if let Some(d) = m.traffic.data.as_mut() {
-        d.matches_count = Some(flows.len() as u64);
         d.flows = flows;
     }
     m.traffic.rebuild_views();
@@ -128,7 +127,7 @@ pub fn model_with_flows() -> Model {
     m.traffic.data = Some(TrafficData {
         flows,
         truncated: false,
-        matches_count: Some(4),
+        incomplete: false,
         elapsed: Duration::from_millis(1840),
         cache_hit: false,
         fetched_at: Instant::now() - Duration::from_secs(3),

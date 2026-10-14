@@ -354,11 +354,10 @@ pub fn closest(name: &str, candidates: &[String], n: usize) -> Vec<String> {
 #[derive(Debug, Clone)]
 pub struct FocusedTraffic {
     pub flows: Vec<ResolvedFlow>,
-    /// Any query hit the cap (or the PCE matched more than it returned).
+    /// Any query hit the cap.
     pub truncated: bool,
-    /// The queries' `matches_count` summed (self-traffic counted per
-    /// query); `None` when one did not report it.
-    pub matches_count: Option<u64>,
+    /// A supercluster region did not respond to a query.
+    pub incomplete: bool,
     pub elapsed: Duration,
     /// Every query was answered from the cache.
     pub hit: bool,

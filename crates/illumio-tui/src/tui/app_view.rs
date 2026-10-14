@@ -412,7 +412,7 @@ mod tests {
         let data = crate::tui::model::TrafficData {
             flows: m.traffic.loaded_flows()[..3].to_vec(),
             truncated: false,
-            matches_count: Some(3),
+            incomplete: false,
             elapsed: std::time::Duration::ZERO,
             cache_hit: false,
             fetched_at: std::time::Instant::now(),

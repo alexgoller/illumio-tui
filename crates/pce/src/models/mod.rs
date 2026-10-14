@@ -17,7 +17,7 @@ pub use policy::{
 };
 pub use traffic::{
     ActorFilter, ActorMatch, AsyncQueryStatus, Endpoint, Flow, FlowService, FlowWorkload, NamedRef,
-    QueryResultRef, ServiceFilter, ServiceMatch, TimestampRange, TrafficQuery,
+    QueryRegion, QueryResultRef, ServiceFilter, ServiceMatch, TimestampRange, TrafficQuery,
 };
 pub use workloads::{
     AgentStatus, HEARTBEAT_OFFLINE, Interface, SYNC_STALE, UNMANAGED, VenHealth, Workload,

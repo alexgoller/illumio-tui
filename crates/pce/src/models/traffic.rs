@@ -171,8 +171,28 @@ pub struct AsyncQueryStatus {
     pub result: Option<QueryResultRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub matches_count: Option<u64>,
+    /// Rows the result holds, after the cap: `flows_count >= max_results`
+    /// is the cap signal. `matches_count` is a bounded raw count, never a
+    /// total.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flows_count: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// A supercluster's per-region counts; each region is capped on its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub regions: Option<Vec<QueryRegion>>,
+}
+
+/// One region of a supercluster's async query.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct QueryRegion {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pce_fqdn: Option<String>,
+    /// `false` when the region did not answer: the result misses its rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub responded: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flows_count: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matches_count: Option<u64>,
 }

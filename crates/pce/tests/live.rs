@@ -49,9 +49,9 @@ async fn live_smoke() {
         .await
         .expect("traffic query");
     eprintln!(
-        "flows={} matches={:?} truncated={} elapsed={:?}",
+        "flows={} flows_count={:?} truncated={} elapsed={:?}",
         r.value.flows.len(),
-        r.value.matches_count,
+        r.value.flows_count,
         r.truncated,
         r.value.elapsed
     );

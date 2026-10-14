@@ -422,7 +422,7 @@ impl Pce {
         let mut out = traffic::FocusedTraffic {
             flows: Vec::new(),
             truncated: false,
-            matches_count: Some(0),
+            incomplete: false,
             elapsed: Duration::ZERO,
             hit: true,
             queries: Vec::new(),
@@ -446,10 +446,7 @@ impl Pce {
                 Some(first) => traffic::union_flows(first, flows),
             });
             out.truncated |= r.truncated;
-            out.matches_count = out
-                .matches_count
-                .zip(r.value.matches_count)
-                .map(|(a, b)| a + b);
+            out.incomplete |= r.value.incomplete;
             out.elapsed += r.value.elapsed;
             out.hit &= r.hit;
             out.queries.push(q);

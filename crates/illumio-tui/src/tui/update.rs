@@ -26,6 +26,10 @@ use pce::{CacheMode, RuleKind, WriteMethod};
 use std::time::Instant;
 use tokio_util::sync::CancellationToken;
 
+/// The status and header note for a result a supercluster region did not
+/// answer.
+pub const INCOMPLETE: &str = " · incomplete: a PCE region did not respond";
+
 pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
     let traffic_answer = matches!(
         msg,
@@ -294,10 +298,11 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     model.traffic.unfocused = None;
                     model.traffic.focus_result = None;
                     let data = outcome_data(o);
-                    let (n, truncated, matches_count, elapsed, hit) = (
+                    let (n, truncated, incomplete, cap, elapsed, hit) = (
                         data.flows.len(),
                         data.truncated,
-                        data.matches_count,
+                        data.incomplete,
+                        data.filter.max_results,
                         data.elapsed,
                         data.cache_hit,
                     );
@@ -321,13 +326,13 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         .as_ref()
                         .map(|f| format!(" · focus is partial: r re-queries {}", f.app_text()))
                         .unwrap_or_default();
+                    let missing = if incomplete { INCOMPLETE } else { "" };
                     model.status = if truncated {
                         StatusLine::warn(format!(
-                            "{n} flows (truncated: the PCE matched {}; raise the cap or narrow the filter){focus_hint}",
-                            matches_count
-                                .map(|m| m.to_string())
-                                .unwrap_or_else(|| "more".into())
+                            "{n} flows, capped at {cap}; B raises the cap{missing}{focus_hint}"
                         ))
+                    } else if incomplete {
+                        StatusLine::warn(format!("{n} flows{missing}{focus_hint}"))
                     } else {
                         StatusLine::info(format!(
                             "{n} flows in {:.1}s{}",
@@ -363,16 +368,25 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     }
                     let mut data = outcome_data(outcome);
                     data.side_coverage = coverage;
-                    let (truncated, elapsed, hit) = (data.truncated, data.elapsed, data.cache_hit);
+                    let (truncated, incomplete, cap, elapsed, hit) = (
+                        data.truncated,
+                        data.incomplete,
+                        data.filter.max_results,
+                        data.elapsed,
+                        data.cache_hit,
+                    );
                     let app = focus.app_text();
                     model.traffic.show_detail = false;
                     model.traffic.apply_focused(focus, queries, data);
                     let n = model.traffic.view_flows().len();
                     let q = queries_text(queries);
+                    let missing = if incomplete { INCOMPLETE } else { "" };
                     model.status = if truncated {
                         StatusLine::warn(format!(
-                            "{n} flows for {app} · {q} (truncated: raise the cap or narrow the filter)"
+                            "{n} flows for {app} · {q}, capped at {cap}; ] raises the cap{missing}"
                         ))
+                    } else if incomplete {
+                        StatusLine::warn(format!("{n} flows for {app} · {q}{missing}"))
                     } else {
                         StatusLine::info(format!(
                             "{n} flows for {app} in {:.1}s · {q}{}",
@@ -927,7 +941,7 @@ fn outcome_data(o: QueryOutcome) -> TrafficData {
     TrafficData {
         flows: o.flows,
         truncated: o.truncated,
-        matches_count: o.matches_count,
+        incomplete: o.incomplete,
         elapsed: o.elapsed,
         cache_hit: o.hit,
         fetched_at: Instant::now(),
@@ -3004,7 +3018,7 @@ fn on_backfill_slice(model: &mut Model, result: Result<QueryOutcome, String>) ->
     let cut = step == pce::traffic::Step::TooSmall;
     if std::mem::take(&mut bf.replace) {
         d.flows = o.flows;
-        d.matches_count = o.matches_count;
+        d.incomplete = o.incomplete;
         d.elapsed = o.elapsed;
         d.cache_hit = o.hit;
         d.filter = o.filter;
@@ -3045,7 +3059,7 @@ fn on_backfill_slice(model: &mut Model, result: Result<QueryOutcome, String>) ->
 fn merge_outcome(d: &mut TrafficData, o: QueryOutcome) {
     pce::traffic::merge_flows(&mut d.flows, o.flows);
     d.truncated |= o.truncated;
-    d.matches_count = d.matches_count.zip(o.matches_count).map(|(a, b)| a + b);
+    d.incomplete |= o.incomplete;
     d.elapsed += o.elapsed;
     d.cache_hit &= o.hit;
     d.filter = o.filter;
@@ -6020,7 +6034,7 @@ mod tests {
         let outcome = crate::tui::msg::QueryOutcome {
             flows: crate::tui::test_support::fixture_flows_rich(),
             truncated: false,
-            matches_count: None,
+            incomplete: false,
             elapsed: std::time::Duration::from_secs(1),
             hit: false,
             filter: m.traffic.filter.clone(),
@@ -6070,7 +6084,7 @@ mod tests {
         let outcome = crate::tui::msg::QueryOutcome {
             flows: fixture_flows(),
             truncated: false,
-            matches_count: Some(4),
+            incomplete: false,
             elapsed: std::time::Duration::from_secs(1),
             hit: false,
             filter: f,
@@ -6343,7 +6357,7 @@ mod tests {
         let outcome = crate::tui::msg::QueryOutcome {
             flows: fixture_flows(),
             truncated: false,
-            matches_count: Some(4),
+            incomplete: false,
             elapsed: std::time::Duration::from_secs(1),
             hit: false,
             filter: f,
@@ -6794,7 +6808,7 @@ mod tests {
         let outcome = crate::tui::msg::QueryOutcome {
             flows: vec![],
             truncated: false,
-            matches_count: Some(0),
+            incomplete: false,
             elapsed: std::time::Duration::from_millis(5),
             hit: false,
             filter: f.clone(),
@@ -6892,7 +6906,7 @@ mod tests {
         let outcome = crate::tui::msg::QueryOutcome {
             flows: vec![],
             truncated: true,
-            matches_count: Some(900),
+            incomplete: false,
             elapsed: std::time::Duration::from_secs(1),
             hit: false,
             filter: f,
@@ -6906,7 +6920,7 @@ mod tests {
             },
         );
         assert_eq!(m.status.kind, StatusKind::Warn);
-        assert!(m.status.text.contains("truncated"), "{}", m.status.text);
+        assert_eq!(m.status.text, "0 flows, capped at 50; B raises the cap");
     }
 
     #[test]
@@ -8826,7 +8840,7 @@ mod tests {
                 result: Ok(QueryOutcome {
                     flows: crate::tui::test_support::fixture_flows(),
                     truncated: false,
-                    matches_count: Some(4),
+                    incomplete: false,
                     elapsed: std::time::Duration::from_secs(1),
                     hit: false,
                     filter,
@@ -12283,7 +12297,7 @@ mod window_step_tests {
             result: Ok(QueryOutcome {
                 flows,
                 truncated,
-                matches_count: None,
+                incomplete: false,
                 elapsed: Duration::from_millis(900),
                 hit: false,
                 filter: m.traffic.filter.clone(),
@@ -12981,7 +12995,7 @@ mod app_sections_tests {
                 result: Ok(crate::tui::msg::QueryOutcome {
                     flows,
                     truncated: false,
-                    matches_count: None,
+                    incomplete: false,
                     elapsed: std::time::Duration::from_secs(1),
                     hit: false,
                     filter,
@@ -13132,7 +13146,7 @@ mod backfill_tests {
                 result: Ok(QueryOutcome {
                     flows,
                     truncated: true,
-                    matches_count: None,
+                    incomplete: false,
                     elapsed: Duration::from_millis(900),
                     hit: false,
                     filter: f,
@@ -13205,7 +13219,7 @@ mod backfill_tests {
             result: Ok(QueryOutcome {
                 flows,
                 truncated,
-                matches_count: None,
+                incomplete: false,
                 elapsed: Duration::from_millis(500),
                 hit: false,
                 filter,
@@ -13260,7 +13274,7 @@ mod backfill_tests {
     fn half_covered_complete_or_unmeasurable_results() {
         let mut m = model_fixture();
         truncated(&mut m, Span::new().hours(13), 4);
-        assert!(m.status.text.contains("truncated"), "{}", m.status.text);
+        assert!(m.status.text.contains("capped at"), "{}", m.status.text);
         assert_eq!(meta(&m), None);
         quiet(&mut m, key('B'));
         assert_eq!(
@@ -14268,7 +14282,7 @@ mod focus_tests {
         TrafficData {
             flows: m.traffic.loaded_flows()[..n].to_vec(),
             truncated: false,
-            matches_count: Some(n as u64),
+            incomplete: false,
             elapsed: Duration::from_millis(900),
             cache_hit: false,
             fetched_at: Instant::now(),
@@ -14313,7 +14327,7 @@ mod focus_tests {
         let outcome = QueryOutcome {
             flows: flows[..3].to_vec(),
             truncated: false,
-            matches_count: Some(3),
+            incomplete: false,
             elapsed: Duration::from_millis(900),
             hit: false,
             filter: m.traffic.filter.clone(),
@@ -14372,7 +14386,7 @@ mod focus_tests {
         let outcome = QueryOutcome {
             flows: Vec::new(),
             truncated: false,
-            matches_count: Some(0),
+            incomplete: false,
             elapsed: Duration::ZERO,
             hit: false,
             filter: m.traffic.filter.clone(),
@@ -14478,7 +14492,7 @@ mod focus_tests {
         let outcome = QueryOutcome {
             flows: crate::tui::test_support::fixture_flows(),
             truncated: true,
-            matches_count: Some(40),
+            incomplete: false,
             elapsed: Duration::from_millis(100),
             hit: false,
             filter: m.traffic.filter.clone(),
@@ -14518,7 +14532,7 @@ mod focus_tests {
         let outcome = QueryOutcome {
             flows: m.traffic.loaded_flows()[..2].to_vec(),
             truncated: false,
-            matches_count: Some(2),
+            incomplete: false,
             elapsed: Duration::from_millis(900),
             hit: false,
             filter: m.traffic.filter.clone(),
@@ -15064,7 +15078,7 @@ mod app_tests {
                 result: Ok(crate::tui::msg::QueryOutcome {
                     flows,
                     truncated: false,
-                    matches_count: Some(1),
+                    incomplete: false,
                     elapsed: std::time::Duration::ZERO,
                     hit: false,
                     filter,
@@ -15119,7 +15133,7 @@ mod app_tests {
             result: Ok(crate::tui::msg::QueryOutcome {
                 flows: m.traffic.loaded_flows()[..1].to_vec(),
                 truncated: false,
-                matches_count: Some(1),
+                incomplete: false,
                 elapsed: std::time::Duration::ZERO,
                 hit: false,
                 filter: m.traffic.filter.clone(),
@@ -15753,7 +15767,7 @@ mod timeline_tests {
                 result: Ok(QueryOutcome {
                     flows: crate::tui::test_support::fixture_flows(),
                     truncated: false,
-                    matches_count: Some(4),
+                    incomplete: false,
                     elapsed: std::time::Duration::from_secs(1),
                     hit: false,
                     filter,
@@ -16031,7 +16045,7 @@ mod timeline_tests {
                 result: Ok(QueryOutcome {
                     flows: Vec::new(),
                     truncated: false,
-                    matches_count: Some(0),
+                    incomplete: false,
                     elapsed: std::time::Duration::from_secs(1),
                     hit: false,
                     filter,

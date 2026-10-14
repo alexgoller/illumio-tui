@@ -183,7 +183,7 @@ impl Runtime {
                 Ok::<_, pce::PceError>(QueryOutcome {
                     flows,
                     truncated: cached.value.truncated,
-                    matches_count: cached.value.matches_count,
+                    incomplete: cached.value.incomplete,
                     elapsed: cached.value.elapsed,
                     hit: cached.hit,
                     filter,
@@ -242,7 +242,7 @@ impl Runtime {
                     outcome: QueryOutcome {
                         flows: ft.flows,
                         truncated: ft.truncated,
-                        matches_count: ft.matches_count,
+                        incomplete: ft.incomplete,
                         elapsed: ft.elapsed,
                         hit: ft.hit,
                         filter,

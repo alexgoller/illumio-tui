@@ -86,7 +86,7 @@ async fn submits_polls_and_downloads() {
         .await;
     Mock::given(method("GET"))
         .and(path(format!("/api/v2{QHREF}")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"href": QHREF, "status": "completed", "result": {"href": format!("{QHREF}/download")}, "matches_count": 4})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"href": QHREF, "status": "completed", "result": {"href": format!("{QHREF}/download")}, "matches_count": 4, "flows_count": 4})))
         .mount(&server)
         .await;
     mount_download(&server).await;
@@ -102,8 +102,8 @@ async fn submits_polls_and_downloads() {
     .await
     .unwrap();
     assert_eq!(r.flows.len(), 4);
-    assert_eq!(r.matches_count, Some(4));
-    assert!(!r.truncated);
+    assert_eq!(r.flows_count, Some(4));
+    assert!(!r.truncated && !r.incomplete);
     assert_eq!(r.query_href, QHREF);
     assert_eq!(c.stats().calls, 5, "POST + 3 polls + download");
     let mut seen = Vec::new();
@@ -127,7 +127,7 @@ async fn result_as_string_href_and_truncation() {
     mount_submit(&server).await;
     Mock::given(method("GET"))
         .and(path(format!("/api/v2{QHREF}")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "completed", "result": format!("{QHREF}/download"), "matches_count": 900})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "completed", "result": format!("{QHREF}/download"), "matches_count": 8, "flows_count": 4})))
         .mount(&server)
         .await;
     mount_download(&server).await;
@@ -136,7 +136,37 @@ async fn result_as_string_href_and_truncation() {
         .await
         .unwrap();
     assert_eq!(r.flows.len(), 4);
-    assert!(r.truncated, "rows == max_results and matches_count > rows");
+    assert!(r.truncated, "flows_count == max_results");
+}
+
+/// #23: demo100's one-day status. `matches_count` above the rows is the
+/// PCE collapsing aggregate versions, not more data.
+#[tokio::test]
+async fn matches_above_rows_is_not_truncation_and_a_silent_region_is_incomplete() {
+    let server = MockServer::start().await;
+    mount_submit(&server).await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "completed",
+            "result": format!("{QHREF}/download"),
+            "matches_count": 6,
+            "flows_count": 4,
+            "regions": [
+                {"pce_fqdn": "a.example", "responded": true, "flows_count": 4, "matches_count": 6},
+                {"pce_fqdn": "b.example", "responded": false, "flows_count": 0, "matches_count": 0}
+            ]
+        })))
+        .mount(&server)
+        .await;
+    mount_download(&server).await;
+    let c = client_for(&server);
+    let r = run_traffic_query(&c, &query(10_000), &fast(), &CancellationToken::new(), None)
+        .await
+        .unwrap();
+    assert_eq!((r.flows.len(), r.flows_count), (4, Some(4)));
+    assert!(!r.truncated, "4 of a 10000 cap");
+    assert!(r.incomplete, "region b did not respond");
 }
 
 #[tokio::test]

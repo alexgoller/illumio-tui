@@ -265,7 +265,7 @@ fn traffic_coverage_header_80x24() {
             result: Ok(QueryOutcome {
                 flows,
                 truncated: true,
-                matches_count: None,
+                incomplete: false,
                 elapsed: std::time::Duration::from_millis(900),
                 hit: false,
                 filter,
