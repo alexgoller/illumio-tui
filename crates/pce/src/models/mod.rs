@@ -20,6 +20,6 @@ pub use traffic::{
     QueryResultRef, ServiceFilter, ServiceMatch, TimestampRange, TrafficQuery,
 };
 pub use workloads::{
-    AgentStatus, HEARTBEAT_OFFLINE, Interface, SYNC_STALE, VenHealth, Workload, WorkloadFilter,
-    WorkloadLabel,
+    AgentStatus, HEARTBEAT_OFFLINE, Interface, SYNC_STALE, UNMANAGED, VenHealth, Workload,
+    WorkloadFilter, WorkloadLabel,
 };

@@ -58,6 +58,11 @@ pub struct Workload {
     pub ven: Option<Ref>,
 }
 
+/// The effective enforcement of a workload without a VEN. The PCE reports
+/// such a workload's `enforcement_mode` as `visibility_only` (or `idle`), but
+/// nothing enforces or reports anything there; the PCE UI calls it unmanaged.
+pub const UNMANAGED: &str = "unmanaged";
+
 /// A heartbeat older than this means the VEN is offline, whatever its status says.
 pub const HEARTBEAT_OFFLINE: Duration = Duration::from_secs(15 * 60);
 /// A policy sync still not applied after this long is an error.
@@ -184,6 +189,25 @@ impl Workload {
 
     pub fn primary_ip(&self) -> Option<&str> {
         self.interfaces.first().map(|i| i.address.as_str())
+    }
+
+    /// No VEN: `managed: false`, or, without that flag, no agent status.
+    pub fn is_unmanaged(&self) -> bool {
+        match self.managed {
+            Some(m) => !m,
+            None => self.agent_status_view().is_none(),
+        }
+    }
+
+    /// The effective enforcement: [`UNMANAGED`] for a workload without a
+    /// VEN, else the PCE's `enforcement_mode`. The raw value stays in
+    /// `enforcement_mode`.
+    pub fn enforcement(&self) -> Option<&str> {
+        if self.is_unmanaged() {
+            Some(UNMANAGED)
+        } else {
+            self.enforcement_mode.as_deref()
+        }
     }
 
     /// `agent.status.status` when present.
@@ -382,6 +406,37 @@ mod tests {
         assert_eq!(w[2].agent_status(), None);
         assert_eq!(w[2].label_text(&KeyOrder::default()), "");
         assert_eq!(w[2].online, None);
+    }
+
+    #[test]
+    fn an_unmanaged_workload_shows_unmanaged_whatever_the_api_mode() {
+        let w = fixture();
+        assert!(!w[0].is_unmanaged());
+        assert_eq!(w[0].enforcement(), Some("full"));
+        assert_eq!(w[1].enforcement(), Some("visibility_only"));
+        // The fixture's unmanaged workload reports `idle`; the PCE says
+        // `visibility_only` for real ones. Either way it is unmanaged.
+        assert!(w[2].is_unmanaged());
+        assert_eq!(w[2].enforcement(), Some(UNMANAGED));
+        let mut vis = w[2].clone();
+        vis.enforcement_mode = Some("visibility_only".into());
+        assert_eq!(vis.enforcement(), Some("unmanaged"));
+        assert_eq!(
+            vis.enforcement_mode.as_deref(),
+            Some("visibility_only"),
+            "the raw value stays"
+        );
+        // Without a managed flag, no agent status means no VEN.
+        let mut bare = vis.clone();
+        bare.managed = None;
+        assert!(bare.is_unmanaged());
+        let mut no_flag = w[0].clone();
+        no_flag.managed = None;
+        assert!(!no_flag.is_unmanaged(), "an agent status means a VEN");
+        // A managed workload without a mode has no enforcement to show.
+        let mut none = w[0].clone();
+        none.enforcement_mode = None;
+        assert_eq!(none.enforcement(), None);
     }
 
     #[test]
