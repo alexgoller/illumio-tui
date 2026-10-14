@@ -69,6 +69,11 @@ pub struct Meta {
     pub queries: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub write: Option<WriteMeta>,
+    /// `labels --unused`: where label usage came from, `pce` (its own
+    /// usage flags) or `workloads, rules and scopes only` (a PCE without
+    /// them: our own counts).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -275,6 +280,11 @@ pub fn meta_line(meta: &Meta) -> String {
     if let Some(n) = meta.queries {
         s.push_str(&format!(" · {}", pce::traffic::queries_text(n)));
     }
+    match meta.usage {
+        Some("pce") => s.push_str(" · usage from the PCE"),
+        Some(u) => s.push_str(&format!(" · usage from {u}")),
+        None => {}
+    }
     if meta.truncated {
         s.push_str(" · WARNING: result truncated");
     }
@@ -377,6 +387,7 @@ mod tests {
                 status: 201,
                 audit: "x".into(),
             }),
+            usage: None,
         };
         assert!(meta_line(&meta).contains("POST /orgs/5/labels → 201"));
     }

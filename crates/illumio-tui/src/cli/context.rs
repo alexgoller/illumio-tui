@@ -75,6 +75,7 @@ impl Context {
             slices: None,
             queries: None,
             write: None,
+            usage: None,
         }
     }
 

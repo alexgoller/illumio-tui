@@ -27,9 +27,9 @@ pub struct LabelsArgs {
     /// Label value containing this text, case-insensitively
     #[arg(long)]
     pub value_contains: Option<String>,
-    /// Only labels no workload, rule, ruleset scope or label group uses;
-    /// reads the workloads, the draft rulesets and the label groups and adds
-    /// workloads and rules counts per label
+    /// Only labels nothing holds, by the PCE's own usage flags (one
+    /// request); a PCE without them: no workload, rule, ruleset scope or
+    /// label group (reads those too and says so)
     #[arg(long)]
     pub unused: bool,
     /// Hide labels of the keys the profile's ignore_keys lists
@@ -285,7 +285,8 @@ impl TableRows for Vec<Service> {
 }
 
 /// A label as `labels --unused` prints it: the label as the PCE returned
-/// it plus how many workloads carry it and how many rules name it.
+/// it (with its `usage` flags when the PCE has them) plus how many
+/// workloads carry it and how many rules name it.
 #[derive(Debug, Serialize)]
 pub struct LabelOut {
     #[serde(flatten)]
@@ -327,10 +328,12 @@ fn keep_label(l: &Label, args: &LabelsArgs, order: &KeyOrder) -> bool {
         && (!args.ignore_keys || order.shows(&l.key))
 }
 
-/// The labels `usage` says nothing uses, with their (zero) counts.
+/// The labels `usage` says nothing uses, with their (zero) counts. A
+/// label the PCE flags as used stays out even when our counts miss it.
 fn unused_labels(labels: Vec<Label>, usage: &HashMap<String, LabelUsage>) -> Vec<LabelOut> {
     labels
         .into_iter()
+        .filter(|l| l.usage.as_ref().is_none_or(|u| !u.is_used()))
         .filter_map(|label| {
             let u = usage.get(&label.href).copied().unwrap_or_default();
             (!u.is_used()).then_some(LabelOut {
@@ -342,9 +345,35 @@ fn unused_labels(labels: Vec<Label>, usage: &HashMap<String, LabelUsage>) -> Vec
         .collect()
 }
 
+/// The labels whose PCE usage flags are all false. Their `workload` and
+/// `rule` flags are false too, so both counts are zero without a read.
+fn unused_by_pce(labels: Vec<Label>) -> Vec<LabelOut> {
+    labels
+        .into_iter()
+        .filter(|l| l.usage.as_ref().is_some_and(|u| !u.is_used()))
+        .map(|label| LabelOut {
+            label,
+            workloads: 0,
+            rules: 0,
+        })
+        .collect()
+}
+
+/// `Meta::usage` when the PCE's usage flags decided.
+const USAGE_PCE: &str = "pce";
+/// `Meta::usage` for a PCE without usage flags: our own counts.
+const USAGE_LOCAL: &str = "workloads, rules and scopes only";
+
 pub async fn labels(ctx: &Context, args: &LabelsArgs) -> Result<(), CliError> {
-    let c = ctx.pce.labels(ctx.cache_mode).await?;
+    // `--unused` asks for the PCE's usage flags in the one labels request.
+    let c = if args.unused {
+        ctx.pce.labels_with_usage(ctx.cache_mode).await?
+    } else {
+        ctx.pce.labels(ctx.cache_mode).await?
+    };
     let order = ctx.config.key_order();
+    // A PCE that ignores `usage=true` returns labels without it.
+    let flagged = c.value.iter().all(|l| l.usage.is_some());
     let data: Vec<Label> = c
         .value
         .into_iter()
@@ -354,7 +383,13 @@ pub async fn labels(ctx: &Context, args: &LabelsArgs) -> Result<(), CliError> {
     if !args.unused {
         return ctx.emit(&data, cache, c.truncated, None);
     }
-    // Usage: three more cached reads, counted in `meta`.
+    if flagged {
+        let mut meta = ctx.meta(cache, c.truncated, None);
+        meta.usage = Some(USAGE_PCE);
+        return ctx.emit_meta(&unused_by_pce(data), &meta);
+    }
+    // No flags: count usage ourselves, three more cached reads counted in
+    // `meta`. Pairing profiles, permissions and the like are not read.
     let w = ctx
         .pce
         .workloads(&WorkloadFilter::default(), ctx.cache_mode)
@@ -367,7 +402,9 @@ pub async fn labels(ctx: &Context, args: &LabelsArgs) -> Result<(), CliError> {
     // Inline deny rules only: the per-ruleset fallback would cost a read each.
     let usage = label_usage(&w.value, &sets.value, [], &groups.value);
     let truncated = c.truncated || w.truncated || sets.truncated || groups.truncated;
-    ctx.emit(&unused_labels(data, &usage), cache, truncated, None)
+    let mut meta = ctx.meta(cache, truncated, None);
+    meta.usage = Some(USAGE_LOCAL);
+    ctx.emit_meta(&unused_labels(data, &usage), &meta)
 }
 
 pub async fn label_groups(ctx: &Context) -> Result<(), CliError> {
@@ -780,5 +817,23 @@ mod tests {
             vec!["app", "", "0", "0", "yes", "/orgs/5/labels/6"]
         );
         assert!(unused_labels(fixture(), &HashMap::new()).len() == 6);
+    }
+
+    #[test]
+    fn the_pce_usage_flags_decide_and_a_flagged_use_is_never_dropped() {
+        let flagged: Vec<Label> =
+            serde_json::from_str(include_str!("../../../../fixtures/labels_usage.json")).unwrap();
+        let hrefs =
+            |out: Vec<LabelOut>| -> Vec<String> { out.into_iter().map(|o| o.label.href).collect() };
+        assert_eq!(
+            hrefs(unused_by_pce(flagged.clone())),
+            vec!["/orgs/5/labels/6", "/orgs/5/labels/7"],
+            "loc=eu: a pairing profile and a permission hold it"
+        );
+        assert!(unused_by_pce(fixture()).is_empty(), "no flags, no verdict");
+        // Our counts say loc=eu is free; its flags say not.
+        assert!(
+            !hrefs(unused_labels(flagged, &HashMap::new())).contains(&"/orgs/5/labels/5".into())
+        );
     }
 }

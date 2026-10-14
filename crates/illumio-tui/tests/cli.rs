@@ -371,13 +371,74 @@ async fn labels_repeatable_keys_value_contains_and_unused() {
     );
     assert_eq!(
         out["meta"]["api_calls"], 4,
-        "labels, workloads, draft rulesets, label groups"
+        "labels (usage asked, none given), workloads, draft rulesets, label groups"
+    );
+    assert_eq!(
+        out["meta"]["usage"], "workloads, rules and scopes only",
+        "a PCE without usage flags: our own counts, and the output says so"
     );
     cmd(&server)
         .args(["labels", "--unused", "--table"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("workloads  rules"));
+        .stdout(predicate::str::contains("workloads  rules"))
+        .stderr(predicate::str::contains(
+            "usage from workloads, rules and scopes only",
+        ));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn labels_unused_trusts_the_pce_usage_flags_in_one_request() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/labels"))
+        .and(query_param("usage", "true"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/labels_usage.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .with_priority(1)
+        .expect(2)
+        .mount(&server)
+        .await;
+    mount_policy(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .expect(0) // the PCE's flags already say whether a workload holds it
+        .mount(&server)
+        .await;
+    let out = stdout_json(
+        cmd(&server)
+            .args(["labels", "--unused", "--include-deleted"])
+            .assert()
+            .success(),
+    );
+    let rows = out["data"].as_array().unwrap();
+    let hrefs: Vec<&str> = rows.iter().map(|r| r["href"].as_str().unwrap()).collect();
+    assert_eq!(
+        hrefs,
+        vec!["/orgs/5/labels/6", "/orgs/5/labels/7"],
+        "loc=eu is held by a pairing profile and a permission: in use"
+    );
+    assert_eq!(
+        (rows[1]["workloads"].as_u64(), rows[1]["rules"].as_u64()),
+        (Some(0), Some(0))
+    );
+    assert_eq!(rows[1]["usage"]["pairing_profile"], false);
+    assert_eq!(
+        out["meta"]["api_calls"], 1,
+        "the labels with usage, nothing else"
+    );
+    assert_eq!(out["meta"]["usage"], "pce");
+    cmd(&server)
+        .args(["labels", "--unused", "--table"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("os   windows"))
+        .stdout(predicate::str::contains("eu").not())
+        .stderr(predicate::str::contains("usage from the PCE"));
 }
 
 #[tokio::test(flavor = "multi_thread")]
