@@ -6,9 +6,9 @@ use crate::tui::edit::{self, EditIntent, RulesetTarget, Start, WriteIntent};
 use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::form::{Completing, FormEvent};
 use crate::tui::model::{
-    By, Connection, Dir, Drill, EventsFilterEdit, Model, ObjectKind, Overlay, PendingAction,
-    PolicyPane, PolicyState, QueryState, Screen, Slices, StatusLine, TrafficData, TrafficState,
-    TrafficView, WritesState, queries_text, rule_line,
+    By, Connection, Dir, Drill, EventsFilterEdit, Model, ObjectKind, ObjectsState, Overlay,
+    PceUsage, PendingAction, PolicyPane, PolicyState, QueryState, Screen, Slices, StatusLine,
+    TrafficData, TrafficState, TrafficView, WritesState, queries_text, rule_line,
 };
 use crate::tui::msg::{
     Cmd, FocusedOutcome, Msg, ObjectsPayload, QueryOutcome, TimelineBucketOutcome,
@@ -630,6 +630,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             }
             Vec::new()
         }
+        Msg::LabelUsageLoaded(result) => label_usage_loaded(model, result),
         Msg::IpListsLoaded(result) => {
             model.objects.ip_lists.loading = false;
             match result {
@@ -4203,9 +4204,10 @@ fn toggle_ignored_labels(model: &mut Model) {
     });
 }
 
-/// `u` on the Labels tab: unused labels only, or all again. Usage needs the
-/// workloads and the rulesets; when one is neither cached nor on its way
-/// the reads wait for a `y` (no request before it).
+/// `u` on the Labels tab: unused labels only, or all again. The PCE's own
+/// usage flags decide: one `usage=true` labels request per `u` (cached like
+/// the labels), the filter applying when it answers (at once with flags
+/// already in hand). A PCE without the flags falls back to our counts.
 fn unused_labels_key(model: &mut Model) -> Vec<Cmd> {
     let o = &mut model.objects;
     if o.unused_only {
@@ -4214,6 +4216,79 @@ fn unused_labels_key(model: &mut Model) -> Vec<Cmd> {
         model.status = StatusLine::info("labels: all, used or not");
         return Vec::new();
     }
+    if o.pce_usage == PceUsage::Unsupported {
+        return counted_unused_key(model);
+    }
+    if !model.is_connected() {
+        model.status = StatusLine::warn("unused labels: not connected");
+        return Vec::new();
+    }
+    let o = &mut model.objects;
+    o.unused_only = true;
+    o.rebuild_labels(&model.limits.key_order());
+    model.status = unused_status(&model.objects);
+    if std::mem::replace(&mut model.objects.pce_usage_loading, true) {
+        return Vec::new(); // already asked
+    }
+    vec![Cmd::LoadLabelUsage(CacheMode::Use)]
+}
+
+/// The PCE's usage answer: its flags decide `u`; without them (an older
+/// PCE) `u` goes on with our own counts, asking for what they need.
+fn label_usage_loaded(
+    model: &mut Model,
+    result: Result<Vec<pce::models::Label>, String>,
+) -> Vec<Cmd> {
+    let o = &mut model.objects;
+    o.pce_usage_loading = false;
+    match result {
+        Ok(labels) => {
+            o.pce_usage = PceUsage::from_labels(labels);
+            if o.pce_usage == PceUsage::Unsupported && o.unused_only {
+                o.unused_only = false;
+                o.rebuild_labels(&model.limits.key_order());
+                return counted_unused_key(model);
+            }
+            o.rebuild_labels(&model.limits.key_order());
+            if o.unused_only {
+                model.status = unused_status(&model.objects);
+            }
+        }
+        Err(e) => {
+            if o.unused_only && !o.unused_decided() {
+                o.unused_only = false;
+                o.rebuild_labels(&model.limits.key_order());
+            }
+            fail(model, "label usage", &e, false);
+        }
+    }
+    Vec::new()
+}
+
+/// What `u` shows in the status line once on.
+fn unused_status(o: &ObjectsState) -> StatusLine {
+    let n = o.labels.len();
+    match (&o.pce_usage, &o.label_usage, o.usage_truncated) {
+        (PceUsage::Flags(_), ..) => StatusLine::info(format!("{n} unused labels")),
+        (PceUsage::Unknown, ..) => {
+            StatusLine::info("unused labels: asking the PCE what holds each label")
+        }
+        (PceUsage::Unsupported, None, _) => {
+            StatusLine::info("unused labels: waiting for workloads and policy")
+        }
+        (PceUsage::Unsupported, Some(_), true) => StatusLine::warn(format!(
+            "{n} unused labels; the workload list is truncated, some may be in use"
+        )),
+        (PceUsage::Unsupported, Some(_), false) => StatusLine::info(format!(
+            "{n} unused labels (usage from workloads, rules and scopes only)"
+        )),
+    }
+}
+
+/// `u` from a PCE without usage flags: our counts need the workloads and
+/// the rulesets; when one is neither cached nor on its way the reads wait
+/// for a `y` (no request before it).
+fn counted_unused_key(model: &mut Model) -> Vec<Cmd> {
     let missing = |loaded: bool, loading: bool| !loaded && !loading;
     let workloads = missing(model.workloads.loaded_at.is_some(), model.workloads.loading);
     let policy = missing(model.policy.loaded_at.is_some(), model.policy.loading);
@@ -4247,15 +4322,7 @@ fn apply_unused(model: &mut Model) {
     }
     model.objects.unused_only = true;
     model.recount_labels();
-    let o = &model.objects;
-    model.status = match (&o.label_usage, o.usage_truncated) {
-        (None, _) => StatusLine::info("unused labels: waiting for workloads and policy"),
-        (Some(_), true) => StatusLine::warn(format!(
-            "{} unused labels; the workload list is truncated, some may be in use",
-            o.labels.len()
-        )),
-        (Some(_), false) => StatusLine::info(format!("{} unused labels", o.labels.len())),
-    };
+    model.status = unused_status(&model.objects);
 }
 
 /// Why label usage cannot be counted: what is neither cached nor loading.
@@ -11606,7 +11673,8 @@ mod label_filter_tests {
 
     #[test]
     fn u_without_workloads_asks_first_and_sends_nothing_until_y() {
-        let mut m = on_labels();
+        // A PCE without usage flags: our counts need workloads and policy.
+        let mut m = older_pce(on_labels());
         press(&mut m, KeyCode::Char('u'));
         assert_eq!(
             m.status.text,
@@ -11679,6 +11747,7 @@ mod label_filter_tests {
         let mut m = with_workloads(model_with_policy());
         let objects = model_with_objects().objects;
         m.objects = objects;
+        m.objects.pce_usage = PceUsage::Unsupported;
         m.recount_labels();
         assert!(update(&mut m, Msg::Key(KeyEvent::from(KeyCode::Char('3')))).is_empty());
         let row = |m: &Model, i: usize| {
@@ -11695,7 +11764,10 @@ mod label_filter_tests {
         assert_eq!(row(&m, 0).usage.unwrap().workloads, 2);
         press(&mut m, KeyCode::Char('u'));
         assert_eq!(m.overlay, Overlay::None, "nothing to load, nothing to ask");
-        assert_eq!(m.status.text, "2 unused labels");
+        assert_eq!(
+            m.status.text,
+            "2 unused labels (usage from workloads, rules and scopes only)"
+        );
         assert_eq!(m.objects.labels.len(), 2);
         press(&mut m, KeyCode::Char('u'));
         assert_eq!(m.objects.labels.len(), 6);
@@ -11703,6 +11775,21 @@ mod label_filter_tests {
         press(&mut m, KeyCode::Char('f'));
         press(&mut m, KeyCode::Esc);
         press(&mut m, KeyCode::Char('i'));
+    }
+
+    /// `m` as from a PCE that answered `usage=true` without usage flags.
+    fn older_pce(mut m: Model) -> Model {
+        m.objects.pce_usage = PceUsage::Unsupported;
+        m
+    }
+
+    /// The fixture labels with the PCE's usage flags: loc=eu is held by a
+    /// pairing profile and a permission, the deleted app label by nothing.
+    fn usage_answer() -> Msg {
+        Msg::LabelUsageLoaded(Ok(serde_json::from_str(include_str!(
+            "../../../../fixtures/labels_usage.json"
+        ))
+        .unwrap()))
     }
 
     /// Workloads, policy and objects cached, usage counted, on the Labels tab.
@@ -11718,7 +11805,7 @@ mod label_filter_tests {
     fn a_truncated_workload_list_is_named_in_the_header_and_the_status() {
         use crate::tui::model::StatusKind;
         use crate::tui::test_support::render_to_string;
-        let mut m = all_cached();
+        let mut m = older_pce(all_cached());
         m.workloads.truncated = true;
         m.recount_labels();
         press(&mut m, KeyCode::Char('u'));
@@ -11732,12 +11819,134 @@ mod label_filter_tests {
         m.workloads.truncated = false;
         m.recount_labels();
         let out = render_to_string(&m, 100, 24);
+        assert!(
+            out.contains("unused (workloads, rules and scopes only)"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn u_asks_the_pce_once_and_its_flags_decide() {
+        use crate::tui::test_support::render_to_string;
+        let mut m = on_labels();
+        assert_eq!(
+            update(&mut m, kc(KeyCode::Char('u'))),
+            vec![Cmd::LoadLabelUsage(pce::CacheMode::Use)],
+            "one request, no confirm, no workloads or policy"
+        );
+        assert_eq!(m.overlay, Overlay::None);
+        assert!(m.objects.unused_only);
+        assert_eq!(m.objects.labels.len(), 6, "not applied before the answer");
+        assert_eq!(
+            m.status.text,
+            "unused labels: asking the PCE what holds each label"
+        );
+        assert!(render_to_string(&m, 100, 24).contains("unused: loading"));
+        // Off and on again while asking: no second request.
+        press(&mut m, KeyCode::Char('u'));
+        assert!(update(&mut m, kc(KeyCode::Char('u'))).is_empty());
+
+        assert!(update(&mut m, usage_answer()).is_empty());
+        assert_eq!(
+            shown(&m),
+            vec![("app".into(), String::new())],
+            "loc=eu, unused by our counts, is held by a pairing profile"
+        );
+        assert_eq!(m.status.text, "1 unused labels");
+        let out = render_to_string(&m, 100, 24);
         assert!(out.contains("· unused ·"), "{out}");
+
+        // Off: every label, each with what holds it.
+        press(&mut m, KeyCode::Char('u'));
+        assert_eq!(m.objects.labels.len(), 6);
+        let loc = m
+            .objects
+            .labels
+            .rows()
+            .iter()
+            .find(|r| r.key == "loc")
+            .unwrap()
+            .clone();
+        assert_eq!(loc.held_by_text(), "pairing_profile,permission");
+        m.objects.show_detail = true;
+        while m.objects.labels.selected_item().map(|r| r.key.as_str()) != Some("loc") {
+            press(&mut m, KeyCode::Down);
+        }
+        let out = render_to_string(&m, 160, 48);
+        assert!(out.contains("held by pairing_profile, permission"), "{out}");
+        assert!(
+            out.contains("pairing_profile,permission"),
+            "the wide table's held by column: {out}"
+        );
+
+        // On again: the flags in hand apply at once; the ask is a cache read.
+        assert_eq!(
+            update(&mut m, kc(KeyCode::Char('u'))),
+            vec![Cmd::LoadLabelUsage(pce::CacheMode::Use)]
+        );
+        assert_eq!(m.objects.labels.len(), 1);
+    }
+
+    #[test]
+    fn a_pce_without_usage_flags_falls_back_to_our_counts_and_says_so() {
+        use crate::tui::test_support::render_to_string;
+        // Everything cached: the fallback applies as soon as the answer is in.
+        let mut m = all_cached();
+        assert_eq!(
+            update(&mut m, kc(KeyCode::Char('u'))),
+            vec![Cmd::LoadLabelUsage(pce::CacheMode::Use)]
+        );
+        let plain: Vec<pce::models::Label> =
+            serde_json::from_str(include_str!("../../../../fixtures/labels.json")).unwrap();
+        assert!(update(&mut m, Msg::LabelUsageLoaded(Ok(plain.clone()))).is_empty());
+        assert_eq!(m.objects.pce_usage, PceUsage::Unsupported);
+        assert_eq!(
+            shown(&m),
+            vec![("loc".into(), "eu".into()), ("app".into(), String::new())]
+        );
+        assert_eq!(
+            m.status.text,
+            "2 unused labels (usage from workloads, rules and scopes only)"
+        );
+        let out = render_to_string(&m, 100, 24);
+        assert!(
+            out.contains("unused (workloads, rules and scopes only)"),
+            "{out}"
+        );
+        // The PCE has said it has none: no more asking.
+        press(&mut m, KeyCode::Char('u'));
+        assert!(update(&mut m, kc(KeyCode::Char('u'))).is_empty());
+        assert_eq!(m.objects.labels.len(), 2);
+
+        // Nothing cached: the answer leads to the usual confirm.
+        let mut m = on_labels();
+        update(&mut m, kc(KeyCode::Char('u')));
+        assert!(update(&mut m, Msg::LabelUsageLoaded(Ok(plain))).is_empty());
+        assert!(!m.objects.unused_only);
+        assert!(matches!(
+            m.overlay,
+            Overlay::Confirm {
+                action: PendingAction::LoadLabelUsage,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn a_failed_usage_ask_turns_u_off_and_says_why() {
+        let mut m = on_labels();
+        update(&mut m, kc(KeyCode::Char('u')));
+        update(&mut m, Msg::LabelUsageLoaded(Err("HTTP 500".into())));
+        assert!(!m.objects.unused_only);
+        assert!(!m.objects.pce_usage_loading);
+        assert_eq!(m.objects.pce_usage, PceUsage::Unknown);
+        assert_eq!(m.status.text, "label usage: HTTP 500");
+        assert_eq!(m.objects.labels.len(), 6);
     }
 
     #[test]
     fn fallback_deny_rules_count_once_loaded() {
-        let mut m = all_cached();
+        let mut m = older_pce(all_cached());
         let loc = |m: &Model| {
             m.objects
                 .label_usage
@@ -11775,7 +11984,7 @@ mod label_filter_tests {
     #[test]
     fn u_names_only_what_is_missing_and_leaves_the_filter_off_on_a_gap() {
         // Workloads cached, policy not: the confirm asks for policy alone.
-        let mut m = with_workloads(model_with_objects());
+        let mut m = older_pce(with_workloads(model_with_objects()));
         assert!(update(&mut m, Msg::Key(KeyEvent::from(KeyCode::Char('3')))).is_empty());
         press(&mut m, KeyCode::Char('u'));
         assert_eq!(
@@ -11794,7 +12003,7 @@ mod label_filter_tests {
 
         // Workloads and policy cached, label groups never loaded: nothing
         // to ask, nothing coming, the filter stays off.
-        let mut m = all_cached();
+        let mut m = older_pce(all_cached());
         m.objects.unused_only = false;
         m.objects.ages[ObjectKind::LabelGroups.index()] = None;
         m.recount_labels();
@@ -11804,7 +12013,7 @@ mod label_filter_tests {
         assert_eq!(m.overlay, Overlay::None);
 
         // No name index: `y` loads nothing, so the filter stays off.
-        let mut m = on_labels();
+        let mut m = older_pce(on_labels());
         if let crate::tui::model::Connection::Connected { index, .. } = &mut m.connection {
             *index = None;
         }

@@ -126,6 +126,8 @@ pub enum Msg {
         kind: ObjectKind,
         result: Result<ObjectsPayload, String>,
     },
+    /// The labels with the PCE's usage flags (`Cmd::LoadLabelUsage`).
+    LabelUsageLoaded(Result<Vec<Label>, String>),
     /// The draft IP lists with the cache age in seconds.
     IpListsLoaded(Result<(Vec<IpList>, u64), String>),
     /// Workloads with the cache age in seconds.
@@ -215,6 +217,8 @@ pub enum Cmd {
     },
     /// The draft IP lists for the Objects IP lists tab (the index's own list, cached).
     LoadIpLists(CacheMode),
+    /// `u` on the Labels tab: the labels with the PCE's usage flags, one request.
+    LoadLabelUsage(CacheMode),
     LoadWorkloads(CacheMode),
     /// The app overlay's workloads: one read filtered by the app's labels.
     LoadAppWorkloads {
@@ -347,6 +351,7 @@ impl PartialEq for Cmd {
                 ka == kb && ma == mb
             }
             (Cmd::LoadIpLists(a), Cmd::LoadIpLists(b)) => a == b,
+            (Cmd::LoadLabelUsage(a), Cmd::LoadLabelUsage(b)) => a == b,
             (Cmd::LoadWorkloads(a), Cmd::LoadWorkloads(b)) => a == b,
             (
                 Cmd::LoadAppWorkloads {

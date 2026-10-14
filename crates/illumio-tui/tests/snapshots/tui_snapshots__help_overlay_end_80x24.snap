@@ -14,7 +14,7 @@ expression: out
 │Policy   N               new deny rule in the selected ruleset (rules pane)   │
 │Policy   i               rule impact: load the workloads once (1 request)     │
 │Objects  Tab / Enter     next tab: labels, groups, services, IP lists · detail│
-│Labels   f / i / u       key filter · ignored keys · unused only (asks first) │
+│Labels   f / i / u       key filter · ignored keys · unused only (PCE usage)  │
 │Labels   /=text /k=text  search values only · the values of key k             │
 │IP lists Enter           detail: ranges · FQDNs · size · rules using it       │
 │Workloads t/T h H Enter  Traffic as src/dst · unhealthy · health sort · detail│

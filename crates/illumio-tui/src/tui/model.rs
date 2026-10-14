@@ -3191,7 +3191,30 @@ impl ObjectKind {
 pub struct LabelRow {
     pub label: Label,
     pub usage: Option<pce::LabelUsage>,
+    /// What holds the label, as the PCE says (`u` asks); `None` before
+    /// that or from a PCE without usage flags.
+    pub held_by: Option<pce::models::LabelUsageFlags>,
     pub in_keys: bool,
+}
+
+impl LabelRow {
+    /// Whether nothing holds the label: by the PCE's flags (and our counts
+    /// when loaded) when `by_pce`, else by our counts alone. Unknown is used.
+    pub fn is_unused(&self, by_pce: bool) -> bool {
+        let counted = |u: pce::LabelUsage| !u.is_used();
+        if by_pce {
+            self.held_by.as_ref().is_some_and(|f| !f.is_used()) && self.usage.is_none_or(counted)
+        } else {
+            self.usage.is_some_and(counted)
+        }
+    }
+
+    /// The `held by` cell: the PCE's kinds, `-` before they are known.
+    pub fn held_by_text(&self) -> String {
+        self.held_by
+            .as_ref()
+            .map_or_else(|| "-".into(), |f| f.kinds().join(","))
+    }
 }
 
 impl std::ops::Deref for LabelRow {
@@ -3290,6 +3313,24 @@ pub fn label_columns() -> Vec<Column<LabelRow>> {
             narrow_width: 0,
             full_title: None,
             full: Some(|l| usage_full(l, |u| u.rules)),
+        },
+        Column {
+            title: "held by",
+            width: 28,
+            cell: |l| l.held_by_text(),
+            key: |l| SortKey::Text(l.held_by_text()),
+            right: false,
+            // Wide terminals only: the counts and the value come first.
+            hide_below: 120,
+            narrow: None,
+            narrow_width: 0,
+            full_title: None,
+            full: Some(|l| {
+                l.held_by
+                    .as_ref()
+                    .map(|f| f.kinds().join(","))
+                    .unwrap_or_default()
+            }),
         },
         Column {
             title: "deleted",
@@ -3432,6 +3473,34 @@ pub fn service_columns() -> Vec<Column<Service>> {
     ]
 }
 
+/// What the PCE said about label usage (`u` on the Labels tab).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum PceUsage {
+    /// Not asked yet (or the ask failed).
+    #[default]
+    Unknown,
+    /// Its flags by label href: they decide what is unused.
+    Flags(HashMap<String, pce::models::LabelUsageFlags>),
+    /// It answered without usage flags (an older PCE): our counts from
+    /// workloads, rules, scopes and label groups decide.
+    Unsupported,
+}
+
+impl PceUsage {
+    /// From a `usage=true` answer: flags when every label has them.
+    pub fn from_labels(labels: Vec<Label>) -> Self {
+        if !labels.iter().all(|l| l.usage.is_some()) {
+            return Self::Unsupported;
+        }
+        Self::Flags(
+            labels
+                .into_iter()
+                .filter_map(|l| l.usage.map(|u| (l.href, u)))
+                .collect(),
+        )
+    }
+}
+
 #[derive(Debug)]
 pub struct ObjectsState {
     pub kind: ObjectKind,
@@ -3447,8 +3516,8 @@ pub struct ObjectsState {
     pub hide_ignored: bool,
     /// How many labels `hide_ignored` leaves out.
     pub ignored_hidden: usize,
-    /// `u`: only labels no workload, rule, scope or label group uses;
-    /// applies once `label_usage` exists.
+    /// `u`: only labels nothing holds; applies once the PCE's usage flags
+    /// arrive, or, from a PCE without them, once `label_usage` exists.
     pub unused_only: bool,
     /// Usage by label href, from the cached workloads, policy and label
     /// groups (`Model::recount_labels`); `None` until all three are loaded.
@@ -3456,6 +3525,10 @@ pub struct ObjectsState {
     /// The workload list behind `label_usage` was cut short: a label it
     /// counts as unused may be carried by a workload not read.
     pub usage_truncated: bool,
+    /// The PCE's own usage flags (`GET /labels?usage=true`), asked for by `u`.
+    pub pce_usage: PceUsage,
+    /// The `u` request is on its way.
+    pub pce_usage_loading: bool,
     pub groups: TableView<LabelGroup>,
     pub services: TableView<Service>,
     /// The IP lists tab.
@@ -3484,6 +3557,8 @@ impl ObjectsState {
             unused_only: false,
             label_usage: None,
             usage_truncated: false,
+            pce_usage: PceUsage::Unknown,
+            pce_usage_loading: false,
             groups: TableView::new(group_columns_objects()),
             services: TableView::new(service_columns()),
             ip_lists: IpListsState::new(min_refresh),
@@ -3506,7 +3581,11 @@ impl ObjectsState {
     /// stored usage (`order` says which keys are ignored). No request.
     pub fn rebuild_labels(&mut self, order: &KeyOrder) {
         let usage = self.label_usage.as_ref();
-        let unused_only = self.unused_only && usage.is_some();
+        let flags = match &self.pce_usage {
+            PceUsage::Flags(m) => Some(m),
+            _ => None,
+        };
+        let unused_only = self.unused_only && self.unused_decided();
         let mut hidden = 0;
         let rows: Vec<LabelRow> = self
             .all_labels
@@ -3518,13 +3597,24 @@ impl ObjectsState {
             })
             .map(|l| LabelRow {
                 usage: usage.map(|u| u.get(&l.href).copied().unwrap_or_default()),
+                held_by: flags.and_then(|m| m.get(&l.href).cloned()),
                 in_keys: self.label_keys.is_empty() || self.label_keys.contains(&l.key),
                 label: l.clone(),
             })
-            .filter(|r| !unused_only || r.usage.is_some_and(|u| !u.is_used()))
+            .filter(|r| !unused_only || r.is_unused(flags.is_some()))
             .collect();
         self.ignored_hidden = hidden;
         self.labels.set_rows(rows);
+    }
+
+    /// Whether `u` can tell used from unused: the PCE's flags are in, or
+    /// the PCE has none and our own counts are.
+    pub fn unused_decided(&self) -> bool {
+        match self.pce_usage {
+            PceUsage::Flags(_) => true,
+            PceUsage::Unsupported => self.label_usage.is_some(),
+            PceUsage::Unknown => false,
+        }
     }
 
     /// Whether any Labels-tab filter (`f`, `i`, `u`) leaves rows out.

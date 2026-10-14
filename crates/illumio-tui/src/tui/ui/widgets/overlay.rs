@@ -144,7 +144,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ),
     (
         "Labels   f / i / u",
-        "key filter · ignored keys · unused only (asks first)",
+        "key filter · ignored keys · unused only (PCE usage)",
     ),
     (
         "Labels   /=text /k=text",

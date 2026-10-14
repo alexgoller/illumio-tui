@@ -2,11 +2,11 @@
 //! groups, services, IP lists), the current kind's table, and an optional
 //! detail pane for the selected object. The IP lists tab is drawn by
 //! `screens::iplists` below the strip.
-use crate::tui::model::{LabelRow, Model, ObjectKind, ObjectsState};
+use crate::tui::model::{LabelRow, Model, ObjectKind, ObjectsState, PceUsage};
 use crate::tui::ui::widgets::bars::age_text;
 use crate::tui::ui::widgets::panel::panel;
 use crate::tui::ui::widgets::table::{header_meta, render};
-use pce::models::{Label, LabelGroup, Service};
+use pce::models::{LabelGroup, Service};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -160,11 +160,17 @@ fn label_filter_meta(o: &ObjectsState, shown: usize, total: usize) -> String {
         parts.push(format!("key {}", o.label_keys.join(",")));
     }
     if o.unused_only {
-        parts.push(match (&o.label_usage, o.usage_truncated) {
-            (None, _) => "unused: loading".to_string(),
-            (Some(_), true) => "unused (workloads truncated)".to_string(),
-            (Some(_), false) => "unused".to_string(),
-        });
+        parts.push(
+            match (&o.pce_usage, &o.label_usage, o.usage_truncated) {
+                (PceUsage::Flags(_), ..) => "unused",
+                (PceUsage::Unknown, ..) | (PceUsage::Unsupported, None, _) => "unused: loading",
+                (PceUsage::Unsupported, Some(_), true) => "unused (workloads truncated)",
+                (PceUsage::Unsupported, Some(_), false) => {
+                    "unused (workloads, rules and scopes only)"
+                }
+            }
+            .to_string(),
+        );
     }
     parts.push(format!("{shown} of {total}"));
     if o.ignored_hidden > 0 {
@@ -230,20 +236,41 @@ pub(super) fn items(head: &'static str, values: Vec<String>) -> Vec<DetailLine> 
         .collect()
 }
 
-fn label_lines(l: &Label) -> Vec<DetailLine> {
+/// A label's lines. Once the PCE's usage flags are in (`u`), `held by`
+/// takes the second line and the two dates share the last, so all of it
+/// fits the four-line pane.
+fn label_lines(l: &LabelRow) -> Vec<DetailLine> {
     let dash = || "-".to_string();
-    vec![
-        (
-            Some("label"),
-            format!(
-                "{}{}",
-                l.display(),
-                if l.is_deleted() { "  (deleted)" } else { "" }
-            ),
+    let label = (
+        Some("label"),
+        format!(
+            "{}{}",
+            l.display(),
+            if l.is_deleted() { "  (deleted)" } else { "" }
         ),
-        (Some("href"), l.href.clone()),
-        (Some("created"), l.created_at.clone().unwrap_or_else(dash)),
-        (Some("updated"), l.updated_at.clone().unwrap_or_else(dash)),
+    );
+    let href = (Some("href"), l.href.clone());
+    let created = l.created_at.clone().unwrap_or_else(dash);
+    let updated = l.updated_at.clone().unwrap_or_else(dash);
+    let Some(flags) = &l.held_by else {
+        return vec![
+            label,
+            href,
+            (Some("created"), created),
+            (Some("updated"), updated),
+        ];
+    };
+    let kinds = flags.kinds();
+    let held = if kinds.is_empty() {
+        "nothing: unused".to_string()
+    } else {
+        kinds.join(", ")
+    };
+    vec![
+        label,
+        (Some("held by"), held),
+        href,
+        (Some("created"), format!("{created} · updated {updated}")),
     ]
 }
 
