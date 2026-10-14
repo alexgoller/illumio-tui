@@ -3918,6 +3918,9 @@ pub struct WorkloadRowView {
     /// `:export`'s labels: every label (ignored keys too), `; `-joined, as
     /// `workloads --csv` prints them.
     pub label_list: String,
+    /// The label model's keys (scope keys, then the tier key) this workload
+    /// has no label for: non-empty means unlabeled (`u`).
+    pub missing: Vec<String>,
 }
 
 impl WorkloadRowView {
@@ -3938,6 +3941,7 @@ impl WorkloadRowView {
             ven: a.and_then(|a| a.version).unwrap_or_default(),
             labels: workload.label_text(order),
             label_list: join_list(workload.label_entries(order)),
+            missing: workload.missing_label_keys(order.first()),
             health,
             workload,
         }
@@ -4007,6 +4011,22 @@ fn agent_of(r: &WorkloadRowView) -> String {
 
 /// Index of the `health` column in `workload_columns()`.
 const HEALTH_COL: usize = 8;
+/// Index of the `heartbeat` column in `workload_columns()`.
+const HEARTBEAT_COL: usize = 9;
+/// Index of the `missing` column (last) in `workload_columns()`.
+const MISSING_COL: usize = 12;
+
+/// The columns, with `missing` shown at every width while `u` (unlabeled)
+/// is on, the heartbeat giving it room below 100 columns; otherwise only
+/// on very wide terminals.
+fn workload_columns_for(unlabeled: bool) -> Vec<Column<WorkloadRowView>> {
+    let mut cols = workload_columns();
+    if unlabeled {
+        cols[MISSING_COL].hide_below = 0;
+        cols[HEARTBEAT_COL].hide_below = 100;
+    }
+    cols
+}
 
 pub fn workload_columns() -> Vec<Column<WorkloadRowView>> {
     // Below 120 columns only hostname, ip, enforcement, heartbeat and health
@@ -4103,7 +4123,75 @@ pub fn workload_columns() -> Vec<Column<WorkloadRowView>> {
                 |r| SortKey::Text(r.ven.clone()),
             )
         },
+        Column {
+            // Names what `u` filters on; shown with `u` (`workload_columns_for`).
+            hide_below: 200,
+            ..text_col(
+                "missing",
+                18,
+                |r| r.missing.join(", "),
+                |r| SortKey::Text(r.missing.join(", ")),
+            )
+        },
     ]
+}
+
+/// `E`'s steps after `all`: the effective enforcement ([`Workload::enforcement`]).
+const ENFORCEMENT_CYCLE: [&str; 5] = [
+    "full",
+    "selective",
+    "visibility_only",
+    "idle",
+    pce::models::UNMANAGED,
+];
+
+/// The Workloads screen's local filters (`E` `m` `o` `u`, `c` clears):
+/// applied to the loaded list, no request. `h` stays its own toggle.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WorkloadFilters {
+    /// The effective enforcement, `unmanaged` included.
+    pub enforcement: Option<&'static str>,
+    /// With a VEN (`true`) or without (`false`).
+    pub managed: Option<bool>,
+    /// The VEN is offline ([`Workload::is_offline`]).
+    pub offline: bool,
+    /// Some label model key has no label ([`Workload::missing_label_keys`]).
+    pub unlabeled: bool,
+}
+
+impl WorkloadFilters {
+    /// `E`: all → full → selective → visibility_only → idle → unmanaged → all.
+    pub fn next_enforcement(&mut self) {
+        let at = self
+            .enforcement
+            .and_then(|e| ENFORCEMENT_CYCLE.iter().position(|c| *c == e));
+        self.enforcement = match at {
+            None => Some(ENFORCEMENT_CYCLE[0]),
+            Some(i) => ENFORCEMENT_CYCLE.get(i + 1).copied(),
+        };
+    }
+
+    /// `m`: all → managed → unmanaged → all.
+    pub fn next_managed(&mut self) {
+        self.managed = match self.managed {
+            None => Some(true),
+            Some(true) => Some(false),
+            Some(false) => None,
+        };
+    }
+
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    fn keeps(&self, v: &WorkloadRowView) -> bool {
+        let w = &v.workload;
+        self.enforcement.is_none_or(|e| w.enforcement() == Some(e))
+            && self.managed.is_none_or(|m| m != w.is_unmanaged())
+            // `health` is `ven_health` at the row's clock: `is_offline`.
+            && (!self.offline || v.health == VenHealth::Offline)
+            && (!self.unlabeled || !v.missing.is_empty())
+    }
 }
 
 #[derive(Debug)]
@@ -4116,6 +4204,10 @@ pub struct WorkloadsState {
     /// Why the last read failed, until one succeeds (`impact: unavailable`).
     pub error: Option<String>,
     pub unhealthy_only: bool,
+    /// `E` `m` `o` `u`: local filters on top of `unhealthy_only`.
+    pub filters: WorkloadFilters,
+    /// The label model keys the last `rebuild` checked for `u`.
+    model_keys: Vec<String>,
     /// Test-only fixed clock so ages in snapshots are deterministic.
     pub now: Option<jiff::Timestamp>,
     /// Workloads per health state in rank order (healthy, unmanaged, warning, offline, error).
@@ -4140,6 +4232,8 @@ impl WorkloadsState {
             truncated: false,
             error: None,
             unhealthy_only: false,
+            filters: WorkloadFilters::default(),
+            model_keys: Vec::new(),
             now: None,
             counts: [0; 5],
             age_secs: 0,
@@ -4179,12 +4273,56 @@ impl WorkloadsState {
                 VenHealth::Warning | VenHealth::Error | VenHealth::Offline
             )
         };
-        let rows = if self.unhealthy_only {
-            views.into_iter().filter(|v| unhealthy(v.health)).collect()
-        } else {
-            views
-        };
+        let rows = views
+            .into_iter()
+            .filter(|v| !self.unhealthy_only || unhealthy(v.health))
+            .filter(|v| self.filters.keeps(v))
+            .collect();
+        self.model_keys = order.first().to_vec();
+        let unlabeled = self.filters.unlabeled;
+        if (self.table.columns[MISSING_COL].hide_below == 0) != unlabeled {
+            self.table.set_columns(workload_columns_for(unlabeled));
+        }
         self.table.set_rows(rows);
+    }
+
+    /// Any filter beyond search: `h` or `E` `m` `o` `u`.
+    pub fn filtered(&self) -> bool {
+        self.unhealthy_only || !self.filters.is_empty()
+    }
+
+    /// The line above the table while a filter is on: what is active and
+    /// the rows shown of those loaded (`enforcement unmanaged · offline ·
+    /// unlabeled (app, env, role) · 24 of 206`); a truncated list says its
+    /// counts are partial.
+    pub fn filter_line(&self) -> Option<String> {
+        if !self.filtered() {
+            return None;
+        }
+        let f = &self.filters;
+        let mut parts: Vec<String> = Vec::new();
+        if self.unhealthy_only {
+            parts.push("unhealthy".into());
+        }
+        if let Some(e) = f.enforcement {
+            parts.push(format!("enforcement {e}"));
+        }
+        match f.managed {
+            Some(true) => parts.push("managed".into()),
+            Some(false) => parts.push("unmanaged".into()),
+            None => {}
+        }
+        if f.offline {
+            parts.push("offline".into());
+        }
+        if f.unlabeled {
+            parts.push(format!("unlabeled ({})", self.model_keys.join(", ")));
+        }
+        parts.push(format!("{} of {}", self.table.len(), self.raw.len()));
+        if self.truncated {
+            parts.push("partial: the list is truncated".into());
+        }
+        Some(parts.join(" · "))
     }
 
     /// Counts per state in rank order (healthy, unmanaged, warning, offline, error)
@@ -4992,6 +5130,132 @@ mod tests {
             sorted,
             vec!["env=prod role=db app=shop", "env=prod role=web app=aaa"]
         );
+    }
+
+    fn shown_hosts(m: &Model) -> Vec<String> {
+        let t = &m.workloads.table;
+        t.visible()
+            .iter()
+            .map(|&i| t.rows()[i].workload.display_name())
+            .collect()
+    }
+
+    #[test]
+    fn workload_filters_combine_and_name_themselves_with_the_count() {
+        let mut m = crate::tui::test_support::model_with_workloads();
+        let order = m.limits.key_order();
+        let w = &mut m.workloads;
+        assert_eq!(w.filter_line(), None, "nothing active: no line");
+        // E: all → full → selective → visibility_only → idle → unmanaged → all.
+        let mut seen = Vec::new();
+        for _ in 0..6 {
+            w.filters.next_enforcement();
+            seen.push(w.filters.enforcement);
+        }
+        assert_eq!(
+            seen,
+            [
+                Some("full"),
+                Some("selective"),
+                Some("visibility_only"),
+                Some("idle"),
+                Some("unmanaged"),
+                None
+            ]
+        );
+        // m: all → managed → unmanaged → all.
+        let mut seen = Vec::new();
+        for _ in 0..3 {
+            w.filters.next_managed();
+            seen.push(w.filters.managed);
+        }
+        assert_eq!(seen, [Some(true), Some(false), None]);
+
+        w.filters.enforcement = Some("unmanaged");
+        w.rebuild(&order);
+        assert_eq!(shown_hosts(&m), ["unmanaged-nas"], "effective: no VEN");
+        let w = &mut m.workloads;
+        w.filters.enforcement = Some("idle");
+        w.rebuild(&order);
+        assert!(
+            shown_hosts(&m).is_empty(),
+            "the nas reports idle, but has no VEN"
+        );
+
+        let w = &mut m.workloads;
+        w.filters = WorkloadFilters {
+            unlabeled: true,
+            ..Default::default()
+        };
+        w.rebuild(&order);
+        assert_eq!(shown_hosts(&m), ["unmanaged-nas", "host-4.example"]);
+        let w = &mut m.workloads;
+        w.filters.managed = Some(true);
+        w.rebuild(&order);
+        assert_eq!(shown_hosts(&m), ["host-4.example"]);
+        assert_eq!(
+            m.workloads.filter_line().as_deref(),
+            Some("managed · unlabeled (app, env, role) · 1 of 4")
+        );
+
+        let w = &mut m.workloads;
+        w.filters = WorkloadFilters {
+            offline: true,
+            ..Default::default()
+        };
+        w.unhealthy_only = true;
+        w.rebuild(&order);
+        assert_eq!(shown_hosts(&m), ["host-2.example"]);
+        assert_eq!(
+            m.workloads.filter_line().as_deref(),
+            Some("unhealthy · offline · 1 of 4")
+        );
+        // Search narrows the shown count too.
+        m.workloads.table.start_search();
+        m.workloads.table.search_push('z');
+        m.workloads.table.search_commit();
+        assert_eq!(
+            m.workloads.filter_line().as_deref(),
+            Some("unhealthy · offline · 0 of 4")
+        );
+        m.workloads.truncated = true;
+        assert_eq!(
+            m.workloads.filter_line().as_deref(),
+            Some("unhealthy · offline · 0 of 4 · partial: the list is truncated")
+        );
+        m.workloads.unhealthy_only = false;
+        m.workloads.filters = WorkloadFilters {
+            enforcement: Some("visibility_only"),
+            managed: Some(false),
+            ..Default::default()
+        };
+        m.workloads.table.search_clear();
+        m.workloads.rebuild(&order);
+        assert_eq!(
+            m.workloads.filter_line().as_deref(),
+            Some(
+                "enforcement visibility_only · unmanaged · 0 of 4 · partial: the list is truncated"
+            )
+        );
+    }
+
+    #[test]
+    fn workload_missing_column_names_the_absent_model_keys() {
+        let mut m = crate::tui::test_support::model_with_workloads();
+        m.set_label_model(vec!["env".into()], "role".into(), Vec::new());
+        m.workloads.raw[0]
+            .labels
+            .retain(|l| l.key.as_deref() != Some("role"));
+        m.workloads.rebuild(&m.limits.key_order());
+        let t = &m.workloads.table;
+        let col = t.columns.iter().position(|c| c.title == "missing").unwrap();
+        let cells: Vec<String> = t.rows().iter().map(|r| t.cell(r, col)).collect();
+        assert_eq!(cells, ["role", "", "env, role", "env, role"]);
+        // Hidden at ordinary widths unless `u` is on.
+        assert!(t.columns[col].hide_below > 180);
+        m.workloads.filters.unlabeled = true;
+        m.workloads.rebuild(&m.limits.key_order());
+        assert_eq!(m.workloads.table.columns[col].hide_below, 0);
     }
 
     #[test]

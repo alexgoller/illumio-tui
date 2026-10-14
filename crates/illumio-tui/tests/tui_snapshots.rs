@@ -508,6 +508,42 @@ fn workloads_screen_80x24_and_detail_160x48() {
 }
 
 #[test]
+fn workloads_filtered_80x24_and_140x30() {
+    use illumio_tui::tui::model::Screen;
+    use illumio_tui::tui::test_support::model_with_workloads;
+    let mut m = model_with_workloads();
+    m.screen = Screen::Workloads;
+    m.workloads.filters.unlabeled = true;
+    m.workloads.rebuild(&m.limits.key_order());
+    let out = render_to_string(&m, 80, 24);
+    assert!(
+        out.contains("filter unlabeled (app, env, role) · 2 of 4"),
+        "{out}"
+    );
+    assert!(out.contains("missing"), "the column shows at 80: {out}");
+    assert!(out.contains("app, env, role"), "{out}");
+    assert!(!out.contains("E/m/o/u"), "no room at 80: {out}");
+    insta::assert_snapshot!("workloads_unlabeled_80x24", out);
+    m.workloads.filters.unlabeled = false;
+    m.workloads.filters.offline = true;
+    m.workloads.truncated = true;
+    m.workloads.rebuild(&m.limits.key_order());
+    let out = render_to_string(&m, 140, 30);
+    assert!(
+        out.contains("offline · 1 of 4 · partial: the list is truncated"),
+        "{out}"
+    );
+    assert!(!out.contains("missing"), "u off: {out}");
+    assert!(out.contains("E/m/o/u filter  c clear"), "{out}");
+    insta::assert_snapshot!("workloads_offline_truncated_140x30", out);
+    m.workloads.filters.offline = false;
+    m.workloads.filters.enforcement = Some("idle");
+    m.workloads.rebuild(&m.limits.key_order());
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("no workloads match the filters"), "{out}");
+}
+
+#[test]
 fn error_overlay_80x24() {
     use illumio_tui::tui::model::Overlay;
     let mut m = model_fixture();

@@ -2,9 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ Keys ───────────────────────────────── 42-63 of 63 · j/k scroll · Esc closes ╮
-│Traffic  w               draft allow rule from a blocked flow or row (writes) │
-│Form     Ctrl-N Ctrl-P   complete from the index · cycle back                 │
+╭ Keys ───────────────────────────────── 44-65 of 65 · j/k scroll · Esc closes ╮
 │Filter   Ctrl-N Ctrl-P   complete the filter fields · cycle back              │
 │w form   Ruleset         found by the destination's scope · Tab/Ctrl-N names  │
 │w form   Ctrl-A Ctrl-R   all labels · create the typed ruleset                │
@@ -18,6 +16,8 @@ expression: out
 │Labels   /=text /k=text  search values only · the values of key k             │
 │IP lists Enter           detail: ranges · FQDNs · size · rules using it       │
 │Workloads t/T h H Enter  Traffic as src/dst · unhealthy · health sort · detail│
+│Workloads E m o u c      enforcement · managed · offline · unlabeled · clear  │
+│                         local filters: combine with h and /, no request      │
 │Events   f / Enter / S   filter · event as JSON · sort by severity            │
 │n / e / x (writes)       new/edit/delete: Objects, IP lists, Workloads, Policy│
 │Pending  j/k Space Enter select · mark · diff of a pending entry              │

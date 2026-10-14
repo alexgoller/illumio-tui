@@ -3652,9 +3652,7 @@ fn counts_text(body: Option<&serde_json::Value>) -> String {
 fn workloads_page(model: &Model) -> usize {
     let area = ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1);
     crate::tui::ui::layout::chrome(area)
-        .map(|c| {
-            crate::tui::ui::screens::workloads::table_rows(c.body, model.workloads.show_detail)
-        })
+        .map(|c| crate::tui::ui::screens::workloads::table_rows(c.body, &model.workloads))
         .unwrap_or(10)
         .max(1)
 }
@@ -3713,10 +3711,21 @@ fn workloads_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 w.show_detail = !w.show_detail && w.table.selected_item().is_some();
                 return Vec::new();
             }
-            KeyCode::Char('h') => {
+            KeyCode::Char(c @ ('h' | 'E' | 'm' | 'o' | 'u' | 'c')) => {
+                // Local filters over the loaded list: no request.
                 let order = model.limits.key_order();
                 let w = &mut model.workloads;
-                w.unhealthy_only = !w.unhealthy_only;
+                match c {
+                    'h' => w.unhealthy_only = !w.unhealthy_only,
+                    'E' => w.filters.next_enforcement(),
+                    'm' => w.filters.next_managed(),
+                    'o' => w.filters.offline = !w.filters.offline,
+                    'u' => w.filters.unlabeled = !w.filters.unlabeled,
+                    _ => {
+                        w.unhealthy_only = false;
+                        w.filters = crate::tui::model::WorkloadFilters::default();
+                    }
+                }
                 w.rebuild(&order);
                 w.show_detail &= w.table.selected_item().is_some();
                 return Vec::new();
@@ -7739,6 +7748,71 @@ mod tests {
     }
 
     #[test]
+    fn workload_filter_keys_are_local_combine_and_c_clears_them() {
+        use crate::tui::test_support::model_with_workloads;
+        let mut m = model_with_workloads();
+        update(&mut m, key('4'));
+        let calls = m.stats.calls;
+        let hosts = |m: &Model| -> Vec<String> {
+            let t = &m.workloads.table;
+            t.visible()
+                .iter()
+                .map(|&i| t.rows()[i].workload.display_name())
+                .collect()
+        };
+        // E: full, then selective.
+        assert!(update(&mut m, key('E')).is_empty());
+        assert_eq!(hosts(&m), ["host-1.example"]);
+        assert!(update(&mut m, key('E')).is_empty());
+        assert_eq!(hosts(&m), ["host-4.example"]);
+        // u combines: host-4 has no labels.
+        assert!(update(&mut m, key('u')).is_empty());
+        assert_eq!(hosts(&m), ["host-4.example"]);
+        assert!(update(&mut m, key('c')).is_empty());
+        assert!(m.workloads.filters.is_empty());
+        assert_eq!(m.workloads.table.len(), 4);
+        // m: managed, then unmanaged.
+        update(&mut m, key('m'));
+        assert_eq!(m.workloads.table.len(), 3);
+        update(&mut m, key('m'));
+        assert_eq!(hosts(&m), ["unmanaged-nas"]);
+        update(&mut m, key('m'));
+        // o: offline only; with h too.
+        update(&mut m, key('o'));
+        assert_eq!(hosts(&m), ["host-2.example"]);
+        update(&mut m, key('h'));
+        assert_eq!(hosts(&m), ["host-2.example"]);
+        // `/` combines with them.
+        update(&mut m, key('/'));
+        update(&mut m, key('z'));
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        assert!(hosts(&m).is_empty(), "no offline host matches z");
+        // c clears h and the filters, not the search.
+        update(&mut m, key('c'));
+        assert!(!m.workloads.unhealthy_only);
+        assert!(m.workloads.filters.is_empty());
+        assert_eq!(m.workloads.table.search_text(), "z");
+        assert_eq!(m.stats.calls, calls, "no request");
+        assert!(!m.quit);
+    }
+
+    #[test]
+    fn workload_filter_keys_type_into_an_open_search() {
+        use crate::tui::test_support::model_with_workloads;
+        let mut m = model_with_workloads();
+        update(&mut m, key('4'));
+        update(&mut m, key('/'));
+        for c in "Eumoc".chars() {
+            assert!(update(&mut m, key(c)).is_empty());
+        }
+        assert!(m.workloads.filters.is_empty());
+        assert!(m.workloads.table.is_searching());
+    }
+
+    #[test]
     fn h_with_no_unhealthy_rows_is_empty_not_a_panic_and_capital_h_flips() {
         use crate::tui::test_support::model_with_workloads;
         let mut m = model_with_workloads();
@@ -9242,7 +9316,7 @@ mod tests {
     fn help_scrolls_to_its_last_line_and_reopens_at_the_top() {
         use crate::tui::ui::widgets::overlay::{HELP_LINES, help_last_scroll};
         let mut m = model_fixture(); // 80x24
-        assert_eq!(HELP_LINES.len(), 63);
+        assert_eq!(HELP_LINES.len(), 65);
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  A"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  D"));
         assert!(
@@ -9266,6 +9340,7 @@ mod tests {
                 .any(|(_, d)| *d == ":writes [on|off]  :export[!] <path>")
         );
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "IP lists Enter"));
+        assert!(HELP_LINES.iter().any(|(k, _)| *k == "Workloads E m o u c"));
         assert!(
             HELP_LINES
                 .iter()
@@ -9273,13 +9348,13 @@ mod tests {
         );
         update(&mut m, key('?'));
         let last = help_last_scroll(24);
-        assert_eq!(last, 41, "63 lines, 22 rows inside the box");
+        assert_eq!(last, 43, "65 lines, 22 rows inside the box");
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app x / X"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app o"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app d"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Sections Space / z"));
 
-        for _ in 0..45 {
+        for _ in 0..50 {
             update(&mut m, key('j'));
         }
         assert_eq!(m.help_scroll, last);

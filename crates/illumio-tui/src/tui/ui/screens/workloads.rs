@@ -1,6 +1,6 @@
 //! Workloads screen: one table of workloads and an optional detail pane for
 //! the selected one (href, OS, VEN status, enforcement, interfaces, labels).
-use crate::tui::model::{Model, WorkloadRowView};
+use crate::tui::model::{Model, WorkloadRowView, WorkloadsState};
 use crate::tui::ui::screens::objects::{DetailLine, clip, items};
 use crate::tui::ui::theme::Theme;
 use crate::tui::ui::widgets::bars::age_text;
@@ -29,9 +29,11 @@ pub fn layout(body: Rect, show_detail: bool) -> (Rect, Rect) {
     (rows[0], rows[1])
 }
 
-/// Rows of data visible in the table (minus the summary line, border and header).
-pub fn table_rows(body: Rect, show_detail: bool) -> usize {
-    layout(body, show_detail).0.height.saturating_sub(4) as usize
+/// Rows of data visible in the table (minus the summary line, the filter
+/// line while a filter is on, border and header).
+pub fn table_rows(body: Rect, w: &WorkloadsState) -> usize {
+    let lines = 4 + u16::from(w.filtered());
+    layout(body, w.show_detail).0.height.saturating_sub(lines) as usize
 }
 
 pub fn render_screen(model: &Model, f: &mut Frame, body: Rect) {
@@ -54,9 +56,23 @@ pub fn render_screen(model: &Model, f: &mut Frame, body: Rect) {
         return;
     }
     let (area, detail) = layout(body, model.workloads.show_detail);
-    let [summary, table] =
-        Layout::vertical([Constraint::Length(1), Constraint::Min(3)]).areas(area);
+    let filter = model.workloads.filter_line();
+    let [summary, filter_area, table] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(u16::from(filter.is_some())),
+        Constraint::Min(3),
+    ])
+    .areas(area);
     f.render_widget(Paragraph::new(summary_line(model, summary.width)), summary);
+    if let Some(text) = filter {
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled("filter ", t.header_style()),
+                Span::raw(text),
+            ])),
+            filter_area,
+        );
+    }
     render_table(model, f, table);
     if detail.height > 0 {
         render_detail(model, f, detail);
@@ -90,20 +106,23 @@ fn render_table(model: &Model, f: &mut Frame, area: Rect) {
         format!("{rows} · {freshness}")
     };
     meta.push_str(&w.auto.meta(Instant::now()));
-    if w.unhealthy_only {
-        meta = format!("unhealthy only · {meta}");
-    }
     let sort_meta = header_meta(&w.table);
     if !sort_meta.is_empty() {
         meta = format!("{sort_meta} · {meta}");
     }
-    if w.unhealthy_only && w.table.is_empty() && w.table.search_text().is_empty() {
+    if w.filtered() && w.table.is_empty() && w.table.search_text().is_empty() {
+        let note = if w.filters.is_empty() {
+            "no unhealthy VENs · h shows all workloads"
+        } else {
+            "no workloads match the filters · c clears them"
+        };
         f.render_widget(
-            Paragraph::new(Span::styled(
-                "no unhealthy VENs · h shows all workloads",
-                t.dim_style(),
-            ))
-            .block(panel("Workloads", &meta, t, true)),
+            Paragraph::new(Span::styled(note, t.dim_style())).block(panel(
+                "Workloads",
+                &meta,
+                t,
+                true,
+            )),
             area,
         );
         return;
