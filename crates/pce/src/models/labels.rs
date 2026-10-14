@@ -23,10 +23,12 @@ pub struct Label {
 }
 
 /// A label's `usage` object from `GET /labels?usage=true`: one flag per
-/// kind of object that can hold a label (`workload`, `rule`, `ruleset`,
-/// `label_group`, `pairing_profile`, `permission`, `enforcement_boundary`,
-/// `container_workload_profile`, `virtual_service`, ...). Kept as a map so
-/// kinds a newer PCE adds parse, count and print too.
+/// kind of object that can hold a label (`workload`, `ruleset` (its scopes
+/// and rules), `label_group`, `pairing_profile`, `permission`,
+/// `enforcement_boundary`, `container_workload_profile`, `virtual_service`,
+/// `label_mapping_rule`, ...; `fixtures/labels_usage.json` has the set a
+/// current PCE sends). Kept as a map so kinds a newer PCE adds parse, count
+/// and print too.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct LabelUsageFlags(pub BTreeMap<String, serde_json::Value>);
@@ -228,7 +230,7 @@ mod tests {
         let labels: Vec<Label> =
             serde_json::from_str(include_str!("../../../../fixtures/labels_usage.json")).unwrap();
         let u = |i: usize| labels[i].usage.as_ref().unwrap();
-        assert_eq!(u(0).kinds(), vec!["rule", "workload"]);
+        assert_eq!(u(0).kinds(), vec!["ruleset", "workload"]);
         assert_eq!(
             u(4).kinds(),
             vec!["pairing_profile", "permission"],
@@ -254,12 +256,12 @@ mod tests {
         // A newer PCE's flag that is not a plain boolean: anything but
         // false, null or 0 counts as a use, so it never hides one.
         let odd: LabelUsageFlags = serde_json::from_value(serde_json::json!({
-            "rule": false, "zero": 0, "none": null, "count": 2, "detail": {"x": 1}
+            "ruleset": false, "zero": 0, "none": null, "count": 2, "detail": {"x": 1}
         }))
         .unwrap();
         assert_eq!(odd.kinds(), vec!["count", "detail"]);
         let unused: LabelUsageFlags =
-            serde_json::from_value(serde_json::json!({"rule": false, "zero": 0})).unwrap();
+            serde_json::from_value(serde_json::json!({"ruleset": false, "zero": 0})).unwrap();
         assert!(!unused.is_used());
     }
 
