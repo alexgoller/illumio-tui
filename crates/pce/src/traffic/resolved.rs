@@ -1,6 +1,6 @@
 //! Flow rows with hrefs replaced by names: what gets printed and displayed.
 use crate::key_order::KeyOrder;
-use crate::models::{Endpoint, Flow, PolicyDecision, proto_name};
+use crate::models::{DraftDecision, Endpoint, Flow, PolicyDecision, proto_name};
 use crate::resolve::{NameIndex, ResolvedLabel};
 use serde::Serialize;
 
@@ -85,7 +85,8 @@ pub struct ResolvedFlow {
     pub user_name: Option<String>,
     pub num_connections: u64,
     pub policy_decision: PolicyDecision,
-    pub draft_policy_decision: Option<String>,
+    /// The decision under the draft policy, after a draft re-evaluation.
+    pub draft_policy_decision: Option<DraftDecision>,
     pub flow_direction: Option<String>,
     pub first_detected: Option<String>,
     pub last_detected: Option<String>,
@@ -110,6 +111,62 @@ impl ResolvedFlow {
     /// `5432/tcp`, or just `icmp` when there is no port.
     pub fn service_text(&self) -> String {
         service_text(self.port, &self.proto)
+    }
+
+    /// Blocked or potentially blocked now, allowed under the draft policy:
+    /// a flow the draft rules would fix.
+    pub fn fixed_by_draft(&self) -> bool {
+        is_blocked(self.policy_decision)
+            && self
+                .draft_policy_decision
+                .as_ref()
+                .is_some_and(|d| d.class() == PolicyDecision::Allowed)
+    }
+
+    /// Allowed now, blocked or potentially blocked under the draft policy.
+    pub fn blocked_by_draft(&self) -> bool {
+        self.policy_decision == PolicyDecision::Allowed
+            && self
+                .draft_policy_decision
+                .as_ref()
+                .is_some_and(|d| is_blocked(d.class()))
+    }
+
+    /// The draft decision when it is not the reported one: what the Flows
+    /// view marks (`blocked → allowed`).
+    pub fn draft_change(&self) -> Option<&DraftDecision> {
+        self.draft_policy_decision
+            .as_ref()
+            .filter(|d| d.as_str() != self.policy_decision.as_str())
+    }
+}
+
+fn is_blocked(d: PolicyDecision) -> bool {
+    matches!(
+        d,
+        PolicyDecision::Blocked | PolicyDecision::PotentiallyBlocked
+    )
+}
+
+/// What a draft re-evaluation changes in a set of flows: the flows the
+/// draft would allow (`fixed`) and those it would block (`newly_blocked`).
+/// `evaluated` is whether any flow carries a draft decision.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct DraftSummary {
+    pub evaluated: bool,
+    pub fixed: u64,
+    pub newly_blocked: u64,
+}
+
+impl DraftSummary {
+    pub fn of<'a>(flows: impl IntoIterator<Item = &'a ResolvedFlow>) -> Self {
+        let mut s = DraftSummary::default();
+        for f in flows {
+            s.evaluated |= f.draft_policy_decision.is_some();
+            s.fixed += u64::from(f.fixed_by_draft());
+            s.newly_blocked += u64::from(f.blocked_by_draft());
+        }
+        s
     }
 }
 
@@ -147,7 +204,7 @@ pub fn resolve_flows(flows: &[Flow], idx: &NameIndex) -> Vec<ResolvedFlow> {
                 .timestamp_range
                 .as_ref()
                 .and_then(|t| t.last_detected.clone()),
-            rules: f.rules.iter().map(|r| r.href.clone()).collect(),
+            rules: f.rules.iter().filter_map(|r| r.text()).collect(),
             bytes_in: f.dst_bi,
             bytes_out: f.dst_bo,
         })
@@ -205,6 +262,37 @@ pub(crate) mod tests {
         let raw: Vec<Flow> =
             serde_json::from_str(include_str!("../../../../fixtures/traffic_flows.json")).unwrap();
         resolve_flows(&raw, &index())
+    }
+
+    #[test]
+    fn draft_changes_are_counted_by_class() {
+        use crate::models::DraftDecision as D;
+        let mut f = rich_flows();
+        let at = |f: &[ResolvedFlow], d: PolicyDecision| {
+            f.iter().position(|x| x.policy_decision == d).unwrap()
+        };
+        assert_eq!(DraftSummary::of(&f), DraftSummary::default());
+        let (b, p, a) = (
+            at(&f, PolicyDecision::Blocked),
+            at(&f, PolicyDecision::PotentiallyBlocked),
+            at(&f, PolicyDecision::Allowed),
+        );
+        f[b].draft_policy_decision = Some(D::Allowed);
+        f[p].draft_policy_decision = Some(D::Other("allowed_across_boundary".into()));
+        f[a].draft_policy_decision = Some(D::Blocked);
+        assert!(f[b].fixed_by_draft() && f[p].fixed_by_draft());
+        assert!(f[a].blocked_by_draft() && !f[a].fixed_by_draft());
+        assert_eq!(f[b].draft_change(), Some(&D::Allowed));
+        f[b].draft_policy_decision = Some(D::Blocked);
+        assert_eq!(f[b].draft_change(), None, "the same decision is no change");
+        assert_eq!(
+            DraftSummary::of(&f),
+            DraftSummary {
+                evaluated: true,
+                fixed: 1,
+                newly_blocked: 1
+            }
+        );
     }
 
     #[test]

@@ -16,9 +16,9 @@ pub use policy::{
     UNKNOWN_CHANGE_TYPE, parse_pending,
 };
 pub use traffic::{
-    ActorFilter, ActorMatch, AsyncQueryStatus, Endpoint, Flow, FlowService, FlowWorkload, NamedRef,
-    QueryRegion, QueryResultRef, ServiceFilter, ServiceMatch, TimestampRange, TrafficQuery,
-    Transmission,
+    ActorFilter, ActorMatch, AsyncQueryStatus, DraftDecision, Endpoint, Flow, FlowRule,
+    FlowService, FlowWorkload, NamedRef, QueryRegion, QueryResultRef, ServiceFilter, ServiceMatch,
+    TimestampRange, TrafficQuery, Transmission,
 };
 pub use workloads::{
     AgentStatus, HEARTBEAT_OFFLINE, Interface, SYNC_STALE, UNMANAGED, VenHealth, Workload,
