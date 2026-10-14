@@ -256,7 +256,8 @@ Startup makes exactly five requests (health plus the four object lists). The fir
 Workloads and to Events costs one request each; going back to them costs none. The IP lists
 tab costs none within the cache TTL (15 minutes): the startup load already read them. Rule impact
 costs one workloads read on `i`, none when the list is cached. `u` on the Labels tab costs one
-labels read with usage flags, none when it is cached. Everything else is caused by a key you press. The header shows
+labels read with usage flags, none when it is cached; while `u` is on, `r` on that tab and each
+write re-read the flags once. Everything else is caused by a key you press. The header shows
 the API call and byte counters at all times.
 
 ## CLI
