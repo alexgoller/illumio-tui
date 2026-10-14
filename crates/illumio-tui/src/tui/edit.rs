@@ -955,39 +955,54 @@ fn tokens_or_fallback(labels: Vec<&ResolvedLabel>, e: &ResolvedEndpoint) -> Stri
     }
 }
 
-/// The live draft rulesets with a scope that covers these labels: one of
-/// its scopes is made of labels only (no label group; the empty, global
-/// scope does not count) and each of them is among `scope`. Those scoped
-/// exactly like `scope` come first (`true`), then the broader ones, each in
-/// list order.
+/// The live draft rulesets with a scope that covers the destination `dst`:
+/// each actor of one of its scopes is a label `dst` has (under any key, so
+/// a scope `app, env, loc=eu` covers a destination with `loc=eu`) or a
+/// label group with such a label among its members (through `idx`). The
+/// empty, global scope and other actors do not count. Those scoped exactly
+/// like `scope` (`dst`'s labels under the scope keys, no group) come first
+/// (`true`), then the others, the more actors the earlier, each in list
+/// order.
 fn rulesets_covering<'r>(
     sets: &'r [RuleSet],
+    dst: &ResolvedEndpoint,
     scope: &[&ResolvedLabel],
+    idx: &NameIndex,
 ) -> Vec<(&'r RuleSet, bool)> {
     let want: BTreeSet<&str> = scope.iter().map(|l| l.href.as_str()).collect();
-    // How a scope relates to `want`: `Some(true)` equal, `Some(false)` a
-    // part of it, `None` neither.
-    let fit = |s: &Vec<Actor>| -> Option<bool> {
-        let hrefs: Option<BTreeSet<&str>> = s
-            .iter()
-            .map(|a| a.label.as_ref().map(|r| r.href.as_str()))
-            .collect();
-        let hrefs = hrefs.filter(|h| !h.is_empty() && h.is_subset(&want))?;
-        Some(hrefs == want)
+    let has: BTreeSet<&str> = dst.labels.iter().map(|l| l.href.as_str()).collect();
+    // `Some((exact, actors))` when the scope covers `dst`.
+    let fit = |s: &Vec<Actor>| -> Option<(bool, usize)> {
+        if s.is_empty() {
+            return None;
+        }
+        let mut labels = BTreeSet::new();
+        let mut grouped = false;
+        for a in s {
+            if let Some(l) = &a.label {
+                labels.insert(has.get(l.href.as_str())?);
+            } else if let Some(g) = &a.label_group {
+                grouped = true;
+                pce::impact::group_members(&g.href, idx)
+                    .iter()
+                    .any(|m| has.contains(m.as_str()))
+                    .then_some(())?;
+            } else {
+                return None;
+            }
+        }
+        let exact = !grouped && labels.into_iter().copied().eq(want.iter().copied());
+        Some((exact, s.len()))
     };
-    let mut hits: Vec<(&RuleSet, bool)> = sets
+    let mut hits: Vec<(&RuleSet, (bool, usize))> = sets
         .iter()
         .filter(|rs| rs.update_type.as_deref() != Some("delete"))
-        .filter_map(|rs| {
-            rs.scopes
-                .iter()
-                .filter_map(fit)
-                .max()
-                .map(|exact| (rs, exact))
-        })
+        .filter_map(|rs| rs.scopes.iter().filter_map(fit).max().map(|f| (rs, f)))
         .collect();
-    hits.sort_by_key(|(_, exact)| !exact);
-    hits
+    hits.sort_by_key(|(_, (exact, n))| (!exact, std::cmp::Reverse(*n)));
+    hits.into_iter()
+        .map(|(rs, (exact, _))| (rs, exact))
+        .collect()
 }
 
 /// How the description names a side: its group (`shop/prod`) when the
@@ -1039,7 +1054,7 @@ fn flow_rule_fields(
         };
         (providers, consumers)
     };
-    let pick = ruleset_pick(f, p);
+    let pick = ruleset_pick(f, p, idx);
     let fields = vec![
         Field::new("Ruleset", pick.name.unwrap_or_default(), pick.hint, true)
             .kind(FieldKind::Ruleset),
@@ -1082,7 +1097,7 @@ pub struct RulesetPick {
 /// rulesets: the one scoped exactly like it, else the only one whose scope
 /// covers it; several leave the choice to the user. A row grouped on keys
 /// that leave out part of the scope spans scopes: nothing is picked for it.
-pub fn ruleset_pick(f: &ResolvedFlow, p: FlowPrefill) -> RulesetPick {
+pub fn ruleset_pick(f: &ResolvedFlow, p: FlowPrefill, idx: &NameIndex) -> RulesetPick {
     let dst_scope = scope_of(&f.dst, p.scope_keys);
     if dst_scope.is_empty() {
         return RulesetPick {
@@ -1099,7 +1114,7 @@ pub fn ruleset_pick(f: &ResolvedFlow, p: FlowPrefill) -> RulesetPick {
             covering: Vec::new(),
         };
     };
-    let hits = rulesets_covering(sets, &dst_scope);
+    let hits = rulesets_covering(sets, &f.dst, &dst_scope, idx);
     let covering: Vec<String> = hits.iter().map(|(rs, _)| rs.name.clone()).collect();
     let exact: Vec<&str> = hits
         .iter()
@@ -1136,7 +1151,7 @@ pub fn ruleset_pick(f: &ResolvedFlow, p: FlowPrefill) -> RulesetPick {
 /// The draft rulesets arrived after a `w` form opened: its Ruleset hint
 /// again, and the pick when the field is still empty (what the user typed
 /// stays). Other forms are left alone.
-pub fn refill_ruleset(form: &mut Form, p: FlowPrefill) {
+pub fn refill_ruleset(form: &mut Form, p: FlowPrefill, idx: &NameIndex) {
     let EditIntent::RuleFromFlow(f) = &form.intent else {
         return;
     };
@@ -1147,6 +1162,7 @@ pub fn refill_ruleset(form: &mut Form, p: FlowPrefill) {
             group_keys: flow.group_keys.as_deref(),
             ..p
         },
+        idx,
     );
     flow.covering = pick.covering;
     let Some(field) = form.fields.iter_mut().find(|x| x.label == "Ruleset") else {
@@ -3110,6 +3126,7 @@ mod tests {
                 rulesets: None,
                 group_keys: None,
             },
+            &fixture_index(),
         );
         assert_eq!(loading.name, None);
         assert_eq!(loading.hint, "scope app=shop, env=prod · loading rulesets");
@@ -3121,11 +3138,61 @@ mod tests {
                     tier_key: "role",
                     rulesets: Some(&[shop, prod, exact]),
                     group_keys: None,
-                }
+                },
+                &fixture_index(),
             )
             .covering,
             vec!["Shop-Prod", "Shop", "Prod"],
             "exact first, then the others in list order"
+        );
+    }
+
+    #[test]
+    fn a_scope_label_outside_the_scope_keys_and_a_label_group_cover_too() {
+        // flows[1]'s destination, with loc=eu (5) as well.
+        let mut flow = crate::tui::test_support::fixture_flows()[1].clone();
+        flow.dst.labels.push(label("/orgs/5/labels/5", "loc", "eu"));
+        let pick = |sets: &[RuleSet]| {
+            let f = form_with(
+                EditIntent::RuleFromFlow(Box::new(flow.clone())),
+                &["app", "env"],
+                "role",
+                sets,
+            );
+            (f.value("Ruleset").to_string(), f.flow.unwrap().covering)
+        };
+        const APP: &str = "/orgs/5/labels/3";
+        const ENV: &str = "/orgs/5/labels/4";
+        const LOC: &str = "/orgs/5/labels/5";
+        // Scoped app, env and loc=eu: the destination is in it.
+        let eu = scoped(1, "Shop-Prod-EU", &[&[APP, ENV, LOC]]);
+        assert_eq!(
+            pick(std::slice::from_ref(&eu)),
+            ("Shop-Prod-EU".into(), vec!["Shop-Prod-EU".into()])
+        );
+        // Another location does not cover it.
+        let us = scoped(2, "Shop-Prod-US", &[&[APP, ENV, "/orgs/5/labels/99"]]);
+        assert_eq!(pick(std::slice::from_ref(&us)).0, "");
+        // A label group with env=prod among its members covers it, but
+        // never as exactly: the one scoped exactly is still picked.
+        let grouped = scoped(
+            3,
+            "Shop-All-Prod",
+            &[&[APP, "g:/orgs/5/sec_policy/draft/label_groups/10"]],
+        );
+        assert_eq!(pick(std::slice::from_ref(&grouped)).0, "Shop-All-Prod");
+        let exact = scoped(4, "Shop-Prod", &[&[APP, ENV]]);
+        assert_eq!(
+            pick(&[grouped, eu, us, exact]),
+            (
+                "Shop-Prod".into(),
+                vec![
+                    "Shop-Prod".into(),
+                    "Shop-Prod-EU".into(),
+                    "Shop-All-Prod".into()
+                ]
+            ),
+            "exact first, then the more specific"
         );
     }
 
