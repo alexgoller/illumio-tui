@@ -2586,7 +2586,7 @@ async fn workloads_csv_prints_full_cells_and_meta_on_stderr() {
     let lines = first_two(&text);
     assert_eq!(
         lines[0],
-        "hostname,name,ip,labels,enforcement,online,agent,sync,heartbeat_age_secs,health,href"
+        "hostname,name,ip,labels,enforcement,online,agent,sync,heartbeat_age_secs,health,href,enforcement_mode"
     );
     // The heartbeat age and the health follow real time.
     let cells: Vec<&str> = lines[1].split(',').collect();

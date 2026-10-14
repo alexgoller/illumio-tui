@@ -317,7 +317,7 @@ stderr, so a redirect holds only CSV. `--csv` sends the same requests as the tab
 `workloads` shows the effective enforcement: `unmanaged` for a workload without a VEN, which
 the PCE reports with a mode of its own (often `visibility_only`), else the PCE's mode. JSON keeps the PCE's value in
 `enforcement_mode` and adds the effective one as `enforcement`; the table and CSV
-`enforcement` column is the effective one. `--enforcement` filters by it in the same request:
+`enforcement` column is the effective one, and CSV appends `enforcement_mode`. `--enforcement` filters by it in the same request:
 `unmanaged` sends `managed=false`, a mode (`full`, `selective`, `visibility_only`, `idle`) adds
 `managed=true`, so `visibility_only` lists only workloads with a VEN; a `--managed` that
 contradicts it is exit 2.

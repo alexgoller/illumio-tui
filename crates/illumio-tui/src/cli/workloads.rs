@@ -362,13 +362,16 @@ impl TableRows for Vec<WorkloadRow> {
             })
             .collect()
     }
-    /// The heartbeat age in seconds, as JSON's `heartbeat_age_secs`.
+    /// The heartbeat age in seconds, as JSON's `heartbeat_age_secs`; the
+    /// PCE's raw `enforcement_mode` appended, as JSON carries it.
     fn full_headers(&self) -> Vec<&'static str> {
         let mut h = self.headers();
         h[8] = "heartbeat_age_secs";
+        h.push("enforcement_mode");
         h
     }
-    /// Every interface address and every label; the heartbeat in seconds.
+    /// Every interface address and every label; the heartbeat in seconds;
+    /// the raw `enforcement_mode` last.
     fn full_rows(&self) -> Vec<Vec<String>> {
         self.iter()
             .zip(self.rows())
@@ -379,6 +382,7 @@ impl TableRows for Vec<WorkloadRow> {
                     .heartbeat_age_secs
                     .map(|s| s.to_string())
                     .unwrap_or_default();
+                row.push(r.workload.enforcement_mode.clone().unwrap_or_default());
                 row
             })
             .collect()
@@ -486,6 +490,12 @@ mod tests {
         let shown: Vec<String> = rows.rows().into_iter().map(|r| r[col].clone()).collect();
         assert_eq!(shown, ["full", "visibility_only", "unmanaged", "selective"]);
         assert_eq!(rows.full_rows()[2][col], "unmanaged");
+        // CSV appends the PCE's raw mode, as the app CSV does.
+        assert_eq!(rows.full_headers().last(), Some(&"enforcement_mode"));
+        let full = rows.full_rows();
+        assert_eq!(full[2].last().unwrap(), "visibility_only");
+        assert_eq!(full[0].last().unwrap(), "full");
+        assert_eq!(full[0].len(), rows.full_headers().len());
         let json = serde_json::to_value(&rows[2]).unwrap();
         assert_eq!(json["enforcement"], "unmanaged");
         assert_eq!(json["enforcement_mode"], "visibility_only");
