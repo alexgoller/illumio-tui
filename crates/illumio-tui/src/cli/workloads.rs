@@ -30,8 +30,8 @@ pub struct WorkloadsArgs {
     pub labels: Vec<String>,
     /// full | visibility_only | selective | idle | unmanaged. Effective
     /// enforcement: unmanaged (no VEN) asks for managed=false; a mode also
-    /// asks for managed=true, as the PCE reports workloads without a VEN as
-    /// visibility_only
+    /// asks for managed=true, as the PCE gives workloads without a VEN a mode
+    /// too (often visibility_only)
     #[arg(long)]
     pub enforcement: Option<String>,
     /// Only online (true) or offline (false) workloads
@@ -387,8 +387,8 @@ impl TableRows for Vec<WorkloadRow> {
 
 /// `--enforcement` (effective) and `--managed` as the PCE's
 /// `(enforcement_mode, managed)` query: `unmanaged` is `managed=false` with
-/// no mode; a mode adds `managed=true`, since the PCE reports workloads
-/// without a VEN as `visibility_only`. A contradiction is an argument error.
+/// no mode; a mode adds `managed=true`, since the PCE gives workloads
+/// without a VEN a mode too (often `visibility_only`). A contradiction is an argument error.
 fn enforcement_query(
     enforcement: Option<&str>,
     managed: Option<bool>,

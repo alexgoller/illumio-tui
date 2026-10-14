@@ -59,7 +59,7 @@ pub struct Workload {
 }
 
 /// The effective enforcement of a workload without a VEN. The PCE reports
-/// such a workload's `enforcement_mode` as `visibility_only` (or `idle`), but
+/// a mode for such a workload too (often `visibility_only`), but
 /// nothing enforces or reports anything there; the PCE UI calls it unmanaged.
 pub const UNMANAGED: &str = "unmanaged";
 

@@ -232,7 +232,7 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
 - **Workloads**: VEN health columns and a summary line, `h` unhealthy only, `H` sort by
   severity, `t` / `T` jump to Traffic with the workload as source / destination. The
   enforcement column is the effective one: a workload without a VEN is `unmanaged`, as in
-  the PCE UI, although the API reports it as `visibility_only`; the detail pane shows both
+  the PCE UI, whatever mode the API reports for it (often `visibility_only`); the detail pane shows both
   (`unmanaged · PCE reports visibility_only`).
 - **Events**: severity-coloured audit events, `f` edit severity / type / window, `S` sort by
   severity, `Enter` the event as JSON (`j` / `k` scroll a long one).
@@ -315,7 +315,7 @@ stderr, so a redirect holds only CSV. `--csv` sends the same requests as the tab
 `policy rules`, `policy pending`, `traffic query`/`groups`/`mesh` and `profile list` take it.
 
 `workloads` shows the effective enforcement: `unmanaged` for a workload without a VEN, which
-the PCE reports as `visibility_only`, else the PCE's mode. JSON keeps the PCE's value in
+the PCE reports with a mode of its own (often `visibility_only`), else the PCE's mode. JSON keeps the PCE's value in
 `enforcement_mode` and adds the effective one as `enforcement`; the table and CSV
 `enforcement` column is the effective one. `--enforcement` filters by it in the same request:
 `unmanaged` sends `managed=false`, a mode (`full`, `selective`, `visibility_only`, `idle`) adds
