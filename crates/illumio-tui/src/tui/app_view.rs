@@ -115,9 +115,15 @@ impl AppView {
     }
 
     /// Peers from `flows` for the direction in force; a side the direction
-    /// leaves out has no rows. No request.
+    /// leaves out has no rows, and the cursor moves off its panel to the
+    /// side shown (`w` and `Enter` act on what is on screen). No request.
     pub fn rebuild_traffic(&mut self, flows: &[ResolvedFlow], partial: bool) {
         let d = self.focus.direction;
+        self.panel = match (self.panel, d) {
+            (AppPanel::Inbound, FocusDirection::Out) => AppPanel::Outbound,
+            (AppPanel::Outbound, FocusDirection::In) => AppPanel::Inbound,
+            (p, _) => p,
+        };
         self.inbound = if d == FocusDirection::Out {
             Vec::new()
         } else {

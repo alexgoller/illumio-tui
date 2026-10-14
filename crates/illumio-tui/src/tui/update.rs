@@ -13919,6 +13919,37 @@ mod app_tests {
     }
 
     #[test]
+    fn the_peer_panel_in_force_is_one_the_direction_shows() {
+        let mut m = everything();
+        m.writes = WritesState::on();
+        quiet(&mut m, key('A'));
+        assert_eq!(view(&m).panel, AppPanel::Inbound);
+        quiet(&mut m, key('X')); // in
+        quiet(&mut m, key('X')); // out: Inbound now says "X shows inbound"
+        assert_eq!(view(&m).panel, AppPanel::Outbound);
+        quiet(&mut m, key('w'));
+        assert_eq!(m.status.text, "this row is allowed; nothing to add");
+        quiet(&mut m, key('X')); // both: stays where it is
+        assert_eq!(view(&m).panel, AppPanel::Outbound);
+        quiet(&mut m, key('X')); // in
+        assert_eq!(view(&m).panel, AppPanel::Inbound);
+        // Opened at the traffic focus's direction (`out`): on Outbound.
+        quiet(&mut m, kc(KeyCode::Esc));
+        m.app_view = None;
+        m.traffic.set_focus(
+            Focus::new(vec!["shop".into(), "prod".into()], Vec::new())
+                .with_direction(FocusDirection::Out),
+        );
+        quiet(&mut m, key('A'));
+        assert_eq!(view(&m).focus.direction, FocusDirection::Out);
+        assert_eq!(view(&m).panel, AppPanel::Outbound);
+        // The other panels are left alone.
+        quiet(&mut m, kc(KeyCode::Tab));
+        quiet(&mut m, key('X'));
+        assert_eq!(view(&m).panel, AppPanel::Policy);
+    }
+
+    #[test]
     fn r_asks_then_reloads_both_panels_past_the_cache() {
         let mut m = everything();
         quiet(&mut m, key('A'));
