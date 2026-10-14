@@ -625,6 +625,25 @@ async fn workloads_enforcement_filter_is_the_effective_mode() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn workloads_unknown_enforcement_exits_2_without_querying() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let a = cmd(&server)
+        .args(["workloads", "--enforcement", "visibility"])
+        .assert()
+        .code(2);
+    let err = String::from_utf8_lossy(&a.get_output().stderr).to_string();
+    assert!(
+        err.contains("visibility_only") && err.contains("unmanaged"),
+        "{err}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn workloads_unknown_label_exits_2_without_querying() {
     let server = MockServer::start().await;
     mount_objects(&server).await;

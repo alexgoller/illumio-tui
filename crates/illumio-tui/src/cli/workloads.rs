@@ -28,11 +28,10 @@ pub struct WorkloadsArgs {
     /// Label key=value; repeat to AND several
     #[arg(long = "label")]
     pub labels: Vec<String>,
-    /// full | visibility_only | selective | idle | unmanaged. Effective
-    /// enforcement: unmanaged (no VEN) asks for managed=false; a mode also
-    /// asks for managed=true, as the PCE gives workloads without a VEN a mode
-    /// too (often visibility_only)
-    #[arg(long)]
+    /// Effective enforcement: unmanaged (no VEN) asks for managed=false; a
+    /// mode also asks for managed=true, as the PCE gives workloads without a
+    /// VEN a mode too (often visibility_only)
+    #[arg(long, value_parser = ["full", "visibility_only", "selective", "idle", "unmanaged"])]
     pub enforcement: Option<String>,
     /// Only online (true) or offline (false) workloads
     #[arg(long)]
