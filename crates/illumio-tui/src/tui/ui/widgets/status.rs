@@ -1,5 +1,6 @@
 //! Bottom status line: query/connection state on the left, key hints right
-//! (only `? help` when a warning or an error needs the room).
+//! (only `? help`, or `Esc back` in the app overlay, when a warning or an
+//! error needs the room).
 use crate::tui::model::{Model, Overlay, StatusKind};
 use crate::tui::ui::widgets::overlay::{screen_hint, screen_hint_more};
 use ratatui::Frame;
@@ -24,15 +25,19 @@ pub fn render(model: &Model, f: &mut Frame, area: Rect) {
     let base = screen_hint(model.screen, model.writes.enabled);
     let more = screen_hint_more(model.screen, model.traffic.view);
     let width = usize::from(area.width);
-    let mut hints = format!(" {base}  : cmd  ? help ");
-    if model.overlay == Overlay::App {
-        hints = APP_HINTS.to_string();
-    } else if model.status.kind != StatusKind::Info
+    let app = model.overlay == Overlay::App;
+    let mut hints = if app {
+        APP_HINTS.to_string()
+    } else {
+        format!(" {base}  : cmd  ? help ")
+    };
+    if model.status.kind != StatusKind::Info
         && model.status.text.chars().count() + hints.chars().count() > width
     {
-        // A warning or an error says what to do next: it outranks the hints.
-        hints = " ? help ".to_string();
-    } else if !more.is_empty() && width >= hints.len() + more.len() + 2 + STATUS_ROOM {
+        // A warning or an error says what to do next: it outranks the hints
+        // (the overlay takes every key, so its way out stays instead of `?`).
+        hints = if app { " Esc back " } else { " ? help " }.to_string();
+    } else if !app && !more.is_empty() && width >= hints.len() + more.len() + 2 + STATUS_ROOM {
         hints = format!(" {base}  {more}  : cmd  ? help ");
     }
     let left_width = area.width.saturating_sub(hints.chars().count() as u16) as usize;

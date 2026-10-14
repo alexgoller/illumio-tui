@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: "render_to_string(&m, 80, 24)"
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭ shop/prod · in+out · last 24h ─────────────────────────────── 0 req · cached ╮
+│Workloads 2   enforced 1 · visibility 1                                       │
+│VENs  1 active · 1 stale                                                      │
+│╭ Inbound ────────────────────────────╮╭ Outbound ───────────────────────────╮│
+││shop/prod           5432/tcp  ✓   821││shop/prod           5432/tcp  ✓   821││
+││ipl:Corp/-          443/tcp   ✓   700││crm/prod            443/tcp   ✓   150││
+││hr/prod             5432/tcp  ~    16││api.partner.exampl… 443/tcp   ✓    33││
+││shop/dev            5432/tcp  ✗     6││                                     ││
+││ipl:Corp/-          5432/tcp  ✗     2││                                     ││
+││                                     ││                                     ││
+││                                     ││                                     ││
+││                                     ││                                     ││
+│╰─────────────────────────────────────╯╰─────────────────────────────────────╯│
+│╭ Policy · draft ─────────────────────╮╭ Workloads ──────────────────────────╮│
+││RS Shop-Prod                  4 rules││host-1.example   web     enforced   ●││
+││RS Global-Infra          1 rule · all││host-2.example   db      visibility ●││
+││                                     ││                                     ││
+││                                     ││                                     ││
+││                                     ││                                     ││
+│╰─────────────────────────────────────╯╰─────────────────────────────────────╯│
+╰──────────────────────────────────────────────────────────────────────────────╯
+writes off; :writes on to enable                                       Esc back

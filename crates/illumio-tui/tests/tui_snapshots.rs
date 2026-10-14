@@ -1596,3 +1596,35 @@ fn app_overlay_draft_120x40() {
     assert!(out.contains("blocked flows fixed"), "{out}");
     insta::assert_snapshot!("app_overlay_draft_120x40", out);
 }
+
+/// `w` in the app overlay with writes off: the refusal outranks the
+/// overlay's hints, whole, at 80 and 120 columns (a cut refusal reads as
+/// a key that does nothing).
+#[test]
+fn app_overlay_w_with_writes_off_shows_the_whole_refusal() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use illumio_tui::tui::model::WRITES_OFF;
+    use illumio_tui::tui::msg::Msg;
+    let key = |c| Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+    let mut m = app_overlay_model();
+    assert!(!m.writes.enabled, "the fixture starts with writes off");
+    for c in ['j', 'j', 'j', 'w'] {
+        illumio_tui::tui::update(&mut m, key(c));
+    }
+    assert_eq!(m.status.text, WRITES_OFF);
+    for (w, h) in [(80, 24), (120, 30)] {
+        let out = render_to_string(&m, w, h);
+        let last = out.lines().last().unwrap_or_default();
+        assert!(last.contains(WRITES_OFF), "{w}x{h}: {last:?}");
+        assert!(last.contains("Esc back"), "{w}x{h}: {last:?}");
+    }
+    insta::assert_snapshot!("app_overlay_writes_off_80x24", render_to_string(&m, 80, 24));
+    // An info line still shares the row with every hint.
+    illumio_tui::tui::update(&mut m, key('k'));
+    m.status = illumio_tui::tui::model::StatusLine::info("shop/prod · 0 req");
+    let out = render_to_string(&m, 80, 24);
+    assert!(
+        out.lines().last().unwrap_or_default().contains("w rule"),
+        "{out}"
+    );
+}
