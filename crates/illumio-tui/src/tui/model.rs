@@ -4699,6 +4699,9 @@ pub struct Model {
     pub writes: WritesState,
     /// First help line shown; `Overlay::Help` is reopened at the top.
     pub help_scroll: usize,
+    /// The overlay `?` was pressed in (the app view, the generator): closing
+    /// the help goes back to it.
+    pub help_return: Overlay,
     /// Number of background tasks in flight; the runtime ticks at 250 ms while > 0.
     pub busy: usize,
     /// A `:profile` switch is being built off the event loop; a second one
@@ -4775,6 +4778,7 @@ impl Model {
             status: StatusLine::info("connecting…"),
             writes,
             help_scroll: 0,
+            help_return: Overlay::None,
             busy: 0,
             switching: false,
             batch_sending: false,

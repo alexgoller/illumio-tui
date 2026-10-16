@@ -1475,7 +1475,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             let last = help_last_scroll(model.size.1);
             match k.code {
                 KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q') => {
-                    model.overlay = Overlay::None;
+                    model.overlay = std::mem::replace(&mut model.help_return, Overlay::None);
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
                     model.help_scroll = (model.help_scroll + 1).min(last);
@@ -2012,8 +2012,7 @@ fn on_screen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             Vec::new()
         }
         (KeyCode::Char('?'), _) => {
-            model.help_scroll = 0;
-            model.overlay = Overlay::Help;
+            open_help(model);
             Vec::new()
         }
         (KeyCode::Char('1'), _) => switch(model, Screen::Traffic),
@@ -2698,9 +2697,21 @@ fn rebuild_app_traffic(model: &mut Model) {
     }
 }
 
+/// `?` / `:help`: the help at its top. Opened over the app view or the
+/// generator, closing it goes back there.
+pub(super) fn open_help(model: &mut Model) {
+    model.help_scroll = 0;
+    model.help_return = match model.overlay {
+        Overlay::App => Overlay::App,
+        Overlay::Generator => Overlay::Generator,
+        _ => Overlay::None,
+    };
+    model.overlay = Overlay::Help;
+}
+
 /// The overlay's keys: `Esc` / `q` close, `Tab` / `BackTab` panels, `j` /
 /// `k` rows, `X` direction, `Enter` opens, `w` drafts a rule, `r` asks to
-/// reload. Only `r` (after `y`) and `Enter` (on another screen) can send.
+/// reload, `?` help. Only `r` (after `y`) and `Enter` (on another screen) can send.
 fn app_overlay_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     let Some(v) = model.app_view.as_mut() else {
         model.overlay = Overlay::None;
@@ -2723,6 +2734,7 @@ fn app_overlay_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             let app = v.focus.app.clone();
             return generator::open_gen(model, app, true);
         }
+        KeyCode::Char('?') => open_help(model),
         _ => {}
     }
     Vec::new()
@@ -5090,8 +5102,7 @@ pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
             Vec::new()
         }
         Command::Help => {
-            model.help_scroll = 0;
-            model.overlay = Overlay::Help;
+            open_help(model);
             Vec::new()
         }
         Command::Filter(expr) => {

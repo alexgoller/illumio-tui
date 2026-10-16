@@ -316,6 +316,7 @@ pub(super) fn gen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     }
     match k.code {
         KeyCode::Esc | KeyCode::Char('q') => close_gen(model),
+        KeyCode::Char('?') => super::open_help(model),
         KeyCode::Down | KeyCode::Char('j') => v.move_cursor(1),
         KeyCode::Up | KeyCode::Char('k') => v.move_cursor(-1),
         KeyCode::Tab | KeyCode::BackTab => v.switch_section(),
@@ -529,6 +530,30 @@ mod tests {
 
     fn open_shop(m: &mut Model) -> Vec<Cmd> {
         update(m, Msg::Command(Command::Gen(Some("shop/prod".into()))))
+    }
+
+    #[test]
+    fn question_mark_opens_the_help_over_the_app_view_and_the_generator_and_esc_returns() {
+        let mut m = loaded();
+        update(&mut m, Msg::Command(Command::App(Some("shop/prod".into()))));
+        assert_eq!(update(&mut m, key('?')), Vec::new());
+        assert_eq!(m.overlay, Overlay::Help);
+        update(&mut m, Msg::Key(KeyEvent::from(KeyCode::Esc)));
+        assert_eq!(m.overlay, Overlay::App, "back to the app view");
+        update(&mut m, key('G'));
+        assert_eq!(update(&mut m, key('?')), Vec::new());
+        assert_eq!(m.overlay, Overlay::Help);
+        update(&mut m, key('?'));
+        assert_eq!(m.overlay, Overlay::Generator, "back to the generator");
+        update(&mut m, key('q'));
+        update(&mut m, key('q'));
+        update(&mut m, key('?'));
+        update(&mut m, Msg::Key(KeyEvent::from(KeyCode::Esc)));
+        assert_eq!(
+            m.overlay,
+            Overlay::None,
+            "the plain help returns to the screen"
+        );
     }
 
     #[test]
