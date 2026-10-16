@@ -189,6 +189,33 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   (writes on; the form replaces the overlay, and cancelling it or the write done comes back
   to the overlay without a request); `r` reloads the panels
   after asking; `Esc` returns.
+  `G` in the app overlay (or `:gen shop/prod`, or `:gen` and the picker) opens the **policy
+  generator** for that app: the allow rules its observed traffic needs, written in one
+  confirmed step. One row per peer and side: intra-app, each app peer (`web/prod`), IP peer and
+  unlabelled workload, with the services seen and the reported decisions (`✓` allowed, `✗`
+  blocked or potentially blocked; with `D` loaded, `would allow N`). Intra-app and same-env
+  peers start checked, the rest unchecked with the reason (`⚠ env mismatch`, `⚠ uses IP list
+  Corp`, `⚠ needs an IP list`, which checking plans). The slider `app·all ─ app·ports ─
+  role·ports ─ role·all` (`←`/`→`) sets how coarse the rules are: all workloads of the app or
+  one rule per role pair, All Services or the services seen; `<`/`>` give a row its own stop
+  (`*`), `=` drops it. `o` adds the outbound section: rules to other apps go into the peers'
+  rulesets (a new `RF-crm-prod` when none covers the peer), to IP peers into the app's own.
+  The target line names the app's ruleset (`R` picks when several cover it, or a new one by
+  `generator.ruleset_name`, default `RF-{app}-{env}`). Rules already in the draft show as
+  `exists` and are not written; an existing rule with the same actors gets the missing
+  services. A row whose rule an override deny rule blocks anyway shows `⚠ override deny
+  blocks N`, one whose ruleset cannot be named `⚠ no target`. The footer counts the rules and
+  the flow records they cover, computed locally; `p` lists every rule and what is not
+  covered, and why. Opening it costs at most the draft rulesets (one request,
+  cached, counted in its header). On a truncated or incomplete result it shows the rows but
+  refuses to plan (`incomplete: r re-queries shop/prod`); `r` runs the focused query through
+  the usual cost guard. With writes on, `Enter` reads the draft rulesets fresh (dedupe again),
+  then shows every request in one confirm (`6 requests: 1 ip_list, 1 rule_set, 4 rules ·
+  planned with 2 reads`); `y` sends them in order and stops at the first failure (`wrote 5 of
+  7 (pending); step 6 failed: …`). The policy view and the draft decisions are reloaded once
+  per batch; `:batch` shows each step again; provision with `P` in the pending overlay as
+  usual. A still-truncated focused result says `still capped at N: B raises the cap, or narrow
+  the window`. `Esc` returns (to the app overlay when opened from it).
   `D` shows, next to each flow's reported decision, the one the **draft** policy would make,
   so you can check whether your draft rules fix the blocked flows before provisioning. It is
   the PCE's own Explorer draft view: the PCE re-evaluates the result's own async query

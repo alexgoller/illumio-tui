@@ -344,3 +344,19 @@ Spec: docs/superpowers/specs/2026-10-11-traffic-views-design.md · Plan: docs/su
 - TUI: `in_flight` from `PlanBatch` to `BatchPlanned` and from `y` to `BatchDone`; a plan landing over another overlay is discarded; one ruleset reload, one IP list reload when one was written, one draft re-evaluation per batch.
 - Gate green, 1329 tests; `git diff main -- '*Cargo.toml' Cargo.lock` empty.
 - No live smoke: this plan's code writes; nothing was sent to any PCE.
+
+## Policy generator 3: the TUI (plan docs/superpowers/plans/2026-10-16-policy-generator-3-tui.md)
+- [x] Task 1 complete_for, ruleset name in Limits
+- [x] Task 2 GenView
+- [x] Task 3 transitions: G, :gen, keys, r, Enter, the batch's return
+- [x] Task 4 drawing, snapshots, help
+- [x] Task 5 docs, gate
+
+## Review (Policy generator 3)
+- `G` in the app overlay, `:gen <app>`, `:gen` and the picker open the generator; header (app, window, flows, completeness, its own request count), slider with four stops (`←`/`→`, `<`/`>`/`=` per row, `*` on the row), target line (`R` picks), inbound and (on `o`) outbound sections, `⚠` flags (env mismatch, IP list, ephemeral, override deny, no target), local preview footer, `p` rule list, `r` re-query through the cost guard, `Enter` into the single batch confirm; `Esc` back to the app overlay.
+- Requests: opening costs at most the cached draft rulesets (counted); keys other than `r` and `Enter` send nothing.
+- `Enter` refuses: writes off or in flight, a profile switch, incomplete data, nothing checked, drafts missing or failed, a blocker, nothing to write. The plan lands only over the generator still planning; the confirm, the batch report and the batch's end return to it.
+- Adaptations to part 2: `batch_lands` / `batch_plan_failed` / `batch_closed` rewritten on the current code (origin check kept first), the batch tests send through `y` before `BatchDone` (the confirm closes on `y`).
+- 80x24 snapshots: default, incomplete, outbound, rule list, override deny / no target; 120x40: outbound role·ports, rule list.
+- Gate green, 1376 tests; `git diff main -- '*Cargo.toml' Cargo.lock` empty.
+- No live smoke: the implementer was told not to contact any PCE. Nothing was written to any PCE.
