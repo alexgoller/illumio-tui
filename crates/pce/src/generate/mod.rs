@@ -4,6 +4,7 @@
 //! rules, merged, and classified against the draft rulesets (create, add
 //! services, exists). Pure: no requests. The TUI's generator and the CLI's
 //! `gen` share it.
+pub mod dedupe;
 pub mod rows;
 pub mod services;
 pub mod target;
@@ -592,6 +593,27 @@ impl Proposal {
                 Some(Target::None(why)) => Some(why.clone()),
                 _ => None,
             })
+    }
+
+    /// Targets and actions again against `drafts`: a fresh draft read at
+    /// plan time, or the rulesets just loaded. `picked`: the app ruleset
+    /// `R` chose among several.
+    pub fn refresh(
+        &mut self,
+        drafts: &[crate::models::RuleSet],
+        idx: &NameIndex,
+        template: &str,
+        picked: Option<&str>,
+    ) {
+        self.targets = self
+            .scopes
+            .iter()
+            .enumerate()
+            .map(|(i, s)| target::resolve(s, drafts, idx, template, picked.filter(|_| i == 0)))
+            .collect();
+        for r in &mut self.rules {
+            r.action = dedupe::classify(r, &self.targets[r.target], drafts, idx);
+        }
     }
 }
 
