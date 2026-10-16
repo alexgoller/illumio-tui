@@ -44,6 +44,9 @@ pub struct Profile {
     /// The label model rules are written in (`[profiles.<name>.labels]`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub labels: Option<LabelsConfig>,
+    /// The policy generator's settings (`[profiles.<name>.generator]`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generator: Option<GeneratorConfig>,
     /// Unknown keys, round-tripped verbatim.
     #[serde(default, flatten)]
     pub extra: toml::Table,
@@ -68,6 +71,7 @@ impl std::fmt::Debug for Profile {
             .field("writes", &self.writes)
             .field("limits", &self.limits)
             .field("labels", &self.labels)
+            .field("generator", &self.generator)
             // Unknown keys could be anything; print their names only.
             .field("extra", &self.extra.keys().collect::<Vec<_>>())
             .finish()
@@ -104,6 +108,13 @@ pub struct LabelsConfig {
     pub scope_keys: Option<Vec<String>>,
     pub tier_key: Option<String>,
     pub ignore_keys: Option<Vec<String>>,
+}
+
+/// The policy generator: `ruleset_name` names a ruleset it creates, a
+/// template over the scope keys (`RF-{app}-{env}` → `RF-shop-prod`).
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct GeneratorConfig {
+    pub ruleset_name: Option<String>,
 }
 
 pub const DEFAULT_SCOPE_KEYS: [&str; 2] = ["app", "env"];
@@ -152,6 +163,9 @@ pub struct ResolvedConfig {
     pub tier_key: String,
     /// Label keys hidden from label text; never a scope key or the tier key.
     pub ignore_keys: Vec<String>,
+    /// `generator.ruleset_name`, checked against the scope keys; default
+    /// `RF-` and every scope key (`RF-{app}-{env}`).
+    pub generator_ruleset_name: String,
 }
 
 impl ResolvedConfig {
@@ -384,6 +398,18 @@ pub fn resolve(
         }
     }
 
+    let generator_ruleset_name = match profile
+        .generator
+        .as_ref()
+        .and_then(|g| g.ruleset_name.clone())
+    {
+        Some(t) => {
+            pce::generate::check_ruleset_name(&t, &scope_keys).map_err(ConfigError::Message)?;
+            t
+        }
+        None => pce::generate::default_ruleset_name(&scope_keys),
+    };
+
     Ok(ResolvedConfig {
         profile_name,
         scheme,
@@ -419,6 +445,7 @@ pub fn resolve(
         scope_keys,
         tier_key,
         ignore_keys: ignored,
+        generator_ruleset_name,
     })
 }
 
@@ -859,6 +886,37 @@ traffic_auto_backfill = true
             err.to_string()
                 .contains("ILLUMIO_AUTO_BACKFILL is not a boolean"),
             "{err}"
+        );
+    }
+
+    #[test]
+    fn generator_ruleset_name_defaults_to_rf_and_names_a_bad_key() {
+        let r = resolve(&file(), &Overrides::default(), &env(&[])).unwrap();
+        assert_eq!(r.generator_ruleset_name, "RF-{app}-{env}");
+        let with = |tail: &str| -> ConfigFile {
+            toml::from_str(&format!(
+                "[profiles.default]\nhost = \"h\"\norg_id = 1\napi_key = \"k\"\napi_secret = \"s\"\n{tail}"
+            ))
+            .unwrap()
+        };
+        let f = with("[profiles.default.generator]\nruleset_name = \"RS-{app}-{env}\"\n");
+        let r = resolve(&f, &Overrides::default(), &env(&[])).unwrap();
+        assert_eq!(r.generator_ruleset_name, "RS-{app}-{env}");
+        let shown = format!("{:?}", f.profiles["default"]);
+        assert!(shown.contains("RS-{app}-{env}"), "{shown}");
+        let f = with("[profiles.default.generator]\nruleset_name = \"RF-{app}-{role}\"\n");
+        let err = resolve(&f, &Overrides::default(), &env(&[]))
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            err,
+            "generator.ruleset_name \"RF-{app}-{role}\": {role} is not a scope key (app, env)"
+        );
+        let f = with("[profiles.default.labels]\nscope_keys = [\"site\"]\n");
+        let r = resolve(&f, &Overrides::default(), &env(&[])).unwrap();
+        assert_eq!(
+            r.generator_ruleset_name, "RF-{site}",
+            "the default follows the scope keys"
         );
     }
 
