@@ -313,3 +313,20 @@ Spec: docs/superpowers/specs/2026-10-11-traffic-views-design.md · Plan: docs/su
 - M5: docs wording and README re-wrap. `t` is not in the overlay's status hints: at 80 columns it would leave the status 13 columns, cutting the run's own progress line.
 - M6/M7: 4w is 28×1d; no bucket under 5 minutes (1h: 12×5m, 90m: 18, under 5m: 1).
 - Smoke (read-only): `--timeline --direction both` exit 2 (48 queries), nothing sent; `app pos/Staging --window 1h --max-results 200 --json` 24 approx buckets, no spike in this hour's data (field omitted), meta.queries 2, 14 api calls.
+
+## Policy generator 1: derive + `gen` (plan docs/superpowers/plans/2026-10-16-policy-generator-1-derive.md)
+- [x] Task 1 pce prerequisites (PortSpec order, IP list data set, All Services, placeholders)
+- [x] Task 2 pce::generate data model, services, targets; ruleset_pick uses them
+- [x] Task 3 rows
+- [x] Task 4 dedupe, Proposal::refresh
+- [x] Task 5 propose
+- [x] Task 6 generator.ruleset_name
+- [x] Task 7 illumio-tui gen
+- [x] Task 8 README, smoke, gate
+
+## Review (Policy generator 1)
+- Tasks 1-8 applied in plan order, TDD (each task's tests failed to compile first, then passed), one commit per task.
+- Gate: `cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` green, 1285 tests; `git diff main -- '*Cargo.toml' Cargo.lock` empty.
+- No deviation from the plan's code was needed.
+- The read-only demo100 smoke (Task 8 Step 3) was not run in this session: the implementer was told not to contact any PCE or read any .env file. It is left for the integrator (`gen <app> --window 24h --json`, then with `--granularity role-ports --outbound`).
+- Nothing was written to any PCE.

@@ -310,6 +310,8 @@ the API call and byte counters at all times.
     illumio-tui traffic groups --window 1h --app shop/prod --direction in
     illumio-tui app shop/prod --window 24h --json
     illumio-tui app shop/prod --direction in --csv --section inbound > inbound.csv
+    illumio-tui gen shop/prod --window 24h --json
+    illumio-tui gen shop/prod --granularity role-ports --outbound --table
     illumio-tui traffic mesh --window 1h --no-user --json
     illumio-tui traffic query --window 30d --dry-run
     illumio-tui traffic query --window 24h --backfill --json
@@ -439,6 +441,25 @@ all cached; `meta` counts them, and `meta.truncated` is the traffic's. `--sectio
 workloads|inbound|outbound|policy` keeps one section (JSON: `app`, `direction` and
 it); `--table` prints each section under a title line; `--csv` prints one and needs
 `--section` (without it, exit 2 before any request).
+
+`illumio-tui gen <app> [--granularity app-all|app-ports|role-ports|role-all] [--outbound]
+[--window W] [--max-results N] [--yes]` proposes the allow rules the app's observed traffic
+needs, as the TUI's generator would plan them, and writes nothing. `rows` holds one row per
+peer and side (intra-app, each app peer, IP peer and unlabelled workload) with its default
+checkbox (`checked`: intra-app and same-env app peers), the services seen, the reported
+decisions and its warnings (`env mismatch`, `uses IP list Corp`, `needs an IP list`,
+`ephemeral port?`, ...); `rules` the merged rules at the chosen granularity, each with its
+`ruleset`, `action` (`create`, `add_services` or `exists`, against the draft rulesets),
+`providers`, `consumers`, `unscoped_consumers`, `services`, `rows` and the exact PCE `body`
+(`{step:N}` stands for an IP list or ruleset the batch would create first); `ip_lists` the
+IP lists it would create (`shop-prod peer 10.4.1.9`); `preview` the counts and the flow
+records covered or not, by reason. tcp and udp services are inline `port/proto` (consecutive
+seen ports fold into a range), icmp uses the ICMP service, other protocols the one service of
+exactly that protocol, else they are not covered. It costs the focused traffic query (`in`,
+plus `out` with `--outbound`), the name index and one draft ruleset read, cached; `meta`
+counts them. A capped result exits 2 and an incomplete one (a region did not answer) exits 4,
+with no rules printed. `--table` and `--csv` print the rules. A new ruleset is named by the
+profile's `[profiles.<name>.generator] ruleset_name` (below).
 
 `traffic query --blocked` prints the `--by in --show blocked`
 sections the same way. `mesh` gives one row per source user, source process, source group,
@@ -784,6 +805,13 @@ which outranks the profile; empty counts as unset) hides housekeeping keys from 
 of the traffic and workload tables, the flow detail, `all labels` and the
 `g` picker, and the Labels tab until `i`; JSON output and the workload edit form keep
 them, and a scope or tier key is never ignored.
+
+The policy generator names a ruleset it creates by a template over the scope keys:
+
+    [profiles.prod.generator]
+    ruleset_name = "RF-{app}-{env}"   # the default: RF-shop-prod
+
+Every `{key}` must be a scope key; another one fails the load and names it.
 
 ## PCE protection
 
