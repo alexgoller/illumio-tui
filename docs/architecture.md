@@ -59,6 +59,12 @@ Module map under `crates/illumio-tui/src/tui/`:
 | `diff` | draft against active for a pending IP list, service or ruleset |
 | `impact` | rule impact as the TUI shows it: `P/C` cells, the rule detail's rows, the confirm line |
 | `picker` | the `g` overlay: which label keys the traffic views group by; also the Labels tab's `f` key filter |
+| `app_picker` | the app picker (`F` on a row without an app, `:focus` / `:app` / `:gen` alone); pure |
+| `app_view` | the app overlay's state (`A`, `:app`): peers, workloads, policy and the requests it cost |
+| `gen_view` | the policy generator's state (`G`, `:gen`): rows, checkboxes, stops, slider, fan-in choices, the proposal |
+| `update/generator` | the generator's transitions: open, keys, rebuilds, `Enter`'s batch plan |
+| `event_diff` | an audit event as a change diff (Events detail and `events --diff`); pure |
+| `export` | `:export`: the table on screen through the CLI's CSV writer |
 | `ui/` | theme, layout, per-screen drawing and widgets (panels, overlays) |
 
 One message, top to bottom: pressing `r` on Traffic.
@@ -101,6 +107,9 @@ terminal is needed.
 | one query per filter | `Pce::traffic` cache key is the request body |
 | confirm big queries | `TrafficQuery::needs_confirmation` |
 | show the request without sending | `traffic query --dry-run` |
+| one query per focused side, never chained | `Pce::focused_traffic`, `traffic::focus` |
+| backfill one cap rung per key press | `pce::traffic::backfill_cap`, `traffic::steps` |
+| draft view: one PUT on our own query, no new POST | `Pce::traffic_eval` / `focused_traffic_eval` |
 
 ## Writes
 
@@ -213,8 +222,8 @@ confirm sends on the typed word `revert` (`PolicyState.revert_typed`) and the
 same reloads follow. A plan with nothing to send (`Plan::Noop`, such as an update
 whose fields already match) is an info status, never a request.
 
-The `w` pre-fill follows the profile's label model (`Limits.scope_keys`,
-`Limits.tier_key`, from `[profiles.<name>.labels]` or `ILLUMIO_SCOPE_KEYS` /
+The `w` pre-fill follows the profile's label model (`ResolvedConfig.scope_keys` and
+`tier_key`, from `[profiles.<name>.labels]` or `ILLUMIO_SCOPE_KEYS` /
 `ILLUMIO_TIER_KEY`): `edit::start` takes a `FlowPrefill` (those keys and the
 loaded draft rulesets, `Model::draft_rulesets`, via `Model::flow_prefill`)
 and fills providers with the destination's tier, consumers with the source's
@@ -353,6 +362,65 @@ the flows `Decisions::kept` leaves; the treemap lays out its own unfiltered
 `TreemapState::groups`, and a pair's `Drill` carries the filter it was
 drilled under. The state, the filter and the folds
 live in `TrafficState::apps_state` and survive every rebuild.
+
+### Focus, app overlay, draft decision
+
+`pce::traffic::focus::Focus` is one app (a group under the `g` keys) and a
+direction: a pure predicate (`Focus::keeps`) over the loaded flows, and the
+focused Explorer queries (`Focus::queries`, one per side because Explorer
+ANDs sources and destinations) that `Pce::focused_traffic` runs in their own
+cache slots (`focus:in`, `focus:out`), merged without duplicates. Setting a
+focus sends nothing; `r` on a partial focus sends `Cmd::RunFocused`.
+
+The app overlay (`tui/app_view.rs`, drawn by `ui/widgets/app_overlay.rs`)
+is built from `pce::app` (`app_peers`, `app_workloads`, `app_policy`; all
+pure) over the loaded result, plus at most two requests: the app's workloads
+(`Cmd::LoadAppWorkloads`, filtered by its labels) and the rulesets when the
+Policy screen has not loaded them. `illumio-tui app` (`cli/app.rs`) prints
+the same profile.
+
+`D` sends `Cmd::RunDraft`: `Pce::traffic_eval` (or `focused_traffic_eval`)
+re-evaluates the query the result came from (`PUT …/update_rules`, polls, one
+download) and caches the draft answer apart from the reported one
+(`draft:<slot>:`), so clearing and asking again costs nothing. A successful
+write drops it and, where `D` would not ask first, runs it once more.
+
+### Policy generator
+
+`pce::generate` is pure and shared by the TUI (`G`, `:gen`) and the CLI
+(`gen`): `rows` turns the app's flows into one `GenRow` per peer and side
+(intra-app, app peer, existing IP list with its IP peers, IP in no list,
+unlabelled workload; IP rows past `MAX_IP_ROWS` fold into one read-only row),
+`propose` turns the rows and the slider `Stop` into merged `GenRule`s
+(`derive`), each classified against the target ruleset's draft rules
+(`dedupe`: `Create`, `AddServices`, `Exists`), with the `Coverage` of the
+flows. `target` picks the ruleset (the logic the `w` form uses) or names a
+new one by `generator.ruleset_name`; `services` writes a flow's service as a
+rule names it. `consolidate` finds the fan-in ports (`candidates`: at least
+`generator.consolidate_min_peers`, or `INFRA_MIN_PEERS` on an `INFRA_PORTS`
+port) and, per `Consolidate` choice (`Any`: the built-in Any IP list;
+`AllWorkloads`: unscoped `ams`), writes the one rule in their place.
+
+The TUI keeps its state in `tui/gen_view.rs`; opening costs at most one
+cached draft ruleset read. `Enter` sends `Cmd::PlanBatch`:
+`Writer::plan_batch` (`pce::write::batch`) reads the draft rulesets fresh,
+dedupes again, adds a ruleset or IP list create where needed (later steps
+name them by the placeholder `{step:N}`, filled in just before sending and
+never passing `checked_href`) and one GET per rule to update. `y` sends
+`Cmd::ExecuteBatch`; `Writer::execute_batch` sends the steps once each, in
+order, through `Writer::execute`, and stops at the first failure. `:batch`
+reopens the last batch's step report.
+
+### Events and export
+
+`tui/event_diff.rs` turns an audit event into a header, one block per
+resource change (`resource_changes`: fields before and after, lists diffed by
+element) and its notifications, from the event and the names already loaded;
+a shape it does not read stays visible as JSON. The Events detail and
+`events --diff` both use it. In the detail, `j`/`k` and the arrows move the
+selection to the previous or next event; the scroll keys move inside one.
+`:export` (`tui/export.rs`) writes the table on screen through the CLI's CSV
+writer as `Cmd::Export`; it never touches the PCE.
 
 ## Testing
 

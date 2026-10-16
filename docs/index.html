@@ -114,7 +114,7 @@ illumio-tui 0.2.0</code></pre>
 
   <div class="shots">
     <figure class="shot">
-      <img src="assets/traffic-flows.png" alt="The Traffic screen, Flows view: filter bar, a result of 1000 flows with a decision bar, the flow table with one row selected, and the detail panel showing both label sets, process, user and bytes" width="2216" height="1352" loading="lazy">
+      <img src="assets/traffic-flows.png" alt="The Traffic screen, Flows view: filter bar, a result of 4996 flows with a decision bar, the flow table with one row selected, and the detail panel showing both label sets, process, user and bytes" width="2216" height="1352" loading="lazy">
       <figcaption><kbd>1</kbd> Traffic, Flows view with the detail of the selected flow.</figcaption>
     </figure>
     <figure class="shot">
@@ -126,7 +126,7 @@ illumio-tui 0.2.0</code></pre>
       <figcaption>Treemap: each source a box, destinations sized by connections.</figcaption>
     </figure>
     <figure class="shot">
-      <img src="assets/traffic-blocked.png" alt="The Traffic screen, Blocked view after a query filtered to blocked flows: 1000 blocked flows grouped by destination app and environment and service, with last seen time, destination host or host count, flow and connection counts and the source groups" width="2216" height="1352" loading="lazy">
+      <img src="assets/traffic-blocked.png" alt="The Traffic screen, Blocked view after a query filtered to blocked flows: 1780 blocked flows grouped by destination app and environment and service, with last seen time, destination host or host count, flow and connection counts and the source groups" width="2216" height="1352" loading="lazy">
       <figcaption>Blocked, after <code>f</code> set the decision to <code>blocked</code>: blocked flows by destination group and service, with their sources.</figcaption>
     </figure>
     <figure class="shot">
@@ -138,7 +138,7 @@ illumio-tui 0.2.0</code></pre>
       <figcaption><kbd>4</kbd> Workloads with VEN health.</figcaption>
     </figure>
     <figure class="shot">
-      <img src="assets/help.png" alt="The key map overlay opened with ?, listing global keys and the keys for each screen" width="2216" height="1352" loading="lazy">
+      <img src="assets/help.png" alt="The key map overlay opened with ?, rows 1 to 34 of 74: the colon commands, the global keys and the Traffic keys" width="2216" height="1352" loading="lazy">
       <figcaption><kbd>?</kbd> The key map.</figcaption>
     </figure>
   </div>
@@ -153,7 +153,7 @@ illumio-tui 0.2.0</code></pre>
         <li><kbd>4</kbd><strong>Workloads.</strong> VEN health columns and a summary line, <code>h</code> unhealthy only, <code>H</code> by severity, <code>t</code> / <code>T</code> jump to Traffic with the workload as source / destination. A workload without a VEN shows enforcement <code>unmanaged</code>, as in the PCE UI, whatever mode the API reports for it (often <code>visibility_only</code>). Local filters, no request: <code>E</code> enforcement, <code>m</code> managed, <code>o</code> offline, <code>u</code> unlabeled (a <code>missing</code> column names the absent scope or role keys), <code>c</code> clears them and <code>h</code> (not the search); a filter line shows what is on and the count.</li>
         <li><kbd>5</kbd><strong>Events.</strong> Severity-coloured audit events, filtered by severity, type and window; <code>Enter</code> shows what changed as a diff: only the changed fields, <code>-</code> before and <code>+</code> after, lists diffed by element, hrefs read as names; <code>J</code> toggles the raw JSON; in the detail <code>j</code>/<code>k</code> (or the arrows) step through the events and <code>Ctrl-d</code>/<code>Ctrl-u</code> scroll.</li>
       </ul>
-      <p>The <code>:</code> prompt takes <code>:traffic</code>, <code>:policy</code>, <code>:objects</code>, <code>:workloads</code>, <code>:events</code>, <code>:iplists</code>, <code>:filter</code>, <code>:window</code>, <code>:profile &lt;name&gt;</code>, <code>:app</code>, <code>:gen</code>, <code>:writes on|off</code>, <code>:draft</code>, <code>:active</code>, <code>:help</code> and <code>:q</code>. <code>?</code> shows the full key map.</p>
+      <p>The <code>:</code> prompt takes <code>:traffic</code>, <code>:policy</code>, <code>:objects</code>, <code>:workloads</code>, <code>:events</code>, <code>:iplists</code>, <code>:filter</code>, <code>:window</code>, <code>:profile &lt;name&gt;</code>, <code>:focus</code>, <code>:app</code>, <code>:gen</code>, <code>:unicast</code>, <code>:export &lt;path&gt;</code>, <code>:writes on|off</code>, <code>:batch</code>, <code>:draft</code>, <code>:active</code>, <code>:help</code> and <code>:q</code>. <code>?</code> shows the full key map.</p>
     </div>
     <div>
       <h3>Five views of one traffic result</h3>
@@ -169,7 +169,7 @@ illumio-tui 0.2.0</code></pre>
       <p><code>F</code> focuses every view on one app: <code>X</code> cycles its inbound, outbound or both directions, <code>Esc</code> clears it. On a truncated result, <code>r</code> re-queries just that app, with its labels in the query.</p>
       <p><code>D</code> shows what the <strong>draft</strong> policy would decide for each flow, next to the reported decision: <code>blocked &rarr; allowed</code> in Flows, <em>would allow</em> counts in App-to-app, a <em>fixed by draft</em> step on <code>d</code>, and <em>draft: N blocked flows fixed</em> in the app screen. It is the PCE&rsquo;s own Explorer draft view and changes no policy: one PUT on the query you already ran, polls and one download, no new query. <code>D</code> again clears it with no request; <code>Esc</code> cancels it while it runs. On the CLI, <code>--draft</code>.</p>
       <p><code>A</code> opens one screen for that app: inbound and outbound peers, its workloads with enforcement modes (workloads without a VEN counted as unmanaged) and VEN health, and the rulesets that cover it. It reuses what is loaded; opening it sends at most two requests, and every request is counted in its header.</p>
-      <p><code>G</code> there (or <code>:gen</code>) opens the <strong>policy generator</strong>: the allow rules the app&rsquo;s own traffic needs, one row per peer with a checkbox, a slider from <em>app, all services</em> to <em>role pairs, the ports seen</em>, rules already in the draft marked <em>exists</em>, and a preview of the flows covered. A port many peers reach (DNS, NTP, a monitoring agent, a shared service) gets a fan-in line: <code>c</code> turns it into one rule from the built-in Any IP list (checked workload peers keep their own rules, which carry their outbound) or from All Workloads, with its catch and what that rule also allows spelled out. <code>Enter</code> plans every write (IP lists, a ruleset, rule updates and creates) into one confirm; <code>y</code> sends them in order. On the CLI, <code>illumio-tui gen</code> prints the same proposal and writes nothing.</p>
+      <p><code>G</code> there (or <code>:gen</code>) opens the <strong>policy generator</strong>: the allow rules the app&rsquo;s own traffic needs, one row per peer with a checkbox, a slider from <em>app, all services</em> to <em>role pairs, the ports seen</em>, rules already in the draft marked <em>exists</em>, and a preview of the flows covered. IP peers that sit in an existing IP list are grouped into one row per list, so the rule names the list rather than a new list per address. A port many peers reach (DNS, NTP, a monitoring agent, a shared service) gets a fan-in line: <code>c</code> turns it into one rule from the built-in Any IP list (checked workload peers keep their own rules, which carry their outbound) or from All Workloads, with its catch and what that rule also allows spelled out. <code>Enter</code> plans every write (IP lists, a ruleset, rule updates and creates) into one confirm; <code>y</code> sends them in order and stops at the first failure, and <code>:batch</code> shows the steps again. On the CLI, <code>illumio-tui gen</code> prints the same proposal and writes nothing. IP list rows and fan-in consolidation are on <code>main</code> since v0.2.0 and ship with the next release.</p>
     </div>
   </div>
 </section>
@@ -202,6 +202,11 @@ illumio-tui 0.2.0</code></pre>
 <span class="p">$ </span>illumio-tui traffic mesh --window 1h --no-user --json
 <span class="p">$ </span>illumio-tui traffic query --window 30d --dry-run
 
+<span class="c"># one app: its profile, and the allow rules its traffic needs (never written)</span>
+<span class="p">$ </span>illumio-tui app shop/prod --window 24h --json
+<span class="p">$ </span>illumio-tui gen shop/prod --granularity role-ports --outbound --table
+<span class="p">$ </span>illumio-tui gen shop/prod --consolidate 5666/tcp=any --json
+
 <span class="c"># connection profiles</span>
 <span class="p">$ </span>illumio-tui profile list
 <span class="p">$ </span>illumio-tui profile use prod</code></pre>
@@ -212,7 +217,8 @@ illumio-tui 0.2.0</code></pre>
       <p><code>traffic query</code> submits the PCE's asynchronous Explorer query, polls with backoff, downloads the result, flags truncation, and resolves every label href to <code>key=value</code>.</p>
       <p>Filters read like you think: <code>app=web</code>, <code>ip:10.0.0.5</code>, <code>ipl:NAME</code>, <code>wl:HOST</code>, <code>fqdn:NAME</code>. A comma means AND, repeating the flag means OR. Add <code>--exclude-src</code>, <code>--exclude-dst</code>, <code>--port</code>, <code>--proto</code>, <code>--process</code> and <code>--decision</code> as needed. An unknown label value fails locally, before the PCE sees anything.</p>
       <p><code>--group app,env</code> folds flows into label pairs; <code>--blocked</code> keeps blocked and potentially blocked flows, grouped by destination group and port. <code>traffic groups</code> prints one row per source and destination group with connections, bytes and decisions (<code>--services</code>: one per group pair and port/proto); <code>traffic mesh</code> one row per user, process, source, destination, service and destination process, with <code>--no-user</code> and <code>--no-process</code> to merge. <code>--keys</code> picks the label keys (default: the profile's scope keys). <code>--app shop/prod --direction in</code> spends the cap on one app: its labels go into the query (two queries for <code>both</code>, merged). <code>flows</code> counts flow records; <code>conns</code> and <code>bytes</code> are the lifetime counts of those records, as in the PCE UI, and JSON and CSV add them per decision (<code>allowed_conns</code>, <code>pot_blocked_conns</code>, <code>blocked_conns</code>, <code>unknown_conns</code>). <code>--transmission unicast</code> (or <code>broadcast</code>, <code>multicast</code>; <code>:unicast</code> in the TUI) leaves out the other kinds in the query itself; the default keeps every kind, where workloader counts unicast only.</p>
-      <p><code>illumio-tui app shop/prod</code> prints the same profile as one JSON envelope for agents: workloads and VENs, peers and policy; <code>--table</code> and <code>--csv --section</code> print it per section.</p>
+      <p><code>illumio-tui app shop/prod</code> prints the app overlay as one JSON envelope for agents: workloads and VENs, peers and policy; <code>--table</code> and <code>--csv --section</code> print it per section.</p>
+      <p><code>illumio-tui gen shop/prod</code> prints the generator's proposal: the target ruleset, one row per peer (<code>kind</code> <code>intra</code>, <code>app</code>, <code>ip_list</code> with its <code>ip_list</code> and <code>ips</code>, <code>ip</code>, <code>workload</code> or <code>folded_ips</code>), the rules with their exact PCE bodies, the IP lists to create, the fan-in ports under <code>consolidations</code> (<code>--consolidate 5666/tcp=any|all</code> switches one to its single rule) and a coverage preview. A capped result exits 2, an incomplete one 4.</p>
       <p><code>--impact</code> on <code>policy rules</code> counts the workloads each rule matches as providers and consumers, across the ruleset's scopes, label groups and exclusions, from one cached workload read; <code>iplists</code> gives every list its size.</p>
     </div>
     <div>
@@ -310,7 +316,9 @@ API_SECRET=xxxxxxxxxxxxxxxx</code></pre>
           <tbody>
             <tr><td><code>PCE_TLS_VERIFY</code></td><td><code>false</code> skips certificate checks, like <code>--insecure</code></td></tr>
             <tr><td><code>ILLUMIO_PROFILE</code></td><td>the profile to use, like <code>--profile</code></td></tr>
+            <tr><td><code>PCE_SCHEME</code></td><td>the URL scheme, <code>https</code> by default</td></tr>
             <tr><td><code>ILLUMIO_WRITES</code></td><td><code>1</code> allows writes, like <code>writes = true</code></td></tr>
+            <tr><td><code>ILLUMIO_AUTO_BACKFILL</code></td><td><code>1</code> like <code>traffic_auto_backfill = true</code></td></tr>
             <tr><td><code>ILLUMIO_SCOPE_KEYS</code></td><td>the label keys a ruleset scope is made of</td></tr>
             <tr><td><code>ILLUMIO_TIER_KEY</code></td><td>the label key a rule selects a tier by</td></tr>
             <tr><td><code>ILLUMIO_IGNORE_KEYS</code></td><td>label keys hidden from label columns</td></tr>
@@ -332,14 +340,27 @@ api_key = "api_..."
 api_secret_cmd = "op read op://vault/pce/secret"
 writes = true    <span class="c"># optional: allow writes</span>
 
+[profiles.prod.limits]
+traffic_max_results = 10000     <span class="c"># starting row cap, at most 200000</span>
+traffic_default_window = "24h"
+traffic_auto_backfill = false
+requests_per_second = 2
+auto_refresh_min_seconds = 60   <span class="c"># at least 60</span>
+
 [profiles.prod.labels]
 scope_keys = ["app", "env"]
 tier_key = "role"
-ignore_keys = ["DFIRBubble"]</code></pre>
+ignore_keys = ["DFIRBubble"]
+
+[profiles.prod.generator]
+ruleset_name = "RF-{app}-{env}"  <span class="c"># the default</span>
+consolidate_min_peers = 5        <span class="c"># the default; at least 2</span></code></pre>
       <p><code>api_secret_cmd</code> fetches the secret from your password manager at run time; keep it non-interactive, because <code>:profile</code> runs it while the TUI owns the terminal. Switch profiles with <code>profile use</code>, <code>--profile</code> or <code>:profile</code>.</p>
       <h3>The label model</h3>
       <p>Rulesets are scoped by <code>scope_keys</code> (<code>app</code>, <code>env</code> by default) and rules select tiers by <code>tier_key</code> (<code>role</code>). The traffic views, <code>traffic groups</code>, <code>traffic mesh</code> and <code>traffic query --blocked</code> group by the scope keys, and the <code>w</code> rule form pre-fills from both. Labels print in scope-key order, then the tier key, then alphabetically.</p>
-      <p><code>ignore_keys</code> hides housekeeping keys from label columns and the <code>g</code> picker; JSON output, the workload edit form and the Labels tab keep them, and a scope or tier key is never ignored.</p>
+      <p><code>ignore_keys</code> hides housekeeping keys from label columns and the <code>g</code> picker; JSON output and the workload edit form keep them, the Labels tab shows them on <code>i</code>, and a scope or tier key is never ignored.</p>
+      <h3>The generator</h3>
+      <p><code>ruleset_name</code> names a ruleset the policy generator creates, as a template over the scope keys (<code>RF-shop-prod</code>); every <code>{key}</code> must be a scope key and every scope key must appear. <code>consolidate_min_peers</code> is how many inbound peers on one port make it a fan-in line; DNS, NTP, Kerberos, LDAP, SMB, syslog, SNMP and monitoring-agent ports need 3.</p>
     </div>
   </div>
 </section>
@@ -350,9 +371,9 @@ ignore_keys = ["DFIRBubble"]</code></pre>
   <p>Most tools that hammer a management plane do it by accident: a refresh loop nobody asked for, a retry storm, an Explorer query over ninety days that someone fired off to see what happens. illumio-tui is built so that none of that can happen quietly. Every request is caused by you, throttled, cached where it can be, counted, and shown back to you.</p>
 
   <ul class="guards">
-    <li><b>2 req/s, burst 5</b><span>One token bucket shared by every request. 429 and 503 pause the whole client with exponential backoff and jitter, honouring <code>Retry-After</code>. POSTs are never retried.</span></li>
+    <li><b>2 req/s, burst 5</b><span>One token bucket shared by every request (<code>requests_per_second</code> in the profile). 429 and 503 pause the whole client with exponential backoff and jitter, honouring <code>Retry-After</code>. POSTs are never retried.</span></li>
     <li><b>Counted, always</b><span>Every call and byte goes into <code>meta.api_calls</code> and <code>meta.bytes</code>, and into the TUI header. You always know what you spent.</span></li>
-    <li><b>Cached 15 / 5 min</b><span>Labels, label groups, IP lists and services for 15 minutes; policy and workloads for 5. One traffic result is kept until the filter changes.</span></li>
+    <li><b>Cached 15 / 5 / 1 min</b><span>Labels, label groups, IP lists and services for 15 minutes; policy and workloads for 5; events for 1. One traffic result is kept until the filter changes; draft decisions for 2 minutes.</span></li>
     <li><b>5 requests to start</b><span>The TUI opens with health plus the four object lists. The first visit to Workloads and to Events costs one request each; going back costs none.</span></li>
     <li><b>No auto-refresh by default</b><span><code>a</code> turns it on per screen, never faster than every 60 seconds, with a countdown; it switches itself off after a failed refresh.</span></li>
     <li><b>24 h, 10 000 rows</b><span>Explorer queries default to a 24-hour window and a 10 000-row cap, at most 200 000. Truncation comes from the PCE's own row count and is always reported; <code>B</code> and <code>--backfill</code> re-run the window at a larger cap, one query per rung, asking above 10 000.</span></li>

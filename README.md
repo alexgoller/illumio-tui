@@ -6,6 +6,10 @@ services, unmanaged workloads and policy (rulesets, rules, provisioning) are opt
 
 Documentation: https://alexgoller.github.io/illumio-tui/
 
+This README describes `main`. Since v0.2.0, `main` adds IP list rows and fan-in
+consolidation to the policy generator and event-to-event navigation in the Events
+detail; they ship with the next release.
+
 Screenshots and a short recording: https://alexgoller.github.io/illumio-tui/#screens
 
 ## Install
@@ -69,14 +73,21 @@ or a profile in `~/.config/illumio-tui/config.toml`:
     api_key = "api_..."
     api_secret_cmd = "op read op://vault/pce/secret"
     writes = true    # optional: allow writes (the CLI still needs --yes, the TUI :writes on)
+    # also: port (443), scheme ("https"), tls_verify (true), api_secret (plaintext, instead of _cmd)
 
     [profiles.prod.limits]
     traffic_max_results = 10000     # the starting traffic row cap (default 10000, at most 200000)
     traffic_default_window = "24h"
     traffic_auto_backfill = false   # true: re-run a truncated result below 10000 at 10000 (see TUI)
+    requests_per_second = 2         # the request throttle (default 2)
+    auto_refresh_min_seconds = 60   # the TUI's auto-refresh interval (default and minimum 60)
 
-`PCE_TLS_VERIFY=false` skips certificate checks like `--insecure`; `ILLUMIO_PROFILE` picks
-the profile and `ILLUMIO_TUI_THEME` the TUI theme. `--env-file .env` loads a dotenv file for one run. Connection settings can
+`[profiles.<name>.labels]` and `[profiles.<name>.generator]` are under Label model below.
+Environment variables outrank the profile. `PCE_TLS_VERIFY=false` skips certificate checks
+like `--insecure`, `PCE_SCHEME` overrides the scheme; `ILLUMIO_PROFILE` picks
+the profile and `ILLUMIO_TUI_THEME` the TUI theme; `ILLUMIO_WRITES` and
+`ILLUMIO_AUTO_BACKFILL` (`1`/`0`, `true`/`false`) outrank the profile's `writes` and
+`traffic_auto_backfill`. `--env-file .env` loads a dotenv file for one run. Connection settings can
 also be overridden per run with global flags: `--host`, `--pce-port`,
 `--org-id`, `--profile`, `--config`, `--insecure`, `--no-cache` (the
 connection-port flag is `--pce-port`, not `--port`, because `traffic query`
@@ -91,7 +102,8 @@ has its own `--port` service-port filter).
 Five screens: `1` Traffic, `2` Policy, `3` Objects, `4` Workloads, `5` Events. The `:` prompt
 takes `:traffic`, `:policy`, `:objects`, `:workloads`, `:events`, `:iplists` (Objects on its
 IP lists tab), `:filter <expr>`, `:window <dur>`, `:profile <name>`, `:writes [on|off]`,
-`:export <path>`, `:draft`, `:active`, `:help` and `:q`. `:export <path>` writes the table on
+`:export <path>`, `:draft`, `:active`, `:unicast`, `:focus [app]`, `:app [app]`, `:gen [app]`,
+`:batch`, `:help` and `:q` (each described below). `:export <path>` writes the table on
 screen as CSV (the rows shown, with the search and filters applied and in sort order; every
 column, whatever the terminal width, each cell whole; `~/` is the home directory), the same
 format as the CLI's `--csv`, and sends nothing; it refuses an existing file, `:export! <path>`
@@ -99,7 +111,7 @@ overwrites it. Cells match the CLI's for the same data (Workloads: every label, 
 too, and `heartbeat_age_secs`). Sectioned views (App-to-app `in`/`out`/`both`, Blocked) export
 every peer, folded sections included, in the columns of `traffic groups --by ... --csv`; the
 Treemap has no table.
-`?` shows the full key map, `Esc` closes overlays, `q` or `Ctrl-C` quits. The mouse wheel
+`?` shows the full key map (`j`/`k` scroll it), `Esc` closes overlays, `q` or `Ctrl-C` quits. The mouse wheel
 scrolls the current table and a click on a tab switches screen; on a terminal narrower than
 the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
 
@@ -201,7 +213,10 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   allowed, `✗` blocked or potentially blocked; with `D` loaded, `would allow N`). Intra-app
   and same-env peers start checked, the rest (IP rows too) unchecked with the reason (`⚠ env
   mismatch`, `⚠ needs an IP list`, which checking plans). `p` and the confirm list the IPs
-  seen under each rule naming a list (`ipl:Corp: 7 IPs seen: 10.1.4.9, ... +4`). The slider `app·all ─ app·ports ─
+  seen under each rule naming a list (`ipl:Corp: 7 IPs seen: 10.1.4.9, ... +4`). Past 25 IP
+  rows on a side the rest fold into one read-only row (`12 more IPs: not proposed`). `Space`
+  checks or unchecks a row, `Tab` moves between the inbound and outbound sections, `q` (like `Esc`)
+  goes back. The slider `app·all ─ app·ports ─
   role·ports ─ role·all` (`←`/`→`) sets how coarse the rules are: all workloads of the app or
   one rule per role pair, All Services or the services seen; `<`/`>` give a row its own stop
   (`*`), `=` drops it. `o` adds the outbound section: rules to other apps go into the peers'
@@ -329,7 +344,7 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   on and the count (`enforcement selective · unlabeled (app, env, role) · 1 of 206`), and
   says the counts are partial when the list was truncated.
 - **Events**: severity-coloured audit events, `f` edit severity / type / window, `S` sort by
-  severity, `Enter` the event as a change diff (`j` / `k` scroll a long one): a header (time,
+  severity, `Enter` the event as a change diff: a header (time,
   type, severity and status, actor, API request and source), then one block per resource
   change. An update shows only the changed fields, `-` before in red and `+` after in green;
   lists (providers, consumers, services, scopes, IP ranges, labels) are diffed by element, so
@@ -424,7 +439,8 @@ a `diff` column, one diff line per line of the cell). `traffic groups --by ...` 
 counts and their names. The meta line always goes to
 stderr, so a redirect holds only CSV. `--csv` sends the same requests as the table;
 `workloads`, `labels`, `label-groups`, `services`, `iplists`, `events`, `policy rulesets`,
-`policy rules`, `policy pending`, `traffic query`/`groups`/`mesh` and `profile list` take it.
+`policy rules`, `policy pending`, `traffic query`/`groups`/`mesh`, `app` (with `--section`),
+`gen` and `profile list` take it.
 
 `workloads` shows the effective enforcement: `unmanaged` for a workload without a VEN, which
 the PCE reports with a mode of its own (often `visibility_only`), else the PCE's mode. JSON keeps the PCE's value in
@@ -519,13 +535,18 @@ it); `--table` prints each section under a title line; `--csv` prints one and ne
 
 `illumio-tui gen <app> [--granularity app-all|app-ports|role-ports|role-all] [--outbound]
 [--window W] [--max-results N] [--yes] [--consolidate <port>/<proto>=any|all ...]` proposes the allow rules the app's observed traffic
-needs, as the TUI's generator would plan them, and writes nothing. `rows` holds one row per
-peer and side (intra-app, each app peer, each existing IP list with its IP peers, `kind:
-"ip_list"`, `ip_list: {name, href}` and `ips`, each IP peer in no list and each unlabelled
-workload; since #38 an IP in a list is no longer its own row with `peer` its IP: read
-`ip_list` and `ips` rather than parsing `peer`; their `uses IP list <name>` warning is kept
-for compatibility but deprecated and will go in a later release) with its default
-checkbox (`checked`: intra-app and same-env app peers), the services seen, the reported
+needs, as the TUI's generator would plan them, and writes nothing. `data` holds `app`,
+`keys`, `window`, `granularity`, `outbound`, `target` (the app's ruleset: `name`, `href`,
+`action` `existing`, `create`, `ambiguous` or `none`), `rows`, `ip_lists`, `rules`,
+`consolidations` and `preview`. `rows` holds one row per
+peer and side, its `kind` `intra`, `app` (each app peer), `ip_list` (each existing IP list
+with its IP peers: `ip_list: {name, href}` and `ips`), `ip` (each IP peer in no list),
+`workload` (each unlabelled workload) or `folded_ips` (the IP rows past 25, read-only);
+`peer` is display text (`IP list rfc1918 · 7 IPs`), not a key to parse. Since #38 an IP in a
+list is no longer its own row with `peer` its IP: read `ip_list` and `ips`; the `uses IP list
+<name>` warning on those rows is kept for compatibility but deprecated and will go in a later
+release. Each row has its `side`, its default
+checkbox (`checked`: intra-app and same-env app peers; `checkable`), its `granularity`, `flows`, the services seen, the reported
 decisions and its warnings (`env mismatch`, `needs an IP list`, `2 IPs also in rfc1918:
 narrowest list`, `ephemeral port?`, ...); `rules` the merged rules at the chosen granularity, each with its
 `ruleset`, `action` (`create`, `add_services` or `exists`, against the draft rulesets),
@@ -632,7 +653,8 @@ match an existing entry. A service update that changes ports refuses (exit 2)
 services carrying fields this tool cannot preserve: `windows_services`,
 `icmp_type`/`icmp_code`, or a port without a protocol. Only unmanaged workloads can be written: one that the PCE
 reports as managed, or that has a VEN, is refused locally, and a hostname or
-name matching more than one workload is refused ("use the href").
+name matching more than one workload is refused ("use the href"); a managed workload's labels
+change only with `--managed-labels` (below).
 
 A sent write returns `data` with `href`, `pending`, `status`, `object`,
 `dropped_fields` and `warnings`, and `meta.write` with the method, path,
@@ -923,7 +945,9 @@ port make it a fan-in line; infrastructure ports need 3.
 
 ## PCE protection
 
-Every request is user-caused, throttled (2/s), cached, and counted.
+Every request is user-caused, throttled (2/s, burst 5; `requests_per_second` in the profile),
+cached (labels, label groups, IP lists and services 15 minutes; policy and workloads 5;
+events 1), and counted.
 Explorer queries default to a 24 h window and 10 000 rows; larger windows
 (> 7 d) or caps (> 10 000, at most 200 000) need `--yes`. `--dry-run` shows the request
 body without sending it. A traffic backfill sends nothing before `B` (or `--backfill`, or
