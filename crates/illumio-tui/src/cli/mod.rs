@@ -4,6 +4,7 @@ pub mod app;
 pub mod context;
 pub mod error;
 pub mod events;
+pub mod generate;
 pub mod health;
 pub mod objects;
 pub mod output;
@@ -97,6 +98,11 @@ pub enum Command {
     /// Peers: flows counts flow records; conns and bytes are the lifetime counts of those
     /// records, as in the PCE UI.
     App(app::AppArgs),
+    /// Propose the allow rules one app needs, from its traffic (read-only)
+    ///
+    /// The TUI generator's rules for the app (G there), printed and never written: rows per
+    /// peer, the rules at one granularity, and what is already in the draft.
+    Gen(generate::GenArgs),
     /// Rulesets, rules, deny rules, pending changes, provisioning
     #[command(subcommand)]
     Policy(policy::PolicyCmd),
@@ -157,6 +163,7 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
         Command::Events(a) => events::run(&ctx, &a).await,
         Command::Workloads(a) => workloads::workloads_cmd(&ctx, &a).await,
         Command::App(a) => app::run(&ctx, &a).await,
+        Command::Gen(a) => generate::run(&ctx, &a).await,
         Command::Policy(p) => policy::run(&ctx, &p).await,
         Command::Traffic(t) => traffic::run(&ctx, &t).await,
         Command::Profile(_) => unreachable!("handled above"),

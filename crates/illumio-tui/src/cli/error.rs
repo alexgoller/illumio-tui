@@ -18,6 +18,9 @@ pub enum CliError {
     Io(#[from] std::io::Error),
     #[error("{0}")]
     Other(String),
+    /// The data is missing rows (a PCE region did not answer): exit 4.
+    #[error("{0}")]
+    Incomplete(String),
 }
 
 impl CliError {
@@ -27,7 +30,7 @@ impl CliError {
             CliError::Pce(PceError::Auth { .. }) => 3,
             CliError::Pce(PceError::RateLimited { .. }) => 5,
             CliError::Pce(PceError::Invalid(_)) => 2,
-            CliError::Pce(_) => 4,
+            CliError::Pce(_) | CliError::Incomplete(_) => 4,
             CliError::Write(e) => write_exit_code(e),
             CliError::Io(_) | CliError::Other(_) => 1,
         }
@@ -41,6 +44,7 @@ impl CliError {
             CliError::Write(e) => e.kind().into(),
             CliError::Io(_) => "io".into(),
             CliError::Other(_) => "error".into(),
+            CliError::Incomplete(_) => "incomplete".into(),
         }
     }
 

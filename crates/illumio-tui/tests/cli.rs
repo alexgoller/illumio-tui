@@ -65,6 +65,7 @@ fn every_flag_has_help_text() {
         vec!["traffic", "groups", "--help"],
         vec!["traffic", "mesh", "--help"],
         vec!["app", "--help"],
+        vec!["gen", "--help"],
         vec!["policy", "pending", "--help"],
         vec!["policy", "rulesets", "--help"],
         vec!["policy", "rules", "--help"],
@@ -3697,4 +3698,243 @@ async fn backfill_with_draft_re_evaluates_only_the_kept_rung_by_its_href() {
     );
     assert_eq!(out["meta"]["draft"]["newly_blocked"], 3);
     server.verify().await;
+}
+
+/// The traffic (any POST answers the 4-flow fixture), the object lists and
+/// the draft rulesets: what `gen` reads.
+/// `runs` commands, `posts` traffic queries each.
+async fn mount_gen(server: &MockServer, runs: u64, posts: u64) {
+    mount_traffic(server, runs * posts).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/sec_policy/draft/rule_sets"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/rule_sets.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(runs)
+        .mount(server)
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn gen_prints_rows_rules_and_the_preview_and_writes_nothing() {
+    let server = MockServer::start().await;
+    mount_gen(&server, 1, 1).await;
+    let out = stdout_json(
+        cmd(&server)
+            .args(["gen", "shop/prod", "--window", "1h"])
+            .assert()
+            .success(),
+    );
+    let d = &out["data"];
+    assert_eq!(d["app"], "shop/prod");
+    assert_eq!(d["keys"], json!(["app", "env"]));
+    assert_eq!(d["granularity"], "app-ports");
+    assert_eq!(d["outbound"], false);
+    assert_eq!(
+        d["target"],
+        json!({"name": "Shop-Prod", "href": "/orgs/5/sec_policy/draft/rule_sets/100", "action": "existing"})
+    );
+    let peers: Vec<&str> = d["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["peer"].as_str().unwrap())
+        .collect();
+    assert_eq!(peers, vec!["intra-app", "unmanaged-nas", "10.1.4.9"]);
+    assert_eq!(d["rows"][0]["checked"], true);
+    assert_eq!(d["rows"][0]["services"], json!(["5432/tcp"]));
+    assert_eq!(
+        d["rows"][1]["checkable"], false,
+        "icmp only, no ICMP service"
+    );
+    assert_eq!(d["rows"][2]["warnings"], json!(["uses IP list Corp"]));
+    assert_eq!(d["rules"].as_array().unwrap().len(), 1);
+    let r = &d["rules"][0];
+    assert_eq!(r["ruleset"], "Shop-Prod");
+    assert_eq!(r["action"], "create");
+    assert_eq!(r["providers"], json!(["all workloads"]));
+    assert_eq!(r["consumers"], json!(["all workloads"]));
+    assert_eq!(r["unscoped_consumers"], false);
+    assert_eq!(r["rows"], json!([1]));
+    assert_eq!(r["body"]["providers"], json!([{"actors": "ams"}]));
+    assert_eq!(
+        r["body"]["ingress_services"],
+        json!([{"port": 5432, "proto": 6}])
+    );
+    assert_eq!(d["preview"]["rules"], 1);
+    assert_eq!(d["preview"]["create"], 1);
+    assert_eq!(d["preview"]["covered_flows"], 1);
+    assert_eq!(d["preview"]["uncovered_flows"], 2);
+    assert_eq!(d["preview"]["uncovered_by"]["unchecked"], 1);
+    assert_eq!(d["preview"]["uncovered_by"]["unsupported_proto"], 1);
+    assert_eq!(out["meta"]["queries"], 1, "the in side only");
+    let sent = server.received_requests().await.unwrap();
+    assert!(
+        sent.iter()
+            .all(|r| r.method.as_str() == "GET" || r.url.path().ends_with("/async_queries")),
+        "only the traffic query is a POST"
+    );
+    server.verify().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn gen_granularity_role_ports_finds_the_existing_rule() {
+    let server = MockServer::start().await;
+    mount_gen(&server, 3, 1).await;
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "gen",
+                "shop/prod",
+                "--window",
+                "1h",
+                "--granularity",
+                "role-ports",
+            ])
+            .assert()
+            .success(),
+    );
+    let r = &out["data"]["rules"][0];
+    assert_eq!(r["providers"], json!(["role=db"]));
+    assert_eq!(r["consumers"], json!(["role=web"]));
+    assert_eq!(r["action"], "exists");
+    assert_eq!(
+        r["existing_rule"],
+        "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1"
+    );
+    assert!(r["body"].is_null());
+    assert_eq!(out["data"]["preview"]["exists"], 1);
+    for g in ["app-all", "role-all"] {
+        let out = stdout_json(
+            cmd(&server)
+                .args(["gen", "shop/prod", "--window", "1h", "--granularity", g])
+                .assert()
+                .success(),
+        );
+        assert_eq!(
+            out["data"]["rules"][0]["services"],
+            json!(["all services"]),
+            "{g}"
+        );
+        assert_eq!(
+            out["data"]["rows"][0]["services"],
+            json!(["all services"]),
+            "{g}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn gen_outbound_adds_the_out_query_and_its_rows() {
+    let server = MockServer::start().await;
+    mount_gen(&server, 1, 2).await;
+    let out = stdout_json(
+        cmd(&server)
+            .args(["gen", "shop/prod", "--window", "1h", "--outbound"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["meta"]["queries"], 2);
+    let rows = out["data"]["rows"].as_array().unwrap();
+    let last = rows.last().unwrap();
+    assert_eq!(last["side"], "outbound");
+    assert_eq!(last["peer"], "93.184.216.34");
+    assert_eq!(last["warnings"], json!(["needs an IP list"]));
+    assert_eq!(last["checked"], false);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn gen_refuses_capped_or_incomplete_traffic_and_unknown_apps() {
+    let server = MockServer::start().await;
+    // One capped query; the unknown apps are refused before any traffic.
+    mount_traffic(&server, 1).await;
+    let a = cmd(&server)
+        .args(["gen", "shop/prod", "--window", "1h", "--max-results", "4"])
+        .assert()
+        .code(2);
+    assert!(a.get_output().stdout.is_empty(), "no rules printed");
+    let err = String::from_utf8_lossy(&a.get_output().stderr).to_string();
+    assert!(
+        err.contains("traffic capped at 4 for shop/prod: raise --max-results or narrow --window; no rules proposed"),
+        "{err}"
+    );
+    let a = cmd(&server)
+        .args(["gen", "shpo/prod", "--window", "1h"])
+        .assert()
+        .code(2);
+    let err = String::from_utf8_lossy(&a.get_output().stderr).to_string();
+    assert!(err.contains("closest: shop"), "{err}");
+    let a = cmd(&server)
+        .args(["gen", "shop", "--window", "1h"])
+        .assert()
+        .code(2);
+    let err = String::from_utf8_lossy(&a.get_output().stderr).to_string();
+    assert!(err.contains("write it as <app>/<env>"), "{err}");
+
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/traffic_flows/async_queries"))
+        .respond_with(
+            ResponseTemplate::new(202).set_body_json(json!({"href": QHREF, "status": "queued"})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "completed", "result": {"href": format!("{QHREF}/download")},
+            "regions": [{"pce_fqdn": "a", "responded": true, "flows_count": 4},
+                        {"pce_fqdn": "b", "responded": false}]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}/download")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/traffic_flows.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .mount(&server)
+        .await;
+    let a = cmd(&server)
+        .args(["gen", "shop/prod", "--window", "1h"])
+        .assert()
+        .code(4);
+    assert!(a.get_output().stdout.is_empty());
+    let err: Value = serde_json::from_slice(&a.get_output().stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "incomplete");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn gen_table_and_csv_print_the_rule_columns() {
+    let server = MockServer::start().await;
+    mount_gen(&server, 2, 1).await;
+    let a = cmd(&server)
+        .args(["gen", "shop/prod", "--window", "1h", "--table"])
+        .assert()
+        .success();
+    let text = String::from_utf8_lossy(&a.get_output().stdout).to_string();
+    assert!(text.contains("consumers → providers"), "{text}");
+    assert!(text.contains("all workloads → all workloads"), "{text}");
+    let a = cmd(&server)
+        .args(["gen", "shop/prod", "--window", "1h", "--csv"])
+        .assert()
+        .success();
+    let text = String::from_utf8_lossy(&a.get_output().stdout).to_string();
+    let mut lines = text.lines();
+    assert_eq!(
+        lines.next(),
+        Some("ruleset,action,consumers,providers,services,unscoped,existing_rule,description")
+    );
+    let row = lines.next().unwrap();
+    assert!(
+        row.starts_with(
+            "Shop-Prod,create,all workloads,all workloads,5432/tcp,false,,\"generated: shop/prod → shop/prod on 5432/tcp, from 1h of traffic"
+        ),
+        "{row}"
+    );
 }
