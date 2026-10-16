@@ -289,6 +289,13 @@ impl Batch {
                 plural(reused, "object", "objects")
             ));
         }
+        let checks = self.steps.iter().filter(|s| s.expect.is_some()).count();
+        if checks > 0 {
+            s.push_str(&format!(
+                " · +{} to check rules before updating",
+                plural(checks, "GET", "GETs")
+            ));
+        }
         let denied = self.denied_rules();
         if denied > 0 {
             s.push_str(&format!(
@@ -354,11 +361,21 @@ impl Batch {
 }
 
 /// The href a finished step left: written, or found by a `Noop`.
-fn result_href(r: &StepResult) -> Option<&str> {
+fn result_href(r: &StepResult) -> Option<String> {
     match r {
-        StepResult::Written(w) => Some(&w.href),
-        StepResult::Skipped { existing_href } => Some(existing_href),
+        StepResult::Written(w) => Some(w.href.clone()),
+        StepResult::Skipped { existing_href } => Some(existing_href.clone()),
         StepResult::Failed(_) | StepResult::NotSent => None,
+    }
+}
+
+/// Whether the batch stops after this step: it failed, or it was
+/// written without an audit entry.
+fn stops(r: &StepResult) -> bool {
+    match r {
+        StepResult::Failed(_) => true,
+        StepResult::Written(w) => w.audit_failed.is_some(),
+        StepResult::Skipped { .. } | StepResult::NotSent => false,
     }
 }
 
@@ -369,7 +386,7 @@ fn result_href(r: &StepResult) -> Option<&str> {
 fn resolve_step(
     i: usize,
     step: &BatchStep,
-    done: &[StepResult],
+    done: &[Option<String>],
     org_id: u64,
 ) -> Result<Plan, WriteError> {
     let Plan::Send { request, kind } = &step.plan else {
@@ -384,7 +401,7 @@ fn resolve_step(
                 n + 1
             )));
         }
-        let href = done.get(n).and_then(result_href).ok_or_else(|| {
+        let href = done.get(n).cloned().flatten().ok_or_else(|| {
             WriteError::invalid(format!(
                 "step {} needs the href of step {}, which has none: nothing more sent",
                 i + 1,
@@ -392,8 +409,8 @@ fn resolve_step(
             ))
         })?;
         match slot {
-            ObjectKind::RuleSet => checked_policy_href(href, "rule_sets", org_id),
-            _ => checked_policy_href(href, "ip_lists", org_id),
+            ObjectKind::RuleSet => checked_policy_href(&href, "rule_sets", org_id),
+            _ => checked_policy_href(&href, "ip_lists", org_id),
         }
     })?;
     if holds_placeholder(&request) {
@@ -697,14 +714,29 @@ impl Writer<'_> {
     /// planning read (one GET before its PUT). Never retried, nothing
     /// rolled back: the steps are draft objects.
     pub async fn execute_batch(&self, batch: Batch) -> Vec<StepResult> {
+        let mut out = Vec::with_capacity(batch.steps.len());
+        self.execute_batch_each(batch, &mut |_, r| out.push(r))
+            .await;
+        out
+    }
+
+    /// [`Writer::execute_batch`], handing each step's result to `each` as
+    /// soon as it is known (in step order, every step once), so a caller
+    /// keeps an exact record even if this future is dropped or panics.
+    pub async fn execute_batch_each(
+        &self,
+        batch: Batch,
+        each: &mut (dyn FnMut(usize, StepResult) + Send),
+    ) {
         let n = batch.steps.len();
-        let refuse = |e: WriteError| -> Vec<StepResult> {
-            std::iter::once(StepResult::Failed(e))
-                .chain((1..n).map(|_| StepResult::NotSent))
-                .collect()
+        let mut refuse = |e: WriteError| {
+            each(0, StepResult::Failed(e));
+            for i in 1..n {
+                each(i, StepResult::NotSent);
+            }
         };
         if n == 0 {
-            return Vec::new();
+            return;
         }
         let here = BatchOrigin::of(self.guard().context());
         match &batch.origin {
@@ -726,39 +758,47 @@ impl Writer<'_> {
             return refuse(e);
         }
         let org = self.pce().client().org_id();
-        let mut out: Vec<StepResult> = Vec::with_capacity(n);
+        // Each finished step's href (for the steps after it), and whether
+        // the batch has stopped.
+        let mut hrefs: Vec<Option<String>> = Vec::with_capacity(n);
+        let mut stopped = false;
         for (i, step) in batch.steps.iter().enumerate() {
-            let stopped = out.iter().any(|r| match r {
-                StepResult::Failed(_) => true,
-                StepResult::Written(w) => w.audit_failed.is_some(),
-                StepResult::Skipped { .. } | StepResult::NotSent => false,
-            });
-            if stopped {
-                out.push(StepResult::NotSent);
-                continue;
-            }
-            let plan = match resolve_step(i, step, &out, org) {
-                Ok(plan) => plan,
-                Err(e) => {
-                    out.push(StepResult::Failed(e));
-                    continue;
-                }
+            let result = if stopped {
+                StepResult::NotSent
+            } else {
+                self.execute_step(i, step, &hrefs, org).await
             };
-            if let (Some(expect), Some(req)) = (&step.expect, plan.request())
-                && let Err(e) = self.unchanged(i, &req.path, expect).await
-            {
-                out.push(StepResult::Failed(e));
-                continue;
-            }
-            out.push(match self.execute(plan).await {
-                Ok(super::Outcome::Written(w)) => StepResult::Written(w),
-                Ok(super::Outcome::Skipped { existing_href, .. }) => {
-                    StepResult::Skipped { existing_href }
-                }
-                Err(e) => StepResult::Failed(e),
-            });
+            hrefs.push(result_href(&result));
+            stopped = stopped || stops(&result);
+            each(i, result);
         }
-        out
+    }
+
+    /// Step `i` with its hrefs put in, its rule checked unchanged (an
+    /// update), sent once.
+    async fn execute_step(
+        &self,
+        i: usize,
+        step: &BatchStep,
+        hrefs: &[Option<String>],
+        org: u64,
+    ) -> StepResult {
+        let plan = match resolve_step(i, step, hrefs, org) {
+            Ok(plan) => plan,
+            Err(e) => return StepResult::Failed(e),
+        };
+        if let (Some(expect), Some(req)) = (&step.expect, plan.request())
+            && let Err(e) = self.unchanged(i, &req.path, expect).await
+        {
+            return StepResult::Failed(e);
+        }
+        match self.execute(plan).await {
+            Ok(super::Outcome::Written(w)) => StepResult::Written(w),
+            Ok(super::Outcome::Skipped { existing_href, .. }) => {
+                StepResult::Skipped { existing_href }
+            }
+            Err(e) => StepResult::Failed(e),
+        }
     }
 
     /// One GET of the rule step `i` updates: refused when a field the PUT

@@ -50,6 +50,37 @@ impl TaskTx {
     }
 }
 
+/// Each step's result of a batch as its task hands it over, `progress`
+/// told the count. When the task ends without them all (a panic, a
+/// cancel), the next step is not answered (it may have applied: the audit
+/// log says) and the rest are not sent.
+async fn collect_batch(
+    n: usize,
+    mut rx: UnboundedReceiver<(usize, StepResult)>,
+    worker: tokio::task::JoinHandle<()>,
+    mut progress: impl FnMut(usize),
+) -> Vec<StepResult> {
+    let mut results = Vec::with_capacity(n);
+    while let Some((_, r)) = rx.recv().await {
+        results.push(r);
+        progress(results.len());
+    }
+    if let Err(e) = worker.await
+        && results.len() < n
+    {
+        results.push(StepResult::Failed(WriteError::Unanswered(
+            pce::PceError::Network(format!(
+                "the batch task failed at step {} ({e}); what it sent is unknown: check the audit log and :batch",
+                results.len() + 1
+            )),
+        )));
+    }
+    while results.len() < n {
+        results.push(StepResult::NotSent);
+    }
+    results
+}
+
 /// What a `:profile` switch built off the event loop: the new client, what
 /// the model needs to know about it and what its write guard is built from,
 /// or the error to show.
@@ -447,25 +478,52 @@ impl Runtime {
                         Plan::Noop { reason, .. } => reason.clone(),
                     })
                     .collect();
+                let target = batch
+                    .origin
+                    .as_ref()
+                    .map_or_else(|| "no profile".to_string(), |o| o.text());
+                let n = kinds.len();
                 tokio::spawn(async move {
-                    // One `execute` per step, in order; the first failure stops it.
-                    let results = match &guard {
-                        Some(guard) => pce.writer(guard).execute_batch(batch).await,
-                        None => (0..kinds.len())
-                            .map(|i| {
-                                if i == 0 {
-                                    StepResult::Failed(WriteError::Invalid(vec![WRITES_OFF.into()]))
-                                } else {
-                                    StepResult::NotSent
+                    // The steps go on their own task, each result handed
+                    // over as it is known: a panic there still ends in an
+                    // answer, exact up to the step it hit.
+                    let (step_tx, step_rx) = unbounded_channel();
+                    let worker = {
+                        let pce = pce.clone();
+                        tokio::spawn(async move {
+                            let mut each = |i: usize, r: StepResult| {
+                                let _ = step_tx.send((i, r));
+                            };
+                            match &guard {
+                                // One `execute` per step, in order; the first failure stops it.
+                                Some(guard) => {
+                                    pce.writer(guard).execute_batch_each(batch, &mut each).await
                                 }
-                            })
-                            .collect(),
+                                None => {
+                                    each(
+                                        0,
+                                        StepResult::Failed(WriteError::Invalid(vec![
+                                            WRITES_OFF.into(),
+                                        ])),
+                                    );
+                                    for i in 1..n {
+                                        each(i, StepResult::NotSent);
+                                    }
+                                }
+                            }
+                        })
                     };
+                    let progress = tx.clone();
+                    let results = collect_batch(n, step_rx, worker, |done| {
+                        let _ = progress.send(Msg::BatchProgress { done, of: n });
+                    })
+                    .await;
                     // Pending changes are not under the kinds' prefixes.
                     pce.invalidate("policy:pending");
                     let _ = tx.send(Msg::BatchDone {
                         kinds,
                         summaries,
+                        target,
                         results,
                     });
                     let _ = tx.send(Msg::Stats(pce.stats()));
@@ -1077,6 +1135,35 @@ pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    #[tokio::test]
+    async fn a_batch_task_that_panics_still_answers_up_to_the_step_it_hit() {
+        let (tx, rx) = unbounded_channel();
+        let worker = tokio::spawn(async move {
+            let _ = tx.send((
+                0,
+                StepResult::Skipped {
+                    existing_href: "/orgs/5/sec_policy/draft/ip_lists/55".into(),
+                },
+            ));
+            panic!("boom in step 2");
+        });
+        let mut seen = Vec::new();
+        let results = collect_batch(3, rx, worker, |d| seen.push(d)).await;
+        assert_eq!(seen, vec![1], "step 1 reported as it finished");
+        assert_eq!(results.len(), 3);
+        assert!(
+            matches!(&results[0], StepResult::Skipped { existing_href } if existing_href.ends_with("/55"))
+        );
+        let StepResult::Failed(e @ WriteError::Unanswered(_)) = &results[1] else {
+            panic!("{results:?}")
+        };
+        assert!(
+            e.to_string().contains("the batch task failed at step 2"),
+            "{e}"
+        );
+        assert!(matches!(results[2], StepResult::NotSent));
+    }
 
     #[test]
     fn mouse_motion_is_dropped_and_the_wheel_kept() {

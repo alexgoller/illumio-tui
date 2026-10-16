@@ -652,6 +652,12 @@ async fn added_services_cost_one_get_of_the_rule_and_send_the_list_whole() {
         .await
         .unwrap();
     assert_eq!(b.reads, 3);
+    assert!(
+        b.summary()
+            .ends_with("planned with 3 reads · +1 GET to check rules before updating"),
+        "the GET before the PUT is counted: {}",
+        b.summary()
+    );
     let put = b
         .steps
         .iter()
@@ -1083,4 +1089,52 @@ async fn rules_an_override_deny_blocks_are_named_in_the_confirm() {
             && l.ends_with("by override deny /orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8")),
         "{lines:#?}"
     );
+}
+
+#[tokio::test]
+async fn each_step_is_handed_over_as_it_finishes() {
+    let server = MockServer::start().await;
+    mount_reads(&server, rule_sets(), ip_lists()).await;
+    mount_created(
+        &server,
+        "/orgs/5/sec_policy/draft/ip_lists",
+        "/orgs/5/sec_policy/draft/ip_lists/77",
+        1,
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/sec_policy/draft/rule_sets"))
+        .respond_with(ResponseTemplate::new(406).set_body_json(json!([{"token": "name_in_use"}])))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let pce = pce_for(&server);
+    let guard = guard_with(MemoryAudit::new());
+    let w = pce.writer(&guard);
+    let b = w.plan_batch(input(), &index()).await.unwrap();
+    let mut seen: Vec<(usize, &'static str)> = Vec::new();
+    w.execute_batch_each(b, &mut |i, r| {
+        seen.push((
+            i,
+            match r {
+                StepResult::Written(_) => "written",
+                StepResult::Skipped { .. } => "skipped",
+                StepResult::Failed(_) => "failed",
+                StepResult::NotSent => "not sent",
+            },
+        ))
+    })
+    .await;
+    assert_eq!(
+        seen,
+        vec![
+            (0, "written"),
+            (1, "failed"),
+            (2, "not sent"),
+            (3, "not sent"),
+            (4, "not sent"),
+            (5, "not sent")
+        ]
+    );
+    server.verify().await;
 }

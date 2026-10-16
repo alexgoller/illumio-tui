@@ -172,7 +172,14 @@ pub enum Msg {
     BatchDone {
         kinds: Vec<pce::write::ObjectKind>,
         summaries: Vec<String>,
+        /// Where it was sent: `demo (pce.example, org 5)`.
+        target: String,
         results: Vec<StepResult>,
+    },
+    /// `done` of the `of` steps of the batch being sent have an answer.
+    BatchProgress {
+        done: usize,
+        of: usize,
     },
     /// The runtime applied `:writes on|off`: the guard was built (or refused,
     /// with the reason) or dropped.

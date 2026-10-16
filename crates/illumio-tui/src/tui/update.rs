@@ -844,6 +844,12 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 }
             }
         }
+        // A plan that lands while a batch is sent belongs to nothing on
+        // screen; `in_flight` stays the batch's.
+        Msg::BatchPlanned(_) | Msg::Planned(_) if model.batch_sending => {
+            model.status = StatusLine::warn("plan discarded: a batch is being sent, nothing sent");
+            Vec::new()
+        }
         Msg::BatchPlanned(result) => {
             model.writes.in_flight = false;
             match result {
@@ -876,8 +882,15 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::BatchDone {
             kinds,
             summaries,
+            target,
             results,
-        } => batch_done(model, &kinds, &summaries, &results),
+        } => batch_done(model, &kinds, &summaries, &target, &results),
+        Msg::BatchProgress { done, of } => {
+            if model.batch_sending {
+                model.status = StatusLine::info(format!("sending: {done} of {of} answered …"));
+            }
+            Vec::new()
+        }
         Msg::Planned(result) => {
             model.writes.in_flight = false;
             let flow_form = model.traffic.rule_form.take();
@@ -3681,10 +3694,14 @@ fn batch_status(results: &[pce::write::StepResult]) -> (String, Option<bool>) {
 
 /// The batch report: each step's summary and what became of it (the href
 /// written or reused, the failure, not sent), then how to undo and resume.
-fn batch_report_lines(summaries: &[String], results: &[pce::write::StepResult]) -> Vec<String> {
+fn batch_report_lines(
+    target: &str,
+    summaries: &[String],
+    results: &[pce::write::StepResult],
+) -> Vec<String> {
     use pce::write::StepResult as R;
     let n = results.len();
-    let mut out = Vec::new();
+    let mut out = vec![format!("sent to {target}")];
     for (i, r) in results.iter().enumerate() {
         let what = summaries.get(i).map_or("?", String::as_str);
         out.push(format!("{}/{n} {what}", i + 1));
@@ -3731,6 +3748,7 @@ fn batch_done(
     model: &mut Model,
     kinds: &[pce::write::ObjectKind],
     summaries: &[String],
+    target: &str,
     results: &[pce::write::StepResult],
 ) -> Vec<Cmd> {
     use pce::write::StepResult as R;
@@ -3741,7 +3759,7 @@ fn batch_done(
     model.policy.pending_marked.clear();
     let (text, kind) = batch_status(results);
     let stopped = kind == Some(true) || results.iter().any(|r| matches!(r, R::NotSent));
-    model.batch_report = Some(batch_report_lines(summaries, results));
+    model.batch_report = Some(batch_report_lines(target, summaries, results));
     model.status = match kind {
         Some(true) => StatusLine::error(text),
         Some(false) => StatusLine::warn(text),
@@ -5013,6 +5031,10 @@ pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
             Vec::new()
         }
         Command::Profile(name) => {
+            if model.batch_sending {
+                model.status = StatusLine::warn("batch sending: wait for it to finish");
+                return Vec::new();
+            }
             if model.writes.in_flight {
                 model.status = StatusLine::warn("finish or cancel the write first");
                 return Vec::new();
@@ -5029,6 +5051,10 @@ pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
             Vec::new()
         }
         Command::Writes(Some(on)) => {
+            if model.batch_sending {
+                model.status = StatusLine::warn("batch sending: wait for it to finish");
+                return Vec::new();
+            }
             if model.writes.in_flight {
                 model.status = StatusLine::warn("finish or cancel the write first");
                 return Vec::new();
@@ -16940,6 +16966,7 @@ mod batch_tests {
             Msg::BatchDone {
                 kinds: kinds(),
                 summaries: summaries(),
+                target: "demo (pce.example, org 5)".into(),
                 results,
             },
         );
@@ -16969,6 +16996,7 @@ mod batch_tests {
         assert_eq!(
             m.batch_report.as_deref().unwrap(),
             [
+                "sent to demo (pce.example, org 5)",
                 "1/3 create ip_list shop-prod peer 203.0.113.7",
                 "    written /orgs/5/sec_policy/draft/ip_lists/77",
                 "2/3 create rule_set RF-crm-prod",
@@ -17010,6 +17038,7 @@ mod batch_tests {
             Msg::BatchDone {
                 kinds: kinds(),
                 summaries: summaries(),
+                target: "demo (pce.example, org 5)".into(),
                 results,
             },
         )
@@ -17034,6 +17063,40 @@ mod batch_tests {
         assert!(!m.batch_sending);
         assert_eq!(update(&mut m, ctrl_c()), vec![Cmd::Quit]);
         assert!(m.quit);
+    }
+
+    #[test]
+    fn nothing_can_switch_or_clear_the_write_guard_while_a_batch_is_sent() {
+        use crate::tui::commands::Command;
+        let mut m = armed();
+        update(&mut m, Msg::BatchPlanned(Ok(batch_plan())));
+        update(&mut m, key('y'));
+        assert_eq!(
+            on_command(&mut m, Command::Profile("prod-b".into())),
+            Vec::new()
+        );
+        assert_eq!(m.status.text, "batch sending: wait for it to finish");
+        assert!(!m.switching);
+        assert_eq!(on_command(&mut m, Command::Writes(Some(false))), Vec::new());
+        assert_eq!(m.status.text, "batch sending: wait for it to finish");
+        // A plan landing now (from anywhere) leaves the batch's guard alone.
+        update(&mut m, Msg::BatchPlanned(Ok(batch_plan())));
+        assert!(m.writes.in_flight, "still the batch's");
+        assert_eq!(m.overlay, Overlay::None);
+        assert_eq!(
+            m.status.text,
+            "plan discarded: a batch is being sent, nothing sent"
+        );
+        update(&mut m, Msg::Planned(Err("x".into())));
+        assert!(m.writes.in_flight);
+        update(&mut m, Msg::BatchProgress { done: 2, of: 3 });
+        assert_eq!(m.status.text, "sending: 2 of 3 answered …");
+        done(&mut m, all_written());
+        assert!(!m.writes.in_flight && !m.batch_sending);
+        assert_eq!(
+            on_command(&mut m, Command::Profile("prod-b".into())),
+            vec![Cmd::SwitchProfile("prod-b".into())]
+        );
     }
 
     #[test]
@@ -17109,7 +17172,7 @@ mod batch_tests {
         );
         assert_eq!(m.status.kind, StatusKind::Error);
         assert_eq!(m.overlay, Overlay::BatchReport { scroll: 0 });
-        assert!(m.batch_report.as_ref().unwrap()[1].contains("NOT AUDITED"));
+        assert!(m.batch_report.as_ref().unwrap()[2].contains("NOT AUDITED"));
     }
 
     #[test]
@@ -17127,6 +17190,7 @@ mod batch_tests {
             Msg::BatchDone {
                 kinds: kinds(),
                 summaries: summaries(),
+                target: "demo (pce.example, org 5)".into(),
                 results,
             },
         );
@@ -17157,6 +17221,7 @@ mod batch_tests {
             Msg::BatchDone {
                 kinds: kinds(),
                 summaries: summaries(),
+                target: "demo (pce.example, org 5)".into(),
                 results,
             },
         );
@@ -17180,6 +17245,7 @@ mod batch_tests {
             Msg::BatchDone {
                 kinds: kinds(),
                 summaries: summaries(),
+                target: "demo (pce.example, org 5)".into(),
                 results,
             },
         );

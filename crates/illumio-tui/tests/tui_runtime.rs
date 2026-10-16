@@ -2819,6 +2819,11 @@ async fn execute_batch_sends_every_step_in_order_with_the_created_hrefs() {
     );
     assert_eq!(audit.entries().len(), 3);
     assert!(audit.entries().iter().all(|e| e.source == "tui"));
+    assert_eq!(
+        model.batch_report.as_ref().unwrap()[0],
+        "sent to t (h, org 5)",
+        "the report names where it went"
+    );
     assert_eq!(model.busy, 0);
     server.verify().await;
 }
