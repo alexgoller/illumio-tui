@@ -331,3 +331,16 @@ Spec: docs/superpowers/specs/2026-10-11-traffic-views-design.md · Plan: docs/su
 - The read-only demo100 smoke (Task 8 Step 3) was not run in this session: the implementer was told not to contact any PCE or read any .env file. It is left for the integrator (`gen <app> --window 24h --json`, then with `--granularity role-ports --outbound`).
 - Nothing was written to any PCE.
 - Fix wave (review M1, M2, S1-S5, N3, N5, N6, plus merging rules across one side): disabled rulesets are no target; wider rulesets get explicit scope labels; template names every scope key, name clashes give no target; ICMPv6 and portless tcp/udp are unsupported unless expressible; no_target and override_deny coverage reasons; exact one-side merging. Gate green, 1299 tests. Spec amended ("Amendments after the part-1 review").
+
+## Policy generator 2: the write batch (plan docs/superpowers/plans/2026-10-16-policy-generator-2-batch.md)
+- [x] Task 1 pce::write::batch: plan_batch, execute_batch
+- [x] Task 2 TUI: PlanBatch, ConfirmBatch, ExecuteBatch, BatchDone
+- [x] Task 3 gate
+
+## Review (Policy generator 2)
+- Order: IP list creates, ruleset creates, rule updates, rule creates. Reads at plan time, all past the cache: one draft ruleset read (`refresh` re-runs targets, dedupe and override denies on it; it is also the create-if-missing check), one IP list read only when the batch creates IP lists, one GET per rule update.
+- Refused at plan time, nothing sent: a truncated ruleset or IP list read; a blocker (ambiguous target, no target, a ruleset to create whose name a draft ruleset has); nothing left to write; an IP list found by name that holds other addresses; step indexes that disagree with `Proposal::{ip_list_step, ruleset_step}`.
+- Execute: one `Writer::execute` per step (audit, cache invalidation, re-fetch on 204), stop at the first failure, never retried. `{step:N}` is put in only from this batch's own earlier results, only for a step the step waits for, checked as a ruleset or IP list href in the profile's org; a placeholder left or a bad href stops the batch before that step is sent.
+- TUI: `in_flight` from `PlanBatch` to `BatchPlanned` and from `y` to `BatchDone`; a plan landing over another overlay is discarded; one ruleset reload, one IP list reload when one was written, one draft re-evaluation per batch.
+- Gate green, 1329 tests; `git diff main -- '*Cargo.toml' Cargo.lock` empty.
+- No live smoke: this plan's code writes; nothing was sent to any PCE.
