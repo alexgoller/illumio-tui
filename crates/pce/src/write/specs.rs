@@ -126,11 +126,24 @@ impl IpRangeSpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PortSpec {
     pub port: Option<u16>,
     pub to_port: Option<u16>,
     pub proto: i64,
+}
+
+/// By protocol, then port, then range end: `443/tcp` before `53/udp`.
+impl Ord for PortSpec {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        (self.proto, self.port, self.to_port).cmp(&(other.proto, other.port, other.to_port))
+    }
+}
+
+impl PartialOrd for PortSpec {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 impl PortSpec {
@@ -463,6 +476,20 @@ mod tests {
         assert_eq!(
             i.to_json(),
             json!({"name": "eth0", "address": "10.0.0.5", "cidr_block": 24, "friendly_name": "lan"})
+        );
+    }
+
+    #[test]
+    fn port_specs_sort_by_protocol_then_port() {
+        let mut v: Vec<PortSpec> = ["53/udp", "443/tcp", "icmp", "22/tcp", "8000-8010/tcp"]
+            .iter()
+            .map(|s| PortSpec::parse(s).unwrap())
+            .collect();
+        v.sort();
+        let shown: Vec<String> = v.iter().map(PortSpec::display).collect();
+        assert_eq!(
+            shown,
+            vec!["icmp", "22/tcp", "443/tcp", "8000-8010/tcp", "53/udp"]
         );
     }
 }

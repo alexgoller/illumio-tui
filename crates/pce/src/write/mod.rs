@@ -5,6 +5,7 @@
 //! through [`crate::Pce::writer`] with a [`WriteGuard`].
 pub mod actors;
 pub mod audit;
+pub mod batch;
 pub mod guard;
 pub mod ip_lists;
 pub mod labels;

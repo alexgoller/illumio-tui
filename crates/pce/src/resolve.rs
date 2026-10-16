@@ -261,6 +261,29 @@ impl NameIndex {
         self.icmp_service().map(|s| s.href.as_str())
     }
 
+    /// The All Services object a rule uses for "every service": the
+    /// built-in one (`ilo_defaults`/`All Services`, whatever its name),
+    /// else the first service whose only entry is protocol `-1` without a
+    /// port, else one named `All Services`.
+    pub fn all_services(&self) -> Option<&Service> {
+        let all = self.services();
+        let by = |f: &dyn Fn(&Service) -> bool| all.iter().copied().find(|s| f(s));
+        by(&|s| {
+            s.external_data_set.as_deref() == Some("com.illumio.ilo_defaults")
+                && s.external_data_reference.as_deref() == Some("All Services")
+        })
+        .or_else(|| {
+            by(&|s| {
+                matches!(s.service_ports.as_slice(), [p] if p.proto == Some(-1) && p.port.is_none())
+            })
+        })
+        .or_else(|| by(&|s| s.name.eq_ignore_ascii_case("All Services")))
+    }
+
+    pub fn all_services_href(&self) -> Option<&str> {
+        self.all_services().map(|s| s.href.as_str())
+    }
+
     /// The one live service named exactly `name` (like the CLI's lookup:
     /// case-sensitive, pending deletions excluded). `None` when there is no
     /// such service, or several.
@@ -588,6 +611,51 @@ mod tests {
         };
         assert_eq!(idx(&[&by_name, &tcp]).icmp_service().unwrap().name, "icmp");
         assert_eq!(idx(&[&tcp]).icmp_service(), None);
+    }
+
+    #[test]
+    fn all_services_is_the_built_in_one_else_the_any_protocol_else_the_name() {
+        let svc = |n: u32, name: &str, v: serde_json::Value| -> Service {
+            let mut s = serde_json::json!({
+                "href": format!("/orgs/5/sec_policy/draft/services/{n}"), "name": name
+            });
+            s.as_object_mut()
+                .unwrap()
+                .extend(v.as_object().unwrap().clone());
+            serde_json::from_value(s).unwrap()
+        };
+        let idx = |v: &[Service]| NameIndex::new(&[], &[], &[], v);
+        // The fixture's All Services is the protocol -1 entry.
+        assert_eq!(
+            index().all_services_href(),
+            Some("/orgs/5/sec_policy/draft/services/30")
+        );
+        let ilo = svc(
+            1,
+            "S-ALL",
+            serde_json::json!({"service_ports": [{"proto": 6}],
+                "external_data_set": "com.illumio.ilo_defaults",
+                "external_data_reference": "All Services"}),
+        );
+        let any = svc(
+            2,
+            "Everything",
+            serde_json::json!({"service_ports": [{"proto": -1}]}),
+        );
+        let named = svc(3, "all services", serde_json::json!({"service_ports": []}));
+        assert_eq!(
+            idx(&[any.clone(), named.clone(), ilo])
+                .all_services()
+                .unwrap()
+                .name,
+            "S-ALL"
+        );
+        assert_eq!(
+            idx(&[named.clone(), any]).all_services().unwrap().name,
+            "Everything"
+        );
+        assert_eq!(idx(&[named]).all_services().unwrap().name, "all services");
+        assert_eq!(idx(&[]).all_services_href(), None);
     }
 
     #[test]

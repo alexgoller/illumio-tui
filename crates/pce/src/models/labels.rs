@@ -153,6 +153,9 @@ pub struct IpList {
     pub fqdns: Vec<Fqdn>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_type: Option<String>,
+    /// `com.illumio.ilo_defaults` for the PCE's built-in Any list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_data_set: Option<String>,
 }
 
 impl IpList {
@@ -332,5 +335,29 @@ mod tests {
         assert_eq!(services[0].summary(), "any");
         assert_eq!(services[1].summary(), "5432/tcp");
         assert_eq!(services[2].summary(), "80/tcp, 443/tcp, 8000-8099/tcp");
+    }
+
+    #[test]
+    fn ip_lists_keep_their_external_data_set() {
+        let l: IpList = serde_json::from_value(serde_json::json!({
+            "href": "/orgs/5/sec_policy/draft/ip_lists/1", "name": "Any (0.0.0.0/0 and ::/0)",
+            "external_data_set": "com.illumio.ilo_defaults"
+        }))
+        .unwrap();
+        assert_eq!(
+            l.external_data_set.as_deref(),
+            Some("com.illumio.ilo_defaults")
+        );
+        let back = serde_json::to_value(&l).unwrap();
+        assert_eq!(back["external_data_set"], "com.illumio.ilo_defaults");
+        let lists: Vec<IpList> =
+            serde_json::from_str(include_str!("../../../../fixtures/ip_lists.json")).unwrap();
+        assert!(
+            serde_json::to_value(&lists[0])
+                .unwrap()
+                .get("external_data_set")
+                .is_none(),
+            "absent stays absent"
+        );
     }
 }
