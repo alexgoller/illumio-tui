@@ -645,8 +645,8 @@ impl Writer<'_> {
         }
         // Services added to one rule by several proposed rules go in one
         // update: two PUTs of the list would drop the first one's.
-        // (rule href, services to add, deny notes, IP notes).
-        type Update = (String, Vec<ServiceRef>, Vec<String>, ListIps);
+        // (rule href, services to add, deny notes, IP notes, fan-in notes).
+        type Update = (String, Vec<ServiceRef>, Vec<String>, ListIps, Vec<String>);
         let mut updates: Vec<Update> = Vec::new();
         for r in &proposal.rules {
             let RuleAction::AddServices { rule_href, add } = &r.action else {
@@ -654,8 +654,9 @@ impl Writer<'_> {
             };
             let href = checked_nested_href(rule_href, "rule_sets", "sec_rules", org)?;
             let note = deny_note(r);
+            let fan: Vec<String> = r.consolidated.iter().flat_map(|c| c.notes()).collect();
             match updates.iter_mut().find(|u| u.0 == href) {
-                Some((_, adds, notes, ips)) => {
+                Some((_, adds, notes, ips, fans)) => {
                     for s in add {
                         if !adds.contains(s) {
                             adds.push(s.clone());
@@ -663,13 +664,18 @@ impl Writer<'_> {
                     }
                     notes.extend(note);
                     add_ips(ips, &r.ips);
+                    fans.extend(fan);
                 }
-                None => {
-                    updates.push((href, add.clone(), note.into_iter().collect(), r.ips.clone()))
-                }
+                None => updates.push((
+                    href,
+                    add.clone(),
+                    note.into_iter().collect(),
+                    r.ips.clone(),
+                    fan,
+                )),
             }
         }
-        for (href, add, notes, ips) in updates {
+        for (href, add, notes, ips, fans) in updates {
             let patch = RulePatch {
                 add_services: add,
                 ..RulePatch::default()
@@ -694,6 +700,7 @@ impl Writer<'_> {
             step.expect = expect.filter(|_| step.plan.request().is_some());
             step.deny_notes = notes;
             step.notes = ip_notes(&ips);
+            step.notes.extend(fans);
             steps.push(step);
         }
         for r in &proposal.rules {
@@ -736,6 +743,8 @@ impl Writer<'_> {
             let mut step = BatchStep::new(plan, ObjectKind::Rule, needs);
             step.deny_notes.extend(deny_note(r));
             step.notes = ip_notes(&r.ips);
+            step.notes
+                .extend(r.consolidated.iter().flat_map(|c| c.notes()));
             steps.push(step);
         }
         check_placeholders(&steps)?;

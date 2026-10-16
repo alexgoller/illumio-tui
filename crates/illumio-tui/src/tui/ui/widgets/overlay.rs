@@ -109,6 +109,10 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "check a row · outbound · pick the ruleset · rule list",
     ),
     (
+        "Generate c",
+        "fan-in line: one rule off · Any · All Workloads",
+    ),
+    (
         "Generate Enter r Esc",
         "plan the writes, one confirm (writes) · re-query · back",
     ),

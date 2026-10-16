@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭ Generate · shop/prod · last 24h · 8 flows · complete ──────── 0 req · cached ╮
+│granularity  app·all ─ [app·ports] ─ role·ports ─ role·all                    │
+│target  Shop-Prod (draft, 2 rules)                                            │
+│1. create · Shop-Prod: all workloads → all workloads on 5432/tcp · unscoped   │
+│   generated: All Workloads (consolidated, 2 peers) → shop/prod on 5432/tcp,  │
+│      from 24h of traffic (illumio-tui)                                       │
+│   ⚠ every VEN recomputes: the rule reaches every managed workload            │
+│   ⚠ not for IP peers (IP list Corp · 1 IP): their own rows                   │
+│   consolidates 5432/tcp from 2 peers → every workload of shop/prod · also    │
+│      allows: shop/dev, any workload not seen                                 │
+│not covered: 2 unchecked · 0 folded IPs · 0 unsupported proto · 0             │
+│   broadcast/multicast · 0 no target · 0 override deny                        │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│1 rules (1 new · 0 add services · 0 exist) · covers 6 of 8 flows · 2 not      │
+│j/k scroll · Esc back to the rows                                             │
+╰──────────────────────────────────────────────────────────────────────────────╯
+every VEN recomputes: 5432/tc │ ←/→ stop  </> row  R pick  r re-query  Esc back

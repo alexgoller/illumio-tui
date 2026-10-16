@@ -4,6 +4,7 @@
 //! differ in one side only merged when the union means exactly both, the
 //! coverage of the flows, the IP lists to create (none for an IP peer in
 //! an existing list: its list row names that list). Pure.
+use super::consolidate::{Consolidate, Consolidated, any_ip_list, is_workload};
 use super::rows::{excluded, ip_list_name, row_key, side_of};
 use super::services::{Expr, express, flow_spec, fold_ports};
 use super::{
@@ -39,6 +40,10 @@ pub struct GenInput<'a> {
     pub outbound: bool,
     /// The app ruleset `R` picked among several.
     pub picked: Option<&'a str>,
+    /// Fan-in ports switched to one rule (`c`, `--consolidate`), inbound
+    /// only. `Off` entries, and Any without the built-in Any IP list, are
+    /// ignored.
+    pub consolidate: &'a BTreeMap<PortSpec, Consolidate>,
 }
 
 /// Row index by key; IP flows of folded peers find the folded row.
@@ -136,7 +141,9 @@ fn merge(p: &mut Proposal, idx: &NameIndex) {
         let mut j = i + 1;
         while j < p.rules.len() {
             let (a, b) = (&p.rules[i], &p.rules[j]);
-            let alike = a.action == RuleAction::Create
+            let alike = a.consolidated.is_none()
+                && b.consolidated.is_none()
+                && a.action == RuleAction::Create
                 && b.action == RuleAction::Create
                 && a.target == b.target
                 && a.unscoped_consumers == b.unscoped_consumers
@@ -181,6 +188,27 @@ fn merge(p: &mut Proposal, idx: &NameIndex) {
 fn describe(r: &GenRule, rows: &[GenRow], input: &GenInput) -> String {
     let app = input.focus.app_text();
     let all = input.idx.all_services_href();
+    let names: Vec<String> = r
+        .services
+        .iter()
+        .map(|s| service_text(s, all, input.idx))
+        .collect();
+    if let Some(c) = &r.consolidated {
+        let consumer = match c.mode {
+            Consolidate::AllWorkloads => "All Workloads".to_string(),
+            _ => r
+                .consumers
+                .iter()
+                .find_map(|a| match a {
+                    GenActor::Ref(x) => x.href.as_deref().and_then(|h| input.idx.ip_list_name(h)),
+                    GenActor::NewIpList(_) => None,
+                })
+                .unwrap_or("Any")
+                .to_string(),
+        };
+        let from = format!("{consumer} (consolidated, {} peers)", c.peers.len());
+        return description(&[from], &[app], &names, input.window);
+    }
     let mut from = BTreeSet::new();
     let mut to = BTreeSet::new();
     for &ri in &r.rows {
@@ -188,11 +216,6 @@ fn describe(r: &GenRule, rows: &[GenRow], input: &GenInput) -> String {
         from.insert(f);
         to.insert(t);
     }
-    let names: Vec<String> = r
-        .services
-        .iter()
-        .map(|s| service_text(s, all, input.idx))
-        .collect();
     let from: Vec<String> = from.into_iter().collect();
     let to: Vec<String> = to.into_iter().collect();
     description(&from, &to, &names, input.window)
@@ -458,6 +481,120 @@ fn description(from: &[String], to: &[String], services: &[String], window: &str
     cut
 }
 
+/// One consolidated port's rule being built.
+struct Fan {
+    mode: Consolidate,
+    rows: BTreeSet<usize>,
+    flows: u64,
+    seen: BTreeMap<SeenFlow, u64>,
+    /// The destination roles of its flows (at a role stop), by href.
+    roles: BTreeSet<String>,
+    /// A flow's destination had no role: the provider stays the app.
+    no_role: bool,
+    /// Rows on the port that keep their own rule.
+    left: BTreeSet<usize>,
+}
+
+impl Fan {
+    fn new(mode: Consolidate) -> Self {
+        Fan {
+            mode,
+            rows: BTreeSet::new(),
+            flows: 0,
+            seen: BTreeMap::new(),
+            roles: BTreeSet::new(),
+            no_role: false,
+            left: BTreeSet::new(),
+        }
+    }
+
+    /// Any (the built-in list `any`) or All Workloads (unscoped) → the app
+    /// on the one port, in the app's ruleset: `ams` (pinned to the app's
+    /// labels in a wider ruleset by `refresh`), at a role stop the
+    /// destination roles its flows reached (`by_role`).
+    fn rule(
+        self,
+        spec: PortSpec,
+        rows: &[GenRow],
+        any: Option<&str>,
+        by_role: bool,
+        input: &GenInput,
+    ) -> GenRule {
+        let text = |i: &usize| rows[*i].peer_text();
+        let peers: Vec<usize> = self
+            .rows
+            .iter()
+            .copied()
+            .filter(|i| !matches!(rows[*i].peer, PeerKind::Intra | PeerKind::FoldedIps(_)))
+            .collect();
+        let folded_ips = self
+            .rows
+            .iter()
+            .map(|i| match rows[*i].peer {
+                PeerKind::FoldedIps(n) => n,
+                _ => 0,
+            })
+            .sum();
+        let app = input.focus.app_text();
+        let (providers, to) = if by_role && !self.no_role && !self.roles.is_empty() {
+            let names: Vec<String> = self.roles.iter().map(|h| input.idx.label_text(h)).collect();
+            let actors = self.roles.iter().map(|h| GenActor::label(h)).collect();
+            (actors, format!("{} of {app}", names.join(", ")))
+        } else {
+            (vec![GenActor::all()], format!("every workload of {app}"))
+        };
+        let workload_sources = match self.mode {
+            Consolidate::Any => self
+                .rows
+                .iter()
+                .filter(|i| is_workload(&rows[**i].peer))
+                .map(text)
+                .collect(),
+            _ => Vec::new(),
+        };
+        let consumers = match (self.mode, any) {
+            (Consolidate::Any, Some(href)) => {
+                vec![GenActor::Ref(ActorRef::new(ActorKind::IpList, href))]
+            }
+            _ => vec![GenActor::all()],
+        };
+        let all = self.mode == Consolidate::AllWorkloads;
+        GenRule {
+            target: 0,
+            providers,
+            consumers,
+            unscoped_consumers: all,
+            services: vec![ServiceRef::Port(spec.clone())],
+            rows: self.rows.iter().copied().collect(),
+            action: RuleAction::Create,
+            description: String::new(),
+            flows: self.flows,
+            denied_flows: 0,
+            denied_by: Vec::new(),
+            seen: self.seen,
+            ips: BTreeMap::new(),
+            consolidated: Some(Consolidated {
+                spec,
+                mode: self.mode,
+                peers: peers.iter().map(text).collect(),
+                folded_ips,
+                unchecked: self
+                    .rows
+                    .iter()
+                    .filter(|i| !rows[**i].proposed())
+                    .map(|i| match rows[*i].peer {
+                        PeerKind::FoldedIps(n) => format!("{n} more IPs"),
+                        _ => text(i),
+                    })
+                    .collect(),
+                to,
+                kept: self.left.iter().map(text).collect(),
+                workload_sources,
+            }),
+        }
+    }
+}
+
 /// The rules before merging.
 fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> Proposal {
     let focus = input.focus;
@@ -471,6 +608,15 @@ fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> Proposal {
     };
     let mut groups: BTreeMap<(usize, Vec<String>, Vec<String>, bool), Group> = BTreeMap::new();
     let mut cov = Coverage::default();
+    // Fan-in ports switched to one rule; Any only with the built-in list.
+    let any = any_ip_list(input.idx);
+    let modes: BTreeMap<&PortSpec, Consolidate> = input
+        .consolidate
+        .iter()
+        .filter(|(_, m)| **m != Consolidate::Off && (**m != Consolidate::Any || any.is_some()))
+        .map(|(s, m)| (s, *m))
+        .collect();
+    let mut fans: BTreeMap<PortSpec, Fan> = BTreeMap::new();
     let in_force = |s: Side| s == Side::Inbound || input.outbound;
     for f in input.flows {
         if excluded(f) {
@@ -500,6 +646,28 @@ fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> Proposal {
             continue;
         };
         let row = &rows[ri];
+        // A consolidated port: the one rule takes the flow (Any: the IP side
+        // and unchecked workload peers, checked ones keep their own rule for
+        // their outbound; All Workloads: every workload peer, IP peers keep
+        // their rows).
+        let spec = flow_spec(f);
+        if let Some(&mode) = modes.get(&spec).filter(|_| key.side == Side::Inbound) {
+            let fan = fans.entry(spec).or_insert_with(|| Fan::new(mode));
+            if mode.takes(row) {
+                fan.rows.insert(ri);
+                fan.flows += 1;
+                *fan.seen.entry(SeenFlow::of(f)).or_default() += 1;
+                match role(&f.dst, input.tier_key) {
+                    Some(GenActor::Ref(r)) => {
+                        fan.roles.extend(r.href);
+                    }
+                    _ => fan.no_role = true,
+                }
+                cov.covered += 1;
+                continue;
+            }
+            fan.left.insert(ri);
+        }
         if matches!(row.peer, PeerKind::FoldedIps(_)) {
             cov.folded_ips += 1;
             continue;
@@ -565,7 +733,7 @@ fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> Proposal {
     let mut groups: Vec<Group> = groups.into_values().collect();
     // The app's ruleset first, then by the first row behind the rule.
     groups.sort_by_key(|g| (g.target, g.rows.first().copied()));
-    let rules = groups
+    let mut rules: Vec<GenRule> = groups
         .into_iter()
         .map(|g| {
             let services: Vec<ServiceRef> = match &all_services {
@@ -590,9 +758,16 @@ fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> Proposal {
                 denied_by: Vec::new(),
                 seen: g.seen,
                 ips: g.ips,
+                consolidated: None,
             }
         })
         .collect();
+    for (spec, fan) in fans.into_iter().filter(|(_, f)| f.flows > 0) {
+        let any = any.as_ref().map(|a| a.0.as_str());
+        rules.push(fan.rule(spec, rows, any, global.is_role(), input));
+    }
+    // The consolidated rules after the app's other rules (stable).
+    rules.sort_by_key(|r| r.target);
     Proposal {
         scopes: ctx.scopes,
         targets: Vec::new(),
@@ -633,6 +808,18 @@ mod tests {
         outbound: bool,
         edit: impl Fn(&mut Vec<GenRow>),
     ) -> (Vec<GenRow>, Proposal) {
+        run_full(drafts, flows, stop, outbound, edit, &BTreeMap::new())
+    }
+
+    /// `run_in` with these ports consolidated.
+    fn run_full(
+        drafts: Vec<RuleSet>,
+        flows: &[ResolvedFlow],
+        stop: Stop,
+        outbound: bool,
+        edit: impl Fn(&mut Vec<GenRow>),
+        consolidate: &BTreeMap<PortSpec, Consolidate>,
+    ) -> (Vec<GenRow>, Proposal) {
         let idx = rich_index();
         let focus = shop();
         let target = app_ruleset(flows, &focus, &idx, &drafts, DEFAULT_RULESET_NAME, None);
@@ -648,6 +835,7 @@ mod tests {
             window: "24h",
             outbound,
             picked: None,
+            consolidate,
         };
         let p = propose(&r, stop, &input);
         (r, p)
@@ -1144,5 +1332,187 @@ mod tests {
         assert!(d.chars().count() <= DESCRIPTION_MAX, "{d}");
         assert!(d.contains(" +"), "{d}");
         assert!(d.ends_with("from 24h of traffic (illumio-tui)"), "{d}");
+    }
+
+    fn fan(mode: Consolidate) -> BTreeMap<PortSpec, Consolidate> {
+        BTreeMap::from([(PortSpec::parse("5432/tcp").unwrap(), mode)])
+    }
+
+    #[test]
+    fn any_takes_the_ip_side_and_unchecked_peers_and_checked_workload_peers_keep_theirs() {
+        let (r, p) = run_full(
+            sets(),
+            &rich_flows(),
+            Stop::AppPorts,
+            false,
+            |_| {},
+            &fan(Consolidate::Any),
+        );
+        assert_eq!(
+            shape(&p),
+            vec![
+                "t0 all workloads <- all workloads 5432/tcp",
+                "t0 all workloads <- app=hr+env=prod unscoped 5432/tcp",
+                "t0 all workloads <- ipl:Any (0.0.0.0/0 and ::/0) 5432/tcp",
+            ],
+            "intra-app and hr/prod are checked: they keep their rules (their outbound)"
+        );
+        let rule = &p.rules[2];
+        assert!(!rule.unscoped_consumers);
+        let c = rule.consolidated.as_ref().unwrap();
+        assert_eq!(c.peers, vec!["shop/dev", "IP list Corp · 1 IP"]);
+        assert_eq!(c.kept, vec!["intra-app", "hr/prod"]);
+        assert_eq!(c.workload_sources, vec!["shop/dev"]);
+        assert_eq!(c.to, "every workload of shop/prod");
+        assert_eq!(
+            c.also_allows(),
+            vec!["shop/dev", "IP list Corp · 1 IP", "any source not seen"],
+            "the unchecked peers count as covered"
+        );
+        assert!(c.warnings()[0].starts_with("destination only for shop/dev"));
+        assert!(c.warnings()[1].starts_with("keeps 2 managed peer rules"));
+        assert!(
+            rule.description
+                .starts_with("generated: Any (0.0.0.0/0 and ::/0) (consolidated, 2 peers) → shop/prod on 5432/tcp"),
+            "{}",
+            rule.description
+        );
+        // Corp's 443/tcp flow stays with its (unchecked) row.
+        assert_eq!(p.coverage.unchecked, 1);
+        assert_eq!(p.coverage.covered, 7);
+        assert!(r[3].services.len() == 2);
+        // Every row unchecked: Any takes them all.
+        let (_, p) = run_full(
+            sets(),
+            &rich_flows(),
+            Stop::AppPorts,
+            false,
+            |r| r.iter_mut().for_each(|x| x.checked = false),
+            &fan(Consolidate::Any),
+        );
+        assert_eq!(p.rules.len(), 1);
+        let c = p.rules[0].consolidated.as_ref().unwrap();
+        assert!(c.kept.is_empty());
+        assert_eq!(c.peers.len(), 3);
+    }
+
+    #[test]
+    fn at_a_role_stop_the_rule_opens_the_port_on_the_roles_it_reached() {
+        let (_, p) = run_full(
+            sets(),
+            &rich_flows(),
+            Stop::RolePorts,
+            false,
+            |r| r.iter_mut().for_each(|x| x.checked = false),
+            &fan(Consolidate::AllWorkloads),
+        );
+        let r = p.rules.iter().find(|r| r.consolidated.is_some()).unwrap();
+        let idx = rich_index();
+        let providers: Vec<String> = r.providers.iter().map(|a| a.text(&p, &idx)).collect();
+        assert_eq!(providers, vec!["role=db"]);
+        assert_eq!(r.consolidated.as_ref().unwrap().to, "role=db of shop/prod");
+    }
+
+    #[test]
+    fn all_workloads_leaves_ip_peers_to_their_rows() {
+        let cons = fan(Consolidate::AllWorkloads);
+        let (_, p) = run_full(
+            sets(),
+            &rich_flows(),
+            Stop::AppPorts,
+            false,
+            |r| r[3].checked = true,
+            &cons,
+        );
+        assert_eq!(
+            shape(&p),
+            vec![
+                "t0 all workloads <- ipl:Corp 443/tcp,5432/tcp",
+                "t0 all workloads <- all workloads unscoped 5432/tcp",
+            ]
+        );
+        let c = p.rules[1].consolidated.as_ref().unwrap();
+        assert_eq!(c.peers, vec!["hr/prod", "shop/dev"]);
+        assert_eq!(c.kept, vec!["IP list Corp · 1 IP"]);
+        assert!(c.warnings()[0].starts_with("every VEN recomputes"));
+        // Unchecked, the IP peer's 5432 flow is not covered by the rule.
+        let (_, p) = run_full(sets(), &rich_flows(), Stop::AppPorts, false, |_| {}, &cons);
+        assert_eq!(p.coverage.unchecked, 2, "both Corp flows");
+    }
+
+    #[test]
+    fn an_existing_broader_rule_means_no_write_and_denies_still_apply() {
+        let mut d = sets();
+        let all: crate::models::Rule = serde_json::from_value(serde_json::json!({
+            "href": "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/9",
+            "enabled": true,
+            "providers": [{"actors": "ams"}],
+            "consumers": [{"actors": "ams"}],
+            "ingress_services": [{"port": 5000, "to_port": 6000, "proto": 6}],
+            "unscoped_consumers": true
+        }))
+        .unwrap();
+        d[0].rules.push(all);
+        let (_, p) = run_full(
+            d,
+            &rich_flows(),
+            Stop::AppPorts,
+            false,
+            |_| {},
+            &fan(Consolidate::AllWorkloads),
+        );
+        assert_eq!(
+            p.rules[0].action,
+            RuleAction::Exists {
+                rule_href: "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/9".into()
+            }
+        );
+        assert!(!p.writes());
+        // An override deny on the port still uncovers what it blocks.
+        let mut f = rich_flows();
+        let mut ssh = intra_on(22);
+        ssh.src = f[17].src.clone(); // from Corp
+        f.push(ssh);
+        let mut cons = fan(Consolidate::Any);
+        cons.insert(PortSpec::parse("22/tcp").unwrap(), Consolidate::Any);
+        let d = deny_22(serde_json::json!({
+            "providers": [{"actors": "ams"}],
+            "consumers": [{"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/21"}}]
+        }));
+        let (_, p) = run_full(d, &f, Stop::AppPorts, false, |_| {}, &cons);
+        let r22 = p
+            .rules
+            .iter()
+            .find(|r| r.services.iter().any(|s| s.display() == "22/tcp"))
+            .unwrap();
+        assert!(r22.consolidated.is_some());
+        assert_eq!(r22.denied_flows, 1);
+        assert_eq!(p.coverage.override_deny, 1);
+    }
+
+    #[test]
+    fn any_without_the_built_in_list_is_ignored() {
+        let flows = rich_flows();
+        let focus = shop();
+        let lists: Vec<crate::models::IpList> =
+            serde_json::from_str(include_str!("../../../../fixtures/ip_lists.json")).unwrap();
+        let idx = NameIndex::new(&[], &[], &lists[1..], &[]);
+        let drafts = sets();
+        let r = rows(&flows, &focus, "role", &idx, None);
+        let cons = fan(Consolidate::Any);
+        let input = GenInput {
+            flows: &flows,
+            focus: &focus,
+            tier_key: "role",
+            drafts: &drafts,
+            idx: &idx,
+            ruleset_name: DEFAULT_RULESET_NAME,
+            window: "24h",
+            outbound: false,
+            picked: None,
+            consolidate: &cons,
+        };
+        let p = propose(&r, Stop::AppPorts, &input);
+        assert!(p.rules.iter().all(|r| r.consolidated.is_none()));
     }
 }

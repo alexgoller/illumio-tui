@@ -4640,6 +4640,9 @@ pub struct Limits {
     pub ignore_keys: Vec<String>,
     /// `generator.ruleset_name`: the name of a ruleset the generator creates.
     pub ruleset_name: String,
+    /// `generator.consolidate_min_peers`: inbound peers on one port that
+    /// make it a fan-in candidate.
+    pub consolidate_min_peers: usize,
 }
 
 impl Limits {
@@ -4655,6 +4658,7 @@ impl Limits {
             tier_key: cfg.tier_key.clone(),
             ignore_keys: cfg.ignore_keys.clone(),
             ruleset_name: cfg.generator_ruleset_name.clone(),
+            consolidate_min_peers: cfg.generator_consolidate_min_peers,
         }
     }
 
@@ -4761,6 +4765,7 @@ impl Model {
                 tier_key: crate::config::DEFAULT_TIER_KEY.into(),
                 ignore_keys: Vec::new(),
                 ruleset_name: pce::generate::DEFAULT_RULESET_NAME.into(),
+                consolidate_min_peers: pce::generate::consolidate::DEFAULT_MIN_PEERS,
             },
             screen: Screen::Traffic,
             overlay: Overlay::None,

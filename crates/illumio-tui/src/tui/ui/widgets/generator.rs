@@ -41,7 +41,10 @@ fn row_line<'a>(
     let peer_w = longest.clamp(peer_w, peer_w + 8);
     let r: &GenRow = &v.rows[i];
     let stop = r.effective(v.global);
+    let consolidated = v.consolidated_flag(i);
     let check = match (r.checkable, r.checked) {
+        // Not checked, but a consolidated rule allows (some of) it.
+        _ if consolidated.is_some() && !r.proposed() => "[~]",
         (false, _) => " - ",
         (true, true) => "[x]",
         (true, false) => "[ ]",
@@ -88,9 +91,10 @@ fn row_line<'a>(
     {
         spans.push(Span::styled(format!("→ {target} "), t.dim_style()));
     }
-    let flags: Vec<String> = r
-        .flag_texts(stop, scope_keys)
+    // `consolidated` first: an unchecked row it covers never looks excluded.
+    let flags: Vec<String> = consolidated
         .into_iter()
+        .chain(r.flag_texts(stop, scope_keys))
         .chain(v.rule_flags(i))
         .collect();
     let used: usize = spans.iter().map(Span::width).sum();
@@ -98,10 +102,15 @@ fn row_line<'a>(
         .iter()
         .map(|f| Span::raw(format!("⚠ {f} ")).width())
         .sum();
-    if used + all <= width || flags.len() < 2 {
+    if used + all <= width {
         for f in flags {
             spans.push(Span::styled(format!("⚠ {f} "), Style::new().fg(t.warn)));
         }
+    } else if flags.len() == 1 {
+        // One flag past the edge: cut with `…` (`p` shows it whole).
+        let room = width.saturating_sub(used).max(4);
+        let flag = fit(&format!("⚠ {}", flags[0]), room).trim_end().to_string();
+        spans.push(Span::styled(flag, Style::new().fg(t.warn)));
     } else {
         // Not all fit: the first one and how many more (`p`, or a wider
         // terminal, shows them).
@@ -261,6 +270,29 @@ pub fn render_generator(model: &Model, f: &mut Frame, area: Rect) {
                     outbound_title = all.len();
                 }
                 all.push(Line::from(Span::styled(title, t.header_style())));
+                // The fan-in lines (inbound): the cursor's first stops.
+                for c in 0..v.lead(side) {
+                    if side == v.section && v.selected_candidate() == Some(c) {
+                        cursor = Some(all.len());
+                    }
+                    let width = usize::from(inner.width);
+                    all.push(Line::from(Span::styled(
+                        fit(&v.candidate_line(c), width).trim_end().to_string(),
+                        Style::new().fg(t.warn),
+                    )));
+                    // Each warning on its own line, the consequence first.
+                    for d in v.candidate_detail(c) {
+                        let style = if d.trim_start().starts_with('⚠') {
+                            Style::new().fg(t.warn)
+                        } else {
+                            t.dim_style()
+                        };
+                        all.push(Line::from(Span::styled(
+                            fit(&d, width).trim_end().to_string(),
+                            style,
+                        )));
+                    }
+                }
                 let rows = v.section_rows(side);
                 if side == Side::Outbound && !v.outbound {
                     all.push(Line::from(Span::styled(
@@ -325,7 +357,11 @@ pub fn render_generator(model: &Model, f: &mut Frame, area: Rect) {
     } else if v.planning {
         "planning… · Esc drops the plan"
     } else {
-        "p lists the rules · Enter plans the writes · Space toggles · o outbound"
+        if v.candidates.is_empty() {
+            "p lists the rules · Enter plans the writes · Space toggles · o outbound"
+        } else {
+            "p lists the rules · Enter plans · Space toggles · c consolidates · o outbound"
+        }
     };
     let keys = if more.is_empty() {
         keys.to_string()

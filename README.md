@@ -206,6 +206,32 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   one rule per role pair, All Services or the services seen; `<`/`>` give a row its own stop
   (`*`), `=` drops it. `o` adds the outbound section: rules to other apps go into the peers'
   rulesets (a new `RF-crm-prod` when none covers the peer), to IP peers into the app's own.
+  **Fan-in ports.** An inbound port reached by many peers (at least
+  `generator.consolidate_min_peers`, default 5, or 3 on an infrastructure port: DNS 53, NTP
+  123, Kerberos 88/464, LDAP 389/636/3268, SMB 445, syslog 514, SNMP 161/162, monitoring
+  agents 5666/9100/10050) gets a line above the inbound rows, `⚠ 5666/tcp from 9 peers
+  (monitoring agent?) · c consolidates: off`, the cursor's first stop. `c` on it cycles that
+  port `off → Any → All Workloads → off`: **Any** is one rule, the built-in Any IP list (never
+  created; without it the option is skipped and says why) → the app on that port. It takes
+  the IP side (list, IP and folded rows) and unchecked workload peers; checked workload peers
+  (intra-app, app peers, workloads) keep their own rule for the port, since only the
+  destination enforces an IP list consumer and their rule also gives their outbound (the line
+  says `keeps N managed peer rules (their outbound)`, and that All Workloads covers managed
+  sources in one rule). Unchecked workload sources it takes are allowed at the destination
+  only, named in the warning (Explorer's flows carry no enforcement mode, so they are named,
+  not sorted by mode). **All Workloads** is one rule with unscoped consumers, which every VEN
+  in the org recomputes (warned); IP peers keep their own rows. At an `·ports` app stop the
+  rule opens the port on every workload of the app; at a role stop on the destination roles
+  its flows reached (the app when one had no role), and the line says which (`→ role=db of
+  shop/prod`). The rows it takes lose that port (a row left with none drops out); a row it
+  covers shows `⚠ consolidated` first and, when unchecked, `[~]`, so it never looks
+  excluded. Its flows count as covered, and the lines under the port give the catch first,
+  then what the rule also allows (unchecked peers, unseen sources). At an all-services stop
+  a checked peer's own rule still covers the port. An equal or broader existing rule makes it
+  `already allowed by …`; override denies still count; a choice that yields no rule says why
+  (`Any unavailable`, `All Workloads covers none of these peers (IP only)`). The choice is
+  kept by port across rebuilds and forgotten when the port stops being a candidate; `p` and
+  the confirm show the rule and its notes.
   The target line names the app's ruleset (`R` picks when several cover it, or a new one by
   `generator.ruleset_name`, default `RF-{app}-{env}`). Rules already in the draft show as
   `exists` and are not written; an existing rule with the same actors gets the missing
@@ -492,7 +518,7 @@ it); `--table` prints each section under a title line; `--csv` prints one and ne
 `--section` (without it, exit 2 before any request).
 
 `illumio-tui gen <app> [--granularity app-all|app-ports|role-ports|role-all] [--outbound]
-[--window W] [--max-results N] [--yes]` proposes the allow rules the app's observed traffic
+[--window W] [--max-results N] [--yes] [--consolidate <port>/<proto>=any|all ...]` proposes the allow rules the app's observed traffic
 needs, as the TUI's generator would plan them, and writes nothing. `rows` holds one row per
 peer and side (intra-app, each app peer, each existing IP list with its IP peers, `kind:
 "ip_list"`, `ip_list: {name, href}` and `ips`, each IP peer in no list and each unlabelled
@@ -518,7 +544,16 @@ exactly that protocol, else they are not covered. It costs the focused traffic q
 plus `out` with `--outbound`), the name index and one draft ruleset read, cached; `meta`
 counts them. A capped result exits 2 and an incomplete one (a region did not answer) exits 4,
 with no rules printed. `--table` and `--csv` print the rules. A new ruleset is named by the
-profile's `[profiles.<name>.generator] ruleset_name` (below).
+profile's `[profiles.<name>.generator] ruleset_name` (below). `consolidations` lists the
+inbound fan-in ports (always, consolidated or not): `service`, `peers` (count) and
+`peer_names`, `reason` (`min_peers` or `infra:<name>`, e.g. `infra:dns`), `mode` (`off`,
+`any`, `all`), `rule` (1-based into `rules`, `null` when off or when it yields no rule), `to`
+(the workloads it opens the port on), `also_allows` and `warnings`; a row the rule takes
+ports from has `consolidated: ["5666/tcp"]`, and that rule's `rows` are the rows whose
+flows it takes. `--consolidate 5666/tcp=any` (repeatable; `all` for All Workloads, `off`)
+switches one of them to its one rule, as `c` does in the TUI; a malformed value or a port
+given twice exits 2 before any request, a port that is not listed (or `any` without the
+built-in Any IP list) exits 2, and `off` on a port that is not listed only warns.
 
 `traffic query --blocked` prints the `--by in --show blocked`
 sections the same way. `mesh` gives one row per source user, source process, source group,
@@ -883,6 +918,8 @@ The policy generator names a ruleset it creates by a template over the scope key
 
 Every `{key}` must be a scope key and every scope key must be named, so each new ruleset
 gets its own name; anything else fails the load and names the key.
+`consolidate_min_peers = 5` (the default; at least 2) is how many inbound peers on one
+port make it a fan-in line; infrastructure ports need 3.
 
 ## PCE protection
 

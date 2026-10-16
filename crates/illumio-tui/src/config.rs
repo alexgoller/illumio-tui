@@ -111,10 +111,13 @@ pub struct LabelsConfig {
 }
 
 /// The policy generator: `ruleset_name` names a ruleset it creates, a
-/// template over the scope keys (`RF-{app}-{env}` → `RF-shop-prod`).
+/// template over the scope keys (`RF-{app}-{env}` → `RF-shop-prod`);
+/// `consolidate_min_peers` is how many inbound peers on one port make it a
+/// fan-in candidate (default 5; infrastructure ports from 3).
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct GeneratorConfig {
     pub ruleset_name: Option<String>,
+    pub consolidate_min_peers: Option<usize>,
 }
 
 pub const DEFAULT_SCOPE_KEYS: [&str; 2] = ["app", "env"];
@@ -166,6 +169,8 @@ pub struct ResolvedConfig {
     /// `generator.ruleset_name`, checked against the scope keys; default
     /// `RF-` and every scope key (`RF-{app}-{env}`).
     pub generator_ruleset_name: String,
+    /// `generator.consolidate_min_peers`, at least 2; default 5.
+    pub generator_consolidate_min_peers: usize,
 }
 
 impl ResolvedConfig {
@@ -410,6 +415,20 @@ pub fn resolve(
         None => pce::generate::default_ruleset_name(&scope_keys),
     };
 
+    let generator_consolidate_min_peers = match profile
+        .generator
+        .as_ref()
+        .and_then(|g| g.consolidate_min_peers)
+    {
+        Some(n) if n < 2 => {
+            return Err(ConfigError::Message(format!(
+                "generator.consolidate_min_peers {n}: at least 2 peers make a fan-in port"
+            )));
+        }
+        Some(n) => n,
+        None => pce::generate::consolidate::DEFAULT_MIN_PEERS,
+    };
+
     Ok(ResolvedConfig {
         profile_name,
         scheme,
@@ -446,6 +465,7 @@ pub fn resolve(
         tier_key,
         ignore_keys: ignored,
         generator_ruleset_name,
+        generator_consolidate_min_peers,
     })
 }
 
@@ -917,6 +937,29 @@ traffic_auto_backfill = true
         assert_eq!(
             r.generator_ruleset_name, "RF-{site}",
             "the default follows the scope keys"
+        );
+    }
+
+    #[test]
+    fn generator_consolidate_min_peers_defaults_to_5_and_needs_2() {
+        let r = resolve(&file(), &Overrides::default(), &env(&[])).unwrap();
+        assert_eq!(r.generator_consolidate_min_peers, 5);
+        let with = |tail: &str| -> ConfigFile {
+            toml::from_str(&format!(
+                "[profiles.default]\nhost = \"h\"\norg_id = 1\napi_key = \"k\"\napi_secret = \"s\"\n{tail}"
+            ))
+            .unwrap()
+        };
+        let f = with("[profiles.default.generator]\nconsolidate_min_peers = 8\n");
+        let r = resolve(&f, &Overrides::default(), &env(&[])).unwrap();
+        assert_eq!(r.generator_consolidate_min_peers, 8);
+        let f = with("[profiles.default.generator]\nconsolidate_min_peers = 1\n");
+        let err = resolve(&f, &Overrides::default(), &env(&[]))
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            err,
+            "generator.consolidate_min_peers 1: at least 2 peers make a fan-in port"
         );
     }
 

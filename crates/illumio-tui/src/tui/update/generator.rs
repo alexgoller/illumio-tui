@@ -9,7 +9,7 @@ use crate::tui::gen_view::{Drafts, GenView};
 use crate::tui::model::Gap;
 use crossterm::event::{KeyCode, KeyEvent};
 use pce::CacheMode;
-use pce::generate::{GenInput, Side, keys_refusal, propose, rows};
+use pce::generate::{Consolidate, GenInput, Side, keys_refusal, propose, rows};
 use pce::traffic::{Focus, FocusDirection, queries_text};
 use pce::write::BatchInput;
 
@@ -49,6 +49,7 @@ pub(super) fn open_gen(model: &mut Model, app: pce::traffic::GroupKey, from_app:
     v.error = None;
     v.planning = false;
     v.all_services = idx.all_services_href().is_some();
+    v.min_peers = model.limits.consolidate_min_peers;
     model.gen_from_app = from_app;
     model.gen_view = Some(v);
     let cmds = ensure_drafts(model);
@@ -189,7 +190,9 @@ pub(super) fn rebuild_gen(model: &mut Model) {
     );
     let fresh = rows(flows, &v.focus, &model.limits.tier_key, &idx, target);
     let (gap, requery, window) = gap_text(model, v);
+    let any_missing = pce::generate::consolidate::unavailable(Consolidate::Any, &idx);
     if let Some(v) = model.gen_view.as_mut() {
+        v.any_missing = any_missing.map(str::to_string);
         v.set_rows(fresh);
         v.gap = gap;
         v.requery = requery;
@@ -210,6 +213,7 @@ pub(super) fn regen(model: &mut Model) {
         let Some(drafts) = v.fresh_drafts.as_deref().or(model.draft_rulesets()) else {
             return;
         };
+        let consolidate = v.consolidations();
         let input = GenInput {
             flows: model.traffic.flows_for(&v.focus),
             focus: &v.focus,
@@ -220,6 +224,7 @@ pub(super) fn regen(model: &mut Model) {
             window: &v.window,
             outbound: v.outbound,
             picked: v.picked.as_deref(),
+            consolidate: &consolidate,
         };
         propose(&v.rows, v.global, &input)
     };
@@ -378,6 +383,19 @@ pub(super) fn gen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             // The rows too: the lists its rules name come first.
             rebuild_gen(model);
         }
+        KeyCode::Char('c') => {
+            let any = model
+                .index()
+                .and_then(|i| pce::generate::consolidate::unavailable(Consolidate::Any, i));
+            let Some(v) = model.gen_view.as_mut() else {
+                return Vec::new();
+            };
+            match v.cycle_consolidation(any) {
+                Ok(what) => model.status = StatusLine::info(what),
+                Err(e) => model.status = StatusLine::warn(e),
+            }
+            regen(model);
+        }
         KeyCode::Char('p') => v.list = Some(0),
         KeyCode::Char('r') => return gen_reload(model),
         KeyCode::Enter => return gen_enter(model),
@@ -474,6 +492,7 @@ fn gen_enter(model: &mut Model) -> Vec<Cmd> {
         .rows
         .iter()
         .any(|r| r.proposed() && (r.side == Side::Inbound || v.outbound))
+        && !v.has_consolidated_rule()
     {
         Some("no row is checked: Space checks one".to_string())
     } else if let Drafts::Failed(e) = &v.drafts {
@@ -1253,5 +1272,46 @@ mod tests {
         }
         update(&mut m, kc(KeyCode::Enter));
         assert_eq!(m.overlay, Overlay::Generator);
+    }
+
+    #[test]
+    fn c_consolidates_a_fan_in_port_without_requests_and_enter_plans_it_alone() {
+        let mut m = loaded();
+        m.limits.consolidate_min_peers = 3;
+        m.writes = WritesState::on();
+        assert_eq!(
+            update(&mut m, key('c')),
+            Vec::new(),
+            "no generator: ignored"
+        );
+        open_shop(&mut m);
+        assert_eq!(view(&m).candidates.len(), 1, "5432/tcp from 3 peers");
+        // Every row unchecked; the fan-in line is the cursor's first stop.
+        for _ in 0..2 {
+            update(&mut m, key('j'));
+            update(&mut m, key(' '));
+        }
+        for _ in 0..5 {
+            update(&mut m, key('k'));
+        }
+        assert_eq!(view(&m).selected_candidate(), Some(0));
+        assert_eq!(update(&mut m, key('c')), Vec::new());
+        assert!(
+            m.status
+                .text
+                .starts_with("destination only: 5432/tcp from any IP")
+        );
+        let p = view(&m).proposal.as_ref().unwrap();
+        assert_eq!(p.rules.len(), 1);
+        assert!(p.rules[0].consolidated.is_some());
+        // The state is the port's: it survives a rebuild (`o` twice).
+        update(&mut m, key('o'));
+        update(&mut m, key('o'));
+        assert_eq!(view(&m).consolidations().len(), 1);
+        let cmds = update(&mut m, kc(KeyCode::Enter));
+        let [Cmd::PlanBatch { input, .. }] = &cmds[..] else {
+            panic!("{cmds:?} {}", m.status.text)
+        };
+        assert!(input.proposal.rules[0].consolidated.is_some());
     }
 }

@@ -8,8 +8,8 @@ use super::output::{TableRows, join_list};
 use super::traffic::{ByArg, DirectionArg, FilterArgs, cli_focus, fetch};
 use clap::{Args, ValueEnum};
 use pce::generate::{
-    Coverage, GenInput, GenRow, Proposal, RuleCounts, Stop, app_ruleset, keys_refusal, propose,
-    rows,
+    Candidate, Consolidate, Coverage, GenInput, GenRow, Proposal, RuleCounts, Stop, app_ruleset,
+    candidates, keys_refusal, propose, rows,
 };
 use pce::models::PolicyScope;
 use pce::write::PortSpec;
@@ -60,6 +60,11 @@ pub struct GenArgs {
     /// Confirm an expensive query (window > 7d, max_results > 10000)
     #[arg(long)]
     pub yes: bool,
+    /// One rule for a fan-in port, e.g. 5666/tcp=any (the built-in Any IP list) or
+    /// 5666/tcp=all (All Workloads, unscoped); repeatable. Only for a port listed in
+    /// `consolidations`
+    #[arg(long, value_name = "PORT/PROTO=any|all")]
+    pub consolidate: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -88,6 +93,9 @@ pub struct RowOut {
     /// An `ip_list` row's IP peers seen, by address.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ips: Option<Vec<String>>,
+    /// The ports a consolidated rule takes from this row (#39).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub consolidated: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -163,6 +171,28 @@ pub struct Preview {
     pub blocker: Option<String>,
 }
 
+/// A fan-in port: a candidate for one rule, consolidated or not.
+#[derive(Debug, Serialize)]
+pub struct ConsolidationOut {
+    pub service: String,
+    /// Distinct inbound peers on the port.
+    pub peers: usize,
+    pub peer_names: Vec<String>,
+    /// `min_peers` or `infra:<name>`.
+    pub reason: String,
+    /// `off`, `any` or `all`.
+    pub mode: &'static str,
+    /// 1-based, into `rules`: the one rule; `null` when off.
+    pub rule: Option<usize>,
+    /// The workloads the rule opens the port on (`every workload of
+    /// shop/prod`, `role=db of shop/prod`); `null` when off.
+    pub to: Option<String>,
+    /// What the rule allows beyond the checked peers.
+    pub also_allows: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct GenReport {
     pub app: String,
@@ -174,6 +204,7 @@ pub struct GenReport {
     pub rows: Vec<RowOut>,
     pub ip_lists: Vec<IpListOut>,
     pub rules: Vec<RuleOut>,
+    pub consolidations: Vec<ConsolidationOut>,
     pub preview: Preview,
 }
 
@@ -271,6 +302,7 @@ fn row_out(r: &GenRow, global: Stop, scope_keys: &[String]) -> RowOut {
         warnings,
         ip_list,
         ips,
+        consolidated: Vec::new(),
     }
 }
 
@@ -310,9 +342,112 @@ fn rules_out(p: &Proposal, idx: &pce::NameIndex) -> Vec<RuleOut> {
         .collect()
 }
 
+/// `--consolidate` as `(arg, port/proto, mode)`, read before any request;
+/// a port given twice is refused.
+fn parse_consolidate(args: &[String]) -> Result<Vec<(&str, PortSpec, Consolidate)>, CliError> {
+    let parsed: Vec<(&str, PortSpec, Consolidate)> = args
+        .iter()
+        .map(|a| {
+            let Some((port, mode)) = a.split_once('=') else {
+                return Err(CliError::Args(format!(
+                    "--consolidate {a}: write it as <port>/<proto>=any|all"
+                )));
+            };
+            let spec = PortSpec::parse(port)
+                .map_err(|e| CliError::Args(format!("--consolidate {a}: {e}")))?;
+            let mode = Consolidate::parse(mode).ok_or_else(|| {
+                CliError::Args(format!("--consolidate {a}: the mode is any, all or off"))
+            })?;
+            Ok((a.as_str(), spec, mode))
+        })
+        .collect::<Result<_, CliError>>()?;
+    for (i, (a, spec, _)) in parsed.iter().enumerate() {
+        if parsed[..i].iter().any(|(_, s, _)| s == spec) {
+            return Err(CliError::Args(format!(
+                "--consolidate {a}: {} is given more than once",
+                spec.display()
+            )));
+        }
+    }
+    Ok(parsed)
+}
+
+/// The parsed `--consolidate`s, each a fan-in port of `cands`; Any only
+/// with the built-in Any IP list.
+fn check_consolidate(
+    asked: &[(&str, PortSpec, Consolidate)],
+    cands: &[Candidate],
+    idx: &pce::NameIndex,
+) -> Result<BTreeMap<PortSpec, Consolidate>, CliError> {
+    let listed = || {
+        if cands.is_empty() {
+            "none here".to_string()
+        } else {
+            cands
+                .iter()
+                .map(|c| c.spec.display())
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+    };
+    let mut out = BTreeMap::new();
+    for (a, spec, mode) in asked {
+        let (spec, mode) = (spec.clone(), *mode);
+        if mode == Consolidate::Off && !cands.iter().any(|c| c.spec == spec) {
+            eprintln!(
+                "warning: --consolidate {a}: {} is not a fan-in port: nothing to switch off",
+                spec.display()
+            );
+            continue;
+        }
+        if !cands.iter().any(|c| c.spec == spec) {
+            return Err(CliError::Args(format!(
+                "--consolidate {a}: {} is not a fan-in port (candidates: {})",
+                spec.display(),
+                listed()
+            )));
+        }
+        if let Some(why) = pce::generate::consolidate::unavailable(mode, idx) {
+            return Err(CliError::Args(format!("--consolidate {a}: {why}")));
+        }
+        out.insert(spec, mode);
+    }
+    Ok(out)
+}
+
+fn consolidations_out(
+    cands: &[Candidate],
+    modes: &BTreeMap<PortSpec, Consolidate>,
+    p: &Proposal,
+) -> Vec<ConsolidationOut> {
+    cands
+        .iter()
+        .map(|c| {
+            let mode = modes.get(&c.spec).copied().unwrap_or_default();
+            let rule = p
+                .rules
+                .iter()
+                .position(|r| r.consolidated.as_ref().is_some_and(|x| x.spec == c.spec));
+            let fan = rule.and_then(|i| p.rules[i].consolidated.as_ref());
+            ConsolidationOut {
+                service: c.spec.display(),
+                peers: c.peers.len(),
+                peer_names: c.peers.clone(),
+                reason: c.reason.cli(),
+                mode: mode.cli(),
+                rule: rule.map(|i| i + 1),
+                to: fan.map(|f| f.to.clone()),
+                also_allows: fan.map(|f| f.also_allows()).unwrap_or_default(),
+                warnings: fan.map(|f| f.warnings()).unwrap_or_default(),
+            }
+        })
+        .collect()
+}
+
 pub async fn run(ctx: &Context, args: &GenArgs) -> Result<(), CliError> {
     let keys = ctx.config.scope_keys.clone();
     let global = Stop::from(args.granularity);
+    let asked = parse_consolidate(&args.consolidate)?;
     let filter = FilterArgs {
         window: args.window.clone(),
         max_results: args.max_results,
@@ -386,6 +521,8 @@ pub async fn run(ctx: &Context, args: &GenArgs) -> Result<(), CliError> {
         None,
     );
     let gen_rows = rows(&fetched.flows, &focus, &tier, &idx, target);
+    let cands = candidates(&gen_rows, ctx.config.generator_consolidate_min_peers);
+    let modes = check_consolidate(&asked, &cands, &idx)?;
     let input = GenInput {
         flows: &fetched.flows,
         focus: &focus,
@@ -396,6 +533,7 @@ pub async fn run(ctx: &Context, args: &GenArgs) -> Result<(), CliError> {
         window: &window,
         outbound: args.outbound,
         picked: None,
+        consolidate: &modes,
     };
     let p = propose(&gen_rows, global, &input);
     // Each row behind a rule an override deny undercuts says so.
@@ -435,6 +573,13 @@ pub async fn run(ctx: &Context, args: &GenArgs) -> Result<(), CliError> {
                 let mut out = row_out(r, global, &keys);
                 out.warnings
                     .extend(denied.get(&i).into_iter().flatten().cloned());
+                out.consolidated = p
+                    .rules
+                    .iter()
+                    .filter(|x| x.rows.contains(&i))
+                    .filter_map(|x| x.consolidated.as_ref())
+                    .map(|c| c.spec.display())
+                    .collect();
                 out
             })
             .collect(),
@@ -447,6 +592,7 @@ pub async fn run(ctx: &Context, args: &GenArgs) -> Result<(), CliError> {
             })
             .collect(),
         rules: rules_out(&p, &idx),
+        consolidations: consolidations_out(&cands, &modes, &p),
         preview: Preview {
             counts: p.counts(),
             covered_flows: p.coverage.covered,

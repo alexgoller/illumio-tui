@@ -4011,3 +4011,153 @@ async fn gen_without_the_cache_reads_the_name_index_once() {
     );
     server.verify().await;
 }
+
+/// A config whose generator calls 2 inbound peers on a port fan-in.
+fn fan_config(dir: &tempfile::TempDir) -> std::path::PathBuf {
+    let cfg = dir.path().join("config.toml");
+    std::fs::write(
+        &cfg,
+        "[profiles.default]\nhost = \"ignored.example\"\norg_id = 5\n\n[profiles.default.generator]\nconsolidate_min_peers = 2\n",
+    )
+    .unwrap();
+    cfg
+}
+
+/// `mount_gen` with a second IP peer (10.9.9.9, in no list) on Corp's
+/// 8443/tcp: two peers on one port.
+async fn mount_gen_fan(server: &MockServer, runs: u64) {
+    let mut flows: Vec<Value> =
+        serde_json::from_str(include_str!("../../../fixtures/traffic_flows.json")).unwrap();
+    let mut other = flows[1].clone();
+    other["src"] = json!({"ip": "10.9.9.9"});
+    flows.push(other);
+    mount_traffic_body(server, runs, Value::Array(flows).to_string()).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/sec_policy/draft/rule_sets"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/rule_sets.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(runs)
+        .mount(server)
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn gen_lists_fan_in_candidates_and_consolidate_writes_one_rule() {
+    let server = MockServer::start().await;
+    mount_gen_fan(&server, 2).await;
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = fan_config(&dir);
+    let base = [
+        "--config",
+        cfg.to_str().unwrap(),
+        "gen",
+        "shop/prod",
+        "--window",
+        "1h",
+    ];
+    let out = stdout_json(cmd(&server).args(base).assert().success());
+    let c = &out["data"]["consolidations"];
+    assert_eq!(c.as_array().unwrap().len(), 1, "{c}");
+    assert_eq!(c[0]["service"], "8443/tcp");
+    assert_eq!(c[0]["reason"], "min_peers");
+    assert_eq!(c[0]["mode"], "off");
+    assert!(c[0]["rule"].is_null());
+    let mut args = base.to_vec();
+    args.extend(["--consolidate", "8443/tcp=any"]);
+    let out = stdout_json(cmd(&server).args(&args).assert().success());
+    let d = &out["data"];
+    let c = &d["consolidations"][0];
+    assert_eq!(c["mode"], "any");
+    assert_eq!(c["peers"], 2);
+    let i = c["rule"].as_u64().unwrap() as usize - 1;
+    let r = &d["rules"][i];
+    assert_eq!(r["consumers"], json!(["ipl:Any (0.0.0.0/0 and ::/0)"]));
+    assert_eq!(r["unscoped_consumers"], false);
+    assert_eq!(r["services"], json!(["8443/tcp"]));
+    assert_eq!(
+        r["body"]["consumers"],
+        json!([{"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/20"}}])
+    );
+    assert_eq!(
+        c["also_allows"].as_array().unwrap().last().unwrap(),
+        "any source not seen"
+    );
+    assert!(
+        c["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains("full enforcement"),
+        "{c}"
+    );
+    assert_eq!(c["to"], "every workload of shop/prod");
+    let marked: Vec<&Value> = d["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|r| r.get("consolidated").is_some())
+        .collect();
+    assert_eq!(marked.len(), 2, "the two IP-side rows");
+    assert_eq!(marked[0]["consolidated"], json!(["8443/tcp"]));
+    server.verify().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn gen_consolidate_refuses_a_bad_spec_before_any_request_and_a_non_candidate_after() {
+    let server = MockServer::start().await;
+    let a = cmd(&server)
+        .args(["gen", "shop/prod", "--consolidate", "5432/tcp=everything"])
+        .assert()
+        .code(2);
+    let err = String::from_utf8_lossy(&a.get_output().stderr).to_string();
+    assert!(err.contains("the mode is any, all or off"), "{err}");
+    let a = cmd(&server)
+        .args([
+            "gen",
+            "shop/prod",
+            "--consolidate",
+            "53/udp=any",
+            "--consolidate",
+            "53/udp=all",
+        ])
+        .assert()
+        .code(2);
+    let err = String::from_utf8_lossy(&a.get_output().stderr).to_string();
+    assert!(err.contains("53/udp is given more than once"), "{err}");
+    assert!(server.received_requests().await.unwrap().is_empty());
+    mount_gen(&server, 1, 1).await;
+    let a = cmd(&server)
+        .args([
+            "gen",
+            "shop/prod",
+            "--window",
+            "1h",
+            "--consolidate",
+            "5432/tcp=all",
+        ])
+        .assert()
+        .code(2);
+    let err = String::from_utf8_lossy(&a.get_output().stderr).to_string();
+    assert!(
+        err.contains("5432/tcp is not a fan-in port (candidates: none here)"),
+        "{err}"
+    );
+    // `off` on a port that is no candidate: a warning, nothing else.
+    let server = MockServer::start().await;
+    mount_gen(&server, 1, 1).await;
+    let a = cmd(&server)
+        .args([
+            "gen",
+            "shop/prod",
+            "--window",
+            "1h",
+            "--consolidate",
+            "5432/tcp=off",
+        ])
+        .assert()
+        .success();
+    let err = String::from_utf8_lossy(&a.get_output().stderr).to_string();
+    assert!(err.contains("nothing to switch off"), "{err}");
+}

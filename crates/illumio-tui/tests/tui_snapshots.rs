@@ -1839,6 +1839,21 @@ fn generator_model() -> illumio_tui::tui::model::Model {
     m
 }
 
+/// `generator_model` with fan-in from 3 peers (5432/tcp: hr/prod,
+/// shop/dev, Corp) and the cursor on its line.
+fn generator_fan_model() -> illumio_tui::tui::model::Model {
+    use illumio_tui::tui::commands::Command;
+    use illumio_tui::tui::msg::Msg;
+    let mut m = with_policy(model_with_window("24h"));
+    m.connection = Connection::Connected {
+        index: Some(illumio_tui::tui::test_support::rich_index()),
+        index_age_secs: 0,
+    };
+    m.limits.consolidate_min_peers = 3;
+    illumio_tui::tui::update(&mut m, Msg::Command(Command::Gen(Some("shop/prod".into()))));
+    m
+}
+
 fn gen_key(m: &mut illumio_tui::tui::model::Model, c: char) {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     illumio_tui::tui::update(
@@ -2042,4 +2057,50 @@ fn generator_flags_that_do_not_fit_say_how_many_more_80x24() {
     assert!(out.contains("⚠ override deny: 2 +1"), "{out}");
     let wide = render_to_string(&m, 120, 40);
     assert!(wide.contains("⚠ override deny: 2 ⚠ no target"), "{wide}");
+}
+
+#[test]
+fn generator_fan_in_off_80x24() {
+    let m = generator_fan_model();
+    let out = render_to_string(&m, 80, 24);
+    for s in [
+        "⚠ 5432/tcp from 3 peers · c consolidates: off",
+        "c consolidates",
+    ] {
+        assert!(out.contains(s), "missing {s:?}:\n{out}");
+    }
+    insta::assert_snapshot!("generator_fan_in_off_80x24", out);
+}
+
+#[test]
+fn generator_fan_in_any_80x24() {
+    let mut m = generator_fan_model();
+    gen_key(&mut m, 'c');
+    let out = render_to_string(&m, 80, 24);
+    for s in [
+        "c consolidates: Any · 1 rule",
+        "also allows: shop/dev",
+        "⚠ consolidated",
+        "covers 7 of 8 flows",
+    ] {
+        assert!(out.contains(s), "missing {s:?}:\n{out}");
+    }
+    insta::assert_snapshot!("generator_fan_in_any_80x24", out);
+}
+
+#[test]
+fn generator_fan_in_all_workloads_rule_list_80x24() {
+    let mut m = generator_fan_model();
+    gen_key(&mut m, 'c');
+    gen_key(&mut m, 'c');
+    gen_key(&mut m, 'p');
+    let out = render_to_string(&m, 80, 24);
+    for s in [
+        "unscoped",
+        "consolidates 5432/tcp from 2 peers",
+        "every VEN",
+    ] {
+        assert!(out.contains(s), "missing {s:?}:\n{out}");
+    }
+    insta::assert_snapshot!("generator_fan_in_all_workloads_rule_list_80x24", out);
 }

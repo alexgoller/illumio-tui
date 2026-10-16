@@ -2,14 +2,17 @@
 //! observed traffic. [`rows`] turns the app's flows into rows (one per
 //! peer and side); [`propose`] turns the rows and the slider stop into
 //! rules, merged, and classified against the draft rulesets (create, add
-//! services, exists). Pure: no requests. The TUI's generator and the CLI's
+//! services, exists). [`consolidate`] finds the fan-in ports one rule can
+//! stand for (#39). Pure: no requests. The TUI's generator and the CLI's
 //! `gen` share it.
+pub mod consolidate;
 pub mod dedupe;
 pub mod derive;
 pub mod rows;
 pub mod services;
 pub mod target;
 
+pub use consolidate::{Candidate, Consolidate, Consolidated, candidates};
 pub use derive::{GenInput, app_ruleset, propose};
 pub use rows::{
     MANY_SERVICES, MAX_IP_ROWS, SEEN_IPS, by_address, excluded, ip_list_name, is_any_ip_list, rows,
@@ -538,6 +541,8 @@ pub struct GenRule {
     pub seen: BTreeMap<SeenFlow, u64>,
     /// The IP peers behind it, by the existing IP list it names for them.
     pub ips: BTreeMap<String, BTreeSet<String>>,
+    /// The one rule of a consolidated fan-in port (#39): what it stands for.
+    pub consolidated: Option<Consolidated>,
 }
 
 /// One end of a flow record as the override-deny check reads it.
@@ -865,6 +870,7 @@ mod tests {
             denied_by: Vec::new(),
             seen: BTreeMap::new(),
             ips: BTreeMap::new(),
+            consolidated: None,
         }
     }
 

@@ -104,6 +104,7 @@ fn proposal() -> Proposal {
         window: "24h",
         outbound: true,
         picked: None,
+        consolidate: &std::collections::BTreeMap::new(),
     };
     propose(&r, Stop::AppPorts, &input)
 }
@@ -1131,6 +1132,7 @@ async fn a_checked_list_row_names_its_list_creates_none_and_the_confirm_lists_it
         window: "24h",
         outbound: false,
         picked: None,
+        consolidate: &std::collections::BTreeMap::new(),
     };
     input.proposal = propose(&r, Stop::AppPorts, &gen_input);
     assert!(input.proposal.ip_lists.is_empty());
@@ -1146,6 +1148,60 @@ async fn a_checked_list_row_names_its_list_creates_none_and_the_confirm_lists_it
     let lines = b.lines();
     assert!(
         lines.contains(&"  · ipl:Corp: 1 IP seen: 10.1.4.9".to_string()),
+        "{lines:#?}"
+    );
+}
+
+#[tokio::test]
+async fn a_consolidated_port_is_one_any_rule_and_the_confirm_says_what_it_also_allows() {
+    let server = MockServer::start().await;
+    mount_reads(&server, rule_sets(), ip_lists()).await;
+    let pce = pce_for(&server);
+    let guard = guard_with(MemoryAudit::new());
+    let mut input = input();
+    let idx = index();
+    let raw: Vec<Flow> =
+        serde_json::from_str(include_str!("../../../fixtures/traffic_flows_rich.json")).unwrap();
+    let flows = resolve_flows(&raw, &idx);
+    let focus = Focus::new(parse_app("shop/prod"), vec!["app".into(), "env".into()]);
+    let r = rows(&flows, &focus, "role", &idx, None);
+    let drafts: Vec<RuleSet> = serde_json::from_value(rule_sets()).unwrap();
+    let consolidate = std::collections::BTreeMap::from([(
+        pce::write::PortSpec::parse("5432/tcp").unwrap(),
+        pce::generate::Consolidate::Any,
+    )]);
+    let gen_input = GenInput {
+        flows: &flows,
+        focus: &focus,
+        tier_key: "role",
+        drafts: &drafts,
+        idx: &idx,
+        ruleset_name: "RF-{app}-{env}",
+        window: "24h",
+        outbound: false,
+        picked: None,
+        consolidate: &consolidate,
+    };
+    input.proposal = propose(&r, Stop::AppPorts, &gen_input);
+    let b = pce.writer(&guard).plan_batch(input, &idx).await.unwrap();
+    // intra-app and hr/prod are checked: they keep their own rules.
+    assert_eq!(b.steps.len(), 3, "{:#?}", b.lines());
+    let body = b.steps[2].plan.request().unwrap().body.clone().unwrap();
+    assert_eq!(
+        body["consumers"],
+        serde_json::json!([{"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/20"}}])
+    );
+    assert_eq!(body["unscoped_consumers"], false);
+    assert_eq!(body["providers"], serde_json::json!([{"actors": "ams"}]));
+    let lines = b.lines();
+    assert!(
+        lines.iter().any(|l| l.starts_with("  · consolidates 5432/tcp from 2 peers → every workload of shop/prod · also allows: shop/dev, IP list Corp · 1 IP, any source not seen")),
+        "{lines:#?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains("keeps 2 managed peer rules (their outbound)")),
         "{lines:#?}"
     );
 }

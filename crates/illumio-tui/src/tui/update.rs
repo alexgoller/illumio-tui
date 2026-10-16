@@ -5415,6 +5415,7 @@ mod tests {
                         tier_key: "tier".into(),
                         ignore_keys: Vec::new(),
                         ruleset_name: "RF-{site}".into(),
+                        consolidate_min_peers: 5,
                     },
                 ))),
             ),
@@ -8645,6 +8646,7 @@ mod tests {
                     tier_key: "tier".into(),
                     ignore_keys: vec!["os".into()],
                     ruleset_name: "RF-{site}".into(),
+                    consolidate_min_peers: 5,
                 },
             ))),
         );
@@ -9045,6 +9047,7 @@ mod tests {
                     tier_key: "role".into(),
                     ignore_keys: Vec::new(),
                     ruleset_name: "RF-{app}-{env}".into(),
+                    consolidate_min_peers: 5,
                 },
             ))),
         );
@@ -10073,7 +10076,7 @@ mod tests {
     fn help_scrolls_to_its_last_line_and_reopens_at_the_top() {
         use crate::tui::ui::widgets::overlay::{HELP_LINES, help_last_scroll};
         let mut m = model_fixture(); // 80x24
-        assert_eq!(HELP_LINES.len(), 73);
+        assert_eq!(HELP_LINES.len(), 74);
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Events   J"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  A"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  D"));
@@ -10106,13 +10109,13 @@ mod tests {
         );
         update(&mut m, key('?'));
         let last = help_last_scroll(24);
-        assert_eq!(last, 51, "73 lines, 22 rows inside the box");
+        assert_eq!(last, 52, "74 lines, 22 rows inside the box");
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app x / X"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app o"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app d"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Sections Space / z"));
 
-        for _ in 0..51 {
+        for _ in 0..52 {
             update(&mut m, key('j'));
         }
         assert_eq!(m.help_scroll, last);

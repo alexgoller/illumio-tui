@@ -1276,6 +1276,7 @@ mod tests {
             tier_key: "role".into(),
             ignore_keys: Vec::new(),
             ruleset_name: "RF-{app}-{env}".into(),
+            consolidate_min_peers: 5,
         }
     }
 

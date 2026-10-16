@@ -459,6 +459,7 @@ mod tests {
             denied_by: Vec::new(),
             seen: Default::default(),
             ips: Default::default(),
+            consolidated: None,
         }
     }
 

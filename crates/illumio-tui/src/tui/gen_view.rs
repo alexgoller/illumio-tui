@@ -3,8 +3,11 @@
 //! proposal they lead to. Pure: `update` fills it, `ui::widgets::generator`
 //! draws it. Nothing here makes a request.
 use pce::NameIndex;
-use pce::generate::{GenRow, PeerKind, Proposal, RowKey, Side, Stop, Target};
+use pce::generate::{
+    Candidate, Consolidate, GenRow, PeerKind, Proposal, RowKey, Side, Stop, Target, candidates,
+};
 use pce::traffic::Focus;
+use pce::write::PortSpec;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The draft rulesets the proposal is checked against.
@@ -61,6 +64,16 @@ pub struct GenView {
     /// The draft rulesets a plan read fresh: the proposal is derived from
     /// them until a newer load arrives.
     pub fresh_drafts: Option<Vec<pce::models::RuleSet>>,
+    /// `generator.consolidate_min_peers`.
+    pub min_peers: usize,
+    /// The inbound fan-in ports, from the rows (#39): one line each above
+    /// the inbound rows, where the cursor goes first.
+    pub candidates: Vec<Candidate>,
+    /// `c`: each port's consolidation, by port and protocol; kept across
+    /// rebuilds (a port that is no candidate now is not applied).
+    pub consolidate: BTreeMap<PortSpec, Consolidate>,
+    /// Why the Any option is unavailable (no built-in Any IP list).
+    pub any_missing: Option<String>,
 }
 
 /// What the fresh read at `Enter` changed against the preview, for the
@@ -162,6 +175,10 @@ impl GenView {
             error: None,
             planned: None,
             fresh_drafts: None,
+            min_peers: pce::generate::consolidate::DEFAULT_MIN_PEERS,
+            candidates: Vec::new(),
+            consolidate: BTreeMap::new(),
+            any_missing: None,
         }
     }
 
@@ -169,6 +186,9 @@ impl GenView {
     /// key (the rows may come in another order after a re-query).
     pub fn set_rows(&mut self, rows: Vec<GenRow>) {
         let at = self.selected().map(|i| self.rows[i].key());
+        let at_fan = self
+            .selected_candidate()
+            .map(|c| self.candidates[c].spec.clone());
         let old: BTreeMap<RowKey, (bool, Option<Stop>)> = self
             .rows
             .iter()
@@ -183,6 +203,11 @@ impl GenView {
             .flat_map(|r| row_ips(r).into_iter().map(move |ip| (r.side, ip)))
             .collect();
         self.rows = rows;
+        self.candidates = candidates(&self.rows, self.min_peers);
+        // A port that is no candidate now forgets its choice: it never
+        // comes back by itself.
+        let fans: BTreeSet<&PortSpec> = self.candidates.iter().map(|c| &c.spec).collect();
+        self.consolidate.retain(|spec, _| fans.contains(spec));
         for r in &mut self.rows {
             if let Some((checked, stop)) = old.get(&r.key()) {
                 r.checked = *checked && r.checkable;
@@ -196,20 +221,124 @@ impl GenView {
             }
         }
         for s in [Side::Inbound, Side::Outbound] {
-            let n = self.section_rows(s).len();
+            let n = self.section_len(s);
             let c = &mut self.cursor[side_index(s)];
             *c = (*c).min(n.saturating_sub(1));
         }
+        let section = self.section;
         if let Some(key) = at {
-            let section = self.section;
             if let Some(pos) = self
                 .section_rows(section)
                 .iter()
                 .position(|i| self.rows[*i].key() == key)
             {
-                self.cursor[side_index(section)] = pos;
+                self.cursor[side_index(section)] = self.lead(section) + pos;
             }
+        } else if let Some(spec) = at_fan
+            && let Some(pos) = self.candidates.iter().position(|c| c.spec == spec)
+        {
+            self.cursor[0] = pos;
         }
+    }
+
+    /// The fan-in lines above a section's rows (inbound only).
+    pub fn lead(&self, s: Side) -> usize {
+        match s {
+            Side::Inbound => self.candidates.len(),
+            Side::Outbound => 0,
+        }
+    }
+
+    /// The cursor's stops in a section: its fan-in lines, then its rows.
+    pub fn section_len(&self, s: Side) -> usize {
+        self.lead(s) + self.section_rows(s).len()
+    }
+
+    /// The fan-in line under the cursor (an index into `candidates`).
+    pub fn selected_candidate(&self) -> Option<usize> {
+        let c = self.cursor[side_index(self.section)];
+        (c < self.lead(self.section)).then_some(c)
+    }
+
+    /// Each candidate port's consolidation in force (`Off` left out).
+    pub fn consolidations(&self) -> BTreeMap<PortSpec, Consolidate> {
+        self.candidates
+            .iter()
+            .filter_map(|c| {
+                let m = self.consolidate.get(&c.spec).copied().unwrap_or_default();
+                (m != Consolidate::Off).then(|| (c.spec.clone(), m))
+            })
+            .collect()
+    }
+
+    /// The consolidation of a candidate port.
+    pub fn mode_of(&self, spec: &PortSpec) -> Consolidate {
+        self.consolidate.get(spec).copied().unwrap_or_default()
+    }
+
+    /// `c` on a fan-in line: off → Any → All Workloads → off for that port.
+    /// `any_missing`: why Any is unavailable (then it is skipped). The
+    /// text says what the port does now; the error why nothing changed.
+    pub fn cycle_consolidation(&mut self, any_missing: Option<&str>) -> Result<String, String> {
+        let Some(i) = self.selected_candidate() else {
+            return Err(if self.candidates.is_empty() {
+                "no fan-in port: c has nothing to consolidate".into()
+            } else {
+                "c works on a fan-in line (⚠ above the inbound rows)".into()
+            });
+        };
+        let spec = self.candidates[i].spec.clone();
+        let mut next = self.mode_of(&spec).next();
+        let mut skipped = None;
+        if next == Consolidate::Any
+            && let Some(why) = any_missing
+        {
+            skipped = Some(why);
+            next = next.next();
+        }
+        self.consolidate.insert(spec.clone(), next);
+        let app = self.focus.app_text();
+        let port = spec.display();
+        let what = match next {
+            Consolidate::Off => format!("per-peer rules again for {port}"),
+            Consolidate::Any => format!(
+                "destination only: {port} from any IP → {app} in one rule; checked workload peers keep theirs"
+            ),
+            Consolidate::AllWorkloads => {
+                format!("every VEN recomputes: {port} from All Workloads → {app} in one rule")
+            }
+        };
+        let skipped = skipped.map_or_else(String::new, |w| format!(" (Any unavailable: {w})"));
+        Ok(format!("{what}{skipped}"))
+    }
+
+    /// Whether the proposal holds a consolidated rule (`Enter` plans it
+    /// with no row checked).
+    pub fn has_consolidated_rule(&self) -> bool {
+        self.proposal
+            .as_ref()
+            .is_some_and(|p| p.rules.iter().any(|r| r.consolidated.is_some()))
+    }
+
+    /// Row `i`'s flag when a consolidated rule takes some of its ports:
+    /// `consolidated` (all of them) or `5432/tcp consolidated`.
+    pub fn consolidated_flag(&self, i: usize) -> Option<String> {
+        let p = self.proposal.as_ref()?;
+        let taken: Vec<String> = p
+            .rules
+            .iter()
+            .filter(|r| r.rows.contains(&i))
+            .filter_map(|r| r.consolidated.as_ref())
+            .map(|c| c.spec.display())
+            .collect();
+        if taken.is_empty() {
+            return None;
+        }
+        Some(if taken.len() == self.rows[i].services.len() {
+            "consolidated".to_string()
+        } else {
+            format!("{} consolidated", taken.join(" "))
+        })
     }
 
     /// The indexes (into `rows`) of one section's rows.
@@ -221,16 +350,17 @@ impl GenView {
 
     /// The row under the cursor (an index into `rows`).
     pub fn selected(&self) -> Option<usize> {
-        self.section_rows(self.section)
-            .get(self.cursor[side_index(self.section)])
-            .copied()
+        let c = self.cursor[side_index(self.section)];
+        let lead = self.lead(self.section);
+        c.checked_sub(lead)
+            .and_then(|c| self.section_rows(self.section).get(c).copied())
     }
 
     /// `j` / `k`, clamped to the section.
     /// Past the last inbound row `j` goes on into the outbound section
     /// (when it is shown and has rows), `k` from its first row back.
     pub fn move_cursor(&mut self, delta: isize) {
-        let n = self.section_rows(self.section).len();
+        let n = self.section_len(self.section);
         let at = self.cursor[side_index(self.section)];
         let outbound_rows = self.section_rows(Side::Outbound).len();
         if delta > 0 && self.section == Side::Inbound && at + 1 >= n {
@@ -242,7 +372,7 @@ impl GenView {
         }
         if delta < 0 && self.section == Side::Outbound && at == 0 {
             self.section = Side::Inbound;
-            let n = self.section_rows(Side::Inbound).len();
+            let n = self.section_len(Side::Inbound);
             self.cursor[0] = n.saturating_sub(1);
             return;
         }
@@ -274,6 +404,9 @@ impl GenView {
 
     /// `Space`; the error says why a row cannot be checked.
     pub fn toggle(&mut self, scope_keys: &[String]) -> Result<(), String> {
+        if self.selected_candidate().is_some() {
+            return Err("Space checks rows: c consolidates this port".into());
+        }
         let i = self.selected().ok_or("no row here")?;
         let r = &mut self.rows[i];
         if !r.checkable {
@@ -471,6 +604,74 @@ impl GenView {
         out
     }
 
+    /// A fan-in line: `5666/tcp from 9 peers (monitoring agent?) · c
+    /// consolidates: off`, and once on what its rule does.
+    pub fn candidate_line(&self, i: usize) -> String {
+        let c = &self.candidates[i];
+        let mode = self.mode_of(&c.spec);
+        let mut s = format!("⚠ {} · c consolidates: {}", c.text(), mode.text());
+        if mode == Consolidate::Off {
+            return s;
+        }
+        match self.fan_rule(&c.spec) {
+            Some(r) => match &r.action {
+                pce::generate::RuleAction::Exists { rule_href } => {
+                    s.push_str(&format!(" · already allowed by {rule_href}"));
+                }
+                pce::generate::RuleAction::AddServices { rule_href, .. } => {
+                    s.push_str(&format!(" · adds the port to {rule_href}"));
+                }
+                pce::generate::RuleAction::Create => s.push_str(" · 1 rule"),
+            },
+            None if self.proposal.is_some() => {
+                s.push_str(&format!(" · no rule: {}", self.no_rule_reason(mode)));
+            }
+            None => {}
+        }
+        s
+    }
+
+    /// Why a port switched on yields no rule.
+    fn no_rule_reason(&self, mode: Consolidate) -> String {
+        match (mode, &self.any_missing) {
+            (Consolidate::Any, Some(why)) => format!("Any unavailable: {why}"),
+            (Consolidate::Any, None) => {
+                "every peer is a checked workload peer and keeps its own rule".into()
+            }
+            _ => "All Workloads covers none of these peers (IP only)".into(),
+        }
+    }
+
+    /// The lines under a consolidated fan-in port: its catch first
+    /// (outbound rules, every VEN), then where it opens the port and what
+    /// it also allows.
+    pub fn candidate_detail(&self, i: usize) -> Vec<String> {
+        let Some(c) = self
+            .candidates
+            .get(i)
+            .and_then(|c| self.fan_rule(&c.spec))
+            .and_then(|r| r.consolidated.as_ref())
+        else {
+            return Vec::new();
+        };
+        let mut out: Vec<String> = c.warnings().iter().map(|w| format!("  ⚠ {w}")).collect();
+        out.push(format!(
+            "  → {} · also allows: {}",
+            c.to,
+            c.also_allows().join(", ")
+        ));
+        out
+    }
+
+    /// The consolidated rule of a port, in the proposal.
+    fn fan_rule(&self, spec: &PortSpec) -> Option<&pce::generate::GenRule> {
+        self.proposal
+            .as_ref()?
+            .rules
+            .iter()
+            .find(|r| r.consolidated.as_ref().is_some_and(|c| &c.spec == spec))
+    }
+
     /// An outbound row's target: the peer's ruleset (or the app's for an IP).
     pub fn row_target(&self, row: &GenRow) -> Option<String> {
         let p = self.proposal.as_ref()?;
@@ -579,6 +780,14 @@ impl GenView {
             }
             for (list, ips) in &r.ips {
                 out.push(format!("   {}", pce::generate::seen_text(list, ips)));
+            }
+            if let Some(c) = &r.consolidated {
+                // The warnings first, then what it consolidates.
+                let notes = c.notes();
+                let last = notes.len().saturating_sub(1);
+                for (n, note) in notes.into_iter().enumerate() {
+                    out.push(format!("   {}{note}", if n == last { "" } else { "⚠ " }));
+                }
             }
             if r.denied_flows > 0 {
                 out.push(format!(
@@ -754,6 +963,7 @@ mod tests {
             window: "24h",
             outbound: false,
             picked: None,
+            consolidate: &BTreeMap::new(),
         };
         let mut p = pce::generate::propose(&v.rows, v.global, &input);
         let row = p.rules[0].rows[0];
@@ -795,5 +1005,192 @@ mod tests {
         assert_eq!(v.header_meta(), "0 req · cached");
         v.requests = 1;
         assert_eq!(v.header_meta(), "1 req");
+    }
+
+    /// `view` with fan-in from 3 peers: 5432/tcp (hr/prod, shop/dev, Corp).
+    fn fan_view() -> GenView {
+        let idx = crate::tui::test_support::fixture_index();
+        let mut v = GenView::new(shop(), "24h".into(), 1);
+        v.min_peers = 3;
+        v.set_rows(pce::generate::rows(
+            &fixture_flows_rich(),
+            &shop(),
+            "role",
+            &idx,
+            None,
+        ));
+        v
+    }
+
+    #[test]
+    fn a_fan_in_port_gets_a_line_above_the_rows_that_c_cycles() {
+        assert!(view().candidates.is_empty(), "3 peers is below 5");
+        let mut v = fan_view();
+        assert_eq!(v.candidates.len(), 1);
+        assert_eq!(
+            v.candidate_line(0),
+            "⚠ 5432/tcp from 3 peers · c consolidates: off"
+        );
+        assert_eq!(v.selected_candidate(), Some(0), "the cursor starts on it");
+        assert_eq!(v.selected(), None);
+        v.move_cursor(1);
+        assert_eq!(v.selected(), Some(0), "then intra-app");
+        assert!(v.cycle_consolidation(None).is_err(), "not on its line");
+        v.move_cursor(-1);
+        let said = v.cycle_consolidation(None).unwrap();
+        assert!(
+            said.starts_with("destination only: 5432/tcp from any IP → shop/prod in one rule"),
+            "{said}"
+        );
+        v.cycle_consolidation(None).unwrap();
+        assert_eq!(
+            v.consolidations().into_values().collect::<Vec<_>>(),
+            vec![Consolidate::AllWorkloads]
+        );
+        v.cycle_consolidation(None).unwrap();
+        assert!(v.consolidations().is_empty(), "back to off");
+        // Without the Any list, Any is skipped and says why.
+        let said = v.cycle_consolidation(Some("no Any list")).unwrap();
+        assert!(said.ends_with("(Any unavailable: no Any list)"), "{said}");
+        assert_eq!(
+            v.mode_of(&PortSpec::parse("5432/tcp").unwrap()),
+            Consolidate::AllWorkloads
+        );
+    }
+
+    #[test]
+    fn the_consolidation_and_the_cursor_on_its_line_survive_a_rebuild() {
+        let mut v = fan_view();
+        v.cycle_consolidation(None).unwrap();
+        let idx = crate::tui::test_support::fixture_index();
+        v.set_rows(pce::generate::rows(
+            &fixture_flows_rich(),
+            &shop(),
+            "role",
+            &idx,
+            None,
+        ));
+        assert_eq!(v.consolidations().len(), 1);
+        assert_eq!(v.selected_candidate(), Some(0));
+        // On a row, the cursor stays on it past the fan-in line.
+        v.move_cursor(2);
+        let at = v.selected().unwrap();
+        v.set_rows(pce::generate::rows(
+            &fixture_flows_rich(),
+            &shop(),
+            "role",
+            &idx,
+            None,
+        ));
+        assert_eq!(v.selected(), Some(at));
+    }
+
+    #[test]
+    fn rows_behind_a_consolidated_port_say_so_and_the_list_shows_the_rule() {
+        let mut v = fan_view();
+        v.cycle_consolidation(None).unwrap();
+        let idx = crate::tui::test_support::fixture_index();
+        let drafts: Vec<pce::models::RuleSet> =
+            serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
+        let flows = fixture_flows_rich();
+        let cons = v.consolidations();
+        let input = pce::generate::GenInput {
+            flows: &flows,
+            focus: &v.focus,
+            tier_key: "role",
+            drafts: &drafts,
+            idx: &idx,
+            ruleset_name: "RF-{app}-{env}",
+            window: "24h",
+            outbound: false,
+            picked: None,
+            consolidate: &cons,
+        };
+        v.proposal = Some(pce::generate::propose(&v.rows, v.global, &input));
+        assert_eq!(
+            v.consolidated_flag(1),
+            None,
+            "hr/prod is checked: keeps its rule"
+        );
+        assert_eq!(
+            v.consolidated_flag(2).as_deref(),
+            Some("consolidated"),
+            "shop/dev"
+        );
+        assert_eq!(
+            v.consolidated_flag(3).as_deref(),
+            Some("5432/tcp consolidated"),
+            "Corp keeps 443/tcp"
+        );
+        assert!(v.rule_flags(2).is_empty(), "the flag is not a rule flag");
+        assert!(v.has_consolidated_rule());
+        assert_eq!(
+            v.candidate_line(0),
+            "⚠ 5432/tcp from 3 peers · c consolidates: Any · 1 rule"
+        );
+        let detail = v.candidate_detail(0);
+        assert!(
+            detail[0].starts_with("  ⚠ destination only for shop/dev"),
+            "{detail:?}"
+        );
+        assert!(
+            detail[1].starts_with("  ⚠ keeps 2 managed peer rules (their outbound)"),
+            "{detail:?}"
+        );
+        assert_eq!(
+            detail[2],
+            "  → every workload of shop/prod · also allows: shop/dev, IP list Corp · 1 IP, any source not seen"
+        );
+        let list = v.rule_list(&idx);
+        let at = list
+            .iter()
+            .position(|l| l.contains("ipl:Any (0.0.0.0/0 and ::/0) → all workloads on 5432/tcp"))
+            .unwrap_or_else(|| panic!("{list:#?}"));
+        assert!(
+            list[at + 2].starts_with("   ⚠ destination only"),
+            "{list:#?}"
+        );
+        assert!(
+            list[at + 4].starts_with("   consolidates 5432/tcp from 2 peers"),
+            "{list:#?}"
+        );
+    }
+
+    #[test]
+    fn a_consolidation_without_a_rule_says_why_and_a_lost_candidate_forgets_it() {
+        let mut v = fan_view();
+        v.cycle_consolidation(None).unwrap();
+        v.cycle_consolidation(None).unwrap(); // All Workloads
+        v.proposal = Some(pce::generate::Proposal {
+            scopes: Vec::new(),
+            targets: Vec::new(),
+            ip_lists: Vec::new(),
+            rules: Vec::new(),
+            coverage: Default::default(),
+        });
+        assert!(!v.has_consolidated_rule());
+        assert!(
+            v.candidate_line(0)
+                .ends_with("no rule: All Workloads covers none of these peers (IP only)")
+        );
+        v.consolidate
+            .insert(PortSpec::parse("5432/tcp").unwrap(), Consolidate::Any);
+        v.any_missing = Some("no Any list".into());
+        assert!(
+            v.candidate_line(0)
+                .ends_with("no rule: Any unavailable: no Any list")
+        );
+        // Below the threshold now: the choice is dropped, not kept for later.
+        v.min_peers = 5;
+        let idx = crate::tui::test_support::fixture_index();
+        v.set_rows(pce::generate::rows(
+            &fixture_flows_rich(),
+            &shop(),
+            "role",
+            &idx,
+            None,
+        ));
+        assert!(v.candidates.is_empty());
+        assert!(v.consolidate.is_empty());
     }
 }
