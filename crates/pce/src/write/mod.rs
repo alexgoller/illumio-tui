@@ -25,7 +25,7 @@ use serde_json::Value;
 
 pub use actors::{ActorKind, ActorRef, ServiceRef};
 pub use audit::{AuditEntry, AuditSink, JsonlAudit, MemoryAudit, NullAudit};
-pub use batch::{Batch, BatchInput, BatchStep, StepResult, step_placeholder};
+pub use batch::{Batch, BatchInput, BatchOrigin, BatchStep, StepResult, step_placeholder};
 pub use guard::{WriteContext, WriteGuard, WriteRefused};
 pub use ip_lists::{IpListDraft, IpListPatch};
 pub use labels::LabelDraft;
@@ -171,6 +171,10 @@ pub struct Written {
     pub dropped_fields: Vec<String>,
     /// Things the caller should know although the write succeeded.
     pub warnings: Vec<String>,
+    /// The write applied but its audit entry could not be written (why).
+    /// Also among `warnings`; a batch stops on it.
+    #[serde(skip)]
+    pub audit_failed: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -481,11 +485,14 @@ impl<'a> Writer<'a> {
         entry.status = Some(resp.status);
         entry.href = Some(href.clone());
         let mut warnings = Vec::new();
+        let mut audit_failed = None;
         if let Err(e) = audit.append(&entry) {
-            warnings.push(format!(
+            let why = format!(
                 "audit entry could not be written to {}: {e}",
                 audit.location()
-            ));
+            );
+            warnings.push(why.clone());
+            audit_failed = Some(why);
         }
         for prefix in kind.cache_prefixes() {
             self.pce.invalidate(prefix);
@@ -525,6 +532,7 @@ impl<'a> Writer<'a> {
             object,
             dropped_fields: dropped,
             warnings,
+            audit_failed,
         }))
     }
 

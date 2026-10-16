@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
- illumio-tui pce.examp╭ Send these requests? ──────────────── j/k scroll · y send all · n cancel ╮api 5 calls · 20.8 KB
+ illumio-tui pce.examp╭ Send these requests? ──── ↓ 13 more · j/k scroll · y send all · n cancel ╮api 5 calls · 20.8 KB
   1 Traffic  │  2 Poli│3 requests: 1 ip_list, 1 rule_set, 1 rule · planned with 2 reads          │
 ╭ Filters ────────────│1/3 POST /orgs/5/sec_policy/draft/ip_lists                                │cap 1000 · unbounded ╮
 │window 24h  src *  ds│  create ip_list shop-prod peer 203.0.113.7                               │                     │

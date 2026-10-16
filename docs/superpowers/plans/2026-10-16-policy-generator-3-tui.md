@@ -3289,3 +3289,9 @@ Claude-Session: https://claude.ai/code/session_01XYuSvdRqoZDGp9ZTwrZ2tx"
 
 - Spec coverage: opening (`G`, `:gen <app>`, `:gen` and the picker; one counted request; `Esc` back), the layout (header, slider, target line, sections, columns, footer), the keys, the row defaults (Plan 1), completeness (`complete_for`, the header texts, `r`, still capped, no flows), `Enter`'s refusals and `Cmd::PlanBatch`, the return after a batch, late answers (`seq`, `planning`), `g` changed, writes off: Tasks 1-4. The spec's TUI tests: Task 3 (`G`, `:gen`, at most one request, `←`/`→`, `<`/`>`/`=`, `Space`, `o`, `R`, `p`, incomplete `Enter`/`r`, writes off, `y` sends one `ExecuteBatch` (Plan 2), a `y` during planning, one redraft per batch (Plan 2), `Esc` back with nothing sent) and Task 4 (snapshots of the layout, `p` and, in Plan 2, the confirm).
 - Verification: every step of this plan was applied in order to a clean checkout of main (after the plans before it); each task built clean under `cargo clippy --workspace --all-targets -- -D warnings` with its own tests passing, and the gate passed at the end.
+
+## Notes from the part-2 review (2026-10-16)
+
+- `batch_lands` requires `Overlay::None`: `Enter` in the generator must close `Overlay::Generator` before it emits `Cmd::PlanBatch` (or `batch_lands` must accept the generator), or every plan is discarded.
+- Add "a profile switch is in progress" (`model.switching`) to `Enter`'s refusals. A batch also carries its `origin` (profile, host, org): `BatchPlanned` from another profile is discarded and `execute_batch` refuses one planned elsewhere.
+- `batch_closed` is also where the batch report (`Overlay::BatchReport`, `:batch`) returns to.

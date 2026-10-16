@@ -10,7 +10,7 @@ expression: out
 │                         :unicast  unicast flows only (again: every kind)     │
 │                         :focus <app>  (alone: a picker of the loaded apps)   │
 │                         :app <app>  the app overlay (alone: the picker)      │
-│                         :writes [on|off]  :export[!] <path>                  │
+│                         :writes [on|off]  :export[!] <path>  :batch          │
 │                         (the table on screen as CSV; ! overwrites)           │
 │?                        this help                                            │
 │q / Ctrl-C               quit                                                 │

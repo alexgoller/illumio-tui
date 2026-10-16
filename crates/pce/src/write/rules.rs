@@ -478,7 +478,7 @@ fn create(ruleset: &str, child: &str, what: &str, body: Value, kind: ObjectKind)
     }
 }
 
-fn update(href: String, what: &str, body: Value, kind: ObjectKind) -> Plan {
+pub(crate) fn update(href: String, what: &str, body: Value, kind: ObjectKind) -> Plan {
     if body.as_object().is_some_and(Map::is_empty) {
         return Plan::Noop {
             existing_href: href,
@@ -512,7 +512,7 @@ fn delete(href: String, what: &str, kind: ObjectKind) -> Plan {
 
 impl Writer<'_> {
     /// One GET of a rule or deny rule, kept as JSON (see `apply_rule_patch`).
-    async fn fetch_rule(&self, href: &str) -> Result<Value, WriteError> {
+    pub(crate) async fn fetch_rule(&self, href: &str) -> Result<Value, WriteError> {
         let v = self.fetch(href).await?;
         if v.is_object() {
             Ok(v)

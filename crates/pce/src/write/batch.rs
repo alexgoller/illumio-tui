@@ -1,22 +1,27 @@
 //! A batch of writes whose later steps name what earlier ones create. A
-//! step that needs such an href carries the placeholder `{step:N}`; the
-//! executor puts the href in just before sending. A placeholder never
+//! step that needs such an href carries the placeholder `{step:N}`, and
+//! only where an href goes: the ruleset prefix of its path, or the href of
+//! an IP list actor. The executor puts the href in just before sending;
+//! free text (names, descriptions) is never touched. A placeholder never
 //! passes `checked_href`, so it cannot reach the wire.
 //!
 //! [`Writer::plan_batch`] turns a generator proposal into the batch: one
 //! fresh draft ruleset read (dedupe again, create-if-missing for every
 //! ruleset), one fresh IP list read when it creates IP lists, one GET per
-//! rule update. [`Writer::execute_batch`] sends the steps one at a time
+//! rule to update. [`Writer::execute_batch`] sends the steps one at a time
 //! through [`Writer::execute`] and stops at the first failure.
+use super::actors::ServiceRef;
+use super::guard::WriteContext;
 use super::ip_lists::IpListDraft;
 use super::rule_sets::RuleSetDraft;
-use super::rules::RulePatch;
+use super::rules::{RulePatch, apply_rule_patch};
 use super::{
-    ObjectKind, Plan, WriteError, WriteRequest, Writer, Written, checked_href, checked_policy_href,
+    ObjectKind, Plan, WriteError, WriteRequest, Writer, Written, checked_nested_href,
+    checked_policy_href,
 };
 use crate::CacheMode;
 use crate::client::WriteMethod;
-use crate::generate::{GenActor, Proposal, RuleAction, Target};
+use crate::generate::{GenActor, GenRule, Proposal, RuleAction, Target};
 use crate::models::{IpList, PolicyScope, RuleSet};
 use crate::resolve::NameIndex;
 use serde_json::Value;
@@ -31,40 +36,64 @@ pub fn parse_placeholder(s: &str) -> Option<usize> {
     s.strip_prefix("{step:")?.strip_suffix('}')?.parse().ok()
 }
 
-/// Every step `s` names, in order of appearance.
-fn placeholders_in(s: &str) -> Vec<usize> {
-    let mut out = Vec::new();
-    let mut rest = s;
-    while let Some(i) = rest.find("{step:") {
-        let tail = &rest[i..];
-        match tail.find('}') {
-            Some(j) => {
-                if let Some(n) = parse_placeholder(&tail[..=j]) {
-                    out.push(n);
-                }
-                rest = &tail[j + 1..];
-            }
-            None => break,
+/// The profile and PCE a batch was planned on; it is sent only there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BatchOrigin {
+    pub profile: String,
+    pub host: String,
+    pub org_id: u64,
+}
+
+impl BatchOrigin {
+    pub fn of(c: &WriteContext) -> Self {
+        Self {
+            profile: c.profile.clone(),
+            host: c.host.clone(),
+            org_id: c.org_id,
         }
     }
-    out
+
+    /// `lab (pce.example, org 5)`.
+    pub fn text(&self) -> String {
+        format!("{} ({}, org {})", self.profile, self.host, self.org_id)
+    }
 }
 
 /// One write of a batch: its plan, its kind, the earlier steps whose
-/// hrefs it carries.
+/// hrefs it carries, the override denies that block its rules' flows,
+/// and for an update the fields it replaces as planning read them.
 #[derive(Debug, Clone)]
 pub struct BatchStep {
     pub plan: Plan,
     pub kind: ObjectKind,
     pub needs: Vec<usize>,
+    /// `blocked: 3 of 5 flows by override deny <href>`, one per rule.
+    pub deny_notes: Vec<String>,
+    /// An update's replaced fields as the plan-time GET returned them;
+    /// the step is sent only while the rule still holds exactly these.
+    pub expect: Option<Value>,
+}
+
+impl BatchStep {
+    pub fn new(plan: Plan, kind: ObjectKind, needs: Vec<usize>) -> Self {
+        Self {
+            plan,
+            kind,
+            needs,
+            deny_notes: Vec::new(),
+            expect: None,
+        }
+    }
 }
 
 /// The steps in sending order (IP lists, rulesets, rule updates, rule
-/// creates) and the reads planning took.
+/// creates), the reads planning took and where it was planned.
 #[derive(Debug, Clone, Default)]
 pub struct Batch {
     pub steps: Vec<BatchStep>,
     pub reads: u32,
+    /// `None`: never sent.
+    pub origin: Option<BatchOrigin>,
 }
 
 /// What became of one step.
@@ -76,7 +105,7 @@ pub enum StepResult {
         existing_href: String,
     },
     Failed(WriteError),
-    /// An earlier step failed.
+    /// An earlier step failed (or was not audited).
     NotSent,
 }
 
@@ -95,6 +124,112 @@ fn plural(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
 
+/// The path's ruleset prefix: `{step:1}/sec_rules` → (1, `/sec_rules`).
+fn path_slot(path: &str) -> Option<(usize, &str)> {
+    let rest = path.strip_prefix("{step:")?;
+    let j = rest.find('}')?;
+    Some((rest[..j].parse().ok()?, &rest[j + 1..]))
+}
+
+/// Fills every placeholder slot of `req` with `f(step, kind it stands
+/// for)`: the path's ruleset prefix and the href of each IP list actor.
+/// Nothing else is read or changed.
+fn fill(
+    req: &mut WriteRequest,
+    f: &mut dyn FnMut(usize, ObjectKind) -> Result<String, WriteError>,
+) -> Result<(), WriteError> {
+    if let Some((n, rest)) = path_slot(&req.path) {
+        let rest = rest.to_string();
+        req.path = format!("{}{rest}", f(n, ObjectKind::RuleSet)?);
+    }
+    if let Some(body) = req.body.as_mut() {
+        for side in ["providers", "consumers"] {
+            let Some(Value::Array(actors)) = body.get_mut(side) else {
+                continue;
+            };
+            for a in actors {
+                if let Some(Value::String(h)) = a.get_mut("ip_list").and_then(|l| l.get_mut("href"))
+                    && let Some(n) = parse_placeholder(h)
+                {
+                    *h = f(n, ObjectKind::IpList)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Whether a placeholder stands in the path or in any `href` of the body:
+/// after [`fill`], one that is not in a slot it may fill.
+fn holds_placeholder(req: &WriteRequest) -> bool {
+    fn any_href(v: &Value) -> bool {
+        match v {
+            Value::Array(a) => a.iter().any(any_href),
+            Value::Object(o) => o.iter().any(|(k, x)| match x {
+                Value::String(s) => k == "href" && s.contains("{step:"),
+                other => any_href(other),
+            }),
+            _ => false,
+        }
+    }
+    req.path.contains("{step:") || req.body.as_ref().is_some_and(any_href)
+}
+
+/// Every step names exactly the steps it waits for, each earlier and of
+/// the kind its slot takes, and no placeholder stands where none may.
+/// Checked at plan time and again before the first request.
+fn check_placeholders(steps: &[BatchStep]) -> Result<(), WriteError> {
+    for (i, s) in steps.iter().enumerate() {
+        let Plan::Send { request, .. } = &s.plan else {
+            if s.needs.is_empty() {
+                continue;
+            }
+            return Err(WriteError::invalid(format!(
+                "step {} sends nothing but waits for other steps: nothing sent",
+                i + 1
+            )));
+        };
+        let mut named: Vec<(usize, ObjectKind)> = Vec::new();
+        let mut probe = request.clone();
+        fill(&mut probe, &mut |n, kind| {
+            named.push((n, kind));
+            Ok(String::new())
+        })?;
+        if holds_placeholder(&probe) {
+            return Err(WriteError::invalid(format!(
+                "step {} holds a placeholder outside the hrefs it may fill: nothing sent",
+                i + 1
+            )));
+        }
+        for (n, kind) in &named {
+            if *n >= i || !s.needs.contains(n) {
+                return Err(WriteError::invalid(format!(
+                    "step {} names step {}, which it does not wait for: nothing sent",
+                    i + 1,
+                    n + 1
+                )));
+            }
+            if steps[*n].kind != *kind {
+                return Err(WriteError::invalid(format!(
+                    "step {} takes a {} href from step {}, which writes a {}: nothing sent",
+                    i + 1,
+                    kind.as_str(),
+                    n + 1,
+                    steps[*n].kind.as_str()
+                )));
+            }
+        }
+        if let Some(n) = s.needs.iter().find(|n| !named.iter().any(|(m, _)| m == *n)) {
+            return Err(WriteError::invalid(format!(
+                "step {} waits for step {} but names it nowhere: nothing sent",
+                i + 1,
+                n + 1
+            )));
+        }
+    }
+    Ok(())
+}
+
 impl Batch {
     /// The steps that send a request (not the `Noop`s).
     pub fn sends(&self) -> usize {
@@ -104,8 +239,14 @@ impl Batch {
             .count()
     }
 
+    /// Rules whose flows an override deny blocks.
+    pub fn denied_rules(&self) -> usize {
+        self.steps.iter().map(|s| s.deny_notes.len()).sum()
+    }
+
     /// `7 requests: 1 ip_list, 1 rule_set, 1 rule update, 4 rules ·
-    /// planned with 3 reads`, and what is reused.
+    /// planned with 3 reads`, what is reused and how many rules an
+    /// override deny blocks.
     pub fn summary(&self) -> String {
         let count = |kind: ObjectKind, method: WriteMethod| {
             self.steps
@@ -148,48 +289,54 @@ impl Batch {
                 plural(reused, "object", "objects")
             ));
         }
+        let denied = self.denied_rules();
+        if denied > 0 {
+            s.push_str(&format!(
+                " · {} blocked by override denies",
+                plural(denied, "rule", "rules")
+            ));
+        }
         s
     }
 
-    /// `text` with each placeholder spelled for a person: `<href of step
-    /// 2: create rule_set RF-shop-prod>` (steps counted from 1), or the
-    /// existing href a `Noop` found.
-    pub fn spell(&self, text: &str) -> String {
-        let mut out = text.to_string();
-        for n in placeholders_in(text) {
-            let what = match self.steps.get(n).map(|s| &s.plan) {
-                Some(Plan::Send { request, .. }) => {
-                    format!("<href of step {}: {}>", n + 1, request.summary)
-                }
-                Some(Plan::Noop { existing_href, .. }) => existing_href.clone(),
-                None => format!("<href of missing step {}>", n + 1),
-            };
-            out = out.replace(&step_placeholder(n), &what);
+    /// How step `n` (from 0) stands in another's request for a person:
+    /// `<href of step 2: create rule_set RF-shop-prod>`, or the existing
+    /// href a `Noop` found.
+    fn spelled(&self, n: usize) -> String {
+        match self.steps.get(n).map(|s| &s.plan) {
+            Some(Plan::Send { request, .. }) => {
+                format!("<href of step {}: {}>", n + 1, request.summary)
+            }
+            Some(Plan::Noop { existing_href, .. }) => existing_href.clone(),
+            None => format!("<href of missing step {}>", n + 1),
         }
-        out
     }
 
     /// The confirm's text: one block per step, `N/M METHOD path`, the
-    /// summary and the body, placeholders spelled.
+    /// summary, the override denies that block its rules, the body;
+    /// placeholders spelled where they stand (free text stays as it is).
     pub fn lines(&self) -> Vec<String> {
         let n = self.steps.len();
         let mut out = Vec::new();
         for (i, s) in self.steps.iter().enumerate() {
             match &s.plan {
                 Plan::Send { request, .. } => {
+                    let mut shown = request.clone();
+                    let _ = fill(&mut shown, &mut |m, _| Ok(self.spelled(m)));
                     out.push(format!(
                         "{}/{n} {} {}",
                         i + 1,
-                        request.method.as_str(),
-                        self.spell(&request.path)
+                        shown.method.as_str(),
+                        shown.path
                     ));
-                    out.push(format!("  {}", self.spell(&request.summary)));
-                    match &request.body {
+                    out.push(format!("  {}", shown.summary));
+                    out.extend(s.deny_notes.iter().map(|d| format!("  ! {d}")));
+                    match &shown.body {
                         Some(b) => out.extend(
                             serde_json::to_string_pretty(b)
                                 .unwrap_or_default()
                                 .lines()
-                                .map(|l| format!("  {}", self.spell(l))),
+                                .map(|l| format!("  {l}")),
                         ),
                         None => out.push("  (no body)".into()),
                     }
@@ -206,39 +353,6 @@ impl Batch {
     }
 }
 
-/// A string with every placeholder replaced by `href_of`'s answer.
-fn substitute_str(
-    s: &str,
-    href_of: &impl Fn(usize) -> Result<String, WriteError>,
-) -> Result<String, WriteError> {
-    let mut out = s.to_string();
-    for n in placeholders_in(s) {
-        out = out.replace(&step_placeholder(n), &href_of(n)?);
-    }
-    Ok(out)
-}
-
-fn substitute_value(
-    v: &mut Value,
-    href_of: &impl Fn(usize) -> Result<String, WriteError>,
-) -> Result<(), WriteError> {
-    match v {
-        Value::String(s) => *s = substitute_str(s, href_of)?,
-        Value::Array(a) => {
-            for x in a {
-                substitute_value(x, href_of)?;
-            }
-        }
-        Value::Object(o) => {
-            for x in o.values_mut() {
-                substitute_value(x, href_of)?;
-            }
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
 /// The href a finished step left: written, or found by a `Noop`.
 fn result_href(r: &StepResult) -> Option<&str> {
     match r {
@@ -248,26 +362,22 @@ fn result_href(r: &StepResult) -> Option<&str> {
     }
 }
 
-/// Step `i`'s plan with the hrefs of the steps it needs put in, each
-/// checked as the kind it stands for; refused when a placeholder names a
-/// step it does not wait for, one without an href, or survives.
+/// Step `i`'s plan with the hrefs of the steps it needs put in, each from
+/// this batch's own results and checked as the kind it stands for;
+/// refused when a placeholder names a step it does not wait for, one
+/// without an href, or survives.
 fn resolve_step(
     i: usize,
-    step: BatchStep,
+    step: &BatchStep,
     done: &[StepResult],
-    kinds: &[ObjectKind],
     org_id: u64,
 ) -> Result<Plan, WriteError> {
-    let BatchStep { plan, kind, needs } = step;
-    let Plan::Send {
-        mut request,
-        kind: plan_kind,
-    } = plan
-    else {
-        return Ok(plan);
+    let Plan::Send { request, kind } = &step.plan else {
+        return Ok(step.plan.clone());
     };
-    let href_of = |n: usize| -> Result<String, WriteError> {
-        if n >= i || !needs.contains(&n) {
+    let mut request = request.clone();
+    fill(&mut request, &mut |n, slot| {
+        if n >= i || !step.needs.contains(&n) {
             return Err(WriteError::invalid(format!(
                 "step {} names step {}, which it does not wait for: nothing more sent",
                 i + 1,
@@ -281,35 +391,20 @@ fn resolve_step(
                 n + 1
             ))
         })?;
-        match kinds[n] {
+        match slot {
             ObjectKind::RuleSet => checked_policy_href(href, "rule_sets", org_id),
-            ObjectKind::IpList => checked_href(href, "ip_lists", org_id),
-            other => Err(WriteError::invalid(format!(
-                "step {} names a {} href: only rulesets and IP lists are named",
-                i + 1,
-                other.as_str()
-            ))),
+            _ => checked_policy_href(href, "ip_lists", org_id),
         }
-    };
-    request.path = substitute_str(&request.path, &href_of)?;
-    if let Some(b) = request.body.as_mut() {
-        substitute_value(b, &href_of)?;
-    }
-    let left = request.path.contains("{step:")
-        || request
-            .body
-            .as_ref()
-            .is_some_and(|b| b.to_string().contains("{step:"));
-    if left {
+    })?;
+    if holds_placeholder(&request) {
         return Err(WriteError::invalid(format!(
             "step {} still holds a placeholder: nothing more sent",
             i + 1
         )));
     }
-    debug_assert_eq!(plan_kind, kind);
     Ok(Plan::Send {
         request,
-        kind: plan_kind,
+        kind: *kind,
     })
 }
 
@@ -318,7 +413,10 @@ fn resolve_step(
 /// would let the rules reach them.
 fn reused_list_holds(draft: &IpListDraft, href: &str, lists: &[IpList]) -> Result<(), WriteError> {
     let Some(found) = lists.iter().find(|l| l.href == href) else {
-        return Ok(());
+        return Err(WriteError::invalid(format!(
+            "ip_list {} was found as {href} but is not in the read: nothing planned",
+            draft.name.trim()
+        )));
     };
     let have = IpListDraft::from_ip_list(found);
     let same = have.ranges.len() == draft.ranges.len()
@@ -339,6 +437,31 @@ fn reused_list_holds(draft: &IpListDraft, href: &str, lists: &[IpList]) -> Resul
             draft.name.trim()
         )))
     }
+}
+
+/// A ruleset to create that the fresh read already has by name: it is
+/// not the scope's (`refresh` would have made it the target), so the
+/// batch must not write into it.
+fn refuse_named_elsewhere(plan: &Plan, name: &str, scope: &str) -> Result<(), WriteError> {
+    match plan {
+        Plan::Noop { existing_href, .. } => Err(WriteError::invalid(format!(
+            "ruleset {name} exists ({existing_href}) but its scope does not cover {scope}: rename it or set generator.ruleset_name; nothing planned"
+        ))),
+        Plan::Send { .. } => Ok(()),
+    }
+}
+
+/// `blocked: 3 of 5 flows by override deny <href>` for a rule whose flows
+/// an override deny blocks (as the fresh read says).
+fn deny_note(r: &GenRule) -> Option<String> {
+    (r.denied_flows > 0).then(|| {
+        format!(
+            "blocked: {} of {} flows by override deny {}",
+            r.denied_flows.min(r.flows),
+            r.flows,
+            r.denied_by.join(", ")
+        )
+    })
 }
 
 impl Writer<'_> {
@@ -388,10 +511,11 @@ impl Writer<'_> {
     }
 
     /// The batch for `input`: the reads above, then the steps in sending
-    /// order. Refused, with nothing sent, when the fresh read is
-    /// truncated, a rule's target is ambiguous, nothing is left to write,
-    /// or a ruleset to create has the name of one that does not cover its
-    /// scope.
+    /// order, bound to this writer's profile and PCE. Refused, with
+    /// nothing sent, when a fresh read is truncated, a rule's target is
+    /// ambiguous, nothing is left to write, a ruleset to create has the
+    /// name of one that does not cover its scope, or an IP list of the
+    /// name holds other addresses.
     pub async fn plan_batch(
         &self,
         input: BatchInput,
@@ -402,6 +526,7 @@ impl Writer<'_> {
             ruleset_name,
             picked,
         } = input;
+        let org = self.pce().client().org_id();
         let fresh = self
             .pce()
             .rule_sets(PolicyScope::Draft, CacheMode::Bypass)
@@ -440,11 +565,7 @@ impl Writer<'_> {
                         "the batch's IP list steps are out of order; nothing planned",
                     ));
                 }
-                steps.push(BatchStep {
-                    plan,
-                    kind: ObjectKind::IpList,
-                    needs: Vec::new(),
-                });
+                steps.push(BatchStep::new(plan, ObjectKind::IpList, Vec::new()));
             }
         }
         let creates: Vec<(usize, &RuleSetDraft)> = proposal
@@ -463,38 +584,60 @@ impl Writer<'_> {
         {
             // `refresh` already gives such a scope no target; kept so a
             // ruleset scoped elsewhere is never written into.
-            if let Plan::Noop { existing_href, .. } = &plan {
-                return Err(WriteError::invalid(format!(
-                    "ruleset {} exists ({existing_href}) but its scope does not cover {}: rename it or set generator.ruleset_name; nothing planned",
-                    d.name,
-                    proposal.scopes[*t].text()
-                )));
-            }
+            refuse_named_elsewhere(&plan, &d.name, &proposal.scopes[*t].text())?;
             if proposal.ruleset_step(*t) != Some(steps.len()) {
                 return Err(WriteError::invalid(
                     "the batch's ruleset steps are out of order; nothing planned",
                 ));
             }
-            steps.push(BatchStep {
-                plan,
-                kind: ObjectKind::RuleSet,
-                needs: Vec::new(),
-            });
+            steps.push(BatchStep::new(plan, ObjectKind::RuleSet, Vec::new()));
         }
+        // Services added to one rule by several proposed rules go in one
+        // update: two PUTs of the list would drop the first one's.
+        let mut updates: Vec<(String, Vec<ServiceRef>, Vec<String>)> = Vec::new();
         for r in &proposal.rules {
-            if let RuleAction::AddServices { rule_href, add } = &r.action {
-                let patch = RulePatch {
-                    add_services: add.clone(),
-                    ..RulePatch::default()
-                };
-                let plan = self.plan_update_rule(rule_href, &patch).await?;
-                reads += 1;
-                steps.push(BatchStep {
-                    plan,
-                    kind: ObjectKind::Rule,
-                    needs: Vec::new(),
-                });
+            let RuleAction::AddServices { rule_href, add } = &r.action else {
+                continue;
+            };
+            let href = checked_nested_href(rule_href, "rule_sets", "sec_rules", org)?;
+            let note = deny_note(r);
+            match updates.iter_mut().find(|u| u.0 == href) {
+                Some((_, adds, notes)) => {
+                    for s in add {
+                        if !adds.contains(s) {
+                            adds.push(s.clone());
+                        }
+                    }
+                    notes.extend(note);
+                }
+                None => updates.push((href, add.clone(), note.into_iter().collect())),
             }
+        }
+        for (href, add, notes) in updates {
+            let patch = RulePatch {
+                add_services: add,
+                ..RulePatch::default()
+            };
+            patch.check().map_err(WriteError::Invalid)?;
+            let current = self.fetch_rule(&href).await?;
+            reads += 1;
+            let body = apply_rule_patch(&current, &patch).map_err(WriteError::Invalid)?;
+            // What the PUT replaces, as read: the step waits for it unchanged.
+            let expect = body.as_object().map(|o| {
+                Value::Object(
+                    o.keys()
+                        .map(|k| (k.clone(), current.get(k).cloned().unwrap_or(Value::Null)))
+                        .collect(),
+                )
+            });
+            let mut step = BatchStep::new(
+                super::rules::update(href, "rule", body, ObjectKind::Rule),
+                ObjectKind::Rule,
+                Vec::new(),
+            );
+            step.expect = expect.filter(|_| step.plan.request().is_some());
+            step.deny_notes = notes;
+            steps.push(step);
         }
         for r in &proposal.rules {
             if r.action != RuleAction::Create {
@@ -533,47 +676,136 @@ impl Writer<'_> {
             };
             needs.sort_unstable();
             needs.dedup();
-            steps.push(BatchStep {
-                plan,
-                kind: ObjectKind::Rule,
-                needs,
-            });
+            let mut step = BatchStep::new(plan, ObjectKind::Rule, needs);
+            step.deny_notes.extend(deny_note(r));
+            steps.push(step);
         }
-        Ok(Batch { steps, reads })
+        check_placeholders(&steps)?;
+        Ok(Batch {
+            steps,
+            reads,
+            origin: Some(BatchOrigin::of(self.guard().context())),
+        })
     }
 
     /// Sends the steps in order, one [`Writer::execute`] each (audit,
-    /// cache invalidation, re-fetch on a 204); the first failure stops the
-    /// batch and the rest are `NotSent`. Never retried, nothing rolled
-    /// back: the steps are draft objects.
+    /// cache invalidation, re-fetch on a 204); the first failure, or a
+    /// write whose audit entry could not be written, stops the batch and
+    /// the rest are `NotSent`. Refused whole, with nothing sent, when it
+    /// was planned on another profile or PCE or its placeholders do not
+    /// add up. An update is sent only while its rule still holds what
+    /// planning read (one GET before its PUT). Never retried, nothing
+    /// rolled back: the steps are draft objects.
     pub async fn execute_batch(&self, batch: Batch) -> Vec<StepResult> {
+        let n = batch.steps.len();
+        let refuse = |e: WriteError| -> Vec<StepResult> {
+            std::iter::once(StepResult::Failed(e))
+                .chain((1..n).map(|_| StepResult::NotSent))
+                .collect()
+        };
+        if n == 0 {
+            return Vec::new();
+        }
+        let here = BatchOrigin::of(self.guard().context());
+        match &batch.origin {
+            None => {
+                return refuse(WriteError::invalid(
+                    "the batch names no profile it was planned on: nothing sent",
+                ));
+            }
+            Some(o) if *o != here => {
+                return refuse(WriteError::invalid(format!(
+                    "planned on {}, this session writes to {}: nothing sent; plan again",
+                    o.text(),
+                    here.text()
+                )));
+            }
+            Some(_) => {}
+        }
+        if let Err(e) = check_placeholders(&batch.steps) {
+            return refuse(e);
+        }
         let org = self.pce().client().org_id();
-        let kinds: Vec<ObjectKind> = batch.steps.iter().map(|s| s.kind).collect();
-        let mut out: Vec<StepResult> = Vec::with_capacity(batch.steps.len());
-        for (i, step) in batch.steps.into_iter().enumerate() {
-            if out.iter().any(|r| matches!(r, StepResult::Failed(_))) {
+        let mut out: Vec<StepResult> = Vec::with_capacity(n);
+        for (i, step) in batch.steps.iter().enumerate() {
+            let stopped = out.iter().any(|r| match r {
+                StepResult::Failed(_) => true,
+                StepResult::Written(w) => w.audit_failed.is_some(),
+                StepResult::Skipped { .. } | StepResult::NotSent => false,
+            });
+            if stopped {
                 out.push(StepResult::NotSent);
                 continue;
             }
-            let result = match resolve_step(i, step, &out, &kinds, org) {
-                Err(e) => StepResult::Failed(e),
-                Ok(plan) => match self.execute(plan).await {
-                    Ok(super::Outcome::Written(w)) => StepResult::Written(w),
-                    Ok(super::Outcome::Skipped { existing_href, .. }) => {
-                        StepResult::Skipped { existing_href }
-                    }
-                    Err(e) => StepResult::Failed(e),
-                },
+            let plan = match resolve_step(i, step, &out, org) {
+                Ok(plan) => plan,
+                Err(e) => {
+                    out.push(StepResult::Failed(e));
+                    continue;
+                }
             };
-            out.push(result);
+            if let (Some(expect), Some(req)) = (&step.expect, plan.request())
+                && let Err(e) = self.unchanged(i, &req.path, expect).await
+            {
+                out.push(StepResult::Failed(e));
+                continue;
+            }
+            out.push(match self.execute(plan).await {
+                Ok(super::Outcome::Written(w)) => StepResult::Written(w),
+                Ok(super::Outcome::Skipped { existing_href, .. }) => {
+                    StepResult::Skipped { existing_href }
+                }
+                Err(e) => StepResult::Failed(e),
+            });
         }
         out
+    }
+
+    /// One GET of the rule step `i` updates: refused when a field the PUT
+    /// replaces differs from what planning read (someone changed it).
+    async fn unchanged(&self, i: usize, href: &str, expect: &Value) -> Result<(), WriteError> {
+        let now = self.fetch_rule(href).await?;
+        let changed: Vec<&str> = expect
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter(|(k, v)| now.get(k.as_str()).unwrap_or(&Value::Null) != *v)
+            .map(|(k, _)| k.as_str())
+            .collect();
+        if changed.is_empty() {
+            Ok(())
+        } else {
+            Err(WriteError::invalid(format!(
+                "step {}: rule {href} changed since planning ({}): nothing more sent; plan again",
+                i + 1,
+                changed.join(", ")
+            )))
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::write::checked_href;
+    use serde_json::json;
+
+    fn post(path: &str, body: Value, kind: ObjectKind, needs: Vec<usize>) -> BatchStep {
+        BatchStep::new(
+            Plan::Send {
+                request: WriteRequest {
+                    method: WriteMethod::Post,
+                    path: path.into(),
+                    body: Some(body),
+                    summary: "test".into(),
+                    objects: Vec::new(),
+                },
+                kind,
+            },
+            kind,
+            needs,
+        )
+    }
 
     #[test]
     fn placeholders_round_trip_and_never_pass_as_hrefs() {
@@ -586,9 +818,97 @@ mod tests {
         );
         assert!(checked_policy_href(&step_placeholder(1), "rule_sets", 5).is_err());
         assert!(checked_href(&step_placeholder(0), "ip_lists", 5).is_err());
-        assert_eq!(
-            placeholders_in("{step:1}/sec_rules and {step:0}"),
-            vec![1, 0]
+        assert_eq!(path_slot("{step:1}/sec_rules"), Some((1, "/sec_rules")));
+    }
+
+    #[test]
+    fn placeholders_are_filled_in_href_slots_only() {
+        let mut s = post(
+            "{step:1}/sec_rules",
+            json!({"description": "app {step:0}", "providers": [{"ip_list": {"href": "{step:0}"}}]}),
+            ObjectKind::Rule,
+            vec![0, 1],
         );
+        let Plan::Send { request, .. } = &mut s.plan else {
+            unreachable!()
+        };
+        fill(request, &mut |n, k| Ok(format!("<{n} {}>", k.as_str()))).unwrap();
+        assert_eq!(request.path, "<1 rule_set>/sec_rules");
+        let body = request.body.as_ref().unwrap();
+        assert_eq!(body["providers"][0]["ip_list"]["href"], "<0 ip_list>");
+        assert_eq!(body["description"], "app {step:0}", "free text untouched");
+        assert!(!holds_placeholder(request));
+    }
+
+    #[test]
+    fn the_plan_time_check_refuses_what_does_not_add_up() {
+        let ipl = post(
+            "/orgs/5/sec_policy/draft/ip_lists",
+            json!({}),
+            ObjectKind::IpList,
+            vec![],
+        );
+        let rs = post(
+            "/orgs/5/sec_policy/draft/rule_sets",
+            json!({}),
+            ObjectKind::RuleSet,
+            vec![],
+        );
+        let ok = post(
+            "{step:1}/sec_rules",
+            json!({"providers": [{"ip_list": {"href": "{step:0}"}}], "description": "{step:7}"}),
+            ObjectKind::Rule,
+            vec![0, 1],
+        );
+        let steps = vec![ipl.clone(), rs.clone(), ok];
+        assert!(
+            check_placeholders(&steps).is_ok(),
+            "free text may say anything"
+        );
+        let err = |steps: Vec<BatchStep>| check_placeholders(&steps).unwrap_err().to_string();
+        // Waits for a step it never names.
+        let idle = post("/orgs/5/x", json!({}), ObjectKind::Rule, vec![0]);
+        assert!(err(vec![ipl.clone(), idle]).contains("waits for step 1 but names it nowhere"));
+        // An IP list slot naming the ruleset step.
+        let wrong = post(
+            "/orgs/5/sec_policy/draft/rule_sets/1/sec_rules",
+            json!({"providers": [{"ip_list": {"href": "{step:1}"}}]}),
+            ObjectKind::Rule,
+            vec![1],
+        );
+        assert!(
+            err(vec![ipl.clone(), rs.clone(), wrong])
+                .contains("takes a ip_list href from step 2, which writes a rule_set")
+        );
+        // A placeholder in an href that is not a slot.
+        let stray = post(
+            "/orgs/5/sec_policy/draft/rule_sets/1/sec_rules",
+            json!({"consumers": [{"label": {"href": "{step:0}"}}]}),
+            ObjectKind::Rule,
+            vec![],
+        );
+        assert!(err(vec![ipl, stray]).contains("outside the hrefs it may fill"));
+    }
+
+    #[test]
+    fn a_ruleset_found_by_name_is_refused() {
+        let found = Plan::Noop {
+            existing_href: "/orgs/5/sec_policy/draft/rule_sets/300".into(),
+            reason: "rule_set RF-crm-prod exists".into(),
+        };
+        let e = refuse_named_elsewhere(&found, "RF-crm-prod", "crm/prod").unwrap_err();
+        assert!(
+            e.to_string().contains(
+                "ruleset RF-crm-prod exists (/orgs/5/sec_policy/draft/rule_sets/300) but its scope does not cover crm/prod"
+            ),
+            "{e}"
+        );
+        let send = post(
+            "/orgs/5/sec_policy/draft/rule_sets",
+            json!({}),
+            ObjectKind::RuleSet,
+            vec![],
+        );
+        assert!(refuse_named_elsewhere(&send.plan, "RF-crm-prod", "crm/prod").is_ok());
     }
 }

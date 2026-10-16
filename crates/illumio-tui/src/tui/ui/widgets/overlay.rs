@@ -30,7 +30,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ("", ":unicast  unicast flows only (again: every kind)"),
     ("", ":focus <app>  (alone: a picker of the loaded apps)"),
     ("", ":app <app>  the app overlay (alone: the picker)"),
-    ("", ":writes [on|off]  :export[!] <path>"),
+    ("", ":writes [on|off]  :export[!] <path>  :batch"),
     ("", "(the table on screen as CSV; ! overwrites)"),
     ("?", "this help"),
     ("q / Ctrl-C", "quit"),
@@ -843,63 +843,145 @@ pub fn render_confirm_write(
     );
 }
 
-/// The batch confirm's rows around its scrolled lines: borders and the
-/// summary line.
-const BATCH_CHROME: u16 = 3;
+/// The batch confirm as drawn: the summary pinned on top and every line
+/// below it, each wrapped to the inner width (the box is the dry run:
+/// nothing may be clipped), and the scrolled rows that fit.
+struct BatchLayout {
+    rect: Rect,
+    summary: Vec<String>,
+    content: Vec<String>,
+    rows: usize,
+}
 
-/// The batch confirm as drawn: every line wrapped to the inner width (the
-/// box is the dry run: nothing may be clipped), and the rows that fit.
-/// Shared by the renderer and the scroll keys so they cannot drift.
-fn confirm_batch_layout(batch: &Batch, area: Rect) -> (Rect, Vec<String>, usize) {
+fn confirm_batch_layout(batch: &Batch, area: Rect) -> BatchLayout {
     let width = usize::from(CONFIRM_WIDTH.min(area.width).saturating_sub(2));
+    let summary = wrap_chars(&plain(&batch.summary()), width);
     let content: Vec<String> = batch
         .lines()
         .iter()
         .flat_map(|l| wrap_chars(&plain(l), width))
         .collect();
+    // Borders and the pinned summary.
+    let chrome = u16::try_from(summary.len())
+        .unwrap_or(u16::MAX)
+        .saturating_add(2);
     let height = u16::try_from(content.len())
         .unwrap_or(u16::MAX)
-        .saturating_add(BATCH_CHROME);
+        .saturating_add(chrome);
     let rect = centered(area, CONFIRM_WIDTH, height);
-    let rows = usize::from(rect.height.saturating_sub(BATCH_CHROME));
-    (rect, content, rows)
+    let rows = usize::from(rect.height.saturating_sub(chrome));
+    BatchLayout {
+        rect,
+        summary,
+        content,
+        rows,
+    }
 }
 
 /// The first line shown when the batch confirm is scrolled to the end.
 pub fn confirm_batch_last_scroll(batch: &Batch, area: Rect) -> usize {
-    let (_, content, rows) = confirm_batch_layout(batch, area);
-    content.len().saturating_sub(rows)
+    let l = confirm_batch_layout(batch, area);
+    l.content.len().saturating_sub(l.rows)
+}
+
+/// The keys of a scrolled box, and how many lines are still below.
+fn scroll_meta(below: usize, keys: &str) -> String {
+    if below > 0 {
+        format!("↓ {below} more · j/k scroll · {keys}")
+    } else {
+        keys.to_string()
+    }
 }
 
 /// `Send these requests?`: the batch's summary pinned, then one block per
-/// request (`N/M METHOD path`, its summary, its body), scrolled.
+/// request (`N/M METHOD path`, its summary, the override denies that
+/// block it, its body), scrolled; the title says how much is still below.
 pub fn render_confirm_batch(model: &Model, batch: &Batch, scroll: u16, f: &mut Frame, area: Rect) {
     let t = &model.theme;
-    let (r, content, rows) = confirm_batch_layout(batch, area);
+    let BatchLayout {
+        rect: r,
+        summary,
+        content,
+        rows,
+    } = confirm_batch_layout(batch, area);
     f.render_widget(Clear, r);
     let first = usize::from(scroll).min(content.len().saturating_sub(rows));
-    let meta = if content.len() > rows {
-        "j/k scroll · y send all · n cancel"
-    } else {
-        "y send all · n cancel"
-    };
-    let mut lines = vec![Line::from(Span::styled(
-        plain(&batch.summary()),
-        Style::new().fg(t.warn),
-    ))];
+    let below = content.len().saturating_sub(first + rows);
+    let meta = scroll_meta(below, "y send all · n cancel");
+    let mut lines: Vec<Line> = summary
+        .into_iter()
+        .map(|s| Line::from(Span::styled(s, Style::new().fg(t.warn))))
+        .collect();
     lines.extend(content.into_iter().skip(first).take(rows).map(|s| {
-        // `2/6 POST …`: a block's head.
+        // `2/6 POST …`: a block's head; `  ! blocked: …`: a deny.
         let head = s.split_once(' ').is_some_and(|(n, _)| {
             n.contains('/') && n.chars().next().is_some_and(|c| c.is_ascii_digit())
         });
-        Line::from(Span::styled(
-            s,
-            if head { t.header_style() } else { t.base() },
-        ))
+        let style = if head {
+            t.header_style()
+        } else if s.starts_with("  ! ") {
+            Style::new().fg(t.warn)
+        } else {
+            t.base()
+        };
+        Line::from(Span::styled(s, style))
     }));
     f.render_widget(
         Paragraph::new(lines)
-            .block(panel("Send these requests?", meta, t, true))
+            .block(panel("Send these requests?", &meta, t, true))
+            .style(t.base()),
+        r,
+    );
+}
+
+/// The batch report as drawn: every line wrapped, the rows that fit.
+fn batch_report_layout(lines: &[String], area: Rect) -> (Rect, Vec<String>, usize) {
+    let width = usize::from(CONFIRM_WIDTH.min(area.width).saturating_sub(2));
+    let content: Vec<String> = lines
+        .iter()
+        .flat_map(|l| wrap_chars(&plain(l), width))
+        .collect();
+    let height = u16::try_from(content.len())
+        .unwrap_or(u16::MAX)
+        .saturating_add(2);
+    let rect = centered(area, CONFIRM_WIDTH, height);
+    let rows = usize::from(rect.height.saturating_sub(2));
+    (rect, content, rows)
+}
+
+/// The first line shown when the batch report is scrolled to the end.
+pub fn batch_report_last_scroll(lines: &[String], area: Rect) -> usize {
+    let (_, content, rows) = batch_report_layout(lines, area);
+    content.len().saturating_sub(rows)
+}
+
+/// `Batch result`: each step and what became of it, then how to undo.
+pub fn render_batch_report(model: &Model, scroll: u16, f: &mut Frame, area: Rect) {
+    let t = &model.theme;
+    let lines = model.batch_report.clone().unwrap_or_default();
+    let (r, content, rows) = batch_report_layout(&lines, area);
+    f.render_widget(Clear, r);
+    let first = usize::from(scroll).min(content.len().saturating_sub(rows));
+    let below = content.len().saturating_sub(first + rows);
+    let meta = scroll_meta(below, "Esc closes");
+    let shown: Vec<Line> = content
+        .into_iter()
+        .skip(first)
+        .take(rows)
+        .map(|s| {
+            let style = if s.contains("FAILED") || s.contains("NOT ") {
+                Style::new().fg(t.bad)
+            } else if s.starts_with("    ") || s.is_empty() {
+                t.base()
+            } else {
+                t.header_style()
+            };
+            Line::from(Span::styled(s, style))
+        })
+        .collect();
+    f.render_widget(
+        Paragraph::new(shown)
+            .block(panel("Batch result", &meta, t, true))
             .style(t.base()),
         r,
     );

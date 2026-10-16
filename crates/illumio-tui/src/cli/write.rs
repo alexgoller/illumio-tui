@@ -783,6 +783,7 @@ mod tests {
             object: json!({"key": "app"}),
             dropped_fields: vec![],
             warnings: vec!["w1".into()],
+            audit_failed: None,
         });
         let rows = out.rows();
         assert_eq!(rows[0], vec!["href", "/orgs/5/labels/9"]);

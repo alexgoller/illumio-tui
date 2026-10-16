@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭ Filters ────────────────────────────────── window 24h · cap 1000 · unbounded ╮
+│window 24h  src *  dst *  svc *  decision all                                 │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭ Result ────────────────────────────────────────────── no query yet · press r ╮
+│r╭ Batch result ──────────────────────────────────────────────── Esc closes ╮ │
+╰─│1/3 create ip_list shop-prod peer 203.0.113.7                             │─╯
+╭ │    written /orgs/5/sec_policy/draft/ip_lists/77                          │─╮
+│n│2/3 create rule_set RF-crm-prod                                           │ │
+│ │    FAILED: name in use                                                   │ │
+│ │3/3 create rule in rule_set RF-crm-prod                                   │ │
+│ │    not sent                                                              │ │
+│ │                                                                          │ │
+╰─│These are draft changes, not provisioned: p on Policy lists them, R revert│─╯
+╭ │s the marked ones.                                                        │ ╮
+│s╰──────────────────────────────────────────────────────────────────────────╯ │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ready         f filter  r run  a auto  v view  g group  / search  : cmd  ? help

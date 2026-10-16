@@ -67,6 +67,9 @@ pub fn view(model: &Model, f: &mut Frame) {
         Overlay::ConfirmBatch { batch, scroll } => {
             widgets::overlay::render_confirm_batch(model, batch, *scroll, f, area)
         }
+        Overlay::BatchReport { scroll } => {
+            widgets::overlay::render_batch_report(model, *scroll, f, area)
+        }
         Overlay::Diff { diff, scroll } => {
             widgets::overlay::render_diff(model, diff, *scroll, f, area)
         }

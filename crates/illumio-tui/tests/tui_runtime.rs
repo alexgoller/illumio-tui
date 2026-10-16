@@ -2803,7 +2803,14 @@ async fn execute_batch_sends_every_step_in_order_with_the_created_hrefs() {
     let audit = MemoryAudit::new();
     let (mut rt, _tx) =
         Runtime::with_writer(pce_for(&server), writes_model(), tui_guard(audit.clone()));
-    rt.execute(Cmd::ExecuteBatch(batch_plan()));
+    // Planned on this runtime's profile (the guard's context).
+    let mut batch = batch_plan();
+    batch.origin = Some(pce::write::BatchOrigin {
+        profile: "t".into(),
+        host: "h".into(),
+        org_id: 5,
+    });
+    rt.execute(Cmd::ExecuteBatch(batch));
     let model = run_loop(&mut rt, Box::pin(wait(500)), &mut |_| {}).await;
     assert!(
         model.status.text.starts_with("wrote 3 of 3 (pending)"),

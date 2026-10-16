@@ -486,6 +486,8 @@ pub fn batch_plan() -> pce::write::Batch {
                 ),
                 kind: ObjectKind::IpList,
                 needs: Vec::new(),
+                deny_notes: Vec::new(),
+                expect: None,
             },
             BatchStep {
                 plan: post(
@@ -496,6 +498,8 @@ pub fn batch_plan() -> pce::write::Batch {
                 ),
                 kind: ObjectKind::RuleSet,
                 needs: Vec::new(),
+                deny_notes: Vec::new(),
+                expect: None,
             },
             BatchStep {
                 plan: post(
@@ -506,8 +510,16 @@ pub fn batch_plan() -> pce::write::Batch {
                 ),
                 kind: ObjectKind::Rule,
                 needs: vec![0, 1],
+                deny_notes: Vec::new(),
+                expect: None,
             },
         ],
         reads: 2,
+        // The profile of `model_fixture` and the models built on it.
+        origin: Some(pce::write::BatchOrigin {
+            profile: "demo".into(),
+            host: "pce.example".into(),
+            org_id: 5,
+        }),
     }
 }

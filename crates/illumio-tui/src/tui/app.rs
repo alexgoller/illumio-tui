@@ -439,6 +439,14 @@ impl Runtime {
                 let guard = self.writer.clone();
                 let kinds: Vec<pce::write::ObjectKind> =
                     batch.steps.iter().map(|s| s.kind).collect();
+                let summaries: Vec<String> = batch
+                    .steps
+                    .iter()
+                    .map(|s| match &s.plan {
+                        Plan::Send { request, .. } => request.summary.clone(),
+                        Plan::Noop { reason, .. } => reason.clone(),
+                    })
+                    .collect();
                 tokio::spawn(async move {
                     // One `execute` per step, in order; the first failure stops it.
                     let results = match &guard {
@@ -455,7 +463,11 @@ impl Runtime {
                     };
                     // Pending changes are not under the kinds' prefixes.
                     pce.invalidate("policy:pending");
-                    let _ = tx.send(Msg::BatchDone { kinds, results });
+                    let _ = tx.send(Msg::BatchDone {
+                        kinds,
+                        summaries,
+                        results,
+                    });
                     let _ = tx.send(Msg::Stats(pce.stats()));
                 });
             }

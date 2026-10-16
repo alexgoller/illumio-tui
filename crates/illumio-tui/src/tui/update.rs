@@ -15,7 +15,8 @@ use crate::tui::msg::{
 };
 use crate::tui::picker::{KeyPicker, PickerOutcome};
 use crate::tui::ui::widgets::overlay::{
-    confirm_batch_last_scroll, confirm_write_last_scroll, help_last_scroll,
+    batch_report_last_scroll, confirm_batch_last_scroll, confirm_write_last_scroll,
+    help_last_scroll,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use pce::models::{EventFilter, PolicyDecision, PolicyScope, Workload};
@@ -848,6 +849,12 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             match result {
                 // Keys typed while the batch was planned went elsewhere; a
                 // `y` there must not confirm this.
+                // Planned on the profile before a switch: never sent here.
+                Ok(batch) if !batch_for_session(model, &batch) => {
+                    model.status = StatusLine::warn(
+                        "requests discarded: planned on another profile, nothing sent",
+                    );
+                }
                 Ok(_) if !batch_lands(model) => {
                     model.status = StatusLine::warn("requests discarded, nothing sent");
                 }
@@ -866,7 +873,11 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             }
             Vec::new()
         }
-        Msg::BatchDone { kinds, results } => batch_done(model, &kinds, &results),
+        Msg::BatchDone {
+            kinds,
+            summaries,
+            results,
+        } => batch_done(model, &kinds, &summaries, &results),
         Msg::Planned(result) => {
             model.writes.in_flight = false;
             let flow_form = model.traffic.rule_form.take();
@@ -1390,8 +1401,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         return Vec::new();
     }
     if k.code == KeyCode::Char('c') && k.modifiers == KeyModifiers::CONTROL {
-        model.quit = true;
-        return vec![Cmd::Quit];
+        return quit(model);
     }
     match model.overlay.clone() {
         Overlay::Help => {
@@ -1758,6 +1768,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                         format!("sending {n} requests …")
                     });
                     model.writes.in_flight = true;
+                    model.batch_sending = true;
                     vec![Cmd::ExecuteBatch(batch)]
                 }
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
@@ -1775,6 +1786,27 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 KeyCode::Up | KeyCode::Char('k') => {
                     model.overlay = Overlay::ConfirmBatch {
                         batch,
+                        scroll: scroll.saturating_sub(1),
+                    };
+                    Vec::new()
+                }
+                _ => Vec::new(),
+            }
+        }
+        Overlay::BatchReport { scroll } => {
+            let area = ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1);
+            let lines = model.batch_report.clone().unwrap_or_default();
+            let last = u16::try_from(batch_report_last_scroll(&lines, area)).unwrap_or(u16::MAX);
+            match k.code {
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => batch_closed(model),
+                KeyCode::Down | KeyCode::Char('j') => {
+                    model.overlay = Overlay::BatchReport {
+                        scroll: (scroll + 1).min(last),
+                    };
+                    Vec::new()
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    model.overlay = Overlay::BatchReport {
                         scroll: scroll.saturating_sub(1),
                     };
                     Vec::new()
@@ -1899,10 +1931,7 @@ fn on_screen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         return reconnect(model);
     }
     match (k.code, k.modifiers) {
-        (KeyCode::Char('q'), KeyModifiers::NONE) => {
-            model.quit = true;
-            vec![Cmd::Quit]
-        }
+        (KeyCode::Char('q'), KeyModifiers::NONE) => quit(model),
         (KeyCode::Char(':'), _) => {
             model.overlay = Overlay::Prompt {
                 input: String::new(),
@@ -3535,6 +3564,28 @@ fn is_unanswered(e: &WriteError) -> bool {
     }
 }
 
+/// `q`, `Ctrl-C`, `:q`: refused while a batch is being sent, so no
+/// request on the wire is dropped before its answer is audited.
+fn quit(model: &mut Model) -> Vec<Cmd> {
+    if model.batch_sending {
+        model.status = StatusLine::warn("batch sending: wait for it to finish");
+        return Vec::new();
+    }
+    model.quit = true;
+    vec![Cmd::Quit]
+}
+
+/// Whether a planned batch was planned on this session's profile and PCE
+/// (and no switch is on its way).
+fn batch_for_session(model: &Model, batch: &pce::write::Batch) -> bool {
+    let p = &model.profile;
+    !model.switching
+        && batch
+            .origin
+            .as_ref()
+            .is_some_and(|o| o.profile == p.name && o.host == p.host && o.org_id == p.org_id)
+}
+
 /// Whether a planned batch may open its confirm: only over the screen it
 /// was planned from (nothing else open).
 fn batch_lands(model: &Model) -> bool {
@@ -3546,16 +3597,24 @@ fn batch_plan_failed(model: &mut Model, e: &str) {
     fail(model, "plan", e, false);
 }
 
-/// The batch confirm or its answer is done: back to the screen. What it
+/// The batch confirm or its report is done: back to the screen. What it
 /// reopens may need to load (none here).
 fn batch_closed(model: &mut Model) -> Vec<Cmd> {
     model.overlay = Overlay::None;
     Vec::new()
 }
 
+/// A written step whose audit entry could not be written (why).
+fn not_audited(r: &pce::write::StepResult) -> Option<&str> {
+    match r {
+        pce::write::StepResult::Written(w) => w.audit_failed.as_deref(),
+        _ => None,
+    }
+}
+
 /// `wrote 5 of 7 (pending); step 6 failed: …; 1 not sent`, then what the
-/// PCE dropped or warned about per written step, and whether a step
-/// failed (`Some(true)`), only warned (`Some(false)`) or neither.
+/// PCE dropped or warned about per written step, and whether the batch
+/// stopped (`Some(true)`), only warned (`Some(false)`) or neither.
 fn batch_status(results: &[pce::write::StepResult]) -> (String, Option<bool>) {
     use pce::write::StepResult as R;
     let count = |f: fn(&R) -> bool| results.iter().filter(|r| f(r)).count();
@@ -3580,6 +3639,16 @@ fn batch_status(results: &[pce::write::StepResult]) -> (String, Option<bool>) {
             s.push_str(&format!("; step {} failed: {e}", i + 1));
         }
     }
+    let unaudited = results
+        .iter()
+        .enumerate()
+        .find_map(|(i, r)| not_audited(r).map(|why| (i, why)));
+    if let Some((i, why)) = unaudited {
+        s.push_str(&format!(
+            "; step {} written but not audited ({why}): batch stopped",
+            i + 1
+        ));
+    }
     if not_sent > 0 {
         s.push_str(&format!("; {not_sent} not sent"));
     }
@@ -3595,11 +3664,14 @@ fn batch_status(results: &[pce::write::StepResult]) -> (String, Option<bool>) {
             ));
         }
         for warning in &w.warnings {
+            if w.audit_failed.as_ref() == Some(warning) {
+                continue;
+            }
             noted = true;
             s.push_str(&format!("; step {}: {warning}", i + 1));
         }
     }
-    let kind = match (failed.is_some(), noted) {
+    let kind = match (failed.is_some() || unaudited.is_some(), noted) {
         (true, _) => Some(true),
         (false, true) => Some(false),
         (false, false) => None,
@@ -3607,20 +3679,69 @@ fn batch_status(results: &[pce::write::StepResult]) -> (String, Option<bool>) {
     (s, kind)
 }
 
-/// A sent batch's answer: the status line, then one reload of the
+/// The batch report: each step's summary and what became of it (the href
+/// written or reused, the failure, not sent), then how to undo and resume.
+fn batch_report_lines(summaries: &[String], results: &[pce::write::StepResult]) -> Vec<String> {
+    use pce::write::StepResult as R;
+    let n = results.len();
+    let mut out = Vec::new();
+    for (i, r) in results.iter().enumerate() {
+        let what = summaries.get(i).map_or("?", String::as_str);
+        out.push(format!("{}/{n} {what}", i + 1));
+        out.push(match r {
+            R::Written(w) => match &w.audit_failed {
+                Some(why) => format!("    written {}, NOT AUDITED: {why}", w.href),
+                None => format!("    written {}", w.href),
+            },
+            R::Skipped { existing_href } => format!("    reused {existing_href}"),
+            R::Failed(e) if is_unanswered(e) => {
+                format!("    NOT ANSWERED, it may have applied: {e}")
+            }
+            R::Failed(e) => format!("    FAILED: {e}"),
+            R::NotSent => "    not sent".into(),
+        });
+    }
+    let touched = results.iter().any(|r| match r {
+        R::Written(_) => true,
+        R::Failed(e) => is_unanswered(e),
+        _ => false,
+    });
+    let stopped = results
+        .iter()
+        .any(|r| matches!(r, R::Failed(_) | R::NotSent) || not_audited(r).is_some());
+    out.push(String::new());
+    if touched {
+        out.push(
+            "These are draft changes, not provisioned: p on Policy lists them, R reverts the marked ones."
+                .into(),
+        );
+    }
+    if stopped {
+        out.push("Planning the batch again resumes it: what was written then exists.".into());
+    }
+    out
+}
+
+/// A sent batch's answer: the status line and the report (opened when the
+/// batch stopped, else `:batch` shows it), then one reload of the
 /// rulesets (and of the IP lists when one was written, so the index
-/// follows) and one draft re-evaluation, whatever the step count.
+/// follows) and one draft re-evaluation, whatever the step count. An
+/// overlay opened while it was sent stays.
 fn batch_done(
     model: &mut Model,
     kinds: &[pce::write::ObjectKind],
+    summaries: &[String],
     results: &[pce::write::StepResult],
 ) -> Vec<Cmd> {
     use pce::write::StepResult as R;
     model.writes.in_flight = false;
+    model.batch_sending = false;
     // The runtime dropped `policy:pending`; the next `p` fetches again.
     model.policy.pending = None;
     model.policy.pending_marked.clear();
     let (text, kind) = batch_status(results);
+    let stopped = kind == Some(true) || results.iter().any(|r| matches!(r, R::NotSent));
+    model.batch_report = Some(batch_report_lines(summaries, results));
     model.status = match kind {
         Some(true) => StatusLine::error(text),
         Some(false) => StatusLine::warn(text),
@@ -3649,7 +3770,14 @@ fn batch_done(
         cmds.extend(reload_after_write(model, pce::write::ObjectKind::Rule));
         cmds.extend(redraft);
     }
-    cmds.extend(batch_closed(model));
+    if model.overlay != Overlay::None {
+        model.status.text.push_str(" · :batch shows each step");
+    } else if stopped {
+        model.overlay = Overlay::BatchReport { scroll: 0 };
+    } else {
+        model.status.text.push_str(" · :batch shows each step");
+        cmds.extend(batch_closed(model));
+    }
     cmds
 }
 
@@ -4824,9 +4952,14 @@ pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
             model.objects.ip_lists.show_detail = false;
             switch(model, Screen::Objects)
         }
-        Command::Quit => {
-            model.quit = true;
-            vec![Cmd::Quit]
+        Command::Quit => quit(model),
+        Command::Batch => {
+            if model.batch_report.is_some() {
+                model.overlay = Overlay::BatchReport { scroll: 0 };
+            } else {
+                model.status = StatusLine::info("no batch sent in this session");
+            }
+            Vec::new()
         }
         Command::Help => {
             model.help_scroll = 0;
@@ -9715,7 +9848,7 @@ mod tests {
         assert!(
             HELP_LINES
                 .iter()
-                .any(|(_, d)| *d == ":writes [on|off]  :export[!] <path>")
+                .any(|(_, d)| *d == ":writes [on|off]  :export[!] <path>  :batch")
         );
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "IP lists Enter"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Workloads E m o u c"));
@@ -9904,6 +10037,7 @@ mod tests {
             object: serde_json::json!({ "href": href }),
             dropped_fields: vec![],
             warnings: vec![],
+            audit_failed: None,
         }
     }
 
@@ -12356,6 +12490,7 @@ mod label_filter_tests {
                 object: serde_json::json!({"href": "/orgs/5/workloads/1"}),
                 dropped_fields: vec![],
                 warnings: vec![],
+                audit_failed: None,
             })),
         }
     }
@@ -14703,6 +14838,7 @@ mod app_tests {
                     object: serde_json::json!({}),
                     dropped_fields: vec![],
                     warnings: vec![],
+                    audit_failed: None,
                 })),
             },
         );
@@ -14762,6 +14898,7 @@ mod app_tests {
                     object: serde_json::json!({}),
                     dropped_fields: vec![],
                     warnings: vec![],
+                    audit_failed: None,
                 })),
             },
         );
@@ -15715,6 +15852,7 @@ mod draft_tests {
                 object: serde_json::Value::Null,
                 dropped_fields: vec![],
                 warnings: vec![],
+                audit_failed: None,
             })),
         }
     }
@@ -15869,6 +16007,7 @@ mod draft_tests {
                     object: serde_json::Value::Null,
                     dropped_fields: vec![],
                     warnings: vec![],
+                    audit_failed: None,
                 })),
             },
         );
@@ -16505,6 +16644,7 @@ mod rule_form_ruleset_tests {
                     object: serde_json::Value::Null,
                     dropped_fields: vec![],
                     warnings: vec![],
+                    audit_failed: None,
                 })),
             },
         )
@@ -16585,6 +16725,7 @@ mod rule_form_ruleset_tests {
                     object: serde_json::Value::Null,
                     dropped_fields: vec![],
                     warnings: vec![],
+                    audit_failed: None,
                 })),
             },
         );
@@ -16681,11 +16822,20 @@ mod batch_tests {
             object: serde_json::json!({"href": href}),
             dropped_fields: Vec::new(),
             warnings: Vec::new(),
+            audit_failed: None,
         })
     }
 
     fn kinds() -> Vec<ObjectKind> {
         vec![ObjectKind::IpList, ObjectKind::RuleSet, ObjectKind::Rule]
+    }
+
+    fn summaries() -> Vec<String> {
+        vec![
+            "create ip_list shop-prod peer 203.0.113.7".into(),
+            "create rule_set RF-crm-prod".into(),
+            "create rule in rule_set RF-crm-prod".into(),
+        ]
     }
 
     fn armed() -> Model {
@@ -16789,6 +16939,7 @@ mod batch_tests {
             &mut m,
             Msg::BatchDone {
                 kinds: kinds(),
+                summaries: summaries(),
                 results,
             },
         );
@@ -16813,7 +16964,152 @@ mod batch_tests {
             1,
             "one redraft per batch"
         );
+        // The report stays up: which object went where, what did not.
+        assert_eq!(m.overlay, Overlay::BatchReport { scroll: 0 });
+        assert_eq!(
+            m.batch_report.as_deref().unwrap(),
+            [
+                "1/3 create ip_list shop-prod peer 203.0.113.7",
+                "    written /orgs/5/sec_policy/draft/ip_lists/77",
+                "2/3 create rule_set RF-crm-prod",
+                "    FAILED: name in use",
+                "3/3 create rule in rule_set RF-crm-prod",
+                "    not sent",
+                "",
+                "These are draft changes, not provisioned: p on Policy lists them, R reverts the marked ones.",
+                "Planning the batch again resumes it: what was written then exists.",
+            ]
+        );
+        assert_eq!(
+            update(
+                &mut m,
+                Msg::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            ),
+            Vec::new()
+        );
         assert_eq!(m.overlay, Overlay::None);
+        on_command(&mut m, crate::tui::commands::Command::Batch);
+        assert_eq!(
+            m.overlay,
+            Overlay::BatchReport { scroll: 0 },
+            ":batch reopens it"
+        );
+    }
+
+    fn all_written() -> Vec<StepResult> {
+        vec![
+            written("/orgs/5/sec_policy/draft/ip_lists/77"),
+            written("/orgs/5/sec_policy/draft/rule_sets/200"),
+            written("/orgs/5/sec_policy/draft/rule_sets/200/sec_rules/1"),
+        ]
+    }
+
+    fn done(m: &mut Model, results: Vec<StepResult>) -> Vec<Cmd> {
+        update(
+            m,
+            Msg::BatchDone {
+                kinds: kinds(),
+                summaries: summaries(),
+                results,
+            },
+        )
+    }
+
+    #[test]
+    fn quitting_waits_while_a_batch_is_sent() {
+        let mut m = armed();
+        update(&mut m, Msg::BatchPlanned(Ok(batch_plan())));
+        update(&mut m, key('y'));
+        assert!(m.batch_sending);
+        let ctrl_c = || Msg::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        assert_eq!(update(&mut m, ctrl_c()), Vec::new());
+        assert_eq!(update(&mut m, key('q')), Vec::new());
+        assert_eq!(
+            on_command(&mut m, crate::tui::commands::Command::Quit),
+            Vec::new()
+        );
+        assert!(!m.quit);
+        assert_eq!(m.status.text, "batch sending: wait for it to finish");
+        done(&mut m, all_written());
+        assert!(!m.batch_sending);
+        assert_eq!(update(&mut m, ctrl_c()), vec![Cmd::Quit]);
+        assert!(m.quit);
+    }
+
+    #[test]
+    fn a_batch_planned_on_another_profile_or_during_a_switch_is_discarded() {
+        let mut m = armed();
+        m.profile.name = "prod-b".into();
+        update(&mut m, Msg::BatchPlanned(Ok(batch_plan())));
+        assert_eq!(m.overlay, Overlay::None);
+        assert_eq!(
+            m.status.text,
+            "requests discarded: planned on another profile, nothing sent"
+        );
+        let mut m = armed();
+        m.switching = true;
+        update(&mut m, Msg::BatchPlanned(Ok(batch_plan())));
+        assert_eq!(m.overlay, Overlay::None);
+        let mut m = armed();
+        let mut b = batch_plan();
+        b.origin = None;
+        update(&mut m, Msg::BatchPlanned(Ok(b)));
+        assert_eq!(m.overlay, Overlay::None, "no origin: never confirmed");
+    }
+
+    #[test]
+    fn a_clean_batch_keeps_its_report_for_batch_and_an_open_overlay_stays() {
+        let mut m = armed();
+        done(&mut m, all_written());
+        assert_eq!(m.overlay, Overlay::None);
+        assert!(
+            m.status.text.contains(":batch shows each step"),
+            "{}",
+            m.status.text
+        );
+        assert!(m.batch_report.is_some());
+        // Help opened while the batch was sent is not closed by its answer.
+        let mut m = armed();
+        m.overlay = Overlay::Help;
+        done(
+            &mut m,
+            vec![
+                StepResult::Failed(pce::write::WriteError::invalid("bad")),
+                StepResult::NotSent,
+                StepResult::NotSent,
+            ],
+        );
+        assert_eq!(m.overlay, Overlay::Help);
+        assert!(m.status.text.contains(":batch shows each step"));
+    }
+
+    #[test]
+    fn a_step_written_but_not_audited_stops_and_says_so() {
+        let mut m = armed();
+        let StepResult::Written(mut w) = written("/orgs/5/sec_policy/draft/ip_lists/77") else {
+            unreachable!()
+        };
+        let why = "audit entry could not be written to audit.jsonl: disk full".to_string();
+        w.warnings = vec![why.clone()];
+        w.audit_failed = Some(why);
+        done(
+            &mut m,
+            vec![
+                StepResult::Written(w),
+                StepResult::NotSent,
+                StepResult::NotSent,
+            ],
+        );
+        assert!(
+            m.status.text.starts_with(
+                "wrote 1 of 3 (pending); step 1 written but not audited (audit entry could not be written to audit.jsonl: disk full): batch stopped; 2 not sent"
+            ),
+            "{}",
+            m.status.text
+        );
+        assert_eq!(m.status.kind, StatusKind::Error);
+        assert_eq!(m.overlay, Overlay::BatchReport { scroll: 0 });
+        assert!(m.batch_report.as_ref().unwrap()[1].contains("NOT AUDITED"));
     }
 
     #[test]
@@ -16830,6 +17126,7 @@ mod batch_tests {
             &mut m,
             Msg::BatchDone {
                 kinds: kinds(),
+                summaries: summaries(),
                 results,
             },
         );
@@ -16859,6 +17156,7 @@ mod batch_tests {
             &mut m,
             Msg::BatchDone {
                 kinds: kinds(),
+                summaries: summaries(),
                 results,
             },
         );
@@ -16881,6 +17179,7 @@ mod batch_tests {
             &mut m,
             Msg::BatchDone {
                 kinds: kinds(),
+                summaries: summaries(),
                 results,
             },
         );

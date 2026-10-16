@@ -6,8 +6,8 @@ use pce::generate::{GenInput, PeerKind, Proposal, Stop, propose, rows};
 use pce::models::{Flow, IpList, Label, LabelGroup, PolicyScope, RuleSet, Service};
 use pce::traffic::{Focus, parse_app, resolve_flows};
 use pce::write::{
-    Batch, BatchInput, BatchStep, MemoryAudit, ObjectKind, Plan, StepResult, WriteContext,
-    WriteError, WriteGuard, WriteRequest,
+    AuditEntry, AuditSink, Batch, BatchInput, BatchOrigin, BatchStep, MemoryAudit, ObjectKind,
+    Plan, StepResult, WriteContext, WriteError, WriteGuard, WriteRequest,
 };
 use pce::{CacheMode, Credentials, NameIndex, Pce, WriteMethod};
 use serde_json::{Value, json};
@@ -44,6 +44,19 @@ fn guard_with(audit: Arc<MemoryAudit>) -> WriteGuard {
         },
     )
     .unwrap()
+}
+
+fn ctx(profile: &str) -> WriteContext {
+    WriteContext {
+        profile: profile.into(),
+        host: "pce.example".into(),
+        org_id: 5,
+        source: "test".into(),
+    }
+}
+
+fn origin() -> BatchOrigin {
+    BatchOrigin::of(&ctx("lab"))
 }
 
 fn index() -> NameIndex {
@@ -423,6 +436,8 @@ async fn a_placeholder_naming_a_step_it_does_not_wait_for_is_refused_before_send
         },
         kind: ObjectKind::Rule,
         needs,
+        deny_notes: Vec::new(),
+        expect: None,
     };
     let b = Batch {
         steps: vec![
@@ -434,6 +449,7 @@ async fn a_placeholder_naming_a_step_it_does_not_wait_for_is_refused_before_send
             ),
         ],
         reads: 0,
+        origin: Some(origin()),
     };
     let out = pce.writer(&guard).execute_batch(b).await;
     let StepResult::Failed(WriteError::Invalid(m)) = &out[0] else {
@@ -683,6 +699,8 @@ async fn a_created_href_is_checked_before_a_later_step_carries_it() {
         },
         kind,
         needs,
+        deny_notes: Vec::new(),
+        expect: None,
     };
     let b = Batch {
         steps: vec![
@@ -700,6 +718,7 @@ async fn a_created_href_is_checked_before_a_later_step_carries_it() {
             ),
         ],
         reads: 0,
+        origin: Some(origin()),
     };
     let out = pce.writer(&guard).execute_batch(b).await;
     assert!(matches!(out[0], StepResult::Written(_)));
@@ -709,4 +728,359 @@ async fn a_created_href_is_checked_before_a_later_step_carries_it() {
     assert!(m[0].contains("belongs to org 9"), "{m:?}");
     assert_eq!(audit.entries().len(), 1, "the rule was not sent");
     server.verify().await;
+}
+
+/// The shop/prod proposal over a draft whose intra-app rule (`ams` to
+/// `ams`) already allows 443/tcp: the intra-app 5432/tcp becomes an update
+/// of rule 50.
+fn sets_with_rule_50() -> (Value, Value) {
+    let rule = json!({
+        "href": "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/50", "enabled": true,
+        "providers": [{"actors": "ams"}], "consumers": [{"actors": "ams"}],
+        "ingress_services": [{"port": 443, "proto": 6}], "unscoped_consumers": false
+    });
+    let mut sets = rule_sets();
+    sets[0]["rules"] = json!([rule.clone()]);
+    (sets, rule)
+}
+
+async fn mount_creates_before_the_update(server: &MockServer) {
+    mount_created(
+        server,
+        "/orgs/5/sec_policy/draft/ip_lists",
+        "/orgs/5/sec_policy/draft/ip_lists/77",
+        1,
+    )
+    .await;
+    mount_created(
+        server,
+        "/orgs/5/sec_policy/draft/rule_sets",
+        "/orgs/5/sec_policy/draft/rule_sets/200",
+        1,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn an_update_whose_rule_changed_since_planning_stops_the_batch() {
+    let server = MockServer::start().await;
+    let (sets, rule) = sets_with_rule_50();
+    mount_reads(&server, sets, ip_lists()).await;
+    let rule_path = "/api/v2/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/50";
+    Mock::given(method("GET"))
+        .and(path(rule_path))
+        .respond_with(ResponseTemplate::new(200).set_body_json(rule.clone()))
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&server)
+        .await;
+    // A colleague adds udp/53 while the confirm is open.
+    let mut changed = rule;
+    changed["ingress_services"] = json!([{"port": 443, "proto": 6}, {"port": 53, "proto": 17}]);
+    Mock::given(method("GET"))
+        .and(path(rule_path))
+        .respond_with(ResponseTemplate::new(200).set_body_json(changed))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path(rule_path))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .expect(0)
+        .mount(&server)
+        .await;
+    mount_creates_before_the_update(&server).await;
+    let pce = pce_for(&server);
+    let audit = MemoryAudit::new();
+    let guard = guard_with(audit.clone());
+    let w = pce.writer(&guard);
+    let b = w.plan_batch(input(), &index()).await.unwrap();
+    assert_eq!(b.steps[2].plan.request().unwrap().method, WriteMethod::Put);
+    let out = w.execute_batch(b).await;
+    let StepResult::Failed(WriteError::Invalid(m)) = &out[2] else {
+        panic!("{out:?}")
+    };
+    assert!(
+        m[0].contains("step 3: rule /orgs/5/sec_policy/draft/rule_sets/100/sec_rules/50 changed since planning (ingress_services)"),
+        "{m:?}"
+    );
+    assert!(out[3..].iter().all(|r| matches!(r, StepResult::NotSent)));
+    assert_eq!(audit.entries().len(), 2, "the PUT was not sent");
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn an_unchanged_rule_is_put_after_one_more_get() {
+    let server = MockServer::start().await;
+    let (sets, rule) = sets_with_rule_50();
+    mount_reads(&server, sets, ip_lists()).await;
+    let rule_path = "/api/v2/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/50";
+    Mock::given(method("GET"))
+        .and(path(rule_path))
+        .respond_with(ResponseTemplate::new(200).set_body_json(rule))
+        .expect(2)
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path(rule_path))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(
+                json!({"href": "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/50"}),
+            ),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    mount_creates_before_the_update(&server).await;
+    mount_created(
+        &server,
+        "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules",
+        "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/9",
+        2,
+    )
+    .await;
+    mount_created(
+        &server,
+        "/orgs/5/sec_policy/draft/rule_sets/200/sec_rules",
+        "/orgs/5/sec_policy/draft/rule_sets/200/sec_rules/1",
+        1,
+    )
+    .await;
+    let pce = pce_for(&server);
+    let guard = guard_with(MemoryAudit::new());
+    let w = pce.writer(&guard);
+    let b = w.plan_batch(input(), &index()).await.unwrap();
+    let out = w.execute_batch(b).await;
+    assert!(
+        out.iter().all(|r| matches!(r, StepResult::Written(_))),
+        "{out:?}"
+    );
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn services_two_rules_add_to_one_rule_go_in_one_update() {
+    let server = MockServer::start().await;
+    let (sets, rule) = sets_with_rule_50();
+    mount_reads(&server, sets, ip_lists()).await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/api/v2/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/50",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(rule))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let mut input = input();
+    let intra = input
+        .proposal
+        .rules
+        .iter()
+        .find(|r| {
+            r.services
+                == vec![pce::write::ServiceRef::Port(
+                    pce::write::PortSpec::parse("5432/tcp").unwrap(),
+                )]
+        })
+        .expect("the intra-app rule")
+        .clone();
+    let mut redis = intra;
+    redis.services = vec![pce::write::ServiceRef::Port(
+        pce::write::PortSpec::parse("6379/tcp").unwrap(),
+    )];
+    input.proposal.rules.push(redis);
+    let pce = pce_for(&server);
+    let guard = guard_with(MemoryAudit::new());
+    let b = pce
+        .writer(&guard)
+        .plan_batch(input, &index())
+        .await
+        .unwrap();
+    let puts: Vec<&WriteRequest> = b
+        .steps
+        .iter()
+        .filter_map(|s| s.plan.request().filter(|r| r.method == WriteMethod::Put))
+        .collect();
+    assert_eq!(puts.len(), 1, "one update for rule 50");
+    assert_eq!(
+        puts[0].body,
+        Some(json!({"ingress_services": [
+            {"port": 443, "proto": 6}, {"port": 5432, "proto": 6}, {"port": 6379, "proto": 6}
+        ]}))
+    );
+    assert_eq!(b.reads, 3, "one GET of rule 50");
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn a_batch_planned_on_another_profile_is_not_sent() {
+    let server = MockServer::start().await;
+    mount_reads(&server, rule_sets(), ip_lists()).await;
+    let pce = pce_for(&server);
+    let b = pce
+        .writer(&guard_with(MemoryAudit::new()))
+        .plan_batch(input(), &index())
+        .await
+        .unwrap();
+    assert_eq!(b.origin, Some(origin()));
+    let audit = MemoryAudit::new();
+    let other = WriteGuard::new(true, Box::new(audit.clone()), ctx("other")).unwrap();
+    let out = pce.writer(&other).execute_batch(b).await;
+    let StepResult::Failed(WriteError::Invalid(m)) = &out[0] else {
+        panic!("{out:?}")
+    };
+    assert!(
+        m[0].contains(
+            "planned on lab (pce.example, org 5), this session writes to other (pce.example, org 5): nothing sent"
+        ),
+        "{m:?}"
+    );
+    assert!(out[1..].iter().all(|r| matches!(r, StepResult::NotSent)));
+    assert_eq!(sent(&server).await.len(), 2, "the plan's two reads only");
+    assert!(audit.entries().is_empty());
+}
+
+#[tokio::test]
+async fn a_placeholder_in_free_text_is_sent_as_typed() {
+    let server = MockServer::start().await;
+    mount_reads(&server, rule_sets(), ip_lists()).await;
+    mount_created(
+        &server,
+        "/orgs/5/sec_policy/draft/ip_lists",
+        "/orgs/5/sec_policy/draft/ip_lists/77",
+        1,
+    )
+    .await;
+    mount_created(
+        &server,
+        "/orgs/5/sec_policy/draft/rule_sets",
+        "/orgs/5/sec_policy/draft/rule_sets/200",
+        1,
+    )
+    .await;
+    mount_created(
+        &server,
+        "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules",
+        "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/9",
+        3,
+    )
+    .await;
+    mount_created(
+        &server,
+        "/orgs/5/sec_policy/draft/rule_sets/200/sec_rules",
+        "/orgs/5/sec_policy/draft/rule_sets/200/sec_rules/1",
+        1,
+    )
+    .await;
+    // A label value that reads like a placeholder ends up in a description.
+    let mut input = input();
+    for r in input.proposal.rules.iter_mut() {
+        r.description = "from app {step:5} and {step:0}".into();
+    }
+    let pce = pce_for(&server);
+    let audit = MemoryAudit::new();
+    let guard = guard_with(audit.clone());
+    let w = pce.writer(&guard);
+    let b = w.plan_batch(input, &index()).await.unwrap();
+    assert!(
+        b.lines()
+            .iter()
+            .any(|l| l.contains("from app {step:5} and {step:0}")),
+        "the confirm shows the text as it is sent"
+    );
+    let out = w.execute_batch(b).await;
+    assert!(
+        out.iter().all(|r| matches!(r, StepResult::Written(_))),
+        "{out:?}"
+    );
+    let entries = audit.entries();
+    let ip_rule = entries[4].body.as_ref().unwrap();
+    assert_eq!(ip_rule["description"], "from app {step:5} and {step:0}");
+    assert_eq!(
+        ip_rule["providers"],
+        json!([{"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/77"}}])
+    );
+    server.verify().await;
+}
+
+/// An audit log that takes nothing: the disk is full.
+struct FullDisk;
+
+impl AuditSink for FullDisk {
+    fn check_writable(&self) -> std::io::Result<()> {
+        Ok(())
+    }
+    fn append(&self, _: &AuditEntry) -> std::io::Result<()> {
+        Err(std::io::Error::other("no space left on device"))
+    }
+    fn location(&self) -> String {
+        "audit.jsonl".into()
+    }
+}
+
+#[tokio::test]
+async fn a_write_whose_audit_entry_failed_stops_the_batch() {
+    let server = MockServer::start().await;
+    mount_reads(&server, rule_sets(), ip_lists()).await;
+    mount_created(
+        &server,
+        "/orgs/5/sec_policy/draft/ip_lists",
+        "/orgs/5/sec_policy/draft/ip_lists/77",
+        1,
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/sec_policy/draft/rule_sets"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({})))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let pce = pce_for(&server);
+    let guard = WriteGuard::new(true, Box::new(FullDisk), ctx("lab")).unwrap();
+    let w = pce.writer(&guard);
+    let b = w.plan_batch(input(), &index()).await.unwrap();
+    let out = w.execute_batch(b).await;
+    let StepResult::Written(first) = &out[0] else {
+        panic!("{out:?}")
+    };
+    assert!(
+        first
+            .audit_failed
+            .as_deref()
+            .is_some_and(|e| e.contains("no space left on device")),
+        "{first:?}"
+    );
+    assert!(out[1..].iter().all(|r| matches!(r, StepResult::NotSent)));
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn rules_an_override_deny_blocks_are_named_in_the_confirm() {
+    let server = MockServer::start().await;
+    let mut sets = rule_sets();
+    sets[0]["deny_rules"] = json!([{
+        "href": "/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8", "enabled": true,
+        "providers": [{"actors": "ams"}], "consumers": [{"actors": "ams"}],
+        "ingress_services": [{"port": 5432, "proto": 6}], "override": true
+    }]);
+    mount_reads(&server, sets, ip_lists()).await;
+    let pce = pce_for(&server);
+    let guard = guard_with(MemoryAudit::new());
+    let b = pce
+        .writer(&guard)
+        .plan_batch(input(), &index())
+        .await
+        .unwrap();
+    assert!(b.denied_rules() >= 1, "{:#?}", b.lines());
+    assert!(
+        b.summary().contains("blocked by override denies"),
+        "{}",
+        b.summary()
+    );
+    let lines = b.lines();
+    assert!(
+        lines.iter().any(|l| l.starts_with("  ! blocked: ")
+            && l.ends_with("by override deny /orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8")),
+        "{lines:#?}"
+    );
 }

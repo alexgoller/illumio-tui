@@ -1681,7 +1681,7 @@ fn confirm_batch_80x24() {
         "Send these requests?",
         "3 requests: 1 ip_list, 1 rule_set, 1 rule · planned with 2 reads",
         "1/3 POST /orgs/5/sec_policy/draft/ip_lists",
-        "j/k scroll · y send all · n cancel",
+        "more · j/k scroll · y send all · n cancel",
     ] {
         assert!(out.contains(s), "missing {s:?}:\n{out}");
     }
@@ -1703,4 +1703,26 @@ fn confirm_batch_spells_placeholders_120x48() {
     );
     assert!(!out.contains("{step:"), "{out}");
     insta::assert_snapshot!("confirm_batch_120x48", out);
+}
+
+#[test]
+fn batch_report_80x24() {
+    use illumio_tui::tui::model::Overlay;
+    let mut m = model_fixture();
+    m.batch_report = Some(vec![
+        "1/3 create ip_list shop-prod peer 203.0.113.7".into(),
+        "    written /orgs/5/sec_policy/draft/ip_lists/77".into(),
+        "2/3 create rule_set RF-crm-prod".into(),
+        "    FAILED: name in use".into(),
+        "3/3 create rule in rule_set RF-crm-prod".into(),
+        "    not sent".into(),
+        String::new(),
+        "These are draft changes, not provisioned: p on Policy lists them, R reverts the marked ones.".into(),
+    ]);
+    m.overlay = Overlay::BatchReport { scroll: 0 };
+    let out = render_to_string(&m, 80, 24);
+    for s in ["Batch result", "FAILED: name in use", "Esc closes"] {
+        assert!(out.contains(s), "missing {s:?}:\n{out}");
+    }
+    insta::assert_snapshot!("batch_report_80x24", out);
 }

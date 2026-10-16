@@ -27,6 +27,8 @@ pub enum Command {
     },
     Draft,
     Active,
+    /// `:batch`: the last sent batch, step by step.
+    Batch,
     Quit,
     Help,
 }
@@ -88,6 +90,7 @@ pub fn parse(input: &str) -> Result<Command, String> {
         "unicast" => no_arg(Command::Unicast),
         "draft" => no_arg(Command::Draft),
         "active" => no_arg(Command::Active),
+        "batch" => no_arg(Command::Batch),
         "q" | "quit" => no_arg(Command::Quit),
         "help" | "h" | "?" => no_arg(Command::Help),
         other => Err(format!("unknown command :{other}; try :help")),
@@ -148,6 +151,7 @@ mod tests {
         assert!(parse("unicast now").is_err());
         assert_eq!(parse("active").unwrap(), Command::Active);
         assert_eq!(parse("q").unwrap(), Command::Quit);
+        assert_eq!(parse("batch").unwrap(), Command::Batch);
         assert_eq!(parse("quit").unwrap(), Command::Quit);
         assert_eq!(parse("help").unwrap(), Command::Help);
         assert_eq!(

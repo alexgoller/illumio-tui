@@ -167,9 +167,11 @@ pub enum Msg {
     /// A planned write batch (every request, in order) or why it could not
     /// be planned.
     BatchPlanned(Result<Batch, String>),
-    /// What became of each step of a sent batch, and each step's kind.
+    /// What became of each step of a sent batch, with each step's kind
+    /// and summary (`create ip_list …`).
     BatchDone {
         kinds: Vec<pce::write::ObjectKind>,
+        summaries: Vec<String>,
         results: Vec<StepResult>,
     },
     /// The runtime applied `:writes on|off`: the guard was built (or refused,

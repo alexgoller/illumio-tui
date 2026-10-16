@@ -225,6 +225,11 @@ pub enum Overlay {
         batch: pce::write::Batch,
         scroll: u16,
     },
+    /// The last sent batch, step by step (`Model::batch_report`): what was
+    /// written where, what failed, what was not sent, how to undo.
+    BatchReport {
+        scroll: u16,
+    },
     /// A pending IP list or service against its active version.
     Diff {
         diff: ObjectDiff,
@@ -268,6 +273,7 @@ impl PartialEq for Overlay {
                     scroll: sb,
                 },
             ) => ba.lines() == bb.lines() && sa == sb,
+            (Overlay::BatchReport { scroll: a }, Overlay::BatchReport { scroll: b }) => a == b,
             (
                 Overlay::Confirm {
                     reason: ra,
@@ -4634,6 +4640,11 @@ pub struct Model {
     /// A `:profile` switch is being built off the event loop; a second one
     /// waits until it lands so two switches cannot race.
     pub switching: bool,
+    /// A write batch is being sent (from `y` to `Msg::BatchDone`): quitting
+    /// would drop a request on the wire unaudited, so it waits.
+    pub batch_sending: bool,
+    /// The last sent batch, step by step (`:batch` shows it again).
+    pub batch_report: Option<Vec<String>>,
     pub quit: bool,
     pub started: Instant,
 }
@@ -4695,6 +4706,8 @@ impl Model {
             help_scroll: 0,
             busy: 0,
             switching: false,
+            batch_sending: false,
+            batch_report: None,
             quit: false,
             started: Instant::now(),
         }
