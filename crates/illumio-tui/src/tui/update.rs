@@ -28,6 +28,8 @@ use pce::write::{
 use pce::{CacheMode, RuleKind, WriteMethod};
 use std::time::Instant;
 
+mod generator;
+
 /// The status and header note for a result a supercluster region did not
 /// answer.
 pub const INCOMPLETE: &str = " · incomplete: a PCE region did not respond";
@@ -50,6 +52,18 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
     );
     if traffic_answer && app_open {
         rebuild_app_traffic(model);
+    }
+    // The same for the generator: its rows and its gap follow.
+    let gen_open = matches!(
+        model.overlay,
+        Overlay::Generator
+            | Overlay::Confirm {
+                action: PendingAction::GenRequery(..),
+                ..
+            }
+    );
+    if traffic_answer && gen_open {
+        generator::rebuild_gen(model);
     }
     cmds
 }
@@ -386,7 +400,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 let waiting = matches!(
                     &model.overlay,
                     Overlay::Form(f) if matches!(f.intent, EditIntent::RuleFromFlow(_))
-                );
+                ) || model.overlay == Overlay::Generator;
                 return if waiting {
                     load_form_drafts(model)
                 } else {
@@ -394,11 +408,15 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 };
             }
             match result {
-                Ok((raw, _, _)) => {
+                Ok((raw, _, hit)) => {
                     model.policy.form_drafts = Some(raw);
                     refill_rule_form(model);
+                    generator::gen_drafts_answer(model, Ok(hit));
                 }
-                Err(e) => model.status = StatusLine::warn(format!("draft rulesets: {e}")),
+                Err(e) => {
+                    model.status = StatusLine::warn(format!("draft rulesets: {e}"));
+                    generator::gen_drafts_answer(model, Err(&e));
+                }
             }
             Vec::new()
         }
@@ -455,6 +473,9 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         CacheMode::Use
                     };
                     refresh_app_policy(model, scope, Ok(hit));
+                    if scope == PolicyScope::Draft {
+                        generator::gen_drafts_answer(model, Ok(hit));
+                    }
                     // Off the Policy screen (the app overlay, `u` on Labels)
                     // nothing shows the deny rules: `switch` asks on entry.
                     if model.screen == Screen::Policy {
@@ -469,6 +490,9 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     let tripped = model.policy.auto.take_tick_failure();
                     fail(model, "rulesets", &e, tripped);
                     refresh_app_policy(model, scope, Err(&e));
+                    if scope == PolicyScope::Draft {
+                        generator::gen_drafts_answer(model, Err(&e));
+                    }
                     Vec::new()
                 }
             }
@@ -852,6 +876,10 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         }
         Msg::BatchPlanned(result) => {
             model.writes.in_flight = false;
+            let planned_here = batch_lands(model);
+            if let Some(v) = model.gen_view.as_mut() {
+                v.planning = false;
+            }
             match result {
                 // Keys typed while the batch was planned went elsewhere; a
                 // `y` there must not confirm this.
@@ -861,7 +889,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         "requests discarded: planned on another profile, nothing sent",
                     );
                 }
-                Ok(_) if !batch_lands(model) => {
+                Ok(_) if !planned_here => {
                     model.status = StatusLine::warn("requests discarded, nothing sent");
                 }
                 Ok(batch) => {
@@ -875,7 +903,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     ));
                     model.overlay = Overlay::ConfirmBatch { batch, scroll: 0 };
                 }
-                Err(e) => batch_plan_failed(model, &e),
+                Err(e) => batch_plan_failed(model, &e, planned_here),
             }
             Vec::new()
         }
@@ -1548,6 +1576,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                         hrefs,
                     } => start_draft(model, filter, focus, hrefs),
                     PendingAction::ReloadApp => app_reload(model),
+                    PendingAction::GenRequery(f, focus) => generator::gen_requery(model, f, focus),
                 }
             }
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
@@ -1555,6 +1584,9 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 model.status = StatusLine::info("cancelled");
                 if matches!(action, PendingAction::ReloadApp) {
                     model.overlay = Overlay::App;
+                }
+                if matches!(action, PendingAction::GenRequery(..)) {
+                    model.overlay = Overlay::Generator;
                 }
                 Vec::new()
             }
@@ -1909,10 +1941,12 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                         Vec::new()
                     }
                     AppPickerPurpose::Overlay => open_app_by_name(model, &app),
+                    AppPickerPurpose::Generator => gen_by_name(model, &app),
                 }
             }
         },
         Overlay::App => app_overlay_key(model, k),
+        Overlay::Generator => generator::gen_key(model, k),
         Overlay::None => on_screen_key(model, k),
     }
 }
@@ -2508,6 +2542,30 @@ fn open_app_by_name(model: &mut Model, name: &str) -> Vec<Cmd> {
     open_app(model, focus)
 }
 
+/// `:gen <app>` and the picker: as `:app` finds an app (the loaded result
+/// or the labels), then the generator for it.
+fn gen_by_name(model: &mut Model, name: &str) -> Vec<Cmd> {
+    let keys = model.traffic.keys.clone();
+    let app = pce::traffic::parse_app(name);
+    let loaded = model.traffic.loaded_apps();
+    let labelled = model
+        .index()
+        .map(|idx| pce::traffic::app_labels(&app, &keys, idx));
+    if !loaded.iter().any(|a| a == name) && !matches!(labelled, Some(Ok(_))) {
+        let near = pce::traffic::closest(name, &loaded, 3);
+        model.status = StatusLine::warn(match (near.is_empty(), labelled) {
+            (false, _) => format!(
+                "unknown app {name:?}; closest: {}; nothing sent",
+                near.join(", ")
+            ),
+            (true, Some(Err(e))) => format!("{e}; nothing sent"),
+            (true, _) => format!("unknown app {name:?}; nothing sent"),
+        });
+        return Vec::new();
+    }
+    generator::open_gen(model, app, false)
+}
+
 /// Opens the overlay for `focus`. The traffic panels come from the loaded
 /// result (no request). The workloads come from the Workloads screen when
 /// it holds every workload; the rulesets from the Policy screen when it is
@@ -2635,6 +2693,10 @@ fn app_overlay_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         KeyCode::Enter => return app_enter(model),
         KeyCode::Char('w') => return app_rule_key(model),
         KeyCode::Char('r') => app_reload_key(model),
+        KeyCode::Char('G') => {
+            let app = v.focus.app.clone();
+            return generator::open_gen(model, app, true);
+        }
         _ => {}
     }
     Vec::new()
@@ -3599,22 +3661,36 @@ fn batch_for_session(model: &Model, batch: &pce::write::Batch) -> bool {
             .is_some_and(|o| o.profile == p.name && o.host == p.host && o.org_id == p.org_id)
 }
 
-/// Whether a planned batch may open its confirm: only over the screen it
-/// was planned from (nothing else open).
+/// Whether a planned batch may open its confirm: only over the generator
+/// that planned it (still open, still planning).
 fn batch_lands(model: &Model) -> bool {
-    model.overlay == Overlay::None
+    model.overlay == Overlay::Generator && model.gen_view.as_ref().is_some_and(|v| v.planning)
 }
 
-/// A batch could not be planned: nothing was sent.
-fn batch_plan_failed(model: &mut Model, e: &str) {
-    fail(model, "plan", e, false);
+/// A batch could not be planned: nothing was sent; the generator that
+/// planned it (still open) keeps its state and shows why.
+fn batch_plan_failed(model: &mut Model, e: &str, planned_here: bool) {
+    match model.gen_view.as_mut() {
+        Some(v) if planned_here => {
+            v.error = Some(e.to_string());
+            model.status = StatusLine::error(format!("plan: {e}"));
+        }
+        _ => fail(model, "plan", e, false),
+    }
 }
 
-/// The batch confirm or its report is done: back to the screen. What it
-/// reopens may need to load (none here).
+/// The batch confirm or its report is done: back to the generator (the
+/// drafts it reads load again after a write: one request, counted), else
+/// to the screen.
 fn batch_closed(model: &mut Model) -> Vec<Cmd> {
-    model.overlay = Overlay::None;
-    Vec::new()
+    if model.gen_view.is_none() {
+        model.overlay = Overlay::None;
+        return Vec::new();
+    }
+    model.overlay = Overlay::Generator;
+    let cmds = generator::ensure_drafts(model);
+    generator::regen(model);
+    cmds
 }
 
 /// A written step whose audit entry could not be written (why).
@@ -5028,6 +5104,11 @@ pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
         Command::App(Some(name)) => open_app_by_name(model, &name),
         Command::App(None) => {
             open_app_picker(model, AppPickerPurpose::Overlay, "");
+            Vec::new()
+        }
+        Command::Gen(Some(name)) => gen_by_name(model, &name),
+        Command::Gen(None) => {
+            open_app_picker(model, AppPickerPurpose::Generator, "");
             Vec::new()
         }
         Command::Profile(name) => {
@@ -16867,10 +16948,28 @@ mod batch_tests {
         ]
     }
 
+    /// Writes on, the draft rulesets loaded, the generator open for
+    /// shop/prod and planning.
     fn armed() -> Model {
-        let mut m = model_with_flows();
+        let mut m = crate::tui::test_support::with_policy(model_with_flows());
         m.writes = crate::tui::model::WritesState::on();
         m.writes.in_flight = true; // the plan is on its way
+        let focus = pce::traffic::Focus::new(
+            pce::traffic::parse_app("shop/prod"),
+            vec!["app".into(), "env".into()],
+        );
+        let mut v = crate::tui::gen_view::GenView::new(focus, "24h".into(), 1);
+        v.planning = true;
+        m.gen_view = Some(v);
+        m.overlay = Overlay::Generator;
+        m
+    }
+
+    /// `m` after its plan landed and `y` sent it: the confirm closed.
+    fn sent(mut m: Model) -> Model {
+        update(&mut m, Msg::BatchPlanned(Ok(batch_plan())));
+        update(&mut m, key('y'));
+        assert!(m.batch_sending && m.overlay == Overlay::None);
         m
     }
 
@@ -16919,7 +17018,7 @@ mod batch_tests {
         let mut m = armed();
         update(&mut m, Msg::BatchPlanned(Ok(batch_plan())));
         assert_eq!(update(&mut m, key('n')), Vec::new());
-        assert_eq!(m.overlay, Overlay::None);
+        assert_eq!(m.overlay, Overlay::Generator, "back to the generator");
         assert_eq!(m.status.text, "cancelled, nothing sent");
     }
 
@@ -16955,7 +17054,7 @@ mod batch_tests {
 
     #[test]
     fn a_partly_failed_batch_reports_each_step_and_reloads_once() {
-        let mut m = with_draft_loaded(armed());
+        let mut m = sent(with_draft_loaded(armed()));
         // A known query: the draft is evaluated again without asking.
         m.traffic.data.as_mut().unwrap().hrefs =
             vec!["/orgs/5/traffic_flows/async_queries/q-1".into()];
@@ -17018,7 +17117,7 @@ mod batch_tests {
             ),
             Vec::new()
         );
-        assert_eq!(m.overlay, Overlay::None);
+        assert_eq!(m.overlay, Overlay::Generator, "back to the generator");
         on_command(&mut m, crate::tui::commands::Command::Batch);
         assert_eq!(
             m.overlay,
@@ -17107,7 +17206,7 @@ mod batch_tests {
         let mut m = armed();
         m.profile.name = "prod-b".into();
         update(&mut m, Msg::BatchPlanned(Ok(batch_plan())));
-        assert_eq!(m.overlay, Overlay::None);
+        assert_eq!(m.overlay, Overlay::Generator, "no confirm");
         assert_eq!(
             m.status.text,
             "requests discarded: planned on another profile, nothing sent"
@@ -17115,19 +17214,19 @@ mod batch_tests {
         let mut m = armed();
         m.switching = true;
         update(&mut m, Msg::BatchPlanned(Ok(batch_plan())));
-        assert_eq!(m.overlay, Overlay::None);
+        assert_eq!(m.overlay, Overlay::Generator, "no confirm");
         let mut m = armed();
         let mut b = batch_plan();
         b.origin = None;
         update(&mut m, Msg::BatchPlanned(Ok(b)));
-        assert_eq!(m.overlay, Overlay::None, "no origin: never confirmed");
+        assert_eq!(m.overlay, Overlay::Generator, "no origin: never confirmed");
     }
 
     #[test]
     fn a_clean_batch_keeps_its_report_for_batch_and_an_open_overlay_stays() {
-        let mut m = armed();
+        let mut m = sent(armed());
         done(&mut m, all_written());
-        assert_eq!(m.overlay, Overlay::None);
+        assert_eq!(m.overlay, Overlay::Generator, "the generator reopens");
         assert!(
             m.status.text.contains(":batch shows each step"),
             "{}",
@@ -17135,7 +17234,7 @@ mod batch_tests {
         );
         assert!(m.batch_report.is_some());
         // Help opened while the batch was sent is not closed by its answer.
-        let mut m = armed();
+        let mut m = sent(armed());
         m.overlay = Overlay::Help;
         done(
             &mut m,
@@ -17151,7 +17250,7 @@ mod batch_tests {
 
     #[test]
     fn a_step_written_but_not_audited_stops_and_says_so() {
-        let mut m = armed();
+        let mut m = sent(armed());
         let StepResult::Written(mut w) = written("/orgs/5/sec_policy/draft/ip_lists/77") else {
             unreachable!()
         };

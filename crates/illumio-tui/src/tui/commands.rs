@@ -16,6 +16,8 @@ pub enum Command {
     Focus(Option<String>),
     /// `:app <app>` opens the app overlay; `:app` alone opens the picker.
     App(Option<String>),
+    /// `:gen <app>` opens the policy generator; `:gen` alone opens the picker.
+    Gen(Option<String>),
     Profile(String),
     /// `:writes on` / `:writes off`; bare `:writes` shows the state.
     Writes(Option<bool>),
@@ -69,6 +71,7 @@ pub fn parse(input: &str) -> Result<Command, String> {
         ),
         "focus" => Ok(Command::Focus((!arg.is_empty()).then(|| arg.to_string()))),
         "app" => Ok(Command::App((!arg.is_empty()).then(|| arg.to_string()))),
+        "gen" => Ok(Command::Gen((!arg.is_empty()).then(|| arg.to_string()))),
         "window" => with_arg(Command::Window, "window <duration>  (e.g. 1h, 24h, 7d)"),
         "profile" => with_arg(Command::Profile, "profile <name>"),
         "writes" => match arg {
@@ -105,6 +108,11 @@ mod tests {
     #[test]
     fn parses_every_documented_command() {
         assert_eq!(parse("app").unwrap(), Command::App(None));
+        assert_eq!(parse("gen").unwrap(), Command::Gen(None));
+        assert_eq!(
+            parse("gen shop/prod").unwrap(),
+            Command::Gen(Some("shop/prod".into()))
+        );
         assert_eq!(
             parse("app shop/prod").unwrap(),
             Command::App(Some("shop/prod".into()))

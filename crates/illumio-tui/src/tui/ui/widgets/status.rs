@@ -14,6 +14,8 @@ const STATUS_ROOM: usize = 40;
 
 /// The app overlay's keys: it takes every key, so the screen's do not apply.
 const APP_HINTS: &str = " │ Tab panel  X dir  Enter open  w rule  r reload  Esc back ";
+/// The generator's keys, for the same reason.
+const GEN_HINTS: &str = " │ ←/→ stop  </> row  R pick  r re-query  Esc back ";
 
 pub fn render(model: &Model, f: &mut Frame, area: Rect) {
     let t = &model.theme;
@@ -25,8 +27,10 @@ pub fn render(model: &Model, f: &mut Frame, area: Rect) {
     let base = screen_hint(model.screen, model.writes.enabled);
     let more = screen_hint_more(model.screen, model.traffic.view);
     let width = usize::from(area.width);
-    let app = model.overlay == Overlay::App;
-    let mut hints = if app {
+    let app = matches!(model.overlay, Overlay::App | Overlay::Generator);
+    let mut hints = if model.overlay == Overlay::Generator {
+        GEN_HINTS.to_string()
+    } else if app {
         APP_HINTS.to_string()
     } else {
         format!(" {base}  : cmd  ? help ")

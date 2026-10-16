@@ -9,6 +9,8 @@ pub enum AppPickerPurpose {
     Focus,
     /// `A` / `:app`: open the app overlay for it.
     Overlay,
+    /// `:gen`: open the policy generator for it.
+    Generator,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

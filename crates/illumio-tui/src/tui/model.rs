@@ -191,6 +191,8 @@ pub enum Overlay {
     AppPicker(AppPicker),
     /// `A` / `:app`: the app overlay; its state is `Model::app_view`.
     App,
+    /// `G` / `:gen`: the policy generator; its state is `Model::gen_view`.
+    Generator,
     /// `f` on the Labels tab: the label keys it shows.
     LabelKeys(KeyPicker),
     /// The selected policy rule in full.
@@ -243,7 +245,8 @@ impl PartialEq for Overlay {
             (Overlay::None, Overlay::None)
             | (Overlay::Help, Overlay::Help)
             | (Overlay::Pending, Overlay::Pending)
-            | (Overlay::App, Overlay::App) => true,
+            | (Overlay::App, Overlay::App)
+            | (Overlay::Generator, Overlay::Generator) => true,
             (Overlay::Prompt { input: a }, Overlay::Prompt { input: b })
             | (Overlay::Error(a), Overlay::Error(b)) => a == b,
             (Overlay::GroupKeys(a), Overlay::GroupKeys(b))
@@ -346,6 +349,9 @@ pub enum PendingAction {
     },
     /// `r` in the app overlay: the workloads and the rulesets again, past the cache.
     ReloadApp,
+    /// `r` in the generator on incomplete data, past a cost threshold: the
+    /// focused query for its app; `y` and `n` go back to the generator.
+    GenRequery(TrafficFilter, pce::traffic::Focus),
 }
 
 #[derive(Debug)]
@@ -4665,6 +4671,13 @@ pub struct Model {
     pub form_from_app: bool,
     /// The last app overlay's sequence number: answers of older ones are dropped.
     pub app_seq: u64,
+    /// The generator's state while it is open (and after, until the next
+    /// `G` for another app: reopening the same app keeps it).
+    pub gen_view: Option<crate::tui::gen_view::GenView>,
+    /// The generator was opened from the app overlay: `Esc` returns there.
+    pub gen_from_app: bool,
+    /// The last generator's sequence number.
+    pub gen_seq: u64,
     pub connection: Connection,
     pub stats: StatsSnapshot,
     pub size: (u16, u16),
@@ -4738,6 +4751,9 @@ impl Model {
             app_view: None,
             form_from_app: false,
             app_seq: 0,
+            gen_view: None,
+            gen_from_app: false,
+            gen_seq: 0,
             connection: Connection::Connecting,
             stats: StatsSnapshot { calls: 0, bytes: 0 },
             size,
@@ -4890,6 +4906,8 @@ impl Model {
         self.events = EventsState::new(min);
         self.app_view = None;
         self.form_from_app = false;
+        self.gen_view = None;
+        self.gen_from_app = false;
         self.stats = StatsSnapshot { calls: 0, bytes: 0 };
         self.busy = 0;
         self.overlay = Overlay::None;
