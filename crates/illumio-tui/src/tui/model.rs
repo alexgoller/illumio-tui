@@ -1685,6 +1685,18 @@ impl FocusResult {
     }
 }
 
+/// Why the loaded traffic may miss flows of an app (`complete_for`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Gap {
+    /// No result is loaded.
+    NoData,
+    /// The result used hit its cap; `focused`: it is the app's own focused
+    /// result, so only a larger cap or a narrower window helps.
+    Capped { cap: u32, focused: bool },
+    /// A supercluster region did not answer.
+    Region { focused: bool },
+}
+
 /// `1 query`, `2 queries` (shared with the CLI's meta line).
 pub use pce::traffic::queries_text;
 
@@ -2218,6 +2230,31 @@ impl TrafficState {
             (_, Some(u)) => u.truncated,
             _ => self.data.as_ref().is_some_and(|d| d.truncated),
         }
+    }
+
+    /// Whether `flows_for(focus)` holds every flow of `focus`: the result
+    /// actually used is neither truncated nor incomplete. Unlike
+    /// [`Self::partial_for`], a covering focused result that is itself
+    /// truncated is a gap, and so is a region that did not answer.
+    pub fn complete_for(&self, focus: &Focus) -> Result<(), Gap> {
+        let focused = self.focus_result.as_ref().is_some_and(|r| r.covers(focus));
+        let used = match (&self.unfocused, focused) {
+            (Some(u), false) => Some(u),
+            _ => self.data.as_ref(),
+        };
+        let Some(d) = used else {
+            return Err(Gap::NoData);
+        };
+        if d.truncated {
+            return Err(Gap::Capped {
+                cap: d.filter.max_results,
+                focused,
+            });
+        }
+        if d.incomplete {
+            return Err(Gap::Region { focused });
+        }
+        Ok(())
     }
 
     /// The loaded result's window, `(start, end)`: its range's end and the
@@ -4580,6 +4617,8 @@ pub struct Limits {
     pub tier_key: String,
     /// Label keys hidden from label text (columns, the `g` picker).
     pub ignore_keys: Vec<String>,
+    /// `generator.ruleset_name`: the name of a ruleset the generator creates.
+    pub ruleset_name: String,
 }
 
 impl Limits {
@@ -4594,6 +4633,7 @@ impl Limits {
             scope_keys: cfg.scope_keys.clone(),
             tier_key: cfg.tier_key.clone(),
             ignore_keys: cfg.ignore_keys.clone(),
+            ruleset_name: cfg.generator_ruleset_name.clone(),
         }
     }
 
@@ -4686,6 +4726,7 @@ impl Model {
                 scope_keys,
                 tier_key: crate::config::DEFAULT_TIER_KEY.into(),
                 ignore_keys: Vec::new(),
+                ruleset_name: pce::generate::DEFAULT_RULESET_NAME.into(),
             },
             screen: Screen::Traffic,
             overlay: Overlay::None,
@@ -4859,6 +4900,64 @@ impl Model {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn complete_for_judges_the_result_actually_used() {
+        use crate::tui::test_support::model_with_flows;
+        use pce::traffic::{FocusDirection, parse_app};
+        let shop = Focus::new(parse_app("shop/prod"), vec!["app".into(), "env".into()])
+            .with_direction(FocusDirection::In);
+        let mut m = model_with_flows();
+        assert_eq!(m.traffic.complete_for(&shop), Ok(()));
+        m.traffic.data.as_mut().unwrap().incomplete = true;
+        assert_eq!(
+            m.traffic.complete_for(&shop),
+            Err(Gap::Region { focused: false })
+        );
+        m.traffic.data.as_mut().unwrap().incomplete = false;
+        m.traffic.data.as_mut().unwrap().truncated = true;
+        assert_eq!(
+            m.traffic.complete_for(&shop),
+            Err(Gap::Capped {
+                cap: 1000,
+                focused: false
+            })
+        );
+        // A focused result for the app, itself truncated: partial_for
+        // calls it whole, complete_for does not.
+        let data = TrafficData {
+            flows: m.traffic.loaded_flows().to_vec(),
+            truncated: true,
+            incomplete: false,
+            elapsed: Duration::ZERO,
+            cache_hit: false,
+            fetched_at: Instant::now(),
+            filter: m.traffic.filter.clone(),
+            range: None,
+            hrefs: Vec::new(),
+            draft: None,
+        };
+        m.traffic.apply_focused(shop.clone(), 1, data);
+        assert!(!m.traffic.partial_for(&shop));
+        assert_eq!(
+            m.traffic.complete_for(&shop),
+            Err(Gap::Capped {
+                cap: 1000,
+                focused: true
+            })
+        );
+        // The out side is not covered by an `in` result: the unfocused one counts.
+        let out = shop.clone().with_direction(FocusDirection::Out);
+        assert_eq!(
+            m.traffic.complete_for(&out),
+            Err(Gap::Capped {
+                cap: 1000,
+                focused: false
+            })
+        );
+        let empty = crate::tui::test_support::model_fixture();
+        assert_eq!(empty.traffic.complete_for(&shop), Err(Gap::NoData));
+    }
 
     fn at(s: &str) -> jiff::Timestamp {
         s.parse().unwrap()
@@ -5377,6 +5476,7 @@ ignore_keys = ["os", "app"]
         .unwrap();
         let limits = Limits::from_config(&cfg);
         assert_eq!(limits.ignore_keys, vec!["os"], "app is a scope key");
+        assert_eq!(limits.ruleset_name, "RF-{app}-{env}");
         assert_eq!(limits.key_order().ignored(), vec!["os"]);
         let mut m = crate::tui::test_support::model_fixture();
         m.limits = limits;

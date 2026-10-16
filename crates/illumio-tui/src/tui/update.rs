@@ -5246,6 +5246,7 @@ mod tests {
                         scope_keys: vec!["site".into()],
                         tier_key: "tier".into(),
                         ignore_keys: Vec::new(),
+                        ruleset_name: "RF-{site}".into(),
                     },
                 ))),
             ),
@@ -8475,6 +8476,7 @@ mod tests {
                     scope_keys: vec!["site".into()],
                     tier_key: "tier".into(),
                     ignore_keys: vec!["os".into()],
+                    ruleset_name: "RF-{site}".into(),
                 },
             ))),
         );
@@ -8874,6 +8876,7 @@ mod tests {
                     scope_keys: vec!["app".into(), "env".into()],
                     tier_key: "role".into(),
                     ignore_keys: Vec::new(),
+                    ruleset_name: "RF-{app}-{env}".into(),
                 },
             ))),
         );
