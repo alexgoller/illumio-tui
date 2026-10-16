@@ -1099,10 +1099,14 @@ fn complete_field(model: &Model, editor: &mut impl Completing, forward: bool) {
 /// auto-refresh switched itself off); long or authentication errors also open
 /// the error overlay unless another overlay is in use.
 /// Lines of the pretty-printed event, the unit the detail overlay scrolls in.
-pub fn event_detail_lines(event: &pce::models::Event) -> usize {
-    serde_json::to_string_pretty(event)
-        .map(|s| s.lines().count())
-        .unwrap_or(0)
+pub fn event_detail_lines(model: &Model, event: &pce::models::Event, raw: bool) -> usize {
+    if raw {
+        serde_json::to_string_pretty(event)
+            .map(|s| s.lines().count())
+            .unwrap_or(0)
+    } else {
+        crate::tui::event_diff::detail_lines(event, &model.event_names()).len()
+    }
 }
 
 /// A query's answer as the loaded result (its range from the bounds).
@@ -1671,12 +1675,21 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             }
             Vec::new()
         }
-        Overlay::EventDetail { event, scroll } => {
+        Overlay::EventDetail { event, scroll, raw } => {
             // The renderer clamps to the last page; here only the top is a hard stop.
-            let last = event_detail_lines(&event).saturating_sub(1);
+            let last = event_detail_lines(model, &event, raw).saturating_sub(1);
             let next = match k.code {
                 KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => {
                     model.overlay = Overlay::None;
+                    return Vec::new();
+                }
+                // Diff ↔ raw JSON, from the top: the line counts differ.
+                KeyCode::Char('J') => {
+                    model.overlay = Overlay::EventDetail {
+                        event,
+                        scroll: 0,
+                        raw: !raw,
+                    };
                     return Vec::new();
                 }
                 KeyCode::Down | KeyCode::Char('j') => (scroll + 1).min(last),
@@ -1690,6 +1703,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             model.overlay = Overlay::EventDetail {
                 event,
                 scroll: next,
+                raw,
             };
             Vec::new()
         }
@@ -4368,6 +4382,7 @@ fn events_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     model.overlay = Overlay::EventDetail {
                         event: e.clone(),
                         scroll: 0,
+                        raw: false,
                     };
                 }
                 return Vec::new();
@@ -9278,7 +9293,7 @@ mod tests {
         assert!(update(&mut m, enter()).is_empty());
         assert!(matches!(m.overlay, Overlay::EventDetail { scroll: 0, .. }));
         // The detail scrolls line by line and stops at the top and the last line.
-        let total = event_detail_lines(m.events.table.selected_item().unwrap());
+        let total = event_detail_lines(&m, m.events.table.selected_item().unwrap(), false);
         assert!(total > 2, "{total}");
         assert!(update(&mut m, key('j')).is_empty());
         assert!(matches!(m.overlay, Overlay::EventDetail { scroll: 1, .. }));
@@ -9982,7 +9997,8 @@ mod tests {
     fn help_scrolls_to_its_last_line_and_reopens_at_the_top() {
         use crate::tui::ui::widgets::overlay::{HELP_LINES, help_last_scroll};
         let mut m = model_fixture(); // 80x24
-        assert_eq!(HELP_LINES.len(), 71);
+        assert_eq!(HELP_LINES.len(), 72);
+        assert!(HELP_LINES.iter().any(|(k, _)| *k == "Events   J"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  A"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  D"));
         assert!(
@@ -10014,7 +10030,7 @@ mod tests {
         );
         update(&mut m, key('?'));
         let last = help_last_scroll(24);
-        assert_eq!(last, 49, "71 lines, 22 rows inside the box");
+        assert_eq!(last, 50, "72 lines, 22 rows inside the box");
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app x / X"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app o"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app d"));

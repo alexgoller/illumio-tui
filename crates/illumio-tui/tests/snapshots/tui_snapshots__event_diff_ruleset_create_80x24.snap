@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+╭ rule_set.create ──────────────────────────────────────── J json · Esc closes ╮
+│  time     2026-10-10T07:41:00.000Z                                           │
+│  type     rule_set.create                                                    │
+│  severity info · success                                                     │
+│  actor    user:ops@example.com                                               │
+│  request  POST /api/v2/orgs/5/sec_policy/draft/rule_sets                     │
+│  from     192.0.2.10 (HTTP 201)                                              │
+│  change   create rule_set RS-shop-prod (3 fields)                            │
+│create rule_set RS-shop-prod                                                  │
+│+ description: Shop production                                                │
+│+ enabled: true                                                               │
+│+ name: RS-shop-prod                                                          │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯

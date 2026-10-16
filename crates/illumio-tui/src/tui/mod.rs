@@ -8,6 +8,7 @@ pub mod commands;
 pub mod complete;
 pub mod diff;
 pub mod edit;
+pub mod event_diff;
 pub mod export;
 pub mod filter;
 pub mod form;

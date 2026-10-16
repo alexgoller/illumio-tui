@@ -297,7 +297,14 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   on and the count (`enforcement selective · unlabeled (app, env, role) · 1 of 206`), and
   says the counts are partial when the list was truncated.
 - **Events**: severity-coloured audit events, `f` edit severity / type / window, `S` sort by
-  severity, `Enter` the event as JSON (`j` / `k` scroll a long one).
+  severity, `Enter` the event as a change diff (`j` / `k` scroll a long one): a header (time,
+  type, severity and status, actor, API request and source), then one block per resource
+  change. An update shows only the changed fields, `-` before in red and `+` after in green;
+  lists (providers, consumers, services, scopes, IP ranges, labels) are diffed by element, so
+  you see which item was added or removed. A create or delete lists the object's fields as all
+  `+` or all `-`. Label, label group, IP list, service and ruleset hrefs read as names from the
+  index already loaded (an unknown href stays an href); notifications (a failed login, a
+  refused request) are a short list. `J` toggles the raw JSON. No extra request.
 
 Auto-refresh (`a`) is opt-in per screen, has a 60 s minimum, shows a countdown in the panel
 title, and switches itself off after a failed refresh.
@@ -334,6 +341,7 @@ the API call and byte counters at all times.
     illumio-tui policy pending
     illumio-tui policy pending --diff --table
     illumio-tui events --since 1h --severity err
+    illumio-tui events --type sec_rule --diff
     illumio-tui traffic query --window 24h --src app=web --dst app=db --json
     illumio-tui traffic query --window 1h --group app,env
     illumio-tui traffic query --window 1h --blocked
@@ -377,7 +385,7 @@ or a line break, CRLF line ends, UTF-8 without BOM. The columns are the full set
 no `…` clipping, lists joined with `; ` where the table folds them (`3 hosts`, a label
 group's member count), plain numbers (`6472`, not `6.5K`), `true`/`false`, and an empty cell
 for nothing (`workloads` gives `heartbeat_age_secs` and every label, ignored keys too;
-`events` every resource change; `policy rules` adds each rule's `href`; `policy pending --diff`
+`events` every resource change, with `--diff` a `diff` column; `policy rules` adds each rule's `href`; `policy pending --diff`
 a `diff` column, one diff line per line of the cell). `traffic groups --by ...` and
 `traffic query --blocked` print one row per peer with `app`, `direction`, the peer and app host
 counts and their names. The meta line always goes to
@@ -734,6 +742,13 @@ gains `diff: [{sign, text}]`, only when `--diff` is given. Each kind's draft and
 list is read once, counted in `meta.api_calls`. The CLI does not fetch deny rules served
 through the fallback endpoint; such a ruleset shows them as "not compared". Label groups
 have no description to compare.
+
+`events --diff` prints each event's resource changes under its row, as the Events detail
+shows them (a `create` / `update` / `delete` title, then `+` / `-` lines). With `--json` each
+event gains `changes: [{change_type, resource_type, resource, href, fields}]`, each field
+`{field, before, after}` for a value or `{field, added, removed}` for a list, only when
+`--diff` is given. It sends no request beyond the events: names come from the event itself,
+other hrefs stay hrefs.
 
 ### Policy editing in the TUI
 

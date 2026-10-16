@@ -207,10 +207,12 @@ pub enum Overlay {
         active: usize,
         error: Option<String>,
     },
-    /// The selected audit event as pretty JSON; `scroll` is the first shown line.
+    /// The selected audit event as a change diff, or as pretty JSON when
+    /// `raw` (`J` toggles); `scroll` is the first shown line.
     EventDetail {
         event: Event,
         scroll: usize,
+        raw: bool,
     },
     /// Create or edit form for a label, IP list, service or workload.
     Form(Form),
@@ -315,12 +317,14 @@ impl PartialEq for Overlay {
                 Overlay::EventDetail {
                     event: a,
                     scroll: sa,
+                    raw: ra,
                 },
                 Overlay::EventDetail {
                     event: b,
                     scroll: sb,
+                    raw: rb,
                 },
-            ) => a.href == b.href && sa == sb,
+            ) => a.href == b.href && sa == sb && ra == rb,
             _ => false,
         }
     }
@@ -4857,6 +4861,16 @@ impl Model {
             tier_key: &self.limits.tier_key,
             rulesets: self.draft_rulesets(),
             group_keys: None,
+        }
+    }
+
+    /// What names hrefs in an event detail: the index and whichever
+    /// rulesets are loaded (draft and active share names). No request.
+    pub fn event_names(&self) -> crate::tui::event_diff::Names<'_> {
+        let loaded = self.policy.loaded_at.map(|_| self.policy.raw.as_slice());
+        crate::tui::event_diff::Names {
+            idx: self.index().map(|i| i.as_ref()),
+            rule_sets: self.draft_rulesets().or(loaded).unwrap_or(&[]),
         }
     }
 

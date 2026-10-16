@@ -2,6 +2,7 @@
 use crate::tui::app_picker::AppPicker;
 use crate::tui::diff::{ObjectDiff, Sign};
 use crate::tui::edit::EditIntent;
+use crate::tui::event_diff::{DetailLine, detail_lines};
 use crate::tui::filter::{FIELD_NAMES, FilterEditor};
 use crate::tui::form::{Form, clip, visible_tail, wrap_rows};
 use crate::tui::model::{Model, Screen, TrafficView, rule_kind_name};
@@ -197,8 +198,9 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ("", "local, no request; c clears them and h, not /"),
     (
         "Events   f / Enter / S",
-        "filter · event as JSON · sort by severity",
+        "filter · event as a change diff · sort by severity",
     ),
+    ("Events   J", "in the detail: change diff ↔ raw JSON"),
     (
         "n / e / x (writes)",
         "new/edit/delete: Objects, IP lists, Workloads, Policy",
@@ -639,14 +641,17 @@ pub fn render_events_editor(
     f.render_widget(Paragraph::new(lines).block(block).style(t.base()), r);
 }
 
-/// Most lines of JSON shown for one event; the rest is cut. A smaller
-/// terminal shows fewer: the cut follows the box height.
+/// Most lines shown for one event; the rest scrolls. A smaller terminal
+/// shows fewer: the cut follows the box height.
 const EVENT_DETAIL_LINES: usize = 30;
 
+/// The event as its change diff (titles in the header style, `+`/`-` in
+/// the pending diff's colours), or as pretty JSON when `raw`.
 pub fn render_event_detail(
     model: &Model,
     event: &pce::models::Event,
     scroll: usize,
+    raw: bool,
     f: &mut Frame,
     area: Rect,
 ) {
@@ -654,24 +659,41 @@ pub fn render_event_detail(
     let r = centered(area, 100, EVENT_DETAIL_LINES as u16 + 2);
     f.render_widget(Clear, r);
     let shown = (r.height.saturating_sub(2) as usize).min(EVENT_DETAIL_LINES);
-    let json = serde_json::to_string_pretty(event).unwrap_or_default();
-    let total = json.lines().count();
+    let all: Vec<Line> = if raw {
+        serde_json::to_string_pretty(event)
+            .unwrap_or_default()
+            .lines()
+            .map(|l| Line::from(plain(l)))
+            .collect()
+    } else {
+        detail_lines(event, &model.event_names())
+            .into_iter()
+            .map(|l| match l {
+                DetailLine::Title(text) => Line::from(Span::styled(plain(&text), t.header_style())),
+                DetailLine::Line(d) => {
+                    let (sign, style) = match d.sign {
+                        Sign::Added => ("+ ", Style::new().fg(t.ok)),
+                        Sign::Removed => ("- ", Style::new().fg(t.bad)),
+                        Sign::Same => ("  ", t.base()),
+                    };
+                    Line::from(Span::styled(format!("{sign}{}", plain(&d.text)), style))
+                }
+            })
+            .collect()
+    };
+    let total = all.len();
     // The model only stops at the last line; the view keeps the box full.
     let first = scroll.min(total.saturating_sub(shown));
-    let lines: Vec<Line> = json
-        .lines()
-        .skip(first)
-        .take(shown)
-        .map(|l| Line::from(crate::tui::ui::screens::workloads::plain(l)))
-        .collect();
+    let lines: Vec<Line> = all.into_iter().skip(first).take(shown).collect();
+    let toggle = if raw { "J diff" } else { "J json" };
     let meta = if total > shown {
         let last = (first + shown).min(total);
         format!(
-            "lines {}-{last} of {total} · j/k scroll · Esc closes",
+            "lines {}-{last} of {total} · j/k scroll · {toggle} · Esc closes",
             first + 1
         )
     } else {
-        "Esc closes".to_string()
+        format!("{toggle} · Esc closes")
     };
     let title = event.event_type.as_deref().unwrap_or("event");
     f.render_widget(

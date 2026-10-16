@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+╭ sec_rule.update ──────────────────────────────────────── J json · Esc closes ╮
+│  time     2026-10-10T07:40:00.000Z                                           │
+│  type     sec_rule.update                                                    │
+│  severity info · success                                                     │
+│  actor    user:ops@example.com                                               │
+│  request  PUT /api/v2/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/7      │
+│  from     192.0.2.10 (HTTP 204)                                              │
+│  change   update sec_rule 7 in Shop-Prod (2 fields)                          │
+│update sec_rule 7 in Shop-Prod                                                │
+│- ingress_services 8080/tcp                                                   │
+│+ ingress_services PostgreSQL                                                 │
+│- providers role=web                                                          │
+│+ providers role=db                                                           │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯

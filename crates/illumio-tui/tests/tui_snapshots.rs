@@ -634,6 +634,7 @@ fn events_screen_80x24_and_detail_160x48() {
     m.overlay = Overlay::EventDetail {
         event: m.events.table.rows()[2].clone(),
         scroll: 0,
+        raw: true,
     };
     let out = render_to_string(&m, 160, 48);
     assert!(out.contains("\"event_type\": \"agent.tampering\""), "{out}");
@@ -655,6 +656,58 @@ fn events_screen_80x24_and_detail_160x48() {
         "last line (closing brace) visible: {end}"
     );
     insta::assert_snapshot!("events_detail_end_80x24", end);
+}
+
+#[test]
+fn event_detail_change_diffs_80x24() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use illumio_tui::tui::model::{Overlay, Screen};
+    use illumio_tui::tui::msg::Msg;
+    use illumio_tui::tui::test_support::{fixture_change_events, model_with_events};
+    use illumio_tui::tui::update::update;
+    let mut m = with_policy(model_with_events());
+    m.screen = Screen::Events;
+    let events = fixture_change_events();
+    let names = [
+        "event_diff_rule_update_80x24",
+        "event_diff_ruleset_create_80x24",
+        "event_diff_workload_labels_80x24",
+        "event_diff_rule_delete_80x24",
+        "event_diff_auth_failure_80x24",
+    ];
+    for (event, name) in events.iter().zip(names) {
+        m.overlay = Overlay::EventDetail {
+            event: event.clone(),
+            scroll: 0,
+            raw: false,
+        };
+        let out = render_to_string(&m, 80, 24);
+        assert!(out.contains("J json"), "{out}");
+        assert!(!out.contains("/orgs/5/labels/"), "label hrefs named: {out}");
+        insta::assert_snapshot!(name, out);
+    }
+    // J shows the raw JSON from the top; J again goes back to the diff.
+    m.overlay = Overlay::EventDetail {
+        event: events[0].clone(),
+        scroll: 3,
+        raw: false,
+    };
+    let j = || Msg::Key(KeyEvent::new(KeyCode::Char('J'), KeyModifiers::SHIFT));
+    update(&mut m, j());
+    assert!(matches!(
+        m.overlay,
+        Overlay::EventDetail {
+            raw: true,
+            scroll: 0,
+            ..
+        }
+    ));
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("\"event_type\": \"sec_rule.update\""), "{out}");
+    assert!(out.contains("J diff"), "{out}");
+    insta::assert_snapshot!("event_diff_raw_toggle_80x24", out);
+    update(&mut m, j());
+    assert!(matches!(m.overlay, Overlay::EventDetail { raw: false, .. }));
 }
 
 #[test]

@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: end
 ---
-╭ agent.tampering ───────────────── lines 4-25 of 25 · j/k scroll · Esc closes ╮
+╭ agent.tampering ──────── lines 4-25 of 25 · j/k scroll · J diff · Esc closes ╮
 │  "event_type": "agent.tampering",                                            │
 │  "severity": "err",                                                          │
 │  "status": "failure",                                                        │

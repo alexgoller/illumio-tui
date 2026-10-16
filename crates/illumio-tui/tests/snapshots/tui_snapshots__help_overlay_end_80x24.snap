@@ -2,8 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ Keys ───────────────────────────────── 50-71 of 71 · j/k scroll · Esc closes ╮
-│Filter   Ctrl-N Ctrl-P   complete the filter fields · cycle back              │
+╭ Keys ───────────────────────────────── 51-72 of 72 · j/k scroll · Esc closes ╮
 │w form   Ruleset         found by the destination's scope · Tab/Ctrl-N names  │
 │w form   Ctrl-A Ctrl-R   all labels · create the typed ruleset                │
 │Policy   d               toggle draft / active                                │
@@ -18,7 +17,8 @@ expression: out
 │Workloads t/T h H Enter  Traffic as src/dst · unhealthy · health sort · detail│
 │Workloads E m o u c      enforcement · managed · offline · unlabeled · clear  │
 │                         local, no request; c clears them and h, not /        │
-│Events   f / Enter / S   filter · event as JSON · sort by severity            │
+│Events   f / Enter / S   filter · event as a change diff · sort by severity   │
+│Events   J               in the detail: change diff ↔ raw JSON                │
 │n / e / x (writes)       new/edit/delete: Objects, IP lists, Workloads, Policy│
 │Pending  j/k Space Enter select · mark · diff of a pending entry              │
 │Pending  P               provision the marked entries, or all (writes)        │

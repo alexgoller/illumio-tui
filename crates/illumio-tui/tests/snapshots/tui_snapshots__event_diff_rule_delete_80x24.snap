@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+╭ sec_rule.delete ──────────────────────────────────────── J json · Esc closes ╮
+│  time     2026-10-10T07:43:00.000Z                                           │
+│  type     sec_rule.delete                                                    │
+│  severity info · success                                                     │
+│  actor    user:admin@example.com                                             │
+│  request  DELETE /api/v2/orgs/5/sec_policy/draft/rule_sets/101/sec_rules/12  │
+│  from     192.0.2.11 (HTTP 204)                                              │
+│  change   delete sec_rule 12 in Global-Infra (6 fields)                      │
+│delete sec_rule 12 in Global-Infra                                            │
+│- consumers iplist:Corp                                                       │
+│- consumers group:All prod envs                                               │
+│- enabled: true                                                               │
+│- ingress_services Web                                                        │
+│- network_type: brn                                                           │
+│- providers role=web                                                          │
+│- providers env=prod                                                          │
+│- rule_set: Global-Infra                                                      │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯

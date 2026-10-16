@@ -266,6 +266,13 @@ pub fn model_with_events() -> Model {
     m
 }
 
+/// The change-diff fixture events: a rule update, a ruleset create, a
+/// workload label change, a rule delete, an authorization failure.
+pub fn fixture_change_events() -> Vec<pce::models::Event> {
+    serde_json::from_str(include_str!("../../../../fixtures/events_changes.json"))
+        .expect("event changes fixture")
+}
+
 /// Renders the model into a `w`×`h` test terminal and returns the text.
 pub fn render_to_string(model: &Model, w: u16, h: u16) -> String {
     let mut term = Terminal::new(TestBackend::new(w, h)).expect("test terminal");

@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+╭ sec_rule.update ──────── lines 1-22 of 91 · j/k scroll · J diff · Esc closes ╮
+│{                                                                             │
+│  "href": "/orgs/5/events/c1",                                                │
+│  "timestamp": "2026-10-10T07:40:00.000Z",                                    │
+│  "event_type": "sec_rule.update",                                            │
+│  "severity": "info",                                                         │
+│  "status": "success",                                                        │
+│  "created_by": {                                                             │
+│    "user": {                                                                 │
+│      "href": "/users/1",                                                     │
+│      "username": "ops@example.com"                                           │
+│    }                                                                         │
+│  },                                                                          │
+│  "notifications": [],                                                        │
+│  "resource_changes": [                                                       │
+│    {                                                                         │
+│      "change_type": "update",                                                │
+│      "changes": {                                                            │
+│        "ingress_services": {                                                 │
+│          "created": [                                                        │
+│            {                                                                 │
+│              "href": "/orgs/5/sec_policy/draft/services/31"                  │
+│            }                                                                 │
+╰──────────────────────────────────────────────────────────────────────────────╯
