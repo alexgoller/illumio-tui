@@ -9,7 +9,7 @@ expression: out
 │  actor    user:ops@example.com                                               │
 │  request  POST /api/v2/orgs/5/sec_policy/draft/rule_sets                     │
 │  from     192.0.2.10 (HTTP 201)                                              │
-│  change   create rule_set RS-shop-prod (3 fields)                            │
+│  api key  k-1                                                                │
 │create rule_set RS-shop-prod                                                  │
 │+ description: Shop production                                                │
 │+ enabled: true                                                               │

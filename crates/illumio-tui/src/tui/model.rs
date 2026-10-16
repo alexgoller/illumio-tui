@@ -4871,6 +4871,7 @@ impl Model {
         crate::tui::event_diff::Names {
             idx: self.index().map(|i| i.as_ref()),
             rule_sets: self.draft_rulesets().or(loaded).unwrap_or(&[]),
+            local: Default::default(),
         }
     }
 

@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+╭ sec_rule.create ──────── lines 4-25 of 25 · j/k scroll · J json · Esc closes ╮
+│  actor    user:ops@example.com                                               │
+│  request  POST /api/v2/orgs/5/sec_policy/draft/rule_sets/100/sec_rules       │
+│  from     192.0.2.10 (HTTP 201)                                              │
+│  api key  k-1                                                                │
+│create sec_rule 21 in Shop-Prod                                               │
+│+ consumers: All Workloads                                                    │
+│+ consumers: iplist:Corp                                                      │
+│+ enabled: true                                                               │
+│+ ingress_services: Web                                                       │
+│+ ingress_services: 8443/tcp                                                  │
+│+ log_flow: false                                                             │
+│+ machine_auth: false                                                         │
+│+ network_type: 2                                                             │
+│+ providers: role=web                                                         │
+│+ providers: env=prod                                                         │
+│+ resolve_labels: consumers=workloads, providers=workloads                    │
+│+ rule_list: Shop-Prod                                                        │
+│+ sec_connect: false                                                          │
+│+ stateless: false                                                            │
+│+ type: allow                                                                 │
+│+ unscoped_consumers: false                                                   │
+│+ use_workload_subnets: none                                                  │
+╰──────────────────────────────────────────────────────────────────────────────╯

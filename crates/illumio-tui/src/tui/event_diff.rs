@@ -4,26 +4,32 @@
 //! ([`Names`]), never a request. The lines are [`DiffLine`]s, so the TUI
 //! colours them as the pending diff does and `events --diff` prints them
 //! as `policy pending --diff` does. A shape this does not read stays
-//! visible as its JSON, never an error.
+//! visible as its JSON, never an error. Names are today's: an href reads
+//! as what the index calls it now, not at the time of the event.
 use crate::tui::diff::{DiffLine, Sign};
 use pce::NameIndex;
 use pce::models::{Event, IpRange, Ref, RuleSet, ServicePort};
 use pce::write::IpRangeSpec;
 use serde::Serialize;
 use serde_json::{Map, Value};
+use std::collections::HashMap;
 
 /// What turns hrefs into names: the name index (labels, label groups, IP
-/// lists, services) and the loaded draft rulesets. Either may be missing;
-/// an href nothing names stays an href.
-#[derive(Clone, Copy, Default)]
+/// lists, services), the loaded rulesets, and the names the event itself
+/// carries (`local`, see [`Names::for_event`]). Any may be missing; an
+/// href nothing names stays an href.
+#[derive(Clone, Default)]
 pub struct Names<'a> {
     pub idx: Option<&'a NameIndex>,
     pub rule_sets: &'a [RuleSet],
+    /// Draft href → name, from `{href, name}` / `{href, key, value}` objects in the event.
+    pub local: HashMap<String, String>,
 }
 
 /// One changed field, as text: a value's `before` and `after` (either
 /// absent when it was or became unset), or a list's `added` and
-/// `removed` elements. `value` holds a change whose shape is not read.
+/// `removed` elements. `value` holds a change whose shape is not read,
+/// or a note (`(order changed)`, `(empty)`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct FieldChange {
     pub field: String,
@@ -37,6 +43,20 @@ pub struct FieldChange {
     pub removed: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
+}
+
+/// The note of a list that is empty on both sides (`null` → `[]`).
+const EMPTY: &str = "(empty)";
+
+impl FieldChange {
+    /// Nothing set, or only an empty list: a create or delete leaves it out.
+    fn is_empty(&self) -> bool {
+        self.before.is_none()
+            && self.after.is_none()
+            && self.added.is_empty()
+            && self.removed.is_empty()
+            && self.value.as_deref().is_none_or(|v| v == EMPTY)
+    }
 }
 
 /// One entry of `resource_changes`: a create, update or delete of one
@@ -77,30 +97,76 @@ fn org_of(event: &Event) -> Option<&str> {
     event.href.strip_prefix("/orgs/")?.split('/').next()
 }
 
-impl Names<'_> {
+/// `{href, name}` or `{href, key, value}` anywhere under `v`, into `out`.
+fn learn(v: &Value, out: &mut HashMap<String, String>) {
+    match v {
+        Value::Array(items) => items.iter().for_each(|i| learn(i, out)),
+        Value::Object(o) => {
+            let s = |k: &str| o.get(k).and_then(Value::as_str).filter(|v| !v.is_empty());
+            let name = match (s("key"), s("value")) {
+                (Some(k), Some(v)) => Some(format!("{k}={v}")),
+                _ => s("name").map(str::to_string),
+            };
+            if let (Some(h), Some(n)) = (s("href"), name) {
+                out.entry(draft(h)).or_insert(n);
+            }
+            o.values().for_each(|i| learn(i, out));
+        }
+        _ => {}
+    }
+}
+
+impl<'a> Names<'a> {
+    /// These names plus the ones `event`'s resources carry (a sec_rule's
+    /// `rule_set {href, name}` names its `rule_list` href). Loaded names win.
+    pub fn for_event(&self, event: &Event) -> Names<'a> {
+        let mut local = self.local.clone();
+        for c in &event.resource_changes {
+            if let Some(r) = c.get("resource") {
+                learn(r, &mut local);
+            }
+        }
+        Names {
+            idx: self.idx,
+            rule_sets: self.rule_sets,
+            local,
+        }
+    }
+
+    /// The bare name of `href` (`app=shop`, `Prod`, `Corp`), if anything knows it.
+    fn base_name(&self, href: &str) -> Option<String> {
+        let kind = Ref::new(href).object_type().to_string();
+        let idx = self.idx.and_then(|idx| match kind.as_str() {
+            "labels" => idx.label(href).map(|l| l.display()),
+            "label_groups" => idx.label_group_name(href).map(str::to_string),
+            "ip_lists" => idx.ip_list_name(href).map(str::to_string),
+            "services" => idx.service_name(href).map(str::to_string),
+            _ => None,
+        });
+        let key = draft(href);
+        idx.or_else(|| {
+            (kind == "rule_sets")
+                .then(|| self.rule_sets.iter().find(|rs| draft(&rs.href) == key))
+                .flatten()
+                .map(|rs| rs.name.clone())
+        })
+        .or_else(|| self.local.get(&key).cloned())
+    }
+
     /// A name for `href` by its object type: `app=shop`, `group:Prod`,
     /// `iplist:Corp`, a service or ruleset name; the href when unknown.
     fn href(&self, href: &str) -> String {
-        let r = Ref::new(href);
-        let named = match (r.object_type(), self.idx) {
-            ("labels", Some(idx)) => idx.label(href).map(|l| l.display()),
-            ("label_groups", Some(idx)) => idx.label_group_name(href).map(|n| format!("group:{n}")),
-            ("ip_lists", Some(idx)) => idx.ip_list_name(href).map(|n| format!("iplist:{n}")),
-            ("services", Some(idx)) => idx.service_name(href).map(str::to_string),
-            ("rule_sets", _) => {
-                let key = draft(href);
-                self.rule_sets
-                    .iter()
-                    .find(|rs| draft(&rs.href) == key)
-                    .map(|rs| rs.name.clone())
-            }
-            _ => None,
+        let prefix = match Ref::new(href).object_type() {
+            "label_groups" => "group:",
+            "ip_lists" => "iplist:",
+            _ => "",
         };
-        named.unwrap_or_else(|| href.to_string())
+        self.base_name(href)
+            .map_or_else(|| href.to_string(), |n| format!("{prefix}{n}"))
     }
 
     /// One value as text. An object reads as the thing it names (an actor,
-    /// a port, a range, an href); anything else as compact JSON.
+    /// a port, a range, an href), any other as `key=value, …`.
     fn text(&self, v: &Value) -> String {
         match v {
             Value::Null => "null".into(),
@@ -112,17 +178,36 @@ impl Names<'_> {
                 .map(|i| self.text(i))
                 .collect::<Vec<_>>()
                 .join(", "),
-            Value::Object(o) => self.object(o).unwrap_or_else(|| v.to_string()),
+            Value::Object(o) => self.object(o).unwrap_or_else(|| self.pairs(o)),
         }
     }
 
+    /// `consumers=workloads, providers=workloads`; a list of more than one
+    /// in brackets, `{}` when empty.
+    fn pairs(&self, o: &Map<String, Value>) -> String {
+        if o.is_empty() {
+            return "{}".into();
+        }
+        o.iter()
+            .map(|(k, v)| match v {
+                Value::Array(a) if a.len() > 1 => format!("{k}=[{}]", self.text(v)),
+                _ => format!("{k}={}", self.text(v)),
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
     fn object(&self, o: &Map<String, Value>) -> Option<String> {
-        let s = |k: &str| o.get(k).and_then(Value::as_str);
+        let s = |k: &str| o.get(k).and_then(Value::as_str).filter(|v| !v.is_empty());
         let excl = o.get("exclusion").and_then(Value::as_bool) == Some(true);
         let not = |t: String| if excl { format!("!{t}") } else { t };
         // An actor: `{"label": {...}}`, `{"ip_list": {...}}`, `{"actors": "ams"}`.
         if let Some(a) = s("actors") {
-            return Some(if a == "ams" { "all".into() } else { a.into() });
+            return Some(if a == "ams" {
+                "All Workloads".into()
+            } else {
+                a.into()
+            });
         }
         for (key, prefix) in [
             ("label", ""),
@@ -140,20 +225,19 @@ impl Names<'_> {
                         .and_then(Value::as_str)
                         .filter(|v| !v.is_empty())
                 };
+                let href = is("href");
                 // The name the event carries wins over the index.
                 let own = match (is("key"), is("value")) {
                     (Some(k), Some(v)) => Some(format!("{k}={v}")),
                     _ => is("name").or_else(|| is("hostname")).map(str::to_string),
                 };
-                let named = match (own, is("href")) {
-                    (Some(t), _) => format!("{prefix}{t}"),
-                    (None, Some(h)) => match self.href(h) {
-                        n if n == h => format!("{prefix}{h}"),
-                        n => n,
-                    },
-                    (None, None) => continue,
+                let Some(name) = own
+                    .or_else(|| href.and_then(|h| self.base_name(h)))
+                    .or(href.map(str::to_string))
+                else {
+                    continue;
                 };
-                return Some(not(named));
+                return Some(not(format!("{prefix}{name}")));
             }
         }
         if let (Some(k), Some(v)) = (s("key"), s("value")) {
@@ -161,11 +245,27 @@ impl Names<'_> {
         }
         if o.contains_key("from_ip") {
             let r: IpRange = serde_json::from_value(Value::Object(o.clone())).ok()?;
-            return Some(IpRangeSpec::from_range(&r).display());
+            let mut t = IpRangeSpec::from_range(&r).display();
+            if let Some(d) = s("description") {
+                t.push_str(&format!(" ({d})"));
+            }
+            return Some(t);
         }
         if o.contains_key("proto") || o.contains_key("port") {
             let p: ServicePort = serde_json::from_value(Value::Object(o.clone())).ok()?;
-            return Some(p.display());
+            // `display` leaves out the ICMP type and code and a Windows service's names.
+            let mut t = p.display();
+            for (k, label) in [("icmp_type", "type"), ("icmp_code", "code")] {
+                if let Some(n) = o.get(k).filter(|v| !v.is_null()) {
+                    t.push_str(&format!(" {label} {n}"));
+                }
+            }
+            for k in ["service_name", "process_name"] {
+                if let Some(n) = s(k) {
+                    t.push_str(&format!(" {n}"));
+                }
+            }
+            return Some(t);
         }
         // A workload interface: `eth0 10.0.0.5`.
         if let Some(addr) = s("address") {
@@ -174,26 +274,25 @@ impl Names<'_> {
                 None => addr.to_string(),
             });
         }
-        if let Some(n) = s("hostname")
-            .or_else(|| s("name"))
-            .filter(|n| !n.is_empty())
-        {
+        if let Some(n) = s("hostname").or_else(|| s("name")) {
             return Some(n.to_string());
         }
         s("href").map(|h| self.href(h))
     }
 
     /// An element's identity across before and after: its href (or the
-    /// href of the object it wraps), else the value itself.
+    /// href of the object it wraps) with its exclusion flag, else the
+    /// value itself.
     fn identity(v: &Value) -> String {
         let href = |v: &Value| v.get("href").and_then(Value::as_str).map(str::to_string);
+        let excl = v.get("exclusion").and_then(Value::as_bool) == Some(true);
         href(v)
             .or_else(|| {
                 v.as_object()?
                     .values()
                     .find_map(|inner| inner.is_object().then(|| href(inner)).flatten())
             })
-            .map(|h| draft(&h))
+            .map(|h| format!("{}{}", if excl { "!" } else { "" }, draft(&h)))
             .unwrap_or_else(|| v.to_string())
     }
 }
@@ -242,6 +341,28 @@ fn resource_text(kind: &str, r: &Map<String, Value>, names: &Names) -> String {
     }
 }
 
+/// Elements whose text is on both sides (a lossy text, e.g. a range whose
+/// only change is not shown) read as their JSON instead, so a real change
+/// never looks like a no-op.
+fn distinct(
+    added: Vec<(String, &Value)>,
+    removed: Vec<(String, &Value)>,
+) -> (Vec<String>, Vec<String>) {
+    let clash = |t: &String, other: &[(String, &Value)]| other.iter().any(|(o, _)| o == t);
+    let fix = |side: &[(String, &Value)], other: &[(String, &Value)]| {
+        side.iter()
+            .map(|(t, v)| {
+                if clash(t, other) {
+                    v.to_string()
+                } else {
+                    t.clone()
+                }
+            })
+            .collect()
+    };
+    (fix(&added, &removed), fix(&removed, &added))
+}
+
 /// One `changes` entry: `{before, after}` (lists diffed by element) or
 /// `{created, deleted}` (a list's added and removed elements).
 fn field_change(field: &str, entry: &Value, names: &Names, org: Option<&str>) -> FieldChange {
@@ -254,10 +375,7 @@ fn field_change(field: &str, entry: &Value, names: &Names, org: Option<&str>) ->
         ("label_ids_array", Value::Number(n), Some(org)) => {
             names.href(&format!("/orgs/{org}/labels/{n}"))
         }
-        _ => names.text(v),
-    };
-    let list = |v: Option<&Value>| -> Vec<Value> {
-        v.and_then(Value::as_array).cloned().unwrap_or_default()
+        _ => element(field, v, names),
     };
     let Some(o) = entry.as_object() else {
         fc.value = Some(names.text(entry));
@@ -270,30 +388,45 @@ fn field_change(field: &str, entry: &Value, names: &Names, org: Option<&str>) ->
         fc.value = Some(entry.to_string());
         return fc;
     }
+    let empty = Vec::new();
+    let list = |k: &str| o.get(k).and_then(Value::as_array).unwrap_or(&empty);
     let before = o.get("before").filter(|v| !v.is_null());
     let after = o.get("after").filter(|v| !v.is_null());
-    if before.is_some_and(Value::is_array) || after.is_some_and(Value::is_array) {
-        let (b, a) = (list(before), list(after));
+    let listy = |v: Option<&Value>| v.is_none_or(Value::is_array);
+    let (mut added, mut removed) = (Vec::new(), Vec::new());
+    if (before.is_some() || after.is_some()) && listy(before) && listy(after) {
+        let (b, a) = (list("before"), list("after"));
         let ids = |l: &[Value]| l.iter().map(Names::identity).collect::<Vec<_>>();
-        let (bi, ai) = (ids(&b), ids(&a));
-        fc.added = a
-            .iter()
-            .zip(&ai)
-            .filter(|(_, id)| !bi.contains(id))
-            .map(|(v, _)| text(v))
-            .collect();
-        fc.removed = b
-            .iter()
-            .zip(&bi)
-            .filter(|(_, id)| !ai.contains(id))
-            .map(|(v, _)| text(v))
-            .collect();
+        let (bi, ai) = (ids(b), ids(a));
+        added.extend(
+            a.iter()
+                .zip(&ai)
+                .filter(|(_, id)| !bi.contains(id))
+                .map(|(v, _)| v),
+        );
+        removed.extend(
+            b.iter()
+                .zip(&bi)
+                .filter(|(_, id)| !ai.contains(id))
+                .map(|(v, _)| v),
+        );
+        if added.is_empty() && removed.is_empty() {
+            fc.value = Some(if bi != ai && !ai.is_empty() {
+                "(order changed)".into()
+            } else {
+                EMPTY.into()
+            });
+        }
     } else {
         fc.before = before.map(text);
         fc.after = after.map(text);
     }
-    fc.added.extend(list(o.get("created")).iter().map(text));
-    fc.removed.extend(list(o.get("deleted")).iter().map(text));
+    added.extend(list("created"));
+    removed.extend(list("deleted"));
+    (fc.added, fc.removed) = distinct(
+        added.into_iter().map(|v| (text(v), v)).collect(),
+        removed.into_iter().map(|v| (text(v), v)).collect(),
+    );
     fc
 }
 
@@ -325,16 +458,17 @@ fn resource_fields(r: &Map<String, Value>, created: bool, names: &Names) -> Vec<
         .collect()
 }
 
-/// A list element; an empty scope reads as `all` (every workload).
+/// A list element; an empty scope reads as `All` (every workload).
 fn element(field: &str, v: &Value, names: &Names) -> String {
     match (field, v) {
-        ("scopes", Value::Array(a)) if a.is_empty() => "all".into(),
+        ("scopes", Value::Array(a)) if a.is_empty() => "All".into(),
         _ => names.text(v),
     }
 }
 
 /// Every resource change of `event`, read.
 pub fn resource_changes(event: &Event, names: &Names) -> Vec<ResourceChange> {
+    let names = &names.for_event(event);
     let org = org_of(event);
     event
         .resource_changes
@@ -357,7 +491,7 @@ pub fn resource_changes(event: &Event, names: &Names) -> Vec<ResourceChange> {
                 .and_then(|r| r.get("href"))
                 .and_then(Value::as_str)
                 .map(str::to_string);
-            let fields = match o.get("changes") {
+            let mut fields: Vec<FieldChange> = match o.get("changes") {
                 Some(Value::Object(ch)) if !ch.is_empty() => ch
                     .iter()
                     .map(|(k, v)| field_change(k, v, names, org))
@@ -371,6 +505,10 @@ pub fn resource_changes(event: &Event, names: &Names) -> Vec<ResourceChange> {
                 }
                 Some(_) => return unread(c),
             };
+            // A create or delete lists what the object holds: unset and empty fields say nothing.
+            if matches!(change_type.as_str(), "create" | "delete") {
+                fields.retain(|f| !f.is_empty());
+            }
             ResourceChange {
                 change_type,
                 resource_type: kind,
@@ -412,35 +550,27 @@ pub fn summary(changes: &[ResourceChange]) -> String {
     s
 }
 
-/// A field's lines: `-` before and `+` after, `+`/`-` per list element,
-/// `field: value` unchanged for a shape not read.
+/// A field's lines, each `field: value`: `-` before and `+` after, one
+/// `-`/`+` per list element, unsigned for a note or a shape not read.
 pub fn field_lines(fc: &FieldChange) -> Vec<DiffLine> {
-    let line = |sign, text: String| DiffLine { sign, text };
+    let line = |sign, v: &str| DiffLine {
+        sign,
+        text: format!("{}: {v}", fc.field),
+    };
     let mut out = Vec::new();
-    if let Some(b) = &fc.before {
-        out.push(line(Sign::Removed, format!("{}: {b}", fc.field)));
-    }
-    if let Some(a) = &fc.after {
-        out.push(line(Sign::Added, format!("{}: {a}", fc.field)));
-    }
-    for r in &fc.removed {
-        out.push(line(Sign::Removed, format!("{} {r}", fc.field)));
-    }
-    for a in &fc.added {
-        out.push(line(Sign::Added, format!("{} {a}", fc.field)));
-    }
-    if let Some(v) = &fc.value {
-        out.push(line(Sign::Same, format!("{}: {v}", fc.field)));
-    }
+    out.extend(fc.before.iter().map(|b| line(Sign::Removed, b)));
+    out.extend(fc.after.iter().map(|a| line(Sign::Added, a)));
+    out.extend(fc.removed.iter().map(|r| line(Sign::Removed, r)));
+    out.extend(fc.added.iter().map(|a| line(Sign::Added, a)));
+    out.extend(fc.value.iter().map(|v| line(Sign::Same, v)));
     if out.is_empty() {
-        // `{"before": null, "after": null}`, or empty lists: changed to unset.
-        out.push(line(Sign::Same, format!("{}: (unset)", fc.field)));
+        // `{"before": null, "after": null}`: unset on both sides.
+        out.push(line(Sign::Same, "(unset)"));
     }
     out
 }
 
-/// The diff lines of every resource change (no header), as `events
-/// --diff` prints them under each row.
+/// The diff lines of every resource change (no header).
 pub fn change_lines(changes: &[ResourceChange]) -> Vec<DetailLine> {
     let mut out = Vec::new();
     for c in changes {
@@ -483,9 +613,53 @@ fn notification_lines(n: &Value, names: &Names) -> Vec<DetailLine> {
     out
 }
 
-/// The whole detail: header, change blocks, notifications. An event with
-/// none of these to show adds its JSON, so nothing is hidden.
+fn action(event: &Event) -> Option<&Map<String, Value>> {
+    event.extra.get("action").and_then(Value::as_object)
+}
+
+/// A failed request's `action.errors`, as red `error  token: message` lines.
+fn error_lines(event: &Event, names: &Names) -> Vec<DetailLine> {
+    action(event)
+        .and_then(|a| a.get("errors"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|e| {
+            let msg = e.get("message").and_then(Value::as_str).unwrap_or("");
+            let text = match e.get("token").and_then(Value::as_str) {
+                Some(t) if !msg.is_empty() => format!("{t}: {msg}"),
+                Some(t) => t.to_string(),
+                None => names.text(e),
+            };
+            DetailLine::Line(DiffLine {
+                sign: Sign::Removed,
+                text: format!("error    {text}"),
+            })
+        })
+        .collect()
+}
+
+/// What happened, without the header: errors, the change blocks and the
+/// notifications; what `events --diff` prints under each row.
+pub fn body_lines(event: &Event, changes: &[ResourceChange], names: &Names) -> Vec<DetailLine> {
+    let mut out = error_lines(event, names);
+    out.extend(change_lines(changes));
+    if !event.notifications.is_empty() {
+        out.push(DetailLine::Title("notifications".into()));
+        out.extend(
+            event
+                .notifications
+                .iter()
+                .flat_map(|n| notification_lines(n, names)),
+        );
+    }
+    out
+}
+
+/// The whole detail: header, then [`body_lines`]. An event with nothing
+/// in its body adds its JSON, so nothing is hidden.
 pub fn detail_lines(event: &Event, names: &Names) -> Vec<DetailLine> {
+    let names = &names.for_event(event);
     let changes = resource_changes(event, names);
     let mut out = Vec::new();
     let mut head = |k: &str, v: String| {
@@ -506,8 +680,11 @@ pub fn detail_lines(event: &Event, names: &Names) -> Vec<DetailLine> {
         },
     );
     head("actor", event.actor());
-    let action = event.extra.get("action").and_then(Value::as_object);
-    let a = |k: &str| action.and_then(|a| a.get(k)).filter(|v| !v.is_null());
+    let a = |k: &str| {
+        action(event)
+            .and_then(|a| a.get(k))
+            .filter(|v| !v.is_null())
+    };
     // The status code goes with the source address: a long endpoint is cut at 80 columns.
     let code = a("http_status_code").map(|c| format!("HTTP {c}"));
     let ip = a("src_ip").and_then(Value::as_str);
@@ -524,39 +701,19 @@ pub fn detail_lines(event: &Event, names: &Names) -> Vec<DetailLine> {
             (None, None) => String::new(),
         },
     );
-    head("change", summary(&changes));
-    let errors: Vec<String> = a("errors")
-        .and_then(Value::as_array)
-        .map(|e| {
-            e.iter()
-                .map(|e| {
-                    let msg = e.get("message").and_then(Value::as_str).unwrap_or("");
-                    match e.get("token").and_then(Value::as_str) {
-                        Some(t) if !msg.is_empty() => format!("{t}: {msg}"),
-                        Some(t) => t.to_string(),
-                        None => names.text(e),
-                    }
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    for e in &errors {
-        out.push(DetailLine::Line(DiffLine {
-            sign: Sign::Removed,
-            text: format!("error    {e}"),
-        }));
+    // Which API key: often a shared service account's.
+    let key = a("info")
+        .and_then(|i| i.get("api_key_id"))
+        .and_then(Value::as_str);
+    head("api key", key.unwrap_or_default().to_string());
+    // One change has its title right below; the summary only adds for several.
+    if changes.len() > 1 {
+        head("changes", summary(&changes));
     }
-    out.extend(change_lines(&changes));
-    if !event.notifications.is_empty() {
-        out.push(DetailLine::Title("notifications".into()));
-        out.extend(
-            event
-                .notifications
-                .iter()
-                .flat_map(|n| notification_lines(n, names)),
-        );
-    }
-    if changes.is_empty() && event.notifications.is_empty() && errors.is_empty() {
+    let body = body_lines(event, &changes, names);
+    let bare = body.is_empty();
+    out.extend(body);
+    if bare {
         out.push(DetailLine::Title("event (no changes recorded)".into()));
         let json = serde_json::to_string_pretty(event).unwrap_or_default();
         out.extend(json.lines().map(|l| same(l.to_string())));
@@ -643,7 +800,7 @@ mod tests {
         let idx = fixture_index();
         let names = Names {
             idx: Some(&idx),
-            rule_sets: &[],
+            ..Names::default()
         };
         let e = sec_rule_update();
         let c = resource_changes(&e, &names);
@@ -654,12 +811,12 @@ mod tests {
             plain(&change_lines(&c)),
             [
                 "# update sec_rule 7 in Shop-Prod",
-                "+ consumers group:All prod envs",
-                "+ consumers all",
+                "+ consumers: group:All prod envs",
+                "+ consumers: All Workloads",
                 "- enabled: true",
                 "+ enabled: false",
-                "- providers role=web",
-                "+ providers role=db",
+                "- providers: role=web",
+                "+ providers: role=db",
             ]
         );
         let head = plain(&detail_lines(&e, &names));
@@ -689,7 +846,7 @@ mod tests {
         let c = resource_changes(&sec_rule_update(), &Names::default());
         let lines = plain(&change_lines(&c));
         assert!(
-            lines.contains(&"+ providers /orgs/5/labels/2".to_string()),
+            lines.contains(&"+ providers: /orgs/5/labels/2".to_string()),
             "{lines:?}"
         );
     }
@@ -699,7 +856,7 @@ mod tests {
         let idx = fixture_index();
         let names = Names {
             idx: Some(&idx),
-            rule_sets: &[],
+            ..Names::default()
         };
         let e = event(json!({
             "href": "/orgs/5/events/aa-2",
@@ -719,8 +876,8 @@ mod tests {
             [
                 "# delete rule_set Shop-Prod",
                 "- name: Shop-Prod",
-                "- scopes app=shop, env=prod",
-                "- scopes all",
+                "- scopes: app=shop, env=prod",
+                "- scopes: All",
             ]
         );
     }
@@ -730,7 +887,7 @@ mod tests {
         let idx = fixture_index();
         let names = Names {
             idx: Some(&idx),
-            rule_sets: &[],
+            ..Names::default()
         };
         let e = event(json!({
             "href": "/orgs/5/events/aa-3",
@@ -748,10 +905,10 @@ mod tests {
             plain(&change_lines(&resource_changes(&e, &names))),
             [
                 "# update workload web-01.example.com",
-                "- label_ids_array role=web",
-                "+ label_ids_array role=db",
-                "- labels role=web",
-                "+ labels role=db",
+                "- label_ids_array: role=web",
+                "+ label_ids_array: role=db",
+                "- labels: role=web",
+                "+ labels: role=db",
             ]
         );
     }
@@ -762,6 +919,7 @@ mod tests {
         let names = Names {
             idx: None,
             rule_sets: &sets,
+            ..Names::default()
         };
         let e = event(json!({
             "href": "/orgs/5/events/aa-4",
@@ -795,10 +953,10 @@ mod tests {
             lines,
             [
                 "# update service Web",
-                "+ ip_ranges 10.2.0.0/16",
-                "- service_ports 8000-8099/tcp",
-                "+ service_ports 8443/tcp",
-                "+ workload_interfaces eth0 192.0.2.5",
+                "+ ip_ranges: 10.2.0.0/16",
+                "- service_ports: 8000-8099/tcp",
+                "+ service_ports: 8443/tcp",
+                "+ workload_interfaces: eth0 192.0.2.5",
             ]
         );
     }
@@ -881,6 +1039,138 @@ mod tests {
                 .iter()
                 .any(|l| l.contains("\"event_type\": \"system.x\"")),
             "{lines:?}"
+        );
+    }
+
+    #[test]
+    fn create_leaves_out_empty_fields_and_update_names_reorders() {
+        let idx = fixture_index();
+        let names = Names {
+            idx: Some(&idx),
+            ..Names::default()
+        };
+        let created = event(json!({
+            "href": "/orgs/5/events/b-1",
+            "resource_changes": [{
+                "change_type": "create",
+                "changes": {
+                    "label_ids_array": {"after": [], "before": null},
+                    "server_roles": {"after": [], "before": null},
+                    "name": {"after": "web-02", "before": null},
+                    "network_type": {"after": 2, "before": null},
+                    "description": {"after": null, "before": null}
+                },
+                "resource": {"workload": {"href": "/orgs/5/workloads/w-2", "name": "web-02"}}
+            }]
+        }));
+        assert_eq!(
+            plain(&change_lines(&resource_changes(&created, &names))),
+            [
+                "# create workload web-02",
+                "+ name: web-02",
+                "+ network_type: 2"
+            ]
+        );
+        let updated = event(json!({
+            "href": "/orgs/5/events/b-2",
+            "resource_changes": [{
+                "change_type": "update",
+                "changes": {
+                    "labels": {"before": [{"href": "/orgs/5/labels/1"}, {"href": "/orgs/5/labels/3"}],
+                               "after": [{"href": "/orgs/5/labels/3"}, {"href": "/orgs/5/labels/1"}]},
+                    "server_roles": {"after": [], "before": null},
+                    "kind": {"before": "x", "after": ["y"]}
+                },
+                "resource": {"workload": {"href": "/orgs/5/workloads/w-2", "name": "web-02"}}
+            }]
+        }));
+        assert_eq!(
+            plain(&change_lines(&resource_changes(&updated, &names))),
+            [
+                "# update workload web-02",
+                "- kind: x",
+                "+ kind: y",
+                "  labels: (order changed)",
+                "  server_roles: (empty)",
+            ]
+        );
+    }
+
+    #[test]
+    fn exclusion_flips_and_lossy_texts_stay_visible() {
+        let idx = fixture_index();
+        let names = Names {
+            idx: Some(&idx),
+            ..Names::default()
+        };
+        let e = event(json!({
+            "href": "/orgs/5/events/b-3",
+            "resource_changes": [{
+                "change_type": "update",
+                "changes": {
+                    "providers": {"before": [{"label": {"href": "/orgs/5/labels/1"}}],
+                                  "after": [{"label": {"href": "/orgs/5/labels/1"}, "exclusion": true}]},
+                    "service_ports": {"deleted": [{"port": 445, "proto": 6, "process_name": "svchost.exe"}, {"proto": 1, "icmp_type": 8}],
+                                      "created": [{"port": 445, "proto": 6, "process_name": "lsass.exe"}, {"proto": 1, "icmp_type": 0}]},
+                    "ip_ranges": {"deleted": [{"from_ip": "10.0.0.0/8", "tag": "a"}],
+                                  "created": [{"from_ip": "10.0.0.0/8", "tag": "b"}]}
+                },
+                "resource": {"service": {"href": "/orgs/5/sec_policy/draft/services/31", "name": "PostgreSQL"}}
+            }]
+        }));
+        assert_eq!(
+            plain(&change_lines(&resource_changes(&e, &names))),
+            [
+                "# update service PostgreSQL",
+                "- ip_ranges: {\"from_ip\":\"10.0.0.0/8\",\"tag\":\"a\"}",
+                "+ ip_ranges: {\"from_ip\":\"10.0.0.0/8\",\"tag\":\"b\"}",
+                "- providers: role=web",
+                "+ providers: !role=web",
+                "- service_ports: 445/tcp svchost.exe",
+                "- service_ports: icmp type 8",
+                "+ service_ports: 445/tcp lsass.exe",
+                "+ service_ports: icmp type 0",
+            ]
+        );
+    }
+
+    #[test]
+    fn nested_objects_and_the_events_own_names_read_as_text() {
+        // No index and no rulesets loaded: the rule's ruleset name comes from the event.
+        let names = Names::default();
+        let e = event(json!({
+            "href": "/orgs/5/events/b-4",
+            "created_by": {"service_account": {"name": "ci-bot"}},
+            "resource_changes": [{
+                "change_type": "create",
+                "changes": {
+                    "resolve_labels": {"after": {"consumers": ["workloads"], "providers": ["workloads", "virtual_services"]}, "before": null},
+                    "rule_list": {"after": {"href": "/orgs/5/sec_policy/draft/rule_sets/100"}, "before": null}
+                },
+                "resource": {"sec_rule": {
+                    "href": "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/9",
+                    "rule_set": {"href": "/orgs/5/sec_policy/draft/rule_sets/100", "name": "Shop-Prod"}
+                }}
+            }],
+            "action": {"api_endpoint": "/api/v2/x", "api_method": "POST", "info": {"api_key_id": "k-9"}}
+        }));
+        let lines = plain(&detail_lines(&e, &names));
+        assert_eq!(
+            lines[lines.len() - 3..],
+            [
+                "# create sec_rule 9 in Shop-Prod",
+                "+ resolve_labels: consumers=workloads, providers=[workloads, virtual_services]",
+                "+ rule_list: Shop-Prod",
+            ]
+        );
+        assert!(
+            lines.contains(&"  actor    service_account:ci-bot".to_string()),
+            "{lines:?}"
+        );
+        assert!(lines.contains(&"  api key  k-9".to_string()), "{lines:?}");
+        assert!(
+            !lines.iter().any(|l| l.contains("changes ")),
+            "one change, no summary: {lines:?}"
         );
     }
 }

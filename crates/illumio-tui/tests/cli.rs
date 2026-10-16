@@ -1892,6 +1892,40 @@ async fn events_command_filters_and_renders() {
         .code(2);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn events_diff_reads_the_index_once_and_names_hrefs() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/events"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/events_changes.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(3)
+        .mount(&server)
+        .await;
+    // Only the two `--diff` runs read the four lists.
+    mount_objects_expecting(&server, Some(2)).await;
+    let plain = stdout_json(cmd(&server).args(["events"]).assert().success());
+    assert_eq!(plain["meta"]["api_calls"], 1, "plain events: no index");
+    assert!(plain["data"][0].get("changes").is_none());
+    let out = stdout_json(cmd(&server).args(["events", "--diff"]).assert().success());
+    assert_eq!(out["meta"]["api_calls"], 5, "events plus the four lists");
+    let fields = &out["data"][0]["changes"][0]["fields"];
+    assert_eq!(fields[1]["field"], "providers");
+    assert_eq!(fields[1]["added"], serde_json::json!(["role=db"]));
+    cmd(&server)
+        .args(["events", "--diff", "--table"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("    + labels: role=db").and(predicate::str::contains(
+                "        src_ip       198.51.100.7",
+            )),
+        );
+}
+
 /// The fixture workloads behind `--impact`, read `n` times (once per command
 /// that needs them); `total` makes the PCE report more than it returned.
 async fn mount_workloads(server: &MockServer, n: u64, total: Option<u64>) {

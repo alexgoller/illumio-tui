@@ -9,11 +9,11 @@ expression: out
 │  actor    user:admin@example.com                                             │
 │  request  PUT /api/v2/orgs/5/workloads/w-1                                   │
 │  from     192.0.2.11 (HTTP 204)                                              │
-│  change   update workload web-01.example.com (1 field)                       │
+│  api key  k-2                                                                │
 │update workload web-01.example.com                                            │
-│- labels role=web                                                             │
-│+ labels role=db                                                              │
-│+ labels loc=eu                                                               │
+│- labels: role=web                                                            │
+│+ labels: role=db                                                             │
+│+ labels: loc=eu                                                              │
 │                                                                              │
 │                                                                              │
 │                                                                              │

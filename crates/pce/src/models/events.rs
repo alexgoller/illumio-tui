@@ -50,7 +50,8 @@ fn change_resource(change: &Value) -> Option<String> {
 }
 
 impl Event {
-    /// `user:<username>`, `agent:<hostname>`, `system`, or `?`.
+    /// `user:<username>`, `agent:<hostname>`, `system`, `<kind>:<name>`
+    /// for another kind, or `?`.
     pub fn actor(&self) -> String {
         let Some(cb) = &self.created_by else {
             return "?".into();
@@ -75,10 +76,17 @@ impl Event {
         if cb.get("system").is_some() {
             return "system".into();
         }
-        cb.as_object()
-            .and_then(|o| o.keys().next())
-            .cloned()
-            .unwrap_or_else(|| "?".into())
+        // Another kind (`service_account`, …): `kind:name` when it names itself.
+        let Some((kind, v)) = cb.as_object().and_then(|o| o.iter().next()) else {
+            return "?".into();
+        };
+        match ["name", "username", "hostname"]
+            .iter()
+            .find_map(|k| v.get(*k).and_then(Value::as_str).filter(|n| !n.is_empty()))
+        {
+            Some(name) => format!("{kind}:{name}"),
+            None => kind.clone(),
+        }
     }
 
     /// `workload host-1.example`, `sec_policy 42`, or empty: the first
@@ -175,6 +183,17 @@ mod tests {
         assert_eq!(e[3].severity_rank(), 1);
         assert_eq!(e[0].severity_rank(), 0);
         assert!(e[0].extra.is_empty());
+    }
+
+    #[test]
+    fn actor_names_another_kind() {
+        let mut e = fixture().remove(0);
+        e.created_by = Some(serde_json::json!({"service_account": {"name": "ci-bot"}}));
+        assert_eq!(e.actor(), "service_account:ci-bot");
+        e.created_by = Some(serde_json::json!({"service_account": {"href": "/x"}}));
+        assert_eq!(e.actor(), "service_account");
+        e.created_by = Some(serde_json::json!({}));
+        assert_eq!(e.actor(), "?");
     }
 
     #[test]

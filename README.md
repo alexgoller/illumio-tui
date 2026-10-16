@@ -303,8 +303,9 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   lists (providers, consumers, services, scopes, IP ranges, labels) are diffed by element, so
   you see which item was added or removed. A create or delete lists the object's fields as all
   `+` or all `-`. Label, label group, IP list, service and ruleset hrefs read as names from the
-  index already loaded (an unknown href stays an href); notifications (a failed login, a
-  refused request) are a short list. `J` toggles the raw JSON. No extra request.
+  index already loaded or from the event itself (an unknown href stays an href; names are
+  today's); notifications (a failed login, a refused request) and a failed request's errors
+  are a short list. `J` toggles the raw JSON. No extra request.
 
 Auto-refresh (`a`) is opt-in per screen, has a 60 s minimum, shows a countdown in the panel
 title, and switches itself off after a failed refresh.
@@ -744,11 +745,15 @@ through the fallback endpoint; such a ruleset shows them as "not compared". Labe
 have no description to compare.
 
 `events --diff` prints each event's resource changes under its row, as the Events detail
-shows them (a `create` / `update` / `delete` title, then `+` / `-` lines). With `--json` each
-event gains `changes: [{change_type, resource_type, resource, href, fields}]`, each field
+shows them (a `create` / `update` / `delete` title, then `+` / `-` lines), and a failed
+request's errors and the notifications. With `--json` each event gains
+`changes: [{change_type, resource_type, resource, href, fields}]`, each field
 `{field, before, after}` for a value or `{field, added, removed}` for a list, only when
-`--diff` is given. It sends no request beyond the events: names come from the event itself,
-other hrefs stay hrefs.
+`--diff` is given; errors and notifications are in the event itself (`action.errors`,
+`notifications`). Like `policy pending --diff`, it reads the name index (labels, label groups,
+IP lists, services; cached, counted in `meta.api_calls`) to show names for hrefs; ruleset
+names come from the event. Plain `events` sends no extra request. Names are today's: after a
+rename, older events show the new name.
 
 ### Policy editing in the TUI
 

@@ -708,6 +708,50 @@ fn event_detail_change_diffs_80x24() {
     insta::assert_snapshot!("event_diff_raw_toggle_80x24", out);
     update(&mut m, j());
     assert!(matches!(m.overlay, Overlay::EventDetail { raw: false, .. }));
+    // A long create (a sec_rule as the PCE logs it) scrolls; the meta says where.
+    let create: pce::models::Event = serde_json::from_value(serde_json::json!({
+        "href": "/orgs/5/events/c9",
+        "timestamp": "2026-10-10T07:45:00.000Z",
+        "event_type": "sec_rule.create",
+        "severity": "info",
+        "status": "success",
+        "created_by": {"user": {"href": "/users/1", "username": "ops@example.com"}},
+        "resource_changes": [{
+            "change_type": "create",
+            "changes": {
+                "consumers": {"created": [{"actors": "ams"}, {"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/21"}}]},
+                "providers": {"created": [{"label": {"href": "/orgs/5/labels/1"}}, {"label": {"href": "/orgs/5/labels/4"}}]},
+                "ingress_services": {"created": [{"href": "/orgs/5/sec_policy/draft/services/32"}, {"port": 8443, "proto": 6}]},
+                "enabled": {"after": true, "before": null},
+                "log_flow": {"after": false, "before": null},
+                "machine_auth": {"after": false, "before": null},
+                "network_type": {"after": 2, "before": null},
+                "resolve_labels": {"after": {"consumers": ["workloads"], "providers": ["workloads"]}, "before": null},
+                "rule_list": {"after": {"href": "/orgs/5/sec_policy/draft/rule_sets/100"}, "before": null},
+                "sec_connect": {"after": false, "before": null},
+                "stateless": {"after": false, "before": null},
+                "type": {"after": "allow", "before": null},
+                "unscoped_consumers": {"after": false, "before": null},
+                "use_workload_subnets": {"after": "none", "before": null}
+            },
+            "resource": {"sec_rule": {
+                "href": "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/21",
+                "rule_set": {"href": "/orgs/5/sec_policy/draft/rule_sets/100", "name": "Shop-Prod"}
+            }}
+        }],
+        "action": {"api_endpoint": "/api/v2/orgs/5/sec_policy/draft/rule_sets/100/sec_rules", "api_method": "POST",
+                   "http_status_code": 201, "info": {"api_key_id": "k-1"}, "src_ip": "192.0.2.10"}
+    }))
+    .unwrap();
+    m.overlay = Overlay::EventDetail {
+        event: create,
+        scroll: 3,
+        raw: false,
+    };
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("lines 4-25 of 25"), "{out}");
+    assert!(out.contains("rule_list: Shop-Prod"), "{out}");
+    insta::assert_snapshot!("event_diff_long_scrolled_80x24", out);
 }
 
 #[test]

@@ -4,7 +4,7 @@ use super::context::{Context, cache_label};
 use super::error::CliError;
 use super::output::{TableRows, Window, join_list};
 use crate::tui::diff::Sign;
-use crate::tui::event_diff::{DetailLine, Names, ResourceChange, change_lines, resource_changes};
+use crate::tui::event_diff::{DetailLine, Names, ResourceChange, body_lines, resource_changes};
 use clap::Args;
 use pce::models::{Event, EventFilter};
 use pce::traffic::{format_timestamp, parse_window};
@@ -27,61 +27,107 @@ pub struct EventsArgs {
     /// Row cap sent to the PCE (default 500)
     #[arg(long)]
     pub max_results: Option<u32>,
-    /// Each event's resource changes as a diff (JSON: a `changes` array per
-    /// event). No extra request: hrefs the event does not name stay hrefs.
+    /// Each event's resource changes as a diff, with its errors and
+    /// notifications (JSON: a `changes` array per event). Reads the name
+    /// index (cached) to show names for hrefs.
     #[arg(long)]
     pub diff: bool,
 }
 
+const HEADERS: [&str; 6] = [
+    "timestamp",
+    "severity",
+    "type",
+    "actor",
+    "resource",
+    "status",
+];
+
+fn row(e: &Event) -> Vec<String> {
+    vec![
+        e.timestamp.clone().unwrap_or_default(),
+        e.severity.clone().unwrap_or_default(),
+        e.event_type.clone().unwrap_or_default(),
+        e.actor(),
+        e.resource(),
+        e.status.clone().unwrap_or_default(),
+    ]
+}
+
+/// Every resource change, not just the first.
+fn full_row(e: &Event) -> Vec<String> {
+    let mut r = row(e);
+    r[4] = join_list(e.resources());
+    r
+}
+
 impl TableRows for Vec<Event> {
     fn headers(&self) -> Vec<&'static str> {
-        vec![
-            "timestamp",
-            "severity",
-            "type",
-            "actor",
-            "resource",
-            "status",
-        ]
+        HEADERS.to_vec()
     }
     fn rows(&self) -> Vec<Vec<String>> {
-        self.iter()
-            .map(|e| {
-                vec![
-                    e.timestamp.clone().unwrap_or_default(),
-                    e.severity.clone().unwrap_or_default(),
-                    e.event_type.clone().unwrap_or_default(),
-                    e.actor(),
-                    e.resource(),
-                    e.status.clone().unwrap_or_default(),
-                ]
-            })
-            .collect()
+        self.iter().map(row).collect()
     }
-    /// Every resource change, not just the first.
     fn full_rows(&self) -> Vec<Vec<String>> {
-        self.iter()
-            .zip(self.rows())
-            .map(|(e, mut row)| {
-                row[4] = join_list(e.resources());
-                row
-            })
-            .collect()
+        self.iter().map(full_row).collect()
     }
 }
 
 /// One event; with `--diff` also its read resource changes (`changes` is
-/// left out of the JSON otherwise, so the shape without the flag is unchanged).
+/// left out of the JSON otherwise, so the shape without the flag is
+/// unchanged) and the lines printed under it.
 #[derive(Serialize)]
 struct EventRow {
     #[serde(flatten)]
     event: Event,
     #[serde(skip_serializing_if = "Option::is_none")]
     changes: Option<Vec<ResourceChange>>,
+    /// Errors, change blocks and notifications; the JSON has them in the event.
+    #[serde(skip)]
+    lines: Vec<DetailLine>,
+}
+
+impl EventRow {
+    /// `names` with `--diff`: the event is read into changes and lines.
+    fn new(event: Event, names: Option<&Names>) -> Self {
+        let Some(names) = names else {
+            return Self {
+                event,
+                changes: None,
+                lines: Vec::new(),
+            };
+        };
+        let names = names.for_event(&event);
+        let changes = resource_changes(&event, &names);
+        let lines = body_lines(&event, &changes, &names);
+        Self {
+            event,
+            changes: Some(changes),
+            lines,
+        }
+    }
+
+    /// The lines as text: a title, then `+`/`-` lines.
+    fn text(&self, indent: &str) -> Vec<String> {
+        self.lines
+            .iter()
+            .map(|l| match l {
+                DetailLine::Title(t) => format!("{indent}{t}"),
+                DetailLine::Line(d) => {
+                    let g = match d.sign {
+                        Sign::Added => "+",
+                        Sign::Removed => "-",
+                        Sign::Same => " ",
+                    };
+                    format!("{indent}  {g} {}", d.text)
+                }
+            })
+            .collect()
+    }
 }
 
 /// `events` as printed: JSON is the rows themselves; `diff` says whether
-/// `--diff` asked for the change lines (under each row, a CSV `diff` column).
+/// `--diff` asked for the lines (under each row, a CSV `diff` column).
 #[derive(Serialize)]
 #[serde(transparent)]
 struct EventsOut {
@@ -90,45 +136,16 @@ struct EventsOut {
     diff: bool,
 }
 
-impl EventsOut {
-    fn events(&self) -> Vec<Event> {
-        self.rows.iter().map(|r| r.event.clone()).collect()
-    }
-
-    /// The change lines of each row as text: a title, then `+`/`-` lines.
-    fn lines(&self, indent: &str) -> Vec<Vec<String>> {
-        self.rows
-            .iter()
-            .map(|r| {
-                change_lines(r.changes.as_deref().unwrap_or_default())
-                    .into_iter()
-                    .map(|l| match l {
-                        DetailLine::Title(t) => format!("{indent}{t}"),
-                        DetailLine::Line(d) => {
-                            let g = match d.sign {
-                                Sign::Added => "+",
-                                Sign::Removed => "-",
-                                Sign::Same => " ",
-                            };
-                            format!("{indent}  {g} {}", d.text)
-                        }
-                    })
-                    .collect()
-            })
-            .collect()
-    }
-}
-
 impl TableRows for EventsOut {
     fn headers(&self) -> Vec<&'static str> {
-        self.events().headers()
+        HEADERS.to_vec()
     }
     fn rows(&self) -> Vec<Vec<String>> {
-        self.events().rows()
+        self.rows.iter().map(|r| row(&r.event)).collect()
     }
     fn notes(&self) -> Vec<Vec<String>> {
         if self.diff {
-            self.lines("  ")
+            self.rows.iter().map(|r| r.text("  ")).collect()
         } else {
             Vec::new()
         }
@@ -142,13 +159,16 @@ impl TableRows for EventsOut {
     }
     /// With `--diff`, the lines one per line of the `diff` cell.
     fn full_rows(&self) -> Vec<Vec<String>> {
-        let mut rows = self.events().full_rows();
-        if self.diff {
-            for (row, lines) in rows.iter_mut().zip(self.lines("")) {
-                row.push(lines.join("\n"));
-            }
-        }
-        rows
+        self.rows
+            .iter()
+            .map(|r| {
+                let mut cells = full_row(&r.event);
+                if self.diff {
+                    cells.push(r.text("").join("\n"));
+                }
+                cells
+            })
+            .collect()
     }
 }
 
@@ -181,13 +201,18 @@ pub async fn run(ctx: &Context, args: &EventsArgs) -> Result<(), CliError> {
             })
         })
         .collect();
-    let names = Names::default();
+    // Names as `policy pending --diff` has them: the index, cached, only with `--diff`.
+    let index = match args.diff {
+        true => Some(ctx.pce.name_index(ctx.cache_mode).await?),
+        false => None,
+    };
+    let names = index.as_deref().map(|idx| Names {
+        idx: Some(idx),
+        ..Names::default()
+    });
     let rows = data
         .into_iter()
-        .map(|event| EventRow {
-            changes: args.diff.then(|| resource_changes(&event, &names)),
-            event,
-        })
+        .map(|event| EventRow::new(event, names.as_ref()))
         .collect();
     ctx.emit(
         &EventsOut {
@@ -239,10 +264,10 @@ mod tests {
         }))
         .unwrap();
         let out = |diff: bool| EventsOut {
-            rows: vec![EventRow {
-                changes: diff.then(|| resource_changes(&event, &Names::default())),
-                event: event.clone(),
-            }],
+            rows: vec![EventRow::new(
+                event.clone(),
+                diff.then(Names::default).as_ref(),
+            )],
             diff,
         };
         let plain = serde_json::to_value(out(false)).unwrap();
@@ -272,6 +297,32 @@ mod tests {
         assert_eq!(
             full.full_rows()[0].last().unwrap(),
             "update label app=store\n  - value: shop\n  + value: store"
+        );
+    }
+
+    #[test]
+    fn diff_shows_why_a_request_failed() {
+        let event: Event = serde_json::from_value(serde_json::json!({
+            "href": "/orgs/5/events/2",
+            "event_type": "sec_rule.create",
+            "status": "failure",
+            "resource_changes": [],
+            "notifications": [{"notification_type": "request.authorization_failed", "info": {"src_ip": "198.51.100.7"}}],
+            "action": {"api_method": "POST", "http_status_code": 406, "errors": [{"token": "invalid_rule", "message": "No such label"}]}
+        }))
+        .unwrap();
+        let out = EventsOut {
+            rows: vec![EventRow::new(event, Some(&Names::default()))],
+            diff: true,
+        };
+        assert_eq!(
+            out.notes(),
+            [[
+                "    - error    invalid_rule: No such label",
+                "  notifications",
+                "      request.authorization_failed",
+                "        src_ip       198.51.100.7",
+            ]]
         );
     }
 }
