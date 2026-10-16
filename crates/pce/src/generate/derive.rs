@@ -6,8 +6,8 @@
 use super::rows::{excluded, ip_list_name, row_key, side_of};
 use super::services::{Expr, express, flow_spec, fold_ports};
 use super::{
-    Coverage, GenActor, GenRow, GenRule, PeerKey, PeerKind, Proposal, RowKey, RuleAction, Side,
-    Stop, TargetScope,
+    Coverage, GenActor, GenRow, GenRule, PeerKey, PeerKind, Proposal, RowKey, RuleAction, SeenFlow,
+    Side, Stop, TargetScope,
 };
 use crate::models::RuleSet;
 use crate::resolve::{NameIndex, ResolvedLabel};
@@ -48,19 +48,13 @@ fn row_index(rows: &[GenRow]) -> BTreeMap<RowKey, usize> {
 /// The rules `rows` (checkboxes and overrides as they are) need at the
 /// slider's `global` stop, classified against `input.drafts`.
 pub fn propose(rows: &[GenRow], global: Stop, input: &GenInput) -> Proposal {
-    let (mut p, mut ids) = derive(rows, global, input);
+    let mut p = derive(rows, global, input);
     p.refresh(input.drafts, input.idx, input.ruleset_name, input.picked);
-    merge(&mut p, &mut ids, input.idx);
+    merge(&mut p, input.idx);
     for r in &mut p.rules {
         r.description = describe(r, rows, input);
     }
     p.refresh(input.drafts, input.idx, input.ruleset_name, input.picked);
-    for (r, ids) in p.rules.iter_mut().zip(&ids) {
-        let flows = ids.iter().map(|&i| &input.flows[i]);
-        (r.denied_flows, r.denied_by) =
-            super::dedupe::override_denied(flows, &p.targets[r.target], input.drafts, input.idx);
-    }
-    p.recount();
     p
 }
 
@@ -121,7 +115,7 @@ fn union_into(into: &mut Vec<GenActor>, from: &[GenActor]) {
 /// same actors on one side and on the other sides whose union means
 /// exactly both (see [`union_exact`]), become one: that union, the rows
 /// and the flows of both. Rules that exist or gain services stay apart.
-fn merge(p: &mut Proposal, ids: &mut Vec<Vec<usize>>, idx: &NameIndex) {
+fn merge(p: &mut Proposal, idx: &NameIndex) {
     let mut i = 0;
     while i < p.rules.len() {
         let mut j = i + 1;
@@ -145,7 +139,6 @@ fn merge(p: &mut Proposal, ids: &mut Vec<Vec<usize>>, idx: &NameIndex) {
                 continue;
             };
             let b = p.rules.remove(j);
-            let b_ids = ids.remove(j);
             let a = &mut p.rules[i];
             if providers {
                 union_into(&mut a.providers, &b.providers);
@@ -156,7 +149,9 @@ fn merge(p: &mut Proposal, ids: &mut Vec<Vec<usize>>, idx: &NameIndex) {
             a.rows.sort_unstable();
             a.rows.dedup();
             a.flows += b.flows;
-            ids[i].extend(b_ids);
+            for (f, n) in b.seen {
+                *a.seen.entry(f).or_default() += n;
+            }
             // Another rule may merge with the union now: look again.
             j = i + 1;
         }
@@ -194,8 +189,8 @@ struct Group {
     inline: BTreeSet<PortSpec>,
     objects: BTreeSet<String>,
     rows: BTreeSet<usize>,
-    /// Indexes into `GenInput::flows`.
-    flows: Vec<usize>,
+    flows: u64,
+    seen: BTreeMap<SeenFlow, u64>,
 }
 
 fn keys_of(a: &[GenActor]) -> Vec<String> {
@@ -414,8 +409,8 @@ fn description(from: &[String], to: &[String], services: &[String], window: &str
     cut
 }
 
-/// The rules before merging, each with the indexes of its flows.
-fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> (Proposal, Vec<Vec<usize>>) {
+/// The rules before merging.
+fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> Proposal {
     let focus = input.focus;
     let index = row_index(rows);
     let all_services = input.idx.all_services_href().map(str::to_string);
@@ -427,7 +422,7 @@ fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> (Proposal, Vec<Vec
     let mut groups: BTreeMap<(usize, Vec<String>, Vec<String>, bool), Group> = BTreeMap::new();
     let mut cov = Coverage::default();
     let in_force = |s: Side| s == Side::Inbound || input.outbound;
-    for (fi, f) in input.flows.iter().enumerate() {
+    for f in input.flows {
         if excluded(f) {
             if side_of(f, focus).is_some_and(in_force) {
                 cov.broadcast_multicast += 1;
@@ -482,7 +477,8 @@ fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> (Proposal, Vec<Vec
             inline: BTreeSet::new(),
             objects: BTreeSet::new(),
             rows: BTreeSet::new(),
-            flows: Vec::new(),
+            flows: 0,
+            seen: BTreeMap::new(),
         });
         match svc {
             Expr::Inline(p) => {
@@ -494,7 +490,8 @@ fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> (Proposal, Vec<Vec
             Expr::Unsupported(_) => {}
         }
         g.rows.insert(ri);
-        g.flows.push(fi);
+        g.flows += 1;
+        *g.seen.entry(SeenFlow::of(f)).or_default() += 1;
         cov.covered += 1;
     }
     cov.uncovered =
@@ -502,7 +499,6 @@ fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> (Proposal, Vec<Vec
     let mut groups: Vec<Group> = groups.into_values().collect();
     // The app's ruleset first, then by the first row behind the rule.
     groups.sort_by_key(|g| (g.target, g.rows.first().copied()));
-    let ids: Vec<Vec<usize>> = groups.iter().map(|g| g.flows.clone()).collect();
     let rules = groups
         .into_iter()
         .map(|g| {
@@ -523,20 +519,20 @@ fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> (Proposal, Vec<Vec
                 services,
                 rows: g.rows.into_iter().collect(),
                 action: RuleAction::Create,
-                flows: g.flows.len() as u64,
+                flows: g.flows,
                 denied_flows: 0,
                 denied_by: Vec::new(),
+                seen: g.seen,
             }
         })
         .collect();
-    let p = Proposal {
+    Proposal {
         scopes: ctx.scopes,
         targets: Vec::new(),
         ip_lists: ctx.ip_lists,
         rules,
         coverage: cov,
-    };
-    (p, ids)
+    }
 }
 
 #[cfg(test)]
@@ -928,6 +924,84 @@ mod tests {
         );
         assert_eq!(p.coverage.override_deny, 1);
         assert_eq!(p.coverage.covered, 6);
+    }
+
+    fn deny_22(json: serde_json::Value) -> Vec<RuleSet> {
+        let mut d = sets();
+        let deny = &mut d[0].deny_rules[1];
+        for (k, v) in json.as_object().unwrap() {
+            match k.as_str() {
+                "providers" => deny.providers = serde_json::from_value(v.clone()).unwrap(),
+                "consumers" => deny.consumers = serde_json::from_value(v.clone()).unwrap(),
+                _ => unreachable!(),
+            }
+        }
+        d
+    }
+
+    fn denied(p: &Proposal) -> u64 {
+        p.rules.iter().map(|r| r.denied_flows).sum()
+    }
+
+    #[test]
+    fn a_deny_that_cannot_be_evaluated_exactly_counts_as_matching() {
+        let mut f = rich_flows();
+        f.push(intra_on(22)); // web -> db
+        f.push(web_to_web(22));
+        // ams minus role=web: exactly, web -> db is not denied; fail safe, it is.
+        let excl = deny_22(serde_json::json!({"consumers": [{"actors": "ams"},
+            {"label": {"href": "/orgs/5/labels/1"}, "exclusion": true}]}));
+        let (_, p) = run_in(excl, &f, Stop::AppPorts, false, |_| {});
+        assert_eq!(denied(&p), 1);
+        assert_eq!(p.coverage.override_deny, 1);
+        // A provider label the index does not know: both 22 flows.
+        let unknown =
+            deny_22(serde_json::json!({"providers": [{"label": {"href": "/orgs/5/labels/999"}}]}));
+        let (_, p) = run_in(unknown, &f, Stop::AppPorts, false, |_| {});
+        assert_eq!(denied(&p), 2);
+        assert_eq!(p.coverage.override_deny, 2);
+    }
+
+    #[test]
+    fn override_denies_of_every_enabled_ruleset_whose_scope_holds_the_flow_count() {
+        let mut f = rich_flows();
+        f.push(intra_on(445));
+        let global = |enabled: bool| {
+            let mut d = sets();
+            d[1].enabled = enabled; // Global-Infra, scopes [[]]
+            d[1].deny_rules = serde_json::from_value(serde_json::json!([{
+                "href": "/orgs/5/sec_policy/draft/rule_sets/101/deny_rules/1", "enabled": true,
+                "providers": [{"actors": "ams"}], "consumers": [{"actors": "ams"}],
+                "ingress_services": [{"port": 445, "proto": 6}], "override": true
+            }]))
+            .unwrap();
+            d
+        };
+        let (_, p) = run_in(global(true), &f, Stop::AppPorts, false, |_| {});
+        let r = p.rules.iter().find(|r| r.denied_flows > 0).unwrap();
+        assert_eq!(
+            r.denied_by,
+            vec!["/orgs/5/sec_policy/draft/rule_sets/101/deny_rules/1".to_string()]
+        );
+        assert_eq!(p.coverage.override_deny, 1);
+        let (_, p) = run_in(global(false), &f, Stop::AppPorts, false, |_| {});
+        assert_eq!(denied(&p), 0, "a disabled ruleset denies nothing");
+    }
+
+    #[test]
+    fn refresh_checks_the_override_denies_again() {
+        let mut f = rich_flows();
+        f.push(intra_on(22));
+        let (_, mut p) = run(&f, Stop::AppPorts, false, |_| {});
+        assert_eq!(p.coverage.override_deny, 1);
+        let idx = rich_index();
+        let mut gone = sets();
+        gone[0].deny_rules.clear();
+        p.refresh(&gone, &idx, DEFAULT_RULESET_NAME, None);
+        assert_eq!((denied(&p), p.coverage.override_deny), (0, 0));
+        assert_eq!(p.coverage.covered, 6);
+        p.refresh(&sets(), &idx, DEFAULT_RULESET_NAME, None);
+        assert_eq!((denied(&p), p.coverage.override_deny), (1, 1));
     }
 
     #[test]

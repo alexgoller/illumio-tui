@@ -455,7 +455,7 @@ decisions and its warnings (`env mismatch`, `uses IP list Corp`, `needs an IP li
 IP lists it would create (`shop-prod peer 10.4.1.9`); `preview` the counts and the flow
 records covered or not, by reason (`unchecked`, `folded_ips`, `unsupported_proto`,
 `broadcast_multicast`, `no_target` when the ruleset is ambiguous or cannot be named,
-`override_deny` when an override deny rule of the ruleset blocks them anyway), and `blocker`
+`override_deny` when an override deny rule of any enabled draft ruleset whose scope holds them blocks them anyway; a deny it cannot evaluate exactly counts), and `blocker`
 when rules cannot be written as shown. Rules to create that differ in one side only merge
 when the union means exactly both (`role=web` and `role=db` providers become one rule). A
 disabled ruleset is never a target; in a ruleset scoped wider than the app the rules name

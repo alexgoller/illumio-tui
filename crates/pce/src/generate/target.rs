@@ -205,7 +205,9 @@ pub fn resolve(
     let keys: Vec<String> = scope.labels.iter().map(|l| l.key.clone()).collect();
     let name = render_ruleset_name(template, &keys, &scope.values);
     if let Some(rs) = drafts.iter().find(|rs| rs.name.eq_ignore_ascii_case(&name)) {
-        let how = if rs.enabled {
+        let how = if rs.update_type.as_deref() == Some("delete") {
+            "pending deletion (provision it first)"
+        } else if rs.enabled {
             "with another scope"
         } else {
             "disabled"
@@ -411,6 +413,22 @@ mod tests {
             resolve(&shop_scope(), &sets, &idx, DEFAULT_RULESET_NAME, None),
             Target::None(
                 "ruleset RF-shop-prod exists disabled: no ruleset for shop/prod to create".into()
+            )
+        );
+    }
+
+    #[test]
+    fn a_ruleset_pending_deletion_with_the_name_says_so() {
+        let idx = rich_index();
+        let mut sets = rule_sets();
+        sets[0].update_type = Some("delete".into());
+        sets[0].name = "RF-shop-prod".into();
+        assert_eq!(
+            resolve(&shop_scope(), &sets, &idx, DEFAULT_RULESET_NAME, None),
+            Target::None(
+                "ruleset RF-shop-prod exists pending deletion (provision it first): \
+                 no ruleset for shop/prod to create"
+                    .into()
             )
         );
     }

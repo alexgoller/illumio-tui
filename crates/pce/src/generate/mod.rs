@@ -26,7 +26,7 @@ use crate::write::{
     ActorKind, ActorRef, IpListDraft, PortSpec, RuleDraft, RuleSetDraft, ServiceRef,
 };
 use serde::Serialize;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// How coarse the rules are: the slider's four stops, in slider order.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
@@ -472,6 +472,42 @@ pub struct GenRule {
     /// this rule allows (`propose` finds them), and those deny rules.
     pub denied_flows: u64,
     pub denied_by: Vec<String>,
+    /// The flow records behind it as the override-deny check needs them
+    /// (ends and service), by count: `refresh` checks them again.
+    pub seen: BTreeMap<SeenFlow, u64>,
+}
+
+/// One end of a flow record as the override-deny check reads it.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SeenEnd {
+    pub workload: Option<String>,
+    /// Label hrefs.
+    pub labels: Vec<String>,
+    /// The IP lists Explorer reported, by name.
+    pub ip_lists: Vec<String>,
+}
+
+/// A flow record's ends and service, without its counters.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SeenFlow {
+    pub src: SeenEnd,
+    pub dst: SeenEnd,
+    pub spec: PortSpec,
+}
+
+impl SeenFlow {
+    pub fn of(f: &ResolvedFlow) -> Self {
+        let end = |e: &crate::traffic::ResolvedEndpoint| SeenEnd {
+            workload: e.workload_href.clone(),
+            labels: e.labels.iter().map(|l| l.href.clone()).collect(),
+            ip_lists: e.ip_lists.clone(),
+        };
+        SeenFlow {
+            src: end(&f.src),
+            dst: end(&f.dst),
+            spec: services::flow_spec(f),
+        }
+    }
 }
 
 impl GenRule {
@@ -609,8 +645,8 @@ impl Proposal {
             })
     }
 
-    /// Targets and actions again against `drafts`: a fresh draft read at
-    /// plan time, or the rulesets just loaded. `picked`: the app ruleset
+    /// Targets, actions and override denies again against `drafts`: a
+    /// fresh draft read at plan time, or the rulesets just loaded. `picked`: the app ruleset
     /// `R` chose among several.
     pub fn refresh(
         &mut self,
@@ -645,11 +681,8 @@ impl Proposal {
                     pin_to_scope(&mut r.consumers, scope, idx);
                 }
             }
-            if !matches!(t, Target::Existing { .. }) {
-                r.denied_flows = 0;
-                r.denied_by.clear();
-            }
             r.action = dedupe::classify(r, t, drafts, idx);
+            (r.denied_flows, r.denied_by) = dedupe::override_denied(&r.seen, drafts, idx);
         }
         self.recount();
     }
@@ -767,6 +800,7 @@ mod tests {
             flows: 1,
             denied_flows: 0,
             denied_by: Vec::new(),
+            seen: BTreeMap::new(),
         }
     }
 

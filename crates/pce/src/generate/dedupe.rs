@@ -7,12 +7,10 @@
 //! AND across keys and OR within one key; `ams`, IP lists and workloads
 //! add to that. An existing side covers a proposed one when it holds
 //! every workload the proposed one names.
-use super::services::flow_spec;
-use super::{GenActor, GenRule, RuleAction, Target, actor_key};
+use super::{GenActor, GenRule, RuleAction, SeenEnd, SeenFlow, Target, actor_key};
 use crate::models::{Actor, DenyRule, IngressService, Rule, RuleSet};
 use crate::resolve::{NameIndex, canon};
-use crate::traffic::{ResolvedEndpoint, ResolvedFlow};
-use crate::write::{ActorKind, ActorRef, ServiceRef};
+use crate::write::{ActorKind, ActorRef, PortSpec, ServiceRef};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) fn classify(
@@ -180,37 +178,35 @@ fn same_actors(existing: &Rule, rule: &GenRule) -> bool {
         && keys(&existing.consumers) == Some(mine(&rule.consumers))
 }
 
-/// The flows an enabled override deny rule of `target`'s ruleset blocks
-/// (an override deny beats every allow rule), and those deny rules. Each
-/// flow is matched by its own endpoints and service.
-pub(crate) fn override_denied<'f>(
-    flows: impl IntoIterator<Item = &'f ResolvedFlow>,
-    target: &Target,
+/// The flow records (`seen`, by count) an enabled override deny rule of
+/// any enabled draft ruleset blocks (an override deny beats every allow
+/// rule; its ruleset's scope, the global one included, says where it
+/// applies), and those deny rules. Each record is matched by its own
+/// endpoints and service. What cannot be evaluated exactly (an exclusion,
+/// an unknown label, IP list or service) counts as a match: the flows
+/// show as denied, never as covered.
+pub(crate) fn override_denied(
+    seen: &BTreeMap<SeenFlow, u64>,
     drafts: &[RuleSet],
     idx: &NameIndex,
 ) -> (u64, Vec<String>) {
-    let Target::Existing { href, .. } = target else {
-        return (0, Vec::new());
-    };
-    let Some(rs) = drafts.iter().find(|r| &r.href == href) else {
-        return (0, Vec::new());
-    };
-    let denies: Vec<&DenyRule> = rs
-        .deny_rules
+    let live = |u: &Option<String>| u.as_deref() != Some("delete");
+    let denies: Vec<(&RuleSet, &DenyRule)> = drafts
         .iter()
-        .filter(|d| d.enabled && d.override_ && d.update_type.as_deref() != Some("delete"))
+        .filter(|rs| rs.enabled && live(&rs.update_type))
+        .flat_map(|rs| rs.deny_rules.iter().map(move |d| (rs, d)))
+        .filter(|(_, d)| d.enabled && d.override_ && live(&d.update_type))
         .collect();
     let mut n = 0;
     let mut by = BTreeSet::new();
-    for f in flows {
-        let spec = ServiceRef::Port(flow_spec(f));
-        let hit = denies.iter().find(|d| {
+    for (f, count) in seen {
+        let hit = denies.iter().find(|(rs, d)| {
             let unscoped = d
                 .extra
                 .get("unscoped_consumers")
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false);
-            service_covered(&d.ingress_services, &spec, idx)
+            deny_service_matches(&d.ingress_services, &f.spec, idx)
                 && endpoint_in(&d.providers, &f.dst, in_scope(rs, &f.dst, idx), idx)
                 && endpoint_in(
                     &d.consumers,
@@ -219,66 +215,94 @@ pub(crate) fn override_denied<'f>(
                     idx,
                 )
         });
-        if let Some(d) = hit {
-            n += 1;
+        if let Some((_, d)) = hit {
+            n += count;
             by.insert(d.href.clone());
         }
     }
     (n, by.into_iter().collect())
 }
 
-/// A workload the ruleset's scopes hold (the global scope holds all).
-fn in_scope(rs: &RuleSet, ep: &ResolvedEndpoint, idx: &NameIndex) -> bool {
-    let has = |h: &str| ep.labels.iter().any(|l| canon(&l.href) == canon(h));
-    ep.is_workload()
-        && rs.scopes.iter().any(|s| {
-            s.iter().all(|a| {
-                if let Some(l) = &a.label {
-                    has(&l.href)
-                } else if let Some(g) = &a.label_group {
-                    crate::impact::group_members(&g.href, idx)
+/// A deny's services hold the flow's: covered, or an object that cannot
+/// be expanded (unknown, or narrowed by an ICMP type) of its protocol.
+fn deny_service_matches(services: &[IngressService], spec: &PortSpec, idx: &NameIndex) -> bool {
+    service_covered(services, &ServiceRef::Port(spec.clone()), idx)
+        || services.iter().any(|e| match e {
+            IngressService::Ref(r) if object_entries(&r.href, idx).is_none() => {
+                idx.service(&r.href).is_none_or(|s| {
+                    s.service_ports
                         .iter()
-                        .any(|m| has(m))
-                } else {
-                    false
-                }
-            })
+                        .any(|p| p.proto.is_none_or(|x| x == spec.proto || x == -1))
+                })
+            }
+            _ => false,
         })
 }
 
-/// Whether an actor list names the endpoint: an IP list it is in, its
-/// workload, or (within the scope, `scoped`) `ams` or a label combination
-/// it carries. An exclusion or an unknown label matches nothing.
-fn endpoint_in(actors: &[Actor], ep: &ResolvedEndpoint, scoped: bool, idx: &NameIndex) -> bool {
+/// A workload the ruleset's scopes hold (the global scope holds all). An
+/// actor of a scope that cannot be evaluated counts as held.
+fn in_scope(rs: &RuleSet, ep: &SeenEnd, idx: &NameIndex) -> bool {
+    let has = |h: &str| ep.labels.iter().any(|l| canon(l) == canon(h));
+    ep.workload.is_some()
+        && (rs.scopes.is_empty()
+            || rs.scopes.iter().any(|s| {
+                s.iter().all(|a| {
+                    if a.exclusion == Some(true) {
+                        true
+                    } else if let Some(l) = &a.label {
+                        idx.label(&l.href).is_none() || has(&l.href)
+                    } else if let Some(g) = &a.label_group {
+                        idx.label_group(&g.href).is_none()
+                            || crate::impact::group_members(&g.href, idx)
+                                .iter()
+                                .any(|m| has(m))
+                    } else {
+                        false
+                    }
+                })
+            }))
+}
+
+/// Whether a deny's actor list names the endpoint: an IP list it is in,
+/// its workload, or (within the scope, `scoped`) `ams` or a label
+/// combination it carries. An exclusion, an unknown label or an unknown
+/// IP list matches (fail safe).
+fn endpoint_in(actors: &[Actor], ep: &SeenEnd, scoped: bool, idx: &NameIndex) -> bool {
     if actors.iter().any(|a| a.exclusion == Some(true)) {
-        return false;
+        return true;
     }
     let by_ref = actors.iter().any(|a| {
-        a.ip_list.as_ref().is_some_and(|r| {
-            idx.ip_list_name(&r.href)
-                .is_some_and(|n| ep.ip_lists.iter().any(|x| x == n))
-        }) || a.workload.as_ref().is_some_and(|r| {
-            ep.workload_href
-                .as_deref()
-                .is_some_and(|w| canon(w) == canon(&r.href))
-        })
+        a.ip_list
+            .as_ref()
+            .is_some_and(|r| match idx.ip_list_name(&r.href) {
+                Some(n) => ep.ip_lists.iter().any(|x| x == n),
+                None => true,
+            })
+            || a.workload.as_ref().is_some_and(|r| {
+                ep.workload
+                    .as_deref()
+                    .is_some_and(|w| canon(w) == canon(&r.href))
+            })
     });
     if by_ref {
         return true;
     }
-    if !scoped || !ep.is_workload() {
+    if !scoped || ep.workload.is_none() {
         return false;
     }
     if actors.iter().any(|a| a.actors.as_deref() == Some("ams")) {
         return true;
     }
     match label_constraint(actors, idx) {
+        None => actors
+            .iter()
+            .any(|a| a.label.is_some() || a.label_group.is_some()),
         Some(c) if !c.is_empty() => c.values().all(|allowed| {
             ep.labels
                 .iter()
-                .any(|l| allowed.iter().any(|h| canon(h) == canon(&l.href)))
+                .any(|l| allowed.iter().any(|h| canon(h) == canon(l)))
         }),
-        _ => false,
+        Some(_) => false,
     }
 }
 
@@ -429,6 +453,7 @@ mod tests {
             flows: 1,
             denied_flows: 0,
             denied_by: Vec::new(),
+            seen: Default::default(),
         }
     }
 
