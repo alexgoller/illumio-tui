@@ -103,8 +103,8 @@ These are verified against `write/rules.rs` and the `w` form's pre-fill (`edit::
 ```
 ┌ Generate · shop/prod · last 24h · 1 310 flows · complete ── 1 req · cached ┐
 │ granularity  app·all ─[app·ports]─ role·ports ─ role·all        ←/→  </> row │
-│ target  RS shop-prod (draft, 12 rules)                                        │
-├ Inbound → shop-prod ─────────────────────────────────────────────────────────┤
+│ target  RF-shop-prod (draft, 12 rules)                                        │
+├ Inbound → RF-shop-prod────────────────────────────────────────────────────────┤
 │ [x] intra-app            app·ports   tcp/5432 tcp/6379      ✓ 402            │
 │ [x] web/prod             app·ports   tcp/443                ✓ 812  ✗ 3      │
 │ [x] ops/prod             role·ports* tcp/22                 ✗ 41             │
@@ -124,8 +124,8 @@ These are verified against `write/rules.rs` and the `w` form's pre-fill (`edit::
   - `←`/`→` (and `h`/`l`) move the global stop.
   - `<`/`>` override the selected row. The row then shows its own stop with a `*`, and `=` drops the override.
 - **Target line.** It names the app's ruleset, from `ruleset_pick` on the app's scope:
-  - the one existing ruleset: `RS shop-prod (draft, 12 rules)`;
-  - a ruleset to create: `new ruleset shop-prod, scoped app=shop, env=prod`;
+  - the one existing ruleset: `RF-shop-prod (draft, 12 rules)`;
+  - a ruleset to create: `new ruleset RF-shop-prod, scoped app=shop, env=prod`;
   - several covering rulesets: `3 rulesets cover shop/prod: R picks`. `R` cycles them in `covering` order, and `Enter` refuses until one is picked.
 - **Inbound rows** (the app's ruleset):
   - one intra-app row;
@@ -298,13 +298,13 @@ The executor replaces the placeholder with that step's `Written.href`, or with t
 
 **Created objects:**
 
-- **New ruleset.** Named by the profile setting `[profiles.<name>.generator] ruleset_name`, a template over the scope keys; the default is `"{app}-{env}"` (`shop-prod`), e.g. `"RS-{app}-{env}"`. Unknown placeholders are a config error at load, naming the key. The CLI `gen` uses the same setting, scoped by the app's scope labels exactly as `edit::new_ruleset_intent` scopes one, `enabled: true`.
+- **New ruleset.** Named by the profile setting `[profiles.<name>.generator] ruleset_name`, a template over the scope keys; the default is `"RF-{app}-{env}"` (`RF-shop-prod`, the ringfence convention). Unknown placeholders are a config error at load, naming the key; the CLI `gen` uses the same setting. The ruleset is scoped by the app's scope labels exactly as `edit::new_ruleset_intent` scopes one, `enabled: true`.
 - **New IP list.** One per checked IP peer row, named `<app>-<env> peer <ip>`, with one range (`<ip>`). It is reused by name if it already exists.
 
 ### The confirm (`Overlay::ConfirmBatch`)
 
 - **Rendering.** It uses the same widget and keys as `ConfirmWrite`:
-  - one block per request: method, path (placeholders spelled `<href of step 2: create rule_set shop-prod>`) and body;
+  - one block per request: method, path (placeholders spelled `<href of step 2: create rule_set RF-shop-prod>`) and body;
   - `y` sends the whole batch, `n`/`Esc` cancel, and scrolling works as in the single confirm.
 - **Header.** For example `7 requests: 1 ip_list, 1 rule_set, 1 rule update, 4 rules · planned with 3 reads`.
 - **Impact lines.** The single-rule impact line (`refresh_confirm_impact`) is not computed for a batch in v1.
@@ -353,7 +353,7 @@ JSON (the default when piped):
 {
   "app": "shop/prod", "keys": ["app", "env"], "window": "24h",
   "granularity": "app-ports", "outbound": false,
-  "target": {"name": "shop-prod", "href": "/orgs/1/sec_policy/draft/rule_sets/12", "action": "existing"},
+  "target": {"name": "RF-shop-prod", "href": "/orgs/1/sec_policy/draft/rule_sets/12", "action": "existing"},
   "rows": [
     {"side": "inbound", "peer": "web/prod", "kind": "app", "checked": true,
      "granularity": "app-ports", "flows": 815, "services": ["443/tcp"],
@@ -361,7 +361,7 @@ JSON (the default when piped):
   ],
   "ip_lists": [],
   "rules": [
-    {"ruleset": "shop-prod", "action": "create",
+    {"ruleset": "RF-shop-prod", "action": "create",
      "providers": ["all workloads"], "consumers": ["app=web", "env=prod"],
      "unscoped_consumers": true, "services": ["443/tcp"], "rows": [1],
      "existing_rule": null, "body": {"providers": [{"actors": "ams"}], "...": "..."}}
@@ -520,5 +520,5 @@ Three GitHub issues, each with its own worktree, review and merge:
 ## Decisions (Alex, 2026-10-16)
 
 1. **Already-allowed rows stay checked** by default, so the app's ruleset spells out its own traffic.
-2. **New ruleset name is a profile setting**: `[profiles.<name>.generator] ruleset_name`, default `"{app}-{env}"` (see Planning).
+2. **New ruleset name is a profile setting**: `[profiles.<name>.generator] ruleset_name`, default `"RF-{app}-{env}"` (see Planning).
 3. **One IP list per IP peer**, named `<app>-<env> peer <ip>`, as specified.
