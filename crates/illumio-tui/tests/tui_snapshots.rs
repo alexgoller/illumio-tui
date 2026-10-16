@@ -641,15 +641,15 @@ fn events_screen_80x24_and_detail_160x48() {
     insta::assert_snapshot!("events_detail_160x48", out);
     // At 80x24 the box holds 22 JSON lines and its note says so.
     let small = render_to_string(&m, 80, 24);
-    assert!(small.contains("lines 1-22 of"), "{small}");
-    assert!(small.contains("j/k scroll"), "{small}");
+    assert!(small.contains("lines 1-22/"), "{small}");
+    assert!(small.contains("^d/^u"), "{small}");
     // Scrolled past the end: the view clamps so the box stays full and the
     // last line is visible.
     if let Overlay::EventDetail { scroll, .. } = &mut m.overlay {
         *scroll = 1000;
     }
     let end = render_to_string(&m, 80, 24);
-    assert!(end.contains("of"), "{end}");
+    assert!(end.contains("lines "), "{end}");
     assert!(!end.contains("lines 1-22"), "{end}");
     assert!(
         end.contains("\n│}"),
@@ -749,7 +749,7 @@ fn event_detail_change_diffs_80x24() {
         raw: false,
     };
     let out = render_to_string(&m, 80, 24);
-    assert!(out.contains("lines 4-25 of 25"), "{out}");
+    assert!(out.contains("lines 4-25/25"), "{out}");
     assert!(out.contains("rule_list: Shop-Prod"), "{out}");
     insta::assert_snapshot!("event_diff_long_scrolled_80x24", out);
 }

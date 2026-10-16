@@ -10,7 +10,7 @@ expression: out
 │  2026-10-10 07:31:00  info     sec_policy.create            user:user-2            sec_policy 42                                                     success │
 │  2026-10-10 07:32:00  err      agent.tampering              agent:host-1.example   workload host-1.example                                           failure │
 │  2026-10-10 07:33:00  warning  system.license_expiring      system                                                                                           │
-│                             ╭ agent.tampering ──────────────────────────────────────────────────────────── J diff · Esc closes ╮                             │
+│                             ╭ agent.tampering ────────────────────────────────────────── 1/4 · j/k event · J diff · Esc closes ╮                             │
 │                             │{                                                                                                 │                             │
 │                             │  "href": "/orgs/5/events/e3",                                                                    │                             │
 │                             │  "timestamp": "2026-10-10T07:32:00Z",                                                            │                             │

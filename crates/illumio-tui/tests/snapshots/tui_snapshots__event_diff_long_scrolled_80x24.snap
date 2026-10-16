@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ sec_rule.create ──────── lines 4-25 of 25 · j/k scroll · J json · Esc closes ╮
+╭ sec_rule.create ─────── 1/4 · j/k event · ^d/^u lines 4-25/25 · J json · Esc ╮
 │  actor    user:ops@example.com                                               │
 │  request  POST /api/v2/orgs/5/sec_policy/draft/rule_sets/100/sec_rules       │
 │  from     192.0.2.10 (HTTP 201)                                              │

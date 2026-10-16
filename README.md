@@ -305,7 +305,7 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   `+` or all `-`. Label, label group, IP list, service and ruleset hrefs read as names from the
   index already loaded or from the event itself (an unknown href stays an href; names are
   today's); notifications (a failed login, a refused request) and a failed request's errors
-  are a short list. `J` toggles the raw JSON. No extra request.
+  are a short list. `J` toggles the raw JSON. In the detail `↑`/`↓` or `j`/`k` step to the previous or next event; `Ctrl-d`/`Ctrl-u`, `PgDn`/`PgUp`, `Ctrl-e`/`Ctrl-y` and `g`/`G` scroll. No extra request.
 
 Auto-refresh (`a`) is opt-in per screen, has a 60 s minimum, shows a countdown in the panel
 title, and switches itself off after a failed refresh.

@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ request.authorization_failed ─────────────────────────── J json · Esc closes ╮
+╭ request.authorization_failed ───────── 1/4 · j/k event · J json · Esc closes ╮
 │  time     2026-10-10T07:44:00.000Z                                           │
 │  type     request.authorization_failed                                       │
 │  severity err · failure                                                      │

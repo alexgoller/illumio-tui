@@ -1692,8 +1692,35 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     };
                     return Vec::new();
                 }
-                KeyCode::Down | KeyCode::Char('j') => (scroll + 1).min(last),
-                KeyCode::Up | KeyCode::Char('k') => scroll.saturating_sub(1),
+                // ↑/↓ and j/k step through the events behind the detail, as
+                // in the table; the detail opens at the top in the same view.
+                KeyCode::Down | KeyCode::Up | KeyCode::Char('j') | KeyCode::Char('k') => {
+                    let t = &mut model.events.table;
+                    if matches!(k.code, KeyCode::Down | KeyCode::Char('j')) {
+                        t.select_next();
+                    } else {
+                        t.select_prev();
+                    }
+                    let event = t.selected_item().cloned().unwrap_or(event);
+                    model.overlay = Overlay::EventDetail {
+                        event,
+                        scroll: 0,
+                        raw,
+                    };
+                    return Vec::new();
+                }
+                KeyCode::Char('e') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                    (scroll + 1).min(last)
+                }
+                KeyCode::Char('y') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                    scroll.saturating_sub(1)
+                }
+                KeyCode::Char('d') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                    (scroll + 10).min(last)
+                }
+                KeyCode::Char('u') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                    scroll.saturating_sub(10)
+                }
                 KeyCode::PageDown | KeyCode::Char(' ') => (scroll + 10).min(last),
                 KeyCode::PageUp => scroll.saturating_sub(10),
                 KeyCode::Home | KeyCode::Char('g') => 0,
@@ -9292,18 +9319,67 @@ mod tests {
         );
         assert!(update(&mut m, enter()).is_empty());
         assert!(matches!(m.overlay, Overlay::EventDetail { scroll: 0, .. }));
-        // The detail scrolls line by line and stops at the top and the last line.
+        // The detail scrolls line by line (^e / ^y) and stops at the top and the last line.
         let total = event_detail_lines(&m, m.events.table.selected_item().unwrap(), false);
         assert!(total > 2, "{total}");
-        assert!(update(&mut m, key('j')).is_empty());
+        assert!(
+            update(
+                &mut m,
+                Msg::Key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL))
+            )
+            .is_empty()
+        );
         assert!(matches!(m.overlay, Overlay::EventDetail { scroll: 1, .. }));
         assert!(update(&mut m, kc(KeyCode::End)).is_empty());
         assert!(matches!(&m.overlay, Overlay::EventDetail { scroll, .. } if *scroll == total - 1));
-        assert!(update(&mut m, key('j')).is_empty());
+        assert!(
+            update(
+                &mut m,
+                Msg::Key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL))
+            )
+            .is_empty()
+        );
         assert!(matches!(&m.overlay, Overlay::EventDetail { scroll, .. } if *scroll == total - 1));
         assert!(update(&mut m, key('g')).is_empty());
-        assert!(update(&mut m, key('k')).is_empty());
+        assert!(
+            update(
+                &mut m,
+                Msg::Key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL))
+            )
+            .is_empty()
+        );
         assert!(matches!(m.overlay, Overlay::EventDetail { scroll: 0, .. }));
+        // j / k (and ↓ / ↑) step to the next and previous event, at the top,
+        // keeping the view; the table cursor follows.
+        let first = m.events.table.selected_pos();
+        assert!(
+            update(
+                &mut m,
+                Msg::Key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL))
+            )
+            .is_empty()
+        );
+        assert!(update(&mut m, key('J')).is_empty());
+        assert!(update(&mut m, key('j')).is_empty());
+        assert_eq!(m.events.table.selected_pos(), first + 1);
+        let Overlay::EventDetail { event, scroll, raw } = &m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        assert_eq!(
+            (*scroll, *raw),
+            (0, true),
+            "next event, from the top, still raw"
+        );
+        assert_eq!(Some(event), m.events.table.selected_item());
+        assert!(update(&mut m, kc(KeyCode::Up)).is_empty());
+        assert_eq!(m.events.table.selected_pos(), first);
+        assert!(update(&mut m, key('k')).is_empty());
+        assert_eq!(
+            m.events.table.selected_pos(),
+            first.saturating_sub(1),
+            "stops at the top"
+        );
+        assert!(update(&mut m, key('J')).is_empty());
         assert!(
             update(
                 &mut m,
@@ -9997,7 +10073,7 @@ mod tests {
     fn help_scrolls_to_its_last_line_and_reopens_at_the_top() {
         use crate::tui::ui::widgets::overlay::{HELP_LINES, help_last_scroll};
         let mut m = model_fixture(); // 80x24
-        assert_eq!(HELP_LINES.len(), 72);
+        assert_eq!(HELP_LINES.len(), 73);
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Events   J"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  A"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  D"));
@@ -10030,13 +10106,13 @@ mod tests {
         );
         update(&mut m, key('?'));
         let last = help_last_scroll(24);
-        assert_eq!(last, 50, "72 lines, 22 rows inside the box");
+        assert_eq!(last, 51, "73 lines, 22 rows inside the box");
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app x / X"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app o"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app d"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Sections Space / z"));
 
-        for _ in 0..50 {
+        for _ in 0..51 {
             update(&mut m, key('j'));
         }
         assert_eq!(m.help_scroll, last);

@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ sec_rule.update ──────── lines 1-22 of 91 · j/k scroll · J diff · Esc closes ╮
+╭ sec_rule.update ─────── 1/4 · j/k event · ^d/^u lines 1-22/91 · J diff · Esc ╮
 │{                                                                             │
 │  "href": "/orgs/5/events/c1",                                                │
 │  "timestamp": "2026-10-10T07:40:00.000Z",                                    │

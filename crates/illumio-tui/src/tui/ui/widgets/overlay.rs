@@ -202,6 +202,10 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ),
     ("Events   J", "in the detail: change diff ↔ raw JSON"),
     (
+        "",
+        "detail: ↑/↓ j/k prev/next event · ^d/^u PgDn/PgUp ^e/^y g/G scroll",
+    ),
+    (
         "n / e / x (writes)",
         "new/edit/delete: Objects, IP lists, Workloads, Policy",
     ),
@@ -686,14 +690,20 @@ pub fn render_event_detail(
     let first = scroll.min(total.saturating_sub(shown));
     let lines: Vec<Line> = all.into_iter().skip(first).take(shown).collect();
     let toggle = if raw { "J diff" } else { "J json" };
+    let table = &model.events.table;
+    let at = format!(
+        "{}/{}",
+        table.selected_pos() + 1,
+        table.visible().len().max(1)
+    );
     let meta = if total > shown {
         let last = (first + shown).min(total);
         format!(
-            "lines {}-{last} of {total} · j/k scroll · {toggle} · Esc closes",
+            "{at} · j/k event · ^d/^u lines {}-{last}/{total} · {toggle} · Esc",
             first + 1
         )
     } else {
-        format!("{toggle} · Esc closes")
+        format!("{at} · j/k event · {toggle} · Esc closes")
     };
     let title = event.event_type.as_deref().unwrap_or("event");
     f.render_widget(

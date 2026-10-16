@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ rule_set.create ──────────────────────────────────────── J json · Esc closes ╮
+╭ rule_set.create ────────────────────── 1/4 · j/k event · J json · Esc closes ╮
 │  time     2026-10-10T07:41:00.000Z                                           │
 │  type     rule_set.create                                                    │
 │  severity info · success                                                     │

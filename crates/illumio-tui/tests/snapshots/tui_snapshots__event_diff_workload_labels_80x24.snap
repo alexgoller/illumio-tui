@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ workload.update ──────────────────────────────────────── J json · Esc closes ╮
+╭ workload.update ────────────────────── 1/4 · j/k event · J json · Esc closes ╮
 │  time     2026-10-10T07:42:00.000Z                                           │
 │  type     workload.update                                                    │
 │  severity info · success                                                     │

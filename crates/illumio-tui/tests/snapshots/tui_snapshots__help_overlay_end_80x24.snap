@@ -2,8 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ Keys ───────────────────────────────── 51-72 of 72 · j/k scroll · Esc closes ╮
-│w form   Ruleset         found by the destination's scope · Tab/Ctrl-N names  │
+╭ Keys ───────────────────────────────── 52-73 of 73 · j/k scroll · Esc closes ╮
 │w form   Ctrl-A Ctrl-R   all labels · create the typed ruleset                │
 │Policy   d               toggle draft / active                                │
 │Policy   p               pending changes                                      │
@@ -19,6 +18,7 @@ expression: out
 │                         local, no request; c clears them and h, not /        │
 │Events   f / Enter / S   filter · event as a change diff · sort by severity   │
 │Events   J               in the detail: change diff ↔ raw JSON                │
+│                         detail: ↑/↓ j/k prev/next event · ^d/^u PgDn/PgUp ^e/│
 │n / e / x (writes)       new/edit/delete: Objects, IP lists, Workloads, Policy│
 │Pending  j/k Space Enter select · mark · diff of a pending entry              │
 │Pending  P               provision the marked entries, or all (writes)        │
