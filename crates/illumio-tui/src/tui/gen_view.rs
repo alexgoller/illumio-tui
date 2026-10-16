@@ -5,7 +5,7 @@
 use pce::NameIndex;
 use pce::generate::{GenRow, PeerKind, Proposal, RowKey, Side, Stop, Target};
 use pce::traffic::Focus;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The draft rulesets the proposal is checked against.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,6 +121,15 @@ pub fn refresh_note(old: &Proposal, new: &Proposal) -> Option<String> {
     (!notes.is_empty()).then(|| notes.join("; "))
 }
 
+/// The IP peers behind an IP or IP list row.
+fn row_ips(r: &GenRow) -> Vec<String> {
+    match &r.peer {
+        PeerKind::Ip { ip } => vec![ip.clone()],
+        PeerKind::IpList { ips, .. } => ips.clone(),
+        _ => Vec::new(),
+    }
+}
+
 fn side_index(s: Side) -> usize {
     match s {
         Side::Inbound => 0,
@@ -165,11 +174,25 @@ impl GenView {
             .iter()
             .map(|r| (r.key(), (r.checked, r.stop)))
             .collect();
+        // The IPs of checked IP rows that are gone (regrouped: the drafts
+        // arrived, `R` picked another ruleset): their new rows stay checked.
+        let moved: BTreeSet<(Side, String)> = self
+            .rows
+            .iter()
+            .filter(|r| r.checked && !rows.iter().any(|n| n.key() == r.key()))
+            .flat_map(|r| row_ips(r).into_iter().map(move |ip| (r.side, ip)))
+            .collect();
         self.rows = rows;
         for r in &mut self.rows {
             if let Some((checked, stop)) = old.get(&r.key()) {
                 r.checked = *checked && r.checkable;
                 r.stop = *stop;
+            }
+            if row_ips(r)
+                .into_iter()
+                .any(|ip| moved.contains(&(r.side, ip)))
+            {
+                r.checked = r.checkable;
             }
         }
         for s in [Side::Inbound, Side::Outbound] {
@@ -599,7 +622,7 @@ mod tests {
             &shop(),
             "role",
             &idx,
-            &[],
+            None,
         ));
         v
     }
@@ -617,7 +640,7 @@ mod tests {
             &shop(),
             "role",
             &idx,
-            &[],
+            None,
         ));
         assert!(v.rows[2].checked, "kept by its key");
         assert_eq!(v.rows[2].stop, Some(Stop::RolePorts));
@@ -639,11 +662,32 @@ mod tests {
         more.src.ip = Some("10.1.4.10".into());
         flows.insert(0, more);
         let idx = crate::tui::test_support::fixture_index();
-        v.set_rows(pce::generate::rows(&flows, &shop(), "role", &idx, &[]));
+        v.set_rows(pce::generate::rows(&flows, &shop(), "role", &idx, None));
         let i = v.selected().unwrap();
         assert_eq!(v.rows[i].peer_text(), "IP list Corp · 2 IPs");
         assert!(v.rows[i].checked);
         assert_eq!(v.rows[i].stop, Some(Stop::RolePorts));
+    }
+
+    #[test]
+    fn a_checked_ip_row_regrouped_on_a_rebuild_stays_checked_in_its_new_row() {
+        let idx = crate::tui::test_support::fixture_index();
+        let mut flows = fixture_flows_rich();
+        let mut alone = flows[17].clone();
+        alone.src.ip = Some("10.1.4.10".into());
+        alone.src.ip_lists.clear();
+        flows.push(alone);
+        let mut v = GenView::new(shop(), "24h".into(), 1);
+        v.set_rows(pce::generate::rows(&flows, &shop(), "role", &idx, None));
+        let at = |v: &GenView, text: &str| v.rows.iter().position(|r| r.peer_text() == text);
+        let lone = at(&v, "10.1.4.10").expect("no list: its own row");
+        v.rows[lone].checked = true;
+        // Now Corp holds it too: the row is gone, its IP in Corp's row.
+        flows.last_mut().unwrap().src.ip_lists = vec!["Corp".into()];
+        v.set_rows(pce::generate::rows(&flows, &shop(), "role", &idx, None));
+        assert_eq!(at(&v, "10.1.4.10"), None);
+        let corp = at(&v, "IP list Corp · 2 IPs").unwrap();
+        assert!(v.rows[corp].checked, "the check followed its IP");
     }
 
     #[test]

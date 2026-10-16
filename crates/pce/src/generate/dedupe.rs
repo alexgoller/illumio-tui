@@ -52,7 +52,7 @@ pub(crate) fn classify(
 
 /// A rule that can cover anything: enabled, not pending deletion, for
 /// workloads, not narrowed by users, machine authentication or network.
-fn eligible(r: &Rule) -> bool {
+pub(crate) fn eligible(r: &Rule) -> bool {
     let workloads = |v: &[String]| v.iter().any(|x| x == "workloads");
     r.enabled
         && r.update_type.as_deref() != Some("delete")
@@ -354,7 +354,11 @@ fn object_entries(href: &str, idx: &NameIndex) -> Option<Vec<Entry>> {
 
 /// Whether the existing services cover `s`: the same object, or entries
 /// that hold every port `s` stands for (All Services holds all).
-fn service_covered(existing: &[IngressService], s: &ServiceRef, idx: &NameIndex) -> bool {
+pub(crate) fn service_covered(
+    existing: &[IngressService],
+    s: &ServiceRef,
+    idx: &NameIndex,
+) -> bool {
     let mut hrefs = BTreeSet::new();
     let mut entries = Vec::new();
     for e in existing {

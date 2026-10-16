@@ -8,7 +8,8 @@ use super::output::{TableRows, join_list};
 use super::traffic::{ByArg, DirectionArg, FilterArgs, cli_focus, fetch};
 use clap::{Args, ValueEnum};
 use pce::generate::{
-    Coverage, GenInput, GenRow, Proposal, RuleCounts, Stop, keys_refusal, propose, rows,
+    Coverage, GenInput, GenRow, Proposal, RuleCounts, Stop, app_ruleset, keys_refusal, propose,
+    rows,
 };
 use pce::models::PolicyScope;
 use pce::write::PortSpec;
@@ -376,7 +377,15 @@ pub async fn run(ctx: &Context, args: &GenArgs) -> Result<(), CliError> {
         .window
         .clone()
         .unwrap_or_else(|| ctx.config.traffic_default_window.clone());
-    let gen_rows = rows(&fetched.flows, &focus, &tier, &idx, &drafts.value);
+    let target = app_ruleset(
+        &fetched.flows,
+        &focus,
+        &idx,
+        &drafts.value,
+        &ctx.config.generator_ruleset_name,
+        None,
+    );
+    let gen_rows = rows(&fetched.flows, &focus, &tier, &idx, target);
     let input = GenInput {
         flows: &fetched.flows,
         focus: &focus,

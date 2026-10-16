@@ -238,13 +238,35 @@ fn role(ep: &ResolvedEndpoint, tier_key: &str) -> Option<GenActor> {
 
 /// The app's scope labels from the index, else from one of its flows.
 fn app_scope(input: &GenInput) -> TargetScope {
-    let f = input.focus;
+    scope_of(input.flows, input.focus, input.idx)
+}
+
+/// The draft ruleset the app's rules would go into (the proposal's target
+/// 0) when it exists: by `template` and the `R` pick (`picked`), as
+/// `propose` resolves it. `None` for a ruleset to create, several or none.
+pub fn app_ruleset<'a>(
+    flows: &[ResolvedFlow],
+    focus: &Focus,
+    idx: &NameIndex,
+    drafts: &'a [RuleSet],
+    template: &str,
+    picked: Option<&str>,
+) -> Option<&'a RuleSet> {
+    let scope = scope_of(flows, focus, idx);
+    match super::target::resolve(&scope, drafts, idx, template, picked) {
+        super::Target::Existing { href, .. } => drafts.iter().find(|rs| rs.href == href),
+        _ => None,
+    }
+}
+
+fn scope_of(flows: &[ResolvedFlow], f: &Focus, idx: &NameIndex) -> TargetScope {
+    let input = (flows, idx);
     let from_index: Option<Vec<ResolvedLabel>> = f
         .keys
         .iter()
         .zip(&f.app)
         .map(|(k, v)| {
-            input.idx.label_href(k, v).map(|h| ResolvedLabel {
+            input.1.label_href(k, v).map(|h| ResolvedLabel {
                 href: h.to_string(),
                 key: k.clone(),
                 value: v.clone(),
@@ -253,7 +275,7 @@ fn app_scope(input: &GenInput) -> TargetScope {
         .collect();
     let labels = from_index.unwrap_or_else(|| {
         input
-            .flows
+            .0
             .iter()
             .find_map(|x| match side_of(x, f)? {
                 Side::Inbound => Some(scope_labels(&x.dst, &f.keys)),
@@ -613,7 +635,8 @@ mod tests {
     ) -> (Vec<GenRow>, Proposal) {
         let idx = rich_index();
         let focus = shop();
-        let mut r = rows(flows, &focus, "role", &idx, &drafts);
+        let target = app_ruleset(flows, &focus, &idx, &drafts, DEFAULT_RULESET_NAME, None);
+        let mut r = rows(flows, &focus, "role", &idx, target);
         edit(&mut r);
         let input = GenInput {
             flows,

@@ -194,7 +194,8 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   confirmed step. One row per peer and side: intra-app, each app peer (`web/prod`), each
   existing IP list its IP peers are in (`IP list rfc1918 · 7 IPs`: one rule naming the list,
   the services of all its IPs; an IP in several lists goes to the narrowest, else the first
-  by name, a list an existing rule already names first, and the row says so; the Any list
+  by name, a list a rule of the target ruleset already names for those services first, and the
+  row says so; the Any list
   and any list covering all addresses never group), each IP peer in no list
   and each unlabelled workload, with the services seen and the reported decisions (`✓`
   allowed, `✗` blocked or potentially blocked; with `D` loaded, `would allow N`). Intra-app
@@ -496,7 +497,8 @@ needs, as the TUI's generator would plan them, and writes nothing. `rows` holds 
 peer and side (intra-app, each app peer, each existing IP list with its IP peers, `kind:
 "ip_list"`, `ip_list: {name, href}` and `ips`, each IP peer in no list and each unlabelled
 workload; since #38 an IP in a list is no longer its own row with `peer` its IP: read
-`ip_list` and `ips` rather than parsing `peer`) with its default
+`ip_list` and `ips` rather than parsing `peer`; their `uses IP list <name>` warning is kept
+for compatibility but deprecated and will go in a later release) with its default
 checkbox (`checked`: intra-app and same-env app peers), the services seen, the reported
 decisions and its warnings (`env mismatch`, `needs an IP list`, `2 IPs also in rfc1918:
 narrowest list`, `ephemeral port?`, ...); `rules` the merged rules at the chosen granularity, each with its

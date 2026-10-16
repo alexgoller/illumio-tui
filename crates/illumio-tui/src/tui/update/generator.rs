@@ -171,20 +171,23 @@ pub(super) fn rebuild_gen(model: &mut Model) {
         model.status = StatusLine::warn("g changed: G reopens the generator");
         return;
     }
-    // The lists existing rules name come first (an IP's row may move once
-    // the draft rulesets arrive).
+    // The lists the target ruleset's rules name come first (an IP's row
+    // may move when the draft rulesets arrive or `R` picks another).
     let drafts = v
         .fresh_drafts
         .as_deref()
         .or(model.draft_rulesets())
         .unwrap_or_default();
-    let fresh = rows(
-        model.traffic.flows_for(&v.focus),
+    let flows = model.traffic.flows_for(&v.focus);
+    let target = pce::generate::app_ruleset(
+        flows,
         &v.focus,
-        &model.limits.tier_key,
         &idx,
         drafts,
+        &model.limits.ruleset_name,
+        v.picked.as_deref(),
     );
+    let fresh = rows(flows, &v.focus, &model.limits.tier_key, &idx, target);
     let (gap, requery, window) = gap_text(model, v);
     if let Some(v) = model.gen_view.as_mut() {
         v.set_rows(fresh);
@@ -372,7 +375,8 @@ pub(super) fn gen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 Ok(name) => model.status = StatusLine::info(format!("rules go into {name}")),
                 Err(e) => model.status = StatusLine::info(e),
             }
-            regen(model);
+            // The rows too: the lists its rules name come first.
+            rebuild_gen(model);
         }
         KeyCode::Char('p') => v.list = Some(0),
         KeyCode::Char('r') => return gen_reload(model),

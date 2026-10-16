@@ -10,7 +10,7 @@ pub mod rows;
 pub mod services;
 pub mod target;
 
-pub use derive::{GenInput, propose};
+pub use derive::{GenInput, app_ruleset, propose};
 pub use rows::{
     MANY_SERVICES, MAX_IP_ROWS, SEEN_IPS, by_address, excluded, ip_list_name, is_any_ip_list, rows,
     seen_text,
