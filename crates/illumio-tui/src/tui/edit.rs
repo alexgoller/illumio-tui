@@ -1025,14 +1025,9 @@ fn tokens_or_fallback(labels: Vec<&ResolvedLabel>, e: &ResolvedEndpoint) -> Stri
     }
 }
 
-/// The live draft rulesets with a scope that covers the destination `dst`:
-/// each actor of one of its scopes is a label `dst` has (under any key, so
-/// a scope `app, env, loc=eu` covers a destination with `loc=eu`) or a
-/// label group with such a label among its members (through `idx`). The
-/// empty, global scope and other actors do not count. Those scoped exactly
-/// like `scope` (`dst`'s labels under the scope keys, no group) come first
-/// (`true`), then the others, the more actors the earlier, each in list
-/// order.
+/// The live draft rulesets with a scope that covers the destination `dst`
+/// (`pce::generate::rulesets_covering` over its labels): those scoped
+/// exactly like `scope` first, then the others.
 fn rulesets_covering<'r>(
     sets: &'r [RuleSet],
     dst: &ResolvedEndpoint,
@@ -1041,38 +1036,7 @@ fn rulesets_covering<'r>(
 ) -> Vec<(&'r RuleSet, bool)> {
     let want: BTreeSet<&str> = scope.iter().map(|l| l.href.as_str()).collect();
     let has: BTreeSet<&str> = dst.labels.iter().map(|l| l.href.as_str()).collect();
-    // `Some((exact, actors))` when the scope covers `dst`.
-    let fit = |s: &Vec<Actor>| -> Option<(bool, usize)> {
-        if s.is_empty() {
-            return None;
-        }
-        let mut labels = BTreeSet::new();
-        let mut grouped = false;
-        for a in s {
-            if let Some(l) = &a.label {
-                labels.insert(has.get(l.href.as_str())?);
-            } else if let Some(g) = &a.label_group {
-                grouped = true;
-                pce::impact::group_members(&g.href, idx)
-                    .iter()
-                    .any(|m| has.contains(m.as_str()))
-                    .then_some(())?;
-            } else {
-                return None;
-            }
-        }
-        let exact = !grouped && labels.into_iter().copied().eq(want.iter().copied());
-        Some((exact, s.len()))
-    };
-    let mut hits: Vec<(&RuleSet, (bool, usize))> = sets
-        .iter()
-        .filter(|rs| rs.update_type.as_deref() != Some("delete"))
-        .filter_map(|rs| rs.scopes.iter().filter_map(fit).max().map(|f| (rs, f)))
-        .collect();
-    hits.sort_by_key(|(_, (exact, n))| (!exact, std::cmp::Reverse(*n)));
-    hits.into_iter()
-        .map(|(rs, (exact, _))| (rs, exact))
-        .collect()
+    pce::generate::rulesets_covering(sets, &has, &want, idx)
 }
 
 /// How the description names a side: its group (`shop/prod`) when the
@@ -1184,22 +1148,17 @@ pub fn ruleset_pick(f: &ResolvedFlow, p: FlowPrefill, idx: &NameIndex) -> Rulese
             covering: Vec::new(),
         };
     };
-    let hits = rulesets_covering(sets, &f.dst, &dst_scope, idx);
-    let covering: Vec<String> = hits.iter().map(|(rs, _)| rs.name.clone()).collect();
-    let exact: Vec<&str> = hits
-        .iter()
-        .filter(|(_, e)| *e)
-        .map(|(rs, _)| rs.name.as_str())
-        .collect();
+    let want: Vec<&str> = dst_scope.iter().map(|l| l.href.as_str()).collect();
+    let has: Vec<&str> = f.dst.labels.iter().map(|l| l.href.as_str()).collect();
+    let choice = pce::generate::pick_ruleset(&want, &has, sets, idx);
+    let covering: Vec<String> = choice.covering.iter().map(|c| c.name.clone()).collect();
     let covers_scope = p
         .group_keys
         .is_none_or(|keys| p.scope_keys.iter().all(|k| keys.contains(k)));
-    let name = match (exact.as_slice(), covering.as_slice()) {
-        _ if !covers_scope => None,
-        ([one], _) => Some(one.to_string()),
-        ([], [one]) => Some(one.clone()),
-        _ => None,
-    };
+    let name = choice
+        .picked
+        .filter(|_| covers_scope)
+        .map(|i| choice.covering[i].name.clone());
 
     let hint = match covering.len() {
         _ if !covers_scope => Cow::Borrowed(SPANS_SCOPES_HINT),
