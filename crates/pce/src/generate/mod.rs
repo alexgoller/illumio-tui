@@ -5,10 +5,12 @@
 //! services, exists). Pure: no requests. The TUI's generator and the CLI's
 //! `gen` share it.
 pub mod dedupe;
+pub mod derive;
 pub mod rows;
 pub mod services;
 pub mod target;
 
+pub use derive::{GenInput, propose};
 pub use rows::{MANY_SERVICES, MAX_IP_ROWS, excluded, ip_list_name, is_any_ip_list, rows};
 pub use services::{Expr, express, flow_spec, fold_ports};
 pub use target::{
