@@ -11,6 +11,7 @@ pub mod edit;
 pub mod export;
 pub mod filter;
 pub mod form;
+pub mod gen_view;
 pub mod impact;
 pub mod model;
 pub mod msg;
