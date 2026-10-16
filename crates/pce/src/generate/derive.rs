@@ -46,6 +46,20 @@ fn row_index(rows: &[GenRow]) -> BTreeMap<RowKey, usize> {
     rows.iter().enumerate().map(|(i, r)| (r.key(), i)).collect()
 }
 
+/// The list row each IP peer went to, by side and IP: a flow follows the
+/// rows as `rows` grouped them.
+fn list_rows(rows: &[GenRow]) -> BTreeMap<(Side, &str), usize> {
+    let mut out = BTreeMap::new();
+    for (i, r) in rows.iter().enumerate() {
+        if let PeerKind::IpList { ips, .. } = &r.peer {
+            for ip in ips {
+                out.insert((r.side, ip.as_str()), i);
+            }
+        }
+    }
+    out
+}
+
 /// The rules `rows` (checkboxes and overrides as they are) need at the
 /// slider's `global` stop, classified against `input.drafts`.
 pub fn propose(rows: &[GenRow], global: Stop, input: &GenInput) -> Proposal {
@@ -426,6 +440,7 @@ fn description(from: &[String], to: &[String], services: &[String], window: &str
 fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> Proposal {
     let focus = input.focus;
     let index = row_index(rows);
+    let by_ip = list_rows(rows);
     let all_services = input.idx.all_services_href().map(str::to_string);
     let mut ctx = Ctx {
         input,
@@ -442,7 +457,7 @@ fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> Proposal {
             }
             continue;
         }
-        let Some(key) = row_key(f, focus, input.idx) else {
+        let Some(key) = row_key(f, focus) else {
             continue;
         };
         if !in_force(key.side) {
@@ -452,7 +467,14 @@ fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> Proposal {
             side: key.side,
             peer: PeerKey::Folded,
         };
-        let Some(&ri) = index.get(&key).or_else(|| index.get(&folded)) else {
+        let listed = match &key.peer {
+            PeerKey::Ip(ip) => by_ip.get(&(key.side, ip.as_str())),
+            _ => None,
+        };
+        let Some(&ri) = listed
+            .or_else(|| index.get(&key))
+            .or_else(|| index.get(&folded))
+        else {
             continue;
         };
         let row = &rows[ri];
@@ -591,7 +613,7 @@ mod tests {
     ) -> (Vec<GenRow>, Proposal) {
         let idx = rich_index();
         let focus = shop();
-        let mut r = rows(flows, &focus, "role", &idx);
+        let mut r = rows(flows, &focus, "role", &idx, &drafts);
         edit(&mut r);
         let input = GenInput {
             flows,

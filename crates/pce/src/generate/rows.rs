@@ -3,10 +3,11 @@
 //! workload, on each side, with their default checkbox and their flags.
 //! Broadcast and multicast are left out first.
 use super::services::{Expr, express, flow_spec, fold_ports};
-use super::{DecisionCounts, GenRow, PeerKey, PeerKind, RowFlag, RowKey, Side};
-use crate::iplist_size::ip_list_size;
-use crate::models::IpList;
-use crate::resolve::NameIndex;
+use super::target::rulesets_covering;
+use super::{DecisionCounts, GenRow, ListWhy, PeerKey, PeerKind, RowFlag, RowKey, Side};
+use crate::iplist_size::{ip_list_contains, ip_list_size};
+use crate::models::{IpList, RuleSet};
+use crate::resolve::{NameIndex, canon};
 use crate::traffic::{Focus, ResolvedEndpoint, ResolvedFlow, group_key};
 use crate::write::PortSpec;
 use std::collections::{BTreeMap, BTreeSet};
@@ -93,45 +94,32 @@ pub(crate) fn scope_values(ep: &ResolvedEndpoint, keys: &[String]) -> Option<Vec
         .collect()
 }
 
-/// The row a flow belongs to; `None` when excluded or not the app's.
-pub(crate) fn row_key(f: &ResolvedFlow, focus: &Focus, idx: &NameIndex) -> Option<RowKey> {
-    classify(f, focus, idx).map(|(k, _)| k)
-}
-
-/// The row a flow belongs to and, for an IP peer in an existing list,
-/// which list and why.
-fn classify(f: &ResolvedFlow, focus: &Focus, idx: &NameIndex) -> Option<(RowKey, Option<Pick>)> {
+/// The row a flow belongs to before IP lists (every IP peer by its IP);
+/// `None` when excluded or not the app's.
+pub(crate) fn row_key(f: &ResolvedFlow, focus: &Focus) -> Option<RowKey> {
     if excluded(f) {
         return None;
     }
     let side = side_of(f, focus)?;
     let other = match side {
         Side::Inbound if group_key(&f.src, &focus.keys) == focus.app => {
-            let key = RowKey {
+            return Some(RowKey {
                 side,
                 peer: PeerKey::Intra,
-            };
-            return Some((key, None));
+            });
         }
         Side::Inbound => &f.src,
         Side::Outbound => &f.dst,
     };
-    let (peer, pick) = if other.is_workload() {
-        let peer = match scope_values(other, &focus.keys) {
+    let peer = if other.is_workload() {
+        match scope_values(other, &focus.keys) {
             Some(v) => PeerKey::App(v),
             None => PeerKey::Workload(other.workload_href.clone().unwrap_or_default()),
-        };
-        (peer, None)
-    } else {
-        match pick_list(other, &focus.app, idx) {
-            Some(p) => (PeerKey::IpList(p.href.clone()), Some(p)),
-            None => (
-                PeerKey::Ip(other.ip.clone().unwrap_or_else(|| "?".into())),
-                None,
-            ),
         }
+    } else {
+        PeerKey::Ip(other.ip.clone().unwrap_or_else(|| "?".into()))
     };
-    Some((RowKey { side, peer }, pick))
+    Some(RowKey { side, peer })
 }
 
 /// Whether role granularity misses a role on a side it uses.
@@ -145,61 +133,128 @@ fn lacks_role(f: &ResolvedFlow, key: &RowKey, tier_key: &str) -> bool {
     }
 }
 
-/// The existing IP list an IP peer's rule names, and the others it is in.
-struct Pick {
-    href: String,
-    name: String,
-    /// The other lists the PCE reported for it (not the Any list).
+/// Which existing IP list an IP peer's rule names, and why.
+#[derive(Debug, Clone, Default)]
+struct Membership {
+    /// `(href, name)`; `None` when the batch creates one.
+    list: Option<(String, String)>,
+    /// The other candidate lists.
     others: Vec<String>,
-    /// Picked by name: the narrowest size was a tie or unknown.
-    by_name: bool,
+    why: ListWhy,
+    /// Reported lists that cover all of IPv4 or IPv6: never used.
+    everything: Vec<String>,
 }
 
-/// A list's addresses for "narrowest": unknown (no ranges, FQDNs only)
-/// and unbounded sort last.
-fn narrowness(l: &IpList) -> u64 {
-    let size = ip_list_size(l);
-    if size.ranges == 0 {
-        u64::MAX
-    } else {
-        size.sort_key()
-    }
-}
-
-/// Of the IP lists the PCE reported for the endpoint that the index knows,
-/// the built-in Any list aside: the narrowest (fewest addresses), the first
-/// by name among equals. Else an existing list named as the batch would
-/// name it. `None` when the batch creates one.
-fn pick_list(ep: &ResolvedEndpoint, app: &[String], idx: &NameIndex) -> Option<Pick> {
-    let mut found: Vec<(u64, String, String)> = ep
-        .ip_lists
+/// The IP lists the enabled draft rules of the rulesets covering the app
+/// already name: as consumers (inbound) or providers (outbound), by
+/// canonical href.
+fn named_lists(drafts: &[RuleSet], focus: &Focus, idx: &NameIndex) -> BTreeSet<(Side, String)> {
+    let mut out = BTreeSet::new();
+    let labels: Option<BTreeSet<&str>> = focus
+        .keys
         .iter()
-        .filter_map(|n| {
-            let href = idx.ip_list_href(n)?;
-            let l = idx.ip_list(href).filter(|l| !is_any_ip_list(l))?;
-            Some((narrowness(l), l.name.clone(), href.to_string()))
-        })
+        .zip(&focus.app)
+        .map(|(k, v)| idx.label_href(k, v))
         .collect();
-    found.sort_by_key(|(size, name, _)| (*size, name.to_lowercase()));
-    found.dedup_by(|a, b| a.2 == b.2);
-    if found.is_empty() {
-        let name = ip_list_name(app, ep.ip.as_deref()?);
-        let href = idx.ip_list_href(&name)?.to_string();
-        return Some(Pick {
-            href,
-            name,
-            others: Vec::new(),
-            by_name: false,
-        });
+    let Some(want) = labels else {
+        return out;
+    };
+    let live = |u: &Option<String>| u.as_deref() != Some("delete");
+    let sets = drafts.iter().filter(|rs| rs.enabled);
+    for (rs, _) in rulesets_covering(sets, &want, &want, idx) {
+        for r in rs
+            .rules
+            .iter()
+            .filter(|r| r.enabled && live(&r.update_type))
+        {
+            for (side, actors) in [
+                (Side::Inbound, &r.consumers),
+                (Side::Outbound, &r.providers),
+            ] {
+                for a in actors.iter().filter(|a| !a.exclusion.unwrap_or(false)) {
+                    if let Some(l) = &a.ip_list {
+                        out.insert((side, canon(&l.href).into_owned()));
+                    }
+                }
+            }
+        }
     }
-    let by_name = found.len() > 1 && found[0].0 == found[1].0;
-    let (_, name, href) = found.remove(0);
-    Some(Pick {
-        href,
-        name,
-        others: found.into_iter().map(|(_, n, _)| n).collect(),
-        by_name,
-    })
+    out
+}
+
+/// The list an IP peer's rule names. Candidates are the lists the PCE
+/// reported for it that the index knows and that hold it (draft ranges,
+/// exclusions out; a list matching only by FQDN on the outbound side
+/// alone, as provider), the built-in Any list and any list covering all of
+/// a family aside. One an existing rule already names on this side comes
+/// first, then the narrowest (addresses of the IP's family), then by name.
+/// Else an existing list named as the batch would name it, if it holds the
+/// IP. No list for an endpoint without an address.
+fn membership(
+    ep: &ResolvedEndpoint,
+    side: Side,
+    app: &[String],
+    idx: &NameIndex,
+    named: &BTreeSet<(Side, String)>,
+) -> Membership {
+    let mut m = Membership::default();
+    let Some((text, ip)) = ep
+        .ip
+        .as_deref()
+        .and_then(|s| s.parse::<IpAddr>().ok().map(|ip| (s, ip)))
+    else {
+        return m;
+    };
+    // (not named by a rule, addresses, name, href)
+    let mut found: Vec<(bool, u128, String, String)> = Vec::new();
+    for n in &ep.ip_lists {
+        let Some(href) = idx.ip_list_href(n) else {
+            continue;
+        };
+        let Some(l) = idx.ip_list(href).filter(|l| !is_any_ip_list(l)) else {
+            continue;
+        };
+        let size = ip_list_size(l);
+        if size.unbounded.is_some() {
+            if !m.everything.contains(&l.name) {
+                m.everything.push(l.name.clone());
+            }
+            continue;
+        }
+        let addresses = if ip_list_contains(l, ip) {
+            if ip.is_ipv4() { size.v4 } else { size.v6 }
+        } else if side == Side::Outbound && !l.fqdns.is_empty() {
+            u128::MAX
+        } else {
+            continue;
+        };
+        let unnamed = !named.contains(&(side, canon(href).into_owned()));
+        found.push((unnamed, addresses, l.name.clone(), href.to_string()));
+    }
+    found.sort_by_key(|(unnamed, n, name, _)| (*unnamed, *n, name.to_lowercase()));
+    found.dedup_by(|a, b| a.3 == b.3);
+    if found.is_empty() {
+        let name = ip_list_name(app, text);
+        let fallback = idx.ip_list_href(&name).and_then(|h| {
+            let l = idx.ip_list(h)?;
+            let fits = ip_list_contains(l, ip) && ip_list_size(l).unbounded.is_none();
+            fits.then(|| (h.to_string(), l.name.clone()))
+        });
+        m.list = fallback;
+        return m;
+    }
+    let (unnamed, n) = (found[0].0, found[0].1);
+    m.why = if !unnamed && found.iter().any(|x| x.1 < n) {
+        ListWhy::Named
+    } else if found.get(1).is_some_and(|x| (x.0, x.1) == (unnamed, n)) {
+        ListWhy::ByName
+    } else {
+        ListWhy::Narrowest
+    };
+    let (_, _, name, href) = found.remove(0);
+    m.list = Some((href, name));
+    m.others = found.into_iter().map(|(_, _, n, _)| n).collect();
+    m
 }
 
 #[derive(Default)]
@@ -212,9 +267,10 @@ struct Acc {
     ephemeral: bool,
     /// The workload's name, the IP list's: from the first flow.
     name: String,
-    /// A list row's IPs, each with the other lists it is in and whether
-    /// the list was picked by name.
-    ips: BTreeMap<String, (Vec<String>, bool)>,
+    /// A list row's IPs, each with the other lists it is in and why.
+    ips: BTreeMap<String, (Vec<String>, ListWhy)>,
+    /// Lists its IPs are in that cover everything (not used).
+    everything: BTreeSet<String>,
 }
 
 /// The rows of `flows` for the app `focus` names (its keys must be the
@@ -222,24 +278,47 @@ struct Acc {
 /// intra-app, app peers (by flows), unlabelled workloads, IP lists (by
 /// connections), IP peers in no list (by connections, at most
 /// [`MAX_IP_ROWS`], the rest folded). Every row's checkbox at its default.
-pub fn rows(flows: &[ResolvedFlow], focus: &Focus, tier_key: &str, idx: &NameIndex) -> Vec<GenRow> {
+/// `drafts`: the draft rulesets, for the IP lists their rules name (see
+/// [`membership`]); an IP's list is picked once, from its first flow.
+pub fn rows(
+    flows: &[ResolvedFlow],
+    focus: &Focus,
+    tier_key: &str,
+    idx: &NameIndex,
+    drafts: &[RuleSet],
+) -> Vec<GenRow> {
+    let named = named_lists(drafts, focus, idx);
+    let mut picks: BTreeMap<(Side, String), Membership> = BTreeMap::new();
     let mut acc: BTreeMap<RowKey, Acc> = BTreeMap::new();
     for f in flows {
-        let Some((key, pick)) = classify(f, focus, idx) else {
+        let Some(mut key) = row_key(f, focus) else {
             continue;
         };
-        let a = acc.entry(key.clone()).or_default();
         let other = match key.side {
             Side::Inbound => &f.src,
             Side::Outbound => &f.dst,
         };
+        let mut pick = None;
+        if let PeerKey::Ip(ip) = key.peer.clone() {
+            let m = picks
+                .entry((key.side, ip.clone()))
+                .or_insert_with(|| membership(other, key.side, &focus.app, idx, &named))
+                .clone();
+            if let Some((href, _)) = &m.list {
+                key.peer = PeerKey::IpList(href.clone());
+            }
+            pick = Some((ip, m));
+        }
+        let a = acc.entry(key.clone()).or_default();
         if a.flows == 0 {
             a.name = other.display_name();
         }
-        if let Some(p) = pick {
-            a.name = p.name;
-            let ip = other.ip.clone().unwrap_or_else(|| "?".into());
-            a.ips.entry(ip).or_insert((p.others, p.by_name));
+        if let Some((ip, m)) = pick {
+            a.everything.extend(m.everything);
+            if let Some((_, name)) = m.list {
+                a.name = name;
+                a.ips.entry(ip).or_insert((m.others, m.why));
+            }
         }
         a.flows += 1;
         a.connections += f.num_connections;
@@ -308,14 +387,14 @@ fn row(key: &RowKey, a: &Acc, focus: &Focus, idx: &NameIndex) -> GenRow {
             (PeerKind::Ip { ip: ip.clone() }, false, addressable)
         }
         PeerKey::IpList(href) => {
-            let multi: Vec<&(Vec<String>, bool)> =
+            let multi: Vec<&(Vec<String>, ListWhy)> =
                 a.ips.values().filter(|(o, _)| !o.is_empty()).collect();
             if !multi.is_empty() {
                 let others: BTreeSet<&String> = multi.iter().flat_map(|(o, _)| o).collect();
                 flags.push(RowFlag::AlsoIn {
                     ips: multi.len(),
                     others: others.into_iter().cloned().collect(),
-                    by_name: multi.iter().any(|(_, b)| *b),
+                    why: multi.iter().map(|(_, w)| *w).max().unwrap_or_default(),
                 });
             }
             let peer = PeerKind::IpList {
@@ -335,6 +414,9 @@ fn row(key: &RowKey, a: &Acc, focus: &Focus, idx: &NameIndex) -> GenRow {
         }
         PeerKey::Folded => (PeerKind::FoldedIps(0), false, false),
     };
+    if !a.everything.is_empty() {
+        flags.push(RowFlag::CoversAll(a.everything.iter().cloned().collect()));
+    }
     let mut inline = BTreeSet::new();
     let mut objects = BTreeSet::new();
     let mut unsupported = BTreeSet::new();
@@ -439,7 +521,7 @@ pub(crate) mod tests {
 
     #[test]
     fn shop_prod_has_four_inbound_and_two_outbound_rows_at_their_defaults() {
-        let r = rows(&rich_flows(), &shop(), "role", &rich_index());
+        let r = rows(&rich_flows(), &shop(), "role", &rich_index(), &[]);
         use Side::*;
         assert_eq!(
             texts(&r),
@@ -497,7 +579,25 @@ pub(crate) mod tests {
             {"href": "/orgs/5/sec_policy/draft/ip_lists/31", "name": "Labs",
              "ip_ranges": [{"from_ip": "10.1.4.0/24"}]},
             {"href": "/orgs/5/sec_policy/draft/ip_lists/32", "name": "Lab twin",
-             "ip_ranges": [{"from_ip": "10.1.4.0", "to_ip": "10.1.4.255"}]}
+             "ip_ranges": [{"from_ip": "10.1.4.0", "to_ip": "10.1.4.255"}]},
+            {"href": "/orgs/5/sec_policy/draft/ip_lists/33", "name": "DC-v6",
+             "ip_ranges": [{"from_ip": "2001:db8::/32"}]},
+            {"href": "/orgs/5/sec_policy/draft/ip_lists/34", "name": "Zone-v6",
+             "ip_ranges": [{"from_ip": "2001:db8:1::/64"}]},
+            {"href": "/orgs/5/sec_policy/draft/ip_lists/35", "name": "Corp-dual",
+             "ip_ranges": [{"from_ip": "10.1.0.0/16"}, {"from_ip": "2001:db8::/32"}]},
+            {"href": "/orgs/5/sec_policy/draft/ip_lists/36", "name": "Ten12",
+             "ip_ranges": [{"from_ip": "10.0.0.0/12"}]},
+            {"href": "/orgs/5/sec_policy/draft/ip_lists/37", "name": "Internet",
+             "ip_ranges": [{"from_ip": "0.0.0.0/0"}, {"from_ip": "10.0.0.0/8", "exclusion": true}]},
+            {"href": "/orgs/5/sec_policy/draft/ip_lists/38", "name": "Corp-no-labs",
+             "ip_ranges": [{"from_ip": "10.1.0.0/16"}, {"from_ip": "10.1.4.0/24", "exclusion": true}]},
+            {"href": "/orgs/5/sec_policy/draft/ip_lists/39", "name": "Feeds",
+             "fqdns": [{"fqdn": "*.feeds.example"}]},
+            {"href": "/orgs/5/sec_policy/draft/ip_lists/40", "name": "shop-prod peer 192.0.2.9",
+             "ip_ranges": [{"from_ip": "192.0.2.10"}]},
+            {"href": "/orgs/5/sec_policy/draft/ip_lists/41", "name": "Broken",
+             "ip_ranges": [{"from_ip": "not-an-ip"}]}
         ]))
         .unwrap();
         lists.extend(extra);
@@ -532,7 +632,7 @@ pub(crate) mod tests {
             from_ip("10.1.4.10", &["Corp"], 5),
             from_ip("192.0.2.1", &["Any (0.0.0.0/0 and ::/0)"], 1),
         ];
-        let r = rows(&f, &shop(), "role", &rich_index());
+        let r = rows(&f, &shop(), "role", &rich_index(), &[]);
         assert_eq!(
             texts(&r),
             vec![
@@ -568,7 +668,7 @@ pub(crate) mod tests {
             // Only in rfc1918.
             from_ip("10.200.0.1", &["rfc1918"], 1),
         ];
-        let r = rows(&f, &shop(), "role", &idx);
+        let r = rows(&f, &shop(), "role", &idx, &[]);
         assert_eq!(
             texts(&r),
             vec![
@@ -587,11 +687,126 @@ pub(crate) mod tests {
             &shop(),
             "role",
             &idx,
+            &[],
         );
         assert_eq!(tie[0].peer_text(), "IP list Lab twin · 1 IP");
         assert_eq!(
             tie[0].flag_texts(super::super::Stop::AppPorts, &[]),
             vec!["1 IP also in Labs: first by name"]
+        );
+    }
+
+    fn texts_of(f: &[ResolvedFlow], drafts: &[RuleSet]) -> Vec<(String, Vec<String>)> {
+        rows(f, &shop(), "role", &lists_index(), drafts)
+            .iter()
+            .map(|r| {
+                let flags = r.flag_texts(super::super::Stop::AppPorts, &[]);
+                (r.peer_text(), flags)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn narrowest_counts_the_ip_s_own_family_in_full() {
+        // Both /32 and /64 are past u64: the /64 is still narrower.
+        assert_eq!(
+            texts_of(&[from_ip("2001:db8:1::5", &["DC-v6", "Zone-v6"], 1)], &[]),
+            vec![(
+                "IP list Zone-v6 · 1 IP".to_string(),
+                vec!["1 IP also in DC-v6: narrowest list".to_string()]
+            )]
+        );
+        // Corp-dual's IPv6 half does not count against an IPv4 peer.
+        assert_eq!(
+            texts_of(&[from_ip("10.1.2.3", &["Ten12", "Corp-dual"], 1)], &[])[0].0,
+            "IP list Corp-dual · 1 IP"
+        );
+    }
+
+    #[test]
+    fn a_list_covering_everything_is_never_a_group_and_the_row_says_so() {
+        assert_eq!(
+            texts_of(&[from_ip("203.0.113.9", &["Internet"], 1)], &[]),
+            vec![(
+                "203.0.113.9".to_string(),
+                vec![
+                    "needs an IP list".to_string(),
+                    "Internet covers everything: not used".to_string()
+                ]
+            )]
+        );
+        assert_eq!(
+            texts_of(&[from_ip("10.1.4.9", &["Internet", "Corp"], 1)], &[]),
+            vec![(
+                "IP list Corp · 1 IP".to_string(),
+                vec!["Internet covers everything: not used".to_string()]
+            )],
+            "the next candidate"
+        );
+    }
+
+    #[test]
+    fn a_list_that_does_not_hold_the_ip_in_the_draft_is_not_used() {
+        let t = |f: ResolvedFlow| texts_of(&[f], &[])[0].0.clone();
+        // Excluded in the draft, though Explorer reported it.
+        assert_eq!(t(from_ip("10.1.4.9", &["Corp-no-labs"], 1)), "10.1.4.9");
+        // Unparsable ranges hold nothing (never the narrowest).
+        assert_eq!(
+            t(from_ip("10.1.4.9", &["Broken", "Corp"], 1)),
+            "IP list Corp · 1 IP"
+        );
+        // An FQDN-only list: an outbound provider only.
+        assert_eq!(t(from_ip("198.51.100.1", &["Feeds"], 1)), "198.51.100.1");
+        let mut out = to_ip(22, "198.51.100.1");
+        out.dst.ip_lists = vec!["Feeds".into()];
+        let r = rows(&[out], &shop(), "role", &lists_index(), &[]);
+        assert_eq!(r[0].peer_text(), "IP list Feeds · 1 IP");
+        // The batch's own name, but another address in it.
+        assert_eq!(t(from_ip("192.0.2.9", &[], 1)), "192.0.2.9");
+        // Matched case-insensitively.
+        assert_eq!(t(from_ip("10.1.4.9", &["corp"], 1)), "IP list Corp · 1 IP");
+    }
+
+    #[test]
+    fn a_list_an_existing_rule_names_comes_before_a_narrower_one() {
+        let mut drafts: Vec<RuleSet> =
+            serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
+        drafts[0].rules.push(
+            serde_json::from_value(serde_json::json!({
+                "href": "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/77", "enabled": true,
+                "providers": [{"actors": "ams"}],
+                "consumers": [{"ip_list": {"href": "/orgs/5/sec_policy/active/ip_lists/30"}}],
+                "ingress_services": [{"port": 443, "proto": 6}]
+            }))
+            .unwrap(),
+        );
+        let f = [from_ip("10.1.4.9", &["Labs", "rfc1918"], 1)];
+        assert_eq!(
+            texts_of(&f, &drafts),
+            vec![(
+                "IP list rfc1918 · 1 IP".to_string(),
+                vec!["1 IP also in Labs: an existing rule names it".to_string()]
+            )]
+        );
+        assert_eq!(texts_of(&f, &[])[0].0, "IP list Labs · 1 IP");
+        // Only on the side the rule names it: outbound it is a consumer.
+        let mut out = to_ip(22, "10.1.4.9");
+        out.dst.ip_lists = vec!["Labs".into(), "rfc1918".into()];
+        let r = rows(&[out], &shop(), "role", &lists_index(), &drafts);
+        assert_eq!(r[0].peer_text(), "IP list Labs · 1 IP");
+    }
+
+    #[test]
+    fn one_ip_lands_in_one_row_even_when_its_records_disagree() {
+        let f = [
+            from_ip("10.1.4.9", &["Labs"], 1),
+            from_ip("10.1.4.9", &["rfc1918"], 1),
+        ];
+        let r = rows(&f, &shop(), "role", &lists_index(), &[]);
+        assert_eq!(r.len(), 1);
+        assert_eq!(
+            (r[0].peer_text().as_str(), r[0].flows),
+            ("IP list Labs · 1 IP", 2)
         );
     }
 
@@ -608,7 +823,7 @@ pub(crate) mod tests {
             .unwrap(),
         );
         let idx = NameIndex::new(&[], &[], &lists, &[]);
-        let r = rows(&[from_ip("192.0.2.1", &[], 1)], &shop(), "role", &idx);
+        let r = rows(&[from_ip("192.0.2.1", &[], 1)], &shop(), "role", &idx, &[]);
         assert_eq!(r[0].peer_text(), "IP list shop-prod peer 192.0.2.1 · 1 IP");
         assert!(r[0].flags.is_empty() && !r[0].checked && r[0].checkable);
     }
@@ -634,7 +849,7 @@ pub(crate) mod tests {
         f.push(to_ip(22, "255.255.255.255"));
         f.push(to_ip(22, "ff02::fb"));
         assert!(excluded(&f[30]) && excluded(&f[31]) && excluded(&f[32]));
-        let r = rows(&f, &shop(), "role", &rich_index());
+        let r = rows(&f, &shop(), "role", &rich_index(), &[]);
         assert_eq!(r.len(), 6, "no row for the three");
         assert!(
             !excluded(&to_ip(22, "10.255.255.255")),
@@ -650,7 +865,7 @@ pub(crate) mod tests {
         let mut out = f[2].clone(); // shop web -> crm web
         out.dst.labels.clear();
         f.extend([inb, out]);
-        let r = rows(&f, &shop(), "role", &rich_index());
+        let r = rows(&f, &shop(), "role", &rich_index(), &[]);
         let wl: Vec<&GenRow> = r
             .iter()
             .filter(|r| matches!(r.peer, PeerKind::Workload { .. }))
@@ -689,7 +904,7 @@ pub(crate) mod tests {
             x.num_connections = 100 + i;
             f.push(x);
         }
-        let r = rows(&f, &shop(), "role", &rich_index());
+        let r = rows(&f, &shop(), "role", &rich_index(), &[]);
         let out: Vec<&GenRow> = r.iter().filter(|r| r.side == Side::Outbound).collect();
         // crm/prod, 25 IPs, the folded row.
         assert_eq!(out.len(), 27);
@@ -717,7 +932,7 @@ pub(crate) mod tests {
             }
         });
         f.push(icmp);
-        let r = rows(&f, &shop(), "role", &rich_index());
+        let r = rows(&f, &shop(), "role", &rich_index(), &[]);
         let erp = r.iter().find(|r| r.peer_text() == "erp/prod").unwrap();
         assert_eq!(erp.flags, vec![RowFlag::UnsupportedProto(1)]);
         assert!(
@@ -735,7 +950,7 @@ pub(crate) mod tests {
         let mut f = rich_flows();
         f.extend((0..33u16).map(|i| intra_on(1000 + 2 * i)));
         f.push(intra_on(50_000));
-        let r = rows(&f, &shop(), "role", &rich_index());
+        let r = rows(&f, &shop(), "role", &rich_index(), &[]);
         assert!(r[0].checked);
         assert!(
             r[0].flags.contains(&RowFlag::ManyServices(35)),
@@ -751,7 +966,7 @@ pub(crate) mod tests {
         let mut x = f[12].clone();
         x.src.labels.retain(|l| l.key != "role");
         f.push(x);
-        let r = rows(&f, &shop(), "role", &rich_index());
+        let r = rows(&f, &shop(), "role", &rich_index(), &[]);
         let hr = r.iter().find(|r| r.peer_text() == "hr/prod").unwrap();
         assert_eq!(hr.flags, vec![RowFlag::NoRole { flows: 1 }]);
         assert!(hr.flag_texts(super::super::Stop::AppPorts, &[]).is_empty());
@@ -764,7 +979,7 @@ pub(crate) mod tests {
     #[test]
     fn with_one_scope_key_every_app_peer_is_checked() {
         let shop = Focus::new(parse_app("shop"), vec!["app".into()]);
-        let r = rows(&rich_flows(), &shop, "role", &rich_index());
+        let r = rows(&rich_flows(), &shop, "role", &rich_index(), &[]);
         assert!(
             r.iter()
                 .filter(|r| matches!(r.peer, PeerKind::App(_)))
@@ -789,7 +1004,7 @@ pub(crate) mod tests {
         assert!(is_any_ip_list(&named));
         let mut f = rich_flows()[17].clone();
         f.src.ip_lists = vec!["Any (0.0.0.0/0 and ::/0)".into()];
-        let r = rows(&[f], &shop(), "role", &rich_index());
+        let r = rows(&[f], &shop(), "role", &rich_index(), &[]);
         assert_eq!(
             r[0].flags,
             vec![RowFlag::NeedsIpList],

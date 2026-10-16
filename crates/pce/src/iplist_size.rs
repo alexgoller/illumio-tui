@@ -136,6 +136,20 @@ pub(crate) fn human(n: u128) -> String {
     format!("{f:.1e}")
 }
 
+/// Whether `ip` is in the list's ranges with its exclusions taken out.
+/// FQDNs and ranges that do not parse hold nothing.
+pub fn ip_list_contains(list: &IpList, ip: IpAddr) -> bool {
+    let (v4, n) = int(ip);
+    let hit = |exclusion: bool| {
+        list.ip_ranges
+            .iter()
+            .filter(|r| r.exclusion.unwrap_or(false) == exclusion)
+            .filter_map(|r| span(&r.from_ip, r.to_ip.as_deref()))
+            .any(|(f, (first, last))| f == v4 && first <= n && n <= last)
+    };
+    hit(false) && !hit(true)
+}
+
 pub fn ip_list_size(list: &IpList) -> IpListSize {
     // Index 0 is IPv4, 1 is IPv6.
     let mut include: [Vec<Span>; 2] = [Vec::new(), Vec::new()];
@@ -209,6 +223,25 @@ mod tests {
             "ip_ranges": ranges, "fqdns": fqdns
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn contains_takes_exclusions_out_and_ignores_fqdns_and_bad_ranges() {
+        let l = list(
+            json!([{"from_ip": "10.1.0.0/16"}, {"from_ip": "10.1.4.0/24", "exclusion": true},
+                {"from_ip": "2001:db8::", "to_ip": "2001:db8::ff"}, {"from_ip": "nonsense"}]),
+            json!([{"fqdn": "*.corp.example"}]),
+        );
+        let has = |ip: &str| ip_list_contains(&l, ip.parse().unwrap());
+        assert!(has("10.1.2.3"));
+        assert!(!has("10.1.4.9"), "excluded");
+        assert!(!has("10.2.0.1"));
+        assert!(has("2001:db8::10"));
+        assert!(!has("2001:db8::100"));
+        assert!(
+            !has("::ffff:10.1.2.3"),
+            "an IPv6 address is not its IPv4 form"
+        );
     }
 
     fn size(ranges: Value) -> IpListSize {

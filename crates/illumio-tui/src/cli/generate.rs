@@ -81,9 +81,18 @@ pub struct RowOut {
     pub services: Vec<String>,
     pub decisions: pce::generate::DecisionCounts,
     pub warnings: Vec<String>,
+    /// An `ip_list` row's list.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ip_list: Option<IpListRef>,
     /// An `ip_list` row's IP peers seen, by address.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ips: Option<Vec<String>>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct IpListRef {
+    pub name: String,
+    pub href: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -231,6 +240,19 @@ fn service_texts(services: &std::collections::BTreeSet<PortSpec>) -> Vec<String>
 
 fn row_out(r: &GenRow, global: Stop, scope_keys: &[String]) -> RowOut {
     let stop = r.effective(global);
+    let mut warnings = r.flag_texts(stop, scope_keys);
+    let (ip_list, ips) = match &r.peer {
+        pce::generate::PeerKind::IpList { href, name, ips } => {
+            // As before #38, for scripts that read the warnings.
+            warnings.insert(0, format!("uses IP list {name}"));
+            let list = IpListRef {
+                name: name.clone(),
+                href: href.clone(),
+            };
+            (Some(list), Some(ips.clone()))
+        }
+        _ => (None, None),
+    };
     RowOut {
         side: r.side,
         peer: r.peer_text(),
@@ -245,11 +267,9 @@ fn row_out(r: &GenRow, global: Stop, scope_keys: &[String]) -> RowOut {
             service_texts(&r.services)
         },
         decisions: r.decisions,
-        warnings: r.flag_texts(stop, scope_keys),
-        ips: match &r.peer {
-            pce::generate::PeerKind::IpList { ips, .. } => Some(ips.clone()),
-            _ => None,
-        },
+        warnings,
+        ip_list,
+        ips,
     }
 }
 
@@ -356,7 +376,7 @@ pub async fn run(ctx: &Context, args: &GenArgs) -> Result<(), CliError> {
         .window
         .clone()
         .unwrap_or_else(|| ctx.config.traffic_default_window.clone());
-    let gen_rows = rows(&fetched.flows, &focus, &tier, &idx);
+    let gen_rows = rows(&fetched.flows, &focus, &tier, &idx, &drafts.value);
     let input = GenInput {
         flows: &fetched.flows,
         focus: &focus,

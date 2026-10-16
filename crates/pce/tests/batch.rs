@@ -87,7 +87,7 @@ fn proposal() -> Proposal {
         serde_json::from_str(include_str!("../../../fixtures/traffic_flows_rich.json")).unwrap();
     let flows = resolve_flows(&raw, &idx);
     let focus = Focus::new(parse_app("shop/prod"), vec!["app".into(), "env".into()]);
-    let mut r = rows(&flows, &focus, "role", &idx);
+    let mut r = rows(&flows, &focus, "role", &idx, &[]);
     for row in r.iter_mut() {
         if matches!(&row.peer, PeerKind::Ip { ip, .. } if ip == "203.0.113.7") {
             row.checked = true;
@@ -1114,7 +1114,7 @@ async fn a_checked_list_row_names_its_list_creates_none_and_the_confirm_lists_it
         serde_json::from_str(include_str!("../../../fixtures/traffic_flows_rich.json")).unwrap();
     let flows = resolve_flows(&raw, &idx);
     let focus = Focus::new(parse_app("shop/prod"), vec!["app".into(), "env".into()]);
-    let mut r = rows(&flows, &focus, "role", &idx);
+    let mut r = rows(&flows, &focus, "role", &idx, &[]);
     for row in r.iter_mut() {
         if matches!(&row.peer, PeerKind::IpList { name, .. } if name == "Corp") {
             row.checked = true;

@@ -482,13 +482,24 @@ fn refuse_named_elsewhere(plan: &Plan, name: &str, scope: &str) -> Result<(), Wr
     }
 }
 
+/// The IPs behind rules, by the existing list they name.
+type ListIps = std::collections::BTreeMap<String, std::collections::BTreeSet<String>>;
+
 /// `ipl:Corp: 2 IPs seen: 10.1.4.9, 10.1.4.10`, one per existing list
-/// the rule names for IP peers.
-fn ip_notes(r: &GenRule) -> Vec<String> {
-    r.ips
-        .iter()
+/// the rules name for IP peers.
+fn ip_notes(ips: &ListIps) -> Vec<String> {
+    ips.iter()
         .map(|(list, ips)| crate::generate::seen_text(list, ips))
         .collect()
+}
+
+/// `into` with `from`'s IPs added, list by list.
+fn add_ips(into: &mut ListIps, from: &ListIps) {
+    for (list, ips) in from {
+        into.entry(list.clone())
+            .or_default()
+            .extend(ips.iter().cloned());
+    }
 }
 
 /// `blocked: 3 of 5 flows by override deny <href>` for a rule whose flows
@@ -635,7 +646,7 @@ impl Writer<'_> {
         // Services added to one rule by several proposed rules go in one
         // update: two PUTs of the list would drop the first one's.
         // (rule href, services to add, deny notes, IP notes).
-        type Update = (String, Vec<ServiceRef>, Vec<String>, Vec<String>);
+        type Update = (String, Vec<ServiceRef>, Vec<String>, ListIps);
         let mut updates: Vec<Update> = Vec::new();
         for r in &proposal.rules {
             let RuleAction::AddServices { rule_href, add } = &r.action else {
@@ -651,9 +662,11 @@ impl Writer<'_> {
                         }
                     }
                     notes.extend(note);
-                    ips.extend(ip_notes(r));
+                    add_ips(ips, &r.ips);
                 }
-                None => updates.push((href, add.clone(), note.into_iter().collect(), ip_notes(r))),
+                None => {
+                    updates.push((href, add.clone(), note.into_iter().collect(), r.ips.clone()))
+                }
             }
         }
         for (href, add, notes, ips) in updates {
@@ -680,7 +693,7 @@ impl Writer<'_> {
             );
             step.expect = expect.filter(|_| step.plan.request().is_some());
             step.deny_notes = notes;
-            step.notes = ips;
+            step.notes = ip_notes(&ips);
             steps.push(step);
         }
         for r in &proposal.rules {
@@ -722,7 +735,7 @@ impl Writer<'_> {
             needs.dedup();
             let mut step = BatchStep::new(plan, ObjectKind::Rule, needs);
             step.deny_notes.extend(deny_note(r));
-            step.notes = ip_notes(r);
+            step.notes = ip_notes(&r.ips);
             steps.push(step);
         }
         check_placeholders(&steps)?;

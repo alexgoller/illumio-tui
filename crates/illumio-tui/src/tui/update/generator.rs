@@ -171,11 +171,19 @@ pub(super) fn rebuild_gen(model: &mut Model) {
         model.status = StatusLine::warn("g changed: G reopens the generator");
         return;
     }
+    // The lists existing rules name come first (an IP's row may move once
+    // the draft rulesets arrive).
+    let drafts = v
+        .fresh_drafts
+        .as_deref()
+        .or(model.draft_rulesets())
+        .unwrap_or_default();
     let fresh = rows(
         model.traffic.flows_for(&v.focus),
         &v.focus,
         &model.limits.tier_key,
         &idx,
+        drafts,
     );
     let (gap, requery, window) = gap_text(model, v);
     if let Some(v) = model.gen_view.as_mut() {
@@ -229,9 +237,10 @@ pub(super) fn gen_drafts_answer(model: &mut Model, outcome: Result<bool, &str>) 
             if std::mem::take(&mut v.drafts_sent) && hit {
                 v.cached += 1;
             }
-            // A load newer than the plan's fresh read.
+            // A load newer than the plan's fresh read; the rows again, for
+            // the IP lists its rules name.
             v.fresh_drafts = None;
-            regen(model);
+            rebuild_gen(model);
         }
         Err(e) if v.drafts == Drafts::Loading => v.drafts = Drafts::Failed(e.to_string()),
         Err(_) => {}

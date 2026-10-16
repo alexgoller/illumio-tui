@@ -26,17 +26,18 @@ fn fit(s: &str, w: usize) -> String {
 /// One row: checkbox, peer, stop (`*` when overridden), services,
 /// decisions, the draft's mark, the flags; an outbound row its target.
 /// One row, its columns narrower below 100 columns (`narrow`) so the
-/// flags fit at 80.
-fn row_line<'a>(v: &GenView, i: usize, scope_keys: &[String], t: &Theme, width: usize) -> Line<'a> {
+/// flags fit at 80. `longest`: the widest peer text of all rows.
+fn row_line<'a>(
+    v: &GenView,
+    i: usize,
+    scope_keys: &[String],
+    t: &Theme,
+    width: usize,
+    longest: usize,
+) -> Line<'a> {
     let narrow = width < 100;
     let (peer_w, services_w) = if narrow { (14, 16) } else { (18, 18) };
     // Wider for a longer peer (`IP list rfc1918 · 7 IPs`), up to 8 more.
-    let longest = v
-        .rows
-        .iter()
-        .map(|r| Span::raw(r.peer_text()).width())
-        .max()
-        .unwrap_or(0);
     let peer_w = longest.clamp(peer_w, peer_w + 8);
     let r: &GenRow = &v.rows[i];
     let stop = r.effective(v.global);
@@ -242,6 +243,12 @@ pub fn render_generator(model: &Model, f: &mut Frame, area: Rect) {
             let mut all = Vec::new();
             let mut cursor = None;
             let mut outbound_title = 0;
+            let longest = v
+                .rows
+                .iter()
+                .map(|r| Span::raw(r.peer_text()).width())
+                .max()
+                .unwrap_or(0);
             for side in [Side::Inbound, Side::Outbound] {
                 let title = match side {
                     Side::Inbound => format!("Inbound → {}", v.target_name()),
@@ -275,6 +282,7 @@ pub fn render_generator(model: &Model, f: &mut Frame, area: Rect) {
                         &model.limits.scope_keys,
                         t,
                         usize::from(inner.width),
+                        longest,
                     ));
                 }
             }

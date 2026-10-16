@@ -3788,9 +3788,14 @@ async fn gen_prints_rows_rules_and_the_preview_and_writes_nothing() {
     );
     assert_eq!(d["rows"][2]["kind"], "ip_list");
     assert_eq!(d["rows"][2]["ips"], json!(["10.1.4.9"]));
-    assert_eq!(d["rows"][2]["warnings"], json!([]));
+    assert_eq!(
+        d["rows"][2]["ip_list"],
+        json!({"name": "Corp", "href": "/orgs/5/sec_policy/draft/ip_lists/21"})
+    );
+    assert_eq!(d["rows"][2]["warnings"], json!(["uses IP list Corp"]));
     assert_eq!(d["rows"][2]["checked"], false, "IP rows start unchecked");
     assert!(d["rows"][0].get("ips").is_none(), "only on ip_list rows");
+    assert!(d["rows"][0].get("ip_list").is_none());
     assert_eq!(d["rules"].as_array().unwrap().len(), 1);
     let r = &d["rules"][0];
     assert_eq!(r["ruleset"], "Shop-Prod");

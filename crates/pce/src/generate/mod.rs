@@ -161,13 +161,15 @@ pub enum RowFlag {
     /// than the first).
     EnvMismatch,
     /// Some of the list row's IPs are in other lists too (`others`): each
-    /// went to its narrowest list, by name (`by_name`) when sizes tie or
-    /// are unknown.
+    /// went to the list `why` says (the strongest reason among them).
     AlsoIn {
         ips: usize,
         others: Vec<String>,
-        by_name: bool,
+        why: ListWhy,
     },
+    /// Reported lists that cover all of IPv4 or IPv6 (a custom "any"):
+    /// never used for a rule.
+    CoversAll(Vec<String>),
     /// No IP list holds the IP peer: checking the row plans one.
     NeedsIpList,
     /// A workload without every scope label.
@@ -192,19 +194,16 @@ impl RowFlag {
                 let rest = scope_keys.get(1..).unwrap_or_default().join(",");
                 format!("{rest} mismatch")
             }
-            RowFlag::AlsoIn {
-                ips,
-                others,
-                by_name,
-            } => format!(
+            RowFlag::AlsoIn { ips, others, why } => format!(
                 "{ips} {} also in {}: {}",
                 if *ips == 1 { "IP" } else { "IPs" },
                 others.join(", "),
-                if *by_name {
-                    "first by name"
-                } else {
-                    "narrowest list"
-                }
+                why.text()
+            ),
+            RowFlag::CoversAll(names) => format!(
+                "{} {} everything: not used",
+                names.join(", "),
+                if names.len() == 1 { "covers" } else { "cover" }
             ),
             RowFlag::NeedsIpList => "needs an IP list".into(),
             RowFlag::NoScopeLabels if side == Side::Inbound => {
@@ -218,6 +217,28 @@ impl RowFlag {
             RowFlag::ManyServices(n) => format!("{n} services: consider app·all or role·all"),
             RowFlag::Ephemeral => "ephemeral port?".into(),
             RowFlag::NoAddress => "no address: no IP list can name it".into(),
+        }
+    }
+}
+
+/// Why an IP peer's rule names its list rather than another it is in.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ListWhy {
+    /// The fewest addresses of the IP's family.
+    #[default]
+    Narrowest,
+    /// As few as another: the first by name.
+    ByName,
+    /// An existing rule on this side names it, though another is narrower.
+    Named,
+}
+
+impl ListWhy {
+    pub fn text(self) -> &'static str {
+        match self {
+            ListWhy::Narrowest => "narrowest list",
+            ListWhy::ByName => "first by name",
+            ListWhy::Named => "an existing rule names it",
         }
     }
 }
@@ -967,18 +988,26 @@ mod tests {
             RowFlag::EnvMismatch.text(Side::Inbound, &keys),
             "env mismatch"
         );
-        let also = |ips, by_name| RowFlag::AlsoIn {
+        let also = |ips, why| RowFlag::AlsoIn {
             ips,
             others: vec!["Corp".into(), "rfc1918".into()],
-            by_name,
+            why,
         };
         assert_eq!(
-            also(2, false).text(Side::Inbound, &keys),
+            also(2, ListWhy::Narrowest).text(Side::Inbound, &keys),
             "2 IPs also in Corp, rfc1918: narrowest list"
         );
         assert_eq!(
-            also(1, true).text(Side::Inbound, &keys),
+            also(1, ListWhy::ByName).text(Side::Inbound, &keys),
             "1 IP also in Corp, rfc1918: first by name"
+        );
+        assert_eq!(
+            also(1, ListWhy::Named).text(Side::Inbound, &keys),
+            "1 IP also in Corp, rfc1918: an existing rule names it"
+        );
+        assert_eq!(
+            RowFlag::CoversAll(vec!["Internet".into()]).text(Side::Outbound, &keys),
+            "Internet covers everything: not used"
         );
         assert_eq!(
             RowFlag::ManyServices(40).text(Side::Inbound, &keys),

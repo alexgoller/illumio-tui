@@ -599,6 +599,7 @@ mod tests {
             &shop(),
             "role",
             &idx,
+            &[],
         ));
         v
     }
@@ -616,6 +617,7 @@ mod tests {
             &shop(),
             "role",
             &idx,
+            &[],
         ));
         assert!(v.rows[2].checked, "kept by its key");
         assert_eq!(v.rows[2].stop, Some(Stop::RolePorts));
@@ -637,7 +639,7 @@ mod tests {
         more.src.ip = Some("10.1.4.10".into());
         flows.insert(0, more);
         let idx = crate::tui::test_support::fixture_index();
-        v.set_rows(pce::generate::rows(&flows, &shop(), "role", &idx));
+        v.set_rows(pce::generate::rows(&flows, &shop(), "role", &idx, &[]));
         let i = v.selected().unwrap();
         assert_eq!(v.rows[i].peer_text(), "IP list Corp · 2 IPs");
         assert!(v.rows[i].checked);

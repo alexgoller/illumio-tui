@@ -275,7 +275,7 @@ fn endpoint_in(actors: &[Actor], ep: &SeenEnd, scoped: bool, idx: &NameIndex) ->
         a.ip_list
             .as_ref()
             .is_some_and(|r| match idx.ip_list_name(&r.href) {
-                Some(n) => ep.ip_lists.iter().any(|x| x == n),
+                Some(n) => ep.ip_lists.iter().any(|x| x.eq_ignore_ascii_case(n)),
                 None => true,
             })
             || a.workload.as_ref().is_some_and(|r| {
