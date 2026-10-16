@@ -298,7 +298,7 @@ The executor replaces the placeholder with that step's `Written.href`, or with t
 
 **Created objects:**
 
-- **New ruleset.** Named `<app>-<env>` (scope values joined with `-`), scoped by the app's scope labels exactly as `edit::new_ruleset_intent` scopes one, `enabled: true`.
+- **New ruleset.** Named by the profile setting `[profiles.<name>.generator] ruleset_name`, a template over the scope keys; the default is `"{app}-{env}"` (`shop-prod`), e.g. `"RS-{app}-{env}"`. Unknown placeholders are a config error at load, naming the key. The CLI `gen` uses the same setting, scoped by the app's scope labels exactly as `edit::new_ruleset_intent` scopes one, `enabled: true`.
 - **New IP list.** One per checked IP peer row, named `<app>-<env> peer <ip>`, with one range (`<ip>`). It is reused by name if it already exists.
 
 ### The confirm (`Overlay::ConfirmBatch`)
@@ -517,8 +517,8 @@ Three GitHub issues, each with its own worktree, review and merge:
 2. `pce::write::batch` (`plan_create_rule_sets_if_missing`, `execute_batch`) and `Overlay::ConfirmBatch`.
 3. The TUI generator (`G`, `:gen`, `GenView`, `complete_for`). Docs: README, docs/index.html, in-TUI help.
 
-## Open questions for Alex
+## Decisions (Alex, 2026-10-16)
 
-1. **Rows that are already allowed.** A peer whose flows the reported policy already allows (by a broad rule elsewhere) stays checked by default, so the app's ruleset spells out its own traffic. Or should fully allowed rows default to unchecked?
-2. **New ruleset name.** It is `<app>-<env>` (`shop-prod`). Is there a house convention instead, such as `RS-shop-prod`, and should it be a profile setting?
-3. **IP lists.** The generator creates one IP list per IP peer, named `<app>-<env> peer <ip>`. Or should it make one list per app and direction holding every checked IP? That means fewer objects, but the rules would no longer show which IP uses which ports.
+1. **Already-allowed rows stay checked** by default, so the app's ruleset spells out its own traffic.
+2. **New ruleset name is a profile setting**: `[profiles.<name>.generator] ruleset_name`, default `"{app}-{env}"` (see Planning).
+3. **One IP list per IP peer**, named `<app>-<env> peer <ip>`, as specified.
