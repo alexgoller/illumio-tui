@@ -8,7 +8,7 @@ expression: out
 │granularity  app·all ─ [app·ports] ─ role·ports ─ role·all                    │
 │target  no ruleset can be named                                               │
 │Inbound → (no target)                                                         │
-│[x] intra-app      app·ports   5432/tcp         ✓ 4 ⚠ override deny blocks 2 ⚠│
+│[x] intra-app      app·ports   5432/tcp         ✓ 4 ⚠ override deny: 2 +1     │
 │[x] hr/prod        app·ports   5432/tcp         ✗ 1 ⚠ no target               │
 │[ ] shop/dev       app·ports   5432/tcp         ✗ 1 ⚠ env mismatch            │
 │[ ] 10.1.4.9       app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1 ⚠ uses IP list Corp   │

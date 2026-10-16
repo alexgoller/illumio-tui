@@ -528,5 +528,7 @@ pub fn batch_plan() -> pce::write::Batch {
             org_id: 5,
         }),
         refreshed: None,
+        drafts: None,
+        note: None,
     }
 }

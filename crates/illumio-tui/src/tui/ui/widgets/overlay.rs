@@ -876,7 +876,13 @@ struct BatchLayout {
 
 fn confirm_batch_layout(batch: &Batch, area: Rect) -> BatchLayout {
     let width = usize::from(CONFIRM_WIDTH.min(area.width).saturating_sub(2));
-    let summary = wrap_chars(&plain(&batch.summary()), width);
+    // The caller's warning first (what changed since the preview).
+    let mut summary: Vec<String> = batch
+        .note
+        .iter()
+        .flat_map(|n| wrap_chars(&plain(&format!("⚠ {n}")), width))
+        .collect();
+    summary.extend(wrap_chars(&plain(&batch.summary()), width));
     let content: Vec<String> = batch
         .lines()
         .iter()

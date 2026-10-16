@@ -193,7 +193,10 @@ pub(super) fn regen(model: &mut Model) {
         return;
     };
     let p = {
-        let (Some(v), Some(drafts)) = (model.gen_view.as_ref(), model.draft_rulesets()) else {
+        let Some(v) = model.gen_view.as_ref() else {
+            return;
+        };
+        let Some(drafts) = v.fresh_drafts.as_deref().or(model.draft_rulesets()) else {
             return;
         };
         let input = GenInput {
@@ -226,6 +229,8 @@ pub(super) fn gen_drafts_answer(model: &mut Model, outcome: Result<bool, &str>) 
             if std::mem::take(&mut v.drafts_sent) && hit {
                 v.cached += 1;
             }
+            // A load newer than the plan's fresh read.
+            v.fresh_drafts = None;
             regen(model);
         }
         Err(e) if v.drafts == Drafts::Loading => v.drafts = Drafts::Failed(e.to_string()),
@@ -251,18 +256,20 @@ pub(super) fn changed_since_plan(model: &Model) -> bool {
 
 /// A plan that opens its confirm: say what the fresh read changed against
 /// the preview, and show the proposal the steps write.
-pub(super) fn planned_proposal(
-    model: &mut Model,
-    refreshed: Option<&pce::generate::Proposal>,
-) -> Option<String> {
-    let v = model.gen_view.as_mut()?;
-    let new = refreshed?;
-    let note = v
+pub(super) fn planned_proposal(model: &mut Model, batch: &mut pce::write::Batch) {
+    let Some(v) = model.gen_view.as_mut() else {
+        return;
+    };
+    let Some(new) = batch.refreshed.as_ref() else {
+        return;
+    };
+    batch.note = v
         .proposal
         .as_ref()
         .and_then(|old| crate::tui::gen_view::refresh_note(old, new));
     v.proposal = Some(new.clone());
-    note
+    // `n` comes back to what the fresh read showed, not the preview.
+    v.fresh_drafts = batch.drafts.clone();
 }
 
 /// `Esc` / `q`: back to the app overlay it came from (its view is kept),
@@ -341,10 +348,10 @@ pub(super) fn gen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         KeyCode::Char('o') => {
             v.toggle_outbound();
             rebuild_gen(model);
-            // Turned on: the cursor goes to its rows, so they are on screen.
+            // Turned on: the cursor goes to the section (its first row,
+            // or its title while it has none), so it is on screen.
             if let Some(v) = model.gen_view.as_mut()
                 && v.outbound
-                && !v.section_rows(Side::Outbound).is_empty()
             {
                 v.section = Side::Outbound;
                 v.cursor[1] = 0;
@@ -482,7 +489,6 @@ fn gen_enter(model: &mut Model) -> Vec<Cmd> {
         v.planned = Some(input.proposal.clone());
         v.error = None;
     }
-    model.batch_from_gen = true;
     model.writes.in_flight = true;
     model.status = StatusLine::info("planning: the draft rulesets, read fresh…");
     vec![Cmd::PlanBatch {
@@ -847,16 +853,53 @@ mod tests {
             rule_href: "/orgs/5/sec_policy/draft/rule_sets/1/sec_rules/9".into(),
         };
         b.refreshed = Some(p.clone());
+        // The fresh read found no ruleset at all (whatever: it is what counts now).
+        b.drafts = Some(Vec::new());
         update(&mut m, Msg::BatchPlanned(Ok(b)));
-        assert!(matches!(m.overlay, Overlay::ConfirmBatch { .. }));
-        assert!(
-            m.status
-                .text
-                .ends_with("· 1 rule is in the draft since the preview: not written"),
-            "{}",
-            m.status.text
+        let Overlay::ConfirmBatch { batch, .. } = &m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        assert_eq!(
+            batch.note.as_deref(),
+            Some("1 rule is in the draft since the preview: not written")
+        );
+        assert_eq!(
+            m.status.text,
+            "the draft changed since the preview: review the requests"
         );
         assert_eq!(view(&m).proposal.as_ref(), Some(&p), "the refreshed one");
+        // At 80x24 the note heads the confirm.
+        let out = crate::tui::test_support::render_to_string(&m, 80, 24);
+        assert!(
+            out.contains("⚠ 1 rule is in the draft since the preview: not"),
+            "{out}"
+        );
+        // `n`: back to the generator, derived from the fresh read, not the
+        // cached drafts of the preview.
+        update(&mut m, key('n'));
+        assert_eq!(m.overlay, Overlay::Generator);
+        assert!(
+            matches!(
+                view(&m).proposal.as_ref().unwrap().targets[0],
+                pce::generate::Target::Create(_)
+            ),
+            "no ruleset in the fresh read: a new one"
+        );
+        // A newer draft load wins again.
+        let rs: Vec<pce::models::RuleSet> =
+            serde_json::from_str(include_str!("../../../../../fixtures/rule_sets.json")).unwrap();
+        update(
+            &mut m,
+            Msg::RuleSetsLoaded {
+                scope: PolicyScope::Draft,
+                result: Ok((rs, 0, false)),
+            },
+        );
+        assert!(view(&m).fresh_drafts.is_none());
+        assert!(matches!(
+            view(&m).proposal.as_ref().unwrap().targets[0],
+            pce::generate::Target::Existing { .. }
+        ));
     }
 
     fn written_all() -> Msg {
@@ -899,6 +942,41 @@ mod tests {
             [Cmd::ExecuteBatch(_)]
         ));
         m
+    }
+
+    #[test]
+    fn an_older_report_while_a_plan_is_on_its_way_closes_onto_the_screen() {
+        let mut m = planning();
+        assert!(!m.batch_from_gen, "set only when the confirm opens");
+        update(&mut m, kc(KeyCode::Esc));
+        m.batch_report = Some(vec!["sent to demo".into()]);
+        update(&mut m, Msg::Command(Command::Batch));
+        assert!(matches!(m.overlay, Overlay::BatchReport { .. }));
+        update(&mut m, kc(KeyCode::Esc));
+        assert_eq!(m.overlay, Overlay::None);
+    }
+
+    #[test]
+    fn after_o_and_a_re_query_the_cursor_stays_on_its_row() {
+        let mut m = loaded();
+        open_shop(&mut m);
+        update(&mut m, key('j'));
+        update(&mut m, key('j')); // shop/dev
+        let at = |m: &Model| view(m).selected().map(|i| view(m).rows[i].peer_text());
+        assert_eq!(at(&m).as_deref(), Some("shop/dev"));
+        // The rows come back in another order: the cursor follows its row.
+        let mut rows = view(&m).rows.clone();
+        rows.reverse();
+        m.gen_view.as_mut().unwrap().set_rows(rows);
+        assert_eq!(at(&m).as_deref(), Some("shop/dev"));
+        // `o`: the cursor goes to the outbound section and stays there
+        // through a rebuild.
+        update(&mut m, key('o'));
+        assert_eq!(view(&m).section, Side::Outbound);
+        let before = at(&m);
+        super::rebuild_gen(&mut m);
+        assert_eq!(view(&m).section, Side::Outbound);
+        assert_eq!(at(&m), before);
     }
 
     #[test]

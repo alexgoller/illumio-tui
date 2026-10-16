@@ -58,6 +58,9 @@ pub struct GenView {
     /// The proposal `Enter` planned: a plan landing after it changed
     /// (keys are frozen, but traffic may land) is discarded.
     pub planned: Option<Proposal>,
+    /// The draft rulesets a plan read fresh: the proposal is derived from
+    /// them until a newer load arrives.
+    pub fresh_drafts: Option<Vec<pce::models::RuleSet>>,
 }
 
 /// What the fresh read at `Enter` changed against the preview, for the
@@ -90,6 +93,21 @@ pub fn refresh_note(old: &Proposal, new: &Proposal) -> Option<String> {
         notes.push(format!(
             "{exists} {} in the draft since the preview: not written",
             if exists == 1 { "rule is" } else { "rules are" }
+        ));
+    }
+    let gone = old
+        .rules
+        .iter()
+        .zip(&new.rules)
+        .filter(|(o, n)| {
+            matches!(o.action, RuleAction::Exists { .. })
+                && !matches!(n.action, RuleAction::Exists { .. })
+        })
+        .count();
+    if gone > 0 {
+        notes.push(format!(
+            "{gone} {} previewed as existing no longer in the draft: written now",
+            if gone == 1 { "rule" } else { "rules" }
         ));
     }
     let adds = moved(|a| matches!(a, RuleAction::AddServices { .. }));
@@ -134,11 +152,14 @@ impl GenView {
             planning: false,
             error: None,
             planned: None,
+            fresh_drafts: None,
         }
     }
 
-    /// New rows; checkboxes and overrides follow their row by key.
+    /// New rows; checkboxes, overrides and the cursor follow their row by
+    /// key (the rows may come in another order after a re-query).
     pub fn set_rows(&mut self, rows: Vec<GenRow>) {
+        let at = self.selected().map(|i| self.rows[i].key());
         let old: BTreeMap<RowKey, (bool, Option<Stop>)> = self
             .rows
             .iter()
@@ -155,6 +176,16 @@ impl GenView {
             let n = self.section_rows(s).len();
             let c = &mut self.cursor[side_index(s)];
             *c = (*c).min(n.saturating_sub(1));
+        }
+        if let Some(key) = at {
+            let section = self.section;
+            if let Some(pos) = self
+                .section_rows(section)
+                .iter()
+                .position(|i| self.rows[*i].key() == key)
+            {
+                self.cursor[side_index(section)] = pos;
+            }
         }
     }
 
@@ -403,7 +434,7 @@ impl GenView {
         let mut out = Vec::new();
         let denied: u64 = mine().map(|r| r.denied_flows.min(r.flows)).sum();
         if denied > 0 {
-            out.push(format!("override deny blocks {denied}"));
+            out.push(format!("override deny: {denied}"));
         }
         let no_target = mine().any(|r| {
             matches!(
@@ -676,10 +707,7 @@ mod tests {
         assert_eq!(v.target_name(), "(no target)");
         assert_eq!(
             v.rule_flags(row),
-            vec![
-                "override deny blocks 2".to_string(),
-                "no target".to_string()
-            ]
+            vec!["override deny: 2".to_string(), "no target".to_string()]
         );
     }
 

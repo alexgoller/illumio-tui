@@ -904,20 +904,21 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         "the proposal changed while planning: nothing sent, Enter plans again",
                     );
                 }
-                Ok(batch) => {
-                    let note = generator::planned_proposal(model, batch.refreshed.as_ref());
-                    let mut text = format!(
-                        "review the {}: y sends them all, n cancels",
-                        if batch.sends() == 1 {
-                            "request"
-                        } else {
-                            "requests"
-                        }
-                    );
-                    if let Some(n) = note {
-                        text.push_str(&format!(" · {n}"));
-                    }
-                    model.status = StatusLine::info(text);
+                Ok(mut batch) => {
+                    generator::planned_proposal(model, &mut batch);
+                    let what = if batch.sends() == 1 {
+                        "request"
+                    } else {
+                        "requests"
+                    };
+                    // The difference itself heads the confirm.
+                    model.status = if batch.note.is_some() {
+                        StatusLine::warn(format!(
+                            "the draft changed since the preview: review the {what}"
+                        ))
+                    } else {
+                        StatusLine::info(format!("review the {what}: y sends them all, n cancels"))
+                    };
                     model.batch_from_gen = true;
                     model.overlay = Overlay::ConfirmBatch { batch, scroll: 0 };
                 }

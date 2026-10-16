@@ -1857,7 +1857,7 @@ fn generator_override_deny_and_no_target_80x24() {
         p.targets[0] = pce::generate::Target::None("no ruleset can be named".into());
     }
     let out = render_to_string(&m, 80, 24);
-    for s in ["⚠ override deny blocks 2", "⚠ no target"] {
+    for s in ["⚠ override deny: 2", "⚠ no target"] {
         assert!(out.contains(s), "missing {s:?}:\n{out}");
     }
     insta::assert_snapshot!("generator_override_deny_and_no_target_80x24", out);
@@ -1930,4 +1930,20 @@ fn generator_rows_scroll_with_the_cursor_80x24() {
         "the outbound title comes along:\n{out}"
     );
     insta::assert_snapshot!("generator_rows_scroll_with_the_cursor_80x24", out);
+}
+
+/// Flags that do not fit at 80 columns: the first and how many more.
+#[test]
+fn generator_flags_that_do_not_fit_say_how_many_more_80x24() {
+    let mut m = generator_model();
+    {
+        let v = m.gen_view.as_mut().unwrap();
+        let p = v.proposal.as_mut().unwrap();
+        p.rules[0].denied_flows = 2;
+        p.targets[0] = pce::generate::Target::None("no ruleset can be named".into());
+    }
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("⚠ override deny: 2 +1"), "{out}");
+    let wide = render_to_string(&m, 120, 40);
+    assert!(wide.contains("⚠ override deny: 2 ⚠ no target"), "{wide}");
 }

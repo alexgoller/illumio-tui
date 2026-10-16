@@ -203,8 +203,9 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   The target line names the app's ruleset (`R` picks when several cover it, or a new one by
   `generator.ruleset_name`, default `RF-{app}-{env}`). Rules already in the draft show as
   `exists` and are not written; an existing rule with the same actors gets the missing
-  services. A row whose rule an override deny rule blocks anyway shows `⚠ override deny
-  blocks N`, one whose ruleset cannot be named `⚠ no target`. The footer counts the rules and
+  services. A row whose rule an override deny rule blocks anyway shows `⚠ override deny:
+  N` (N flows stay blocked), one whose ruleset cannot be named `⚠ no target`; flags that do
+  not fit show the first and `+N`. The footer counts the rules and
   the flow records they cover, computed locally; `p` lists every rule and what is not
   covered, and why. Opening it costs at most the draft rulesets (one request,
   cached, counted in its header). On a truncated or incomplete result it shows the rows but

@@ -27,7 +27,8 @@ fn fit(s: &str, w: usize) -> String {
 /// decisions, the draft's mark, the flags; an outbound row its target.
 /// One row, its columns narrower below 100 columns (`narrow`) so the
 /// flags fit at 80.
-fn row_line<'a>(v: &GenView, i: usize, scope_keys: &[String], t: &Theme, narrow: bool) -> Line<'a> {
+fn row_line<'a>(v: &GenView, i: usize, scope_keys: &[String], t: &Theme, width: usize) -> Line<'a> {
+    let narrow = width < 100;
     let (peer_w, services_w) = if narrow { (14, 16) } else { (18, 18) };
     let r: &GenRow = &v.rows[i];
     let stop = r.effective(v.global);
@@ -78,12 +79,35 @@ fn row_line<'a>(v: &GenView, i: usize, scope_keys: &[String], t: &Theme, narrow:
     {
         spans.push(Span::styled(format!("→ {target} "), t.dim_style()));
     }
-    for f in r
+    let flags: Vec<String> = r
         .flag_texts(stop, scope_keys)
         .into_iter()
         .chain(v.rule_flags(i))
-    {
-        spans.push(Span::styled(format!("⚠ {f} "), Style::new().fg(t.warn)));
+        .collect();
+    let used: usize = spans.iter().map(Span::width).sum();
+    let all: usize = flags
+        .iter()
+        .map(|f| Span::raw(format!("⚠ {f} ")).width())
+        .sum();
+    if used + all <= width || flags.len() < 2 {
+        for f in flags {
+            spans.push(Span::styled(format!("⚠ {f} "), Style::new().fg(t.warn)));
+        }
+    } else {
+        // Not all fit: the first one and how many more (`p`, or a wider
+        // terminal, shows them).
+        let more = format!(" +{}", flags.len() - 1);
+        let room = width.saturating_sub(used + more.len()).max(4);
+        let first = format!("⚠ {}", flags[0]);
+        let first = if Span::raw(first.as_str()).width() > room {
+            fit(&first, room).trim_end().to_string()
+        } else {
+            first
+        };
+        spans.push(Span::styled(
+            format!("{first}{more}"),
+            Style::new().fg(t.warn),
+        ));
     }
     Line::from(spans)
 }
@@ -242,7 +266,7 @@ pub fn render_generator(model: &Model, f: &mut Frame, area: Rect) {
                         i,
                         &model.limits.scope_keys,
                         t,
-                        inner.width < 100,
+                        usize::from(inner.width),
                     ));
                 }
             }
@@ -250,6 +274,10 @@ pub fn render_generator(model: &Model, f: &mut Frame, area: Rect) {
             // The outbound section's first row brings its title along.
             if v.section == Side::Outbound && v.cursor[1] == 0 {
                 first = first.min(outbound_title);
+            }
+            // An outbound section without rows yet: its title and `no rows`.
+            if v.section == Side::Outbound && cursor.is_none() {
+                first = (outbound_title + 2).saturating_sub(height);
             }
             let all = all
                 .into_iter()

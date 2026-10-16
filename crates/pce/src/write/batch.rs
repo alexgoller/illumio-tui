@@ -98,6 +98,11 @@ pub struct Batch {
     /// override denies again): what the steps write. `None` outside
     /// `plan_batch`.
     pub refreshed: Option<Proposal>,
+    /// The fresh draft ruleset read the steps were planned against.
+    pub drafts: Option<Vec<RuleSet>>,
+    /// A warning the confirm shows first (the caller's: what the fresh
+    /// read changed against what was previewed).
+    pub note: Option<String>,
 }
 
 /// What became of one step.
@@ -707,6 +712,8 @@ impl Writer<'_> {
             reads,
             origin: Some(BatchOrigin::of(self.guard().context())),
             refreshed: Some(proposal),
+            drafts: Some(fresh.value),
+            note: None,
         })
     }
 

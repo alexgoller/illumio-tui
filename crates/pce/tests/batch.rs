@@ -194,6 +194,7 @@ async fn planning_reads_twice_orders_the_steps_and_sends_nothing() {
     );
     let refreshed = b.refreshed.as_ref().expect("the refreshed proposal");
     assert_eq!(refreshed.counts().create, 4, "what the steps create");
+    assert!(b.drafts.is_some(), "the fresh read it was planned against");
     let lines = b.lines();
     assert!(
         lines.contains(
@@ -453,6 +454,8 @@ async fn a_placeholder_naming_a_step_it_does_not_wait_for_is_refused_before_send
         reads: 0,
         origin: Some(origin()),
         refreshed: None,
+        drafts: None,
+        note: None,
     };
     let out = pce.writer(&guard).execute_batch(b).await;
     let StepResult::Failed(WriteError::Invalid(m)) = &out[0] else {
@@ -729,6 +732,8 @@ async fn a_created_href_is_checked_before_a_later_step_carries_it() {
         reads: 0,
         origin: Some(origin()),
         refreshed: None,
+        drafts: None,
+        note: None,
     };
     let out = pce.writer(&guard).execute_batch(b).await;
     assert!(matches!(out[0], StepResult::Written(_)));
