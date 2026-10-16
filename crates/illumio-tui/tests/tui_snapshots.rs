@@ -1726,3 +1726,134 @@ fn batch_report_80x24() {
     }
     insta::assert_snapshot!("batch_report_80x24", out);
 }
+
+/// The rich flows in a known 24h window, the rulesets loaded, the
+/// generator open for shop/prod: nothing sent.
+fn generator_model() -> illumio_tui::tui::model::Model {
+    use illumio_tui::tui::commands::Command;
+    use illumio_tui::tui::msg::Msg;
+    let mut m = with_policy(model_with_window("24h"));
+    illumio_tui::tui::update(&mut m, Msg::Command(Command::Gen(Some("shop/prod".into()))));
+    m
+}
+
+fn gen_key(m: &mut illumio_tui::tui::model::Model, c: char) {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    illumio_tui::tui::update(
+        m,
+        illumio_tui::tui::msg::Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)),
+    );
+}
+
+#[test]
+fn generator_80x24() {
+    let m = generator_model();
+    let out = render_to_string(&m, 80, 24);
+    for s in [
+        "Generate · shop/prod · last 24h · 8 flows · complete",
+        "0 req · cached",
+        "[app·ports]",
+        "target  Shop-Prod (draft, 2 rules)",
+        "Inbound → Shop-Prod",
+        "[x] intra-app",
+        "⚠ env mismatch",
+        "Outbound (o: off)",
+        "2 rows hidden: o shows them",
+        "2 rules (2 new · 0 add services · 0 exist) · covers 5 of 8 flows · 3 not",
+    ] {
+        assert!(out.contains(s), "missing {s:?}:\n{out}");
+    }
+    insta::assert_snapshot!("generator_80x24", out);
+}
+
+#[test]
+fn generator_outbound_role_ports_120x40() {
+    let mut m = generator_model();
+    gen_key(&mut m, 'o');
+    gen_key(&mut m, 'l');
+    let out = render_to_string(&m, 120, 40);
+    for s in [
+        "[role·ports]",
+        "Outbound (o: on) · IP peers → Shop-Prod",
+        "→ RF-crm-prod",
+        "⚠ needs an IP list",
+    ] {
+        assert!(out.contains(s), "missing {s:?}:\n{out}");
+    }
+    insta::assert_snapshot!("generator_outbound_role_ports_120x40", out);
+}
+
+#[test]
+fn generator_rule_list_120x40() {
+    let mut m = generator_model();
+    gen_key(&mut m, 'p');
+    let out = render_to_string(&m, 120, 40);
+    assert!(
+        out.contains("1. create · Shop-Prod: all workloads → all workloads on 5432/tcp"),
+        "{out}"
+    );
+    assert!(out.contains("not covered: 3 unchecked"), "{out}");
+    insta::assert_snapshot!("generator_rule_list_120x40", out);
+}
+
+#[test]
+fn generator_incomplete_80x24() {
+    let mut m = with_policy(model_with_window("24h"));
+    m.traffic.data.as_mut().unwrap().truncated = true;
+    {
+        use illumio_tui::tui::commands::Command;
+        use illumio_tui::tui::msg::Msg;
+        illumio_tui::tui::update(&mut m, Msg::Command(Command::Gen(Some("shop/prod".into()))));
+    }
+    let out = render_to_string(&m, 80, 24);
+    assert!(
+        out.contains("incomplete: r re-queries shop/prod (1 query)"),
+        "{out}"
+    );
+    insta::assert_snapshot!("generator_incomplete_80x24", out);
+}
+
+#[test]
+fn generator_outbound_80x24() {
+    let mut m = generator_model();
+    gen_key(&mut m, 'o');
+    let out = render_to_string(&m, 80, 24);
+    for s in [
+        "Outbound (o: on) · IP peers → Shop-Prod",
+        "→ RF-crm-prod",
+        "⚠ needs an IP list",
+        "10 flows",
+    ] {
+        assert!(out.contains(s), "missing {s:?}:\n{out}");
+    }
+    insta::assert_snapshot!("generator_outbound_80x24", out);
+}
+
+#[test]
+fn generator_rule_list_80x24() {
+    let mut m = generator_model();
+    gen_key(&mut m, 'p');
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("1. create · Shop-Prod"), "{out}");
+    assert!(out.contains("j/k scroll · Esc back to the rows"), "{out}");
+    insta::assert_snapshot!("generator_rule_list_80x24", out);
+}
+
+/// A rule an override deny blocks, and one without a ruleset: the rows
+/// behind them say so.
+#[test]
+fn generator_override_deny_and_no_target_80x24() {
+    let mut m = generator_model();
+    {
+        let v = m.gen_view.as_mut().unwrap();
+        let p = v.proposal.as_mut().unwrap();
+        p.rules[0].denied_flows = 2;
+        p.rules[0].denied_by = vec!["deny-db".into()];
+        p.targets[0] = pce::generate::Target::None("no ruleset can be named".into());
+    }
+    let out = render_to_string(&m, 80, 24);
+    for s in ["⚠ override deny blocks 2", "⚠ no target"] {
+        assert!(out.contains(s), "missing {s:?}:\n{out}");
+    }
+    insta::assert_snapshot!("generator_override_deny_and_no_target_80x24", out);
+}

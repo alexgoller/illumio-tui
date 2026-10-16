@@ -333,7 +333,7 @@ impl GenView {
         let mut out = Vec::new();
         let denied: u64 = mine().map(|r| r.denied_flows.min(r.flows)).sum();
         if denied > 0 {
-            out.push(format!("override deny: {denied} flows stay blocked"));
+            out.push(format!("override deny blocks {denied}"));
         }
         let no_target = mine().any(|r| {
             matches!(
@@ -590,7 +590,7 @@ mod tests {
         assert_eq!(
             v.rule_flags(row),
             vec![
-                "override deny: 2 flows stay blocked".to_string(),
+                "override deny blocks 2".to_string(),
                 "no target".to_string()
             ]
         );

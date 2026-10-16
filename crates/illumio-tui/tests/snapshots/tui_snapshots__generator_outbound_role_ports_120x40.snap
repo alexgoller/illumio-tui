@@ -1,0 +1,44 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                                                                api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭ Generate · shop/prod · last 24h · 10 flows · complete ─────────────────────────────────────────────── 0 req · cached ╮
+│granularity  app·all ─ app·ports ─ [role·ports] ─ role·all                                                            │
+│target  Shop-Prod (draft, 2 rules)                                                                                    │
+│Inbound → Shop-Prod                                                                                                   │
+│[x] intra-app          role·ports  5432/tcp           ✓ 4                                                             │
+│[x] hr/prod            role·ports  5432/tcp           ✗ 1                                                             │
+│[ ] shop/dev           role·ports  5432/tcp           ✗ 1 ⚠ env mismatch                                              │
+│[ ] 10.1.4.9           role·ports  443/tcp 5432/tcp   ✓ 1 ✗ 1 ⚠ uses IP list Corp                                     │
+│Outbound (o: on) · IP peers → Shop-Prod                                                                               │
+│[x] crm/prod           role·ports  443/tcp            ✓ 1 → RF-crm-prod                                               │
+│[ ] 203.0.113.7        role·ports  443/tcp            ✓ 1 ⚠ needs an IP list                                          │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│3 rules (2 new · 0 add services · 1 exist) · covers 6 of 10 flows · 4 not                                             │
+│p lists the rules · Enter plans the writes · Space toggles · o outbound                                               │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+shop/prod · generator · 0 req                                         │ ←/→ stop  </> row  R pick  r re-query  Esc back

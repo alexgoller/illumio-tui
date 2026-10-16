@@ -30,6 +30,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ("", ":unicast  unicast flows only (again: every kind)"),
     ("", ":focus <app>  (alone: a picker of the loaded apps)"),
     ("", ":app <app>  the app overlay (alone: the picker)"),
+    ("", ":gen <app>  the policy generator (alone: the picker)"),
     ("", ":writes [on|off]  :export[!] <path>  :batch"),
     ("", "(the table on screen as CSV; ! overwrites)"),
     ("?", "this help"),
@@ -89,6 +90,22 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     (
         "App      w r Esc",
         "draft allow rule · reload panels (asks) · back",
+    ),
+    (
+        "App      G",
+        "policy generator: the rules the app's traffic needs",
+    ),
+    (
+        "Generate ←/→ < > =",
+        "granularity · the row's own (*) · back to the slider",
+    ),
+    (
+        "Generate Space o R p",
+        "check a row · outbound · pick the ruleset · rule list",
+    ),
+    (
+        "Generate Enter r Esc",
+        "plan the writes, one confirm (writes) · re-query · back",
     ),
     (
         "Traffic  Enter",

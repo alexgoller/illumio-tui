@@ -6,13 +6,13 @@ use crate::tui::model::Model;
 use crate::tui::ui::theme::Theme;
 use crate::tui::ui::widgets::panel::panel;
 use crate::tui::ui::widgets::table::{clip_width, fit as fit_cells};
-use pce::generate::{GenRow, Side};
+use pce::generate::{GenRow, PeerKind, Side};
 use pce::write::PortSpec;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Paragraph};
+use ratatui::widgets::{Clear, Paragraph, Wrap};
 
 /// `s` padded to `w` cells, or cut with `…` when wider.
 fn fit(s: &str, w: usize) -> String {
@@ -25,7 +25,10 @@ fn fit(s: &str, w: usize) -> String {
 
 /// One row: checkbox, peer, stop (`*` when overridden), services,
 /// decisions, the draft's mark, the flags; an outbound row its target.
-fn row_line<'a>(v: &GenView, i: usize, scope_keys: &[String], t: &Theme) -> Line<'a> {
+/// One row, its columns narrower below 100 columns (`narrow`) so the
+/// flags fit at 80.
+fn row_line<'a>(v: &GenView, i: usize, scope_keys: &[String], t: &Theme, narrow: bool) -> Line<'a> {
+    let (peer_w, services_w) = if narrow { (14, 16) } else { (18, 18) };
     let r: &GenRow = &v.rows[i];
     let stop = r.effective(v.global);
     let check = match (r.checkable, r.checked) {
@@ -54,7 +57,7 @@ fn row_line<'a>(v: &GenView, i: usize, scope_keys: &[String], t: &Theme) -> Line
     }
     let mut spans = vec![
         Span::styled(format!("{check} "), Style::new().fg(t.accent)),
-        Span::styled(fit(&r.peer_text(), 18), t.base()),
+        Span::styled(fit(&r.peer_text(), peer_w), t.base()),
         Span::raw(" "),
         Span::styled(
             fit(
@@ -64,11 +67,15 @@ fn row_line<'a>(v: &GenView, i: usize, scope_keys: &[String], t: &Theme) -> Line
             t.dim_style(),
         ),
         Span::raw(" "),
-        Span::styled(fit(&services, 18), t.base()),
+        Span::styled(fit(&services, services_w), t.base()),
         Span::raw(" "),
         Span::styled(decisions, t.base()),
     ];
-    if let Some(target) = v.row_target(r) {
+    // An app peer's own ruleset; IP peers go into the app's (the title says so).
+    if let Some(target) = v
+        .row_target(r)
+        .filter(|_| matches!(r.peer, PeerKind::App(_)))
+    {
         spans.push(Span::styled(format!("→ {target} "), t.dim_style()));
     }
     for f in r
@@ -93,7 +100,7 @@ pub fn render_generator(model: &Model, f: &mut Frame, area: Rect) {
     let inner = outer.inner(body);
     f.render_widget(outer, body);
     let parts = Layout::vertical([
-        Constraint::Length(2),
+        Constraint::Length(2 + u16::from(v.gap.is_some())),
         Constraint::Fill(1),
         Constraint::Length(2),
     ])
@@ -108,7 +115,10 @@ pub fn render_generator(model: &Model, f: &mut Frame, area: Rect) {
         )),
     ];
     if let Some(g) = &v.gap {
-        top[0] = Line::from(Span::styled(g.clone(), Style::new().fg(t.warn)));
+        top.push(Line::from(Span::styled(
+            format!("⚠ {g}"),
+            Style::new().fg(t.warn),
+        )));
     }
     f.render_widget(Paragraph::new(top), parts[0]);
     let height = usize::from(parts[1].height);
@@ -128,7 +138,9 @@ pub fn render_generator(model: &Model, f: &mut Frame, area: Rect) {
             for side in [Side::Inbound, Side::Outbound] {
                 let title = match side {
                     Side::Inbound => format!("Inbound → {}", v.target_name()),
-                    Side::Outbound if v.outbound => "Outbound (o: on)".to_string(),
+                    Side::Outbound if v.outbound => {
+                        format!("Outbound (o: on) · IP peers → {}", v.target_name())
+                    }
                     Side::Outbound => "Outbound (o: off)".to_string(),
                 };
                 all.push(Line::from(Span::styled(title, t.header_style())));
@@ -144,7 +156,13 @@ pub fn render_generator(model: &Model, f: &mut Frame, area: Rect) {
                     if Some(i) == v.selected() && side == v.section {
                         cursor = Some(all.len());
                     }
-                    all.push(row_line(v, i, &model.limits.scope_keys, t));
+                    all.push(row_line(
+                        v,
+                        i,
+                        &model.limits.scope_keys,
+                        t,
+                        inner.width < 100,
+                    ));
                 }
             }
             (all, cursor)
@@ -164,7 +182,13 @@ pub fn render_generator(model: &Model, f: &mut Frame, area: Rect) {
             }
         })
         .collect();
-    f.render_widget(Paragraph::new(shown), parts[1]);
+    // The rule list wraps (long actor lists at 80 columns); the rows are cut.
+    let body = if v.list.is_some() {
+        Paragraph::new(shown).wrap(Wrap { trim: false })
+    } else {
+        Paragraph::new(shown)
+    };
+    f.render_widget(body, parts[1]);
     let keys = if v.list.is_some() {
         "j/k scroll · Esc back to the rows"
     } else {
