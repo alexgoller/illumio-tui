@@ -460,3 +460,54 @@ pub fn with_draft_loaded(mut m: Model) -> Model {
     m.traffic.rebuild_views();
     m
 }
+
+/// A planned generator batch: an IP list, a ruleset, a rule in that new
+/// ruleset (it waits for step 2's href) naming the new IP list.
+pub fn batch_plan() -> pce::write::Batch {
+    use pce::write::{BatchStep, ObjectKind, Plan, WriteRequest};
+    let post = |path: &str, summary: &str, body: serde_json::Value, kind: ObjectKind| Plan::Send {
+        request: WriteRequest {
+            method: pce::WriteMethod::Post,
+            path: path.into(),
+            body: Some(body),
+            summary: summary.into(),
+            objects: Vec::new(),
+        },
+        kind,
+    };
+    pce::write::Batch {
+        steps: vec![
+            BatchStep {
+                plan: post(
+                    "/orgs/5/sec_policy/draft/ip_lists",
+                    "create ip_list shop-prod peer 203.0.113.7",
+                    serde_json::json!({"name": "shop-prod peer 203.0.113.7", "ip_ranges": [{"from_ip": "203.0.113.7"}], "fqdns": []}),
+                    ObjectKind::IpList,
+                ),
+                kind: ObjectKind::IpList,
+                needs: Vec::new(),
+            },
+            BatchStep {
+                plan: post(
+                    "/orgs/5/sec_policy/draft/rule_sets",
+                    "create rule_set RF-crm-prod",
+                    serde_json::json!({"name": "RF-crm-prod", "enabled": true, "scopes": [[{"label": {"href": "/orgs/5/labels/101"}}, {"label": {"href": "/orgs/5/labels/4"}}]]}),
+                    ObjectKind::RuleSet,
+                ),
+                kind: ObjectKind::RuleSet,
+                needs: Vec::new(),
+            },
+            BatchStep {
+                plan: post(
+                    "{step:1}/sec_rules",
+                    "create rule in rule_set RF-crm-prod",
+                    serde_json::json!({"enabled": true, "providers": [{"ip_list": {"href": "{step:0}"}}], "consumers": [{"actors": "ams"}], "ingress_services": [{"port": 443, "proto": 6}], "unscoped_consumers": false}),
+                    ObjectKind::Rule,
+                ),
+                kind: ObjectKind::Rule,
+                needs: vec![0, 1],
+            },
+        ],
+        reads: 2,
+    }
+}

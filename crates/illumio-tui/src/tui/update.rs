@@ -14,7 +14,9 @@ use crate::tui::msg::{
     Cmd, DraftFailure, DraftOutcome, FocusedOutcome, Msg, ObjectsPayload, QueryOutcome,
 };
 use crate::tui::picker::{KeyPicker, PickerOutcome};
-use crate::tui::ui::widgets::overlay::{confirm_write_last_scroll, help_last_scroll};
+use crate::tui::ui::widgets::overlay::{
+    confirm_batch_last_scroll, confirm_write_last_scroll, help_last_scroll,
+};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use pce::models::{EventFilter, PolicyDecision, PolicyScope, Workload};
 use pce::traffic::treemap::Weight;
@@ -841,6 +843,30 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 }
             }
         }
+        Msg::BatchPlanned(result) => {
+            model.writes.in_flight = false;
+            match result {
+                // Keys typed while the batch was planned went elsewhere; a
+                // `y` there must not confirm this.
+                Ok(_) if !batch_lands(model) => {
+                    model.status = StatusLine::warn("requests discarded, nothing sent");
+                }
+                Ok(batch) => {
+                    model.status = StatusLine::info(format!(
+                        "review the {}: y sends them all, n cancels",
+                        if batch.sends() == 1 {
+                            "request"
+                        } else {
+                            "requests"
+                        }
+                    ));
+                    model.overlay = Overlay::ConfirmBatch { batch, scroll: 0 };
+                }
+                Err(e) => batch_plan_failed(model, &e),
+            }
+            Vec::new()
+        }
+        Msg::BatchDone { kinds, results } => batch_done(model, &kinds, &results),
         Msg::Planned(result) => {
             model.writes.in_flight = false;
             let flow_form = model.traffic.rule_form.take();
@@ -1715,6 +1741,43 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     let cmds = impact_key(model);
                     model.refresh_confirm_impact();
                     cmds
+                }
+                _ => Vec::new(),
+            }
+        }
+        Overlay::ConfirmBatch { batch, scroll } => {
+            let area = ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1);
+            let last = u16::try_from(confirm_batch_last_scroll(&batch, area)).unwrap_or(u16::MAX);
+            match k.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    model.overlay = Overlay::None;
+                    let n = batch.sends();
+                    model.status = StatusLine::info(if n == 1 {
+                        "sending 1 request …".to_string()
+                    } else {
+                        format!("sending {n} requests …")
+                    });
+                    model.writes.in_flight = true;
+                    vec![Cmd::ExecuteBatch(batch)]
+                }
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                    let cmds = batch_closed(model);
+                    model.status = StatusLine::info("cancelled, nothing sent");
+                    cmds
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    model.overlay = Overlay::ConfirmBatch {
+                        batch,
+                        scroll: (scroll + 1).min(last),
+                    };
+                    Vec::new()
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    model.overlay = Overlay::ConfirmBatch {
+                        batch,
+                        scroll: scroll.saturating_sub(1),
+                    };
+                    Vec::new()
                 }
                 _ => Vec::new(),
             }
@@ -3470,6 +3533,124 @@ fn is_unanswered(e: &WriteError) -> bool {
         WriteError::AuditFailed { write, .. } => is_unanswered(write),
         _ => false,
     }
+}
+
+/// Whether a planned batch may open its confirm: only over the screen it
+/// was planned from (nothing else open).
+fn batch_lands(model: &Model) -> bool {
+    model.overlay == Overlay::None
+}
+
+/// A batch could not be planned: nothing was sent.
+fn batch_plan_failed(model: &mut Model, e: &str) {
+    fail(model, "plan", e, false);
+}
+
+/// The batch confirm or its answer is done: back to the screen. What it
+/// reopens may need to load (none here).
+fn batch_closed(model: &mut Model) -> Vec<Cmd> {
+    model.overlay = Overlay::None;
+    Vec::new()
+}
+
+/// `wrote 5 of 7 (pending); step 6 failed: …; 1 not sent`, then what the
+/// PCE dropped or warned about per written step, and whether a step
+/// failed (`Some(true)`), only warned (`Some(false)`) or neither.
+fn batch_status(results: &[pce::write::StepResult]) -> (String, Option<bool>) {
+    use pce::write::StepResult as R;
+    let count = |f: fn(&R) -> bool| results.iter().filter(|r| f(r)).count();
+    let written = count(|r| matches!(r, R::Written(_)));
+    let reused = count(|r| matches!(r, R::Skipped { .. }));
+    let not_sent = count(|r| matches!(r, R::NotSent));
+    let mut s = format!("wrote {written} of {} (pending)", results.len());
+    if reused > 0 {
+        s.push_str(&format!("; reused {reused}"));
+    }
+    let failed = results.iter().enumerate().find_map(|(i, r)| match r {
+        R::Failed(e) => Some((i, e)),
+        _ => None,
+    });
+    if let Some((i, e)) = failed {
+        if is_unanswered(e) {
+            s.push_str(&format!(
+                "; step {} not answered: it may have applied; reloading",
+                i + 1
+            ));
+        } else {
+            s.push_str(&format!("; step {} failed: {e}", i + 1));
+        }
+    }
+    if not_sent > 0 {
+        s.push_str(&format!("; {not_sent} not sent"));
+    }
+    let mut noted = false;
+    for (i, r) in results.iter().enumerate() {
+        let R::Written(w) = r else { continue };
+        if !w.dropped_fields.is_empty() {
+            noted = true;
+            s.push_str(&format!(
+                "; step {}: the PCE dropped {}",
+                i + 1,
+                w.dropped_fields.join(", ")
+            ));
+        }
+        for warning in &w.warnings {
+            noted = true;
+            s.push_str(&format!("; step {}: {warning}", i + 1));
+        }
+    }
+    let kind = match (failed.is_some(), noted) {
+        (true, _) => Some(true),
+        (false, true) => Some(false),
+        (false, false) => None,
+    };
+    (s, kind)
+}
+
+/// A sent batch's answer: the status line, then one reload of the
+/// rulesets (and of the IP lists when one was written, so the index
+/// follows) and one draft re-evaluation, whatever the step count.
+fn batch_done(
+    model: &mut Model,
+    kinds: &[pce::write::ObjectKind],
+    results: &[pce::write::StepResult],
+) -> Vec<Cmd> {
+    use pce::write::StepResult as R;
+    model.writes.in_flight = false;
+    // The runtime dropped `policy:pending`; the next `p` fetches again.
+    model.policy.pending = None;
+    model.policy.pending_marked.clear();
+    let (text, kind) = batch_status(results);
+    model.status = match kind {
+        Some(true) => StatusLine::error(text),
+        Some(false) => StatusLine::warn(text),
+        None => StatusLine::info(text),
+    };
+    // Written, or sent without an answer (it may have applied).
+    let touched = |r: &R| match r {
+        R::Written(_) => true,
+        R::Failed(e) => is_unanswered(e),
+        R::Skipped { .. } | R::NotSent => false,
+    };
+    let mut cmds = Vec::new();
+    if results.iter().any(touched) {
+        // Once per batch, not per step.
+        let redraft = redraft_after_write(model, true, false);
+        let lists = kinds
+            .iter()
+            .zip(results)
+            .any(|(k, r)| *k == pce::write::ObjectKind::IpList && touched(r));
+        if lists {
+            cmds.extend(reload_kind_after_write(
+                model,
+                pce::write::ObjectKind::IpList,
+            ));
+        }
+        cmds.extend(reload_after_write(model, pce::write::ObjectKind::Rule));
+        cmds.extend(redraft);
+    }
+    cmds.extend(batch_closed(model));
+    cmds
 }
 
 /// One reload of the written kind's table, past the cache (the writer
@@ -16477,5 +16658,232 @@ mod rule_form_ruleset_tests {
         );
         assert!(update(&mut m, key('n')).is_empty());
         assert!(m.traffic.draft_loaded() && !m.traffic.is_running());
+    }
+}
+
+#[cfg(test)]
+mod batch_tests {
+    use super::*;
+    use crate::tui::model::{Model, Overlay, StatusKind};
+    use crate::tui::test_support::{batch_plan, model_with_flows, with_draft_loaded};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use pce::write::{ObjectKind, StepResult, Written};
+
+    fn key(c: char) -> Msg {
+        Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))
+    }
+
+    fn written(href: &str) -> StepResult {
+        StepResult::Written(Written {
+            href: href.into(),
+            pending: true,
+            status: 201,
+            object: serde_json::json!({"href": href}),
+            dropped_fields: Vec::new(),
+            warnings: Vec::new(),
+        })
+    }
+
+    fn kinds() -> Vec<ObjectKind> {
+        vec![ObjectKind::IpList, ObjectKind::RuleSet, ObjectKind::Rule]
+    }
+
+    fn armed() -> Model {
+        let mut m = model_with_flows();
+        m.writes = crate::tui::model::WritesState::on();
+        m.writes.in_flight = true; // the plan is on its way
+        m
+    }
+
+    #[test]
+    fn a_planned_batch_opens_its_confirm_with_every_request() {
+        let mut m = armed();
+        assert_eq!(
+            update(&mut m, Msg::BatchPlanned(Ok(batch_plan()))),
+            Vec::new()
+        );
+        assert!(!m.writes.in_flight);
+        let Overlay::ConfirmBatch { batch, scroll } = &m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        assert_eq!(*scroll, 0);
+        assert_eq!(
+            batch.summary(),
+            "3 requests: 1 ip_list, 1 rule_set, 1 rule · planned with 2 reads"
+        );
+        assert_eq!(
+            m.status.text,
+            "review the requests: y sends them all, n cancels"
+        );
+    }
+
+    #[test]
+    fn a_batch_landing_over_another_overlay_is_discarded() {
+        let mut m = armed();
+        m.overlay = Overlay::Prompt { input: "y".into() };
+        update(&mut m, Msg::BatchPlanned(Ok(batch_plan())));
+        assert_eq!(m.overlay, Overlay::Prompt { input: "y".into() });
+        assert_eq!(m.status.text, "requests discarded, nothing sent");
+        assert!(!m.writes.in_flight);
+    }
+
+    #[test]
+    fn y_sends_exactly_one_execute_batch_and_n_sends_nothing() {
+        let mut m = armed();
+        update(&mut m, Msg::BatchPlanned(Ok(batch_plan())));
+        let cmds = update(&mut m, key('y'));
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(&cmds[0], Cmd::ExecuteBatch(b) if b.steps.len() == 3));
+        assert!(m.writes.in_flight);
+        assert_eq!(m.overlay, Overlay::None);
+        assert_eq!(m.status.text, "sending 3 requests …");
+        let mut m = armed();
+        update(&mut m, Msg::BatchPlanned(Ok(batch_plan())));
+        assert_eq!(update(&mut m, key('n')), Vec::new());
+        assert_eq!(m.overlay, Overlay::None);
+        assert_eq!(m.status.text, "cancelled, nothing sent");
+    }
+
+    #[test]
+    fn j_scrolls_the_confirm_and_stops_at_the_end() {
+        let mut m = armed();
+        m.size = (80, 12);
+        update(&mut m, Msg::BatchPlanned(Ok(batch_plan())));
+        for _ in 0..100 {
+            update(&mut m, key('j'));
+        }
+        let Overlay::ConfirmBatch { batch, scroll } = &m.overlay else {
+            panic!()
+        };
+        let area = ratatui::layout::Rect::new(0, 0, 80, 12);
+        assert_eq!(usize::from(*scroll), confirm_batch_last_scroll(batch, area));
+        assert!(*scroll > 0);
+    }
+
+    #[test]
+    fn a_failed_plan_sends_nothing_and_says_why() {
+        let mut m = armed();
+        assert_eq!(
+            update(
+                &mut m,
+                Msg::BatchPlanned(Err("too many draft rulesets".into()))
+            ),
+            Vec::new()
+        );
+        assert_eq!(m.status.text, "plan: too many draft rulesets");
+        assert_eq!(m.status.kind, StatusKind::Error);
+    }
+
+    #[test]
+    fn a_partly_failed_batch_reports_each_step_and_reloads_once() {
+        let mut m = with_draft_loaded(armed());
+        // A known query: the draft is evaluated again without asking.
+        m.traffic.data.as_mut().unwrap().hrefs =
+            vec!["/orgs/5/traffic_flows/async_queries/q-1".into()];
+        let results = vec![
+            written("/orgs/5/sec_policy/draft/ip_lists/77"),
+            StepResult::Failed(pce::write::WriteError::invalid("name in use")),
+            StepResult::NotSent,
+        ];
+        let cmds = update(
+            &mut m,
+            Msg::BatchDone {
+                kinds: kinds(),
+                results,
+            },
+        );
+        assert_eq!(
+            m.status.text.split(" · ").next().unwrap(),
+            "wrote 1 of 3 (pending); step 2 failed: name in use; 1 not sent"
+        );
+        assert_eq!(m.status.kind, StatusKind::Error);
+        assert!(!m.writes.in_flight);
+        let count = |f: fn(&Cmd) -> bool| cmds.iter().filter(|c| f(c)).count();
+        assert_eq!(
+            count(|c| matches!(c, Cmd::LoadRuleSets { .. })),
+            1,
+            "{cmds:?}"
+        );
+        assert_eq!(
+            count(|c| matches!(c, Cmd::LoadIpLists(CacheMode::Bypass))),
+            1
+        );
+        assert_eq!(
+            count(|c| matches!(c, Cmd::RunDraft { .. })),
+            1,
+            "one redraft per batch"
+        );
+        assert_eq!(m.overlay, Overlay::None);
+    }
+
+    #[test]
+    fn an_unanswered_step_says_it_may_have_applied_and_reloads() {
+        let mut m = armed();
+        let results = vec![
+            StepResult::Failed(pce::write::WriteError::Unanswered(pce::PceError::Timeout(
+                std::time::Duration::from_secs(30),
+            ))),
+            StepResult::NotSent,
+            StepResult::NotSent,
+        ];
+        let cmds = update(
+            &mut m,
+            Msg::BatchDone {
+                kinds: kinds(),
+                results,
+            },
+        );
+        assert!(
+            m.status
+                .text
+                .starts_with("wrote 0 of 3 (pending); step 1 not answered: it may have applied; reloading; 2 not sent"),
+            "{}",
+            m.status.text
+        );
+        assert!(cmds.iter().any(|c| matches!(c, Cmd::LoadRuleSets { .. })));
+    }
+
+    #[test]
+    fn what_the_pce_dropped_from_a_written_step_is_a_warning() {
+        let mut m = armed();
+        let StepResult::Written(mut w) = written("/orgs/5/sec_policy/draft/ip_lists/77") else {
+            unreachable!()
+        };
+        w.dropped_fields = vec!["fqdns".into()];
+        let results = vec![
+            StepResult::Written(w),
+            written("/orgs/5/sec_policy/draft/rule_sets/200"),
+            written("/orgs/5/sec_policy/draft/rule_sets/200/sec_rules/1"),
+        ];
+        update(
+            &mut m,
+            Msg::BatchDone {
+                kinds: kinds(),
+                results,
+            },
+        );
+        assert_eq!(
+            m.status.text.split(" · ").next().unwrap(),
+            "wrote 3 of 3 (pending); step 1: the PCE dropped fqdns"
+        );
+        assert_eq!(m.status.kind, StatusKind::Warn);
+    }
+
+    #[test]
+    fn a_batch_that_failed_first_reloads_nothing() {
+        let mut m = armed();
+        let results = vec![
+            StepResult::Failed(pce::write::WriteError::invalid("bad")),
+            StepResult::NotSent,
+            StepResult::NotSent,
+        ];
+        let cmds = update(
+            &mut m,
+            Msg::BatchDone {
+                kinds: kinds(),
+                results,
+            },
+        );
+        assert_eq!(cmds, Vec::new());
     }
 }

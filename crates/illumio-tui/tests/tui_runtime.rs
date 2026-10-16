@@ -2740,3 +2740,109 @@ impl wiremock::Respond for Ticking {
         ResponseTemplate::new(200).set_body_json(body)
     }
 }
+
+#[tokio::test]
+async fn execute_batch_sends_every_step_in_order_with_the_created_hrefs() {
+    use illumio_tui::tui::test_support::batch_plan;
+    use wiremock::matchers::body_partial_json;
+    let server = MockServer::start().await;
+    for (p, href) in [
+        (
+            "/api/v2/orgs/5/sec_policy/draft/ip_lists",
+            "/orgs/5/sec_policy/draft/ip_lists/77",
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/rule_sets",
+            "/orgs/5/sec_policy/draft/rule_sets/200",
+        ),
+    ] {
+        Mock::given(method("POST"))
+            .and(path(p))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({"href": href})))
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+    Mock::given(method("POST"))
+        .and(path(
+            "/api/v2/orgs/5/sec_policy/draft/rule_sets/200/sec_rules",
+        ))
+        .and(body_partial_json(
+            json!({"providers": [{"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/77"}}]}),
+        ))
+        .respond_with(
+            ResponseTemplate::new(201).set_body_json(
+                json!({"href": "/orgs/5/sec_policy/draft/rule_sets/200/sec_rules/1"}),
+            ),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    // One reload each afterwards: the rulesets, the IP lists (one was written).
+    for (p, body) in [
+        (
+            "/api/v2/orgs/5/sec_policy/draft/rule_sets",
+            include_str!("../../../fixtures/rule_sets.json"),
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/ip_lists",
+            include_str!("../../../fixtures/ip_lists.json"),
+        ),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(p))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(body)
+                    .insert_header("Content-Type", "application/json"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+    let audit = MemoryAudit::new();
+    let (mut rt, _tx) =
+        Runtime::with_writer(pce_for(&server), writes_model(), tui_guard(audit.clone()));
+    rt.execute(Cmd::ExecuteBatch(batch_plan()));
+    let model = run_loop(&mut rt, Box::pin(wait(500)), &mut |_| {}).await;
+    assert!(
+        model.status.text.starts_with("wrote 3 of 3 (pending)"),
+        "{}",
+        model.status.text
+    );
+    assert_eq!(audit.entries().len(), 3);
+    assert!(audit.entries().iter().all(|e| e.source == "tui"));
+    assert_eq!(model.busy, 0);
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn plan_batch_needs_the_runtime_writer_and_sends_nothing() {
+    use illumio_tui::tui::test_support::fixture_index;
+    let server = MockServer::start().await;
+    let (mut rt, _tx) = Runtime::new(pce_for(&server), writes_model());
+    let input = pce::write::BatchInput {
+        proposal: pce::generate::Proposal {
+            scopes: Vec::new(),
+            targets: Vec::new(),
+            ip_lists: Vec::new(),
+            rules: Vec::new(),
+            coverage: pce::generate::Coverage::default(),
+        },
+        ruleset_name: "RF-{app}-{env}".into(),
+        picked: None,
+    };
+    rt.execute(Cmd::PlanBatch {
+        input: Box::new(input),
+        index: fixture_index(),
+    });
+    let model = run_loop(&mut rt, Box::pin(wait(300)), &mut |_| {}).await;
+    assert_eq!(model.status.text, "plan: writes are not enabled");
+    assert!(
+        server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .is_empty()
+    );
+}

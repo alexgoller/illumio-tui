@@ -19,7 +19,9 @@ use crossterm::event::{
 use futures::{Stream, StreamExt};
 use pce::models::{PolicyScope, WorkloadFilter};
 use pce::traffic::Focus;
-use pce::write::{IfMissing, JsonlAudit, Plan, WriteContext, WriteError, WriteGuard, WriteRefused};
+use pce::write::{
+    IfMissing, JsonlAudit, Plan, StepResult, WriteContext, WriteError, WriteGuard, WriteRefused,
+};
 use pce::{CacheMode, NameIndex, Pce};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -413,6 +415,50 @@ impl Runtime {
                     let _ = tx.send(Msg::Stats(pce.stats()));
                 });
             }
+            Cmd::PlanBatch { input, index } => {
+                self.model.busy += 1;
+                let (pce, tx) = self.task_ctx();
+                let guard = self.writer.clone();
+                tokio::spawn(async move {
+                    // Reads only: the fresh drafts, the IP lists, a GET per update.
+                    let result = match guard {
+                        None => Err("writes are not enabled".to_string()),
+                        Some(guard) => pce
+                            .writer(&guard)
+                            .plan_batch(*input, &index)
+                            .await
+                            .map_err(|e| e.to_string()),
+                    };
+                    let _ = tx.send(Msg::BatchPlanned(result));
+                    let _ = tx.send(Msg::Stats(pce.stats()));
+                });
+            }
+            Cmd::ExecuteBatch(batch) => {
+                self.model.busy += 1;
+                let (pce, tx) = self.task_ctx();
+                let guard = self.writer.clone();
+                let kinds: Vec<pce::write::ObjectKind> =
+                    batch.steps.iter().map(|s| s.kind).collect();
+                tokio::spawn(async move {
+                    // One `execute` per step, in order; the first failure stops it.
+                    let results = match &guard {
+                        Some(guard) => pce.writer(guard).execute_batch(batch).await,
+                        None => (0..kinds.len())
+                            .map(|i| {
+                                if i == 0 {
+                                    StepResult::Failed(WriteError::Invalid(vec![WRITES_OFF.into()]))
+                                } else {
+                                    StepResult::NotSent
+                                }
+                            })
+                            .collect(),
+                    };
+                    // Pending changes are not under the kinds' prefixes.
+                    pce.invalidate("policy:pending");
+                    let _ = tx.send(Msg::BatchDone { kinds, results });
+                    let _ = tx.send(Msg::Stats(pce.stats()));
+                });
+            }
             Cmd::LoadDiff {
                 change,
                 kind,
@@ -704,6 +750,8 @@ impl Runtime {
                 | Msg::Planned(_)
                 | Msg::WriteDone { .. }
                 | Msg::DiffLoaded(_)
+                | Msg::BatchPlanned(_)
+                | Msg::BatchDone { .. }
         );
         let cmds = update(&mut self.model, msg);
         if task_result {

@@ -219,6 +219,12 @@ pub enum Overlay {
         kind: pce::write::ObjectKind,
         scroll: u16,
     },
+    /// Every request of a write batch (the generator's); `y` sends them
+    /// all, in order; `n`/`Esc` cancel. `scroll` is the first line shown.
+    ConfirmBatch {
+        batch: pce::write::Batch,
+        scroll: u16,
+    },
     /// A pending IP list or service against its active version.
     Diff {
         diff: ObjectDiff,
@@ -252,6 +258,16 @@ impl PartialEq for Overlay {
                     scroll: sb,
                 },
             ) => pa.request() == pb.request() && ka == kb && sa == sb,
+            (
+                Overlay::ConfirmBatch {
+                    batch: ba,
+                    scroll: sa,
+                },
+                Overlay::ConfirmBatch {
+                    batch: bb,
+                    scroll: sb,
+                },
+            ) => ba.lines() == bb.lines() && sa == sb,
             (
                 Overlay::Confirm {
                     reason: ra,

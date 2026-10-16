@@ -12,7 +12,7 @@ use crate::tui::ui::theme::Theme;
 use crate::tui::ui::widgets::panel::panel;
 use crate::tui::update::REVERT_WORD;
 use pce::RuleView;
-use pce::write::{ObjectKind, Plan, WriteRequest};
+use pce::write::{Batch, ObjectKind, Plan, WriteRequest};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -838,6 +838,68 @@ pub fn render_confirm_write(
                 t,
                 true,
             ))
+            .style(t.base()),
+        r,
+    );
+}
+
+/// The batch confirm's rows around its scrolled lines: borders and the
+/// summary line.
+const BATCH_CHROME: u16 = 3;
+
+/// The batch confirm as drawn: every line wrapped to the inner width (the
+/// box is the dry run: nothing may be clipped), and the rows that fit.
+/// Shared by the renderer and the scroll keys so they cannot drift.
+fn confirm_batch_layout(batch: &Batch, area: Rect) -> (Rect, Vec<String>, usize) {
+    let width = usize::from(CONFIRM_WIDTH.min(area.width).saturating_sub(2));
+    let content: Vec<String> = batch
+        .lines()
+        .iter()
+        .flat_map(|l| wrap_chars(&plain(l), width))
+        .collect();
+    let height = u16::try_from(content.len())
+        .unwrap_or(u16::MAX)
+        .saturating_add(BATCH_CHROME);
+    let rect = centered(area, CONFIRM_WIDTH, height);
+    let rows = usize::from(rect.height.saturating_sub(BATCH_CHROME));
+    (rect, content, rows)
+}
+
+/// The first line shown when the batch confirm is scrolled to the end.
+pub fn confirm_batch_last_scroll(batch: &Batch, area: Rect) -> usize {
+    let (_, content, rows) = confirm_batch_layout(batch, area);
+    content.len().saturating_sub(rows)
+}
+
+/// `Send these requests?`: the batch's summary pinned, then one block per
+/// request (`N/M METHOD path`, its summary, its body), scrolled.
+pub fn render_confirm_batch(model: &Model, batch: &Batch, scroll: u16, f: &mut Frame, area: Rect) {
+    let t = &model.theme;
+    let (r, content, rows) = confirm_batch_layout(batch, area);
+    f.render_widget(Clear, r);
+    let first = usize::from(scroll).min(content.len().saturating_sub(rows));
+    let meta = if content.len() > rows {
+        "j/k scroll · y send all · n cancel"
+    } else {
+        "y send all · n cancel"
+    };
+    let mut lines = vec![Line::from(Span::styled(
+        plain(&batch.summary()),
+        Style::new().fg(t.warn),
+    ))];
+    lines.extend(content.into_iter().skip(first).take(rows).map(|s| {
+        // `2/6 POST …`: a block's head.
+        let head = s.split_once(' ').is_some_and(|(n, _)| {
+            n.contains('/') && n.chars().next().is_some_and(|c| c.is_ascii_digit())
+        });
+        Line::from(Span::styled(
+            s,
+            if head { t.header_style() } else { t.base() },
+        ))
+    }));
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(panel("Send these requests?", meta, t, true))
             .style(t.base()),
         r,
     );

@@ -1667,3 +1667,40 @@ fn app_overlay_w_with_writes_off_shows_the_whole_refusal() {
         "{out}"
     );
 }
+
+#[test]
+fn confirm_batch_80x24() {
+    use illumio_tui::tui::model::Overlay;
+    let mut m = model_fixture();
+    m.overlay = Overlay::ConfirmBatch {
+        batch: illumio_tui::tui::test_support::batch_plan(),
+        scroll: 0,
+    };
+    let out = render_to_string(&m, 80, 24);
+    for s in [
+        "Send these requests?",
+        "3 requests: 1 ip_list, 1 rule_set, 1 rule · planned with 2 reads",
+        "1/3 POST /orgs/5/sec_policy/draft/ip_lists",
+        "j/k scroll · y send all · n cancel",
+    ] {
+        assert!(out.contains(s), "missing {s:?}:\n{out}");
+    }
+    insta::assert_snapshot!("confirm_batch_80x24", out);
+}
+
+#[test]
+fn confirm_batch_spells_placeholders_120x48() {
+    use illumio_tui::tui::model::Overlay;
+    let mut m = model_fixture();
+    m.overlay = Overlay::ConfirmBatch {
+        batch: illumio_tui::tui::test_support::batch_plan(),
+        scroll: 0,
+    };
+    let out = render_to_string(&m, 120, 48);
+    assert!(
+        out.contains("<href of step 2: create rule_set RF-crm-prod>/sec_rules"),
+        "{out}"
+    );
+    assert!(!out.contains("{step:"), "{out}");
+    insta::assert_snapshot!("confirm_batch_120x48", out);
+}

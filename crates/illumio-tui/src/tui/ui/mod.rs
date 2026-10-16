@@ -64,6 +64,9 @@ pub fn view(model: &Model, f: &mut Frame) {
         Overlay::ConfirmWrite { plan, kind, scroll } => {
             widgets::overlay::render_confirm_write(model, plan, *kind, *scroll, f, area)
         }
+        Overlay::ConfirmBatch { batch, scroll } => {
+            widgets::overlay::render_confirm_batch(model, batch, *scroll, f, area)
+        }
         Overlay::Diff { diff, scroll } => {
             widgets::overlay::render_diff(model, diff, *scroll, f, area)
         }

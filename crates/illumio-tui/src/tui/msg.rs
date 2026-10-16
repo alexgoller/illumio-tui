@@ -9,7 +9,7 @@ use pce::models::{
     Service, Workload, WorkloadFilter,
 };
 use pce::traffic::{Focus, QueryProgress, ResolvedFlow};
-use pce::write::{Outcome, Plan, WriteError};
+use pce::write::{Batch, BatchInput, Outcome, Plan, StepResult, WriteError};
 use pce::{CacheMode, StatsSnapshot};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -164,6 +164,14 @@ pub enum Msg {
         result: Result<Outcome, WriteError>,
     },
     DiffLoaded(Result<ObjectDiff, String>),
+    /// A planned write batch (every request, in order) or why it could not
+    /// be planned.
+    BatchPlanned(Result<Batch, String>),
+    /// What became of each step of a sent batch, and each step's kind.
+    BatchDone {
+        kinds: Vec<pce::write::ObjectKind>,
+        results: Vec<StepResult>,
+    },
     /// The runtime applied `:writes on|off`: the guard was built (or refused,
     /// with the reason) or dropped.
     WritesSet(WritesState),
@@ -257,6 +265,16 @@ pub enum Cmd {
         plan: Plan,
         kind: pce::write::ObjectKind,
     },
+    /// Plan a write batch: one fresh draft ruleset read (dedupe again,
+    /// create-if-missing), one IP list read when it creates IP lists, one
+    /// GET per rule update. Never sends a write. `index` resolves names.
+    PlanBatch {
+        input: Box<BatchInput>,
+        index: Arc<pce::NameIndex>,
+    },
+    /// `y` on the batch confirm: send every step once, in order, stopping
+    /// at the first failure.
+    ExecuteBatch(Batch),
     /// The draft and active list of one kind (cached) for a pending IP list, service or ruleset.
     LoadDiff {
         change: PendingChange,
@@ -383,6 +401,8 @@ impl PartialEq for Cmd {
                 Cmd::ExecuteWrite { plan: pa, kind: ka },
                 Cmd::ExecuteWrite { plan: pb, kind: kb },
             ) => pa.request() == pb.request() && ka == kb,
+            (Cmd::PlanBatch { input: a, .. }, Cmd::PlanBatch { input: b, .. }) => a == b,
+            (Cmd::ExecuteBatch(a), Cmd::ExecuteBatch(b)) => a.lines() == b.lines(),
             (
                 Cmd::LoadDiff {
                     change: ca,
