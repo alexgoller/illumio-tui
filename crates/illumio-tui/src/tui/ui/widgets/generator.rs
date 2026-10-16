@@ -12,7 +12,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Paragraph, Wrap};
+use ratatui::widgets::{Clear, Paragraph};
 
 /// `s` padded to `w` cells, or cut with `…` when wider.
 fn fit(s: &str, w: usize) -> String {
@@ -88,6 +88,87 @@ fn row_line<'a>(v: &GenView, i: usize, scope_keys: &[String], t: &Theme, narrow:
     Line::from(spans)
 }
 
+/// `s` wrapped at `w` cells, word by word; its own indent kept, and
+/// continuation lines indented three cells more; a word wider than a line
+/// is cut into pieces.
+fn wrap_text(s: &str, w: usize) -> Vec<String> {
+    let width = |x: &str| Span::raw(x).width();
+    if w < 8 || width(s) <= w {
+        return vec![s.to_string()];
+    }
+    let indent: String = s.chars().take_while(|c| *c == ' ').collect();
+    let more = format!("{indent}   ");
+    let mut out = Vec::new();
+    let mut line = indent.clone();
+    for word in s.split(' ').filter(|w| !w.is_empty()) {
+        let mut word = word.to_string();
+        loop {
+            let sep = usize::from(!line.is_empty() && !line.ends_with(' '));
+            if width(&line) + sep + width(&word) <= w {
+                if sep == 1 {
+                    line.push(' ');
+                }
+                line.push_str(&word);
+                break;
+            }
+            if line.trim().is_empty() {
+                // The word alone is wider than the line.
+                let room = w - width(&line);
+                let head = clip_width(&word, room).to_string();
+                line.push_str(&head);
+                word = word[head.len()..].to_string();
+            }
+            out.push(std::mem::replace(&mut line, more.clone()));
+            if word.is_empty() {
+                break;
+            }
+        }
+    }
+    if !line.trim().is_empty() {
+        out.push(line);
+    }
+    out
+}
+
+/// The panel's inner area and its three parts (slider and target, the
+/// rows or the rule list, the footer).
+fn layout(v: &GenView, area: Rect) -> (Rect, std::rc::Rc<[Rect]>) {
+    let body = crate::tui::ui::layout::chrome(area).map_or(area, |c| c.body);
+    let inner = Rect {
+        x: body.x + 1,
+        y: body.y + 1,
+        width: body.width.saturating_sub(2),
+        height: body.height.saturating_sub(2),
+    };
+    let parts = Layout::vertical([
+        Constraint::Length(2 + u16::from(v.gap.is_some())),
+        Constraint::Fill(1),
+        Constraint::Length(2),
+    ])
+    .split(inner);
+    (inner, parts)
+}
+
+/// The rule list (`p`), wrapped at the width it is drawn at.
+fn list_lines(model: &Model, v: &GenView, width: u16) -> Vec<String> {
+    let empty = pce::NameIndex::default();
+    let idx = model.index().map_or(&empty, |i| i.as_ref());
+    v.rule_list(idx)
+        .iter()
+        .flat_map(|l| wrap_text(l, usize::from(width)))
+        .collect()
+}
+
+/// The last scroll position of the rule list: its end on screen.
+pub fn rule_list_last_scroll(model: &Model, area: Rect) -> u16 {
+    let Some(v) = &model.gen_view else {
+        return 0;
+    };
+    let (_, parts) = layout(v, area);
+    let n = list_lines(model, v, parts[1].width).len();
+    u16::try_from(n.saturating_sub(usize::from(parts[1].height))).unwrap_or(u16::MAX)
+}
+
 pub fn render_generator(model: &Model, f: &mut Frame, area: Rect) {
     let Some(v) = &model.gen_view else {
         return;
@@ -97,14 +178,8 @@ pub fn render_generator(model: &Model, f: &mut Frame, area: Rect) {
     f.render_widget(Clear, body);
     let (title, meta) = (v.header_title(), v.header_meta());
     let outer = panel(&title, &meta, t, true).style(t.base());
-    let inner = outer.inner(body);
     f.render_widget(outer, body);
-    let parts = Layout::vertical([
-        Constraint::Length(2 + u16::from(v.gap.is_some())),
-        Constraint::Fill(1),
-        Constraint::Length(2),
-    ])
-    .split(inner);
+    let (inner, parts) = layout(v, area);
     let empty = pce::NameIndex::default();
     let idx = model.index().map_or(&empty, |i| i.as_ref());
     let mut top = vec![
@@ -122,19 +197,19 @@ pub fn render_generator(model: &Model, f: &mut Frame, area: Rect) {
     }
     f.render_widget(Paragraph::new(top), parts[0]);
     let height = usize::from(parts[1].height);
-    let (lines, cursor) = match v.list {
+    let (lines, first) = match v.list {
         Some(scroll) => {
-            let all: Vec<Line> = v
-                .rule_list(idx)
+            let all: Vec<Line> = list_lines(model, v, parts[1].width)
                 .into_iter()
                 .map(|l| Line::from(Span::styled(l, t.base())))
                 .collect();
             let first = usize::from(scroll).min(all.len().saturating_sub(height));
-            (all.into_iter().skip(first).collect::<Vec<_>>(), None)
+            (all, first)
         }
         None => {
             let mut all = Vec::new();
             let mut cursor = None;
+            let mut outbound_title = 0;
             for side in [Side::Inbound, Side::Outbound] {
                 let title = match side {
                     Side::Inbound => format!("Inbound → {}", v.target_name()),
@@ -143,6 +218,9 @@ pub fn render_generator(model: &Model, f: &mut Frame, area: Rect) {
                     }
                     Side::Outbound => "Outbound (o: off)".to_string(),
                 };
+                if side == Side::Outbound {
+                    outbound_title = all.len();
+                }
                 all.push(Line::from(Span::styled(title, t.header_style())));
                 let rows = v.section_rows(side);
                 if side == Side::Outbound && !v.outbound {
@@ -151,6 +229,9 @@ pub fn render_generator(model: &Model, f: &mut Frame, area: Rect) {
                         t.dim_style(),
                     )));
                     continue;
+                }
+                if rows.is_empty() {
+                    all.push(Line::from(Span::styled("no rows", t.dim_style())));
                 }
                 for i in rows {
                     if Some(i) == v.selected() && side == v.section {
@@ -165,34 +246,47 @@ pub fn render_generator(model: &Model, f: &mut Frame, area: Rect) {
                     ));
                 }
             }
-            (all, cursor)
+            let mut first = cursor.map_or(0, |c| c.saturating_sub(height.saturating_sub(1)));
+            // The outbound section's first row brings its title along.
+            if v.section == Side::Outbound && v.cursor[1] == 0 {
+                first = first.min(outbound_title);
+            }
+            let all = all
+                .into_iter()
+                .enumerate()
+                .map(|(i, l)| {
+                    if Some(i) == cursor {
+                        l.patch_style(Style::new().add_modifier(Modifier::REVERSED))
+                    } else {
+                        l
+                    }
+                })
+                .collect();
+            (all, first)
         }
     };
-    let first = cursor.map_or(0, |c| c.saturating_sub(height.saturating_sub(1)));
-    let shown: Vec<Line> = lines
-        .into_iter()
-        .enumerate()
-        .skip(first)
-        .take(height)
-        .map(|(i, l)| {
-            if Some(i) == cursor {
-                l.patch_style(Style::new().add_modifier(Modifier::REVERSED))
-            } else {
-                l
-            }
-        })
-        .collect();
-    // The rule list wraps (long actor lists at 80 columns); the rows are cut.
-    let body = if v.list.is_some() {
-        Paragraph::new(shown).wrap(Wrap { trim: false })
-    } else {
-        Paragraph::new(shown)
-    };
-    f.render_widget(body, parts[1]);
+    let total = lines.len();
+    let below = total.saturating_sub(first + height);
+    let shown: Vec<Line> = lines.into_iter().skip(first).take(height).collect();
+    f.render_widget(Paragraph::new(shown), parts[1]);
+    let mut more = Vec::new();
+    if first > 0 {
+        more.push(format!("↑ {first} more above"));
+    }
+    if below > 0 {
+        more.push(format!("↓ {below} more below"));
+    }
     let keys = if v.list.is_some() {
         "j/k scroll · Esc back to the rows"
+    } else if v.planning {
+        "planning… · Esc drops the plan"
     } else {
         "p lists the rules · Enter plans the writes · Space toggles · o outbound"
+    };
+    let keys = if more.is_empty() {
+        keys.to_string()
+    } else {
+        format!("{} · {keys}", more.join(" · "))
     };
     let footer = vec![
         Line::from(Span::styled(
@@ -203,7 +297,25 @@ pub fn render_generator(model: &Model, f: &mut Frame, area: Rect) {
                 t.base()
             },
         )),
-        Line::from(Span::styled(keys, t.dim_style())),
+        Line::from(Span::styled(
+            fit(&keys, usize::from(inner.width)),
+            t.dim_style(),
+        )),
     ];
     f.render_widget(Paragraph::new(footer), parts[2]);
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn wrap_keeps_the_indent_and_indents_continuations() {
+        assert_eq!(
+            super::wrap_text("   generated: a b c d", 14),
+            vec!["   generated:", "      a b c d"]
+        );
+        assert_eq!(
+            super::wrap_text("abcdefghijklmnop", 10),
+            vec!["abcdefghij", "   klmnop"]
+        );
+    }
 }

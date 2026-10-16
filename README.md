@@ -215,7 +215,13 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   7 (pending); step 6 failed: …`). The policy view and the draft decisions are reloaded once
   per batch; `:batch` shows each step again; provision with `P` in the pending overlay as
   usual. A still-truncated focused result says `still capped at N: B raises the cap, or narrow
-  the window`. `Esc` returns (to the app overlay when opened from it).
+  the window`. A Traffic filter other than window and cap (`svc 443`, `decision blocked`) is
+  a gap too (`:filter` clears it), and so is a query still running; with `o` on, the `out`
+  side must be loaded as well (`r` then runs both sides). While `Enter` plans, the rows are
+  frozen; a plan whose proposal changed meanwhile is discarded, nothing sent. The confirm's
+  status names what the fresh read changed (`1 rule is in the draft since the preview: not
+  written`). The rows scroll with the cursor (`↑ N more above · ↓ N more below`), `j` runs on
+  into the outbound section. `Esc` returns (to the app overlay when opened from it).
   `D` shows, next to each flow's reported decision, the one the **draft** policy would make,
   so you can check whether your draft rules fix the blocked flows before provisioning. It is
   the PCE's own Explorer draft view: the PCE re-evaluates the result's own async query

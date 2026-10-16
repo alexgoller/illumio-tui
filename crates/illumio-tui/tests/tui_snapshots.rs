@@ -1733,6 +1733,11 @@ fn generator_model() -> illumio_tui::tui::model::Model {
     use illumio_tui::tui::commands::Command;
     use illumio_tui::tui::msg::Msg;
     let mut m = with_policy(model_with_window("24h"));
+    // The index the rich flows were resolved with: every label has its name.
+    m.connection = Connection::Connected {
+        index: Some(illumio_tui::tui::test_support::rich_index()),
+        index_age_secs: 0,
+    };
     illumio_tui::tui::update(&mut m, Msg::Command(Command::Gen(Some("shop/prod".into()))));
     m
 }
@@ -1856,4 +1861,73 @@ fn generator_override_deny_and_no_target_80x24() {
         assert!(out.contains(s), "missing {s:?}:\n{out}");
     }
     insta::assert_snapshot!("generator_override_deny_and_no_target_80x24", out);
+}
+
+/// Every row checked at role·ports with outbound on: more rules than the
+/// 80x24 body holds; `p` scrolled to its end shows the last line.
+#[test]
+fn generator_rule_list_scrolled_to_the_end_80x24() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut m = generator_model();
+    gen_key(&mut m, 'o');
+    gen_key(&mut m, 'l');
+    {
+        let v = m.gen_view.as_mut().unwrap();
+        for r in v.rows.iter_mut().filter(|r| r.checkable) {
+            r.checked = true;
+        }
+    }
+    gen_key(&mut m, '='); // any key that re-derives
+    gen_key(&mut m, 'p');
+    for _ in 0..100 {
+        gen_key(&mut m, 'j');
+    }
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("not covered:"), "{out}");
+    assert!(out.contains("more above"), "{out}");
+    insta::assert_snapshot!("generator_rule_list_scrolled_to_the_end_80x24", out);
+    illumio_tui::tui::update(
+        &mut m,
+        illumio_tui::tui::msg::Msg::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+    );
+}
+
+/// More rows than the 80x24 body holds: the list follows the cursor and
+/// says what is above and below.
+#[test]
+fn generator_rows_scroll_with_the_cursor_80x24() {
+    let mut m = generator_model();
+    gen_key(&mut m, 'o');
+    {
+        // Twelve more inbound IP peers.
+        let v = m.gen_view.as_mut().unwrap();
+        let ip = v
+            .rows
+            .iter()
+            .find(|r| matches!(r.peer, pce::generate::PeerKind::Ip { .. }))
+            .cloned()
+            .unwrap();
+        for n in 0..12 {
+            let mut r = ip.clone();
+            r.peer = pce::generate::PeerKind::Ip {
+                ip: format!("10.9.9.{n}"),
+                list: None,
+            };
+            v.rows.insert(4, r);
+        }
+        v.section = pce::generate::Side::Inbound;
+        v.cursor = [0, 0];
+    }
+    let top = render_to_string(&m, 80, 24);
+    assert!(top.contains("more below"), "{top}");
+    for _ in 0..16 {
+        gen_key(&mut m, 'j');
+    }
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("more above"), "{out}");
+    assert!(
+        out.contains("Outbound (o: on)"),
+        "the outbound title comes along:\n{out}"
+    );
+    insta::assert_snapshot!("generator_rows_scroll_with_the_cursor_80x24", out);
 }

@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ Keys ───────────────────────────────── 49-70 of 70 · j/k scroll · Esc closes ╮
+╭ Keys ───────────────────────────────── 50-71 of 71 · j/k scroll · Esc closes ╮
 │Filter   Ctrl-N Ctrl-P   complete the filter fields · cycle back              │
 │w form   Ruleset         found by the destination's scope · Tab/Ctrl-N names  │
 │w form   Ctrl-A Ctrl-R   all labels · create the typed ruleset                │

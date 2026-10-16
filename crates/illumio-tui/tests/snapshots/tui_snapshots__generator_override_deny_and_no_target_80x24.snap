@@ -7,7 +7,7 @@ expression: out
 ╭ Generate · shop/prod · last 24h · 8 flows · complete ──────── 0 req · cached ╮
 │granularity  app·all ─ [app·ports] ─ role·ports ─ role·all                    │
 │target  no ruleset can be named                                               │
-│Inbound → no ruleset can be named                                             │
+│Inbound → (no target)                                                         │
 │[x] intra-app      app·ports   5432/tcp         ✓ 4 ⚠ override deny blocks 2 ⚠│
 │[x] hr/prod        app·ports   5432/tcp         ✗ 1 ⚠ no target               │
 │[ ] shop/dev       app·ports   5432/tcp         ✗ 1 ⚠ env mismatch            │

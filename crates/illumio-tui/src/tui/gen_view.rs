@@ -55,6 +55,52 @@ pub struct GenView {
     pub planning: bool,
     /// The last plan's error (nothing was sent).
     pub error: Option<String>,
+    /// The proposal `Enter` planned: a plan landing after it changed
+    /// (keys are frozen, but traffic may land) is discarded.
+    pub planned: Option<Proposal>,
+}
+
+/// What the fresh read at `Enter` changed against the preview, for the
+/// confirm's status line; `None` when nothing did.
+pub fn refresh_note(old: &Proposal, new: &Proposal) -> Option<String> {
+    use pce::generate::RuleAction;
+    let mut notes = Vec::new();
+    for (i, (o, n)) in old.targets.iter().zip(&new.targets).enumerate() {
+        if o != n {
+            let was = match o {
+                Target::Create(d) => format!("new {}", d.name),
+                t => t.name(),
+            };
+            let scope = new.scopes.get(i).map_or_else(String::new, |s| s.text());
+            notes.push(format!(
+                "target of {scope} changed: {} (was {was})",
+                n.name()
+            ));
+        }
+    }
+    let moved = |f: fn(&RuleAction) -> bool| {
+        old.rules
+            .iter()
+            .zip(&new.rules)
+            .filter(|(o, n)| !f(&o.action) && f(&n.action))
+            .count()
+    };
+    let exists = moved(|a| matches!(a, RuleAction::Exists { .. }));
+    if exists > 0 {
+        notes.push(format!(
+            "{exists} {} in the draft since the preview: not written",
+            if exists == 1 { "rule is" } else { "rules are" }
+        ));
+    }
+    let adds = moved(|a| matches!(a, RuleAction::AddServices { .. }));
+    if adds > 0 {
+        notes.push(format!("{adds} now only add services to an existing rule"));
+    }
+    let denied = |p: &Proposal| p.rules.iter().map(|r| r.denied_flows).sum::<u64>();
+    if denied(new) > denied(old) {
+        notes.push(format!("override denies now block {} flows", denied(new)));
+    }
+    (!notes.is_empty()).then(|| notes.join("; "))
 }
 
 fn side_index(s: Side) -> usize {
@@ -87,6 +133,7 @@ impl GenView {
             list: None,
             planning: false,
             error: None,
+            planned: None,
         }
     }
 
@@ -126,8 +173,25 @@ impl GenView {
     }
 
     /// `j` / `k`, clamped to the section.
+    /// Past the last inbound row `j` goes on into the outbound section
+    /// (when it is shown and has rows), `k` from its first row back.
     pub fn move_cursor(&mut self, delta: isize) {
         let n = self.section_rows(self.section).len();
+        let at = self.cursor[side_index(self.section)];
+        let outbound_rows = self.section_rows(Side::Outbound).len();
+        if delta > 0 && self.section == Side::Inbound && at + 1 >= n {
+            if self.outbound && outbound_rows > 0 {
+                self.section = Side::Outbound;
+                self.cursor[1] = 0;
+            }
+            return;
+        }
+        if delta < 0 && self.section == Side::Outbound && at == 0 {
+            self.section = Side::Inbound;
+            let n = self.section_rows(Side::Inbound).len();
+            self.cursor[0] = n.saturating_sub(1);
+            return;
+        }
         let c = &mut self.cursor[side_index(self.section)];
         *c = c.saturating_add_signed(delta).min(n.saturating_sub(1));
     }
@@ -319,7 +383,13 @@ impl GenView {
         self.proposal
             .as_ref()
             .and_then(|p| p.targets.first())
-            .map_or_else(|| self.focus.app_text(), Target::name)
+            .map_or_else(
+                || self.focus.app_text(),
+                |t| match t {
+                    Target::None(_) => "(no target)".to_string(),
+                    t => t.name(),
+                },
+            )
     }
 
     /// The flags a row's rules earn (row `i`, an index into `rows`): an
@@ -449,7 +519,10 @@ impl GenView {
                     ""
                 }
             ));
-            out.push(format!("   {}", r.description));
+            // An existing rule keeps its own description: nothing is written.
+            if !matches!(r.action, RuleAction::Exists { .. }) {
+                out.push(format!("   {}", r.description));
+            }
             if r.denied_flows > 0 {
                 out.push(format!(
                     "   ⚠ override deny {}: {} of its {} flows stay blocked",
@@ -586,7 +659,21 @@ mod tests {
         assert_eq!(v.rule_flags(row), Vec::<String>::new(), "no proposal yet");
         p.rules[0].denied_flows = 2;
         p.targets[0] = Target::None("no ruleset".into());
+        p.rules[1].action = pce::generate::RuleAction::Exists {
+            rule_href: "/orgs/5/sec_policy/draft/rule_sets/1/sec_rules/9".into(),
+        };
         v.proposal = Some(p);
+        let idx = crate::tui::test_support::fixture_index();
+        let list = v.rule_list(&idx);
+        let at = list
+            .iter()
+            .position(|l| l.starts_with("2. exists"))
+            .unwrap();
+        assert!(
+            !list[at + 1].contains("generated"),
+            "an existing rule has no new description: {list:#?}"
+        );
+        assert_eq!(v.target_name(), "(no target)");
         assert_eq!(
             v.rule_flags(row),
             vec![

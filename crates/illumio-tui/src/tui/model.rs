@@ -1701,6 +1701,9 @@ pub enum Gap {
     Capped { cap: u32, focused: bool },
     /// A supercluster region did not answer.
     Region { focused: bool },
+    /// The only result loaded is a focused one that does not cover this
+    /// side (an `in` query, and the `out` side is asked).
+    Uncovered,
 }
 
 /// `1 query`, `2 queries` (shared with the CLI's meta line).
@@ -2234,6 +2237,8 @@ impl TrafficState {
         match (&self.focus_result, &self.unfocused) {
             (Some(r), _) if r.covers(focus) => false,
             (_, Some(u)) => u.truncated,
+            // Only another side's focused result is loaded.
+            (Some(_), None) => true,
             _ => self.data.as_ref().is_some_and(|d| d.truncated),
         }
     }
@@ -2244,13 +2249,7 @@ impl TrafficState {
     /// truncated is a gap, and so is a region that did not answer.
     pub fn complete_for(&self, focus: &Focus) -> Result<(), Gap> {
         let focused = self.focus_result.as_ref().is_some_and(|r| r.covers(focus));
-        let used = match (&self.unfocused, focused) {
-            (Some(u), false) => Some(u),
-            _ => self.data.as_ref(),
-        };
-        let Some(d) = used else {
-            return Err(Gap::NoData);
-        };
+        let d = self.used_for(focus)?;
         if d.truncated {
             return Err(Gap::Capped {
                 cap: d.filter.max_results,
@@ -2261,6 +2260,18 @@ impl TrafficState {
             return Err(Gap::Region { focused });
         }
         Ok(())
+    }
+
+    /// The result `flows_for(focus)` reads, whatever its completeness: a
+    /// focused result covering `focus`, else the unfocused one. A focused
+    /// result for another side alone is [`Gap::Uncovered`].
+    pub fn used_for(&self, focus: &Focus) -> Result<&TrafficData, Gap> {
+        let focused = self.focus_result.as_ref().is_some_and(|r| r.covers(focus));
+        match (&self.unfocused, focused) {
+            (Some(u), false) => Ok(u),
+            (None, false) if self.focus_result.is_some() => Err(Gap::Uncovered),
+            _ => self.data.as_ref().ok_or(Gap::NoData),
+        }
     }
 
     /// The loaded result's window, `(start, end)`: its range's end and the
@@ -4698,6 +4709,9 @@ pub struct Model {
     pub batch_sending: bool,
     /// The last sent batch, step by step (`:batch` shows it again).
     pub batch_report: Option<Vec<String>>,
+    /// The batch on its way (planned, confirmed, sent) came from the
+    /// generator: its confirm, report and end return there.
+    pub batch_from_gen: bool,
     pub quit: bool,
     pub started: Instant,
 }
@@ -4765,6 +4779,7 @@ impl Model {
             switching: false,
             batch_sending: false,
             batch_report: None,
+            batch_from_gen: false,
             quit: false,
             started: Instant::now(),
         }
@@ -4975,6 +4990,27 @@ mod tests {
         );
         let empty = crate::tui::test_support::model_fixture();
         assert_eq!(empty.traffic.complete_for(&shop), Err(Gap::NoData));
+        // A focused `in` result as the only result: the out side is not loaded.
+        let mut only = crate::tui::test_support::model_fixture();
+        let data = TrafficData {
+            flows: m.traffic.loaded_flows().to_vec(),
+            truncated: false,
+            incomplete: false,
+            elapsed: Duration::ZERO,
+            cache_hit: false,
+            fetched_at: Instant::now(),
+            filter: m.traffic.filter.clone(),
+            range: None,
+            hrefs: Vec::new(),
+            draft: None,
+        };
+        only.traffic.apply_focused(shop.clone(), 1, data);
+        assert!(only.traffic.unfocused.is_none());
+        assert_eq!(only.traffic.complete_for(&out), Err(Gap::Uncovered));
+        assert!(
+            only.traffic.partial_for(&out),
+            "nothing covers the out side"
+        );
     }
 
     fn at(s: &str) -> jiff::Timestamp {

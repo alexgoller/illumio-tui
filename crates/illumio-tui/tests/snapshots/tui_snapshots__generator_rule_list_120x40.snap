@@ -9,7 +9,7 @@ expression: out
 │target  Shop-Prod (draft, 2 rules)                                                                                    │
 │1. create · Shop-Prod: all workloads → all workloads on 5432/tcp                                                      │
 │   generated: shop/prod → shop/prod on 5432/tcp, from 24h of traffic (illumio-tui)                                    │
-│2. create · Shop-Prod: /orgs/5/labels/103, env=prod → all workloads on 5432/tcp · unscoped                            │
+│2. create · Shop-Prod: app=hr, env=prod → all workloads on 5432/tcp · unscoped                                        │
 │   generated: hr/prod → shop/prod on 5432/tcp, from 24h of traffic (illumio-tui)                                      │
 │not covered: 3 unchecked · 0 folded IPs · 0 unsupported proto · 0 broadcast/multicast · 0 no target · 0 override deny │
 │                                                                                                                      │

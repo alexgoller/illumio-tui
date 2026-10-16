@@ -88,6 +88,16 @@ pub fn with_draft(mut flows: Vec<ResolvedFlow>) -> Vec<ResolvedFlow> {
 /// some workloads, the Corp IP list, an FQDN, users, processes, both
 /// directions, bytes on 9 flows), resolved with its own extra labels.
 pub fn fixture_flows_rich() -> Vec<ResolvedFlow> {
+    let idx = rich_index();
+    let raw: Vec<Flow> =
+        serde_json::from_str(include_str!("../../../../fixtures/traffic_flows_rich.json"))
+            .expect("rich flows fixture");
+    resolve_flows(&raw, &idx)
+}
+
+/// The fixture index with the rich fixture's extra labels: what the rich
+/// flows are resolved with.
+pub fn rich_index() -> Arc<NameIndex> {
     let mut labels: Vec<Label> =
         serde_json::from_str(include_str!("../../../../fixtures/labels.json"))
             .expect("labels fixture");
@@ -105,11 +115,7 @@ pub fn fixture_flows_rich() -> Vec<ResolvedFlow> {
     let services: Vec<Service> =
         serde_json::from_str(include_str!("../../../../fixtures/services.json"))
             .expect("services fixture");
-    let idx = NameIndex::new(&labels, &groups, &lists, &services);
-    let raw: Vec<Flow> =
-        serde_json::from_str(include_str!("../../../../fixtures/traffic_flows_rich.json"))
-            .expect("rich flows fixture");
-    resolve_flows(&raw, &idx)
+    Arc::new(NameIndex::new(&labels, &groups, &lists, &services))
 }
 
 /// A connected model with the rich fixture loaded as a finished query.
@@ -521,5 +527,6 @@ pub fn batch_plan() -> pce::write::Batch {
             host: "pce.example".into(),
             org_id: 5,
         }),
+        refreshed: None,
     }
 }

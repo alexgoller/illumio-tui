@@ -100,6 +100,10 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "granularity · the row's own (*) · back to the slider",
     ),
     (
+        "Generate j/k Tab q",
+        "rows (on into outbound) · section · back",
+    ),
+    (
         "Generate Space o R p",
         "check a row · outbound · pick the ruleset · rule list",
     ),

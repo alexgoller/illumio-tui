@@ -400,8 +400,11 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 let waiting = matches!(
                     &model.overlay,
                     Overlay::Form(f) if matches!(f.intent, EditIntent::RuleFromFlow(_))
-                ) || model.overlay == Overlay::Generator;
-                return if waiting {
+                );
+                return if model.overlay == Overlay::Generator {
+                    // Counted in its header.
+                    generator::ensure_drafts(model)
+                } else if waiting {
                     load_form_drafts(model)
                 } else {
                     Vec::new()
@@ -877,9 +880,13 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::BatchPlanned(result) => {
             model.writes.in_flight = false;
             let planned_here = batch_lands(model);
+            let changed = planned_here && generator::changed_since_plan(model);
             if let Some(v) = model.gen_view.as_mut() {
                 v.planning = false;
+                v.planned = None;
             }
+            // Set again only when the confirm opens over the generator.
+            model.batch_from_gen = false;
             match result {
                 // Keys typed while the batch was planned went elsewhere; a
                 // `y` there must not confirm this.
@@ -892,15 +899,26 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 Ok(_) if !planned_here => {
                     model.status = StatusLine::warn("requests discarded, nothing sent");
                 }
+                Ok(_) if changed => {
+                    model.status = StatusLine::warn(
+                        "the proposal changed while planning: nothing sent, Enter plans again",
+                    );
+                }
                 Ok(batch) => {
-                    model.status = StatusLine::info(format!(
+                    let note = generator::planned_proposal(model, batch.refreshed.as_ref());
+                    let mut text = format!(
                         "review the {}: y sends them all, n cancels",
                         if batch.sends() == 1 {
                             "request"
                         } else {
                             "requests"
                         }
-                    ));
+                    );
+                    if let Some(n) = note {
+                        text.push_str(&format!(" · {n}"));
+                    }
+                    model.status = StatusLine::info(text);
+                    model.batch_from_gen = true;
                     model.overlay = Overlay::ConfirmBatch { batch, scroll: 0 };
                 }
                 Err(e) => batch_plan_failed(model, &e, planned_here),
@@ -1140,6 +1158,13 @@ fn run_now(model: &mut Model, f: TrafficFilter) -> Vec<Cmd> {
     let cmds = start_query(model, f, CacheMode::Bypass);
     model.traffic.auto.rearm();
     cmds
+}
+
+/// A query started as the Traffic screen starts it (tests of the
+/// generator's running-query guards).
+#[cfg(test)]
+pub(crate) fn start_query_for_tests(model: &mut Model, filter: TrafficFilter) -> Vec<Cmd> {
+    start_query(model, filter, CacheMode::Use)
 }
 
 fn start_query(model: &mut Model, filter: TrafficFilter, mode: CacheMode) -> Vec<Cmd> {
@@ -3683,13 +3708,19 @@ fn batch_plan_failed(model: &mut Model, e: &str, planned_here: bool) {
 /// drafts it reads load again after a write: one request, counted), else
 /// to the screen.
 fn batch_closed(model: &mut Model) -> Vec<Cmd> {
-    if model.gen_view.is_none() {
+    if !std::mem::take(&mut model.batch_from_gen) || model.gen_view.is_none() {
         model.overlay = Overlay::None;
         return Vec::new();
     }
     model.overlay = Overlay::Generator;
+    // The batch's outcome stays on the status line, whatever loads.
+    let status = model.status.clone();
     let cmds = generator::ensure_drafts(model);
-    generator::regen(model);
+    // Rows, gap and keys again: traffic may have landed meanwhile.
+    generator::rebuild_gen(model);
+    if model.overlay == Overlay::Generator {
+        model.status = status;
+    }
     cmds
 }
 
@@ -3865,6 +3896,8 @@ fn batch_done(
         cmds.extend(redraft);
     }
     if model.overlay != Overlay::None {
+        // Whatever opened meanwhile closes onto the screen.
+        model.batch_from_gen = false;
         model.status.text.push_str(" · :batch shows each step");
     } else if stopped {
         model.overlay = Overlay::BatchReport { scroll: 0 };
@@ -9937,7 +9970,7 @@ mod tests {
     fn help_scrolls_to_its_last_line_and_reopens_at_the_top() {
         use crate::tui::ui::widgets::overlay::{HELP_LINES, help_last_scroll};
         let mut m = model_fixture(); // 80x24
-        assert_eq!(HELP_LINES.len(), 70);
+        assert_eq!(HELP_LINES.len(), 71);
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  A"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  D"));
         assert!(
@@ -9969,7 +10002,7 @@ mod tests {
         );
         update(&mut m, key('?'));
         let last = help_last_scroll(24);
-        assert_eq!(last, 48, "70 lines, 22 rows inside the box");
+        assert_eq!(last, 49, "71 lines, 22 rows inside the box");
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app x / X"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app o"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app d"));

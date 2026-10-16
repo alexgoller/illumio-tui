@@ -94,6 +94,10 @@ pub struct Batch {
     pub reads: u32,
     /// `None`: never sent.
     pub origin: Option<BatchOrigin>,
+    /// The proposal as the fresh read left it (targets, actions and
+    /// override denies again): what the steps write. `None` outside
+    /// `plan_batch`.
+    pub refreshed: Option<Proposal>,
 }
 
 /// What became of one step.
@@ -702,6 +706,7 @@ impl Writer<'_> {
             steps,
             reads,
             origin: Some(BatchOrigin::of(self.guard().context())),
+            refreshed: Some(proposal),
         })
     }
 

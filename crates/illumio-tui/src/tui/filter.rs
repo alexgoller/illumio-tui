@@ -133,6 +133,28 @@ impl TrafficFilter {
         empty(self.src_groups()) && empty(self.dst_groups()) && self.service.trim().is_empty()
     }
 
+    /// What narrows the flows besides the window and the cap (`svc 443,
+    /// decision blocked`); `None` when every flow of the window is asked.
+    pub fn narrowing(&self) -> Option<String> {
+        let mut parts = Vec::new();
+        for (name, text) in [
+            ("src", &self.src),
+            ("dst", &self.dst),
+            ("svc", &self.service),
+        ] {
+            if !text.trim().is_empty() {
+                parts.push(format!("{name} {}", text.trim()));
+            }
+        }
+        if self.decisions_text() != "all" {
+            parts.push(format!("decision {}", self.decisions_text()));
+        }
+        if self.has_transmission() {
+            parts.push("transmission".to_string());
+        }
+        (!parts.is_empty()).then(|| parts.join(", "))
+    }
+
     /// The decisions as shown in the summary, the filter bar and the editor.
     pub fn decisions_text(&self) -> String {
         decisions_text(&self.decisions)
@@ -436,6 +458,18 @@ mod tests {
     use super::*;
     use pce::models::PolicyDecision;
     use pce::traffic::FilterExpr;
+
+    #[test]
+    fn narrowing_names_what_is_not_window_or_cap() {
+        let mut f = TrafficFilter::defaults("24h", 1000);
+        assert_eq!(f.narrowing(), None);
+        f.service = "443".into();
+        f.decisions = vec![PolicyDecision::Blocked];
+        assert_eq!(
+            f.narrowing().unwrap(),
+            format!("svc 443, decision {}", f.decisions_text())
+        );
+    }
 
     #[test]
     fn defaults_and_cost_hint() {

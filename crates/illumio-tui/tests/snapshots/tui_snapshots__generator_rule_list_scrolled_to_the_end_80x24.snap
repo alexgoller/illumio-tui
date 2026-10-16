@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭ Generate · shop/prod · last 24h · 10 flows · complete ─────── 0 req · cached ╮
+│granularity  app·all ─ app·ports ─ [role·ports] ─ role·all                    │
+│target  Shop-Prod (draft, 2 rules)                                            │
+│   generated: 10.1.4.9 → shop/prod on 443/tcp, from 24h of traffic            │
+│      (illumio-tui)                                                           │
+│5. create · Shop-Prod: ipl:Corp → role=db on 5432/tcp                         │
+│   generated: 10.1.4.9 → shop/prod on 5432/tcp, from 24h of traffic           │
+│      (illumio-tui)                                                           │
+│6. create · Shop-Prod: role=web → new ipl:shop-prod peer 203.0.113.7 on       │
+│   443/tcp                                                                    │
+│   generated: shop/prod → 203.0.113.7 on 443/tcp, from 24h of traffic         │
+│      (illumio-tui)                                                           │
+│7. create · RF-crm-prod: app=shop, env=prod, role=web → role=web on 443/tcp · │
+│   unscoped                                                                   │
+│   generated: shop/prod → crm/prod on 443/tcp, from 24h of traffic            │
+│      (illumio-tui)                                                           │
+│not covered: 0 unchecked · 0 folded IPs · 0 unsupported proto · 0             │
+│   broadcast/multicast · 0 no target · 0 override deny                        │
+│7 rules (6 new · 0 add services · 1 exist) · covers 10 of 10 flows · 0 not    │
+│↑ 13 more above · j/k scroll · Esc back to the rows                           │
+╰──────────────────────────────────────────────────────────────────────────────╯
+shop/prod · generator · 0 req │ ←/→ stop  </> row  R pick  r re-query  Esc back

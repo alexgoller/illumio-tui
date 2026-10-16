@@ -73,6 +73,12 @@ pub(super) fn ensure_drafts(model: &mut Model) -> Vec<Cmd> {
         }
         return Vec::new();
     }
+    if !model.is_connected() {
+        if let Some(v) = model.gen_view.as_mut() {
+            v.drafts = Drafts::Failed("not connected".into());
+        }
+        return Vec::new();
+    }
     let cmds = load_form_drafts(model);
     if let Some(v) = model.gen_view.as_mut() {
         v.drafts = Drafts::Loading;
@@ -83,47 +89,68 @@ pub(super) fn ensure_drafts(model: &mut Model) -> Vec<Cmd> {
 }
 
 /// What the header says when the data the generator reads may miss flows
-/// (`None`: complete), and whether `r` can help.
-fn gap_text(model: &Model, v: &GenView) -> (Option<String>, bool) {
+/// (`None`: complete), whether `r` can help, and the window of the result
+/// it reads (the filter's while none is loaded).
+fn gap_text(model: &Model, v: &GenView) -> (Option<String>, bool, String) {
+    let t = &model.traffic;
+    let n = v.focus.direction.query_count();
+    let app = v.focus.app_text();
+    let window = t
+        .used_for(&v.focus.clone().with_direction(FocusDirection::In))
+        .map_or_else(|_| t.filter.window.clone(), |d| d.filter.window.clone());
+    if t.is_running() {
+        let ours = t.running_focus().is_some_and(|f| f.same_app(&v.focus));
+        let g = if ours {
+            format!("re-querying {app}…")
+        } else {
+            "a query is running: the generator follows when it lands".to_string()
+        };
+        return (Some(g), false, window);
+    }
     let mut sides = vec![FocusDirection::In];
     if v.outbound {
         sides.push(FocusDirection::Out);
     }
-    let n = v.focus.direction.query_count();
-    let app = v.focus.app_text();
     for d in sides {
         let side = v.focus.clone().with_direction(d);
-        match model.traffic.complete_for(&side) {
-            Ok(()) => {}
-            Err(Gap::Capped { cap, focused: true }) => {
-                return (
-                    Some(format!(
-                        "still capped at {cap}: B raises the cap, or narrow the window"
-                    )),
-                    false,
-                );
+        let gap = match t.complete_for(&side) {
+            Ok(()) => {
+                // Whole, but of a narrowed filter: flows outside it are missing.
+                let narrowed = t.used_for(&side).ok().and_then(|d| d.filter.narrowing());
+                match narrowed {
+                    Some(what) => (
+                        Some(format!(
+                            "filtered ({what}): the generator needs every flow; :filter clears it"
+                        )),
+                        false,
+                    ),
+                    None => continue,
+                }
             }
-            Err(Gap::NoData) => {
-                return (
-                    Some(format!(
-                        "no traffic loaded: r queries {app} ({})",
-                        queries_text(n)
-                    )),
-                    true,
-                );
-            }
-            Err(_) => {
-                return (
-                    Some(format!(
-                        "incomplete: r re-queries {app} ({})",
-                        queries_text(n)
-                    )),
-                    true,
-                );
-            }
-        }
+            Err(Gap::Capped { cap, focused: true }) => (
+                Some(format!(
+                    "still capped at {cap}: B raises the cap, or narrow the window"
+                )),
+                false,
+            ),
+            Err(Gap::NoData) => (
+                Some(format!(
+                    "no traffic loaded: r queries {app} ({})",
+                    queries_text(n)
+                )),
+                true,
+            ),
+            Err(_) => (
+                Some(format!(
+                    "incomplete: r re-queries {app} ({})",
+                    queries_text(n)
+                )),
+                true,
+            ),
+        };
+        return (gap.0, gap.1, window);
     }
-    (None, false)
+    (None, false, window)
 }
 
 /// The rows again from the loaded flows (checkboxes kept), the gap, and
@@ -150,11 +177,12 @@ pub(super) fn rebuild_gen(model: &mut Model) {
         &model.limits.tier_key,
         &idx,
     );
-    let (gap, requery) = gap_text(model, v);
+    let (gap, requery, window) = gap_text(model, v);
     if let Some(v) = model.gen_view.as_mut() {
         v.set_rows(fresh);
         v.gap = gap;
         v.requery = requery;
+        v.window = window;
     }
     regen(model);
 }
@@ -205,9 +233,44 @@ pub(super) fn gen_drafts_answer(model: &mut Model, outcome: Result<bool, &str>) 
     }
 }
 
+/// The rule list's last scroll position at the terminal's size.
+fn list_last_scroll(model: &Model) -> u16 {
+    let area = ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1);
+    crate::tui::ui::widgets::generator::rule_list_last_scroll(model, area)
+}
+
+/// Whether the plan that just landed is for something else than what the
+/// generator shows now: its proposal changed (a traffic answer rebuilt it)
+/// or its data became incomplete.
+pub(super) fn changed_since_plan(model: &Model) -> bool {
+    model
+        .gen_view
+        .as_ref()
+        .is_some_and(|v| v.gap.is_some() || v.planned != v.proposal)
+}
+
+/// A plan that opens its confirm: say what the fresh read changed against
+/// the preview, and show the proposal the steps write.
+pub(super) fn planned_proposal(
+    model: &mut Model,
+    refreshed: Option<&pce::generate::Proposal>,
+) -> Option<String> {
+    let v = model.gen_view.as_mut()?;
+    let new = refreshed?;
+    let note = v
+        .proposal
+        .as_ref()
+        .and_then(|old| crate::tui::gen_view::refresh_note(old, new));
+    v.proposal = Some(new.clone());
+    note
+}
+
 /// `Esc` / `q`: back to the app overlay it came from (its view is kept),
 /// else to the screen.
 fn close_gen(model: &mut Model) {
+    if let Some(v) = model.gen_view.as_mut() {
+        v.list = None;
+    }
     let back = std::mem::take(&mut model.gen_from_app) && model.app_view.is_some();
     model.overlay = if back { Overlay::App } else { Overlay::None };
 }
@@ -221,19 +284,34 @@ pub(super) fn gen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         return Vec::new();
     };
     if let Some(scroll) = v.list {
+        let last = list_last_scroll(model);
+        let Some(v) = model.gen_view.as_mut() else {
+            return Vec::new();
+        };
         match k.code {
             KeyCode::Esc | KeyCode::Char('p') | KeyCode::Char('q') => v.list = None,
-            KeyCode::Down | KeyCode::Char('j') => v.list = Some(scroll.saturating_add(1)),
+            KeyCode::Down | KeyCode::Char('j') => v.list = Some((scroll + 1).min(last)),
             KeyCode::Up | KeyCode::Char('k') => v.list = Some(scroll.saturating_sub(1)),
             _ => {}
         }
+        return Vec::new();
+    }
+    // The plan is on its way for the proposal on screen: nothing may
+    // change it until the confirm opens (or `Esc` drops the plan).
+    if v.planning
+        && !matches!(
+            k.code,
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('p')
+        )
+    {
+        model.status = StatusLine::info("planning: wait for the confirm, or Esc");
         return Vec::new();
     }
     match k.code {
         KeyCode::Esc | KeyCode::Char('q') => close_gen(model),
         KeyCode::Down | KeyCode::Char('j') => v.move_cursor(1),
         KeyCode::Up | KeyCode::Char('k') => v.move_cursor(-1),
-        KeyCode::Tab => v.switch_section(),
+        KeyCode::Tab | KeyCode::BackTab => v.switch_section(),
         KeyCode::Char(' ') => {
             if let Err(e) = v.toggle(&scope_keys) {
                 model.status = StatusLine::warn(e);
@@ -263,6 +341,14 @@ pub(super) fn gen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         KeyCode::Char('o') => {
             v.toggle_outbound();
             rebuild_gen(model);
+            // Turned on: the cursor goes to its rows, so they are on screen.
+            if let Some(v) = model.gen_view.as_mut()
+                && v.outbound
+                && !v.section_rows(Side::Outbound).is_empty()
+            {
+                v.section = Side::Outbound;
+                v.cursor[1] = 0;
+            }
         }
         KeyCode::Char('R') => {
             match v.pick_next() {
@@ -289,6 +375,11 @@ fn gen_reload(model: &mut Model) -> Vec<Cmd> {
     if matches!(v.drafts, Drafts::Failed(_)) {
         return ensure_drafts(model);
     }
+    // One query at a time: never stack Explorer queries, never cancel one.
+    if model.traffic.is_running() {
+        model.status = StatusLine::info("query already running");
+        return Vec::new();
+    }
     if !v.requery {
         model.status = StatusLine::info(match &v.gap {
             Some(g) => g.clone(),
@@ -298,7 +389,6 @@ fn gen_reload(model: &mut Model) -> Vec<Cmd> {
     }
     let focus = v.focus.clone();
     let filter = model.traffic.filter.clone();
-    model.traffic.set_focus(focus.clone());
     if let Some(reason) = filter.needs_confirmation() {
         model.overlay = Overlay::Confirm {
             reason: format!(
@@ -310,7 +400,20 @@ fn gen_reload(model: &mut Model) -> Vec<Cmd> {
         };
         return Vec::new();
     }
-    start_focused(model, filter, focus, CacheMode::Use)
+    run_requery(model, filter, focus)
+}
+
+/// The focused query for the generator's app: the Traffic screen takes
+/// its focus (so the answer is applied), the header says it runs.
+fn run_requery(
+    model: &mut Model,
+    filter: crate::tui::filter::TrafficFilter,
+    focus: Focus,
+) -> Vec<Cmd> {
+    model.traffic.set_focus(focus.clone());
+    let cmds = start_focused(model, filter, focus, CacheMode::Use);
+    rebuild_gen(model);
+    cmds
 }
 
 /// `y` on `r`'s prompt: the focused query, back to the generator.
@@ -319,9 +422,12 @@ pub(super) fn gen_requery(
     filter: crate::tui::filter::TrafficFilter,
     focus: Focus,
 ) -> Vec<Cmd> {
-    let cmds = start_focused(model, filter, focus, CacheMode::Use);
     model.overlay = Overlay::Generator;
-    cmds
+    if model.traffic.is_running() {
+        model.status = StatusLine::info("query already running");
+        return Vec::new();
+    }
+    run_requery(model, filter, focus)
 }
 
 /// `Enter`: refused with the reason, or one `Cmd::PlanBatch` (its reads
@@ -332,6 +438,10 @@ fn gen_enter(model: &mut Model) -> Vec<Cmd> {
     }
     if model.switching {
         model.status = StatusLine::warn("a profile switch is in progress: nothing planned");
+        return Vec::new();
+    }
+    if model.traffic.is_running() {
+        model.status = StatusLine::warn("a query is running: Enter plans once it lands");
         return Vec::new();
     }
     let Some(v) = model.gen_view.as_ref() else {
@@ -369,8 +479,10 @@ fn gen_enter(model: &mut Model) -> Vec<Cmd> {
     };
     if let Some(v) = model.gen_view.as_mut() {
         v.planning = true;
+        v.planned = Some(input.proposal.clone());
         v.error = None;
     }
+    model.batch_from_gen = true;
     model.writes.in_flight = true;
     model.status = StatusLine::info("planning: the draft rulesets, read fresh…");
     vec![Cmd::PlanBatch {
@@ -505,8 +617,18 @@ mod tests {
         update(&mut m, kc(KeyCode::Esc));
         assert_eq!(view(&m).list, None, "Esc leaves the list first");
         assert_eq!(m.overlay, Overlay::Generator);
+        assert_eq!(view(&m).section, Side::Outbound, "o moves to its rows");
         update(&mut m, kc(KeyCode::Tab));
+        assert_eq!(view(&m).section, Side::Inbound);
+        // j runs on from the last inbound row into the outbound section.
+        for _ in 0..10 {
+            update(&mut m, key('j'));
+        }
         assert_eq!(view(&m).section, Side::Outbound);
+        update(&mut m, key('k'));
+        update(&mut m, key('k'));
+        assert_eq!(view(&m).section, Side::Inbound, "and k back");
+        update(&mut m, kc(KeyCode::Tab));
         update(&mut m, key('='));
         update(&mut m, key('R'));
         assert_eq!(
@@ -642,7 +764,7 @@ mod tests {
         assert!(view(&m).planning && m.writes.in_flight);
         assert_eq!(update(&mut m, key('y')), Vec::new());
         assert_eq!(update(&mut m, kc(KeyCode::Enter)), Vec::new(), "in flight");
-        assert_eq!(m.status.text, "a write is already in progress");
+        assert_eq!(m.status.text, "planning: wait for the confirm, or Esc");
         update(
             &mut m,
             Msg::BatchPlanned(Ok(crate::tui::test_support::batch_plan())),
@@ -668,6 +790,283 @@ mod tests {
             "plan failed, nothing sent: too many draft rulesets"
         );
         assert!(!view(&m).planning);
+    }
+
+    /// Writes on, the generator open for shop/prod, `Enter` sent the plan.
+    fn planning() -> Model {
+        let mut m = loaded();
+        m.writes = WritesState::on();
+        open_shop(&mut m);
+        let cmds = update(&mut m, kc(KeyCode::Enter));
+        assert!(matches!(&cmds[..], [Cmd::PlanBatch { .. }]), "{cmds:?}");
+        m
+    }
+
+    #[test]
+    fn edits_are_frozen_while_the_plan_is_on_its_way() {
+        let mut m = planning();
+        let before = view(&m).rows.clone();
+        for msg in [key(' '), kc(KeyCode::Right), key('o'), key('R'), key('>')] {
+            assert_eq!(update(&mut m, msg), Vec::new());
+            assert_eq!(m.status.text, "planning: wait for the confirm, or Esc");
+        }
+        assert_eq!(view(&m).rows, before);
+        assert_eq!(view(&m).global, Stop::AppPorts);
+        assert!(!view(&m).outbound);
+        update(
+            &mut m,
+            Msg::BatchPlanned(Ok(crate::tui::test_support::batch_plan())),
+        );
+        assert!(matches!(m.overlay, Overlay::ConfirmBatch { .. }));
+    }
+
+    #[test]
+    fn a_plan_for_a_proposal_that_changed_meanwhile_is_discarded() {
+        let mut m = planning();
+        // A traffic answer lands while planning: truncated now.
+        m.traffic.data.as_mut().unwrap().truncated = true;
+        super::rebuild_gen(&mut m);
+        update(
+            &mut m,
+            Msg::BatchPlanned(Ok(crate::tui::test_support::batch_plan())),
+        );
+        assert_eq!(m.overlay, Overlay::Generator);
+        assert_eq!(
+            m.status.text,
+            "the proposal changed while planning: nothing sent, Enter plans again"
+        );
+        assert!(!view(&m).planning && !m.writes.in_flight);
+    }
+
+    #[test]
+    fn the_fresh_read_s_changes_are_named_and_shown() {
+        let mut m = planning();
+        let mut b = crate::tui::test_support::batch_plan();
+        let mut p = view(&m).proposal.clone().unwrap();
+        p.rules[1].action = pce::generate::RuleAction::Exists {
+            rule_href: "/orgs/5/sec_policy/draft/rule_sets/1/sec_rules/9".into(),
+        };
+        b.refreshed = Some(p.clone());
+        update(&mut m, Msg::BatchPlanned(Ok(b)));
+        assert!(matches!(m.overlay, Overlay::ConfirmBatch { .. }));
+        assert!(
+            m.status
+                .text
+                .ends_with("· 1 rule is in the draft since the preview: not written"),
+            "{}",
+            m.status.text
+        );
+        assert_eq!(view(&m).proposal.as_ref(), Some(&p), "the refreshed one");
+    }
+
+    fn written_all() -> Msg {
+        let w = |href: &str| {
+            pce::write::StepResult::Written(pce::write::Written {
+                href: href.into(),
+                pending: true,
+                status: 201,
+                object: serde_json::json!({"href": href}),
+                dropped_fields: Vec::new(),
+                warnings: Vec::new(),
+                audit_failed: None,
+            })
+        };
+        Msg::BatchDone {
+            kinds: vec![
+                pce::write::ObjectKind::IpList,
+                pce::write::ObjectKind::RuleSet,
+                pce::write::ObjectKind::Rule,
+            ],
+            summaries: vec!["a".into(), "b".into(), "c".into()],
+            target: "demo (pce.example, org 5)".into(),
+            results: vec![
+                w("/orgs/5/sec_policy/draft/ip_lists/77"),
+                w("/orgs/5/sec_policy/draft/rule_sets/200"),
+                w("/orgs/5/sec_policy/draft/rule_sets/200/sec_rules/1"),
+            ],
+        }
+    }
+
+    /// `planning()`, the plan landed, `y` sent it.
+    fn sending() -> Model {
+        let mut m = planning();
+        update(
+            &mut m,
+            Msg::BatchPlanned(Ok(crate::tui::test_support::batch_plan())),
+        );
+        assert!(matches!(
+            &update(&mut m, key('y'))[..],
+            [Cmd::ExecuteBatch(_)]
+        ));
+        m
+    }
+
+    #[test]
+    fn back_from_a_batch_the_generator_rebuilds_from_the_traffic_now_loaded() {
+        let mut m = sending();
+        // Traffic lands under the screen while the batch is sent: truncated.
+        m.traffic.data.as_mut().unwrap().truncated = true;
+        update(&mut m, written_all());
+        assert_eq!(m.overlay, Overlay::Generator);
+        assert!(view(&m).gap.is_some(), "the gap is judged again");
+        update(&mut m, kc(KeyCode::Enter));
+        assert!(
+            m.status.text.ends_with("no rules from incomplete data"),
+            "{}",
+            m.status.text
+        );
+    }
+
+    #[test]
+    fn the_batch_outcome_stays_on_the_status_line_when_the_drafts_load_again() {
+        let mut m = sending();
+        m.policy.scope = PolicyScope::Active;
+        m.policy.form_drafts = None;
+        let cmds = update(&mut m, written_all());
+        assert!(
+            cmds.iter().any(|c| matches!(
+                c,
+                Cmd::LoadRuleSets {
+                    scope: PolicyScope::Draft,
+                    ..
+                }
+            )),
+            "{cmds:?}"
+        );
+        assert!(
+            m.status.text.starts_with("wrote 3 of 3 (pending)"),
+            "{}",
+            m.status.text
+        );
+        assert_eq!(view(&m).requests, 1, "counted in its header");
+    }
+
+    #[test]
+    fn batch_later_does_not_reopen_a_closed_generator() {
+        let mut m = sending();
+        update(&mut m, written_all());
+        assert_eq!(m.overlay, Overlay::Generator);
+        update(&mut m, kc(KeyCode::Esc));
+        assert_eq!(m.overlay, Overlay::None);
+        update(&mut m, Msg::Command(Command::Batch));
+        assert!(matches!(m.overlay, Overlay::BatchReport { .. }));
+        assert_eq!(update(&mut m, kc(KeyCode::Esc)), Vec::new());
+        assert_eq!(m.overlay, Overlay::None, "the screen, not the generator");
+    }
+
+    #[test]
+    fn a_narrowing_filter_is_a_gap_r_cannot_close() {
+        let mut m = loaded();
+        m.writes = WritesState::on();
+        m.traffic.data.as_mut().unwrap().filter.service = "443".into();
+        open_shop(&mut m);
+        assert_eq!(
+            view(&m).gap.as_deref(),
+            Some("filtered (svc 443): the generator needs every flow; :filter clears it")
+        );
+        assert!(view(&m).header_title().ends_with("· incomplete"));
+        assert_eq!(update(&mut m, kc(KeyCode::Enter)), Vec::new());
+        assert!(m.status.text.ends_with("no rules from incomplete data"));
+        assert_eq!(update(&mut m, key('r')), Vec::new());
+    }
+
+    #[test]
+    fn the_window_is_the_loaded_result_s_and_a_running_query_blocks_enter() {
+        let mut m = loaded();
+        m.writes = WritesState::on();
+        m.traffic.filter.window = "7d".into(); // asked, not yet loaded
+        open_shop(&mut m);
+        assert!(view(&m).header_title().contains("last 24h"), "the data's");
+        let filter = m.traffic.filter.clone();
+        let cmds = crate::tui::update::start_query_for_tests(&mut m, filter);
+        assert!(!cmds.is_empty());
+        super::rebuild_gen(&mut m);
+        assert_eq!(
+            view(&m).gap.as_deref(),
+            Some("a query is running: the generator follows when it lands")
+        );
+        assert_eq!(update(&mut m, kc(KeyCode::Enter)), Vec::new());
+        assert_eq!(
+            m.status.text,
+            "a query is running: Enter plans once it lands"
+        );
+        assert_eq!(update(&mut m, key('r')), Vec::new());
+        assert_eq!(m.status.text, "query already running");
+    }
+
+    #[test]
+    fn r_twice_sends_one_query() {
+        let mut m = loaded();
+        m.traffic.data.as_mut().unwrap().truncated = true;
+        open_shop(&mut m);
+        assert_eq!(update(&mut m, key('r')).len(), 1);
+        assert_eq!(view(&m).gap.as_deref(), Some("re-querying shop/prod…"));
+        assert_eq!(update(&mut m, key('r')), Vec::new());
+        assert_eq!(m.status.text, "query already running");
+    }
+
+    #[test]
+    fn n_on_r_s_prompt_leaves_the_traffic_focus_alone() {
+        let mut m = loaded();
+        m.traffic.data.as_mut().unwrap().truncated = true;
+        m.traffic.filter.window = "30d".into();
+        open_shop(&mut m);
+        update(&mut m, key('r'));
+        update(&mut m, key('n'));
+        assert!(m.traffic.focus.is_none());
+    }
+
+    #[test]
+    fn outbound_needs_the_out_side_and_r_queries_both() {
+        // Only a focused `in` result is loaded (no unfocused one).
+        let mut m = with_policy(crate::tui::test_support::model_fixture());
+        let rich = model_with_window("24h");
+        let shop = pce::traffic::Focus::new(
+            pce::traffic::parse_app("shop/prod"),
+            vec!["app".into(), "env".into()],
+        )
+        .with_direction(pce::traffic::FocusDirection::In);
+        let data = crate::tui::model::TrafficData {
+            flows: rich.traffic.loaded_flows().to_vec(),
+            truncated: false,
+            incomplete: false,
+            elapsed: std::time::Duration::ZERO,
+            cache_hit: false,
+            fetched_at: std::time::Instant::now(),
+            filter: rich.traffic.filter.clone(),
+            range: None,
+            hrefs: Vec::new(),
+            draft: None,
+        };
+        m.traffic.apply_focused(shop, 1, data);
+        open_shop(&mut m);
+        assert_eq!(view(&m).gap, None, "inbound is whole");
+        update(&mut m, key('o'));
+        assert_eq!(
+            view(&m).gap.as_deref(),
+            Some("incomplete: r re-queries shop/prod (2 queries)")
+        );
+        let cmds = update(&mut m, key('r'));
+        assert!(
+            matches!(&cmds[..], [Cmd::RunFocused { focus, .. }]
+                if focus.direction == pce::traffic::FocusDirection::Both),
+            "{cmds:?}"
+        );
+    }
+
+    #[test]
+    fn the_rule_list_scrolls_to_its_end_and_no_further() {
+        let mut m = loaded();
+        open_shop(&mut m);
+        update(&mut m, key('p'));
+        for _ in 0..200 {
+            update(&mut m, key('j'));
+        }
+        let area = ratatui::layout::Rect::new(0, 0, m.size.0, m.size.1);
+        let last = crate::tui::ui::widgets::generator::rule_list_last_scroll(&m, area);
+        assert_eq!(view(&m).list, Some(last));
+        update(&mut m, key('k'));
+        assert_eq!(view(&m).list, Some(last.saturating_sub(1)));
     }
 
     #[test]
