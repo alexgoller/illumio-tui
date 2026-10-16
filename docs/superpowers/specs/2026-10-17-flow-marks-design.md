@@ -15,7 +15,7 @@ Hard rules, unchanged:
 
 ## Definitions
 
-- **Mark:** one `[[mark]]` entry: an action, a match (`src`, `dst`, `service`, `decision`), an optional PCE scope, an optional expiry and a note.
+- **Mark:** one `[[mark]]` entry: an action, a match (`src`, `dst`, `service`, `decision`), an optional PCE scope, an optional expiry and a comment: why it was marked.
 - **Match:** directional, source → destination, on a `ResolvedFlow`. Every field given must match; an absent field matches anything.
 - **Active:** not expired (`now < expires`), and in scope for the current PCE.
 - **Hit:** the winning active mark of one flow, as `(action, mark id)`.
@@ -26,7 +26,7 @@ Hard rules, unchanged:
 `marks.toml` next to `config.toml`: `$XDG_CONFIG_HOME/illumio-tui/marks.toml`, else `~/.config/illumio-tui/marks.toml` (the same rule as `config::default_config_path`, so tests point it at a temp dir with `XDG_CONFIG_HOME`). A missing file means no marks. TOML only; JSON goes through `marks export` / `marks import`.
 
 ```toml
-# illumio-tui marks. The tool rewrites this file: comments are not kept, put text in `note`.
+# illumio-tui marks. The tool rewrites this file: comments are not kept, put text in `comment`.
 
 [[mark]]
 id = "m-7k2q9x"
@@ -35,7 +35,7 @@ src = { labels = { app = "monitoring" } }
 dst = "any"
 service = "5666/tcp"
 expires = "2027-01-15T23:59:59Z"
-note = "Nagios NRPE, known"
+comment = "Nagios NRPE, known"
 created = "2026-10-17T09:12:00Z"
 created_on = "pce.example.com"
 
@@ -47,7 +47,7 @@ dst = { labels = { app = "shop", env = ["prod", "dr"] } }
 service = "8000-8010/tcp"
 decision = "blocked"
 pce = "pce.example.com"
-note = "legacy batch, blocked on purpose (CHG-1182)"
+comment = "legacy batch, blocked on purpose (CHG-1182)"
 created = "2026-10-17T09:20:00Z"
 created_on = "pce.example.com"
 
@@ -73,7 +73,7 @@ created_on = "pce.example.com"
 | `pce` | user | the PCE host the mark is limited to (case-insensitive); absent: portable |
 | `org` | user | optional org id, only with `pce` |
 | `expires` | user | RFC 3339 UTC timestamp; absent: never |
-| `note` | user | free text |
+| `comment` | user | **required**: why the flows were marked (free text, e.g. a ticket or the owner's answer). A file entry without one loads with a warning (`m-… has no comment`) and shows `(no comment)`. |
 | `id` | tool | `m-` + 6 Crockford base32 characters |
 | `created` | tool | RFC 3339 UTC |
 | `created_on` | tool | the PCE host the mark was created on (information only; it never scopes) |
@@ -109,7 +109,7 @@ Unknown fields, in a mark or at the top level, are not errors: they are kept (se
 
 1. Take every active mark that matches.
 2. **The strongest action wins**: critical > important > revisit > accept-blocked > reviewed > squelch. So a highlight always beats squelch, and so does a quiet action: a critical flow is never hidden by a broad squelch.
-3. **Same action, several marks:** the action is the same, so only the reported id (and note) depends on the choice. The most specific mark wins, by a score summed over its fields:
+3. **Same action, several marks:** the action is the same, so only the reported id (and comment) depends on the choice. The most specific mark wins, by a score summed over its fields:
    - side: workload 5, ip /32 or /128 4, labels 2 + one per key, ip_list 2, a wider CIDR 1, any 0;
    - service: one port 3, a range 2, a protocol 1, absent 0;
    - `decision` given 1; `pce` given 1.
@@ -216,7 +216,7 @@ pub struct Mark { pub id: String, pub action: Action, pub src: Side, pub dst: Si
                   pub services: Vec<ServiceSpec>,                  // empty: any
                   pub decisions: Vec<PolicyDecision>,              // empty: any
                   pub scope: Option<PceScope>, pub expires: Option<Timestamp>,
-                  pub note: String, pub created: Option<Timestamp>, pub created_on: Option<String> }
+                  pub comment: String, pub created: Option<Timestamp>, pub created_on: Option<String> }
 pub struct MarkSet { pub marks: Vec<Mark> }                         // validated, file order
 pub struct Hit { pub action: Action, pub mark: usize }              // index into MarkSet::marks
 pub struct ActiveMarks<'a> { .. }                                   // in scope, unexpired, by action
@@ -325,7 +325,7 @@ The TUI form, the CLI flags and `:marks` all use one text form. It follows the p
 │ Decision                                  empty: any · blocked …              │
 │ Expires      90d                          1d 7d 30d 90d YYYY-MM-DD never      │
 │ Scope        this PCE (pce.example.com)   Ctrl-N: any PCE                      │
-│ Note                                                                          │
+│ Comment      why: CHG-1182, owner confirmed (required)                        │
 ├───────────────────────────────────────────────────────────────────────────────┤
 │ matches 3 rows · 41 flows in this result · hides them (M shows)               │
 │ 5 of them stay shown: critical m-q9e2aa wins                                  │
@@ -358,6 +358,7 @@ The TUI form, the CLI flags and `:marks` all use one text form. It follows the p
   - At the 200k cap one pass is under 10 ms per mark, so there is no debounce.
 - **Validation** is the file's validation for this one mark; the first error shows in red under the fields. For example, choosing `any PCE` with a `wl:` side gives `workload marks are PCE-scoped`.
 - **Save.**
+  - The comment is required: `Enter` with an empty comment keeps the form open, puts the cursor on Comment and says `comment required: why are these flows marked?`. The CLI `marks add` refuses without `--comment` (exit 2). Editing a mark in `:marks` keeps its comment and offers it for change; `e` (extend) asks for the reason again, prefilled.
   - `Enter` runs `MarksStore::apply(Add | Replace)`: lock, reload, write.
   - Then the views rebuild, the form closes to where it came from, and the status says `mark m-7k2q9x saved: squelch, 41 flows · :marks lists marks`.
   - A failure (locked, invalid file, I/O) keeps the form open with the error.
@@ -368,7 +369,7 @@ The TUI form, the CLI flags and `:marks` all use one text form. It follows the p
 
 ```
 ┌ Marks · 14 active · 3 expired · marks.toml ───────────── :marks revisit filters ┐
-│   action          match                                     scope     expires   hits  note
+│   action          match                                     scope     expires   hits  comment
 │ ● critical        any → wl:db-01                            this PCE  never       12  
 │ ◆ revisit         app=crm → app=shop env=prod 443/tcp       any PCE   5d left     40  check with crm team
 │ ~ squelch         app=monitoring → any 5666/tcp             any PCE   91d left   412  Nagios NRPE, known
@@ -408,13 +409,13 @@ Plus the `:` line gets `:marks`. The app overlay's `Tab j/k X Enter` line gains 
 ```
 illumio-tui marks list   [--action A] [--active | --expired]
 illumio-tui marks add    --action A --src SIDE --dst SIDE [--service S] [--decision D]
-                         [--expires 30d|YYYY-MM-DD|never] [--pce [HOST]] [--org N] [--note TEXT]
+                         [--expires 30d|YYYY-MM-DD|never] [--pce [HOST]] [--org N] --comment TEXT
 illumio-tui marks rm     <id>... | --expired
 illumio-tui marks export [--format json|toml]          # stdout; JSON by default
 illumio-tui marks import <file> [--replace]            # JSON or TOML by extension
 ```
 
-- **`list`.** JSON by default when piped: `{"data": [{"id", "action", "src", "dst", "service", "decision", "pce", "org", "expires", "active", "note", "created", "created_on", ...extra}], "meta": {...}}`. `src` and `dst` are in the side grammar. `--table` and `--csv` print the same columns. The meta has `api_calls: 0`.
+- **`list`.** JSON by default when piped: `{"data": [{"id", "action", "src", "dst", "service", "decision", "pce", "org", "expires", "active", "comment", "created", "created_on", ...extra}], "meta": {...}}`. `src` and `dst` are in the side grammar. `--table` and `--csv` print the same columns. The meta has `api_calls: 0`.
 - **`add`.** It prints the new id. Validation errors exit 2, naming the field.
 - **`rm`.** An unknown id exits 2 and nothing is removed. Several ids are one operation.
 - **`import`.** It validates every incoming mark before writing anything. An incoming mark whose id exists is skipped (`--replace` replaces it), and one without an id gets a new one. The result is `{"added": n, "replaced": n, "skipped": [ids]}`. The JSON shape is `{"marks": [...]}` with the TOML field names, and it is what `export` writes.
