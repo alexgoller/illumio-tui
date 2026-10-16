@@ -4,9 +4,11 @@
 //! rules, merged, and classified against the draft rulesets (create, add
 //! services, exists). Pure: no requests. The TUI's generator and the CLI's
 //! `gen` share it.
+pub mod rows;
 pub mod services;
 pub mod target;
 
+pub use rows::{MANY_SERVICES, MAX_IP_ROWS, excluded, ip_list_name, is_any_ip_list, rows};
 pub use services::{Expr, express, flow_spec, fold_ports};
 pub use target::{
     Covering, DEFAULT_RULESET_NAME, RulesetChoice, check_ruleset_name, default_ruleset_name,
@@ -205,6 +207,14 @@ impl DecisionCounts {
         if let Some(d) = &f.draft_policy_decision {
             let n = self.draft_allowed.get_or_insert(0);
             *n += u64::from(d.class() == PolicyDecision::Allowed);
+        }
+    }
+
+    fn merge(&mut self, o: &DecisionCounts) {
+        self.allowed += o.allowed;
+        self.blocked += o.blocked;
+        if let Some(n) = o.draft_allowed {
+            *self.draft_allowed.get_or_insert(0) += n;
         }
     }
 }
