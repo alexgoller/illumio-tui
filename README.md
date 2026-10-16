@@ -191,11 +191,15 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   after asking; `Esc` returns.
   `G` in the app overlay (or `:gen shop/prod`, or `:gen` and the picker) opens the **policy
   generator** for that app: the allow rules its observed traffic needs, written in one
-  confirmed step. One row per peer and side: intra-app, each app peer (`web/prod`), IP peer and
-  unlabelled workload, with the services seen and the reported decisions (`✓` allowed, `✗`
-  blocked or potentially blocked; with `D` loaded, `would allow N`). Intra-app and same-env
-  peers start checked, the rest unchecked with the reason (`⚠ env mismatch`, `⚠ uses IP list
-  Corp`, `⚠ needs an IP list`, which checking plans). The slider `app·all ─ app·ports ─
+  confirmed step. One row per peer and side: intra-app, each app peer (`web/prod`), each
+  existing IP list its IP peers are in (`IP list rfc1918 · 7 IPs`: one rule naming the list,
+  the services of all its IPs; an IP in several lists goes to the narrowest, else the first
+  by name, and the row says so; the built-in Any list never groups), each IP peer in no list
+  and each unlabelled workload, with the services seen and the reported decisions (`✓`
+  allowed, `✗` blocked or potentially blocked; with `D` loaded, `would allow N`). Intra-app
+  and same-env peers start checked, the rest (IP rows too) unchecked with the reason (`⚠ env
+  mismatch`, `⚠ needs an IP list`, which checking plans). `p` and the confirm list the IPs
+  seen under each rule naming a list (`ipl:Corp: 7 IPs seen: 10.1.4.9, ... +4`). The slider `app·all ─ app·ports ─
   role·ports ─ role·all` (`←`/`→`) sets how coarse the rules are: all workloads of the app or
   one rule per role pair, All Services or the services seen; `<`/`>` give a row its own stop
   (`*`), `=` drops it. `o` adds the outbound section: rules to other apps go into the peers'
@@ -488,10 +492,11 @@ it); `--table` prints each section under a title line; `--csv` prints one and ne
 `illumio-tui gen <app> [--granularity app-all|app-ports|role-ports|role-all] [--outbound]
 [--window W] [--max-results N] [--yes]` proposes the allow rules the app's observed traffic
 needs, as the TUI's generator would plan them, and writes nothing. `rows` holds one row per
-peer and side (intra-app, each app peer, IP peer and unlabelled workload) with its default
+peer and side (intra-app, each app peer, each existing IP list with its IP peers, `kind:
+"ip_list"` and `ips`, each IP peer in no list and each unlabelled workload) with its default
 checkbox (`checked`: intra-app and same-env app peers), the services seen, the reported
-decisions and its warnings (`env mismatch`, `uses IP list Corp`, `needs an IP list`,
-`ephemeral port?`, ...); `rules` the merged rules at the chosen granularity, each with its
+decisions and its warnings (`env mismatch`, `needs an IP list`, `2 IPs also in rfc1918:
+narrowest list`, `ephemeral port?`, ...); `rules` the merged rules at the chosen granularity, each with its
 `ruleset`, `action` (`create`, `add_services` or `exists`, against the draft rulesets),
 `providers`, `consumers`, `unscoped_consumers`, `services`, `rows` and the exact PCE `body`
 (`{step:N}` stands for an IP list or ruleset the batch would create first); `ip_lists` the

@@ -554,6 +554,9 @@ impl GenView {
             if !matches!(r.action, RuleAction::Exists { .. }) {
                 out.push(format!("   {}", r.description));
             }
+            for (list, ips) in &r.ips {
+                out.push(format!("   {}", pce::generate::seen_text(list, ips)));
+            }
             if r.denied_flows > 0 {
                 out.push(format!(
                     "   ⚠ override deny {}: {} of its {} flows stay blocked",
@@ -618,6 +621,27 @@ mod tests {
         assert_eq!(v.rows[2].stop, Some(Stop::RolePorts));
         v.clear_row_stop();
         assert_eq!(v.rows[2].stop, None);
+    }
+
+    #[test]
+    fn a_list_row_keeps_its_checkbox_override_and_cursor_as_its_ips_change() {
+        let mut v = view();
+        v.move_cursor(3);
+        assert_eq!(v.rows[3].peer_text(), "IP list Corp · 1 IP");
+        assert!(!v.rows[3].checked, "IP rows start unchecked");
+        v.toggle(&shop().keys).unwrap();
+        v.slide_row(1);
+        // A second Corp address arrives: the same row (same list href).
+        let mut flows = fixture_flows_rich();
+        let mut more = flows[17].clone();
+        more.src.ip = Some("10.1.4.10".into());
+        flows.insert(0, more);
+        let idx = crate::tui::test_support::fixture_index();
+        v.set_rows(pce::generate::rows(&flows, &shop(), "role", &idx));
+        let i = v.selected().unwrap();
+        assert_eq!(v.rows[i].peer_text(), "IP list Corp · 2 IPs");
+        assert!(v.rows[i].checked);
+        assert_eq!(v.rows[i].stop, Some(Stop::RolePorts));
     }
 
     #[test]

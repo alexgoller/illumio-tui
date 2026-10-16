@@ -30,6 +30,14 @@ fn fit(s: &str, w: usize) -> String {
 fn row_line<'a>(v: &GenView, i: usize, scope_keys: &[String], t: &Theme, width: usize) -> Line<'a> {
     let narrow = width < 100;
     let (peer_w, services_w) = if narrow { (14, 16) } else { (18, 18) };
+    // Wider for a longer peer (`IP list rfc1918 · 7 IPs`), up to 8 more.
+    let longest = v
+        .rows
+        .iter()
+        .map(|r| Span::raw(r.peer_text()).width())
+        .max()
+        .unwrap_or(0);
+    let peer_w = longest.clamp(peer_w, peer_w + 8);
     let r: &GenRow = &v.rows[i];
     let stop = r.effective(v.global);
     let check = match (r.checkable, r.checked) {

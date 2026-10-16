@@ -11,7 +11,10 @@ pub mod services;
 pub mod target;
 
 pub use derive::{GenInput, propose};
-pub use rows::{MANY_SERVICES, MAX_IP_ROWS, excluded, ip_list_name, is_any_ip_list, rows};
+pub use rows::{
+    MANY_SERVICES, MAX_IP_ROWS, SEEN_IPS, by_address, excluded, ip_list_name, is_any_ip_list, rows,
+    seen_text,
+};
 pub use services::{Expr, express, flow_spec, fold_ports};
 pub use target::{
     Covering, DEFAULT_RULESET_NAME, RulesetChoice, check_ruleset_name, default_ruleset_name,
@@ -115,10 +118,17 @@ pub enum PeerKind {
     Intra,
     /// A workload with a label under every scope key: its values.
     App(GroupKey),
-    /// An endpoint with no workload; `list` is the IP list the rule uses
-    /// (an existing one other than the built-in Any list), `None` when one
-    /// would be created.
-    Ip { ip: String, list: Option<String> },
+    /// An endpoint with no workload in no existing IP list (the built-in
+    /// Any list aside): its rule names a list the batch creates.
+    Ip { ip: String },
+    /// The IP peers in one existing IP list other than the built-in Any
+    /// list (each in its narrowest): the rule names the list. `ips` by
+    /// address.
+    IpList {
+        href: String,
+        name: String,
+        ips: Vec<String>,
+    },
     /// A workload without a label under some scope key.
     Workload { href: String, name: String },
     /// IP peers past [`MAX_IP_ROWS`] in one section: never proposed.
@@ -132,6 +142,8 @@ pub enum PeerKey {
     Intra,
     App(GroupKey),
     Ip(String),
+    /// The list's href.
+    IpList(String),
     Workload(String),
     Folded,
 }
@@ -148,8 +160,14 @@ pub enum RowFlag {
     /// An app peer in another env (another value under a scope key other
     /// than the first).
     EnvMismatch,
-    /// The IP peer is in this existing IP list: the rule names it.
-    UsesIpList(String),
+    /// Some of the list row's IPs are in other lists too (`others`): each
+    /// went to its narrowest list, by name (`by_name`) when sizes tie or
+    /// are unknown.
+    AlsoIn {
+        ips: usize,
+        others: Vec<String>,
+        by_name: bool,
+    },
     /// No IP list holds the IP peer: checking the row plans one.
     NeedsIpList,
     /// A workload without every scope label.
@@ -174,7 +192,20 @@ impl RowFlag {
                 let rest = scope_keys.get(1..).unwrap_or_default().join(",");
                 format!("{rest} mismatch")
             }
-            RowFlag::UsesIpList(n) => format!("uses IP list {n}"),
+            RowFlag::AlsoIn {
+                ips,
+                others,
+                by_name,
+            } => format!(
+                "{ips} {} also in {}: {}",
+                if *ips == 1 { "IP" } else { "IPs" },
+                others.join(", "),
+                if *by_name {
+                    "first by name"
+                } else {
+                    "narrowest list"
+                }
+            ),
             RowFlag::NeedsIpList => "needs an IP list".into(),
             RowFlag::NoScopeLabels if side == Side::Inbound => {
                 "no scope labels: rule names the workload".into()
@@ -249,7 +280,8 @@ impl GenRow {
         let peer = match &self.peer {
             PeerKind::Intra => PeerKey::Intra,
             PeerKind::App(v) => PeerKey::App(v.clone()),
-            PeerKind::Ip { ip, .. } => PeerKey::Ip(ip.clone()),
+            PeerKind::Ip { ip } => PeerKey::Ip(ip.clone()),
+            PeerKind::IpList { href, .. } => PeerKey::IpList(href.clone()),
             PeerKind::Workload { href, .. } => PeerKey::Workload(href.clone()),
             PeerKind::FoldedIps(_) => PeerKey::Folded,
         };
@@ -269,23 +301,31 @@ impl GenRow {
         self.checked && self.checkable
     }
 
-    /// `intra-app`, `web/prod`, `10.4.1.9`, the workload's name, `3 more IPs`.
+    /// `intra-app`, `web/prod`, `10.4.1.9`, `IP list Corp · 7 IPs`, the
+    /// workload's name, `3 more IPs`.
     pub fn peer_text(&self) -> String {
         match &self.peer {
             PeerKind::Intra => "intra-app".into(),
             PeerKind::App(v) => v.join("/"),
-            PeerKind::Ip { ip, .. } => ip.clone(),
+            PeerKind::Ip { ip } => ip.clone(),
+            PeerKind::IpList { name, ips, .. } => format!(
+                "IP list {name} · {} {}",
+                ips.len(),
+                if ips.len() == 1 { "IP" } else { "IPs" }
+            ),
             PeerKind::Workload { name, .. } => name.clone(),
             PeerKind::FoldedIps(n) => format!("{n} more IPs: not proposed"),
         }
     }
 
-    /// `intra`, `app`, `ip`, `workload`, `folded_ips`: the JSON's `kind`.
+    /// `intra`, `app`, `ip`, `ip_list`, `workload`, `folded_ips`: the
+    /// JSON's `kind`.
     pub fn kind_text(&self) -> &'static str {
         match self.peer {
             PeerKind::Intra => "intra",
             PeerKind::App(_) => "app",
             PeerKind::Ip { .. } => "ip",
+            PeerKind::IpList { .. } => "ip_list",
             PeerKind::Workload { .. } => "workload",
             PeerKind::FoldedIps(_) => "folded_ips",
         }
@@ -475,6 +515,8 @@ pub struct GenRule {
     /// The flow records behind it as the override-deny check needs them
     /// (ends and service), by count: `refresh` checks them again.
     pub seen: BTreeMap<SeenFlow, u64>,
+    /// The IP peers behind it, by the existing IP list it names for them.
+    pub ips: BTreeMap<String, BTreeSet<String>>,
 }
 
 /// One end of a flow record as the override-deny check reads it.
@@ -801,6 +843,7 @@ mod tests {
             denied_flows: 0,
             denied_by: Vec::new(),
             seen: BTreeMap::new(),
+            ips: BTreeMap::new(),
         }
     }
 
@@ -924,9 +967,18 @@ mod tests {
             RowFlag::EnvMismatch.text(Side::Inbound, &keys),
             "env mismatch"
         );
+        let also = |ips, by_name| RowFlag::AlsoIn {
+            ips,
+            others: vec!["Corp".into(), "rfc1918".into()],
+            by_name,
+        };
         assert_eq!(
-            RowFlag::UsesIpList("Corp".into()).text(Side::Inbound, &keys),
-            "uses IP list Corp"
+            also(2, false).text(Side::Inbound, &keys),
+            "2 IPs also in Corp, rfc1918: narrowest list"
+        );
+        assert_eq!(
+            also(1, true).text(Side::Inbound, &keys),
+            "1 IP also in Corp, rfc1918: first by name"
         );
         assert_eq!(
             RowFlag::ManyServices(40).text(Side::Inbound, &keys),

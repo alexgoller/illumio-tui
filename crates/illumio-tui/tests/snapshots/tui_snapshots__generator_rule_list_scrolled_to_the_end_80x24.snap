@@ -7,11 +7,11 @@ expression: out
 ╭ Generate · shop/prod · last 24h · 10 flows · complete ─────── 0 req · cached ╮
 │granularity  app·all ─ app·ports ─ [role·ports] ─ role·all                    │
 │target  Shop-Prod (draft, 2 rules)                                            │
-│   generated: 10.1.4.9 → shop/prod on 443/tcp, from 24h of traffic            │
-│      (illumio-tui)                                                           │
+│   ipl:Corp: 1 IP seen: 10.1.4.9                                              │
 │5. create · Shop-Prod: ipl:Corp → role=db on 5432/tcp                         │
-│   generated: 10.1.4.9 → shop/prod on 5432/tcp, from 24h of traffic           │
+│   generated: IP list Corp → shop/prod on 5432/tcp, from 24h of traffic       │
 │      (illumio-tui)                                                           │
+│   ipl:Corp: 1 IP seen: 10.1.4.9                                              │
 │6. create · Shop-Prod: role=web → new ipl:shop-prod peer 203.0.113.7 on       │
 │   443/tcp                                                                    │
 │   generated: shop/prod → 203.0.113.7 on 443/tcp, from 24h of traffic         │
@@ -23,6 +23,6 @@ expression: out
 │not covered: 0 unchecked · 0 folded IPs · 0 unsupported proto · 0             │
 │   broadcast/multicast · 0 no target · 0 override deny                        │
 │7 rules (6 new · 0 add services · 1 exist) · covers 10 of 10 flows · 0 not    │
-│↑ 13 more above · j/k scroll · Esc back to the rows                           │
+│↑ 15 more above · j/k scroll · Esc back to the rows                           │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 shop/prod · generator · 0 req │ ←/→ stop  </> row  R pick  r re-query  Esc back

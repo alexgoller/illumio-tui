@@ -2,7 +2,8 @@
 //! by the derivation tables, one rule per (target, providers, consumers,
 //! flag) with the services of every flow behind it, rules to create that
 //! differ in one side only merged when the union means exactly both, the
-//! coverage of the flows, the IP lists to create. Pure.
+//! coverage of the flows, the IP lists to create (none for an IP peer in
+//! an existing list: its list row names that list). Pure.
 use super::rows::{excluded, ip_list_name, row_key, side_of};
 use super::services::{Expr, express, flow_spec, fold_ports};
 use super::{
@@ -152,6 +153,9 @@ fn merge(p: &mut Proposal, idx: &NameIndex) {
             for (f, n) in b.seen {
                 *a.seen.entry(f).or_default() += n;
             }
+            for (l, ips) in b.ips {
+                a.ips.entry(l).or_default().extend(ips);
+            }
             // Another rule may merge with the union now: look again.
             j = i + 1;
         }
@@ -191,6 +195,7 @@ struct Group {
     rows: BTreeSet<usize>,
     flows: u64,
     seen: BTreeMap<SeenFlow, u64>,
+    ips: BTreeMap<String, BTreeSet<String>>,
 }
 
 fn keys_of(a: &[GenActor]) -> Vec<String> {
@@ -267,11 +272,8 @@ impl Ctx<'_> {
         self.scopes.len() - 1
     }
 
-    /// The IP list actor of an IP row: the existing list, else the new one.
-    fn ip_actor(&mut self, ip: &str, list: Option<&str>) -> GenActor {
-        if let Some(h) = list.and_then(|n| self.input.idx.ip_list_href(n)) {
-            return GenActor::Ref(ActorRef::new(ActorKind::IpList, h));
-        }
+    /// The new IP list of an IP row (in no existing list).
+    fn ip_actor(&mut self, ip: &str) -> GenActor {
         let name = ip_list_name(&self.input.focus.app, ip);
         if let Some(i) = self.ip_lists.iter().position(|d| d.name == name) {
             return GenActor::NewIpList(i);
@@ -327,8 +329,12 @@ impl Ctx<'_> {
                 (0, provider(&f.dst), vec![cons], false)
             }
             (Side::Inbound, PeerKind::App(_)) => (0, provider(&f.dst), side(&f.src), true),
-            (Side::Inbound, PeerKind::Ip { ip, list }) => {
-                let cons = self.ip_actor(ip, list.as_deref());
+            (Side::Inbound, PeerKind::Ip { ip }) => {
+                let cons = self.ip_actor(ip);
+                (0, provider(&f.dst), vec![cons], false)
+            }
+            (Side::Inbound, PeerKind::IpList { href, .. }) => {
+                let cons = GenActor::Ref(ActorRef::new(ActorKind::IpList, href));
                 (0, provider(&f.dst), vec![cons], false)
             }
             (Side::Inbound, PeerKind::Workload { href, .. }) => (
@@ -341,8 +347,14 @@ impl Ctx<'_> {
                 let t = self.peer_target(values, &f.dst);
                 (t, provider(&f.dst), side(&f.src), true)
             }
-            (Side::Outbound, PeerKind::Ip { ip, list }) => {
-                let prov = self.ip_actor(ip, list.as_deref());
+            (Side::Outbound, PeerKind::Ip { .. } | PeerKind::IpList { .. }) => {
+                let prov = match &row.peer {
+                    PeerKind::IpList { href, .. } => {
+                        GenActor::Ref(ActorRef::new(ActorKind::IpList, href))
+                    }
+                    PeerKind::Ip { ip } => self.ip_actor(ip),
+                    _ => return None,
+                };
                 let cons = by_role
                     .then(|| role(&f.src, tier))
                     .flatten()
@@ -358,6 +370,7 @@ impl Ctx<'_> {
 fn ends(row: &GenRow, app: &str) -> (String, String) {
     let peer = match &row.peer {
         PeerKind::Intra => app.to_string(),
+        PeerKind::IpList { name, .. } => format!("IP list {name}"),
         _ => row.peer_text(),
     };
     match row.side {
@@ -429,7 +442,7 @@ fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> Proposal {
             }
             continue;
         }
-        let Some(key) = row_key(f, focus) else {
+        let Some(key) = row_key(f, focus, input.idx) else {
             continue;
         };
         if !in_force(key.side) {
@@ -479,6 +492,7 @@ fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> Proposal {
             rows: BTreeSet::new(),
             flows: 0,
             seen: BTreeMap::new(),
+            ips: BTreeMap::new(),
         });
         match svc {
             Expr::Inline(p) => {
@@ -488,6 +502,14 @@ fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> Proposal {
                 g.objects.insert(h);
             }
             Expr::Unsupported(_) => {}
+        }
+        if let PeerKind::IpList { name, .. } = &row.peer {
+            let peer = match key.side {
+                Side::Inbound => &f.src,
+                Side::Outbound => &f.dst,
+            };
+            let ip = peer.ip.clone().unwrap_or_else(|| "?".into());
+            g.ips.entry(name.clone()).or_default().insert(ip);
         }
         g.rows.insert(ri);
         g.flows += 1;
@@ -523,6 +545,7 @@ fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> Proposal {
                 denied_flows: 0,
                 denied_by: Vec::new(),
                 seen: g.seen,
+                ips: g.ips,
             }
         })
         .collect();
@@ -694,13 +717,12 @@ mod tests {
         f.push(other);
         let (r, p) = run(&f, Stop::AppPorts, false, |r| {
             for row in r.iter_mut() {
-                if matches!(row.peer, PeerKind::Ip { .. }) {
+                if matches!(row.peer, PeerKind::IpList { .. }) {
                     row.checked = true;
                 }
             }
         });
-        assert_eq!(r[3].peer_text(), "10.1.4.9");
-        assert_eq!(r[4].peer_text(), "10.1.4.10");
+        assert_eq!(r[3].peer_text(), "IP list Corp · 2 IPs", "one row per list");
         assert_eq!(
             shape(&p),
             vec![
@@ -709,10 +731,15 @@ mod tests {
                 "t0 all workloads <- ipl:Corp 443/tcp,5432/tcp",
             ]
         );
-        assert_eq!(p.rules[2].rows, vec![3, 4], "two IP peers, one rule");
+        assert_eq!(p.rules[2].rows, vec![3], "two IP peers, one row, one rule");
+        assert!(p.ip_lists.is_empty(), "an existing list: none created");
+        assert_eq!(
+            p.rules[2].ips["Corp"].iter().collect::<Vec<_>>(),
+            ["10.1.4.10", "10.1.4.9"]
+        );
         assert_eq!(
             p.rules[2].description,
-            "generated: 10.1.4.10, 10.1.4.9 → shop/prod on 443/tcp, 5432/tcp, from 24h of traffic (illumio-tui)"
+            "generated: IP list Corp → shop/prod on 443/tcp, 5432/tcp, from 24h of traffic (illumio-tui)"
         );
     }
 
@@ -941,6 +968,53 @@ mod tests {
 
     fn denied(p: &Proposal) -> u64 {
         p.rules.iter().map(|r| r.denied_flows).sum()
+    }
+
+    #[test]
+    fn a_list_row_keeps_the_override_deny_of_a_deny_naming_its_list() {
+        let mut f = rich_flows();
+        let mut ssh = f[17].clone(); // Corp 10.1.4.9 -> shop web
+        ssh.port = Some(22);
+        f.push(ssh);
+        let d = deny_22(serde_json::json!({
+            "providers": [{"actors": "ams"}],
+            "consumers": [{"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/21"}}]
+        }));
+        let (r, p) = run_in(d, &f, Stop::AppPorts, false, |r| r[3].checked = true);
+        assert!(matches!(r[3].peer, PeerKind::IpList { .. }));
+        let corp = p.rules.iter().find(|x| x.rows == vec![3]).unwrap();
+        assert_eq!(corp.denied_flows, 1, "the 22/tcp flow from Corp");
+        assert_eq!(p.coverage.override_deny, 1);
+    }
+
+    #[test]
+    fn an_outbound_list_row_names_its_list_as_provider_and_creates_none() {
+        let mut f = rich_flows();
+        let mut x = to_ip(22, "10.1.9.9");
+        x.dst.ip_lists = vec!["Corp".into()];
+        f.push(x);
+        let (r, p) = run(&f, Stop::AppPorts, true, |r| {
+            for row in r.iter_mut() {
+                if matches!(row.peer, PeerKind::IpList { .. }) && row.side == Side::Outbound {
+                    row.checked = true;
+                }
+            }
+        });
+        let out = r
+            .iter()
+            .position(|x| x.side == Side::Outbound && x.peer_text() == "IP list Corp · 1 IP")
+            .unwrap();
+        let rule = p.rules.iter().find(|x| x.rows == vec![out]).unwrap();
+        assert_eq!(rule.target, 0, "the app's own ruleset");
+        assert_eq!(
+            rule.providers,
+            vec![GenActor::Ref(ActorRef::new(
+                ActorKind::IpList,
+                "/orgs/5/sec_policy/draft/ip_lists/21"
+            ))]
+        );
+        assert!(p.ip_lists.is_empty());
+        assert_eq!(rule.ips["Corp"].iter().collect::<Vec<_>>(), ["10.1.9.9"]);
     }
 
     #[test]

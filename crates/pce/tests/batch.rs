@@ -440,6 +440,7 @@ async fn a_placeholder_naming_a_step_it_does_not_wait_for_is_refused_before_send
         kind: ObjectKind::Rule,
         needs,
         deny_notes: Vec::new(),
+        notes: Vec::new(),
         expect: None,
     };
     let b = Batch {
@@ -712,6 +713,7 @@ async fn a_created_href_is_checked_before_a_later_step_carries_it() {
         kind,
         needs,
         deny_notes: Vec::new(),
+        notes: Vec::new(),
         expect: None,
     };
     let b = Batch {
@@ -1096,6 +1098,54 @@ async fn rules_an_override_deny_blocks_are_named_in_the_confirm() {
     assert!(
         lines.iter().any(|l| l.starts_with("  ! blocked: ")
             && l.ends_with("by override deny /orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8")),
+        "{lines:#?}"
+    );
+}
+
+#[tokio::test]
+async fn a_checked_list_row_names_its_list_creates_none_and_the_confirm_lists_its_ips() {
+    let server = MockServer::start().await;
+    mount_reads(&server, rule_sets(), ip_lists()).await;
+    let pce = pce_for(&server);
+    let guard = guard_with(MemoryAudit::new());
+    let mut input = input();
+    let idx = index();
+    let raw: Vec<Flow> =
+        serde_json::from_str(include_str!("../../../fixtures/traffic_flows_rich.json")).unwrap();
+    let flows = resolve_flows(&raw, &idx);
+    let focus = Focus::new(parse_app("shop/prod"), vec!["app".into(), "env".into()]);
+    let mut r = rows(&flows, &focus, "role", &idx);
+    for row in r.iter_mut() {
+        if matches!(&row.peer, PeerKind::IpList { name, .. } if name == "Corp") {
+            row.checked = true;
+        }
+    }
+    let drafts: Vec<RuleSet> = serde_json::from_value(rule_sets()).unwrap();
+    let gen_input = GenInput {
+        flows: &flows,
+        focus: &focus,
+        tier_key: "role",
+        drafts: &drafts,
+        idx: &idx,
+        ruleset_name: "RF-{app}-{env}",
+        window: "24h",
+        outbound: false,
+        picked: None,
+    };
+    input.proposal = propose(&r, Stop::AppPorts, &gen_input);
+    assert!(input.proposal.ip_lists.is_empty());
+    let b = pce.writer(&guard).plan_batch(input, &idx).await.unwrap();
+    assert_eq!(b.reads, 1, "no IP list read: none is created");
+    assert!(
+        b.steps
+            .iter()
+            .all(|s| s.kind != pce::write::ObjectKind::IpList),
+        "{:#?}",
+        b.lines()
+    );
+    let lines = b.lines();
+    assert!(
+        lines.contains(&"  · ipl:Corp: 1 IP seen: 10.1.4.9".to_string()),
         "{lines:#?}"
     );
 }

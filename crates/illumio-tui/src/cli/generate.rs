@@ -81,6 +81,9 @@ pub struct RowOut {
     pub services: Vec<String>,
     pub decisions: pce::generate::DecisionCounts,
     pub warnings: Vec<String>,
+    /// An `ip_list` row's IP peers seen, by address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ips: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -243,6 +246,10 @@ fn row_out(r: &GenRow, global: Stop, scope_keys: &[String]) -> RowOut {
         },
         decisions: r.decisions,
         warnings: r.flag_texts(stop, scope_keys),
+        ips: match &r.peer {
+            pce::generate::PeerKind::IpList { ips, .. } => Some(ips.clone()),
+            _ => None,
+        },
     }
 }
 

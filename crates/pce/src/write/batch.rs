@@ -69,6 +69,9 @@ pub struct BatchStep {
     pub needs: Vec<usize>,
     /// `blocked: 3 of 5 flows by override deny <href>`, one per rule.
     pub deny_notes: Vec<String>,
+    /// `ipl:Corp: 7 IPs seen: 10.0.0.1, ...`: the IP peers its rules name
+    /// an existing list for.
+    pub notes: Vec<String>,
     /// An update's replaced fields as the plan-time GET returned them;
     /// the step is sent only while the rule still holds exactly these.
     pub expect: Option<Value>,
@@ -81,6 +84,7 @@ impl BatchStep {
             kind,
             needs,
             deny_notes: Vec::new(),
+            notes: Vec::new(),
             expect: None,
         }
     }
@@ -347,6 +351,7 @@ impl Batch {
                     ));
                     out.push(format!("  {}", shown.summary));
                     out.extend(s.deny_notes.iter().map(|d| format!("  ! {d}")));
+                    out.extend(s.notes.iter().map(|d| format!("  · {d}")));
                     match &shown.body {
                         Some(b) => out.extend(
                             serde_json::to_string_pretty(b)
@@ -475,6 +480,15 @@ fn refuse_named_elsewhere(plan: &Plan, name: &str, scope: &str) -> Result<(), Wr
         ))),
         Plan::Send { .. } => Ok(()),
     }
+}
+
+/// `ipl:Corp: 2 IPs seen: 10.1.4.9, 10.1.4.10`, one per existing list
+/// the rule names for IP peers.
+fn ip_notes(r: &GenRule) -> Vec<String> {
+    r.ips
+        .iter()
+        .map(|(list, ips)| crate::generate::seen_text(list, ips))
+        .collect()
 }
 
 /// `blocked: 3 of 5 flows by override deny <href>` for a rule whose flows
@@ -620,7 +634,9 @@ impl Writer<'_> {
         }
         // Services added to one rule by several proposed rules go in one
         // update: two PUTs of the list would drop the first one's.
-        let mut updates: Vec<(String, Vec<ServiceRef>, Vec<String>)> = Vec::new();
+        // (rule href, services to add, deny notes, IP notes).
+        type Update = (String, Vec<ServiceRef>, Vec<String>, Vec<String>);
+        let mut updates: Vec<Update> = Vec::new();
         for r in &proposal.rules {
             let RuleAction::AddServices { rule_href, add } = &r.action else {
                 continue;
@@ -628,18 +644,19 @@ impl Writer<'_> {
             let href = checked_nested_href(rule_href, "rule_sets", "sec_rules", org)?;
             let note = deny_note(r);
             match updates.iter_mut().find(|u| u.0 == href) {
-                Some((_, adds, notes)) => {
+                Some((_, adds, notes, ips)) => {
                     for s in add {
                         if !adds.contains(s) {
                             adds.push(s.clone());
                         }
                     }
                     notes.extend(note);
+                    ips.extend(ip_notes(r));
                 }
-                None => updates.push((href, add.clone(), note.into_iter().collect())),
+                None => updates.push((href, add.clone(), note.into_iter().collect(), ip_notes(r))),
             }
         }
-        for (href, add, notes) in updates {
+        for (href, add, notes, ips) in updates {
             let patch = RulePatch {
                 add_services: add,
                 ..RulePatch::default()
@@ -663,6 +680,7 @@ impl Writer<'_> {
             );
             step.expect = expect.filter(|_| step.plan.request().is_some());
             step.deny_notes = notes;
+            step.notes = ips;
             steps.push(step);
         }
         for r in &proposal.rules {
@@ -704,6 +722,7 @@ impl Writer<'_> {
             needs.dedup();
             let mut step = BatchStep::new(plan, ObjectKind::Rule, needs);
             step.deny_notes.extend(deny_note(r));
+            step.notes = ip_notes(r);
             steps.push(step);
         }
         check_placeholders(&steps)?;

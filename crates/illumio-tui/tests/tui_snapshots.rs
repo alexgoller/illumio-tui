@@ -2001,14 +2001,13 @@ fn generator_rows_scroll_with_the_cursor_80x24() {
         let ip = v
             .rows
             .iter()
-            .find(|r| matches!(r.peer, pce::generate::PeerKind::Ip { .. }))
+            .find(|r| matches!(r.peer, pce::generate::PeerKind::IpList { .. }))
             .cloned()
             .unwrap();
         for n in 0..12 {
             let mut r = ip.clone();
             r.peer = pce::generate::PeerKind::Ip {
                 ip: format!("10.9.9.{n}"),
-                list: None,
             };
             v.rows.insert(4, r);
         }

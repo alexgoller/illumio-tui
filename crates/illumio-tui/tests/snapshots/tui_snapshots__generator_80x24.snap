@@ -8,10 +8,10 @@ expression: out
 │granularity  app·all ─ [app·ports] ─ role·ports ─ role·all                    │
 │target  Shop-Prod (draft, 2 rules)                                            │
 │Inbound → Shop-Prod                                                           │
-│[x] intra-app      app·ports   5432/tcp         ✓ 4                           │
-│[x] hr/prod        app·ports   5432/tcp         ✗ 1                           │
-│[ ] shop/dev       app·ports   5432/tcp         ✗ 1 ⚠ env mismatch            │
-│[ ] 10.1.4.9       app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1 ⚠ uses IP list Corp   │
+│[x] intra-app           app·ports   5432/tcp         ✓ 4                      │
+│[x] hr/prod             app·ports   5432/tcp         ✗ 1                      │
+│[ ] shop/dev            app·ports   5432/tcp         ✗ 1 ⚠ env mismatch       │
+│[ ] IP list Corp · 1 IP app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1                  │
 │Outbound (o: off)                                                             │
 │2 rows hidden: o shows them                                                   │
 │                                                                              │

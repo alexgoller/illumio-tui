@@ -7,21 +7,21 @@ expression: out
 ╭ Generate · shop/prod · last 24h · 34 flows · complete ─────── 0 req · cached ╮
 │granularity  app·all ─ [app·ports] ─ role·ports ─ role·all                    │
 │target  Shop-Prod (draft, 2 rules)                                            │
-│[ ] 10.1.4.9       app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1 ⚠ uses IP list Corp   │
-│[ ] 10.9.9.11      app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1 ⚠ uses IP list Corp   │
-│[ ] 10.9.9.10      app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1 ⚠ uses IP list Corp   │
-│[ ] 10.9.9.9       app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1 ⚠ uses IP list Corp   │
-│[ ] 10.9.9.8       app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1 ⚠ uses IP list Corp   │
-│[ ] 10.9.9.7       app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1 ⚠ uses IP list Corp   │
-│[ ] 10.9.9.6       app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1 ⚠ uses IP list Corp   │
-│[ ] 10.9.9.5       app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1 ⚠ uses IP list Corp   │
-│[ ] 10.9.9.4       app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1 ⚠ uses IP list Corp   │
-│[ ] 10.9.9.3       app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1 ⚠ uses IP list Corp   │
-│[ ] 10.9.9.2       app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1 ⚠ uses IP list Corp   │
-│[ ] 10.9.9.1       app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1 ⚠ uses IP list Corp   │
-│[ ] 10.9.9.0       app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1 ⚠ uses IP list Corp   │
+│[ ] IP list Corp · 1 IP app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1                  │
+│[ ] 10.9.9.11           app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1                  │
+│[ ] 10.9.9.10           app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1                  │
+│[ ] 10.9.9.9            app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1                  │
+│[ ] 10.9.9.8            app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1                  │
+│[ ] 10.9.9.7            app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1                  │
+│[ ] 10.9.9.6            app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1                  │
+│[ ] 10.9.9.5            app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1                  │
+│[ ] 10.9.9.4            app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1                  │
+│[ ] 10.9.9.3            app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1                  │
+│[ ] 10.9.9.2            app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1                  │
+│[ ] 10.9.9.1            app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1                  │
+│[ ] 10.9.9.0            app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1                  │
 │Outbound (o: on) · IP peers → Shop-Prod                                       │
-│[x] crm/prod       app·ports   443/tcp          ✓ 1 → RF-crm-prod             │
+│[x] crm/prod            app·ports   443/tcp          ✓ 1 → RF-crm-prod        │
 │3 rules (3 new · 0 add services · 0 exist) · covers 6 of 10 flows · 4 not     │
 │↑ 4 more above · ↓ 1 more below · p lists the rules · Enter plans the writes …│
 ╰──────────────────────────────────────────────────────────────────────────────╯

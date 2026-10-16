@@ -454,6 +454,7 @@ mod tests {
             denied_flows: 0,
             denied_by: Vec::new(),
             seen: Default::default(),
+            ips: Default::default(),
         }
     }
 

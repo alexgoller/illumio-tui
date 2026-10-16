@@ -500,6 +500,7 @@ pub fn batch_plan() -> pce::write::Batch {
                 kind: ObjectKind::IpList,
                 needs: Vec::new(),
                 deny_notes: Vec::new(),
+                notes: Vec::new(),
                 expect: None,
             },
             BatchStep {
@@ -512,6 +513,7 @@ pub fn batch_plan() -> pce::write::Batch {
                 kind: ObjectKind::RuleSet,
                 needs: Vec::new(),
                 deny_notes: Vec::new(),
+                notes: Vec::new(),
                 expect: None,
             },
             BatchStep {
@@ -524,6 +526,7 @@ pub fn batch_plan() -> pce::write::Batch {
                 kind: ObjectKind::Rule,
                 needs: vec![0, 1],
                 deny_notes: Vec::new(),
+                notes: Vec::new(),
                 expect: None,
             },
         ],
