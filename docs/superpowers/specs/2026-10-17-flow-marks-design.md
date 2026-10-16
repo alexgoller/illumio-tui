@@ -70,6 +70,7 @@ created_on = "pce.example.com"
 | `src`, `dst` | user, required | a side (below) |
 | `service` | user | `5666/tcp`, `8000-8010/tcp`, `udp` (any port of the protocol), a protocol name or number `proto_number` knows (`icmp`, `47`), or a list of these (OR). Absent: any service. |
 | `decision` | user | `allowed`, `potentially_blocked`, `blocked`, or a list (OR). Absent: any. Matched against the reported `policy_decision`, never the draft decision. |
+| `draft_decision` | user | Same values as `decision`, matched against the draft decision (`D`, #29). A mark with `draft_decision` applies only while draft decisions are loaded for the result on screen; otherwise it is inactive for that result and the views say `N marks wait for the draft decision (D)`. The CLI applies it only with `--draft`. Example: `decision = "blocked"` + `draft_decision = "allowed"` marks the flows the pending policy fixes. |
 | `pce` | user | the PCE host the mark is limited to (case-insensitive); absent: portable |
 | `org` | user | optional org id, only with `pce` |
 | `expires` | user | RFC 3339 UTC timestamp; absent: never |
@@ -512,7 +513,7 @@ illumio-tui marks import <file> [--replace]            # JSON or TOML by extensi
 ## Out of scope (v1)
 
 - Syncing marks to the PCE (labels, rule descriptions, Explorer saved filters) or sharing beyond `export`/`import`.
-- Matching on FQDN, process, user, transmission, or the draft decision.
+- Matching on FQDN, process, user or transmission.
 - Negation, wildcards or regex in sides; time-of-day marks.
 - `m` on the treemap, the Policy, Objects, Workloads and Events screens, and generator rows.
 - A `mark` column in `:export`.
@@ -546,8 +547,8 @@ Three GitHub issues, each with its own worktree, review and merge:
    - invalid-file warnings, the startup expiry line, help.
 3. **TUI creation and management.** The `m` form (prefill per view, widening, live preview, save), the `:marks` overlay (edit, delete, extend, filter), and docs: README, `docs/index.html`, in-TUI help.
 
-## Open questions for Alex
+## Decisions (Alex, 2026-10-17)
 
-1. **Default expiries per action:** squelch 90d, accept-blocked 90d, reviewed 30d, revisit 7d, critical and important never. Keep these, or one default for all?
-2. **Decision matching uses the reported decision only.** Should a mark with `decision` also match the draft decision when `D` has loaded it? For example, `accept-blocked` would stop applying once the draft allows the flow.
-3. **Comments.** Without `toml_edit` a rewrite drops comments; the plan keeps one `.bak` and writes a header that says so. Is that enough, or should the TUI refuse to rewrite a hand-commented file until `marks import`/an explicit `--force`?
+1. **Default expiries per action** stay: squelch 90d, accept-blocked 90d, reviewed 30d, revisit 7d, critical and important never.
+2. **Draft decision is in**, as its own field `draft_decision` (see Fields), so a mark can match the reported decision, the draft one, or both.
+3. **Why a mark exists** is the required `comment` field; hand-written `#` comments in the file are not kept (one `.bak`, a header says so).
