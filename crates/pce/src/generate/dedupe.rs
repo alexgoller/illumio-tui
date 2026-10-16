@@ -7,9 +7,11 @@
 //! AND across keys and OR within one key; `ams`, IP lists and workloads
 //! add to that. An existing side covers a proposed one when it holds
 //! every workload the proposed one names.
+use super::services::flow_spec;
 use super::{GenActor, GenRule, RuleAction, Target, actor_key};
-use crate::models::{Actor, IngressService, Rule, RuleSet};
+use crate::models::{Actor, DenyRule, IngressService, Rule, RuleSet};
 use crate::resolve::{NameIndex, canon};
+use crate::traffic::{ResolvedEndpoint, ResolvedFlow};
 use crate::write::{ActorKind, ActorRef, ServiceRef};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -101,7 +103,8 @@ fn side_covers(existing: &[Actor], proposed: &[GenActor], in_scope: bool, idx: &
             r.is_some_and(|r| canon(&r.href) == canon(href))
         })
     };
-    let mut labels: BTreeMap<String, String> = BTreeMap::new();
+    // A merged side holds several labels of one key (OR): each must be allowed.
+    let mut labels: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for p in proposed {
         let GenActor::Ref(a) = p else {
             return false; // an IP list that does not exist yet
@@ -118,7 +121,10 @@ fn side_covers(existing: &[Actor], proposed: &[GenActor], in_scope: bool, idx: &
             ActorKind::Workload => {}
             ActorKind::Label => match idx.label(href) {
                 Some(l) => {
-                    labels.insert(l.key.clone(), href.to_string());
+                    labels
+                        .entry(l.key.clone())
+                        .or_default()
+                        .insert(href.to_string());
                 }
                 None => return false,
             },
@@ -131,7 +137,7 @@ fn side_covers(existing: &[Actor], proposed: &[GenActor], in_scope: bool, idx: &
     match label_constraint(existing, idx) {
         Some(c) if !c.is_empty() => c
             .iter()
-            .all(|(k, allowed)| labels.get(k).is_some_and(|h| allowed.contains(h))),
+            .all(|(k, allowed)| labels.get(k).is_some_and(|hs| hs.is_subset(allowed))),
         _ => false,
     }
 }
@@ -172,6 +178,108 @@ fn same_actors(existing: &Rule, rule: &GenRule) -> bool {
     existing.unscoped_consumers.unwrap_or(false) == rule.unscoped_consumers
         && keys(&existing.providers) == Some(mine(&rule.providers))
         && keys(&existing.consumers) == Some(mine(&rule.consumers))
+}
+
+/// The flows an enabled override deny rule of `target`'s ruleset blocks
+/// (an override deny beats every allow rule), and those deny rules. Each
+/// flow is matched by its own endpoints and service.
+pub(crate) fn override_denied<'f>(
+    flows: impl IntoIterator<Item = &'f ResolvedFlow>,
+    target: &Target,
+    drafts: &[RuleSet],
+    idx: &NameIndex,
+) -> (u64, Vec<String>) {
+    let Target::Existing { href, .. } = target else {
+        return (0, Vec::new());
+    };
+    let Some(rs) = drafts.iter().find(|r| &r.href == href) else {
+        return (0, Vec::new());
+    };
+    let denies: Vec<&DenyRule> = rs
+        .deny_rules
+        .iter()
+        .filter(|d| d.enabled && d.override_ && d.update_type.as_deref() != Some("delete"))
+        .collect();
+    let mut n = 0;
+    let mut by = BTreeSet::new();
+    for f in flows {
+        let spec = ServiceRef::Port(flow_spec(f));
+        let hit = denies.iter().find(|d| {
+            let unscoped = d
+                .extra
+                .get("unscoped_consumers")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            service_covered(&d.ingress_services, &spec, idx)
+                && endpoint_in(&d.providers, &f.dst, in_scope(rs, &f.dst, idx), idx)
+                && endpoint_in(
+                    &d.consumers,
+                    &f.src,
+                    unscoped || in_scope(rs, &f.src, idx),
+                    idx,
+                )
+        });
+        if let Some(d) = hit {
+            n += 1;
+            by.insert(d.href.clone());
+        }
+    }
+    (n, by.into_iter().collect())
+}
+
+/// A workload the ruleset's scopes hold (the global scope holds all).
+fn in_scope(rs: &RuleSet, ep: &ResolvedEndpoint, idx: &NameIndex) -> bool {
+    let has = |h: &str| ep.labels.iter().any(|l| canon(&l.href) == canon(h));
+    ep.is_workload()
+        && rs.scopes.iter().any(|s| {
+            s.iter().all(|a| {
+                if let Some(l) = &a.label {
+                    has(&l.href)
+                } else if let Some(g) = &a.label_group {
+                    crate::impact::group_members(&g.href, idx)
+                        .iter()
+                        .any(|m| has(m))
+                } else {
+                    false
+                }
+            })
+        })
+}
+
+/// Whether an actor list names the endpoint: an IP list it is in, its
+/// workload, or (within the scope, `scoped`) `ams` or a label combination
+/// it carries. An exclusion or an unknown label matches nothing.
+fn endpoint_in(actors: &[Actor], ep: &ResolvedEndpoint, scoped: bool, idx: &NameIndex) -> bool {
+    if actors.iter().any(|a| a.exclusion == Some(true)) {
+        return false;
+    }
+    let by_ref = actors.iter().any(|a| {
+        a.ip_list.as_ref().is_some_and(|r| {
+            idx.ip_list_name(&r.href)
+                .is_some_and(|n| ep.ip_lists.iter().any(|x| x == n))
+        }) || a.workload.as_ref().is_some_and(|r| {
+            ep.workload_href
+                .as_deref()
+                .is_some_and(|w| canon(w) == canon(&r.href))
+        })
+    });
+    if by_ref {
+        return true;
+    }
+    if !scoped || !ep.is_workload() {
+        return false;
+    }
+    if actors.iter().any(|a| a.actors.as_deref() == Some("ams")) {
+        return true;
+    }
+    match label_constraint(actors, idx) {
+        Some(c) if !c.is_empty() => c.values().all(|allowed| {
+            ep.labels
+                .iter()
+                .any(|l| allowed.iter().any(|h| canon(h) == canon(&l.href)))
+        }),
+        _ => false,
+    }
 }
 
 /// One port entry: a protocol (`-1` all), a port range (`None` all ports).
@@ -318,6 +426,9 @@ mod tests {
             rows: vec![0],
             action: RuleAction::Create,
             description: String::new(),
+            flows: 1,
+            denied_flows: 0,
+            denied_by: Vec::new(),
         }
     }
 
@@ -348,6 +459,27 @@ mod tests {
         RuleAction::Exists {
             rule_href: format!("{RS}/sec_rules/9"),
         }
+    }
+
+    #[test]
+    fn a_merged_side_is_covered_only_when_every_label_of_a_key_is() {
+        let merged = proposed(
+            vec![lbl(1), lbl(2)],
+            vec![lbl(1)],
+            false,
+            vec![port("5432/tcp")],
+        );
+        let only_db = rule(
+            json!({"providers": [{"label": {"href": "/orgs/5/labels/2"}}],
+            "consumers": [{"label": {"href": "/orgs/5/labels/1"}}]}),
+        );
+        assert_eq!(classify_in(only_db, &merged), RuleAction::Create);
+        let both = rule(
+            json!({"providers": [{"label": {"href": "/orgs/5/labels/2"}},
+                {"label": {"href": "/orgs/5/labels/1"}}],
+            "consumers": [{"label": {"href": "/orgs/5/labels/1"}}]}),
+        );
+        assert_eq!(classify_in(both, &merged), exists());
     }
 
     #[test]

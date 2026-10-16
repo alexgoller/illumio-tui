@@ -35,14 +35,24 @@ pub enum Expr {
     Unsupported(i64),
 }
 
+/// tcp and udp inline, with their port (a flow without one would read
+/// as every port: unsupported); icmp and icmpv6 through the ICMP object
+/// when it holds that protocol untyped, else the one object of exactly
+/// that protocol; others through the one object of exactly theirs.
 pub fn express(spec: &PortSpec, idx: &NameIndex) -> Expr {
     match spec.proto {
-        6 | 17 => Expr::Inline(spec.clone()),
-        1 | 58 => idx
-            .icmp_service_href()
-            .map_or(Expr::Unsupported(spec.proto), |h| {
-                Expr::Object(h.to_string())
-            }),
+        6 | 17 if spec.port.is_some() => Expr::Inline(spec.clone()),
+        6 | 17 => Expr::Unsupported(spec.proto),
+        p @ (1 | 58) => idx
+            .icmp_service()
+            .filter(|s| {
+                s.service_ports
+                    .iter()
+                    .any(|e| e.proto == Some(p) && e.icmp_type.is_none())
+            })
+            .map(|s| s.href.clone())
+            .or_else(|| single_proto_service(idx, p))
+            .map_or(Expr::Unsupported(p), Expr::Object),
         -1 => Expr::Unsupported(-1),
         p => single_proto_service(idx, p).map_or(Expr::Unsupported(p), Expr::Object),
     }
@@ -172,6 +182,48 @@ mod tests {
             proto: -1,
         };
         assert_eq!(express(&unknown, &one), Expr::Unsupported(-1));
+    }
+
+    #[test]
+    fn icmpv6_needs_an_object_that_holds_protocol_58() {
+        let v6 = PortSpec {
+            port: None,
+            to_port: None,
+            proto: 58,
+        };
+        let v4_only = index_with(&[service(
+            "/orgs/5/sec_policy/draft/services/7",
+            "ICMP",
+            serde_json::json!([{"proto": 1}]),
+        )]);
+        assert_eq!(express(&v6, &v4_only), Expr::Unsupported(58));
+        let typed = index_with(&[service(
+            "/orgs/5/sec_policy/draft/services/7",
+            "ICMP",
+            serde_json::json!([{"proto": 1}, {"proto": 58, "icmp_type": 128}]),
+        )]);
+        assert_eq!(express(&v6, &typed), Expr::Unsupported(58), "echo only");
+        let both = index_with(&[service(
+            "/orgs/5/sec_policy/draft/services/7",
+            "ICMP",
+            serde_json::json!([{"proto": 1}, {"proto": 58}]),
+        )]);
+        assert_eq!(
+            express(&v6, &both),
+            Expr::Object("/orgs/5/sec_policy/draft/services/7".into())
+        );
+    }
+
+    #[test]
+    fn tcp_or_udp_without_a_port_is_never_every_port() {
+        for proto in [6, 17] {
+            let bare = PortSpec {
+                port: None,
+                to_port: None,
+                proto,
+            };
+            assert_eq!(express(&bare, &index_with(&[])), Expr::Unsupported(proto));
+        }
     }
 
     #[test]

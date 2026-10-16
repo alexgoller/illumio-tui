@@ -453,7 +453,13 @@ decisions and its warnings (`env mismatch`, `uses IP list Corp`, `needs an IP li
 `providers`, `consumers`, `unscoped_consumers`, `services`, `rows` and the exact PCE `body`
 (`{step:N}` stands for an IP list or ruleset the batch would create first); `ip_lists` the
 IP lists it would create (`shop-prod peer 10.4.1.9`); `preview` the counts and the flow
-records covered or not, by reason. tcp and udp services are inline `port/proto` (consecutive
+records covered or not, by reason (`unchecked`, `folded_ips`, `unsupported_proto`,
+`broadcast_multicast`, `no_target` when the ruleset is ambiguous or cannot be named,
+`override_deny` when an override deny rule of the ruleset blocks them anyway), and `blocker`
+when rules cannot be written as shown. Rules to create that differ in one side only merge
+when the union means exactly both (`role=web` and `role=db` providers become one rule). A
+disabled ruleset is never a target; in a ruleset scoped wider than the app the rules name
+the app's labels instead of All Workloads. tcp and udp services are inline `port/proto` (consecutive
 seen ports fold into a range), icmp uses the ICMP service, other protocols the one service of
 exactly that protocol, else they are not covered. It costs the focused traffic query (`in`,
 plus `out` with `--outbound`), the name index and one draft ruleset read, cached; `meta`
@@ -811,7 +817,8 @@ The policy generator names a ruleset it creates by a template over the scope key
     [profiles.prod.generator]
     ruleset_name = "RF-{app}-{env}"   # the default: RF-shop-prod
 
-Every `{key}` must be a scope key; another one fails the load and names it.
+Every `{key}` must be a scope key and every scope key must be named, so each new ruleset
+gets its own name; anything else fails the load and names the key.
 
 ## PCE protection
 

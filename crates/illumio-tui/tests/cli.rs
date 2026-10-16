@@ -3769,6 +3769,13 @@ async fn gen_prints_rows_rules_and_the_preview_and_writes_nothing() {
     assert_eq!(d["preview"]["uncovered_flows"], 2);
     assert_eq!(d["preview"]["uncovered_by"]["unchecked"], 1);
     assert_eq!(d["preview"]["uncovered_by"]["unsupported_proto"], 1);
+    assert_eq!(
+        d["preview"]["uncovered_by"],
+        json!({"unchecked": 1, "folded_ips": 0, "unsupported_proto": 1,
+            "broadcast_multicast": 0, "no_target": 0, "override_deny": 0}),
+        "the reasons only"
+    );
+    assert!(d["preview"].get("blocker").is_none());
     assert_eq!(out["meta"]["queries"], 1, "the in side only");
     let sent = server.received_requests().await.unwrap();
     assert!(
@@ -3937,4 +3944,24 @@ async fn gen_table_and_csv_print_the_rule_columns() {
         ),
         "{row}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn gen_without_the_cache_reads_the_name_index_once() {
+    let server = MockServer::start().await;
+    mount_gen(&server, 1, 1).await;
+    cmd(&server)
+        .args(["--no-cache", "gen", "shop/prod", "--window", "1h"])
+        .assert()
+        .success();
+    let sent = server.received_requests().await.unwrap();
+    let labels = sent
+        .iter()
+        .filter(|r| r.method.as_str() == "GET" && r.url.path() == "/api/v2/orgs/5/labels")
+        .count();
+    assert_eq!(
+        labels, 1,
+        "the index fetch resolved the flows with is reused"
+    );
+    server.verify().await;
 }

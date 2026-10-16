@@ -1,7 +1,8 @@
 //! Rows and a stop to rules: providers, consumers and `unscoped_consumers`
 //! by the derivation tables, one rule per (target, providers, consumers,
-//! flag) with the services of every flow behind it, the coverage of the
-//! flows, the IP lists to create. Pure.
+//! flag) with the services of every flow behind it, rules to create that
+//! differ in one side only merged when the union means exactly both, the
+//! coverage of the flows, the IP lists to create. Pure.
 use super::rows::{excluded, ip_list_name, row_key, side_of};
 use super::services::{Expr, express, flow_spec, fold_ports};
 use super::{
@@ -47,9 +48,141 @@ fn row_index(rows: &[GenRow]) -> BTreeMap<RowKey, usize> {
 /// The rules `rows` (checkboxes and overrides as they are) need at the
 /// slider's `global` stop, classified against `input.drafts`.
 pub fn propose(rows: &[GenRow], global: Stop, input: &GenInput) -> Proposal {
-    let mut p = derive(rows, global, input);
+    let (mut p, mut ids) = derive(rows, global, input);
     p.refresh(input.drafts, input.idx, input.ruleset_name, input.picked);
+    merge(&mut p, &mut ids, input.idx);
+    for r in &mut p.rules {
+        r.description = describe(r, rows, input);
+    }
+    p.refresh(input.drafts, input.idx, input.ruleset_name, input.picked);
+    for (r, ids) in p.rules.iter_mut().zip(&ids) {
+        let flows = ids.iter().map(|&i| &input.flows[i]);
+        (r.denied_flows, r.denied_by) =
+            super::dedupe::override_denied(flows, &p.targets[r.target], input.drafts, input.idx);
+    }
+    p.recount();
     p
+}
+
+/// A side as Illumio reads it: its labels by key (AND across keys, OR
+/// within one), ORed with its other actors (IP lists, workloads). `None`
+/// for `ams`, an exclusion or a label the index does not know.
+#[allow(clippy::type_complexity)]
+fn split(
+    side: &[GenActor],
+    idx: &NameIndex,
+) -> Option<(BTreeMap<String, BTreeSet<String>>, BTreeSet<String>)> {
+    let mut labels: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut others = BTreeSet::new();
+    for a in side {
+        match a {
+            GenActor::Ref(r) if r.exclusion => return None,
+            GenActor::Ref(r) if r.kind == ActorKind::Label => {
+                let h = r.href.as_deref()?;
+                labels
+                    .entry(idx.label(h)?.key.clone())
+                    .or_default()
+                    .insert(h.to_string());
+            }
+            GenActor::Ref(r) if matches!(r.kind, ActorKind::IpList | ActorKind::Workload) => {
+                others.insert(a.sort_key());
+            }
+            GenActor::Ref(_) => return None,
+            GenActor::NewIpList(_) => {
+                others.insert(a.sort_key());
+            }
+        }
+    }
+    Some((labels, others))
+}
+
+/// Whether one side holding both sides' actors means exactly either: the
+/// label parts agree on every key but at most one (`role=web` and
+/// `role=db` become `role=web, role=db`), or one side has no labels.
+fn union_exact(a: &[GenActor], b: &[GenActor], idx: &NameIndex) -> bool {
+    let (Some((la, _)), Some((lb, _))) = (split(a, idx), split(b, idx)) else {
+        return false;
+    };
+    if la.is_empty() || lb.is_empty() {
+        return true;
+    }
+    la.keys().eq(lb.keys()) && la.iter().filter(|(k, v)| lb.get(*k) != Some(v)).count() <= 1
+}
+
+fn union_into(into: &mut Vec<GenActor>, from: &[GenActor]) {
+    for a in from {
+        if !into.iter().any(|x| x.sort_key() == a.sort_key()) {
+            into.push(a.clone());
+        }
+    }
+}
+
+/// Rules to create in one ruleset with the same services and flag, the
+/// same actors on one side and on the other sides whose union means
+/// exactly both (see [`union_exact`]), become one: that union, the rows
+/// and the flows of both. Rules that exist or gain services stay apart.
+fn merge(p: &mut Proposal, ids: &mut Vec<Vec<usize>>, idx: &NameIndex) {
+    let mut i = 0;
+    while i < p.rules.len() {
+        let mut j = i + 1;
+        while j < p.rules.len() {
+            let (a, b) = (&p.rules[i], &p.rules[j]);
+            let alike = a.action == RuleAction::Create
+                && b.action == RuleAction::Create
+                && a.target == b.target
+                && a.unscoped_consumers == b.unscoped_consumers
+                && a.services == b.services;
+            let same_p = keys_of(&a.providers) == keys_of(&b.providers);
+            let same_c = keys_of(&a.consumers) == keys_of(&b.consumers);
+            let side = match () {
+                _ if !alike => None,
+                _ if same_p && union_exact(&a.consumers, &b.consumers, idx) => Some(false),
+                _ if same_c && union_exact(&a.providers, &b.providers, idx) => Some(true),
+                _ => None,
+            };
+            let Some(providers) = side else {
+                j += 1;
+                continue;
+            };
+            let b = p.rules.remove(j);
+            let b_ids = ids.remove(j);
+            let a = &mut p.rules[i];
+            if providers {
+                union_into(&mut a.providers, &b.providers);
+            } else {
+                union_into(&mut a.consumers, &b.consumers);
+            }
+            a.rows.extend(b.rows);
+            a.rows.sort_unstable();
+            a.rows.dedup();
+            a.flows += b.flows;
+            ids[i].extend(b_ids);
+            // Another rule may merge with the union now: look again.
+            j = i + 1;
+        }
+        i += 1;
+    }
+}
+
+/// The rule's description from the rows behind it and its services.
+fn describe(r: &GenRule, rows: &[GenRow], input: &GenInput) -> String {
+    let app = input.focus.app_text();
+    let all = input.idx.all_services_href();
+    let mut from = BTreeSet::new();
+    let mut to = BTreeSet::new();
+    for &ri in &r.rows {
+        let (f, t) = ends(&rows[ri], &app);
+        from.insert(f);
+        to.insert(t);
+    }
+    let names: Vec<String> = r
+        .services
+        .iter()
+        .map(|s| service_text(s, all, input.idx))
+        .collect();
+    let from: Vec<String> = from.into_iter().collect();
+    let to: Vec<String> = to.into_iter().collect();
+    description(&from, &to, &names, input.window)
 }
 
 /// One rule being built.
@@ -61,8 +194,8 @@ struct Group {
     inline: BTreeSet<PortSpec>,
     objects: BTreeSet<String>,
     rows: BTreeSet<usize>,
-    from: BTreeSet<String>,
-    to: BTreeSet<String>,
+    /// Indexes into `GenInput::flows`.
+    flows: Vec<usize>,
 }
 
 fn keys_of(a: &[GenActor]) -> Vec<String> {
@@ -271,12 +404,19 @@ fn description(from: &[String], to: &[String], services: &[String], window: &str
     let t = capped(to, 60);
     let fixed = head(&f, &t, "").chars().count();
     let s = capped(services, DESCRIPTION_MAX.saturating_sub(fixed));
-    head(&f, &t, &s)
+    // One long name alone can still pass the limit.
+    let full = head(&f, &t, &s);
+    if full.chars().count() <= DESCRIPTION_MAX {
+        return full;
+    }
+    let mut cut: String = full.chars().take(DESCRIPTION_MAX - 1).collect();
+    cut.push('…');
+    cut
 }
 
-fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> Proposal {
+/// The rules before merging, each with the indexes of its flows.
+fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> (Proposal, Vec<Vec<usize>>) {
     let focus = input.focus;
-    let app = focus.app_text();
     let index = row_index(rows);
     let all_services = input.idx.all_services_href().map(str::to_string);
     let mut ctx = Ctx {
@@ -287,7 +427,7 @@ fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> Proposal {
     let mut groups: BTreeMap<(usize, Vec<String>, Vec<String>, bool), Group> = BTreeMap::new();
     let mut cov = Coverage::default();
     let in_force = |s: Side| s == Side::Inbound || input.outbound;
-    for f in input.flows {
+    for (fi, f) in input.flows.iter().enumerate() {
         if excluded(f) {
             if side_of(f, focus).is_some_and(in_force) {
                 cov.broadcast_multicast += 1;
@@ -342,8 +482,7 @@ fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> Proposal {
             inline: BTreeSet::new(),
             objects: BTreeSet::new(),
             rows: BTreeSet::new(),
-            from: BTreeSet::new(),
-            to: BTreeSet::new(),
+            flows: Vec::new(),
         });
         match svc {
             Expr::Inline(p) => {
@@ -355,9 +494,7 @@ fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> Proposal {
             Expr::Unsupported(_) => {}
         }
         g.rows.insert(ri);
-        let (from, to) = ends(row, &app);
-        g.from.insert(from);
-        g.to.insert(to);
+        g.flows.push(fi);
         cov.covered += 1;
     }
     cov.uncovered =
@@ -365,6 +502,7 @@ fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> Proposal {
     let mut groups: Vec<Group> = groups.into_values().collect();
     // The app's ruleset first, then by the first row behind the rule.
     groups.sort_by_key(|g| (g.target, g.rows.first().copied()));
+    let ids: Vec<Vec<usize>> = groups.iter().map(|g| g.flows.clone()).collect();
     let rules = groups
         .into_iter()
         .map(|g| {
@@ -376,31 +514,29 @@ fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> Proposal {
                     .chain(g.objects.iter().cloned().map(ServiceRef::Href))
                     .collect(),
             };
-            let names: Vec<String> = services
-                .iter()
-                .map(|s| service_text(s, all_services.as_deref(), input.idx))
-                .collect();
-            let from: Vec<String> = g.from.into_iter().collect();
-            let to: Vec<String> = g.to.into_iter().collect();
             GenRule {
                 target: g.target,
                 providers: g.providers,
                 consumers: g.consumers,
                 unscoped_consumers: g.unscoped,
-                description: description(&from, &to, &names, input.window),
+                description: String::new(),
                 services,
                 rows: g.rows.into_iter().collect(),
                 action: RuleAction::Create,
+                flows: g.flows.len() as u64,
+                denied_flows: 0,
+                denied_by: Vec::new(),
             }
         })
         .collect();
-    Proposal {
+    let p = Proposal {
         scopes: ctx.scopes,
         targets: Vec::new(),
         ip_lists: ctx.ip_lists,
         rules,
         coverage: cov,
-    }
+    };
+    (p, ids)
 }
 
 #[cfg(test)]
@@ -423,11 +559,21 @@ mod tests {
         outbound: bool,
         edit: impl Fn(&mut Vec<GenRow>),
     ) -> (Vec<GenRow>, Proposal) {
+        run_in(sets(), flows, stop, outbound, edit)
+    }
+
+    /// `run` against these draft rulesets.
+    fn run_in(
+        drafts: Vec<RuleSet>,
+        flows: &[ResolvedFlow],
+        stop: Stop,
+        outbound: bool,
+        edit: impl Fn(&mut Vec<GenRow>),
+    ) -> (Vec<GenRow>, Proposal) {
         let idx = rich_index();
         let focus = shop();
         let mut r = rows(flows, &focus, "role", &idx);
         edit(&mut r);
-        let drafts = sets();
         let input = GenInput {
             flows,
             focus: &focus,
@@ -631,6 +777,7 @@ mod tests {
                 folded_ips: 0,
                 unsupported_proto: 1,
                 broadcast_multicast: 1,
+                ..Coverage::default()
             }
         );
         let (_, p) = run(&f, Stop::AppPorts, false, |_| {});
@@ -638,6 +785,161 @@ mod tests {
             p.coverage.broadcast_multicast, 0,
             "outbound off: not counted"
         );
+    }
+
+    /// Flow 0 (shop web to shop db) on `port`, to a shop web workload.
+    fn web_to_web(port: u16) -> ResolvedFlow {
+        let mut f = intra_on(port);
+        for l in &mut f.dst.labels {
+            if l.key == "role" {
+                l.href = "/orgs/5/labels/1".into();
+                l.value = "web".into();
+            }
+        }
+        f
+    }
+
+    #[test]
+    fn rules_differing_in_one_role_merge_into_one_and_existing_ones_stay_apart() {
+        let mut f = rich_flows();
+        f.push(web_to_web(5432));
+        let mut empty = sets();
+        empty[0].rules.clear();
+        let (_, p) = run_in(empty, &f, Stop::RolePorts, false, |_| {});
+        assert_eq!(
+            shape(&p)[0],
+            "t0 role=web+role=db <- role=web 5432/tcp",
+            "{:?}",
+            shape(&p)
+        );
+        assert_eq!(p.rules[0].action, RuleAction::Create);
+        assert_eq!(p.rules[0].flows, 5, "4 web to db, 1 web to web");
+        assert_eq!(p.rules[0].rows, vec![0]);
+        // sec_rules/1 (db <- web) covers the db part: it exists, apart.
+        let (_, p) = run(&f, Stop::RolePorts, false, |_| {});
+        let s = shape(&p);
+        assert_eq!(s[0], "t0 role=web <- role=web 5432/tcp", "{s:?}");
+        assert_eq!(p.rules[0].action, RuleAction::Create);
+        assert_eq!(s[1], "t0 role=db <- role=web 5432/tcp", "{s:?}");
+        assert!(matches!(p.rules[1].action, RuleAction::Exists { .. }));
+    }
+
+    #[test]
+    fn only_unions_that_mean_exactly_both_sides_merge() {
+        let idx = rich_index();
+        let l = |n: u32| GenActor::label(&format!("/orgs/5/labels/{n}"));
+        let ipl = GenActor::Ref(ActorRef::new(
+            ActorKind::IpList,
+            "/orgs/5/sec_policy/draft/ip_lists/21",
+        ));
+        // app=shop role=web | app=shop role=db: one key apart.
+        assert!(union_exact(&[l(3), l(1)], &[l(3), l(2)], &idx));
+        // role=web | app=shop: the union would read role=web AND app=shop.
+        assert!(!union_exact(&[l(1)], &[l(3)], &idx));
+        assert!(!union_exact(&[l(3), l(1)], &[l(3)], &idx));
+        // app=shop env=prod | app=hr env=dev-like: two keys apart.
+        assert!(!union_exact(&[l(3), l(1)], &[l(103), l(2)], &idx));
+        // An IP list ORs with any label combination; ams never merges.
+        assert!(union_exact(std::slice::from_ref(&ipl), &[l(3), l(1)], &idx));
+        assert!(!union_exact(&[GenActor::all()], &[l(1)], &idx));
+        assert!(!union_exact(&[ipl], &[GenActor::all()], &idx));
+    }
+
+    /// The fixture rulesets with Shop-Prod scoped by `app=shop` only.
+    fn shop_wide() -> Vec<RuleSet> {
+        let mut d = sets();
+        d[0].scopes = vec![vec![
+            serde_json::from_value(serde_json::json!({"label": {"href": "/orgs/5/labels/3"}}))
+                .unwrap(),
+        ]];
+        d
+    }
+
+    #[test]
+    fn a_ruleset_wider_than_the_app_gets_the_app_labels_not_ams() {
+        let (_, p) = run_in(shop_wide(), &rich_flows(), Stop::AppPorts, false, |_| {});
+        assert_eq!(p.targets[0].name(), "Shop-Prod");
+        assert_eq!(
+            shape(&p),
+            vec![
+                "t0 app=shop+env=prod <- app=shop+env=prod 5432/tcp",
+                "t0 app=shop+env=prod <- app=hr+env=prod unscoped 5432/tcp",
+            ]
+        );
+        let (_, p) = run_in(shop_wide(), &rich_flows(), Stop::RolePorts, false, |_| {});
+        assert_eq!(
+            shape(&p)[0],
+            "t0 app=shop+env=prod+role=db <- app=shop+env=prod+role=web 5432/tcp"
+        );
+        assert_eq!(
+            p.rules[0].action,
+            RuleAction::Exists {
+                rule_href: "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1".into()
+            },
+            "role=db <- role=web over all of shop covers shop/prod"
+        );
+        // Two scopes: as wide.
+        let mut two = sets();
+        let dev = two[0].scopes[0].clone();
+        two[0].scopes.push(dev[..1].to_vec());
+        let (_, p) = run_in(two, &rich_flows(), Stop::AppPorts, false, |_| {});
+        assert_eq!(
+            shape(&p)[0],
+            "t0 app=shop+env=prod <- app=shop+env=prod 5432/tcp"
+        );
+    }
+
+    #[test]
+    fn flows_of_a_rule_without_a_ruleset_are_not_covered() {
+        let mut d = sets();
+        let mut twin = d[0].clone();
+        twin.href = "/orgs/5/sec_policy/draft/rule_sets/102".into();
+        twin.name = "Shop-Prod-2".into();
+        d.push(twin);
+        let (_, p) = run_in(d, &rich_flows(), Stop::AppPorts, false, |_| {});
+        assert_eq!(p.targets[0].action(), "ambiguous");
+        assert_eq!(
+            p.coverage,
+            Coverage {
+                covered: 0,
+                uncovered: 8,
+                unchecked: 3,
+                no_target: 5,
+                ..Coverage::default()
+            }
+        );
+    }
+
+    #[test]
+    fn an_override_deny_in_the_target_uncovers_its_flows() {
+        let mut f = rich_flows();
+        f.push(intra_on(22)); // web -> db: deny_rules/8 (db, ams, 22/tcp, override)
+        f.push(web_to_web(22)); // web -> web: not a db provider
+        let (_, p) = run(&f, Stop::AppPorts, false, |_| {});
+        let r = p
+            .rules
+            .iter()
+            .find(|r| r.services.iter().any(|s| s.display() == "22/tcp"))
+            .unwrap();
+        assert_eq!(r.denied_flows, 1);
+        assert_eq!(
+            r.denied_by,
+            vec!["/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8".to_string()]
+        );
+        assert_eq!(p.coverage.override_deny, 1);
+        assert_eq!(p.coverage.covered, 6);
+    }
+
+    #[test]
+    fn one_long_name_still_keeps_the_description_within_the_limit() {
+        let d = description(
+            &["w".repeat(300)],
+            &["shop/prod".into()],
+            &["22/tcp".into()],
+            "24h",
+        );
+        assert_eq!(d.chars().count(), DESCRIPTION_MAX);
+        assert!(d.ends_with('…'));
     }
 
     #[test]

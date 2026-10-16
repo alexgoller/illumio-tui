@@ -19,12 +19,14 @@ pub fn default_ruleset_name(scope_keys: &[String]) -> String {
     format!("RF-{}", keys.join("-"))
 }
 
-/// Every `{key}` in `template` must be a scope key; braces must close; the
-/// template must not be blank. The error names the key.
+/// Every `{key}` in `template` must be a scope key and every scope key
+/// must be named (so two scopes never share a name); braces must close;
+/// the template must not be blank. The error names the key.
 pub fn check_ruleset_name(template: &str, scope_keys: &[String]) -> Result<(), String> {
     if template.trim().is_empty() {
         return Err("generator.ruleset_name must not be empty".into());
     }
+    let mut named = BTreeSet::new();
     let mut rest = template;
     while let Some(open) = rest.find('{') {
         let after = &rest[open + 1..];
@@ -40,7 +42,14 @@ pub fn check_ruleset_name(template: &str, scope_keys: &[String]) -> Result<(), S
                 scope_keys.join(", ")
             ));
         }
+        named.insert(key);
         rest = &after[close + 1..];
+    }
+    if let Some(k) = scope_keys.iter().find(|k| !named.contains(k.as_str())) {
+        return Err(format!(
+            "generator.ruleset_name {template:?}: {{{k}}} is missing; every scope key must be named, \
+             so each new ruleset gets its own name"
+        ));
     }
     Ok(())
 }
@@ -69,10 +78,12 @@ pub fn keys_refusal(keys: &[String], scope_keys: &[String]) -> Option<String> {
 /// the labels `has`: each actor of one of its scopes is a label in `has`
 /// (under any key) or a label group with such a label among its members.
 /// The empty, global scope and other actors do not count. Those scoped
-/// exactly like `want` (no group) come first (`true`), then the others,
-/// the more actors the earlier, each in list order.
+/// exactly like `want` (in one of their scopes, no group) come first
+/// (`true`), then the others, the more actors the earlier, each in list
+/// order. A ruleset with a second scope is wider than `want` even so: the
+/// generator checks [`narrow`] before writing `ams` into it.
 pub fn rulesets_covering<'r>(
-    sets: &'r [RuleSet],
+    sets: impl IntoIterator<Item = &'r RuleSet>,
     has: &BTreeSet<&str>,
     want: &BTreeSet<&str>,
     idx: &NameIndex,
@@ -101,7 +112,7 @@ pub fn rulesets_covering<'r>(
         Some((exact, s.len()))
     };
     let mut hits: Vec<(&RuleSet, (bool, usize))> = sets
-        .iter()
+        .into_iter()
         .filter(|rs| rs.update_type.as_deref() != Some("delete"))
         .filter_map(|rs| rs.scopes.iter().filter_map(fit).max().map(|f| (rs, f)))
         .collect();
@@ -131,10 +142,10 @@ pub struct RulesetChoice {
 /// [`rulesets_covering`] and the pick, by label hrefs: `scope` the labels
 /// a ruleset would be scoped by, `has` every label the endpoint carries
 /// (for the generator's app, the scope labels themselves).
-pub fn pick_ruleset(
+pub fn pick_ruleset<'r>(
     scope: &[&str],
     has: &[&str],
-    sets: &[RuleSet],
+    sets: impl IntoIterator<Item = &'r RuleSet>,
     idx: &NameIndex,
 ) -> RulesetChoice {
     let want: BTreeSet<&str> = scope.iter().copied().collect();
@@ -161,9 +172,11 @@ pub fn pick_ruleset(
     RulesetChoice { covering, picked }
 }
 
-/// The target of one scope against `drafts`: the picked covering ruleset
-/// (`picked` overrides among several), a ruleset to create when none
-/// covers it, else ambiguous.
+/// The target of one scope against `drafts`: the picked covering enabled
+/// ruleset (`picked` overrides among several; a disabled one enforces
+/// nothing, so it is no target), a ruleset to create when none covers it,
+/// else ambiguous. A ruleset to create whose name a draft ruleset already
+/// has is no target either.
 pub fn resolve(
     scope: &TargetScope,
     drafts: &[RuleSet],
@@ -175,7 +188,8 @@ pub fn resolve(
         return Target::None(format!("{} has no scope labels", scope.text()));
     }
     let hrefs: Vec<&str> = scope.labels.iter().map(|l| l.href.as_str()).collect();
-    let choice = pick_ruleset(&hrefs, &hrefs, drafts, idx);
+    let enabled = drafts.iter().filter(|rs| rs.enabled);
+    let choice = pick_ruleset(&hrefs, &hrefs, enabled, idx);
     let chosen = picked
         .and_then(|h| choice.covering.iter().find(|c| c.href == h))
         .or_else(|| choice.picked.map(|i| &choice.covering[i]));
@@ -189,8 +203,21 @@ pub fn resolve(
         return Target::Ambiguous(choice.covering);
     }
     let keys: Vec<String> = scope.labels.iter().map(|l| l.key.clone()).collect();
+    let name = render_ruleset_name(template, &keys, &scope.values);
+    if let Some(rs) = drafts.iter().find(|rs| rs.name.eq_ignore_ascii_case(&name)) {
+        let how = if rs.enabled {
+            "with another scope"
+        } else {
+            "disabled"
+        };
+        return Target::None(format!(
+            "ruleset {} exists {how}: no ruleset for {} to create",
+            rs.name,
+            scope.text()
+        ));
+    }
     Target::Create(RuleSetDraft {
-        name: render_ruleset_name(template, &keys, &scope.values),
+        name,
         description: None,
         enabled: true,
         scopes: vec![
@@ -201,6 +228,33 @@ pub fn resolve(
                 .collect(),
         ],
     })
+}
+
+/// Whether `target`'s ruleset is scoped by exactly `scope`'s labels: one
+/// scope of those labels and nothing else (a ruleset to create is). Only
+/// then do `ams` and a bare role in it stay within the scope's workloads.
+pub fn narrow(scope: &TargetScope, target: &Target, drafts: &[RuleSet]) -> bool {
+    match target {
+        Target::Create(_) => true,
+        Target::Existing { href, .. } => {
+            drafts.iter().find(|rs| &rs.href == href).is_some_and(|rs| {
+                let want: BTreeSet<&str> = scope.labels.iter().map(|l| l.href.as_str()).collect();
+                match rs.scopes.as_slice() {
+                    [one] => {
+                        one.iter()
+                            .all(|a| a.label.is_some() && a.exclusion != Some(true))
+                            && one.len() == want.len()
+                            && one
+                                .iter()
+                                .filter_map(|a| a.label.as_ref())
+                                .all(|l| want.contains(l.href.as_str()))
+                    }
+                    _ => false,
+                }
+            })
+        }
+        Target::Ambiguous(_) | Target::None(_) => false,
+    }
 }
 
 #[cfg(test)]
@@ -252,7 +306,16 @@ mod tests {
     #[test]
     fn a_template_names_scope_keys_only_and_closes_its_braces() {
         assert!(check_ruleset_name("RS-{app}-{env}", &keys()).is_ok());
-        assert!(check_ruleset_name("fixed name", &keys()).is_ok());
+        assert_eq!(
+            check_ruleset_name("fixed name", &keys()).unwrap_err(),
+            "generator.ruleset_name \"fixed name\": {app} is missing; every scope key must be \
+             named, so each new ruleset gets its own name"
+        );
+        assert!(
+            check_ruleset_name("RF-{app}", &keys())
+                .unwrap_err()
+                .contains("{env} is missing")
+        );
         assert_eq!(
             check_ruleset_name("RF-{app}-{role}", &keys()).unwrap_err(),
             "generator.ruleset_name \"RF-{app}-{role}\": {role} is not a scope key (app, env)"
@@ -330,6 +393,84 @@ mod tests {
                 name: "Shop-Prod-2".into()
             }
         );
+    }
+
+    #[test]
+    fn a_disabled_ruleset_is_no_target() {
+        let idx = rich_index();
+        let mut sets = rule_sets();
+        sets[0].enabled = false;
+        let t = resolve(&shop_scope(), &sets, &idx, DEFAULT_RULESET_NAME, None);
+        let Target::Create(d) = t else {
+            panic!("a disabled ruleset enforces nothing: {t:?}")
+        };
+        assert_eq!(d.name, "RF-shop-prod");
+        // Named like the ruleset to create: no target, and why.
+        sets[0].name = "RF-shop-prod".into();
+        assert_eq!(
+            resolve(&shop_scope(), &sets, &idx, DEFAULT_RULESET_NAME, None),
+            Target::None(
+                "ruleset RF-shop-prod exists disabled: no ruleset for shop/prod to create".into()
+            )
+        );
+    }
+
+    #[test]
+    fn a_ruleset_named_like_the_one_to_create_but_scoped_otherwise_is_no_target() {
+        let idx = rich_index();
+        let mut sets = rule_sets();
+        // Scoped by loc=eu too: it does not cover shop/prod.
+        sets[0].scopes[0].push(
+            serde_json::from_value(serde_json::json!({"label": {"href": "/orgs/5/labels/5"}}))
+                .unwrap(),
+        );
+        sets[0].name = "rf-shop-prod".into();
+        assert_eq!(
+            resolve(&shop_scope(), &sets, &idx, DEFAULT_RULESET_NAME, None),
+            Target::None(
+                "ruleset rf-shop-prod exists with another scope: no ruleset for shop/prod to create"
+                    .into()
+            )
+        );
+    }
+
+    #[test]
+    fn a_second_scope_or_a_wider_one_is_not_exact_and_not_narrow() {
+        let idx = rich_index();
+        let mut sets = rule_sets();
+        let t = resolve(&shop_scope(), &sets, &idx, DEFAULT_RULESET_NAME, None);
+        assert!(narrow(&shop_scope(), &t, &sets), "exactly shop/prod");
+        // A second scope (shop and loc=eu).
+        sets[0].scopes.push(vec![
+            serde_json::from_value(serde_json::json!({"label": {"href": "/orgs/5/labels/3"}}))
+                .unwrap(),
+            serde_json::from_value(serde_json::json!({"label": {"href": "/orgs/5/labels/5"}}))
+                .unwrap(),
+        ]);
+        let hrefs = ["/orgs/5/labels/3", "/orgs/5/labels/4"];
+        let c = pick_ruleset(&hrefs, &hrefs, &sets, &idx);
+        assert_eq!(c.picked, Some(0), "still the one");
+        assert!(
+            !narrow(&shop_scope(), &t, &sets),
+            "but wider than shop/prod"
+        );
+        // Scoped by app=shop only.
+        sets[0].scopes = vec![vec![
+            serde_json::from_value(serde_json::json!({"label": {"href": "/orgs/5/labels/3"}}))
+                .unwrap(),
+        ]];
+        let t = resolve(&shop_scope(), &sets, &idx, DEFAULT_RULESET_NAME, None);
+        assert_eq!(t.name(), "Shop-Prod", "it covers shop/prod");
+        assert!(!narrow(&shop_scope(), &t, &sets));
+        let Target::Create(_) = resolve(&shop_scope(), &[], &idx, DEFAULT_RULESET_NAME, None)
+        else {
+            panic!()
+        };
+        assert!(narrow(
+            &shop_scope(),
+            &resolve(&shop_scope(), &[], &idx, DEFAULT_RULESET_NAME, None),
+            &[]
+        ));
     }
 
     #[test]

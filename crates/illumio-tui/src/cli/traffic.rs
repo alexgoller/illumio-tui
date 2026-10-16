@@ -1092,6 +1092,8 @@ pub(crate) struct Fetched {
     pub(crate) queries: Option<u32>,
     /// `--draft`: what the draft decisions change.
     pub(crate) draft: Option<DraftSummary>,
+    /// The name index the flows were resolved with.
+    pub(crate) index: Arc<NameIndex>,
 }
 
 impl Fetched {
@@ -1223,6 +1225,7 @@ pub(crate) async fn fetch(
             cap: q.max_results,
             cap_steps: None,
             flows: ft.flows,
+            index: idx,
         }));
     }
     let cancel = CancellationToken::new();
@@ -1255,6 +1258,7 @@ pub(crate) async fn fetch(
         cap_steps: None,
         queries: None,
         draft: None,
+        index: idx.clone(),
     };
     if args.backfill {
         let (last, href) =

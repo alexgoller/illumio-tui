@@ -13,6 +13,7 @@ use pce::generate::{
 use pce::models::PolicyScope;
 use pce::write::PortSpec;
 use serde::Serialize;
+use std::collections::BTreeMap;
 
 #[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GranularityArg {
@@ -101,9 +102,39 @@ pub struct RuleOut {
     pub rows: Vec<usize>,
     pub existing_rule: Option<String>,
     pub description: String,
+    /// Override deny rules of the ruleset that block some of its flows
+    /// anyway (they stay uncovered).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub override_deny: Vec<String>,
     /// The PCE JSON a create sends (`{step:N}` for what the batch creates
     /// first); for `add_services`, the services the update adds.
     pub body: serde_json::Value,
+}
+
+/// The uncovered flow records by reason.
+#[derive(Debug, Serialize)]
+pub struct UncoveredBy {
+    pub unchecked: u64,
+    pub folded_ips: u64,
+    pub unsupported_proto: u64,
+    pub broadcast_multicast: u64,
+    /// Behind a rule whose ruleset is ambiguous or cannot be named.
+    pub no_target: u64,
+    /// Behind a rule, but an override deny rule blocks them anyway.
+    pub override_deny: u64,
+}
+
+impl From<Coverage> for UncoveredBy {
+    fn from(c: Coverage) -> Self {
+        UncoveredBy {
+            unchecked: c.unchecked,
+            folded_ips: c.folded_ips,
+            unsupported_proto: c.unsupported_proto,
+            broadcast_multicast: c.broadcast_multicast,
+            no_target: c.no_target,
+            override_deny: c.override_deny,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -112,7 +143,11 @@ pub struct Preview {
     pub counts: RuleCounts,
     pub covered_flows: u64,
     pub uncovered_flows: u64,
-    pub uncovered_by: Coverage,
+    pub uncovered_by: UncoveredBy,
+    /// Why the rules cannot be written as shown (a ruleset is ambiguous or
+    /// cannot be named).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blocker: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -241,6 +276,7 @@ fn rules_out(p: &Proposal, idx: &pce::NameIndex) -> Vec<RuleOut> {
                 }
             },
             description: r.description.clone(),
+            override_deny: r.denied_by.clone(),
             body: r.body(p),
         })
         .collect()
@@ -292,7 +328,7 @@ pub async fn run(ctx: &Context, args: &GenArgs) -> Result<(), CliError> {
             "a PCE region did not answer the traffic query for {app}: run it again; no rules proposed"
         )));
     }
-    let idx = ctx.pce.name_index(ctx.cache_mode).await?;
+    let idx = fetched.index.clone();
     if global.is_all() && idx.all_services_href().is_none() {
         return Err(CliError::Args(format!(
             "--granularity {}: the PCE has no All Services object; use app-ports or role-ports",
@@ -326,6 +362,20 @@ pub async fn run(ctx: &Context, args: &GenArgs) -> Result<(), CliError> {
         picked: None,
     };
     let p = propose(&gen_rows, global, &input);
+    // Each row behind a rule an override deny undercuts says so.
+    let mut denied: BTreeMap<usize, Vec<String>> = BTreeMap::new();
+    for r in p.rules.iter().filter(|r| r.denied_flows > 0) {
+        for &i in &r.rows {
+            denied.entry(i).or_default().push(format!(
+                "override deny blocks {} of the rule's flows",
+                r.denied_flows
+            ));
+        }
+    }
+    let blocker = p.blocker();
+    if let Some(b) = &blocker {
+        eprintln!("warning: {b}: those rules cannot be written as shown");
+    }
     let t = &p.targets[0];
     let report = GenReport {
         app: app.clone(),
@@ -343,8 +393,14 @@ pub async fn run(ctx: &Context, args: &GenArgs) -> Result<(), CliError> {
         },
         rows: gen_rows
             .iter()
-            .filter(|r| args.outbound || r.side == pce::generate::Side::Inbound)
-            .map(|r| row_out(r, global, &keys))
+            .enumerate()
+            .filter(|(_, r)| args.outbound || r.side == pce::generate::Side::Inbound)
+            .map(|(i, r)| {
+                let mut out = row_out(r, global, &keys);
+                out.warnings
+                    .extend(denied.get(&i).into_iter().flatten().cloned());
+                out
+            })
             .collect(),
         ip_lists: p
             .ip_lists
@@ -359,7 +415,8 @@ pub async fn run(ctx: &Context, args: &GenArgs) -> Result<(), CliError> {
             counts: p.counts(),
             covered_flows: p.coverage.covered,
             uncovered_flows: p.coverage.uncovered,
-            uncovered_by: p.coverage,
+            uncovered_by: p.coverage.into(),
+            blocker,
         },
     };
     let mut meta = fetched.meta(ctx);

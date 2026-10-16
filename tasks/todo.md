@@ -330,3 +330,4 @@ Spec: docs/superpowers/specs/2026-10-11-traffic-views-design.md · Plan: docs/su
 - No deviation from the plan's code was needed.
 - The read-only demo100 smoke (Task 8 Step 3) was not run in this session: the implementer was told not to contact any PCE or read any .env file. It is left for the integrator (`gen <app> --window 24h --json`, then with `--granularity role-ports --outbound`).
 - Nothing was written to any PCE.
+- Fix wave (review M1, M2, S1-S5, N3, N5, N6, plus merging rules across one side): disabled rulesets are no target; wider rulesets get explicit scope labels; template names every scope key, name clashes give no target; ICMPv6 and portless tcp/udp are unsupported unless expressible; no_target and override_deny coverage reasons; exact one-side merging. Gate green, 1299 tests. Spec amended ("Amendments after the part-1 review").

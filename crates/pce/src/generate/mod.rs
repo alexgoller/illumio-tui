@@ -15,7 +15,7 @@ pub use rows::{MANY_SERVICES, MAX_IP_ROWS, excluded, ip_list_name, is_any_ip_lis
 pub use services::{Expr, express, flow_spec, fold_ports};
 pub use target::{
     Covering, DEFAULT_RULESET_NAME, RulesetChoice, check_ruleset_name, default_ruleset_name,
-    keys_refusal, pick_ruleset, render_ruleset_name, rulesets_covering,
+    keys_refusal, narrow, pick_ruleset, render_ruleset_name, rulesets_covering,
 };
 
 use crate::models::PolicyDecision;
@@ -181,6 +181,8 @@ impl RowFlag {
             }
             RowFlag::NoScopeLabels => "no scope labels: no ruleset to write into".into(),
             RowFlag::NoRole { flows } => format!("{flows} flows without role: app-level for those"),
+            RowFlag::UnsupportedProto(6) => "tcp without a port: not proposed".into(),
+            RowFlag::UnsupportedProto(17) => "udp without a port: not proposed".into(),
             RowFlag::UnsupportedProto(p) => format!("proto {p} needs a service object"),
             RowFlag::ManyServices(n) => format!("{n} services: consider app·all or role·all"),
             RowFlag::Ephemeral => "ephemeral port?".into(),
@@ -464,6 +466,12 @@ pub struct GenRule {
     pub rows: Vec<usize>,
     pub action: RuleAction,
     pub description: String,
+    /// The flow records behind it.
+    pub flows: u64,
+    /// Those an override deny rule of the target ruleset blocks whatever
+    /// this rule allows (`propose` finds them), and those deny rules.
+    pub denied_flows: u64,
+    pub denied_by: Vec<String>,
 }
 
 impl GenRule {
@@ -512,6 +520,10 @@ pub struct Coverage {
     pub folded_ips: u64,
     pub unsupported_proto: u64,
     pub broadcast_multicast: u64,
+    /// Behind a rule whose ruleset is ambiguous or cannot be named.
+    pub no_target: u64,
+    /// Behind a rule, but an override deny rule blocks them anyway.
+    pub override_deny: u64,
 }
 
 /// How many rules there are and what the batch does with them.
@@ -607,16 +619,105 @@ impl Proposal {
         template: &str,
         picked: Option<&str>,
     ) {
-        self.targets = self
-            .scopes
-            .iter()
-            .enumerate()
-            .map(|(i, s)| target::resolve(s, drafts, idx, template, picked.filter(|_| i == 0)))
-            .collect();
+        self.targets = Vec::with_capacity(self.scopes.len());
+        for (i, s) in self.scopes.iter().enumerate() {
+            let mut t = target::resolve(s, drafts, idx, template, picked.filter(|_| i == 0));
+            // Two new rulesets of one name: the batch would create one.
+            if let Target::Create(d) = &t
+                && self
+                    .targets
+                    .iter()
+                    .any(|o| matches!(o, Target::Create(e) if e.name.eq_ignore_ascii_case(&d.name)))
+            {
+                t = Target::None(format!(
+                    "{} would get the name {} of another new ruleset",
+                    s.text(),
+                    d.name
+                ));
+            }
+            self.targets.push(t);
+        }
         for r in &mut self.rules {
-            r.action = dedupe::classify(r, &self.targets[r.target], drafts, idx);
+            let (scope, t) = (&self.scopes[r.target], &self.targets[r.target]);
+            if !target::narrow(scope, t, drafts) {
+                pin_to_scope(&mut r.providers, scope, idx);
+                if !r.unscoped_consumers {
+                    pin_to_scope(&mut r.consumers, scope, idx);
+                }
+            }
+            if !matches!(t, Target::Existing { .. }) {
+                r.denied_flows = 0;
+                r.denied_by.clear();
+            }
+            r.action = dedupe::classify(r, t, drafts, idx);
+        }
+        self.recount();
+    }
+
+    /// `covered`, `no_target`, `override_deny` and `uncovered` from the
+    /// rules; the other reasons stay as `propose` counted them.
+    pub(crate) fn recount(&mut self) {
+        let c = &mut self.coverage;
+        (c.covered, c.no_target, c.override_deny) = (0, 0, 0);
+        for r in &self.rules {
+            match self.targets.get(r.target) {
+                Some(Target::Existing { .. } | Target::Create(_)) => {
+                    c.covered += r.flows - r.denied_flows.min(r.flows);
+                    c.override_deny += r.denied_flows.min(r.flows);
+                }
+                _ => c.no_target += r.flows,
+            }
+        }
+        c.uncovered = c.unchecked
+            + c.folded_ips
+            + c.unsupported_proto
+            + c.broadcast_multicast
+            + c.no_target
+            + c.override_deny;
+    }
+}
+
+/// An in-scope side of a rule whose ruleset is scoped wider than the
+/// target scope (fewer keys, a label group, a second scope): `ams` and a
+/// bare role there would reach every workload of that wider scope, so the
+/// side names the scope's labels itself (`ams` → `app=shop, env=prod`,
+/// `role=db` → `app=shop, env=prod, role=db`). Sides with other actors,
+/// or already naming a scope key, stay.
+fn pin_to_scope(side: &mut Vec<GenActor>, scope: &TargetScope, idx: &NameIndex) {
+    let scope_keys: BTreeSet<&str> = scope.labels.iter().map(|l| l.key.as_str()).collect();
+    let mut kept = Vec::new();
+    for a in side.iter() {
+        let GenActor::Ref(r) = a else {
+            return;
+        };
+        if r.exclusion {
+            return;
+        }
+        match r.kind {
+            ActorKind::All => {}
+            ActorKind::Label => {
+                let key = r
+                    .href
+                    .as_deref()
+                    .and_then(|h| idx.label(h))
+                    .map(|l| l.key.as_str());
+                match key {
+                    Some(k) if !scope_keys.contains(k) => kept.push(a.clone()),
+                    _ => return,
+                }
+            }
+            _ => return,
         }
     }
+    if side.is_empty() || scope.labels.is_empty() {
+        return;
+    }
+    *side = scope
+        .labels
+        .iter()
+        .map(|l| GenActor::label(&l.href))
+        .chain(kept)
+        .collect();
 }
 
 #[cfg(test)]
@@ -663,6 +764,9 @@ mod tests {
             rows: vec![0],
             action,
             description: String::new(),
+            flows: 1,
+            denied_flows: 0,
+            denied_by: Vec::new(),
         }
     }
 
@@ -742,6 +846,41 @@ mod tests {
         };
         assert_eq!(p.blocker(), None, "nothing to write there");
         assert!(!p.writes());
+    }
+
+    #[test]
+    fn two_new_rulesets_of_one_name_leave_the_second_without_a_target() {
+        let scope = |app: &str, env: &str, n: u32| TargetScope {
+            values: vec![app.into(), env.into()],
+            labels: vec![
+                ResolvedLabel {
+                    href: format!("/orgs/5/labels/{n}"),
+                    key: "app".into(),
+                    value: app.into(),
+                },
+                ResolvedLabel {
+                    href: format!("/orgs/5/labels/{}", n + 1),
+                    key: "env".into(),
+                    value: env.into(),
+                },
+            ],
+        };
+        let mut p = Proposal {
+            scopes: vec![scope("ab", "c", 50), scope("a", "bc", 60)],
+            targets: Vec::new(),
+            ip_lists: Vec::new(),
+            rules: vec![rule(1, RuleAction::Create)],
+            coverage: Coverage::default(),
+        };
+        let idx = NameIndex::new(&[], &[], &[], &[]);
+        p.refresh(&[], &idx, "RF-{app}{env}", None);
+        assert_eq!(p.targets[0].name(), "RF-abc");
+        assert_eq!(
+            p.targets[1],
+            Target::None("a/bc would get the name RF-abc of another new ruleset".into())
+        );
+        assert_eq!(p.coverage.no_target, 1);
+        assert!(p.blocker().is_some());
     }
 
     #[test]

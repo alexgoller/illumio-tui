@@ -253,7 +253,7 @@ pub async fn run(ctx: &Context, args: &AppArgs) -> Result<(), CliError> {
         return Ok(()); // a dry run; `app` has none, kept for completeness
     };
     let focus = focus.focus;
-    let idx = ctx.pce.name_index(ctx.cache_mode).await?;
+    let idx = fetched.index.clone();
     let hrefs = label_hrefs(&focus.label_matches(&idx).map_err(CliError::Args)?);
     let wl = ctx
         .pce

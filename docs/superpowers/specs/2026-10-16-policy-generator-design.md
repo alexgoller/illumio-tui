@@ -522,3 +522,13 @@ Three GitHub issues, each with its own worktree, review and merge:
 1. **Already-allowed rows stay checked** by default, so the app's ruleset spells out its own traffic.
 2. **New ruleset name is a profile setting**: `[profiles.<name>.generator] ruleset_name`, default `"RF-{app}-{env}"` (see Planning).
 3. **One IP list per IP peer**, named `<app>-<env> peer <ip>`, as specified.
+
+## Amendments after the part-1 review (2026-10-16)
+
+These change the behaviour described above. Where they conflict, they win.
+
+- **Targets.** A disabled ruleset is never a target, because it enforces nothing. A ruleset to create whose name a draft ruleset already has gets no target, and the target says why. Two new rulesets with one name: the second gets no target. `generator.ruleset_name` must name every scope key.
+- **Wider rulesets.** Sometimes the picked ruleset is scoped wider than the app: fewer keys, a label group, or a second scope. In that case the in-scope side names the scope labels: `A` instead of `ams`, and `A + role` instead of a bare role. The same goes for `P` in a peer's ruleset.
+- **Merging (extends 2).** Two rules to create in one ruleset can merge when they have the same services and flag, the same actors on one side, and other sides whose union means exactly both. That means the label parts agree on every key but one, or one side has no labels; IP lists and workloads OR with labels. The merged rule takes that union, for example providers `role=web, role=db`. Rules that exist, or that only gain services, stay apart. When dedupe compares sides, every label of a key must be allowed.
+- **Services (amends 3).** icmp/icmpv6 use the ICMP object only when it holds that protocol untyped. Otherwise they use the one object of exactly that protocol, or count as unsupported. A tcp/udp flow without a port is unsupported, never "every port".
+- **Coverage (amends 5).** There are two more reasons. `no_target`: the rule's ruleset is ambiguous or cannot be named. `override_deny`: an enabled override deny rule of the target ruleset matches the flow by its endpoints and service. The CLI's `preview.uncovered_by` holds the reasons only, and `preview.blocker` says why rules cannot be written as shown.
