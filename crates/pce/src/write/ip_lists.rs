@@ -178,17 +178,30 @@ impl Writer<'_> {
         if_missing: IfMissing,
     ) -> Result<Plan, WriteError> {
         draft.validate().map_err(WriteError::Invalid)?;
-        if if_missing == IfMissing::SkipExisting {
-            let lists = self.pce().ip_lists(self.bypass()).await?.value;
-            if let Some(existing) = lists
-                .iter()
-                .find(|l| l.update_type.as_deref() != Some("delete") && l.name == draft.name.trim())
-            {
-                return Ok(Plan::Noop {
-                    existing_href: existing.href.clone(),
-                    reason: format!("ip_list {} exists", draft.name.trim()),
-                });
-            }
+        if if_missing == IfMissing::Create {
+            return self.ip_list_create(draft, None);
+        }
+        let lists = self.pce().ip_lists(self.bypass()).await?.value;
+        self.ip_list_create(draft, Some(&lists))
+    }
+
+    /// The create plan; with `existing` (a fresh read), a live list of
+    /// exactly that name is a `Noop` with its href. No request.
+    pub(crate) fn ip_list_create(
+        &self,
+        draft: &IpListDraft,
+        existing: Option<&[IpList]>,
+    ) -> Result<Plan, WriteError> {
+        draft.validate().map_err(WriteError::Invalid)?;
+        if let Some(found) = existing
+            .into_iter()
+            .flatten()
+            .find(|l| l.update_type.as_deref() != Some("delete") && l.name == draft.name.trim())
+        {
+            return Ok(Plan::Noop {
+                existing_href: found.href.clone(),
+                reason: format!("ip_list {} exists", draft.name.trim()),
+            });
         }
         Ok(Plan::Send {
             request: WriteRequest {

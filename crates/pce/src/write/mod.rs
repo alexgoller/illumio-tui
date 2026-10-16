@@ -25,6 +25,7 @@ use serde_json::Value;
 
 pub use actors::{ActorKind, ActorRef, ServiceRef};
 pub use audit::{AuditEntry, AuditSink, JsonlAudit, MemoryAudit, NullAudit};
+pub use batch::{Batch, BatchInput, BatchStep, StepResult, step_placeholder};
 pub use guard::{WriteContext, WriteGuard, WriteRefused};
 pub use ip_lists::{IpListDraft, IpListPatch};
 pub use labels::LabelDraft;

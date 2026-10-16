@@ -142,19 +142,33 @@ impl Writer<'_> {
         if_missing: IfMissing,
     ) -> Result<Plan, WriteError> {
         draft.validate().map_err(WriteError::Invalid)?;
+        if if_missing == IfMissing::Create {
+            return self.rule_set_create(draft, None);
+        }
+        let sets = self
+            .pce()
+            .rule_sets(PolicyScope::Draft, self.bypass())
+            .await?;
+        if sets.truncated {
+            return Err(WriteError::invalid(
+                "too many rulesets to check --if-missing; create without it",
+            ));
+        }
+        self.rule_set_create(draft, Some(&sets.value))
+    }
+
+    /// The create plan; with `existing` (a fresh read), a live ruleset of
+    /// the same name (any case) is a `Noop` with its href, several are an
+    /// error. No request.
+    pub(crate) fn rule_set_create(
+        &self,
+        draft: &RuleSetDraft,
+        existing: Option<&[RuleSet]>,
+    ) -> Result<Plan, WriteError> {
+        draft.validate().map_err(WriteError::Invalid)?;
         let name = draft.name.trim();
-        if if_missing == IfMissing::SkipExisting {
-            let sets = self
-                .pce()
-                .rule_sets(PolicyScope::Draft, self.bypass())
-                .await?;
-            if sets.truncated {
-                return Err(WriteError::invalid(
-                    "too many rulesets to check --if-missing; create without it",
-                ));
-            }
+        if let Some(sets) = existing {
             let hits: Vec<&RuleSet> = sets
-                .value
                 .iter()
                 .filter(|rs| {
                     rs.update_type.as_deref() != Some("delete")
