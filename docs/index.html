@@ -64,8 +64,24 @@
 
 <section class="panel" id="install" aria-labelledby="install-h">
   <h2 id="install-h"><span class="key">1</span>Install</h2>
-  <p class="lede">One binary. Download it, check it, put it on your PATH.</p>
-  <p>Every <a href="https://github.com/alexgoller/illumio-tui/releases">GitHub Release</a> carries one archive per platform and a <code>SHA256SUMS</code> file. The current release is <a href="https://github.com/alexgoller/illumio-tui/releases/tag/v0.2.0">v0.2.0</a>.</p>
+  <p class="lede">One binary. Install it with Homebrew, apt or dnf, or download it, check it, put it on your PATH.</p>
+
+  <h3>Homebrew (macOS, Linux)</h3>
+  <p>The repository is its own tap:</p>
+<pre><code><span class="p">$ </span>brew tap alexgoller/illumio-tui https://github.com/alexgoller/illumio-tui
+<span class="p">$ </span>brew install illumio-tui</code></pre>
+
+  <h3>Debian, Ubuntu</h3>
+  <p>Download the <code>.deb</code> (<code>amd64</code> or <code>arm64</code>) from the <a href="https://github.com/alexgoller/illumio-tui/releases">release page</a>:</p>
+<pre><code><span class="p">$ </span>sudo apt install ./illumio-tui_0.2.0-1_amd64.deb</code></pre>
+
+  <h3>RHEL, Rocky, Alma, Fedora</h3>
+  <p>Download the <code>.rpm</code> (<code>x86_64</code> or <code>aarch64</code>) from the release page:</p>
+<pre><code><span class="p">$ </span>sudo dnf install ./illumio-tui-0.2.0-1.x86_64.rpm</code></pre>
+  <p>Both packages put <code>illumio-tui</code> in <code>/usr/bin</code> with no dependencies, and are install-tested on Debian 12, Ubuntu 22.04, Rocky Linux 9 and AlmaLinux 8 before each release.</p>
+
+  <h3>Release archives</h3>
+  <p>Every <a href="https://github.com/alexgoller/illumio-tui/releases">GitHub Release</a> carries one archive per platform, the <code>.deb</code>/<code>.rpm</code> packages and a <code>SHA256SUMS</code> file covering all of them. The current release is <a href="https://github.com/alexgoller/illumio-tui/releases/tag/v0.2.0">v0.2.0</a>.</p>
 
   <div class="table-scroll">
     <table>

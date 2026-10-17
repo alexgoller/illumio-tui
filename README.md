@@ -14,15 +14,46 @@ Screenshots and a short recording: https://alexgoller.github.io/illumio-tui/#scr
 
 ## Install
 
+### Homebrew (macOS, Linux)
+
+This repository is its own Homebrew tap:
+
+    brew tap alexgoller/illumio-tui https://github.com/alexgoller/illumio-tui
+    brew install illumio-tui
+
+`brew upgrade illumio-tui` picks up new releases. The formula installs the
+prebuilt binaries from the GitHub Release (static musl build on Linux x86_64).
+
+### Debian, Ubuntu
+
+Download the `.deb` for your architecture (`amd64` or `arm64`) from the
+[release page](https://github.com/alexgoller/illumio-tui/releases), then:
+
+    sudo apt install ./illumio-tui_0.2.0-1_amd64.deb
+
+### RHEL, Rocky, Alma, Fedora
+
+Download the `.rpm` (`x86_64` or `aarch64`) from the release page, then:
+
+    sudo dnf install ./illumio-tui-0.2.0-1.x86_64.rpm
+
+Both packages install `/usr/bin/illumio-tui` with no dependencies (the x86_64
+binary is static, the arm64 one needs glibc 2.18 or newer) and are tested on
+Debian 12, Ubuntu 22.04, Rocky Linux 9 and AlmaLinux 8 before each release.
+Their sha256 is in the release's `SHA256SUMS`.
+
+### From source
+
 From a clone of this repository (Rust 1.88 or newer):
 
     cargo install --path crates/illumio-tui
 
-### Releases
+### Release archives
 
 Prebuilt binaries are attached to each
 [GitHub Release](https://github.com/alexgoller/illumio-tui/releases), one
-archive per platform plus a `SHA256SUMS` file:
+archive per platform, the `.deb`/`.rpm` packages, and a `SHA256SUMS` file
+covering all of them:
 
 | Platform | Archive |
 |---|---|
@@ -53,9 +84,17 @@ the hash with `Get-FileHash illumio-tui-<version>-x86_64-pc-windows-msvc.zip`
    `cargo check` so `Cargo.lock` follows.
 2. Commit, then tag and push: `git tag v0.2.0 && git push --tags`.
 
-The `Release` workflow builds all targets and publishes the release with
-generated notes; it fails if the tag does not match the Cargo version. Run it
-manually (`workflow_dispatch`) for a dry run that only uploads artifacts.
+The `Release` workflow builds all targets, builds the `.deb`/`.rpm` packages
+(nfpm, `packaging/nfpm.yaml`) and install-tests them in Debian, Ubuntu, Rocky
+and Alma containers, then publishes the release with generated notes; it fails
+if the tag does not match the Cargo version. Afterwards it renders
+`Formula/illumio-tui.rb` from `packaging/homebrew/illumio-tui.rb.tmpl` with
+the new sha256s and commits it to `main` as `brew: illumio-tui <version>`
+(with the workflow's own `GITHUB_TOKEN`; no secret to set up, pre-release
+tags such as `v1.2.3-rc1` are skipped). Pull before your next commit. Edit
+the template, not the formula. Run the workflow manually
+(`workflow_dispatch`) for a dry run that builds and tests everything and only
+uploads artifacts.
 
 ## Configure
 
