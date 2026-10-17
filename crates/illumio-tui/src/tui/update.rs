@@ -1630,6 +1630,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     } => start_draft(model, filter, focus, hrefs),
                     PendingAction::ReloadApp => app_reload(model),
                     PendingAction::GenRequery(f, focus) => generator::gen_requery(model, f, focus),
+                    PendingAction::DeleteMark(id) => marks::delete_mark(model, &id),
                 }
             }
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
@@ -1640,6 +1641,9 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 }
                 if matches!(action, PendingAction::GenRequery(..)) {
                     model.overlay = Overlay::Generator;
+                }
+                if matches!(action, PendingAction::DeleteMark(_)) {
+                    model.overlay = Overlay::Marks;
                 }
                 Vec::new()
             }
@@ -1758,6 +1762,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             Vec::new()
         }
         Overlay::MarkForm(mf) => marks::form_key(model, *mf, k),
+        Overlay::Marks => marks::overlay_key(model, k),
         Overlay::Form(mut form)
             if k.modifiers.contains(KeyModifiers::CONTROL)
                 && matches!(k.code, KeyCode::Char('n' | 'p')) =>
@@ -5203,6 +5208,7 @@ pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
             open_help(model);
             Vec::new()
         }
+        Command::Marks(action) => marks::open_marks(model, action.as_deref()),
         Command::Filter(expr) => {
             let mut f = model.traffic.filter.clone();
             f.src = expr;

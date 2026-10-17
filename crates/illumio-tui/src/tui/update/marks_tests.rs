@@ -406,6 +406,156 @@ fn a_failed_write_keeps_the_form_open_with_the_error() {
     );
 }
 
+fn view(m: &Model) -> &crate::tui::marks_view::MarksView {
+    m.marks_view.as_ref().expect("the marks overlay's state")
+}
+
+fn command(m: &mut Model, text: &str) {
+    quiet(m, key(':'));
+    typed(m, text);
+    quiet(m, kc(KeyCode::Enter));
+}
+
+#[test]
+fn colon_marks_lists_every_mark_with_its_hits_and_filters_by_action() {
+    let (mut m, _dir) = marked_model(RICH_MARKS);
+    command(&mut m, "marks");
+    assert_eq!(m.overlay, Overlay::Marks);
+    let v = view(&m);
+    assert_eq!(v.title(), "Marks · 6 active · 0 expired · marks.toml");
+    let rows: Vec<(String, String)> = v
+        .table
+        .rows()
+        .iter()
+        .map(|r| (r.mark.id.clone(), r.hits.clone()))
+        .collect();
+    assert_eq!(
+        rows,
+        vec![
+            ("m-sq1".to_string(), "5 · 1 to stronger".to_string()),
+            ("m-sq2".into(), "6 · 1 to stronger".into()),
+            ("m-crit".into(), "2".into()),
+            ("m-rev".into(), "2".into()),
+            ("m-acc".into(), "2".into()),
+            ("m-hr".into(), "4".into()),
+        ]
+    );
+    // Below 120 columns the match keeps its room: hits narrow to `5 ↑1`.
+    let out = crate::tui::test_support::render_to_string(&m, 80, 24);
+    assert!(
+        out.contains("ipl:Corp → any") && out.contains("5 ↑1"),
+        "{out}"
+    );
+    quiet(&mut m, kc(KeyCode::Esc));
+    assert_eq!(m.overlay, Overlay::None);
+    command(&mut m, "marks revisit");
+    assert_eq!(view(&m).table.rows().len(), 1);
+    assert_eq!(view(&m).meta(), "revisit only · :marks shows all");
+    quiet(&mut m, kc(KeyCode::Esc));
+    command(&mut m, "marks bogus");
+    assert_eq!(
+        m.status.text,
+        "unknown action: critical important revisit accept-blocked reviewed squelch"
+    );
+    assert_eq!(m.overlay, Overlay::None);
+}
+
+#[test]
+fn enter_edits_a_mark_in_place_and_returns_to_the_overlay() {
+    let (mut m, dir) = marked_model(RICH_MARKS);
+    command(&mut m, "marks");
+    quiet(&mut m, key('j'));
+    quiet(&mut m, kc(KeyCode::Enter));
+    assert_eq!(form(&m).form.title, "Edit mark m-sq2");
+    assert_eq!(form(&m).form.value("Comment"), "app tier to its db");
+    quiet(&mut m, ctrl('u'));
+    typed(&mut m, "app tier, confirmed");
+    quiet(&mut m, kc(KeyCode::Enter));
+    assert_eq!(m.overlay, Overlay::Marks, "back to the list");
+    let text = std::fs::read_to_string(dir.path().join("marks.toml")).unwrap();
+    assert!(text.contains("id = \"m-sq2\""), "{text}");
+    assert!(text.contains("comment = \"app tier, confirmed\""), "{text}");
+    assert_eq!(view(&m).table.rows()[1].mark.comment, "app tier, confirmed");
+}
+
+#[test]
+fn x_and_y_delete_a_mark_and_n_keeps_it() {
+    let (mut m, dir) = marked_model(RICH_MARKS);
+    command(&mut m, "marks");
+    quiet(&mut m, key('x'));
+    assert!(
+        matches!(&m.overlay, Overlay::Confirm { reason, .. } if reason == "delete m-sq1 (squelch, 5 flows)? y/n"),
+        "{:?}",
+        m.overlay
+    );
+    quiet(&mut m, key('n'));
+    assert_eq!(m.overlay, Overlay::Marks);
+    assert_eq!(view(&m).table.rows().len(), 6);
+    quiet(&mut m, key('x'));
+    quiet(&mut m, key('y'));
+    assert_eq!(m.overlay, Overlay::Marks);
+    assert_eq!(m.status.text, "mark m-sq1 deleted");
+    assert_eq!(view(&m).table.rows().len(), 5);
+    let text = std::fs::read_to_string(dir.path().join("marks.toml")).unwrap();
+    assert!(!text.contains("m-sq1"), "{text}");
+    assert_eq!(
+        m.traffic.marked.as_ref().unwrap().flows.flows,
+        5,
+        "Corp's flows are back in the views"
+    );
+}
+
+#[test]
+fn e_extends_by_thirty_days_asking_why_again_and_never_marks_stay() {
+    let soon = (jiff::Timestamp::now() + jiff::SignedDuration::from_hours(48)).to_string();
+    let text = format!(
+        "[[mark]]\nid = \"m-soon01\"\naction = \"squelch\"\nsrc = {{ ip_list = \"Corp\" }}\ndst = \"any\"\nexpires = \"{soon}\"\ncomment = \"scanner\"\n\n[[mark]]\nid = \"m-never1\"\naction = \"critical\"\nsrc = \"any\"\ndst = \"any\"\ncomment = \"all of it\"\n"
+    );
+    let (mut m, _dir) = marked_model(&text);
+    command(&mut m, "marks");
+    let crit = view(&m)
+        .table
+        .rows()
+        .iter()
+        .position(|r| r.mark.id == "m-never1")
+        .unwrap();
+    for _ in 0..crit {
+        quiet(&mut m, key('j'));
+    }
+    quiet(&mut m, key('e'));
+    assert_eq!(m.status.text, "m-never1 never expires: nothing to extend");
+    quiet(&mut m, key('k'));
+    let soon_row = view(&m).selected().unwrap().mark.clone();
+    assert_eq!(soon_row.id, "m-soon01");
+    quiet(&mut m, key('e'));
+    assert_eq!(form(&m).form.fields.len(), 1, "only why");
+    assert_eq!(form(&m).comment(), "scanner");
+    quiet(&mut m, ctrl('u'));
+    typed(&mut m, "scanner still runs");
+    quiet(&mut m, kc(KeyCode::Enter));
+    assert_eq!(m.overlay, Overlay::Marks);
+    assert_eq!(m.status.text, "mark m-soon01 extended by 30 days");
+    let after = m.traffic.marks.set().unwrap().marks[0].clone();
+    assert_eq!(
+        after.expires,
+        soon_row
+            .expires
+            .map(|e| e + jiff::SignedDuration::from_hours(24 * 30))
+    );
+    assert_eq!(after.comment, "scanner still runs");
+}
+
+#[test]
+fn an_invalid_file_shows_its_problems_where_m_and_marks_open() {
+    use crate::tui::test_support::render_to_string;
+    let (mut m, _dir) = marked_model("[[mark]]\naction = \"squelch\"\nsrc = \"any\"\n");
+    quiet(&mut m, key('m'));
+    assert_eq!(m.overlay, Overlay::Marks, "the problems, not the form");
+    let out = render_to_string(&m, 100, 24);
+    assert!(out.contains("Marks · marks.toml invalid"), "{out}");
+    assert!(out.contains("mark 1: dst is required"), "{out}");
+}
+
 #[test]
 fn the_app_overlay_and_the_generator_pick_up_an_edited_marks_file() {
     use crate::tui::commands::Command;
@@ -508,4 +658,27 @@ fn the_app_overlay_judges_only_the_apps_flows() {
     assert!(v.marks_on);
     assert_eq!(v.squelched, [Default::default(); 2]);
     assert_eq!(v.panel_title(AppPanel::Inbound), "Inbound");
+}
+
+#[test]
+fn colon_marks_works_without_traffic_loaded() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("marks.toml");
+    std::fs::write(&path, RICH_MARKS).unwrap();
+    let mut m = crate::tui::test_support::model_fixture();
+    m.traffic.marks = crate::marks::MarksStore::new(path);
+    assert!(m.traffic.data.is_none());
+    command(&mut m, "marks");
+    assert_eq!(m.overlay, Overlay::Marks);
+    assert_eq!(view(&m).table.rows().len(), 6);
+    assert_eq!(view(&m).table.rows()[0].hits, "0");
+    // Enter edits with the preview saying it matches nothing loaded.
+    quiet(&mut m, kc(KeyCode::Enter));
+    assert_eq!(form(&m).preview, vec!["matches nothing in this result"]);
+    quiet(&mut m, kc(KeyCode::Esc));
+    assert_eq!(m.overlay, Overlay::Marks);
+    // `m` without traffic says why, and opens nothing.
+    quiet(&mut m, kc(KeyCode::Esc));
+    quiet(&mut m, key('m'));
+    assert_eq!(m.overlay, Overlay::None);
 }

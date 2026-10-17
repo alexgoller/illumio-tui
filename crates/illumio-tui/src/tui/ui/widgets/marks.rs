@@ -82,3 +82,50 @@ pub fn render_mark_form(model: &Model, mf: &MarkForm, f: &mut Frame, area: Rect)
     });
     f.render_widget(Paragraph::new(lines).block(block).style(t.base()), r);
 }
+
+/// The `:marks` overlay over the screen body: the marks table (inactive
+/// rows greyed) and the keys, or the problems of an invalid file.
+pub fn render_marks(model: &Model, f: &mut Frame, area: Rect) {
+    let Some(v) = &model.marks_view else {
+        return;
+    };
+    let t = &model.theme;
+    let body = crate::tui::ui::layout::chrome(area).map_or(area, |c| c.body);
+    f.render_widget(Clear, body);
+    let title = v.title();
+    let meta = v.meta();
+    if let Some(problems) = &v.problems {
+        let block = panel(&title, "Esc back", t, true).style(t.base());
+        let mut lines = vec![Line::from(Span::styled(
+            "marks.toml is invalid: marks are off until it is fixed by hand",
+            Style::new().fg(t.warn),
+        ))];
+        lines.extend(
+            problems
+                .iter()
+                .map(|p| Line::from(Span::styled(p.clone(), Style::new().fg(t.bad)))),
+        );
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(v.path.clone(), t.dim_style())));
+        f.render_widget(Paragraph::new(lines).block(block), body);
+        return;
+    }
+    let rows = ratatui::layout::Layout::vertical([
+        ratatui::layout::Constraint::Min(3),
+        ratatui::layout::Constraint::Length(1),
+    ])
+    .split(body);
+    let block = panel(&title, &meta, t, true).style(t.base());
+    let dim = t.dim_style();
+    let base = t.base();
+    crate::tui::ui::widgets::table::render(f, rows[0], &v.table, t, block, &move |r| {
+        if r.active { base } else { dim }
+    });
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            " Enter edit · x delete · e +30d · / search · Esc back",
+            dim,
+        ))),
+        rows[1],
+    );
+}

@@ -25,9 +25,9 @@ use std::collections::BTreeMap;
 /// Never a request.
 pub(super) fn mark_key(model: &mut Model) -> Vec<Cmd> {
     let t = &model.traffic;
+    // An invalid file: its problems instead of the form.
     if t.marks.error().is_some() {
-        model.status = StatusLine::warn("marks.toml invalid: :marks shows the problems");
-        return Vec::new();
+        return open_marks(model, None);
     }
     if t.data.is_none() {
         model.status = StatusLine::info("no traffic loaded: r runs the query");
@@ -72,8 +72,7 @@ pub(super) fn mark_app_key(model: &mut Model) -> Vec<Cmd> {
         return Vec::new();
     }
     if model.traffic.marks.error().is_some() {
-        model.status = StatusLine::warn("marks.toml invalid: :marks shows the problems");
-        return Vec::new();
+        return open_marks(model, None);
     }
     let Some((dir, p)) = v.selected_peer() else {
         model.status = StatusLine::info("no row to mark");
@@ -375,12 +374,120 @@ fn open_form(model: &mut Model, mut mf: MarkForm) {
     model.overlay = Overlay::MarkForm(Box::new(mf));
 }
 
-/// Back where the form came from.
+/// Back where the form came from: the `:marks` overlay rebuilt.
 fn close(model: &mut Model, origin: MarkOrigin) {
     model.overlay = match origin {
         MarkOrigin::App if model.app_view.is_some() => Overlay::App,
+        MarkOrigin::Marks if model.marks_view.is_some() => {
+            rebuild_view(model);
+            Overlay::Marks
+        }
         _ => Overlay::None,
     };
+}
+
+fn rebuild_view(model: &mut Model) {
+    if let Some(v) = model.marks_view.as_mut() {
+        v.rebuild(&model.traffic, jiff::Timestamp::now());
+    }
+}
+
+/// `:marks [action]`: every mark (one action's), or the problems of an
+/// invalid file. The file is looked at first (one `stat`). No request.
+pub(super) fn open_marks(model: &mut Model, action: Option<&str>) -> Vec<Cmd> {
+    let filter = match action {
+        None => None,
+        Some(a) => match Action::parse(a) {
+            Some(a) => Some(a),
+            None => {
+                model.status = StatusLine::error(format!("unknown action: {}", Action::names()));
+                return Vec::new();
+            }
+        },
+    };
+    // The file as it is now (one `stat`; the views rebuilt if it changed).
+    model.traffic.sync_marks();
+    let mut v = crate::tui::marks_view::MarksView::new(filter);
+    v.rebuild(&model.traffic, jiff::Timestamp::now());
+    model.marks_view = Some(v);
+    model.overlay = Overlay::Marks;
+    Vec::new()
+}
+
+/// The overlay's keys: `j`/`k` (and the table's keys, `/`, `s`), `Enter`
+/// edits, `x` asks to delete, `e` extends by 30 days (asking why again),
+/// `Esc`/`q` back. Every change is one operation on `marks.toml`.
+pub(super) fn overlay_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
+    let page = super::traffic_page(model);
+    let Some(v) = model.marks_view.as_mut() else {
+        model.overlay = Overlay::None;
+        return Vec::new();
+    };
+    if v.table.is_searching() {
+        super::search_key(&mut v.table, k);
+        v.table.ensure_visible(page);
+        return Vec::new();
+    }
+    let host = model.profile.host.clone();
+    match k.code {
+        KeyCode::Esc | KeyCode::Char('q') => model.overlay = Overlay::None,
+        KeyCode::Enter => {
+            if let Some(r) = v.selected() {
+                let mf = MarkForm::edit(&r.mark, &host, false);
+                open_form(model, mf);
+            }
+        }
+        KeyCode::Char('x') => {
+            if let Some(r) = v.selected() {
+                model.overlay = Overlay::Confirm {
+                    reason: format!(
+                        "delete {} ({}, {})? y/n",
+                        r.mark.id,
+                        r.mark.action.as_str(),
+                        plural(r.hit_count as usize, "flow", "flows")
+                    ),
+                    action: crate::tui::model::PendingAction::DeleteMark(r.mark.id.clone()),
+                };
+            }
+        }
+        KeyCode::Char('e') => match v.selected() {
+            Some(r) if r.mark.expires.is_none() => {
+                model.status =
+                    StatusLine::info(format!("{} never expires: nothing to extend", r.mark.id));
+            }
+            Some(r) => {
+                let mf = MarkForm::edit(&r.mark, &host, true);
+                open_form(model, mf);
+            }
+            None => {}
+        },
+        _ => {
+            super::table_key(&mut v.table, k, page);
+            v.table.ensure_visible(page);
+        }
+    }
+    Vec::new()
+}
+
+/// `y` on `delete m-…?`: the mark leaves the file (lock, reload, write),
+/// the views rebuild, the overlay comes back. A local file only.
+pub(super) fn delete_mark(model: &mut Model, id: &str) -> Vec<Cmd> {
+    let now = jiff::Timestamp::now();
+    model.status = match model
+        .traffic
+        .marks
+        .apply(MarkOp::Delete(vec![id.to_string()]), now)
+    {
+        Ok(_) => {
+            model.traffic.rebuild_views();
+            super::rebuild_app_traffic(model);
+            StatusLine::info(format!("mark {id} deleted"))
+        }
+        Err(e) => StatusLine::error(e.to_string()),
+    };
+    rebuild_view(model);
+    model.overlay = Overlay::Marks;
+    Vec::new()
 }
 
 /// The form's keys: `Ctrl-N`/`Ctrl-P` complete from the loaded data (no

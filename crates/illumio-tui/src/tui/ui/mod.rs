@@ -49,7 +49,13 @@ pub fn view(model: &Model, f: &mut Frame) {
             widgets::overlay::render_label_key_picker(model, picker, f, area)
         }
         Overlay::FilterEditor(e) => widgets::overlay::render_filter_editor(model, e, f, area),
-        Overlay::Confirm { reason, .. } => widgets::overlay::render_confirm(model, reason, f, area),
+        Overlay::Confirm { reason, action } => {
+            // Deleting a mark: the `:marks` list stays behind the question.
+            if matches!(action, crate::tui::model::PendingAction::DeleteMark(_)) {
+                widgets::marks::render_marks(model, f, area);
+            }
+            widgets::overlay::render_confirm(model, reason, f, area)
+        }
         Overlay::RuleDetail(rule) => widgets::overlay::render_rule_detail(model, rule, f, area),
         Overlay::Pending => widgets::overlay::render_pending(model, f, area),
         Overlay::Error(text) => widgets::overlay::render_error(model, text, f, area),
@@ -62,7 +68,20 @@ pub fn view(model: &Model, f: &mut Frame) {
             widgets::overlay::render_event_detail(model, event, *scroll, *raw, f, area)
         }
         Overlay::Form(form) => widgets::overlay::render_form(model, form, f, area),
-        Overlay::MarkForm(mf) => widgets::marks::render_mark_form(model, mf, f, area),
+        Overlay::MarkForm(mf) => {
+            // The overlay the form came from stays behind it.
+            match mf.ctx.origin {
+                crate::tui::mark_form::MarkOrigin::Marks => {
+                    widgets::marks::render_marks(model, f, area)
+                }
+                crate::tui::mark_form::MarkOrigin::App if model.app_view.is_some() => {
+                    widgets::app_overlay::render_app(model, f, area)
+                }
+                _ => {}
+            }
+            widgets::marks::render_mark_form(model, mf, f, area)
+        }
+        Overlay::Marks => widgets::marks::render_marks(model, f, area),
         Overlay::ConfirmWrite { plan, kind, scroll } => {
             widgets::overlay::render_confirm_write(model, plan, *kind, *scroll, f, area)
         }

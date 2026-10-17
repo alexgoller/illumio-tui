@@ -2167,6 +2167,17 @@ fn mark_form_from_blocked_100x30() {
     );
 }
 
+#[test]
+fn marks_overlay_120x30() {
+    use illumio_tui::tui::commands::Command;
+    use illumio_tui::tui::test_support::{RICH_MARKS, model_with_marks};
+    use illumio_tui::tui::{Msg, update};
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = model_with_marks(dir.path(), RICH_MARKS);
+    update(&mut m, Msg::Command(Command::Marks(None)));
+    insta::assert_snapshot!("marks_overlay_120x30", render_to_string(&m, 120, 30));
+}
+
 /// No terminal size panics the generator: every width from 20 to 130 and a
 /// few heights, in its main states (rows, outbound at a role stop, a fan-in
 /// line off and switched on, the rule list).
@@ -2319,6 +2330,72 @@ fn screens_render_at_every_terminal_size() {
         illumio_tui::tui::model::Overlay::MarkForm(_)
     ));
     models.push(am);
+    // `:marks`: the list, its delete confirm, the extend and edit forms,
+    // an invalid file's problems, and the list with no traffic loaded.
+    for keys in ["", "x", "\n"] {
+        let mut mm = ts::model_with_marks(dir.path(), ts::RICH_MARKS);
+        illumio_tui::tui::update(
+            &mut mm,
+            illumio_tui::tui::msg::Msg::Command(illumio_tui::tui::commands::Command::Marks(None)),
+        );
+        for c in keys.chars() {
+            let code = match c {
+                '\n' => crossterm::event::KeyCode::Enter,
+                c => crossterm::event::KeyCode::Char(c),
+            };
+            illumio_tui::tui::update(
+                &mut mm,
+                illumio_tui::tui::msg::Msg::Key(crossterm::event::KeyEvent::new(
+                    code,
+                    crossterm::event::KeyModifiers::NONE,
+                )),
+            );
+        }
+        assert!(!matches!(
+            mm.overlay,
+            illumio_tui::tui::model::Overlay::None
+        ));
+        models.push(mm);
+    }
+    let bad = tempfile::tempdir().unwrap();
+    let mut inv = ts::model_with_marks(
+        bad.path(),
+        "[[mark]]\naction = \"squelch\"\nsrc = \"any\"\n",
+    );
+    gen_key(&mut inv, 'm');
+    assert!(matches!(
+        inv.overlay,
+        illumio_tui::tui::model::Overlay::Marks
+    ));
+    models.push(inv);
+    // `e` on a mark that expires: the extend form (the comment alone).
+    let mut ext = ts::model_with_marks(
+        bad.path(),
+        "[[mark]]\nid = \"m-soon01\"\naction = \"squelch\"\nsrc = { ip_list = \"Corp\" }\ndst = \"any\"\nexpires = \"2099-01-01T23:59:59Z\"\ncomment = \"scanner\"\n",
+    );
+    illumio_tui::tui::update(
+        &mut ext,
+        illumio_tui::tui::msg::Msg::Command(illumio_tui::tui::commands::Command::Marks(None)),
+    );
+    gen_key(&mut ext, 'e');
+    assert!(
+        matches!(
+            &ext.overlay,
+            illumio_tui::tui::model::Overlay::MarkForm(f) if f.ctx.extend
+        ),
+        "{:?} {:?}",
+        ext.status,
+        ext.traffic.marks.error()
+    );
+    models.push(ext);
+    let mut bare = ts::model_fixture();
+    std::fs::write(bad.path().join("bare.toml"), ts::RICH_MARKS).unwrap();
+    bare.traffic.marks = illumio_tui::marks::MarksStore::new(bad.path().join("bare.toml"));
+    illumio_tui::tui::update(
+        &mut bare,
+        illumio_tui::tui::msg::Msg::Command(illumio_tui::tui::commands::Command::Marks(None)),
+    );
+    models.push(bare);
     for m in &models {
         for w in 20..=130 {
             for h in [6, 24] {

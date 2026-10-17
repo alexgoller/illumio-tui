@@ -31,6 +31,8 @@ pub enum Command {
     Active,
     /// `:batch`: the last sent batch, step by step.
     Batch,
+    /// `:marks [action]`: the marks overlay, filtered to one action.
+    Marks(Option<String>),
     Quit,
     Help,
 }
@@ -94,6 +96,7 @@ pub fn parse(input: &str) -> Result<Command, String> {
         "draft" => no_arg(Command::Draft),
         "active" => no_arg(Command::Active),
         "batch" => no_arg(Command::Batch),
+        "marks" => Ok(Command::Marks((!arg.is_empty()).then(|| arg.to_string()))),
         "q" | "quit" => no_arg(Command::Quit),
         "help" | "h" | "?" => no_arg(Command::Help),
         other => Err(format!("unknown command :{other}; try :help")),
@@ -104,6 +107,15 @@ pub fn parse(input: &str) -> Result<Command, String> {
 mod tests {
     use super::*;
     use crate::tui::model::Screen;
+
+    #[test]
+    fn parses_marks_with_an_optional_action() {
+        assert_eq!(parse("marks").unwrap(), Command::Marks(None));
+        assert_eq!(
+            parse("marks revisit").unwrap(),
+            Command::Marks(Some("revisit".into()))
+        );
+    }
 
     #[test]
     fn parses_every_documented_command() {

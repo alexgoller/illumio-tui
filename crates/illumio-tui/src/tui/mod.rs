@@ -15,6 +15,7 @@ pub mod form;
 pub mod gen_view;
 pub mod impact;
 pub mod mark_form;
+pub mod marks_view;
 pub mod model;
 pub mod msg;
 pub mod picker;

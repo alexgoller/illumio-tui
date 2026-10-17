@@ -221,6 +221,8 @@ pub enum Overlay {
     Form(Form),
     /// `m`: a mark for the selected row; saved to `marks.toml`, never sent.
     MarkForm(Box<crate::tui::mark_form::MarkForm>),
+    /// `:marks`: every mark; its state is `Model::marks_view`.
+    Marks,
     /// The exact request a write would send; `y` sends it, `n`/`Esc` cancel.
     /// `scroll` is the first body line shown.
     ConfirmWrite {
@@ -253,7 +255,8 @@ impl PartialEq for Overlay {
             | (Overlay::Help, Overlay::Help)
             | (Overlay::Pending, Overlay::Pending)
             | (Overlay::App, Overlay::App)
-            | (Overlay::Generator, Overlay::Generator) => true,
+            | (Overlay::Generator, Overlay::Generator)
+            | (Overlay::Marks, Overlay::Marks) => true,
             (Overlay::Prompt { input: a }, Overlay::Prompt { input: b })
             | (Overlay::Error(a), Overlay::Error(b)) => a == b,
             (Overlay::GroupKeys(a), Overlay::GroupKeys(b))
@@ -362,6 +365,9 @@ pub enum PendingAction {
     /// `r` in the generator on incomplete data, past a cost threshold: the
     /// focused query for its app; `y` and `n` go back to the generator.
     GenRequery(TrafficFilter, pce::traffic::Focus),
+    /// `x` on `:marks`: this mark leaves `marks.toml`; `y` and `n` go back
+    /// to the overlay. A local file only.
+    DeleteMark(String),
 }
 
 #[derive(Debug)]
@@ -4953,6 +4959,8 @@ pub struct Model {
     pub gen_from_app: bool,
     /// The last generator's sequence number.
     pub gen_seq: u64,
+    /// The `:marks` overlay's state while it is open.
+    pub marks_view: Option<crate::tui::marks_view::MarksView>,
     pub connection: Connection,
     pub stats: StatsSnapshot,
     pub size: (u16, u16),
@@ -5040,6 +5048,7 @@ impl Model {
             gen_view: None,
             gen_from_app: false,
             gen_seq: 0,
+            marks_view: None,
             connection: Connection::Connecting,
             stats: StatsSnapshot { calls: 0, bytes: 0 },
             size,
