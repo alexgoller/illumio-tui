@@ -5704,13 +5704,19 @@ mod tests {
         let mut m = model_with_flows();
         m.set_label_model(vec!["app".into()], "role".into(), vec!["env".into()]);
         m.traffic.show_detail = true;
-        let screen = render_to_string(&m, 160, 50);
+        // Stacked (80 columns): the labels line.
+        let screen = render_to_string(&m, 80, 30);
         let line = screen
             .lines()
             .find(|l| l.contains("src labels"))
             .unwrap_or_else(|| panic!("{screen}"));
         assert!(line.contains("app=shop role=web"), "{line}");
         assert!(!line.contains("env="), "{line}");
+        // In columns (160 columns): one label per line, no `env`.
+        let screen = render_to_string(&m, 160, 50);
+        assert!(screen.contains("│role  web"), "{screen}");
+        assert!(screen.contains("│app   shop"), "{screen}");
+        assert!(!screen.contains("env   prod"), "{screen}");
     }
 
     #[test]

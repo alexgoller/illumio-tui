@@ -700,7 +700,9 @@ pub(crate) mod tests {
             .select_where(|r| !r.src.ip_lists.is_empty() && r.port == Some(5432));
         let out = render_to_string(&m, 160, 40);
         assert!(
-            out.contains("mark       critical m-crit · payments db · never expires · also matches: m-sq1 (squelch)"),
+            out.contains(
+                "mark critical m-crit · payments db · never expires · also matches: m-sq1 (squelch)"
+            ),
             "{out}"
         );
         assert!(

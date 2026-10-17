@@ -1,0 +1,14 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: "pane.join(\"\\n\")"
+---
+╭ Detail ───────────────────────────────────────────────────────────────────────────────────────────────── Enter hides ╮
+│SOURCE                                    │ DESTINATION                               │ SERVICE                       │
+│10.1.4.9                                  │ host-1.example                            │ 8443/tcp                      │
+│ip lists                                  │ 10.0.1.10                                 │ potentially_blocked           │
+│Corp                                      │ app   shop                                │                               │
+│                                          │ env   prod                                │                               │
+│                                          │ role  web                                 │                               │
+│                                          │                                           │                               │
+│seen 2026-10-10 07:00 → 10-10 07:30 · rules n/a                                                                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

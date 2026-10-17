@@ -1,0 +1,12 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: "detail_pane(&render_to_string(&m, 80, 40)).join(\"\\n\")"
+---
+╭ Detail ───────────────────────────────────────────────────────── Enter hides ╮
+│src        host-1.example  10.0.1.10                                          │
+│src labels app=shop env=prod role=web                                         │
+│dst        host-2.example  10.0.2.20                                          │
+│dst labels app=shop env=prod role=db                                          │
+│svc        5432/tcp  process postgres  user postgres  allowed                 │
+│seen       first 2026-10-07T08:00:00Z  last 2026-10-10T07:31:02Z  bytes in    │
+╰──────────────────────────────────────────────────────────────────────────────╯

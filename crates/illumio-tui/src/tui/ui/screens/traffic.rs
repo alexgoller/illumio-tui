@@ -26,14 +26,45 @@ pub struct TrafficLayout {
 /// Shared by `view` and `update` (for page sizes): filter bar 3, stats 3,
 /// table takes the rest, detail 8 (0 when the terminal is short).
 pub fn layout(body: Rect) -> TrafficLayout {
-    layout_with(body, 0)
+    layout_with(body, DetailLines::default())
 }
 
-/// `layout` with `extra` lines for the detail pane (its `mark` line while
-/// marks are active); the table gives them up, so the treemap's area (the
-/// two together) is the same.
-pub fn layout_with(body: Rect, extra: u16) -> TrafficLayout {
-    let detail_h = if body.height >= 20 { 8 + extra } else { 0 };
+/// What the detail pane holds, for its height: whether the Flows detail
+/// is open and whether it has a `mark` line.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DetailLines {
+    pub open: bool,
+    pub mark: bool,
+}
+
+/// The detail pane's inner width from which an open Flows detail is drawn
+/// in source | destination | service columns.
+pub const COLUMNS_MIN_WIDTH: u16 = 90;
+/// The body height from which the columns get their taller pane (the
+/// table keeps 9 rows there); below it the detail stays stacked.
+pub const COLUMNS_MIN_HEIGHT: u16 = 28;
+/// The columns' pane: border 2, headings 1, 6 rows, footer 1.
+const COLUMNS_DETAIL_H: u16 = 10;
+/// Rows of each column in the columns' pane.
+const COLUMN_ROWS: usize = (COLUMNS_DETAIL_H - 4) as usize;
+
+/// Whether an open Flows detail in `body` is drawn in columns: wide and
+/// tall enough. Shared by the layout and the drawing.
+pub fn detail_columns(body: Rect, d: DetailLines) -> bool {
+    d.open && body.width.saturating_sub(2) >= COLUMNS_MIN_WIDTH && body.height >= COLUMNS_MIN_HEIGHT
+}
+
+/// `layout` with the detail pane sized for `d`: the columns' taller pane,
+/// and a `mark` line while marks are active; the table gives the lines
+/// up, so the treemap's area (the two together) is the same.
+pub fn layout_with(body: Rect, d: DetailLines) -> TrafficLayout {
+    let detail_h = if body.height < 20 {
+        0
+    } else if detail_columns(body, d) {
+        COLUMNS_DETAIL_H + u16::from(d.mark)
+    } else {
+        8 + u16::from(d.mark)
+    };
     let rows = Layout::vertical([
         Constraint::Length(3),
         Constraint::Length(3),
@@ -66,29 +97,35 @@ pub fn treemap_area(size: (u16, u16)) -> TreemapRect {
     }
 }
 
-/// The detail pane's extra lines: its `mark` line, while marks are active
-/// and the Flows detail is open (a closed one, "press Enter", needs none).
-/// Shared by `render` and `table_rows`, so drawing and scrolling agree.
-pub fn detail_extra(t: &crate::tui::model::TrafficState) -> u16 {
+/// What the detail pane holds: open while the Flows detail is shown, a
+/// `mark` line while marks are active too (a closed one, "press Enter",
+/// needs neither). Shared by `render` and `table_rows`, so drawing and
+/// scrolling agree.
+pub fn detail_extra(t: &crate::tui::model::TrafficState) -> DetailLines {
+    let open = t.show_detail && t.view == TrafficView::Flows;
     let marks_on = t.marked.as_ref().is_some_and(|m| m.active > 0);
-    u16::from(marks_on && t.show_detail && t.view == TrafficView::Flows)
+    DetailLines {
+        open,
+        mark: marks_on && open,
+    }
 }
 
 /// Rows of data visible in the flow table (minus border and header), with
-/// `extra` detail lines (`detail_extra`).
-pub fn table_rows(body: Rect, extra: u16) -> usize {
-    layout_with(body, extra).table.height.saturating_sub(3) as usize
+/// the detail pane sized for `d` (`detail_extra`).
+pub fn table_rows(body: Rect, d: DetailLines) -> usize {
+    layout_with(body, d).table.height.saturating_sub(3) as usize
 }
 
 pub fn render(model: &Model, f: &mut Frame, body: Rect) {
-    let l = layout_with(body, detail_extra(&model.traffic));
+    let d = detail_extra(&model.traffic);
+    let l = layout_with(body, d);
     render_filter_bar(model, f, l.filter);
     render_stats(model, f, l.stats);
     match model.traffic.view {
         TrafficView::Flows => {
             render_flows(model, f, l.table);
             if l.detail.height > 0 {
-                render_detail(model, f, l.detail);
+                render_detail(model, f, l.detail, detail_columns(body, d));
             }
         }
         // The detail pane belongs to the Flows view; the others use its space.
@@ -617,7 +654,10 @@ fn bytes_text(fl: &ResolvedFlow) -> String {
     format!("  bytes in {} out {}", n(fl.bytes_in), n(fl.bytes_out))
 }
 
-fn render_detail(model: &Model, f: &mut Frame, area: Rect) {
+/// The Flows detail: a section header's two lines, the hint while closed,
+/// else the selected flow, in columns (`columns`, see `detail_columns`)
+/// or stacked rows.
+fn render_detail(model: &Model, f: &mut Frame, area: Rect, columns: bool) {
     let t = &model.theme;
     let block = panel(
         "Detail",
@@ -671,6 +711,11 @@ fn render_detail(model: &Model, f: &mut Frame, area: Rect) {
     };
     let dash = || "-".to_string();
     let order = model.limits.key_order();
+    if columns {
+        let lines = detail_column_lines(model, fl, &order, &rules, block.inner(area).width);
+        f.render_widget(Paragraph::new(lines).block(block), area);
+        return;
+    }
     let row = |head: &'static str, body: String| {
         Line::from(vec![
             Span::styled(format!("{head:<11}"), t.header_style()),
@@ -710,6 +755,263 @@ fn render_detail(model: &Model, f: &mut Frame, area: Rect) {
         Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
         area,
     );
+}
+
+/// How a detail cell is drawn; theme-free, so the builders are testable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CellStyle {
+    Plain,
+    Dim,
+    /// In the decision's colour, bold when `true` (a draft change).
+    Decision(PolicyDecision, bool),
+}
+
+/// One line of a detail column: `key` (aligned, dim) before `text`, or
+/// `text` alone when `key` is empty.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Cell {
+    key: String,
+    text: String,
+    style: CellStyle,
+}
+
+impl Cell {
+    fn new(text: impl Into<String>, style: CellStyle) -> Self {
+        Self {
+            key: String::new(),
+            text: text.into(),
+            style,
+        }
+    }
+
+    fn label(key: &str, value: &str) -> Self {
+        Self {
+            key: key.to_string(),
+            text: value.to_string(),
+            style: CellStyle::Plain,
+        }
+    }
+}
+
+/// An endpoint's column in at most `rows` lines: its name, its IP (unless
+/// that is the name), its labels one per line in `order` (minus the keys
+/// `order` hides; `unlabeled` without any), then its IP lists. What does
+/// not fit ends in `+N more`.
+fn endpoint_cells(e: &ResolvedEndpoint, order: &KeyOrder, rows: usize) -> Vec<Cell> {
+    let name = e.display_name();
+    let mut head = vec![Cell::new(name.clone(), CellStyle::Plain)];
+    if let Some(ip) = e.ip.as_deref().filter(|ip| !ip.is_empty() && *ip != name) {
+        head.push(Cell::new(ip, CellStyle::Plain));
+    }
+    let mut labels: Vec<_> = e
+        .labels
+        .iter()
+        .filter(|l| order.shows(&l.key))
+        .cloned()
+        .collect();
+    order.sort_labels(&mut labels);
+    // `(cell, counts)`: whether `+N more` counts it (the `ip lists` heading not).
+    let mut body: Vec<(Cell, bool)> = labels
+        .iter()
+        .map(|l| (Cell::label(&l.key, &l.value), true))
+        .collect();
+    if !e.ip_lists.is_empty() {
+        body.push((Cell::new("ip lists", CellStyle::Dim), false));
+        body.extend(
+            e.ip_lists
+                .iter()
+                .map(|n| (Cell::new(n.clone(), CellStyle::Plain), true)),
+        );
+    } else if labels.is_empty() {
+        body.push((Cell::new("unlabeled", CellStyle::Dim), false));
+    }
+    let rows = rows.max(1);
+    let fits = head.len() + body.len() <= rows;
+    if !fits {
+        head.truncate(rows.saturating_sub(1).max(1));
+    }
+    let keep = if fits {
+        body.len()
+    } else {
+        rows.saturating_sub(1).saturating_sub(head.len())
+    };
+    let hidden = body[keep..].iter().filter(|(_, n)| *n).count();
+    body.truncate(keep);
+    // The keys shown, aligned.
+    let width = body
+        .iter()
+        .map(|(c, _)| c.key.chars().count())
+        .max()
+        .unwrap_or(0);
+    head.extend(body.into_iter().map(|(mut c, _)| {
+        if !c.key.is_empty() {
+            c.key = format!("{:<width$}", c.key);
+        }
+        c
+    }));
+    if !fits && head.len() < rows {
+        head.push(Cell::new(format!("+{hidden} more"), CellStyle::Dim));
+    }
+    head
+}
+
+/// The service column: `5432/tcp`, `process · user` (when either is
+/// known), the reported decision, then the draft's (`draft blocked →
+/// allowed`, as the Flows table's draft column) when the flow has one.
+fn service_cells(fl: &ResolvedFlow) -> Vec<Cell> {
+    let mut cells = vec![Cell::new(fl.service_text(), CellStyle::Plain)];
+    let who: Vec<&str> = [&fl.process_name, &fl.user_name]
+        .into_iter()
+        .flatten()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty() && !s.chars().all(|c| c == '-'))
+        .collect();
+    if !who.is_empty() {
+        cells.push(Cell::new(who.join(" · "), CellStyle::Plain));
+    }
+    cells.push(Cell::new(
+        fl.policy_decision.as_str(),
+        CellStyle::Decision(fl.policy_decision, false),
+    ));
+    if let Some(d) = &fl.draft_policy_decision {
+        let changed = fl.draft_change().is_some();
+        cells.push(Cell::new(
+            format!("draft {}", fl.draft_text()),
+            CellStyle::Decision(d.class(), changed),
+        ));
+    }
+    cells
+}
+
+/// `2026-10-16T08:12:33Z` -> `2026-10-16 08:12`; anything else as given.
+fn seen_time(s: &str) -> String {
+    match (s.get(..10), s.get(10..11), s.get(11..16)) {
+        (Some(day), Some("T"), Some(hm)) => format!("{day} {hm}"),
+        _ => s.to_string(),
+    }
+}
+
+/// The columns' footer: `seen 2026-10-16 08:12 → 10-17 09:40 · bytes
+/// 117.2K/3.9K · rules …` (the last time without the year it shares with
+/// the first).
+fn seen_footer(fl: &ResolvedFlow, rules: &str) -> String {
+    let first = seen_time(fl.first_detected.as_deref().unwrap_or(""));
+    let mut last = seen_time(fl.last_detected.as_deref().unwrap_or(""));
+    if first.len() >= 16 && last.len() >= 16 && first.get(..5) == last.get(..5) {
+        last = last[5..].to_string();
+    }
+    let mut s = format!("seen {first} → {last}");
+    if fl.has_bytes() {
+        let n = |b: Option<u64>| b.map_or_else(|| "-".to_string(), compact_count);
+        s.push_str(&format!(
+            " · bytes in {} out {}",
+            n(fl.bytes_in),
+            n(fl.bytes_out)
+        ));
+    }
+    s.push_str(&format!(" · rules {rules}"));
+    s
+}
+
+/// `s` in at most `w` cells, its end cut to `…` when it does not fit.
+fn clip_ellipsis(s: &str, w: usize) -> String {
+    use crate::tui::ui::widgets::table::clip_width;
+    if Span::raw(s).width() <= w {
+        return s.to_string();
+    }
+    if w == 0 {
+        return String::new();
+    }
+    format!("{}…", clip_width(s, w - 1))
+}
+
+/// `cell` as spans of exactly `w` cells: clipped with `…` one short of
+/// `w` (a gap before the next column), then padded.
+fn cell_spans(cell: Option<&Cell>, w: usize, t: &Theme) -> Vec<Span<'static>> {
+    let Some(c) = cell else {
+        return vec![Span::raw(" ".repeat(w))];
+    };
+    let room = w.saturating_sub(1);
+    let style = match c.style {
+        CellStyle::Plain => Style::new(),
+        CellStyle::Dim => t.dim_style(),
+        CellStyle::Decision(d, bold) if bold => t.decision_style(d).add_modifier(Modifier::BOLD),
+        CellStyle::Decision(d, _) => t.decision_style(d),
+    };
+    let mut spans = Vec::new();
+    let mut used = 0;
+    if !c.key.is_empty() {
+        let key = clip_ellipsis(&format!("{}  ", c.key), room);
+        used += Span::raw(key.as_str()).width();
+        spans.push(Span::styled(key, t.dim_style()));
+    }
+    let text = clip_ellipsis(&c.text, room.saturating_sub(used));
+    used += Span::raw(text.as_str()).width();
+    spans.push(Span::styled(text, style));
+    spans.push(Span::raw(" ".repeat(w.saturating_sub(used))));
+    spans
+}
+
+/// The source, destination and service widths in `width` inner cells,
+/// less the two `│ ` separators: the service column about a quarter,
+/// the endpoints equal.
+fn column_widths(width: u16) -> [usize; 3] {
+    let avail = (width as usize).saturating_sub(4);
+    let ep = (avail - avail * 26 / 100) / 2;
+    [ep, ep, avail - 2 * ep]
+}
+
+/// The Flows detail in columns, in `width` inner cells: the headings,
+/// `COLUMN_ROWS` rows of source | destination | service, the `seen`
+/// footer, then the `mark` line when the flow has one.
+fn detail_column_lines(
+    model: &Model,
+    fl: &crate::tui::model::FlowRow,
+    order: &KeyOrder,
+    rules: &str,
+    width: u16,
+) -> Vec<Line<'static>> {
+    let t = &model.theme;
+    let w = column_widths(width);
+    let sep = || Span::styled("│ ", t.dim_style());
+    let heading = |s: &str, w: usize| Span::styled(fit_cell(s, w), t.header_style());
+    let mut lines = vec![Line::from(vec![
+        heading("SOURCE", w[0]),
+        sep(),
+        heading("DESTINATION", w[1]),
+        sep(),
+        heading("SERVICE", w[2]),
+    ])];
+    let src = endpoint_cells(&fl.flow.src, order, COLUMN_ROWS);
+    let dst = endpoint_cells(&fl.flow.dst, order, COLUMN_ROWS);
+    let svc = service_cells(&fl.flow);
+    for i in 0..COLUMN_ROWS {
+        let mut spans = cell_spans(src.get(i), w[0], t);
+        spans.push(sep());
+        spans.extend(cell_spans(dst.get(i), w[1], t));
+        spans.push(sep());
+        spans.extend(cell_spans(svc.get(i), w[2], t));
+        lines.push(Line::from(spans));
+    }
+    let width = width as usize;
+    lines.push(Line::from(Span::raw(clip_ellipsis(
+        &seen_footer(&fl.flow, rules),
+        width,
+    ))));
+    if let Some(text) = mark_line(model, fl) {
+        lines.push(Line::from(vec![
+            Span::styled("mark ", t.header_style()),
+            Span::raw(clip_ellipsis(&text, width.saturating_sub(5))),
+        ]));
+    }
+    lines
+}
+
+/// `s` clipped (with `…`) and padded to exactly `w` cells.
+fn fit_cell(s: &str, w: usize) -> String {
+    let s = clip_ellipsis(s, w.saturating_sub(1));
+    let pad = w.saturating_sub(Span::raw(s.as_str()).width());
+    format!("{s}{}", " ".repeat(pad))
 }
 
 pub fn render_filter_bar(model: &Model, f: &mut Frame, area: Rect) {
@@ -785,5 +1087,251 @@ mod tests {
             meta_text(&treemap_meta(&tm, &t)),
             "by bytes · b conns · Enter zoom · Esc out"
         );
+    }
+
+    fn ep(labels: &[(&str, &str)]) -> ResolvedEndpoint {
+        ResolvedEndpoint {
+            ip: Some("10.0.0.1".into()),
+            hostname: Some("web-01".into()),
+            workload_href: Some("/orgs/1/workloads/w1".into()),
+            labels: labels
+                .iter()
+                .map(|(k, v)| pce::resolve::ResolvedLabel {
+                    href: format!("/orgs/1/labels/{k}"),
+                    key: k.to_string(),
+                    value: v.to_string(),
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    fn texts(cells: &[Cell]) -> Vec<String> {
+        cells
+            .iter()
+            .map(|c| {
+                if c.key.is_empty() {
+                    c.text.clone()
+                } else {
+                    format!("{}  {}", c.key, c.text)
+                }
+            })
+            .collect()
+    }
+
+    fn keys(k: &[&str]) -> Vec<String> {
+        k.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn endpoint_cells_list_labels_in_key_order_with_aligned_keys() {
+        let order = KeyOrder::new(&keys(&["app", "env"]), "role");
+        let e = ep(&[
+            ("loc", "fra"),
+            ("role", "web"),
+            ("env", "prod"),
+            ("app", "shop"),
+        ]);
+        assert_eq!(
+            texts(&endpoint_cells(&e, &order, 6)),
+            [
+                "web-01",
+                "10.0.0.1",
+                "app   shop",
+                "env   prod",
+                "role  web",
+                "loc   fra"
+            ]
+        );
+    }
+
+    #[test]
+    fn endpoint_cells_hide_ignored_keys_and_say_unlabeled() {
+        let order = KeyOrder::new(&keys(&["app"]), "role").with_ignored(&keys(&["bu"]));
+        let e = ep(&[("bu", "retail"), ("app", "shop")]);
+        assert_eq!(
+            texts(&endpoint_cells(&e, &order, 6)),
+            ["web-01", "10.0.0.1", "app  shop"]
+        );
+        let only_ignored = ep(&[("bu", "retail")]);
+        let cells = endpoint_cells(&only_ignored, &order, 6);
+        assert_eq!(texts(&cells), ["web-01", "10.0.0.1", "unlabeled"]);
+        assert_eq!(cells[2].style, CellStyle::Dim);
+    }
+
+    #[test]
+    fn endpoint_cells_omit_an_ip_that_is_the_name() {
+        let order = KeyOrder::new(&[], "");
+        let e = ResolvedEndpoint {
+            ip: Some("10.1.4.9".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            texts(&endpoint_cells(&e, &order, 6)),
+            ["10.1.4.9", "unlabeled"]
+        );
+        let none = ResolvedEndpoint {
+            hostname: Some("db".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            texts(&endpoint_cells(&none, &order, 6)),
+            ["db", "unlabeled"]
+        );
+    }
+
+    #[test]
+    fn endpoint_cells_show_ip_lists_where_labels_would_be() {
+        let order = KeyOrder::new(&[], "");
+        let e = ResolvedEndpoint {
+            ip: Some("10.1.4.9".into()),
+            ip_lists: keys(&["Corp", "VPN"]),
+            ..Default::default()
+        };
+        let cells = endpoint_cells(&e, &order, 6);
+        assert_eq!(texts(&cells), ["10.1.4.9", "ip lists", "Corp", "VPN"]);
+        assert_eq!(cells[1].style, CellStyle::Dim);
+    }
+
+    #[test]
+    fn endpoint_cells_end_in_n_more_when_they_do_not_fit() {
+        let order = KeyOrder::new(&keys(&["app", "env"]), "role");
+        let e = ep(&[
+            ("app", "shop"),
+            ("env", "prod"),
+            ("role", "web"),
+            ("datacenter", "fra1"),
+            ("os", "linux"),
+            ("zone", "a"),
+        ]);
+        // The keys shown are aligned among themselves (not to `datacenter`).
+        let cells = endpoint_cells(&e, &order, 6);
+        assert_eq!(
+            texts(&cells),
+            [
+                "web-01",
+                "10.0.0.1",
+                "app   shop",
+                "env   prod",
+                "role  web",
+                "+3 more"
+            ]
+        );
+        assert_eq!(cells[5].style, CellStyle::Dim);
+        // Exactly full: no `+N more`, and the keys align to `datacenter`.
+        let all = texts(&endpoint_cells(&e, &order, 8));
+        assert_eq!(all.len(), 8);
+        assert_eq!(all[2], "app         shop");
+        assert_eq!(all[5], "datacenter  fra1");
+        assert_eq!(texts(&endpoint_cells(&e, &order, 1)), ["web-01"]);
+        assert_eq!(texts(&endpoint_cells(&e, &order, 2)), ["web-01", "+6 more"]);
+    }
+
+    fn flow() -> ResolvedFlow {
+        ResolvedFlow {
+            src: ep(&[]),
+            dst: ep(&[]),
+            port: Some(5432),
+            proto: "tcp".into(),
+            process_name: Some("postgres".into()),
+            user_name: Some("-".into()),
+            num_connections: 1,
+            policy_decision: PolicyDecision::Blocked,
+            draft_policy_decision: None,
+            flow_direction: None,
+            first_detected: Some("2026-10-16T08:12:33Z".into()),
+            last_detected: Some("2026-10-17T09:40:00Z".into()),
+            rules: vec![],
+            bytes_in: Some(117_200),
+            bytes_out: None,
+        }
+    }
+
+    #[test]
+    fn service_cells_show_process_user_decision_and_draft() {
+        let mut fl = flow();
+        let cells = service_cells(&fl);
+        assert_eq!(texts(&cells), ["5432/tcp", "postgres", "blocked"]);
+        assert_eq!(
+            cells[2].style,
+            CellStyle::Decision(PolicyDecision::Blocked, false)
+        );
+        fl.process_name = None;
+        fl.user_name = None;
+        assert_eq!(texts(&service_cells(&fl)), ["5432/tcp", "blocked"]);
+        fl.user_name = Some("svc".into());
+        fl.draft_policy_decision = Some(pce::models::DraftDecision::Allowed);
+        let cells = service_cells(&fl);
+        assert_eq!(
+            texts(&cells),
+            ["5432/tcp", "svc", "blocked", "draft blocked → allowed"]
+        );
+        assert_eq!(
+            cells[3].style,
+            CellStyle::Decision(PolicyDecision::Allowed, true)
+        );
+        fl.draft_policy_decision = Some(pce::models::DraftDecision::Blocked);
+        let cells = service_cells(&fl);
+        assert_eq!(cells[3].text, "draft blocked");
+        assert_eq!(
+            cells[3].style,
+            CellStyle::Decision(PolicyDecision::Blocked, false)
+        );
+    }
+
+    #[test]
+    fn the_footer_shortens_the_times_and_drops_a_shared_year() {
+        let mut fl = flow();
+        assert_eq!(
+            seen_footer(&fl, "n/a"),
+            "seen 2026-10-16 08:12 → 10-17 09:40 · bytes in 117.2K out - · rules n/a"
+        );
+        fl.last_detected = Some("2027-01-02T00:00:00Z".into());
+        fl.bytes_in = None;
+        assert_eq!(
+            seen_footer(&fl, "r1"),
+            "seen 2026-10-16 08:12 → 2027-01-02 00:00 · rules r1"
+        );
+    }
+
+    #[test]
+    fn columns_need_an_open_detail_a_wide_and_a_tall_body() {
+        let open = DetailLines {
+            open: true,
+            mark: false,
+        };
+        let body = |w, h| Rect::new(0, 0, w, h);
+        assert!(detail_columns(body(92, 28), open));
+        assert!(!detail_columns(body(91, 28), open));
+        assert!(!detail_columns(body(120, 27), open));
+        assert!(!detail_columns(body(120, 40), DetailLines::default()));
+        assert_eq!(column_widths(118), [42, 42, 30]);
+        assert_eq!(column_widths(90), [32, 32, 22]);
+    }
+
+    /// The table's rows and the pane drawn are cut from the same layout:
+    /// every size, open or closed, with or without a mark line.
+    #[test]
+    fn table_rows_and_the_detail_height_agree() {
+        for w in [60, 91, 92, 120, 200] {
+            for h in 5..=60 {
+                let body = Rect::new(0, 0, w, h);
+                for (open, mark) in [(false, false), (true, false), (true, true)] {
+                    let d = DetailLines { open, mark };
+                    let l = layout_with(body, d);
+                    assert_eq!(
+                        table_rows(body, d),
+                        l.table.height.saturating_sub(3) as usize
+                    );
+                    let want = match (h >= 20, detail_columns(body, d)) {
+                        (false, _) => 0,
+                        (true, true) => 10 + u16::from(mark),
+                        (true, false) => 8 + u16::from(mark),
+                    };
+                    assert_eq!(l.detail.height, want, "{w}x{h} {d:?}");
+                    assert_eq!(l.table.height + l.detail.height + 6, h.max(10), "{w}x{h}");
+                }
+            }
+        }
     }
 }

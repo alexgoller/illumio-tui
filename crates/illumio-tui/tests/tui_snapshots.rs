@@ -1475,7 +1475,8 @@ fn traffic_group_columns_picker_and_blocked_by_group_80x24() {
 fn flow_detail_shows_both_label_sets_and_the_bytes() {
     let mut m = model_with_flows();
     m.traffic.show_detail = true; // row 0: shop/prod -> shop/prod with bytes
-    let out = render_to_string(&m, 160, 48);
+    // Stacked below 92 columns.
+    let out = render_to_string(&m, 91, 40);
     assert!(
         out.contains("src labels app=shop env=prod role=web"),
         "{out}"
@@ -1484,12 +1485,149 @@ fn flow_detail_shows_both_label_sets_and_the_bytes() {
         out.contains("dst labels app=shop env=prod role=db"),
         "{out}"
     );
+    assert!(out.contains("bytes in 120.0K"), "{out}");
+    // In columns from 92.
+    let out = render_to_string(&m, 160, 48);
+    assert!(out.contains("│role  web"), "{out}");
+    assert!(out.contains("│ role  db"), "{out}");
     assert!(out.contains("bytes in 120.0K out 4.0K"), "{out}");
     m.traffic.flows.select_next(); // Corp: an IP list, no labels, no bytes
-    let out = render_to_string(&m, 160, 48);
+    let out = render_to_string(&m, 91, 40);
     assert!(out.contains("src labels -"), "{out}");
     assert!(out.contains("ip lists: Corp"), "{out}");
     assert!(!out.contains("bytes in"), "{out}");
+    let out = render_to_string(&m, 160, 48);
+    assert!(out.contains("│ip lists"), "{out}");
+    assert!(out.contains("│Corp "), "{out}");
+    assert!(!out.contains("bytes in"), "{out}");
+}
+
+/// The detail pane's rows (the lines between `╭ Detail` and its bottom
+/// border) of a render.
+fn detail_pane(out: &str) -> Vec<String> {
+    let mut pane: Vec<String> = Vec::new();
+    for l in out.lines().skip_while(|l| !l.starts_with("╭ Detail")) {
+        pane.push(l.to_string());
+        if l.starts_with('╰') {
+            break;
+        }
+    }
+    pane
+}
+
+/// The character column `needle` starts at in `line`.
+fn col_of(line: &str, needle: &str) -> usize {
+    let i = line
+        .find(needle)
+        .unwrap_or_else(|| panic!("{needle:?} in {line}"));
+    line[..i].chars().count()
+}
+
+/// From 92 columns (and a tall enough body) the open Flows detail is three
+/// columns: SOURCE and DESTINATION alike, SERVICE narrower, and the values
+/// sit under their headings.
+#[test]
+fn flow_detail_in_columns_120x40() {
+    let mut m = model_with_flows();
+    m.traffic.show_detail = true;
+    let out = render_to_string(&m, 120, 40);
+    let pane = detail_pane(&out);
+    assert_eq!(
+        pane.len(),
+        10,
+        "border, headings, 6 rows, footer, border: {out}"
+    );
+    let head = &pane[1];
+    let (src, dst, svc) = (
+        col_of(head, "SOURCE"),
+        col_of(head, "DESTINATION"),
+        col_of(head, "SERVICE"),
+    );
+    assert!(src < dst && dst < svc, "{head}");
+    assert_eq!(dst - src, svc - dst, "equal endpoint columns: {head}");
+    assert!(120 - svc < svc - dst, "a narrower service column: {head}");
+    let at = |row: usize, needle: &str| col_of(&pane[row], needle);
+    assert_eq!(at(2, "host-1.example"), src);
+    assert_eq!(at(2, "host-2.example"), dst);
+    assert_eq!(at(2, "5432/tcp"), svc);
+    assert_eq!(at(3, "10.0.1.10"), src);
+    assert_eq!(at(3, "10.0.2.20"), dst);
+    assert_eq!(at(3, "postgres · postgres"), svc);
+    assert_eq!(at(4, "app   shop"), src);
+    assert_eq!(at(4, "allowed"), svc);
+    assert_eq!(at(6, "role  web"), src);
+    assert_eq!(at(6, "role  db"), dst);
+    assert!(
+        pane[8]
+            .contains("seen 2026-10-07 08:00 → 10-10 07:31 · bytes in 120.0K out 4.0K · rules n/a"),
+        "{out}"
+    );
+    insta::assert_snapshot!("traffic_flow_detail_columns_120x40", pane.join("\n"));
+    // An IP-list source: its lists where labels would be.
+    m.traffic.flows.select_next();
+    let out = render_to_string(&m, 120, 40);
+    let pane = detail_pane(&out);
+    assert_eq!(col_of(&pane[2], "10.1.4.9"), src, "{out}");
+    assert_eq!(col_of(&pane[3], "ip lists"), src, "{out}");
+    assert_eq!(col_of(&pane[4], "Corp"), src, "{out}");
+    assert_eq!(col_of(&pane[3], "potentially_blocked"), svc, "{out}");
+    insta::assert_snapshot!(
+        "traffic_flow_detail_columns_ip_list_120x40",
+        pane.join("\n")
+    );
+}
+
+/// Narrow or short terminals keep the stacked detail.
+#[test]
+fn flow_detail_stays_stacked_when_narrow_or_short() {
+    let mut m = model_with_flows();
+    m.traffic.show_detail = true;
+    for (w, h) in [(80, 40), (91, 40), (120, 30)] {
+        let out = render_to_string(&m, w, h);
+        assert!(!out.contains("SOURCE"), "{w}x{h}: {out}");
+        assert!(out.contains("src labels"), "{w}x{h}: {out}");
+        assert_eq!(detail_pane(&out).len(), 8, "{w}x{h}: {out}");
+    }
+    insta::assert_snapshot!(
+        "traffic_flow_detail_stacked_80x40",
+        detail_pane(&render_to_string(&m, 80, 40)).join("\n")
+    );
+}
+
+/// The Flows detail at every width and the heights around the columns'
+/// threshold: plain, drafted, marked (the mark line), grouped (a section
+/// header), a long-labelled flow and the IP-list one. No panics, and the
+/// columns only where they fit.
+#[test]
+fn flow_detail_renders_at_every_terminal_size() {
+    use illumio_tui::tui::test_support as ts;
+    let dir = tempfile::tempdir().unwrap();
+    let mut models = vec![model_with_flows()];
+    let mut ip = model_with_flows();
+    ip.traffic.flows.select_next();
+    models.push(ip);
+    models.push(ts::with_draft_loaded(ts::model_with_rich_flows()));
+    models.push(ts::model_with_marks(dir.path(), ts::RICH_MARKS));
+    for keys in ["x", "xj"] {
+        let mut g = ts::model_with_rich_flows();
+        for c in keys.chars() {
+            gen_key(&mut g, c);
+        }
+        models.push(g);
+    }
+    for m in &mut models {
+        m.traffic.show_detail = true;
+    }
+    for m in &models {
+        for w in 20..=130 {
+            for h in [6, 10, 22, 23, 30, 31, 32, 40] {
+                let out = render_to_string(m, w, h);
+                if w < 92 || h < 31 {
+                    assert!(!out.contains("│SOURCE"), "{w}x{h}: {out}");
+                }
+            }
+        }
+    }
 }
 
 #[test]

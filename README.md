@@ -186,7 +186,9 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   (`app,env` by default) until `g` opens the picker (`Space` toggles a key, `all labels` takes
   every key the flows carry, typing edits the list as text, `Enter` applies, for this session).
   **Flows** shows each side's group (`shop/prod`; `-` for an IP list or FQDN, whose name is in
-  the name column) and, on `Enter`, a detail with both label sets and the bytes; `x` / `X`
+  the name column) and, on `Enter`, a detail with both label sets and the bytes (from 92
+  columns and 31 rows in source | destination | service columns, one label per line, IP
+  lists where labels would be, `+N more` when they run out; stacked below that); `x` / `X`
   group it into app sections (`flat` → `by src app` → `by dst app`): one header per app (by
   the `g` keys; an IP list or FQDN by its name) with its flow and connection counts, then its
   flows in the table's sort (set it with `s` while flat). There `s` orders the sections, `Space`

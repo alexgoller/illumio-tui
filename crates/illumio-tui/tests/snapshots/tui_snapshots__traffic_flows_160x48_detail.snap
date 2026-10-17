@@ -38,15 +38,15 @@ expression: out
 │                                                                                                                                                              │
 │                                                                                                                                                              │
 │                                                                                                                                                              │
-│                                                                                                                                                              │
-│                                                                                                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭ Detail ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── Enter hides ╮
-│src        10.1.4.9  10.1.4.9  ip lists: Corp                                                                                                                 │
-│src labels -                                                                                                                                                  │
-│dst        host-1.example  10.0.1.10                                                                                                                          │
-│dst labels app=shop env=prod role=web                                                                                                                         │
-│svc        8443/tcp  process -  user -  potentially_blocked                                                                                                   │
-│seen       first 2026-10-10T07:00:00Z  last 2026-10-10T07:30:58Z  rules n/a                                                                                   │
+│SOURCE                                                   │ DESTINATION                                              │ SERVICE                                 │
+│10.1.4.9                                                 │ host-1.example                                           │ 8443/tcp                                │
+│ip lists                                                 │ 10.0.1.10                                                │ potentially_blocked                     │
+│Corp                                                     │ app   shop                                               │                                         │
+│                                                         │ env   prod                                               │                                         │
+│                                                         │ role  web                                                │                                         │
+│                                                         │                                                          │                                         │
+│seen 2026-10-10 07:00 → 10-10 07:30 · rules n/a                                                                                                               │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ready                                                           f filter  r run  a auto  v view  g group  / search  +/- window  ]/[ cap  D draft  : cmd  ? help
