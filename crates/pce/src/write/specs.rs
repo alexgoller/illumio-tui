@@ -9,8 +9,9 @@ fn parse_ip(s: &str) -> Result<IpAddr, String> {
         .map_err(|_| format!("{s:?} is not an IP address"))
 }
 
-/// `addr/N` → (addr, N) with N checked against the address family.
-fn parse_cidr(s: &str) -> Result<(IpAddr, u8), String> {
+/// `addr/N` → (addr, N) with N checked against the address family. Shared
+/// with `marks` (its `ip:` sides).
+pub(crate) fn parse_cidr(s: &str) -> Result<(IpAddr, u8), String> {
     let (a, n) = s
         .split_once('/')
         .ok_or_else(|| format!("{s:?} is not a CIDR"))?;
