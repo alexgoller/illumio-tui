@@ -568,7 +568,7 @@ pub fn render_form(model: &Model, form: &Form, f: &mut Frame, area: Rect) {
 /// The candidate strip under the field being completed: the shown candidate
 /// in the accent colour, the others and `+N more` dim, two blanks apart,
 /// `indent` cells in (under the value), cut to `width`.
-fn completion_line<'a>(
+pub(crate) fn completion_line<'a>(
     strip: &[(String, bool)],
     indent: usize,
     width: usize,

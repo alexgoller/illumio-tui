@@ -2146,6 +2146,27 @@ fn traffic_marks_pairs_and_blocked_120x34() {
     );
 }
 
+#[test]
+fn mark_form_from_blocked_100x30() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use illumio_tui::tui::model::TrafficView;
+    use illumio_tui::tui::test_support::{RICH_MARKS, model_with_marks};
+    use illumio_tui::tui::{Msg, update};
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = model_with_marks(dir.path(), RICH_MARKS);
+    m.traffic.view = TrafficView::Blocked;
+    let key = |c| Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+    update(&mut m, key('j'));
+    update(&mut m, key('m'));
+    for c in "CHG-1182, owner confirmed".chars() {
+        update(&mut m, key(c));
+    }
+    insta::assert_snapshot!(
+        "mark_form_from_blocked_100x30",
+        render_to_string(&m, 100, 30)
+    );
+}
+
 /// No terminal size panics the generator: every width from 20 to 130 and a
 /// few heights, in its main states (rows, outbound at a role stop, a fan-in
 /// line off and switched on, the rule list).
@@ -2252,7 +2273,52 @@ fn screens_render_at_every_terminal_size() {
             mk.traffic.show_detail = true;
             models.push(mk);
         }
+        // The mark form on the view's row: as opened, with a long comment,
+        // and with a bad field (the error, no preview).
+        for (back, typed) in [
+            (0, ""),
+            (0, "a long reason that runs past the value column, CHG-1182"),
+            (5, "x"),
+        ] {
+            let mut mf = ts::model_with_marks(dir.path(), ts::RICH_MARKS);
+            for c in views[..i].chars() {
+                gen_key(&mut mf, c);
+            }
+            gen_key(&mut mf, 'm');
+            for _ in 0..back {
+                illumio_tui::tui::update(
+                    &mut mf,
+                    illumio_tui::tui::msg::Msg::Key(crossterm::event::KeyEvent::new(
+                        crossterm::event::KeyCode::BackTab,
+                        crossterm::event::KeyModifiers::SHIFT,
+                    )),
+                );
+            }
+            for c in typed.chars() {
+                gen_key(&mut mf, c);
+            }
+            // The treemap (the fifth view) drills first: no form there.
+            match &mf.overlay {
+                illumio_tui::tui::model::Overlay::MarkForm(f) => {
+                    assert_eq!(f.form.error.is_some(), back > 0, "{:?}", f.form.error);
+                }
+                o => assert_eq!(i, 4, "no form in view {i}: {o:?}"),
+            }
+            models.push(mf);
+        }
     }
+    // The mark form from the app overlay.
+    let mut am = with_policy(with_workloads(ts::model_with_marks(
+        dir.path(),
+        ts::RICH_MARKS,
+    )));
+    open_app(&mut am, "shop/prod");
+    gen_key(&mut am, 'm');
+    assert!(matches!(
+        am.overlay,
+        illumio_tui::tui::model::Overlay::MarkForm(_)
+    ));
+    models.push(am);
     for m in &models {
         for w in 20..=130 {
             for h in [6, 24] {

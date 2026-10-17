@@ -219,6 +219,8 @@ pub enum Overlay {
     },
     /// Create or edit form for a label, IP list, service or workload.
     Form(Form),
+    /// `m`: a mark for the selected row; saved to `marks.toml`, never sent.
+    MarkForm(Box<crate::tui::mark_form::MarkForm>),
     /// The exact request a write would send; `y` sends it, `n`/`Esc` cancel.
     /// `scroll` is the first body line shown.
     ConfirmWrite {
@@ -259,6 +261,7 @@ impl PartialEq for Overlay {
             (Overlay::FilterEditor(a), Overlay::FilterEditor(b)) => a == b,
             (Overlay::AppPicker(a), Overlay::AppPicker(b)) => a == b,
             (Overlay::Form(a), Overlay::Form(b)) => a == b,
+            (Overlay::MarkForm(a), Overlay::MarkForm(b)) => a == b,
             (
                 Overlay::ConfirmWrite {
                     plan: pa,

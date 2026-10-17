@@ -29,6 +29,7 @@ use pce::{CacheMode, RuleKind, WriteMethod};
 use std::time::Instant;
 
 mod generator;
+mod marks;
 #[cfg(test)]
 mod marks_tests;
 
@@ -1756,6 +1757,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             };
             Vec::new()
         }
+        Overlay::MarkForm(mf) => marks::form_key(model, *mf, k),
         Overlay::Form(mut form)
             if k.modifiers.contains(KeyModifiers::CONTROL)
                 && matches!(k.code, KeyCode::Char('n' | 'p')) =>
@@ -2225,6 +2227,8 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         KeyCode::Char('w') => return flow_rule_key(model),
         // Squelched flows shown or left out: a rebuild, no request.
         KeyCode::Char('M') => model.status = model.traffic.toggle_squelched(),
+        // The mark form for the row: marks.toml only, no request.
+        KeyCode::Char('m') => return marks::mark_key(model),
         KeyCode::Char('g') => {
             model.overlay = Overlay::GroupKeys(open_key_picker(model));
             return Vec::new();
@@ -2820,6 +2824,7 @@ fn app_overlay_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             rebuild_app_traffic(model);
         }
         KeyCode::Enter => return app_enter(model),
+        KeyCode::Char('m') => return marks::mark_app_key(model),
         KeyCode::Char('w') => return app_rule_key(model),
         KeyCode::Char('r') => app_reload_key(model),
         KeyCode::Char('G') => {

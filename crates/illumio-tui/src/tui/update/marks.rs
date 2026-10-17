@@ -1,0 +1,480 @@
+//! The marks' keys: `m` opens the mark form prefilled from the row, its
+//! keys and live preview, the save to `marks.toml`. No path here returns a
+//! `Cmd`: marks never reach the PCE.
+use super::complete_field;
+use crate::marks::MarkOp;
+use crate::tui::app_view::AppPanel;
+use crate::tui::form::FormEvent;
+use crate::tui::mark_form::{
+    MarkForm, MarkOrigin, Prefill, RowsOf, SidePrefill, any_side, decisions_text, endpoint_side,
+    group_side,
+};
+use crate::tui::model::{
+    By, Drill, FlowRow, Model, Overlay, RowKind, SectionRow, StatusLine, TrafficState, TrafficView,
+};
+use crate::tui::msg::Cmd;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use pce::marks::Action;
+use pce::traffic::{
+    Decisions, Direction, FlowGroup, MeshRow, ResolvedFlow, app_sections, app_sections_both,
+    group_by_labels, group_by_service, mesh,
+};
+use std::collections::BTreeMap;
+
+/// `m` on the Traffic screen: the form for the selected row, or why not.
+/// Never a request.
+pub(super) fn mark_key(model: &mut Model) -> Vec<Cmd> {
+    let t = &model.traffic;
+    if t.marks.error().is_some() {
+        model.status = StatusLine::warn("marks.toml invalid: :marks shows the problems");
+        return Vec::new();
+    }
+    if t.data.is_none() {
+        model.status = StatusLine::info("no traffic loaded: r runs the query");
+        return Vec::new();
+    }
+    let prefill = match t.view {
+        TrafficView::Flows => t.flows.selected_item().map(|r| flow_prefill(t, r)),
+        TrafficView::Aggregate if t.apps_state.by == By::Pairs => {
+            t.pairs_table().selected_item().map(|g| pair_prefill(t, g))
+        }
+        TrafficView::Aggregate => t
+            .apps
+            .selected_item()
+            .and_then(|r| section_prefill(t, r, false)),
+        TrafficView::Mesh => t.mesh.selected_item().map(|r| mesh_prefill(t, r)),
+        TrafficView::Blocked => t
+            .blocked
+            .selected_item()
+            .and_then(|r| section_prefill(t, r, true)),
+        TrafficView::Treemap => {
+            model.status = StatusLine::info("m: Enter drills to the flows, mark there");
+            return Vec::new();
+        }
+    };
+    let Some(p) = prefill else {
+        model.status = StatusLine::info("no row to mark");
+        return Vec::new();
+    };
+    let host = model.profile.host.clone();
+    open_form(model, MarkForm::new(p, MarkOrigin::Traffic, &host));
+    Vec::new()
+}
+
+/// `m` in the app overlay: the selected peer of the Inbound or Outbound
+/// panel; the Policy and Workloads panels say where marks go.
+pub(super) fn mark_app_key(model: &mut Model) -> Vec<Cmd> {
+    let Some(v) = model.app_view.as_ref() else {
+        return Vec::new();
+    };
+    if matches!(v.panel, AppPanel::Policy | AppPanel::Workloads) {
+        model.status = StatusLine::info("m marks traffic rows (Inbound, Outbound)");
+        return Vec::new();
+    }
+    if model.traffic.marks.error().is_some() {
+        model.status = StatusLine::warn("marks.toml invalid: :marks shows the problems");
+        return Vec::new();
+    }
+    let Some((dir, p)) = v.selected_peer() else {
+        model.status = StatusLine::info("no row to mark");
+        return Vec::new();
+    };
+    let focus = v.focus.clone();
+    let drill = Drill::Peer {
+        app: focus.app.clone(),
+        direction: dir,
+        peer: p.peer.clone(),
+        service: p.service.clone(),
+        decisions: Decisions::All,
+    };
+    let t = &model.traffic;
+    let rep = t.first_flow(|f| drill.matches(f, &focus.keys) && f.policy_decision == p.decision);
+    let (peer_ep, app_ep) = split(rep.as_ref(), dir);
+    let peer = group_side(&p.peer, &focus.keys, peer_ep);
+    let app = group_side(&focus.app, &focus.keys, app_ep);
+    let (src, dst) = match dir {
+        Direction::In => (peer, app),
+        Direction::Out => (app, peer),
+    };
+    let decision = match p.decision {
+        pce::models::PolicyDecision::Unknown => String::new(),
+        d => d.as_str().to_string(),
+    };
+    let prefill = Prefill {
+        what: format!(
+            "{} {} · {} {}",
+            focus.app_text(),
+            dir.as_str(),
+            p.peer_text(),
+            p.service
+        ),
+        action: Action::Reviewed,
+        src,
+        dst,
+        service: p.service.clone(),
+        decision,
+        draft: String::new(),
+        rows: RowsOf::Peers(Box::new(focus), dir),
+    };
+    let host = model.profile.host.clone();
+    open_form(model, MarkForm::new(prefill, MarkOrigin::App, &host));
+    Vec::new()
+}
+
+/// The endpoints of `f` on the peer and the app side of `dir`.
+fn split(
+    f: Option<&ResolvedFlow>,
+    dir: Direction,
+) -> (
+    Option<&pce::traffic::ResolvedEndpoint>,
+    Option<&pce::traffic::ResolvedEndpoint>,
+) {
+    match (f, dir) {
+        (Some(f), Direction::In) => (Some(&f.src), Some(&f.dst)),
+        (Some(f), Direction::Out) => (Some(&f.dst), Some(&f.src)),
+        (None, _) => (None, None),
+    }
+}
+
+fn flow_prefill(t: &TrafficState, r: &FlowRow) -> Prefill {
+    let service = r.service_text();
+    Prefill {
+        what: format!(
+            "Flows · {} → {} {service}",
+            r.src.display_name(),
+            r.dst.display_name()
+        ),
+        action: Action::Reviewed,
+        src: endpoint_side(&r.src, &t.keys),
+        dst: endpoint_side(&r.dst, &t.keys),
+        service,
+        decision: String::new(),
+        draft: String::new(),
+        rows: RowsOf::Flows,
+    }
+}
+
+fn pair_prefill(t: &TrafficState, g: &FlowGroup) -> Prefill {
+    let d = t.apps_state.decisions;
+    let drill = match &g.service {
+        Some(s) => Drill::Service(g.src.clone(), g.dst.clone(), s.clone(), d),
+        None => Drill::Pair(g.src.clone(), g.dst.clone(), d),
+    };
+    let rep = t.first_flow(|f| drill.matches(f, &t.keys));
+    let (decision, draft) = decisions_text(d);
+    let service = g.service.clone().unwrap_or_default();
+    Prefill {
+        what: format!(
+            "App-to-app pairs · {} → {} {service}",
+            g.src.join("/"),
+            g.dst.join("/")
+        )
+        .trim_end()
+        .to_string(),
+        action: Action::Reviewed,
+        src: group_side(&g.src, &t.keys, rep.as_ref().map(|f| &f.src)),
+        dst: group_side(&g.dst, &t.keys, rep.as_ref().map(|f| &f.dst)),
+        service,
+        decision,
+        draft,
+        rows: if g.service.is_some() {
+            RowsOf::Services(d)
+        } else {
+            RowsOf::Pairs(d)
+        },
+    }
+}
+
+fn mesh_prefill(t: &TrafficState, r: &MeshRow) -> Prefill {
+    let drill = Drill::Mesh {
+        key: r.key(),
+        cols: t.mesh_cols,
+    };
+    let rep = t.first_flow(|f| drill.matches(f, &t.keys));
+    let service = r.service_text();
+    Prefill {
+        what: format!("Mesh · {} → {} {service}", r.src.join("/"), r.dst.join("/")),
+        action: Action::Reviewed,
+        src: group_side(&r.src, &t.keys, rep.as_ref().map(|f| &f.src)),
+        dst: group_side(&r.dst, &t.keys, rep.as_ref().map(|f| &f.dst)),
+        service,
+        decision: String::new(),
+        draft: String::new(),
+        rows: RowsOf::Mesh(t.mesh_cols),
+    }
+}
+
+/// A section's peer row (direction-aware: in `in` the peer is the
+/// source) or its header (the app side only; the peer side `any`).
+fn section_prefill(t: &TrafficState, r: &SectionRow, blocked: bool) -> Option<Prefill> {
+    let drill = t.section_drill()?;
+    let decisions = t.section_decisions();
+    let (decision, draft) = decisions_text(decisions);
+    let rep = t.first_flow(|f| drill.matches(f, &t.keys));
+    let dir_of_view = if blocked {
+        Some(Direction::In)
+    } else {
+        match t.apps_state.by {
+            By::In => Some(Direction::In),
+            By::Out => Some(Direction::Out),
+            _ => None,
+        }
+    };
+    let view = if blocked { "Blocked" } else { "App-to-app" };
+    let app_text = r.app.join("/");
+    let (src, dst, service, what) = match &r.kind {
+        RowKind::Header { totals, .. } => {
+            // A `both` header: the app as the destination.
+            let dir = match totals.as_slice() {
+                [(d, _)] => *d,
+                _ => Direction::In,
+            };
+            let (_, app_ep) = split(rep.as_ref(), dir);
+            let app = group_side(&r.app, &t.keys, app_ep);
+            let (src, dst) = match dir {
+                Direction::In => (any_side(), app),
+                Direction::Out => (app, any_side()),
+            };
+            (src, dst, String::new(), format!("{view} · {app_text}"))
+        }
+        RowKind::Peer { direction, row, .. } => {
+            let (peer_ep, app_ep) = split(rep.as_ref(), *direction);
+            let peer: SidePrefill = group_side(&row.peer, &t.keys, peer_ep);
+            let app = group_side(&r.app, &t.keys, app_ep);
+            let what = format!(
+                "{view} {} · {app_text} {} {} {}",
+                direction.as_str(),
+                direction.arrow(),
+                row.peer_text(),
+                row.service
+            );
+            match direction {
+                Direction::In => (peer, app, row.service.clone(), what),
+                Direction::Out => (app, peer, row.service.clone(), what),
+            }
+        }
+    };
+    Some(Prefill {
+        what,
+        action: if blocked {
+            Action::AcceptBlocked
+        } else {
+            Action::Reviewed
+        },
+        src,
+        dst,
+        service,
+        decision,
+        draft,
+        rows: RowsOf::Sections(dir_of_view, decisions),
+    })
+}
+
+/// The rows of the view `rows` names that hold one of `flows`: the view's
+/// own aggregation of them.
+fn rows_of(t: &TrafficState, rows: &RowsOf, flows: &[ResolvedFlow]) -> usize {
+    let keys = &t.keys;
+    match rows {
+        RowsOf::Flows => flows.len(),
+        RowsOf::Pairs(d) => group_by_labels(&d.kept(flows), keys).len(),
+        RowsOf::Services(d) => group_by_service(&d.kept(flows), keys).len(),
+        RowsOf::Sections(Some(dir), d) => app_sections(flows, keys, *dir, *d)
+            .iter()
+            .map(|s| s.rows.len())
+            .sum(),
+        RowsOf::Sections(None, d) => app_sections_both(flows, keys, *d)
+            .iter()
+            .map(|s| s.rows.len())
+            .sum(),
+        RowsOf::Mesh(cols) => mesh(flows, keys, *cols).len(),
+        RowsOf::Peers(focus, dir) => pce::app::app_peers(flows, focus, *dir).len(),
+    }
+}
+
+fn plural(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
+/// The live preview: the loaded result (all of it, not only the focus)
+/// classified against the active marks plus this one. Local; no request.
+pub(crate) fn preview(t: &TrafficState, mf: &MarkForm, now: jiff::Timestamp) -> Vec<String> {
+    let Ok(draft) = mf.mark(now) else {
+        return Vec::new();
+    };
+    let matched: Vec<ResolvedFlow> = t
+        .loaded_flows()
+        .iter()
+        .filter(|f| draft.matches(f))
+        .cloned()
+        .collect();
+    if matched.is_empty() {
+        return vec!["matches nothing in this result".into()];
+    }
+    let rows = rows_of(t, &mf.ctx.rows, &matched);
+    let squelch = draft.action == Action::Squelch;
+    let mut first = format!(
+        "matches {} · {} in this result",
+        plural(rows, "row", "rows"),
+        plural(matched.len(), "flow", "flows")
+    );
+    if squelch {
+        first.push_str(" · hides them (M shows)");
+    }
+    let mut lines = vec![first];
+    // The file's marks (the edited one replaced) plus this one.
+    let mut set = t.marks.set().cloned().unwrap_or_default();
+    let at = match mf.ctx.editing.as_ref().and_then(|m| set.find(&m.id)) {
+        Some(i) => {
+            set.marks[i] = draft.clone();
+            i
+        }
+        None => {
+            set.marks.push(draft.clone());
+            set.marks.len() - 1
+        }
+    };
+    let active = set.active(Some(&t.marks_pce), now, t.draft_loaded());
+    if !active.is_active(at) {
+        lines.push("not active here: another PCE, expired, or waiting for D".into());
+        return lines;
+    }
+    let mut winners: BTreeMap<usize, u64> = BTreeMap::new();
+    for f in &matched {
+        if let Some(h) = active.classify(f)
+            && h.mark != at
+        {
+            *winners.entry(h.mark).or_default() += 1;
+        }
+    }
+    let k: u64 = winners.values().sum();
+    if let Some((&top, _)) = winners.iter().max_by_key(|(_, n)| **n) {
+        let w = &set.marks[top];
+        lines.push(format!(
+            "{k} of them {}: {} {} wins",
+            if squelch {
+                "stay shown"
+            } else {
+                "go to a stronger mark"
+            },
+            w.action.as_str(),
+            w.id
+        ));
+    }
+    lines
+}
+
+/// The form's validation and preview after a key.
+fn refresh(t: &TrafficState, mf: &mut MarkForm) {
+    let now = jiff::Timestamp::now();
+    mf.form.error = mf.mark(now).err();
+    mf.preview = preview(t, mf, now);
+}
+
+fn open_form(model: &mut Model, mut mf: MarkForm) {
+    refresh(&model.traffic, &mut mf);
+    model.overlay = Overlay::MarkForm(Box::new(mf));
+}
+
+/// Back where the form came from.
+fn close(model: &mut Model, origin: MarkOrigin) {
+    model.overlay = match origin {
+        MarkOrigin::App if model.app_view.is_some() => Overlay::App,
+        _ => Overlay::None,
+    };
+}
+
+/// The form's keys: `Ctrl-N`/`Ctrl-P` complete from the loaded data (no
+/// request), `Ctrl-T` cycles a side's kind, `Ctrl-A` swaps all labels in,
+/// `Enter` saves, `Esc` returns.
+pub(super) fn form_key(model: &mut Model, mut mf: MarkForm, k: KeyEvent) -> Vec<Cmd> {
+    let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+    let before = mf.form.value("Expires").to_string();
+    if ctrl && matches!(k.code, KeyCode::Char('n' | 'p')) {
+        complete_field(model, &mut mf.form, k.code == KeyCode::Char('n'));
+    } else if ctrl && k.code == KeyCode::Char('t') {
+        mf.cycle_kind();
+    } else if ctrl && k.code == KeyCode::Char('a') {
+        mf.swap_labels();
+    } else {
+        match mf.form.on_key(k) {
+            FormEvent::Continue | FormEvent::NewRuleset => {}
+            FormEvent::Cancel => {
+                close(model, mf.ctx.origin);
+                model.status = StatusLine::info("cancelled, nothing written");
+                return Vec::new();
+            }
+            FormEvent::Submit => return submit(model, mf),
+        }
+    }
+    mf.sync_expiry(&before);
+    refresh(&model.traffic, &mut mf);
+    model.overlay = Overlay::MarkForm(Box::new(mf));
+    Vec::new()
+}
+
+/// `Enter`: the comment is required; then one operation on `marks.toml`
+/// (lock, reload, write), the views rebuilt, back where the form came
+/// from. A failure keeps the form open with the error. Never a `Cmd`.
+fn submit(model: &mut Model, mut mf: MarkForm) -> Vec<Cmd> {
+    let now = jiff::Timestamp::now();
+    if mf.comment().is_empty() {
+        mf.form.active = if mf.ctx.extend {
+            0
+        } else {
+            crate::tui::mark_form::COMMENT
+        };
+        mf.form.error = Some("comment required: why are these flows marked?".into());
+        model.overlay = Overlay::MarkForm(Box::new(mf));
+        return Vec::new();
+    }
+    let mark = match mf.mark(now) {
+        Ok(m) => m,
+        Err(e) => {
+            mf.form.error = Some(e);
+            model.overlay = Overlay::MarkForm(Box::new(mf));
+            return Vec::new();
+        }
+    };
+    let flows = model
+        .traffic
+        .loaded_flows()
+        .iter()
+        .filter(|f| mark.matches(f))
+        .count();
+    let op = match (&mf.ctx.editing, mf.ctx.extend) {
+        (Some(m), true) => MarkOp::Extend {
+            id: m.id.clone(),
+            days: 30,
+            comment: Some(mf.comment().to_string()),
+        },
+        (Some(_), false) => MarkOp::Replace(mark.clone()),
+        (None, _) => MarkOp::Add(mark.clone()),
+    };
+    match model.traffic.marks.apply(op, now) {
+        Ok(done) => {
+            let id = done.ids.first().cloned().unwrap_or(mark.id.clone());
+            model.traffic.rebuild_views();
+            super::rebuild_app_traffic(model);
+            close(model, mf.ctx.origin);
+            let backup = if done.backup.is_some() {
+                " · marks.toml had comments: kept in marks.toml.bak"
+            } else {
+                ""
+            };
+            model.status = StatusLine::info(if mf.ctx.extend {
+                format!("mark {id} extended by 30 days{backup}")
+            } else {
+                format!(
+                    "mark {id} saved: {}, {} · :marks lists marks{backup}",
+                    mark.action.as_str(),
+                    plural(flows, "flow", "flows")
+                )
+            });
+        }
+        Err(e) => {
+            mf.form.error = Some(e.to_string());
+            model.overlay = Overlay::MarkForm(Box::new(mf));
+        }
+    }
+    Vec::new()
+}

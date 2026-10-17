@@ -1,0 +1,34 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: "render_to_string(&m, 100, 30)"
+---
+ illumio-tui pce.example · org 5 ●                                            api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭ Filters ────────────────────────────────────────────────────── window 24h · cap 1000 · unbounded ╮
+│window 24h  src *  dst *  svc *  decision all                                                     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭ Result ─────────────────────────────────────────────────────────────────────── 30 flows · 3s ago ╮
+│21 of 30 flows (9 squelched) allowed 8 pot.blocked 6 blocked 6  ██████████████████████████████████│
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭ ╭ New mark · Blocked in · erp/prod ← erp/dev 8443/tcp ─── Tab next · Enter saves · Esc cancels ╮ ╮
+│ │  Action       accept-blocked                       Ctrl-N: critical important revisit…       │ │
+│ │  Source       app=erp env=dev                      Ctrl-A all labels · Ctrl-T kind           │ │
+│▸│  Destination  app=erp env=prod                     Ctrl-A all labels · Ctrl-T kind           │2│
+│ │  Service      8443/tcp                             empty: any · 8000-8010/tcp · udp          │5│
+│ │  Decision     blocked, potentially_blocked         empty: any · blocked …                    │4│
+│ │  Draft                                             empty: any · matched with D loaded        │1│
+│ │  Expires      90d                                  1d 7d 30d 90d YYYY-MM-DD never            │ │
+│ │  Scope        this PCE                             this PCE = pce.example · Ctrl-N: any PCE  │6│
+│ │▸ Comment      CHG-1182, owner confirmed▏           why: CHG-1182, owner confirmed (required) │2│
+│ │──────────────────────────────────────────────────────────────────────────────────────────────│1│
+│ │matches 1 row · 1 flow in this result                                                         │ │
+│ │Enter saves to marks.toml · Esc cancels                                                       │5│
+│ ╰──────────────────────────────────────────────────────────────────────────────────────────────╯ │
+│      crm/dev                                   api.partner.ex 443/tcp         1    18 10-10 07:19│
+│    ▾ crm/prod  in · 1 group · 12 conns · 1 blocked                                               │
+│      crm/dev                                   crm-db-p.examp 3306/tcp        1    12 10-10 07:20│
+│  ◆ ▾ hr/prod  in · 1 group · 5 conns · 1 blocked                                                 │
+│  ◆   hr/dev                                    hr-web-p.examp icmp            1     5 10-10 07:00│
+│    ▾ shop/dev  in · 1 group · 3 conns · 1 pot.blocked                                            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ready                             f filter  r run  a auto  v view  g group  / search  : cmd  ? help
