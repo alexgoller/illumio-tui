@@ -2649,6 +2649,7 @@ fn gen_by_name(model: &mut Model, name: &str) -> Vec<Cmd> {
 /// Otherwise one request each, counted. A new app gets a new `seq`, so an
 /// earlier overlay's late answer is dropped.
 fn open_app(model: &mut Model, focus: Focus) -> Vec<Cmd> {
+    model.traffic.sync_marks();
     let window = model.traffic.filter.window.clone();
     let (mut v, reused) = match model.app_view.take() {
         Some(mut v) if v.focus.same_app(&focus) => {
@@ -2662,7 +2663,12 @@ fn open_app(model: &mut Model, focus: Focus) -> Vec<Cmd> {
         }
     };
     let t = &model.traffic;
-    v.rebuild_traffic(t.flows_for(&focus), t.partial_for(&focus));
+    let a = t.active_marks();
+    v.rebuild_traffic(
+        t.flows_for(&focus),
+        t.partial_for(&focus),
+        a.as_ref().map(|a| (a, t.show_squelched)),
+    );
     let idx = model.index().cloned();
     v.label_hrefs = idx
         .as_ref()
@@ -2740,10 +2746,16 @@ fn open_app(model: &mut Model, focus: Focus) -> Vec<Cmd> {
 /// The overlay's peers again from the loaded flows: after `X`, and when a
 /// traffic answer lands while it is open. No request.
 fn rebuild_app_traffic(model: &mut Model) {
+    model.traffic.sync_marks();
     let t = &model.traffic;
     if let Some(v) = model.app_view.as_mut() {
         let focus = v.focus.clone();
-        v.rebuild_traffic(t.flows_for(&focus), t.partial_for(&focus));
+        let a = t.active_marks();
+        v.rebuild_traffic(
+            t.flows_for(&focus),
+            t.partial_for(&focus),
+            a.as_ref().map(|a| (a, t.show_squelched)),
+        );
     }
 }
 
@@ -2775,6 +2787,11 @@ fn app_overlay_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         KeyCode::Up | KeyCode::Char('k') => v.move_cursor(-1),
         KeyCode::Char('X') => {
             v.focus.direction = v.focus.direction.next();
+            rebuild_app_traffic(model);
+        }
+        // Squelched peers shown or left out here and on the Traffic screen.
+        KeyCode::Char('M') => {
+            model.status = model.traffic.toggle_squelched();
             rebuild_app_traffic(model);
         }
         KeyCode::Enter => return app_enter(model),

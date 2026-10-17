@@ -134,6 +134,15 @@ impl TrafficState {
     /// One `stat` of `marks.toml` (parsed again only when it changed),
     /// then the result split by the active marks. Pure apart from that
     /// `stat`: a local file, never a request.
+    /// The app overlay and the generator open (and rebuild) with the marks
+    /// file as it is now: when a `stat` says it changed since the last
+    /// rebuild, every view is rebuilt with it first. Never a request.
+    pub fn sync_marks(&mut self) {
+        if self.marks.is_stale() {
+            self.rebuild_views();
+        }
+    }
+
     pub(crate) fn refresh_marks(&mut self) {
         let was_error = self.marks.error().cloned();
         let changed = self.marks.refresh();
@@ -205,9 +214,10 @@ impl TrafficState {
                 },
             )
         });
+        // A valid file with no mark active or waiting changes nothing.
         let (unsquelched, marked) = match computed {
-            Some((u, m)) => (u, Some(m)),
-            None => (None, None),
+            Some((u, m)) if m.active > 0 || m.waiting > 0 => (u, Some(m)),
+            _ => (None, None),
         };
         self.unsquelched = unsquelched;
         self.marked = marked;

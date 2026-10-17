@@ -34,6 +34,7 @@ pub(super) fn open_gen(model: &mut Model, app: pce::traffic::GroupKey, from_app:
         model.status = StatusLine::info("the name index is not loaded yet");
         return Vec::new();
     };
+    model.traffic.sync_marks(); // the header's squelched count
     let window = model.traffic.filter.window.clone();
     let mut v = match model.gen_view.take() {
         Some(mut v) if v.focus.same_app(&focus) => {
@@ -189,10 +190,27 @@ pub(super) fn rebuild_gen(model: &mut Model) {
         v.picked.as_deref(),
     );
     let fresh = rows(flows, &v.focus, &model.limits.tier_key, &idx, target);
+    // Marks are not policy: the rows above saw every flow; only the
+    // header counts the app's squelched ones.
+    let squelched = model
+        .traffic
+        .active_marks()
+        .map(|a| {
+            flows
+                .iter()
+                .filter(|f| v.focus.keeps(f))
+                .filter(|f| {
+                    a.classify(f)
+                        .is_some_and(|h| h.action == pce::marks::Action::Squelch)
+                })
+                .count() as u64
+        })
+        .unwrap_or(0);
     let (gap, requery, window) = gap_text(model, v);
     let any_missing = pce::generate::consolidate::unavailable(Consolidate::Any, &idx);
     if let Some(v) = model.gen_view.as_mut() {
         v.any_missing = any_missing.map(str::to_string);
+        v.squelched = squelched;
         v.set_rows(fresh);
         v.gap = gap;
         v.requery = requery;

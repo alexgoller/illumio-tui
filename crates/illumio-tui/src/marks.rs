@@ -1118,6 +1118,18 @@ impl MarksStore {
         }
     }
 
+    /// Whether a `refresh` would read the file again (its stamp changed,
+    /// or a stat error changed): one `stat`, nothing read or kept.
+    pub fn is_stale(&self) -> bool {
+        if self.path.as_os_str().is_empty() {
+            return false;
+        }
+        match self.stamp_now() {
+            Ok(s) => self.stamp != Some(s),
+            Err(e) => self.error() != Some(&e),
+        }
+    }
+
     /// One `stat`; the file is read and parsed again only when its stamp
     /// changed. Whether it did. A local file, never a request.
     pub fn refresh(&mut self) -> bool {
@@ -1337,6 +1349,23 @@ created_on = "pce.example.com"
             .unwrap();
         assert_eq!(again.backup, None, "no comment left: no second backup");
         assert_eq!(fs::read_to_string(&bak).unwrap(), "old");
+    }
+
+    #[test]
+    fn is_stale_stats_without_reading_and_refresh_clears_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = store(&dir);
+        assert!(!s.is_stale(), "missing, and seen missing");
+        assert!(!MarksStore::none().is_stale());
+        write(
+            &s,
+            "[[mark]]\naction = \"reviewed\"\nsrc = \"any\"\ndst = \"any\"\ncomment = \"x\"\n",
+        );
+        let parses = s.parses();
+        assert!(s.is_stale());
+        assert_eq!(s.parses(), parses, "a stat, no parse");
+        assert!(s.refresh());
+        assert!(!s.is_stale());
     }
 
     #[test]

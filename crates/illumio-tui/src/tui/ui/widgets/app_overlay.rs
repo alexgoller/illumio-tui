@@ -136,23 +136,43 @@ fn render_summary(v: &AppView, t: &Theme, f: &mut Frame, area: Rect) {
     f.render_widget(Paragraph::new(lines), area);
 }
 
-fn peer_line<'a>(p: &AppPeer, cells: usize, t: &Theme) -> Line<'a> {
+/// One peer row; with `gutter` (marks active) the mark's glyph first, the
+/// peer in the highlight's colour, a quiet row dimmed.
+fn peer_line<'a>(p: &AppPeer, cells: usize, t: &Theme, gutter: bool) -> Line<'a> {
+    use crate::tui::ui::widgets::table::{dims_row, marker_style, name_style};
     let conns = compact_count(p.connections);
     let svc_w = 9;
     // With draft decisions: `+N` flows the draft would allow, `-N` block.
     let draft = crate::tui::model::draft_short(p.draft.as_ref());
     let draft_w = if p.draft.is_some() { 7 } else { 0 };
-    let peer_w = cells.saturating_sub(svc_w + conns.len().max(5) + 4 + draft_w);
-    let mut spans = vec![Span::styled(
+    let gutter_w = if gutter { 2 } else { 0 };
+    let peer_w = cells.saturating_sub(svc_w + conns.len().max(5) + 4 + draft_w + gutter_w);
+    let m = p.marks.as_ref().and_then(pce::marks::RowMarks::marker);
+    let style = if dims_row(m) {
+        t.dim_style()
+    } else {
+        t.decision_style(p.decision)
+    };
+    let mut spans = Vec::new();
+    if gutter {
+        spans.push(match m {
+            Some(m) => Span::styled(format!("{} ", m.glyph()), marker_style(m, t)),
+            None => Span::raw("  "),
+        });
+    }
+    spans.push(Span::styled(
+        fit(&p.peer_text(), peer_w),
+        name_style(m, t).unwrap_or(style),
+    ));
+    spans.push(Span::styled(
         format!(
-            "{} {} {} {:>5}",
-            fit(&p.peer_text(), peer_w),
+            " {} {} {:>5}",
             fit(&p.service, svc_w),
             mark(p.decision),
             conns
         ),
-        t.decision_style(p.decision),
-    )];
+        style,
+    ));
     if let Some(d) = &p.draft {
         let style = if d.draft_allowed > 0 {
             Style::new().fg(t.ok)
@@ -168,11 +188,7 @@ fn peer_line<'a>(p: &AppPeer, cells: usize, t: &Theme) -> Line<'a> {
 
 fn render_peers(v: &AppView, side: AppPanel, t: &Theme, f: &mut Frame, area: Rect) {
     let focused = v.panel == side;
-    let title = if v.partial {
-        format!("{} · partial", side.title())
-    } else {
-        side.title().to_string()
-    };
+    let title = v.panel_title(side);
     let block = panel(&title, "", t, focused);
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -200,7 +216,10 @@ fn render_peers(v: &AppView, side: AppPanel, t: &Theme, f: &mut Frame, area: Rec
         return;
     }
     let w = inner.width as usize;
-    let lines: Vec<Line> = rows.iter().map(|p| peer_line(p, w, t)).collect();
+    let lines: Vec<Line> = rows
+        .iter()
+        .map(|p| peer_line(p, w, t, v.marks_on))
+        .collect();
     f.render_widget(
         rows_paragraph(
             lines,

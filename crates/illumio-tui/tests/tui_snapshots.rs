@@ -2151,8 +2151,24 @@ fn generator_renders_at_every_terminal_size() {
         (&generator_fan_model, "c"),
         (&generator_model, "p"),
     ];
-    for (make, keys) in states {
+    let dir = tempfile::tempdir().unwrap();
+    for (make, keys, marks) in states
+        .into_iter()
+        .map(|(make, keys)| (make, keys, false))
+        .chain([(&generator_model as &dyn Fn() -> _, "", true)])
+    {
         let mut m = make();
+        if marks {
+            // The header's squelched count (the rules include them).
+            std::fs::write(
+                dir.path().join("marks.toml"),
+                illumio_tui::tui::test_support::RICH_MARKS,
+            )
+            .unwrap();
+            m.traffic.marks = illumio_tui::marks::MarksStore::new(dir.path().join("marks.toml"));
+            open_gen_again(&mut m);
+            assert!(gen_header(&m).contains("squelched (rules include them)"));
+        }
         for c in keys.chars() {
             gen_key(&mut m, c);
         }
@@ -2162,6 +2178,20 @@ fn generator_renders_at_every_terminal_size() {
             }
         }
     }
+}
+
+/// `:gen` again for the generator's app (its marks read afresh).
+fn open_gen_again(m: &mut illumio_tui::tui::model::Model) {
+    use illumio_tui::tui::commands::Command;
+    use illumio_tui::tui::msg::Msg;
+    illumio_tui::tui::update(m, Msg::Command(Command::Gen(Some("shop/prod".into()))));
+}
+
+fn gen_header(m: &illumio_tui::tui::model::Model) -> String {
+    m.gen_view
+        .as_ref()
+        .map(|v| v.header_title())
+        .unwrap_or_default()
 }
 
 /// No terminal size panics any screen, traffic view or the app overlay:
@@ -2179,6 +2209,19 @@ fn screens_render_at_every_terminal_size() {
         ts::model_with_events(),
         app_overlay_model(),
     ];
+    // The app overlay with marks (the gutter, the panel titles), and `M`.
+    for keys in ["", "M"] {
+        let mut a = with_policy(with_workloads(ts::model_with_marks(
+            dir.path(),
+            ts::RICH_MARKS,
+        )));
+        open_app(&mut a, "shop/prod");
+        for c in keys.chars() {
+            gen_key(&mut a, c);
+        }
+        assert!(a.app_view.as_ref().is_some_and(|v| v.marks_on));
+        models.push(a);
+    }
     for i in 0..views.len() {
         let mut m = ts::model_with_rich_flows();
         for c in views[..i].chars() {

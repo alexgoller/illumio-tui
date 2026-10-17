@@ -74,6 +74,9 @@ pub struct GenView {
     pub consolidate: BTreeMap<PortSpec, Consolidate>,
     /// Why the Any option is unavailable (no built-in Any IP list).
     pub any_missing: Option<String>,
+    /// The app's flows a squelch mark hides elsewhere: the rules include
+    /// them (marks are not policy), the header says so.
+    pub squelched: u64,
 }
 
 /// What the fresh read at `Enter` changed against the preview, for the
@@ -179,6 +182,7 @@ impl GenView {
             candidates: Vec::new(),
             consolidate: BTreeMap::new(),
             any_missing: None,
+            squelched: 0,
         }
     }
 
@@ -487,8 +491,13 @@ impl GenView {
     /// `Generate · shop/prod · last 24h · 1310 flows · complete`.
     pub fn header_title(&self) -> String {
         let flows: u64 = self.in_force().map(|r| r.flows).sum();
+        let squelched = if self.squelched > 0 {
+            format!(" · {} squelched (rules include them)", self.squelched)
+        } else {
+            String::new()
+        };
         format!(
-            "Generate · {} · last {} · {flows} flows · {}",
+            "Generate · {} · last {} · {flows} flows · {}{squelched}",
             self.focus.app_text(),
             self.window,
             if self.gap.is_some() {

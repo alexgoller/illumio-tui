@@ -1,7 +1,9 @@
 //! The app overlay's state (`A` / `:app`): one app's peers, workloads and
 //! policy. Built from what is loaded plus at most two requests, each counted
 //! here. Pure: `update` fills it, `ui::widgets::app_overlay` draws it.
+use crate::tui::traffic_marks::Squelch;
 use pce::app::{AppPeer, AppPolicyRow, AppWorkload, WorkloadSummary, app_peers};
+use pce::marks::{ActiveMarks, annotate_peers, partition};
 use pce::models::PolicyScope;
 use pce::traffic::{Direction, Focus, FocusDirection, ResolvedFlow};
 
@@ -89,6 +91,13 @@ pub struct AppView {
     /// With draft decisions loaded: the app's blocked or potentially
     /// blocked flows (in the direction in force) the draft would allow.
     pub draft_fixed: Option<u64>,
+    /// Marks are active: the peer panels draw the gutter.
+    pub marks_on: bool,
+    /// `M`: squelched peers are shown, dimmed `~`.
+    pub show_squelched: bool,
+    /// Per peer panel (inbound, outbound): the peer rows squelch removed
+    /// and the squelched flow records of that side.
+    pub squelched: [Squelch; 2],
 }
 
 impl AppView {
@@ -111,29 +120,59 @@ impl AppView {
             requests: 0,
             cached: 0,
             draft_fixed: None,
+            marks_on: false,
+            show_squelched: false,
+            squelched: [Squelch::default(); 2],
         }
     }
 
     /// Peers from `flows` for the direction in force; a side the direction
     /// leaves out has no rows, and the cursor moves off its panel to the
-    /// side shown (`w` and `Enter` act on what is on screen). No request.
-    pub fn rebuild_traffic(&mut self, flows: &[ResolvedFlow], partial: bool) {
+    /// side shown (`w` and `Enter` act on what is on screen). With `marks`
+    /// (the active marks, and `M`), the peers are those of the flows kept
+    /// and carry their marks. No request.
+    pub fn rebuild_traffic(
+        &mut self,
+        flows: &[ResolvedFlow],
+        partial: bool,
+        marks: Option<(&ActiveMarks, bool)>,
+    ) {
         let d = self.focus.direction;
         self.panel = match (self.panel, d) {
             (AppPanel::Inbound, FocusDirection::Out) => AppPanel::Outbound,
             (AppPanel::Outbound, FocusDirection::In) => AppPanel::Inbound,
             (p, _) => p,
         };
-        self.inbound = if d == FocusDirection::Out {
-            Vec::new()
-        } else {
-            app_peers(flows, &self.focus, Direction::In)
+        let marks = marks.filter(|(a, _)| !a.is_empty());
+        let part = marks.map(|(a, keep)| partition(flows, a, keep));
+        let kept: &[ResolvedFlow] = part.as_ref().map_or(flows, |p| &p.kept);
+        self.marks_on = marks.is_some();
+        self.show_squelched = marks.is_some_and(|(_, keep)| keep);
+        self.squelched = [Squelch::default(); 2];
+        let focus = &self.focus;
+        let mut side = |dir: Direction, skip: FocusDirection, i: usize| -> Vec<AppPeer> {
+            if d == skip {
+                return Vec::new();
+            }
+            let agg = |f: &[ResolvedFlow]| app_peers(f, focus, dir);
+            let mut rows = agg(kept);
+            if let (Some((a, _)), Some(p)) = (marks, &part) {
+                let rows_gone = annotate_peers(&mut rows, &p.marked, a, agg);
+                let on_side = |f: &ResolvedFlow| {
+                    let ep = if dir == Direction::In { &f.dst } else { &f.src };
+                    pce::traffic::group_key(ep, &focus.keys) == focus.app
+                };
+                self.squelched[i] = Squelch {
+                    rows: rows_gone,
+                    flows: p.marked.squelched_where(on_side),
+                };
+            }
+            rows
         };
-        self.outbound = if d == FocusDirection::In {
-            Vec::new()
-        } else {
-            app_peers(flows, &self.focus, Direction::Out)
-        };
+        let inbound = side(Direction::In, FocusDirection::Out, 0);
+        let outbound = side(Direction::Out, FocusDirection::In, 1);
+        self.inbound = inbound;
+        self.outbound = outbound;
         self.partial = partial;
         self.draft_fixed = flows
             .iter()
@@ -205,6 +244,25 @@ impl AppView {
         }
     }
 
+    /// A peer panel's title: `Inbound`, then `3 peers (41 flows)
+    /// squelched` (`, shown ~` with `M`) when squelch took some.
+    pub fn panel_title(&self, side: AppPanel) -> String {
+        let mut t = side.title().to_string();
+        if self.partial {
+            t.push_str(" · partial");
+        }
+        let sq = self.squelched[usize::from(side == AppPanel::Outbound)];
+        if sq.flows > 0 {
+            t.push_str(&format!(
+                " · {} peers ({} flows) squelched{}",
+                sq.rows,
+                sq.flows,
+                if self.show_squelched { ", shown ~" } else { "" }
+            ));
+        }
+        t
+    }
+
     /// `shop/prod · in+out · last 24h`.
     pub fn header_title(&self) -> String {
         format!(
@@ -245,10 +303,10 @@ mod tests {
     fn the_traffic_panels_follow_the_direction() {
         let m = model_with_flows();
         let mut v = AppView::new(shop(FocusDirection::Both), "24h".into(), 1);
-        v.rebuild_traffic(m.traffic.loaded_flows(), false);
+        v.rebuild_traffic(m.traffic.loaded_flows(), false, None);
         assert_eq!((v.inbound.len(), v.outbound.len()), (3, 2));
         v.focus.direction = FocusDirection::In;
-        v.rebuild_traffic(m.traffic.loaded_flows(), false);
+        v.rebuild_traffic(m.traffic.loaded_flows(), false, None);
         assert_eq!((v.inbound.len(), v.outbound.len()), (3, 0));
         assert_eq!(v.header_title(), "shop/prod · in · last 24h");
         assert_eq!(v.header_meta(), "0 req · cached");
@@ -258,7 +316,7 @@ mod tests {
     fn tab_cycles_the_panels_and_the_cursor_stays_in_its_panel() {
         let m = model_with_flows();
         let mut v = AppView::new(shop(FocusDirection::Both), "24h".into(), 1);
-        v.rebuild_traffic(m.traffic.loaded_flows(), false);
+        v.rebuild_traffic(m.traffic.loaded_flows(), false, None);
         assert_eq!(v.panel, AppPanel::Inbound);
         v.move_cursor(5);
         assert_eq!(v.cursor[0], 2, "clamped to the 3 inbound rows");
