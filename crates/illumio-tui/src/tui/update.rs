@@ -10138,8 +10138,15 @@ mod tests {
     fn help_scrolls_to_its_last_line_and_reopens_at_the_top() {
         use crate::tui::ui::widgets::overlay::{HELP_LINES, help_last_scroll};
         let mut m = model_fixture(); // 80x24
-        assert_eq!(HELP_LINES.len(), 75);
+        assert_eq!(HELP_LINES.len(), 77);
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  M"));
+        assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  m"));
+        assert!(HELP_LINES.iter().any(|(k, _)| *k == "App      m w r Esc"));
+        assert!(
+            HELP_LINES
+                .iter()
+                .any(|(_, d)| d.starts_with(":marks [action]"))
+        );
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Events   J"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  A"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  D"));
@@ -10172,13 +10179,13 @@ mod tests {
         );
         update(&mut m, key('?'));
         let last = help_last_scroll(24);
-        assert_eq!(last, 53, "75 lines, 22 rows inside the box");
+        assert_eq!(last, 55, "77 lines, 22 rows inside the box");
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app x / X"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app o"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app d"));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "Sections Space / z"));
 
-        for _ in 0..53 {
+        for _ in 0..55 {
             update(&mut m, key('j'));
         }
         assert_eq!(m.help_scroll, last);

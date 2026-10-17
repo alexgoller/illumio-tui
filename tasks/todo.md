@@ -393,3 +393,18 @@ Spec: docs/superpowers/specs/2026-10-11-traffic-views-design.md · Plan: docs/su
 - Gate green, 1526 tests (1 ignored: the release speed test); `git diff main -- '*Cargo.toml' Cargo.lock` empty.
 - No marks key sends a request; nothing was written to any PCE.
 - Review fixes: one helper (`detail_extra`) for the detail's `mark` line in drawing and paging, so the cursor row stays on screen; the flows column is 10 cells (7 narrow) while marks are active and `~N` uses 4-cell counts (the narrow cell drops the hidden count rather than cut it); the expiry notice counts only this PCE's marks and is spent only when queued; a marks notice waits behind a warning and joins an info status; the app overlay classifies only the app's flows; `M` without squelch marks says so; with `M` partly squelched rows show `~`; the Result line and the query/focus statuses say `21 of 30 flows (9 squelched)`, the breakdown counting the same flows; `marks.toml unreadable` for I/O errors; `1 mark waits`; tests for the draft-mark lifecycle, the Mesh invariant, a scoped mark across `:profile`; a light styled 80x24 snapshot. Gate green, 1536 tests (1 ignored).
+
+## Flow marks 3: create and manage (plan docs/superpowers/plans/2026-10-17-flow-marks-3-create-manage.md)
+- [x] Task 1 field kinds, completion, MarkForm
+- [x] Task 2 m: form, preview, save
+- [x] Task 3 :marks overlay
+- [x] Task 4 help, README, site, tracking, gate
+
+## Review (Flow marks 3)
+- `m` on any traffic row (Flows, App-to-app pairs / by service / section peer and header rows, Mesh, Blocked, the app overlay's Inbound and Outbound) opens the mark form prefilled from the row through the view's own drill; the treemap and the app overlay's Policy/Workloads panels say where to mark; an invalid file opens its problems instead.
+- The form (`MarkForm` around the generic `Form`): Action, Source, Destination, Service, Decision, Draft, Expires, Scope, Comment; `Ctrl-N`/`Ctrl-P` complete from the loaded index and workloads (fixed lists cycle), `Ctrl-T` cycles a side's kind, `Ctrl-A` swaps one side to every label, `Ctrl-U` clears; Expires follows the action's default until edited; `wl:` sides refuse `any PCE`; the live preview (`matches N rows · M flows in this result`, `hides them (M shows)`, `K of them stay shown / go to a stronger mark: <action> <id> wins`, `not active here`) is local; `Enter` needs a comment, then one `MarkOp` through the lock; a failure keeps the form open with the error.
+- `:marks [action]`: every mark with scope, expiry, hits (`· N to stronger`, `N ↑K` below 120 columns) and comment, active first; `Enter` edits (Replace), `x` deletes through a confirm drawn over the list, `e` extends by 30 days asking why again (prefilled; `never` marks say so); works without traffic loaded; the form opened from `:marks` or the app overlay is drawn over it.
+- Help (77 lines), README (TUI paragraph, CLI examples, `### Flow marks`), site paragraph and prompt list.
+- Snapshots: 2 new (`mark_form_from_blocked_100x30`, `marks_overlay_120x30`), the 3 help snapshots; the size sweep covers the form in every view (as opened, a long comment, a bad field), the form from the app overlay, `:marks`, its delete confirm, the edit and extend forms, an invalid file and `:marks` with no traffic.
+- Gate green, 1558 tests (1 ignored: the release speed test); `git diff main -- '*Cargo.toml' Cargo.lock` empty.
+- No marks key sends a request (every key test goes through `quiet`); nothing was written to any PCE.

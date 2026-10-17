@@ -298,6 +298,22 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   (the draft stays on screen until its rule is written), while a query runs, or where `D`
   would ask first (no query of this session behind the result, a large window or cap); if
   draft decisions were dropped, the status then says `draft cleared: D re-evaluates`.
+  `m` **marks** the row under the cursor (Flows, App-to-app pairs and sections, Mesh, Blocked,
+  the app overlay's Inbound and Outbound): `squelch` hides known noise, `reviewed` and
+  `accept-blocked` dim what you have judged, `critical`, `important` and `revisit` flag what
+  matters (`●` `◆` in a gutter before the row; the strongest mark wins, so a squelch never hides
+  a critical flow). The form is prefilled from the row (the labels under the keys in force,
+  else `wl:`, `ipl:` or `ip:`; `Ctrl-A` every label of the endpoint, `Ctrl-T` another kind,
+  `Ctrl-U` clears a field), defaults to this PCE and an expiry by action (squelch and
+  accept-blocked 90 days, reviewed 30, revisit 7, critical and important never), previews what
+  it matches in the loaded result, and needs a comment: why. `Enter` saves to `marks.toml`
+  next to `config.toml`. Marks change nothing on the PCE and send no request. Squelched flows
+  leave every view (a row goes when all its flows do; `1 ~1` beside a count says one is
+  hidden) and the panel says `4 rows (9 flows) squelched · M shows them`; `M` shows them,
+  dimmed `~`. Blocked counts the flows accepted as blocked apart (`10 blocked flows · 2
+  accepted`). `:marks` lists every mark with its hits (`Enter` edit, `x` delete, `e` 30 more
+  days); expired marks stay in the file, greyed. The generator's rules ignore marks; its
+  header counts the squelched flows.
 - **Policy**: `d` toggle draft / active, `p` pending changes (`Enter` on one shows its diff against active), `Tab` switch panes, `Enter` rule
   detail, or on a ruleset load its deny rules. Rules are listed in evaluation order: override
   deny, allow, deny. With writes on, `n` / `e` / `x` create, edit and delete rulesets and rules
@@ -398,6 +414,9 @@ the API call and byte counters at all times.
     illumio-tui traffic groups --window 1h --services --show blocked --csv > still-blocked.csv
     illumio-tui traffic groups --window 1h --by in --show blocked --app pos/PCI
     illumio-tui traffic groups --window 1h --app shop/prod --direction in
+    illumio-tui marks add --action squelch --src app=monitoring --dst any --service 5666/tcp --comment "Nagios NRPE, known"
+    illumio-tui marks list --table
+    illumio-tui traffic groups --window 1h --by in --show-squelched
     illumio-tui app shop/prod --window 24h --json
     illumio-tui app shop/prod --direction in --csv --section inbound > inbound.csv
     illumio-tui gen shop/prod --window 24h --json
@@ -610,6 +629,20 @@ index) and `truncated`. `policy rules impact <rule-href>` prints one rule the sa
 through the cache; `meta.truncated` includes it. `iplists` gives every list a `size`: `v4` and
 `v6` address counts as strings, `unbounded` (the included `0.0.0.0/0` or `::/0`, else `null`),
 `ranges` and `fqdns`.
+
+### Flow marks
+
+`illumio-tui marks list|add|rm|export|import` reads and writes `marks.toml` (next to
+`config.toml`, mode 0600, rewritten under a lock from a fresh read; comments are not kept, and
+the first rewrite of a commented file keeps it in `marks.toml.bak`). It sends no request and
+needs no profile, except `add --pce` without a host. `add` needs `--comment` (why) and prints
+the new id; `export` prints `{"marks": [...]}` (or `--format toml`), which `import` reads.
+Traffic commands and `app` apply the marks: squelched flows are left out (`--show-squelched`
+keeps them, `--no-marks` ignores the file), rows carry `mark` (`{"action", "id"}`; aggregated
+rows also `flows`, the per-action `marks` and the `squelched` records they hide), tables a
+last `mark` column, and `meta.squelched` counts the rows and flows left out. `gen` proposes the
+same rules either way and reports `meta.squelched`. An invalid file is a warning (the command
+runs without marks); `add`, `rm` and `import` refuse to write it (exit 2), a held lock exits 3.
 
 ## Writes
 

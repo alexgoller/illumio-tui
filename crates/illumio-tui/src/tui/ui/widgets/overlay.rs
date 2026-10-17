@@ -27,7 +27,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ),
     (":", "command prompt: :traffic :policy :objects :workloads"),
     ("", ":events  :iplists  :filter <expr>  :window <dur>"),
-    ("", ":profile <name>  :draft  :active  :help  :q"),
+    ("", ":profile <name>  :draft  :active  :marks  :help  :q"),
     ("", ":unicast  unicast flows only (again: every kind)"),
     ("", ":focus <app>  (alone: a picker of the loaded apps)"),
     ("", ":app <app>  the app overlay (alone: the picker)"),
@@ -89,8 +89,8 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "panel · row · direction · open (peer: its flows)",
     ),
     (
-        "App      w r Esc",
-        "draft allow rule · reload panels (asks) · back",
+        "App      m w r Esc",
+        "mark · draft allow rule · reload panels (asks) · back",
     ),
     (
         "App      G",
@@ -145,7 +145,15 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "Traffic  w",
         "draft allow rule from a blocked flow or row (writes)",
     ),
+    (
+        "Traffic  m",
+        "mark the row: squelch · reviewed · critical … (marks.toml)",
+    ),
     ("Traffic  M", "show or hide squelched rows (~)"),
+    (
+        "",
+        ":marks [action]  the marks: Enter edit · x delete · e +30d",
+    ),
     (
         "Form     Ctrl-N Ctrl-P",
         "complete from the index · cycle back",
