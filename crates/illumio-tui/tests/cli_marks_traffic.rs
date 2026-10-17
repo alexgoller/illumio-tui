@@ -343,3 +343,174 @@ async fn gen_ignores_marks_for_its_rules_and_only_counts_them() {
     assert_eq!(with["meta"]["squelched"], json!({"flows": 1}));
     assert!(without["meta"].get("squelched").is_none());
 }
+
+/// A status that changes on every poll (`updated_at`), as the PCE's does
+/// while it evaluates the draft rules (repeats cli.rs's `Ticking`).
+struct Ticking {
+    body: Value,
+    n: std::sync::atomic::AtomicU64,
+}
+
+impl wiremock::Respond for Ticking {
+    fn respond(&self, _: &wiremock::Request) -> ResponseTemplate {
+        let n = self.n.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let mut body = self.body.clone();
+        body["updated_at"] = json!(format!("2026-10-14T00:00:{:02}Z", n % 60));
+        ResponseTemplate::new(200).set_body_json(body)
+    }
+}
+
+/// `mount` for `--draft`, mounted first so these win: the status reports
+/// the rules completed, `update_rules` answers, the download carries draft
+/// decisions (Corp's potentially blocked flow would be allowed).
+async fn mount_draft(server: &MockServer) {
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}")))
+        .respond_with(Ticking {
+            body: json!({
+                "status": "completed", "rules": "completed",
+                "result": {"href": format!("{QHREF}/download")}, "flows_count": 4
+            }),
+            n: std::sync::atomic::AtomicU64::new(0),
+        })
+        .mount(server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path(format!("/api/v2{QHREF}/update_rules")))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(server)
+        .await;
+    let mut flows: Vec<Value> =
+        serde_json::from_str(include_str!("../../../fixtures/traffic_flows.json")).unwrap();
+    for f in &mut flows {
+        let d = match f["policy_decision"].as_str().unwrap() {
+            "potentially_blocked" => "allowed",
+            d => d,
+        }
+        .to_string();
+        f["draft_policy_decision"] = json!(d);
+    }
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}/download")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(Value::Array(flows))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .mount(server)
+        .await;
+    mount(server).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn draft_decision_marks_apply_only_with_draft_and_are_counted_as_waiting() {
+    let server = MockServer::start().await;
+    mount_draft(&server).await;
+    let home = home_with(
+        "[[mark]]\nid = \"m-fixed1\"\naction = \"revisit\"\nsrc = \"any\"\ndst = \"any\"\n\
+         decision = \"potentially_blocked\"\ndraft_decision = \"allowed\"\ncomment = \"the draft fixes it\"\n",
+    );
+    let q = ["traffic", "query", "--window", "1h"];
+    let off = json_out(cmd(&server, home.path()).args(q).assert().success());
+    assert!(
+        off["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|f| f.get("mark").is_none())
+    );
+    assert_eq!(off["meta"]["marks"]["active"], 0);
+    assert_eq!(off["meta"]["marks"]["waiting_draft"], 1);
+    assert!(off["meta"].get("squelched").is_none());
+    let on = json_out(
+        cmd(&server, home.path())
+            .args(q)
+            .arg("--draft")
+            .assert()
+            .success(),
+    );
+    let marked: Vec<&Value> = on["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f.get("mark").is_some())
+        .collect();
+    assert_eq!(marked.len(), 1, "{}", on["data"]);
+    assert_eq!(
+        marked[0]["mark"],
+        json!({"action": "revisit", "id": "m-fixed1"})
+    );
+    assert_eq!(on["meta"]["marks"]["active"], 1);
+    assert!(on["meta"]["marks"].get("waiting_draft").is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn by_both_with_app_counts_a_squelched_record_once_and_an_emptied_app_says_so() {
+    let server = MockServer::start().await;
+    mount(&server).await;
+    let home = home_with(MARKS);
+    let both = json_out(
+        cmd(&server, home.path())
+            .args([
+                "traffic",
+                "groups",
+                "--window",
+                "1h",
+                "--by",
+                "both",
+                "--app",
+                "shop/prod",
+            ])
+            .assert()
+            .success(),
+    );
+    let sections = both["data"]["sections"].as_array().unwrap();
+    assert!(!sections.is_empty());
+    assert!(
+        sections
+            .iter()
+            .flat_map(|s| s["rows"].as_array().unwrap())
+            .all(|r| r["peer"] != json!(["ipl:Corp", "-"]))
+    );
+    assert_eq!(both["meta"]["squelched"]["flows"], 1, "{}", both["meta"]);
+
+    let all = home_with(
+        "[[mark]]\naction = \"squelch\"\nsrc = \"any\"\ndst = \"any\"\ncomment = \"everything\"\n",
+    );
+    let groups = |show: bool| {
+        let mut c = cmd(&server, all.path());
+        c.args([
+            "traffic",
+            "groups",
+            "--window",
+            "1h",
+            "--by",
+            "in",
+            "--app",
+            "shop/prod",
+        ]);
+        if show {
+            c.arg("--show-squelched");
+        }
+        c.assert().success()
+    };
+    let a = groups(false);
+    let err = String::from_utf8_lossy(&a.get_output().stderr).to_string();
+    assert!(
+        err.contains("all of \"shop/prod\"'s flows are squelched (--show-squelched shows them)"),
+        "{err}"
+    );
+    assert!(!err.contains("no app matches"), "{err}");
+    let a = groups(true);
+    let err = String::from_utf8_lossy(&a.get_output().stderr).to_string();
+    assert!(
+        !err.contains("squelched (--show") && !err.contains("no app"),
+        "{err}"
+    );
+    assert!(
+        !json_out(a)["data"]["sections"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}

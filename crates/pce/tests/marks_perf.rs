@@ -1,6 +1,7 @@
 //! The marks' speed budget: 200 000 flows against 200 marks, classified
 //! and partitioned, in under 300 ms. Release only (`#[ignore]`); CI runs
-//! it with `cargo test --release -p pce --test marks_perf -- --ignored`.
+//! it on Ubuntu with `cargo test --release -p pce --test marks_perf --
+//! --ignored --nocapture`, which prints the time.
 use pce::marks::{Action, Mark, MarkSet, ServiceSpec, parse_side, partition};
 use pce::models::PolicyDecision;
 use pce::resolve::ResolvedLabel;
@@ -103,6 +104,10 @@ fn two_hundred_thousand_flows_against_two_hundred_marks_in_under_300_ms() {
     let start = Instant::now();
     let p = partition(&flows, &active, false);
     let took = start.elapsed();
+    println!(
+        "marks_perf: 200k flows x 200 marks partitioned in {took:?} ({} hits)",
+        p.hits
+    );
     assert!(p.hits > 0, "the marks match something");
     assert!(
         took.as_millis() < 300,

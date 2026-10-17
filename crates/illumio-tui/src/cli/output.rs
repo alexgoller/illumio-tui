@@ -121,6 +121,10 @@ pub struct SquelchedMeta {
 pub struct MarksMeta {
     pub active: usize,
     pub file: String,
+    /// Marks with `draft_decision` left out because the result has no
+    /// draft decisions (run with `--draft` to apply them).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiting_draft: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]

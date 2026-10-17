@@ -7,6 +7,13 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 /// Distinctive so a leak check cannot trip on the word "secret" in prose
 /// such as "check API key, secret and org id".
 const TEST_SECRET: &str = "s3cr3t-cli-test-9f2a";
+/// A config directory of this call only, never created: no config.toml and
+/// no marks.toml, and nothing shared with a parallel test or an earlier run.
+pub fn no_config_dir() -> std::path::PathBuf {
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    std::env::temp_dir().join(format!("illumio-tui-no-config-{}-{n}", std::process::id()))
+}
 
 pub fn cmd(server: &MockServer) -> Command {
     let url = url::Url::parse(&server.uri()).unwrap();
@@ -19,10 +26,7 @@ pub fn cmd(server: &MockServer) -> Command {
         .env("PCE_ORG_ID", "5")
         .env("API_KEY", "key")
         .env("API_SECRET", TEST_SECRET)
-        .env(
-            "XDG_CONFIG_HOME",
-            std::env::temp_dir().join("illumio-tui-no-config"),
-        );
+        .env("XDG_CONFIG_HOME", no_config_dir());
     c
 }
 
@@ -132,10 +136,7 @@ fn version_and_no_subcommand() {
     let assert = Command::cargo_bin("illumio-tui")
         .unwrap()
         .env_clear()
-        .env(
-            "XDG_CONFIG_HOME",
-            std::env::temp_dir().join("illumio-tui-no-config"),
-        )
+        .env("XDG_CONFIG_HOME", no_config_dir())
         .assert()
         .code(2);
     let err: Value = serde_json::from_slice(&assert.get_output().stderr).unwrap();
@@ -223,10 +224,7 @@ fn missing_config_exits_2() {
     let assert = Command::cargo_bin("illumio-tui")
         .unwrap()
         .env_clear()
-        .env(
-            "XDG_CONFIG_HOME",
-            std::env::temp_dir().join("illumio-tui-no-config"),
-        )
+        .env("XDG_CONFIG_HOME", no_config_dir())
         .arg("health")
         .assert()
         .code(2);

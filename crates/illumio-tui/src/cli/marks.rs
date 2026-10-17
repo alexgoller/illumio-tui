@@ -255,7 +255,11 @@ impl TableRows for Vec<ListRow> {
                     r.org.map(|o| o.to_string()).unwrap_or_default(),
                     r.expires.clone().unwrap_or_else(|| "never".into()),
                     r.active.to_string(),
-                    r.comment.clone(),
+                    if r.comment.trim().is_empty() {
+                        "(no comment)".into()
+                    } else {
+                        r.comment.clone()
+                    },
                     opt(&r.created),
                     opt(&r.created_on),
                 ]
@@ -360,6 +364,7 @@ fn list(global: &GlobalArgs, args: &ListArgs) -> Result<(), CliError> {
         Some(MarksMeta {
             active,
             file: s.path().display().to_string(),
+            waiting_draft: None,
         }),
     );
     emit(global, &rows, &meta)
@@ -438,7 +443,13 @@ pub fn mark_from_args(
         created_on: profile.map(|p| p.host.clone()),
     };
     if let Some(p) = m.problems().into_iter().next() {
-        return Err(CliError::Args(p));
+        // Name the flag that fixes it.
+        let flag = if p.contains("workload") {
+            "pce"
+        } else {
+            "decision"
+        };
+        return Err(bad(flag, p));
     }
     Ok(m)
 }
@@ -518,8 +529,12 @@ fn export(global: &GlobalArgs, args: &ExportArgs) -> Result<(), CliError> {
 pub fn read_import(path: &std::path::Path) -> Result<Vec<(Mark, toml::Table)>, CliError> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| CliError::Args(format!("cannot read {}: {e}", path.display())))?;
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    let entries: Vec<MarkEntry> = match ext {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let entries: Vec<MarkEntry> = match ext.as_str() {
         "json" => {
             serde_json::from_str::<MarksJson>(&text)
                 .map_err(|e| CliError::Args(format!("{}: {e}", path.display())))?
@@ -527,7 +542,13 @@ pub fn read_import(path: &std::path::Path) -> Result<Vec<(Mark, toml::Table)>, C
         }
         "toml" => {
             toml::from_str::<MarkFile>(&text)
-                .map_err(|e| CliError::Args(format!("{}: {}", path.display(), e.message())))?
+                .map_err(|e| {
+                    CliError::Args(format!(
+                        "{}: {}",
+                        path.display(),
+                        crate::marks::toml_error_text(&text, &e)
+                    ))
+                })?
                 .mark
         }
         _ => {
@@ -538,10 +559,29 @@ pub fn read_import(path: &std::path::Path) -> Result<Vec<(Mark, toml::Table)>, C
         }
     };
     let mut problems = Vec::new();
-    let mut out = Vec::new();
+    let mut out: Vec<(Mark, toml::Table)> = Vec::new();
+    // (id, position in the file) of the marks read so far.
+    let mut seen: Vec<(String, usize)> = Vec::new();
     for (i, e) in entries.into_iter().enumerate() {
         match to_mark(&e) {
-            Ok(m) => out.push((m, e.extra)),
+            Ok(m) => {
+                let at = || {
+                    let id = if m.id.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" ({})", m.id)
+                    };
+                    format!("mark {}{id}", i + 1)
+                };
+                if let Some((_, j)) = seen.iter().find(|(id, _)| !m.id.is_empty() && *id == m.id) {
+                    problems.push(format!("{}: id used by mark {j} too", at()));
+                }
+                seen.push((m.id.clone(), i + 1));
+                if m.comment.trim().is_empty() {
+                    eprintln!("warning: {}: no comment (shown as (no comment))", at());
+                }
+                out.push((m, e.extra));
+            }
             Err(msgs) => problems.extend(msgs.into_iter().map(|m| {
                 let id = e.id_text().map(|id| format!(" ({id})")).unwrap_or_default();
                 format!("mark {}{id}: {m}", i + 1)

@@ -103,6 +103,13 @@ pub fn expiry_date(t: Timestamp) -> String {
     t.strftime("%Y-%m-%d").to_string()
 }
 
+/// `t` plus `days` x 24 h; `None` when that leaves jiff's range (a huge
+/// `<N>d` must be an error, never a panic).
+pub fn add_days(t: Timestamp, days: i64) -> Option<Timestamp> {
+    let secs = days.checked_mul(24 * 3600)?;
+    t.checked_add(jiff::SignedDuration::from_secs(secs)).ok()
+}
+
 /// An expiry as typed: `1d`, `7d`, `30d`, `90d` (any `<N>d`: now + N x 24
 /// h), a date `YYYY-MM-DD` (23:59:59 UTC that day), an RFC 3339 instant,
 /// or `never` (`None`). UTC, as the CLI's date-only `--to`.
@@ -115,7 +122,9 @@ pub fn parse_expiry(s: &str, now: Timestamp) -> Result<Option<Timestamp>, String
         if days <= 0 {
             return Err(format!("{t:?}: at least 1d"));
         }
-        return Ok(Some(now + jiff::SignedDuration::from_hours(24 * days)));
+        return add_days(now, days)
+            .map(Some)
+            .ok_or_else(|| format!("{t:?}: too far"));
     }
     if let Ok(ts) = t.parse::<Timestamp>() {
         return Ok(Some(ts));
@@ -194,9 +203,11 @@ impl Side {
                             .any(|l| l.key != "?" && &l.key == k && values.contains(&l.value))
                     })
             }
+            // An empty hostname is no hostname: fall back to the name.
             Side::Workload(name) => ep
                 .hostname
                 .as_deref()
+                .filter(|h| !h.trim().is_empty())
                 .or(ep.name.as_deref())
                 .is_some_and(|h| h.eq_ignore_ascii_case(name)),
             Side::Ip { addr, bits } => ip.is_some_and(|ip| ip_contains(*addr, *bits, ip)),
@@ -931,6 +942,12 @@ pub(crate) mod tests {
         );
         assert!(mark("m-3", Action::Squelch, "ipl:corp", "any").matches(&corp));
         assert!(!mark("m-4", Action::Squelch, "ipl:other", "any").matches(&corp));
+        // An empty hostname is absent: the workload name decides.
+        let mut named = web();
+        named.hostname = Some(String::new());
+        named.name = Some("web-name".into());
+        let g = flow(named, db(), None, "icmp", PolicyDecision::Allowed);
+        assert!(mark("m-5", Action::Reviewed, "wl:web-name", "any").matches(&g));
     }
 
     #[test]
@@ -1279,6 +1296,12 @@ pub(crate) mod tests {
             Some("2027-01-15T08:00:00Z".parse().unwrap())
         );
         assert!(parse_expiry("0d", now()).is_err());
+        for huge in ["9223372036854775807d", "106751991167300d", "4000000d"] {
+            assert!(
+                parse_expiry(huge, now()).unwrap_err().contains("too far"),
+                "{huge}"
+            );
+        }
         assert!(
             parse_expiry("soon", now())
                 .unwrap_err()

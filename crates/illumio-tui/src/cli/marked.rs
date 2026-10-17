@@ -20,6 +20,8 @@ pub struct CliMarks {
     pub show: bool,
     pce: PceId,
     now: Timestamp,
+    /// `draft_decision` marks the last `active` left out (no `--draft`).
+    waiting: std::cell::Cell<usize>,
 }
 
 impl CliMarks {
@@ -36,6 +38,7 @@ impl CliMarks {
                 org: ctx.config.org_id,
             },
             now: Timestamp::now(),
+            waiting: std::cell::Cell::new(0),
         };
         if no_marks {
             return cm;
@@ -66,10 +69,12 @@ impl CliMarks {
     /// The marks active for this result (`draft`: draft decisions were
     /// loaded, `--draft`); `None` without a valid file or an active mark.
     pub fn active(&self, draft: bool) -> Option<ActiveMarks<'_>> {
-        self.set
+        let a = self
+            .set
             .as_ref()
-            .map(|s| s.active(Some(&self.pce), self.now, draft))
-            .filter(|a| !a.is_empty())
+            .map(|s| s.active(Some(&self.pce), self.now, draft))?;
+        self.waiting.set(a.waiting_for_draft());
+        (!a.is_empty()).then_some(a)
     }
 
     /// `meta.marks`, `meta.squelched` (with an active mark) and the
@@ -78,12 +83,20 @@ impl CliMarks {
         if let Some(w) = &self.warning {
             meta.warnings.get_or_insert_with(Vec::new).push(w.clone());
         }
+        let waiting = self.waiting.get();
         if let Some(a) = active {
             meta.marks = Some(MarksMeta {
                 active: a.len(),
                 file: self.file.clone(),
+                waiting_draft: (waiting > 0).then_some(waiting),
             });
             meta.squelched = sq;
+        } else if waiting > 0 {
+            meta.marks = Some(MarksMeta {
+                active: 0,
+                file: self.file.clone(),
+                waiting_draft: Some(waiting),
+            });
         }
     }
 }

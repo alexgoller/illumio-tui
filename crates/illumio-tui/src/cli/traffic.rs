@@ -1109,13 +1109,21 @@ pub fn peer_csv_row(
     ]
 }
 
-/// `no app matches "pos/PCI"` when `--app` kept no section.
-pub fn app_miss(args: &GroupsArgs, s: &Sections) -> Option<String> {
+/// `no app matches "pos/PCI"` when `--app` kept no section, or, when the
+/// app has flows but squelch left none of them (`squelched_only`), `all of
+/// "pos/PCI"'s flows are squelched (--show-squelched shows them)`.
+pub fn app_miss(args: &GroupsArgs, s: &Sections, squelched_only: bool) -> Option<String> {
     args.filter
         .app
         .as_ref()
         .filter(|_| s.sections.is_empty())
-        .map(|a| format!("no app matches {a:?}"))
+        .map(|a| {
+            if squelched_only {
+                format!("all of {a:?}'s flows are squelched (--show-squelched shows them)")
+            } else {
+                format!("no app matches {a:?}")
+            }
+        })
 }
 
 /// `--by`, `--show` and `--app` over the loaded flows: the sections (only
@@ -1486,7 +1494,12 @@ async fn groups(ctx: &Context, args: &GroupsArgs) -> Result<(), CliError> {
                 },
             );
             cm.fill(&mut meta, act.as_ref(), sq);
-            if let Some(miss) = app_miss(args, &sections) {
+            // An app emptied by squelch is not a miss: judge it on the
+            // unsquelched flows (only then, and only when squelch hid some).
+            let squelched_only = sections.sections.is_empty()
+                && part.as_ref().is_some_and(|p| p.kept.len() < f.flows.len())
+                && sections_for(&f.flows, &keys, args).is_some_and(|s| !s.sections.is_empty());
+            if let Some(miss) = app_miss(args, &sections, squelched_only) {
                 eprintln!("{miss}");
             }
             ctx.emit_meta(&sections, &meta)
@@ -1768,13 +1781,17 @@ mod tests {
         );
         assert!(rows[1][0].starts_with("  ← "), "{:?}", rows[1]);
         assert!(rows.last().unwrap()[0].starts_with("  → "));
-        assert_eq!(app_miss(&a, &s), None);
+        assert_eq!(app_miss(&a, &s, false), None);
         let a = groups_args(&["--by", "in", "--app", "pos/PCI"]);
         let s = sections_for(&flows, &app_env(), &a).unwrap();
         assert!(s.sections.is_empty());
         assert_eq!(
-            app_miss(&a, &s).as_deref(),
+            app_miss(&a, &s, false).as_deref(),
             Some("no app matches \"pos/PCI\"")
+        );
+        assert_eq!(
+            app_miss(&a, &s, true).as_deref(),
+            Some("all of \"pos/PCI\"'s flows are squelched (--show-squelched shows them)")
         );
     }
 

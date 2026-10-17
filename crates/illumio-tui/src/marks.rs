@@ -4,7 +4,7 @@
 //! (one `stat`), written as operations (`MarkOp`) under a lock, from a
 //! fresh read, atomically, mode 0600. A local file only: marks never cause
 //! a PCE request.
-use jiff::{SignedDuration, Timestamp};
+use jiff::Timestamp;
 use pce::marks::{
     Action, Mark, MarkSet, PceScope, ServiceSpec, Side, derived_id, new_id, parse_decision,
     parse_side,
@@ -201,7 +201,7 @@ fn strings(v: &toml::Value, what: &str) -> Result<Vec<String>, String> {
 fn side_of(v: &toml::Value, what: &str) -> Result<Side, String> {
     const KINDS: [&str; 4] = ["labels", "workload", "ip", "ip_list"];
     let t = match v {
-        toml::Value::String(s) if s == "any" => return Ok(Side::Any),
+        toml::Value::String(s) if s.trim().eq_ignore_ascii_case("any") => return Ok(Side::Any),
         toml::Value::Table(t) => t,
         _ => {
             return Err(format!(
@@ -515,14 +515,22 @@ fn convert(file: &MarkFile) -> Result<(MarkSet, Vec<String>), Vec<MarkProblem>> 
         let index = i + 1;
         match to_mark(e) {
             Ok(mut m) => {
-                if m.id.is_empty() {
+                let derived = m.id.is_empty();
+                if derived {
                     m.id = derived_id(&m.canonical());
                 }
                 if let Some(j) = marks.iter().position(|x| x.id == m.id) {
+                    let message = if derived {
+                        // A hand-written mark without an id: the same
+                        // fields as mark j, so the same derived id.
+                        format!("duplicates mark {} (the same fields)", j + 1)
+                    } else {
+                        format!("id {} is used by mark {} too", m.id, j + 1)
+                    };
                     problems.push(MarkProblem {
                         index,
                         id: Some(m.id.clone()),
-                        message: format!("id {} is used by mark {} too", m.id, j + 1),
+                        message,
                     });
                 }
                 if m.comment.trim().is_empty() {
@@ -569,26 +577,112 @@ fn placeholder() -> Mark {
     }
 }
 
-/// A comment line other than the header.
+/// A TOML comment other than the header line: a `#` outside every kind
+/// of string, on its own line or after a value. A `#` inside a string (a
+/// multi-line `comment` included) is text, not a comment: counting it
+/// would make a later write replace the `.bak` that holds the user's
+/// real comments.
 fn has_comments(text: &str) -> bool {
-    text.lines().any(|l| {
-        let t = l.trim();
-        t.starts_with('#') && t != HEADER
-    })
+    #[derive(PartialEq)]
+    enum St {
+        Normal,
+        Basic,
+        Literal,
+        MlBasic,
+        MlLiteral,
+    }
+    let b = text.as_bytes();
+    let at = |i: usize, pat: &[u8]| b[i..].starts_with(pat);
+    let mut st = St::Normal;
+    let mut i = 0;
+    while i < b.len() {
+        match st {
+            St::Normal => {
+                if at(i, b"\"\"\"") {
+                    st = St::MlBasic;
+                    i += 3;
+                    continue;
+                }
+                if at(i, b"'''") {
+                    st = St::MlLiteral;
+                    i += 3;
+                    continue;
+                }
+                match b[i] {
+                    b'"' => st = St::Basic,
+                    b'\'' => st = St::Literal,
+                    b'#' => {
+                        let start = text[..i].rfind('\n').map_or(0, |n| n + 1);
+                        let end = text[i..].find('\n').map_or(b.len(), |n| i + n);
+                        if text[start..end].trim() != HEADER {
+                            return true;
+                        }
+                        i = end;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+            St::Basic | St::MlBasic if b[i] == b'\\' => {
+                i += 2;
+                continue;
+            }
+            St::Basic if b[i] == b'"' || b[i] == b'\n' => st = St::Normal,
+            St::Literal if b[i] == b'\'' || b[i] == b'\n' => st = St::Normal,
+            St::MlBasic if at(i, b"\"\"\"") => {
+                st = St::Normal;
+                i += 3;
+                continue;
+            }
+            St::MlLiteral if at(i, b"'''") => {
+                st = St::Normal;
+                i += 3;
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    false
+}
+
+/// The 1-based line and column (in characters) of byte `at` of `text`.
+fn line_col(text: &str, at: usize) -> (usize, usize) {
+    let at = (0..=at.min(text.len()))
+        .rev()
+        .find(|&i| text.is_char_boundary(i))
+        .unwrap_or(0);
+    let before = &text[..at];
+    let line = before.matches('\n').count() + 1;
+    let col = before
+        .rfind('\n')
+        .map_or(before, |n| &before[n + 1..])
+        .chars()
+        .count()
+        + 1;
+    (line, col)
+}
+
+/// A TOML syntax error as `<message> at line L, column C` (when the
+/// parser gives a position): never the offending text.
+pub fn toml_error_text(text: &str, e: &toml::de::Error) -> String {
+    match e.span() {
+        Some(span) => {
+            let (line, col) = line_col(text, span.start);
+            format!("{} at line {line}, column {col}", e.message().trim())
+        }
+        None => e.message().trim().to_string(),
+    }
 }
 
 /// The file's text, every problem at once. The parser's own message is
-/// reported with its byte offset only, never the offending line.
+/// reported with its line and column only, never the offending text.
 pub fn parse(text: &str) -> Result<Loaded, Vec<MarkProblem>> {
     let file: MarkFile = toml::from_str(text).map_err(|e| {
-        let message = match e.span() {
-            Some(span) => format!("{} at byte {}", e.message().trim(), span.start),
-            None => e.message().trim().to_string(),
-        };
         vec![MarkProblem {
             index: 0,
             id: None,
-            message,
+            message: toml_error_text(text, &e),
         }]
     })?;
     let (set, warnings) = convert(&file)?;
@@ -741,7 +835,13 @@ fn apply_op(loaded: &mut Loaded, op: MarkOp, now: Timestamp) -> Result<Applied, 
             let i = find(marks, &id)?;
             let m = &mut marks[i];
             if let Some(e) = m.expires {
-                m.expires = Some(e.max(now) + SignedDuration::from_hours(24 * days));
+                m.expires = Some(pce::marks::add_days(e.max(now), days).ok_or_else(|| {
+                    MarksError::Parse(vec![MarkProblem {
+                        index: i + 1,
+                        id: Some(id.clone()),
+                        message: format!("expires: +{days}d is too far"),
+                    }])
+                })?);
                 if let Some(c) = comment {
                     m.comment = c;
                 }
@@ -904,7 +1004,27 @@ fn write_atomic(path: &Path, text: &str) -> Result<(), MarksError> {
     result.map_err(|e| {
         let _ = fs::remove_file(&tmp);
         io(path, "write", e)
-    })
+    })?;
+    sync_dir(path);
+    Ok(())
+}
+
+/// Makes the rename durable: syncs the directory where that is supported
+/// (Unix). Best effort: the file is written either way.
+fn sync_dir(path: &Path) {
+    #[cfg(unix)]
+    if let Some(dir) = path.parent() {
+        let dir = if dir.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            dir
+        };
+        if let Ok(d) = fs::File::open(dir) {
+            let _ = d.sync_all();
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
 }
 
 /// The marks file: its path, its last stamp and the parsed result.
@@ -1054,7 +1174,9 @@ impl MarksStore {
             done.backup = Some(bak);
         }
         write_atomic(&self.path, &render(&loaded.file))?;
-        self.stamp = Some(self.stamp_now()?);
+        // The write succeeded: a failed stat after it only means the next
+        // refresh parses the file once more.
+        self.stamp = self.stamp_now().ok();
         self.state = Ok(Loaded {
             file: loaded.file,
             set,
@@ -1068,6 +1190,7 @@ impl MarksStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jiff::SignedDuration;
 
     const SPEC: &str = r#"# illumio-tui marks. The tool rewrites this file: comments are not kept, put text in `comment`.
 
@@ -1206,6 +1329,65 @@ created_on = "pce.example.com"
             .unwrap();
         assert_eq!(again.backup, None, "no comment left: no second backup");
         assert_eq!(fs::read_to_string(&bak).unwrap(), "old");
+    }
+
+    #[test]
+    fn a_hash_inside_a_string_is_not_a_comment_and_the_backup_survives() {
+        assert!(!has_comments(&format!("{HEADER}\nx = \"a # b\"\n")));
+        assert!(!has_comments("c = '''\n# not a comment\n'''\n"));
+        assert!(!has_comments("c = \"\"\"\n# text \\\"\"\" still\n\"\"\"\n"));
+        assert!(!has_comments("c = 'it''s'\n"));
+        assert!(has_comments("x = 1 # trailing\n"));
+        assert!(has_comments("c = '''a'''\n  # real\n"));
+        // A file with real comments: one backup. A later write of a mark
+        // whose comment has a `#` line keeps that backup.
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = store(&dir);
+        write(
+            &s,
+            "# my notes\n[[mark]]\naction = \"reviewed\"\nsrc = \"any\"\ndst = \"any\"\ncomment = \"x\"\n",
+        );
+        s.refresh();
+        s.apply(
+            MarkOp::Add(new_mark(Action::Revisit, "app=a", "line one\n# line two")),
+            now(),
+        )
+        .unwrap();
+        let bak = sibling(s.path(), ".bak");
+        let text = fs::read_to_string(s.path()).unwrap();
+        assert!(
+            text.contains("\n# line two"),
+            "a `#` line in a string: {text}"
+        );
+        let again = s
+            .apply(MarkOp::Add(new_mark(Action::Revisit, "app=b", "z")), now())
+            .unwrap();
+        assert_eq!(again.backup, None);
+        assert!(fs::read_to_string(&bak).unwrap().starts_with("# my notes"));
+        let set = s.set().unwrap();
+        assert!(
+            set.marks
+                .iter()
+                .any(|m| m.comment == "line one\n# line two")
+        );
+    }
+
+    #[test]
+    fn same_hand_marks_say_duplicate_and_syntax_errors_give_line_and_column() {
+        let one =
+            "[[mark]]\naction = \"reviewed\"\nsrc = \"Any\"\ndst = \"any\"\ncomment = \"x\"\n";
+        let p = parse(&format!("{one}{one}")).unwrap_err();
+        assert_eq!(p.len(), 1);
+        assert!(
+            p[0].to_string()
+                .ends_with("duplicates mark 1 (the same fields)"),
+            "{}",
+            p[0]
+        );
+        let p = parse("[[mark]]\naction = \"reviewed\"\nsrc = = 1\n").unwrap_err();
+        assert!(p[0].message.contains("at line 3, column 7"), "{}", p[0]);
+        assert_eq!(line_col("ab\ncdé", 7), (2, 4));
+        assert_eq!(line_col("ab\ncdé", 6), (2, 3), "inside a character");
     }
 
     #[cfg(unix)]
@@ -1379,6 +1561,18 @@ created_on = "pce.example.com"
         );
         assert_eq!(get(&a).comment, "still needed");
         assert_eq!(get(&never).expires, None);
+        let huge = s.apply(
+            MarkOp::Extend {
+                id: a.clone(),
+                days: i64::MAX,
+                comment: None,
+            },
+            now(),
+        );
+        assert!(
+            matches!(&huge, Err(MarksError::Parse(p)) if p[0].message.contains("too far")),
+            "{huge:?}"
+        );
         let later = now() + SignedDuration::from_hours(24 * 29);
         let done = s.apply(MarkOp::DeleteExpired, later).unwrap();
         assert!(done.removed.is_empty());

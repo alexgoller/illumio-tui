@@ -153,7 +153,51 @@ fn add_refuses_without_a_comment_and_names_the_bad_field() {
         ])
         .assert()
         .code(2);
-    assert!(stderr(&a).contains("workload needs pce"), "{}", stderr(&a));
+    assert!(
+        stderr(&a).contains("--pce: workload needs pce"),
+        "{}",
+        stderr(&a)
+    );
+    let a = marks(home.path())
+        .args([
+            "add",
+            "--action",
+            "accept-blocked",
+            "--src",
+            "any",
+            "--dst",
+            "any",
+            "--comment",
+            "x",
+        ])
+        .assert()
+        .code(2);
+    assert!(
+        stderr(&a).contains("--decision: accept-blocked needs decision"),
+        "{}",
+        stderr(&a)
+    );
+    let a = marks(home.path())
+        .args([
+            "add",
+            "--action",
+            "squelch",
+            "--src",
+            "any",
+            "--dst",
+            "any",
+            "--org",
+            "1",
+            "--comment",
+            "x",
+        ])
+        .assert()
+        .code(2);
+    assert!(
+        stderr(&a).contains("--pce"),
+        "--org needs --pce: {}",
+        stderr(&a)
+    );
     let a = marks(home.path())
         .args([
             "add",
@@ -340,4 +384,56 @@ fn an_invalid_file_refuses_every_write_and_a_held_lock_exits_3() {
         "{}",
         stderr(&a)
     );
+}
+
+#[test]
+fn import_checks_ids_and_comments_and_reads_upper_case_extensions() {
+    let home = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    // Two marks with one id: refused, nothing written.
+    let dup = dir.path().join("dup.JSON");
+    std::fs::write(
+        &dup,
+        json!({"marks": [
+            {"id": "m-aaaaaa", "action": "reviewed", "src": "any", "dst": "any", "comment": "a"},
+            {"id": "m-aaaaaa", "action": "revisit", "src": "any", "dst": "any", "comment": "b"}
+        ]})
+        .to_string(),
+    )
+    .unwrap();
+    let a = marks(home.path()).arg("import").arg(&dup).assert().code(2);
+    assert!(
+        stderr(&a).contains("mark 2 (m-aaaaaa): id used by mark 1 too"),
+        "{}",
+        stderr(&a)
+    );
+    assert!(!file(home.path()).exists());
+    // A mark without a comment imports with a warning; list says so.
+    let bare = dir.path().join("bare.Toml");
+    std::fs::write(
+        &bare,
+        "[[mark]]\naction = \"reviewed\"\nsrc = \"ANY\"\ndst = \"any\"\n",
+    )
+    .unwrap();
+    let a = marks(home.path())
+        .arg("import")
+        .arg(&bare)
+        .assert()
+        .success();
+    assert!(stderr(&a).contains("mark 1: no comment"), "{}", stderr(&a));
+    let t = marks(home.path())
+        .args(["list", "--table"])
+        .assert()
+        .success();
+    let text = String::from_utf8_lossy(&t.get_output().stdout).to_string();
+    assert!(text.contains("(no comment)"), "{text}");
+    // A TOML syntax error names its line and column.
+    let broken = dir.path().join("broken.toml");
+    std::fs::write(&broken, "[[mark]]\naction = \"reviewed\"\nsrc = = 1\n").unwrap();
+    let a = marks(home.path())
+        .arg("import")
+        .arg(&broken)
+        .assert()
+        .code(2);
+    assert!(stderr(&a).contains("at line 3, column"), "{}", stderr(&a));
 }
