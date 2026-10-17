@@ -204,7 +204,8 @@ jobs:
           set -euo pipefail
           if [[ "$KIND" == deb ]]; then
             pkg=$(cd pkg && ls ./*_"$ARCH".deb)
-            install="export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y /pkg/$pkg && dpkg -s $BIN && dpkg -L $BIN"
+            # Ubuntu's minimised images tell dpkg to skip /usr/share/doc; undo that.
+            install="rm -f /etc/dpkg/dpkg.cfg.d/excludes; export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y /pkg/$pkg && dpkg -s $BIN && dpkg -L $BIN"
             remove="apt-get remove -y $BIN"
           else
             pkg=$(cd pkg && ls ./*."$ARCH".rpm)
