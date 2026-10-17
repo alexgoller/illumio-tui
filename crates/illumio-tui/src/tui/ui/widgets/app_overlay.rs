@@ -147,7 +147,10 @@ fn peer_line<'a>(p: &AppPeer, cells: usize, t: &Theme, gutter: bool) -> Line<'a>
     let draft_w = if p.draft.is_some() { 7 } else { 0 };
     let gutter_w = if gutter { 2 } else { 0 };
     let peer_w = cells.saturating_sub(svc_w + conns.len().max(5) + 4 + draft_w + gutter_w);
-    let m = p.marks.as_ref().and_then(pce::marks::RowMarks::marker);
+    let m = p
+        .marks
+        .as_ref()
+        .and_then(crate::tui::traffic_marks::row_marker);
     let style = if dims_row(m) {
         t.dim_style()
     } else {

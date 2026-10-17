@@ -123,3 +123,83 @@ fn the_app_overlay_and_the_generator_pick_up_an_edited_marks_file() {
             .contains("squelched")
     );
 }
+
+#[test]
+fn the_cursor_stays_on_screen_with_marks_and_the_detail_open() {
+    use crate::tui::test_support::render_to_string;
+    use crossterm::event::KeyEvent;
+    let (mut m, _dir) = marked_model(RICH_MARKS);
+    m.size = (80, 24);
+    let enter = || Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    // Walk down with the detail closed for a while, then open it: the
+    // row it takes from the table must not hide the cursor.
+    let n = m.traffic.flows.rows().len();
+    for i in 0..n {
+        if i == 4 {
+            update(&mut m, enter());
+            assert!(m.traffic.show_detail);
+        }
+        if i > 0 {
+            update(&mut m, key('j'));
+        }
+        let out = render_to_string(&m, 80, 24);
+        let sel = m.traffic.flows.selected_item().unwrap();
+        let col = m
+            .traffic
+            .flows
+            .columns
+            .iter()
+            .position(|c| c.title == "src");
+        let src: String = m
+            .traffic
+            .flows
+            .cell(sel, col.unwrap())
+            .chars()
+            .take(10)
+            .collect();
+        let line = out
+            .lines()
+            .find(|l| l.contains('▸'))
+            .unwrap_or_else(|| panic!("the cursor row is off screen:\n{out}"));
+        assert!(line.contains(&src), "{src:?} not on {line:?}\n{out}");
+    }
+}
+
+#[test]
+fn a_marks_notice_waits_behind_a_warning_and_joins_an_info() {
+    use crate::tui::model::StatusLine;
+    let (mut m, _dir) = marked_model("[[mark]]\naction = \"squelch\"\n");
+    m.status = StatusLine::warn("query failed");
+    update(&mut m, Msg::Tick(std::time::Instant::now()));
+    assert_eq!(m.status.text, "query failed", "the warning stays");
+    m.status = StatusLine::info("30 flows");
+    update(&mut m, Msg::Tick(std::time::Instant::now()));
+    assert_eq!(
+        m.status,
+        StatusLine::warn(
+            "30 flows · marks.toml invalid (2 problems): marks off · :marks shows them"
+        )
+    );
+    m.status = StatusLine::info("ready");
+    update(&mut m, Msg::Tick(std::time::Instant::now()));
+    assert_eq!(m.status.text, "ready", "shown once");
+}
+
+#[test]
+fn the_app_overlay_judges_only_the_apps_flows() {
+    use crate::tui::app_view::AppPanel;
+    use crate::tui::commands::Command;
+    use crate::tui::test_support::with_policy;
+    // A squelch far from shop/prod: the Traffic screen counts it, the
+    // overlay of shop/prod has nothing squelched.
+    let (m, _dir) = marked_model(
+        "[[mark]]\naction = \"squelch\"\nsrc = { labels = { app = \"erp\" } }\ndst = { labels = { app = \"erp\" } }\ncomment = \"x\"\n",
+    );
+    let mut m = with_policy(m);
+    assert!(m.traffic.marked.as_ref().unwrap().flows.flows > 0);
+    update(&mut m, Msg::Command(Command::App(Some("shop/prod".into()))));
+    let v = m.app_view.as_ref().unwrap();
+    assert!(v.marks_on);
+    assert_eq!(v.squelched, [Default::default(); 2]);
+    assert_eq!(v.panel_title(AppPanel::Inbound), "Inbound");
+}

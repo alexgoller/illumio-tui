@@ -2116,6 +2116,13 @@ fn traffic_marks_80x24() {
     insta::assert_snapshot!("traffic_marks_flows_80x24", render_to_string(&m, 80, 24));
     m.traffic.view = TrafficView::Aggregate;
     insta::assert_snapshot!("traffic_marks_pairs_80x24", render_to_string(&m, 80, 24));
+    // The light palette: the gutter's colours, the red critical name
+    // cell, the dimmed quiet rows.
+    m.set_theme("light");
+    insta::assert_snapshot!(
+        "traffic_marks_pairs_light_styled_80x24",
+        render_styled(&m, 80, 24)
+    );
 }
 
 #[test]

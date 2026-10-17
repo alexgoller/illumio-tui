@@ -44,9 +44,12 @@ pub struct MarkedView {
     pub marked: Marked,
     /// The hit of each flow of `view_flows()`, in its order.
     pub hits: Vec<Option<Hit>>,
-    /// Active marks, and marks waiting for draft decisions (`D`).
+    /// Active marks.
     pub active: usize,
+    /// Marks waiting for draft decisions (`D`) to apply.
     pub waiting: usize,
+    /// Each view's squelched counts (`Squelch`): Flows, App-to-app's pairs,
+    /// by service and sections, Blocked, Mesh, the treemap.
     pub flows: Squelch,
     pub pairs: Squelch,
     pub services: Squelch,
@@ -54,9 +57,9 @@ pub struct MarkedView {
     pub blocked: Squelch,
     pub mesh: Squelch,
     pub treemap: Squelch,
-    /// Blocked: flow records still blocked or potentially blocked, and
-    /// those accepted as blocked (not problems).
+    /// Blocked: flow records still blocked or potentially blocked.
     pub blocked_open: u64,
+    /// Blocked: flow records accepted as blocked (not problems).
     pub accepted: u64,
 }
 
@@ -65,21 +68,29 @@ pub fn flow_marker(r: &FlowRow) -> Option<Marker> {
     r.mark.map(|h| Marker::of(h.action))
 }
 
+/// A row's gutter marker: `RowMarks::marker`, and with `M` on a row
+/// holding some shown squelched records (not all) gets `~` too, so they
+/// stay visible as such.
+pub fn row_marker(rm: &RowMarks) -> Option<Marker> {
+    rm.marker()
+        .or_else(|| (rm.count(Action::Squelch) > 0).then_some(Marker::PartlySquelched(0)))
+}
+
 /// App-to-app pairs' (and by service) gutter.
 pub fn group_marker(g: &FlowGroup) -> Option<Marker> {
-    g.marks.as_ref().and_then(RowMarks::marker)
+    g.marks.as_ref().and_then(row_marker)
 }
 
 /// The Mesh view's gutter.
 pub fn mesh_marker(r: &MeshRow) -> Option<Marker> {
-    r.marks.as_ref().and_then(RowMarks::marker)
+    r.marks.as_ref().and_then(row_marker)
 }
 
 /// A sectioned table's gutter: a header shows its rows' marks summed.
 pub fn section_marker(r: &SectionRow) -> Option<Marker> {
     match &r.kind {
-        RowKind::Header { marks, .. } => marks.as_deref().and_then(RowMarks::marker),
-        RowKind::Peer { row, .. } => row.marks.as_ref().and_then(RowMarks::marker),
+        RowKind::Header { marks, .. } => marks.as_deref().and_then(row_marker),
+        RowKind::Peer { row, .. } => row.marks.as_ref().and_then(row_marker),
     }
 }
 
@@ -106,7 +117,22 @@ pub fn sum_marks<'a>(
     any.then_some(out)
 }
 
+/// `30 flows`, `21 of 30 flows`, or with squelched flows left out `21 of
+/// 30 flows (9 squelched)`: a count and its base on the same basis.
+pub fn flows_text(shown: usize, total: usize, squelched: usize) -> String {
+    match (shown == total, squelched) {
+        (true, 0) => format!("{total} flows"),
+        (_, 0) => format!("{shown} of {total} flows"),
+        _ => format!("{shown} of {total} flows ({squelched} squelched)"),
+    }
+}
+
 impl TrafficState {
+    /// The focused flows squelch leaves out of every view (0 with `M`).
+    pub fn squelched_hidden(&self) -> usize {
+        self.focus_flows().len() - self.view_flows().len()
+    }
+
     /// The marks in force for the result on screen: valid file, in scope
     /// for the profile's PCE, unexpired at the last refresh, `draft_decision`
     /// marks only with draft decisions loaded. `None` without a valid file.
@@ -123,8 +149,8 @@ impl TrafficState {
         Some((a, mv))
     }
 
-    /// The hit of the selected flow (Flows) and the weaker marks it also
-    /// matches.
+    /// Every active mark `f` matches (its hit among them), by mark index:
+    /// the Flows detail names the weaker ones as `also matches`.
     pub fn flow_marks(&self, f: &ResolvedFlow) -> Vec<usize> {
         self.active_marks()
             .map(|a| a.matching(f))
@@ -156,7 +182,9 @@ impl TrafficState {
                     )));
                 }
                 Some(e) => {
-                    self.marks_notice = Some(StatusLine::warn(format!("{e}: marks off")));
+                    self.marks_notice = Some(StatusLine::warn(format!(
+                        "marks.toml unreadable: marks off ({e})"
+                    )));
                 }
                 None if was_error.is_some() => {
                     self.marks_notice = Some(StatusLine::info("marks.toml valid again: marks on"));
@@ -165,19 +193,22 @@ impl TrafficState {
             }
         }
         self.marks_now = jiff::Timestamp::now();
-        // The first load of the session announces marks expiring soon.
+        // Marks of this PCE (draft-waiting ones too) expiring soon are
+        // announced once a session, at the first load that has some.
         if changed
             && !self.marks_announced
+            && self.marks_notice.is_none()
             && let Some(set) = self.marks.set()
         {
-            self.marks_announced = true;
             let soon = self.marks_now + jiff::SignedDuration::from_hours(72);
             let n = set
                 .marks
                 .iter()
+                .filter(|m| m.in_scope(Some(&self.marks_pce)))
                 .filter(|m| m.expires.is_some_and(|e| e > self.marks_now && e <= soon))
                 .count();
-            if n > 0 && self.marks_notice.is_none() {
+            if n > 0 {
+                self.marks_announced = true;
                 self.marks_notice = Some(StatusLine::info(format!(
                     "{n} mark{} expire{} within 3 days · :marks",
                     if n == 1 { "" } else { "s" },
@@ -231,6 +262,7 @@ impl TrafficState {
         let sections = on.then_some(section_marker as fn(&SectionRow) -> Option<Marker>);
         self.apps.marker = sections;
         self.blocked.marker = sections;
+        self.sync_marks_columns(on);
     }
 
     /// A status the marks file asked for (invalid, valid again, marks
@@ -242,6 +274,11 @@ impl TrafficState {
     /// `M`: squelched flows shown (dimmed `~`) or left out, in every view
     /// and the app overlay. Session only; no request.
     pub fn toggle_squelched(&mut self) -> StatusLine {
+        let squelch = self.active_marks().is_some_and(|a| a.has(Action::Squelch));
+        // Nothing to show: say so (turning `M` off always works).
+        if !squelch && !self.show_squelched {
+            return StatusLine::info("no squelch marks active");
+        }
         self.show_squelched = !self.show_squelched;
         self.rebuild_views();
         StatusLine::info(if self.show_squelched {
@@ -253,10 +290,14 @@ impl TrafficState {
 
     /// The marks' part of a view's panel meta: the squelched counts, the
     /// marks waiting for draft decisions, or `marks off: marks.toml
-    /// invalid`. `None` when there is nothing to say.
+    /// invalid` (`unreadable`). `None` when there is nothing to say.
     pub fn marks_meta(&self, view: TrafficView) -> Option<String> {
-        if self.marks.error().is_some() {
-            return Some("marks off: marks.toml invalid".into());
+        match self.marks.error() {
+            Some(crate::marks::MarksError::Parse(_)) => {
+                return Some("marks off: marks.toml invalid".into());
+            }
+            Some(_) => return Some("marks off: marks.toml unreadable".into()),
+            None => {}
         }
         let mv = self.marked.as_ref()?;
         let sq = match view {
@@ -280,9 +321,13 @@ impl TrafficState {
         parts.extend(sq.meta(self.show_squelched, view != TrafficView::Treemap));
         if mv.waiting > 0 {
             parts.push(format!(
-                "{} mark{} wait for the draft decision (D)",
+                "{} {} for the draft decision (D)",
                 mv.waiting,
-                if mv.waiting == 1 { "" } else { "s" }
+                if mv.waiting == 1 {
+                    "mark waits"
+                } else {
+                    "marks wait"
+                }
             ));
         }
         (!parts.is_empty()).then(|| parts.join(" · "))
@@ -341,6 +386,11 @@ pub(crate) mod tests {
         assert_eq!((mv.blocked_open, mv.accepted), (10, 2));
         let shown: u64 = t.groups.rows().iter().map(|g| g.flows).sum();
         assert_eq!(shown + mv.pairs.flows, 30, "visible + squelched = input");
+        let mesh: u64 = t.mesh.rows().iter().map(|r| r.flows).sum();
+        assert_eq!(mv.mesh.flows, 9);
+        assert_eq!(mesh + mv.mesh.flows, 30, "the Mesh adds up too");
+        assert!(mv.mesh.rows > 0, "the mesh rows squelch removed");
+        // (Mesh rows key on the port too: here a row is squelched whole or not.)
         assert!(
             t.groups
                 .rows()
@@ -434,6 +484,37 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn m_without_squelch_marks_says_so() {
+        let (mut m, _dir) = marked_model(
+            "[[mark]]\naction = \"critical\"\nsrc = \"any\"\ndst = \"any\"\ncomment = \"x\"\n",
+        );
+        assert_eq!(m.traffic.toggle_squelched().text, "no squelch marks active");
+        assert!(!m.traffic.show_squelched);
+        let mut plain = crate::tui::test_support::model_with_rich_flows();
+        assert_eq!(
+            plain.traffic.toggle_squelched().text,
+            "no squelch marks active"
+        );
+    }
+
+    #[test]
+    fn with_m_on_partly_squelched_rows_show_the_tilde() {
+        let (mut m, _dir) = marked_model(RICH_MARKS);
+        m.traffic.toggle_squelched();
+        let dev = m
+            .traffic
+            .groups
+            .rows()
+            .iter()
+            .find(|g| g.src.join("/") == "shop/dev" && g.dst.join("/") == "shop/dev")
+            .unwrap();
+        assert_eq!(dev.flows, 2, "both records shown");
+        assert_eq!(group_marker(dev), Some(Marker::PartlySquelched(0)));
+        assert_eq!(Marker::PartlySquelched(0).glyph(), "~");
+        assert!(!crate::tui::ui::widgets::table::dims_row(group_marker(dev)));
+    }
+
+    #[test]
     fn sections_count_their_own_squelched_rows() {
         let (mut m, _dir) = marked_model(RICH_MARKS);
         m.traffic.apps_state.by = By::In;
@@ -475,6 +556,28 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn an_unreadable_file_says_unreadable_not_invalid() {
+        let dir = tempfile::tempdir().unwrap();
+        // A directory where the file should be: the read fails.
+        std::fs::create_dir(dir.path().join("marks.toml")).unwrap();
+        let mut m = crate::tui::test_support::model_with_rich_flows();
+        m.traffic.marks = crate::marks::MarksStore::new(dir.path().join("marks.toml"));
+        m.traffic.rebuild_views();
+        assert_eq!(
+            m.traffic.marks_meta(TrafficView::Flows).as_deref(),
+            Some("marks off: marks.toml unreadable")
+        );
+        let s = m.traffic.take_marks_notice().unwrap();
+        assert!(
+            s.text
+                .starts_with("marks.toml unreadable: marks off (cannot read "),
+            "{}",
+            s.text
+        );
+    }
+
+    #[test]
     fn marks_expiring_within_three_days_are_announced_once() {
         let soon = (jiff::Timestamp::now() + jiff::SignedDuration::from_hours(48)).to_string();
         let text = format!(
@@ -490,6 +593,32 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn only_marks_of_this_pce_are_announced_and_a_later_load_still_can() {
+        let soon = (jiff::Timestamp::now() + jiff::SignedDuration::from_hours(48)).to_string();
+        let mark = |pce: &str| {
+            format!(
+                "[[mark]]\naction = \"squelch\"\nsrc = \"any\"\ndst = \"any\"\ncomment = \"x\"\nexpires = \"{soon}\"\n{pce}"
+            )
+        };
+        let other = mark("pce = \"other.example\"\n");
+        let (mut m, dir) = marked_model(&other);
+        assert!(
+            m.traffic.take_marks_notice().is_none(),
+            "another PCE's mark"
+        );
+        assert!(!m.traffic.marks_announced, "nothing queued, nothing spent");
+        // Edited: now one of this PCE's (portable) marks expires soon too.
+        let both = format!("{other}\n{}", mark("").replace("x\"", "y\""));
+        std::fs::write(dir.path().join("marks.toml"), both).unwrap();
+        m.traffic.rebuild_views();
+        assert_eq!(
+            m.traffic.take_marks_notice().map(|s| s.text).as_deref(),
+            Some("1 mark expires within 3 days · :marks")
+        );
+        assert!(m.traffic.marks_announced);
+    }
+
+    #[test]
     fn draft_decision_marks_wait_for_draft_decisions() {
         let (m, _dir) = marked_model(
             "[[mark]]\naction = \"revisit\"\nsrc = \"any\"\ndst = \"any\"\ndecision = \"blocked\"\ndraft_decision = \"allowed\"\ncomment = \"fixed by the pending policy\"\n",
@@ -498,7 +627,7 @@ pub(crate) mod tests {
         assert_eq!((mv.active, mv.waiting), (0, 1));
         assert_eq!(
             m.traffic.marks_meta(TrafficView::Flows).as_deref(),
-            Some("1 mark wait for the draft decision (D)")
+            Some("1 mark waits for the draft decision (D)")
         );
     }
 
@@ -579,6 +708,29 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn the_result_line_counts_and_breaks_down_the_same_flows() {
+        use crate::tui::test_support::render_to_string;
+        assert_eq!(flows_text(30, 30, 0), "30 flows");
+        assert_eq!(flows_text(8, 30, 0), "8 of 30 flows");
+        assert_eq!(flows_text(21, 30, 9), "21 of 30 flows (9 squelched)");
+        let (mut m, _dir) = marked_model(RICH_MARKS);
+        let out = render_to_string(&m, 120, 34);
+        let line = out.lines().find(|l| l.contains("allowed")).unwrap();
+        // 21 visible: allowed + pot.blocked + blocked = 21.
+        assert!(
+            line.contains("21 of 30 flows (9 squelched) allowed"),
+            "{line}"
+        );
+        m.traffic.toggle_squelched();
+        let out = render_to_string(&m, 120, 34);
+        let line = out.lines().find(|l| l.contains("allowed")).unwrap();
+        assert!(
+            line.contains("│30 flows allowed 15 pot.blocked 7 blocked 7"),
+            "{line}"
+        );
+    }
+
+    #[test]
     fn an_invalid_file_says_marks_off_in_the_panel() {
         use crate::tui::test_support::render_to_string;
         let (m, _dir) = marked_model("[[mark]]\naction = \"squelch\"\n");
@@ -587,13 +739,60 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_profile_switch_keeps_the_file_and_m_and_scopes_to_the_new_pce() {
+    fn a_flows_cell_never_shows_a_cut_number() {
+        use crate::tui::model::{flows_cell, flows_cell_narrow};
+        let rm = |hidden| RowMarks {
+            hidden,
+            ..RowMarks::default()
+        };
+        assert_eq!(flows_cell(250, Some(&rm(12))), "250 ~12");
+        assert_eq!(flows_cell(1234, Some(&rm(56))), "1.2K ~56");
+        assert_eq!(flows_cell(123_456, Some(&rm(7890))), "123K ~7.8K");
+        assert_eq!(flows_cell(9_999_999, Some(&rm(999_999))), "9.9M ~999K");
+        assert_eq!(flows_cell(1234, None), "1234", "no hidden: the count");
+        assert_eq!(flows_cell_narrow(250, Some(&rm(12))), "250 ~12");
+        assert_eq!(flows_cell_narrow(1234, Some(&rm(56))), "1.2K ~", "no cut 5");
+        // Big counts on screen: the wide column holds both numbers, the
+        // narrow one drops the hidden count rather than cut it.
         let (mut m, _dir) = marked_model(RICH_MARKS);
+        m.traffic.view = TrafficView::Aggregate;
+        let col = |m: &Model| {
+            let c = m.traffic.groups.columns.iter().find(|c| c.title == "flows");
+            c.map(|c| (c.width, c.narrow_width)).unwrap()
+        };
+        assert_eq!(col(&m), (10, 7));
+        let mut rows = m.traffic.groups.rows().to_vec();
+        rows[0].flows = 1234;
+        rows[0].marks = Some(rm(56));
+        m.traffic.groups.set_rows(rows);
+        let wide = crate::tui::test_support::render_to_string(&m, 120, 34);
+        assert!(wide.contains(" 1.2K ~56 "), "{wide}");
+        let narrow = crate::tui::test_support::render_to_string(&m, 80, 24);
+        assert!(narrow.contains(" 1.2K ~ "), "{narrow}");
+        assert!(!narrow.contains("~5"), "{narrow}");
+        let plain = crate::tui::test_support::model_with_rich_flows();
+        assert_eq!(col(&plain), (6, 5), "no marks, no wider column");
+    }
+
+    #[test]
+    fn a_profile_switch_keeps_the_file_and_m_and_scopes_to_the_new_pce() {
+        let scoped = format!(
+            "{RICH_MARKS}\n[[mark]]\nid = \"m-here\"\naction = \"important\"\nsrc = {{ workload = \"shop-web-p.example\" }}\ndst = \"any\"\npce = \"PCE.example\"\ncomment = \"this PCE only\"\n"
+        );
+        let (mut m, _dir) = marked_model(&scoped);
+        let active = |m: &Model, id: &str| {
+            let a = m.traffic.active_marks().unwrap();
+            let i = a.set().find(id).unwrap();
+            a.is_active(i)
+        };
+        assert!(active(&m, "m-here"), "scoped to this PCE (any case)");
         m.traffic.toggle_squelched();
         m.profile.host = "other.example".into();
         m.reset_data();
         assert!(m.traffic.show_squelched);
         assert_eq!(m.traffic.marks_pce.host, "other.example");
         assert!(m.traffic.marks.set().is_some(), "the same file");
+        assert!(!active(&m, "m-here"), "another PCE: inactive");
+        assert!(active(&m, "m-sq1"), "portable marks stay");
     }
 }

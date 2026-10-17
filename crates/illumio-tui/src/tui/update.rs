@@ -7,8 +7,8 @@ use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::form::{Completing, FieldKind, Form, FormEvent};
 use crate::tui::model::{
     By, Connection, Dir, Drill, EventsFilterEdit, Model, ObjectKind, ObjectsState, Overlay,
-    PceUsage, PendingAction, PolicyPane, PolicyState, QueryState, Range, Screen, StatusLine,
-    TrafficData, TrafficState, TrafficView, WritesState, queries_text, rule_line,
+    PceUsage, PendingAction, PolicyPane, PolicyState, QueryState, Range, Screen, StatusKind,
+    StatusLine, TrafficData, TrafficState, TrafficView, WritesState, queries_text, rule_line,
 };
 use crate::tui::msg::{
     Cmd, DraftFailure, DraftOutcome, FocusedOutcome, Msg, ObjectsPayload, QueryOutcome,
@@ -68,9 +68,20 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         generator::rebuild_gen(model);
     }
     // The marks file changed into (or out of) an invalid state, or marks
-    // expire soon: one status line, once.
-    if let Some(s) = model.traffic.take_marks_notice() {
-        model.status = s;
+    // expire soon: shown once, beside an info status; a warning or an
+    // error on the line keeps it waiting.
+    if model.status.kind == StatusKind::Info
+        && let Some(n) = model.traffic.take_marks_notice()
+    {
+        let text = &model.status.text;
+        model.status = if text.is_empty() || text == "ready" {
+            n
+        } else {
+            StatusLine {
+                text: format!("{text} · {}", n.text),
+                kind: n.kind,
+            }
+        };
     }
     cmds
 }
@@ -343,8 +354,10 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         .as_ref()
                         .map(|f| format!(" · focus is partial: r re-queries {}", f.app_text()))
                         .unwrap_or_default();
+                    let z = model.traffic.squelched_hidden();
+                    let count = crate::tui::traffic_marks::flows_text(n - z, n, z);
                     if let Some(d) = model.traffic.data.as_ref() {
-                        model.status = result_status(d, &format!("{n} flows"), "", &focus_hint);
+                        model.status = result_status(d, &count, "", &focus_hint);
                     }
                 }
                 Err(e) => {
@@ -375,10 +388,12 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     let app = focus.app_text();
                     model.traffic.show_detail = false;
                     model.traffic.apply_focused(focus, queries, data);
-                    let n = model.traffic.view_flows().len();
+                    let t = &model.traffic;
+                    let (n, z) = (t.focus_flows().len(), t.squelched_hidden());
+                    let count = crate::tui::traffic_marks::flows_text(n - z, n, z);
                     let q = format!(" · {}", queries_text(queries));
                     if let Some(d) = model.traffic.data.as_ref() {
-                        model.status = result_status(d, &format!("{n} flows for {app}"), &q, "");
+                        model.status = result_status(d, &format!("{count} for {app}"), &q, "");
                     }
                 }
                 Err(e) => {
@@ -2090,7 +2105,10 @@ fn reconnect(model: &mut Model) -> Vec<Cmd> {
 fn traffic_page(model: &Model) -> usize {
     let area = ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1);
     crate::tui::ui::layout::chrome(area)
-        .map(|c| crate::tui::ui::screens::traffic::table_rows(c.body))
+        .map(|c| {
+            use crate::tui::ui::screens::traffic::{detail_extra, table_rows};
+            table_rows(c.body, detail_extra(&model.traffic))
+        })
         .unwrap_or(10)
         .max(1)
 }
@@ -2292,7 +2310,13 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     t.rebuild_views();
                 }
             }
-            TrafficView::Flows => model.traffic.show_detail = !model.traffic.show_detail,
+            TrafficView::Flows => {
+                model.traffic.show_detail = !model.traffic.show_detail;
+                // The detail's `mark` line takes a table row: keep the
+                // cursor on screen.
+                let page = traffic_page(model);
+                model.traffic.flows.ensure_visible(page);
+            }
             TrafficView::Blocked => {}
             TrafficView::Treemap => treemap_enter(model),
         },
@@ -2492,17 +2516,18 @@ fn focus_status(t: &TrafficState) -> StatusLine {
     let Some(f) = &t.focus else {
         return StatusLine::info("focus cleared");
     };
-    let n = t.view_flows().len();
+    let (all, z) = (t.focus_flows().len(), t.squelched_hidden());
+    let n = crate::tui::traffic_marks::flows_text(all - z, all, z);
     if t.focus_partial() {
         let q = f.direction.query_count();
         StatusLine::warn(format!(
-            "{} · {n} flows · the result is truncated: r re-queries {} ({})",
+            "{} · {n} · the result is truncated: r re-queries {} ({})",
             f.badge(),
             f.app_text(),
             crate::tui::model::queries_text(q)
         ))
     } else {
-        StatusLine::info(format!("{} · {n} flows", f.badge()))
+        StatusLine::info(format!("{} · {n}", f.badge()))
     }
 }
 
@@ -15842,6 +15867,49 @@ mod draft_tests {
     }
 
     use tokio_util::sync::CancellationToken;
+
+    #[test]
+    fn draft_decision_marks_go_active_with_draft_decisions_and_wait_again_without() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut m = crate::tui::test_support::model_with_marks(
+            dir.path(),
+            "[[mark]]\naction = \"revisit\"\nsrc = \"any\"\ndst = \"any\"\ndecision = [\"blocked\", \"potentially_blocked\"]\ndraft_decision = \"allowed\"\ncomment = \"fixed by the pending policy\"\n",
+        );
+        m.traffic.data.as_mut().unwrap().hrefs = vec![HREF.into()];
+        let counts = |m: &Model| {
+            let mv = m.traffic.marked.as_ref().unwrap();
+            (mv.active, mv.waiting)
+        };
+        assert_eq!(counts(&m), (0, 1));
+        assert!(
+            m.traffic.flows.marker.is_none(),
+            "nothing active, no gutter"
+        );
+        let (seq, ..) = press_d(&mut m);
+        let msg = answer(&m, seq, false);
+        assert!(update(&mut m, msg).is_empty());
+        assert_eq!(counts(&m), (1, 0), "draft decisions loaded: active");
+        let revisit = m
+            .traffic
+            .flows
+            .rows()
+            .iter()
+            .filter(|r| {
+                r.mark
+                    .is_some_and(|h| h.action == pce::marks::Action::Revisit)
+            })
+            .count();
+        assert!(revisit > 0, "the flows the draft fixes are marked");
+        assert!(m.traffic.flows.marker.is_some());
+        assert!(m.traffic.marks_meta(TrafficView::Flows).is_none());
+        assert!(m.traffic.clear_draft());
+        assert_eq!(counts(&m), (0, 1), "draft decisions gone: waiting again");
+        assert!(m.traffic.flows.rows().iter().all(|r| r.mark.is_none()));
+        assert_eq!(
+            m.traffic.marks_meta(TrafficView::Flows).as_deref(),
+            Some("1 mark waits for the draft decision (D)")
+        );
+    }
 
     #[test]
     fn d_with_a_known_query_sends_one_draft_run_and_no_new_query() {

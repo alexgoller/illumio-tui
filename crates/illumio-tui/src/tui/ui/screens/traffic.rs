@@ -66,16 +66,22 @@ pub fn treemap_area(size: (u16, u16)) -> TreemapRect {
     }
 }
 
-/// Rows of data visible in the flow table (minus border and header).
-pub fn table_rows(body: Rect) -> usize {
-    layout(body).table.height.saturating_sub(3) as usize
+/// The detail pane's extra lines: its `mark` line, while marks are active
+/// and the Flows detail is open (a closed one, "press Enter", needs none).
+/// Shared by `render` and `table_rows`, so drawing and scrolling agree.
+pub fn detail_extra(t: &crate::tui::model::TrafficState) -> u16 {
+    let marks_on = t.marked.as_ref().is_some_and(|m| m.active > 0);
+    u16::from(marks_on && t.show_detail && t.view == TrafficView::Flows)
+}
+
+/// Rows of data visible in the flow table (minus border and header), with
+/// `extra` detail lines (`detail_extra`).
+pub fn table_rows(body: Rect, extra: u16) -> usize {
+    layout_with(body, extra).table.height.saturating_sub(3) as usize
 }
 
 pub fn render(model: &Model, f: &mut Frame, body: Rect) {
-    // The open detail's `mark` line, while marks are active; a closed
-    // detail ("press Enter") needs none, so the table keeps its rows.
-    let marks_on = model.traffic.marked.as_ref().is_some_and(|m| m.active > 0);
-    let l = layout_with(body, u16::from(marks_on && model.traffic.show_detail));
+    let l = layout_with(body, detail_extra(&model.traffic));
     render_filter_bar(model, f, l.filter);
     render_stats(model, f, l.stats);
     match model.traffic.view {
@@ -156,11 +162,17 @@ fn render_stats(model: &Model, f: &mut Frame, area: Rect) {
             PolicyDecision::Unknown => {}
         }
     }
-    let count = if model.traffic.focus.is_some() {
-        format!("{} of {} flows ", shown.len(), d.flows.len())
+    // The count says the same flows the breakdown counts: the visible ones
+    // of the loaded, the squelched ones left out named.
+    let (total, squelched) = (d.flows.len(), model.traffic.squelched_hidden());
+    let mut count = if model.traffic.focus.is_some() || squelched > 0 {
+        format!("{} of {total} flows ", shown.len())
     } else {
-        format!("{} flows ", d.flows.len())
+        format!("{total} flows ")
     };
+    if squelched > 0 {
+        count.push_str(&format!("({squelched} squelched) "));
+    }
     let mut left = vec![
         Span::styled(count, t.header_style()),
         Span::styled(format!("allowed {a} "), Style::new().fg(t.ok)),
@@ -175,7 +187,12 @@ fn render_stats(model: &Model, f: &mut Frame, area: Rect) {
         .map(|s| s.content.chars().count())
         .sum::<usize>()
         .saturating_add(2)
-        .min(inner.width.saturating_sub(24) as usize) as u16;
+        // The bar keeps 24 cells; 10 when the squelched count needs room.
+        .min(
+            inner
+                .width
+                .saturating_sub(if squelched > 0 { 10 } else { 24 }) as usize,
+        ) as u16;
     let cols = Layout::horizontal([Constraint::Length(left_w), Constraint::Min(10)]).split(inner);
     f.render_widget(Paragraph::new(Line::from(left)), cols[0]);
     // No time sparkline: the flows are lifetime aggregates, so their

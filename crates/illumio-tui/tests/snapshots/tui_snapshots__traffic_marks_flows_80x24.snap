@@ -8,7 +8,7 @@ expression: "render_to_string(&m, 80, 24)"
 │window 24h  src *  dst *  svc *  decision all                                 │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭ Result ─────────────────────────────────────────────────── 30 flows · 3s ago ╮
-│30 flows allowed 8 pot.blocked 6 blocked 6  ██████████████████████████████████│
+│21 of 30 flows (9 squelched) allowed 8 pot.blocked 6 blocked 6  ██████████████│
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭ Flows · conns: lifetime ────────── 9 rows (9 flows) squelched · M shows them ╮
 │    src          src group  dst            dst group  service   conns decision│

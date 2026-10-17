@@ -144,8 +144,15 @@ impl AppView {
             (p, _) => p,
         };
         let marks = marks.filter(|(a, _)| !a.is_empty());
-        let part = marks.map(|(a, keep)| partition(flows, a, keep));
-        let kept: &[ResolvedFlow] = part.as_ref().map_or(flows, |p| &p.kept);
+        // Only the app's flows are classified: the overlay never shows the
+        // rest of the result.
+        let mine: Option<Vec<ResolvedFlow>> = marks.map(|_| {
+            let focus = &self.focus;
+            flows.iter().filter(|f| focus.keeps(f)).cloned().collect()
+        });
+        let base: &[ResolvedFlow] = mine.as_deref().unwrap_or(flows);
+        let part = marks.map(|(a, keep)| partition(base, a, keep));
+        let kept: &[ResolvedFlow] = part.as_ref().map_or(base, |p| &p.kept);
         self.marks_on = marks.is_some();
         self.show_squelched = marks.is_some_and(|(_, keep)| keep);
         self.squelched = [Squelch::default(); 2];

@@ -1450,12 +1450,46 @@ pub fn section_rows(
 
 /// A flows cell: the records shown, then `~12` for the squelched ones of
 /// the row left out (its sort key stays the shown count; `:export` writes
-/// the count alone).
-fn flows_cell(flows: u64, m: Option<&RowMarks>) -> String {
+/// the count alone). With a hidden count both numbers are at most 4 cells
+/// (`short_count`), so the text fits the 10-cell column marks give it.
+pub(crate) fn flows_cell(flows: u64, m: Option<&RowMarks>) -> String {
     match m.map(|m| m.hidden).filter(|h| *h > 0) {
-        Some(h) => format!("{flows} ~{h}"),
+        Some(h) => format!("{} ~{}", short_count(flows), short_count(h)),
         None => flows.to_string(),
     }
+}
+
+/// The cells of the flows column below 120 columns while marks are active.
+pub(crate) const FLOWS_NARROW_MARKED: usize = 7;
+
+/// `flows_cell` for the narrow column: the hidden count is dropped (`1.2K
+/// ~`) rather than cut into a wrong number when both do not fit.
+pub(crate) fn flows_cell_narrow(flows: u64, m: Option<&RowMarks>) -> String {
+    let full = flows_cell(flows, m);
+    if full.chars().count() <= FLOWS_NARROW_MARKED || m.is_none_or(|m| m.hidden == 0) {
+        full
+    } else {
+        format!("{} ~", short_count(flows))
+    }
+}
+
+/// A count in at most 4 cells, truncated, never rounded up: `999`, `1.2K`,
+/// `123K`, `9.9M`.
+fn short_count(n: u64) -> String {
+    if n < 1_000 {
+        return n.to_string();
+    }
+    let mut scale = 1_000u64;
+    for unit in ['K', 'M', 'G', 'T', 'P'] {
+        if n / scale < 10 {
+            return format!("{}.{}{unit}", n / scale, n % scale / (scale / 10));
+        }
+        if n / scale < 1_000 {
+            return format!("{}{unit}", n / scale);
+        }
+        scale *= 1_000;
+    }
+    format!("{}E", n / scale)
 }
 
 /// Bytes as `1.2K`, `-` when none were reported.
@@ -2481,6 +2515,28 @@ impl TrafficState {
         self.rebuild_pairs();
         self.rebuild_sections();
         self.relayout_treemap();
+    }
+
+    /// The flows column of the tables that show `~N` (pairs, by service,
+    /// sections, Blocked): 10 cells (7 narrow, `flows_cell_narrow`) while
+    /// marks are active, else the usual 6 (5).
+    pub(crate) fn sync_marks_columns(&mut self, on: bool) {
+        fn set<T>(t: &mut TableView<T>, on: bool, narrow: fn(&T) -> String) {
+            if let Some(c) = t.columns.iter_mut().find(|c| c.title == "flows") {
+                (c.width, c.narrow_width, c.narrow) = if on {
+                    (10, FLOWS_NARROW_MARKED as u16, Some(narrow))
+                } else {
+                    (6, 5, None)
+                };
+            }
+        }
+        let group: fn(&FlowGroup) -> String = |g| flows_cell_narrow(g.flows, g.marks.as_ref());
+        let section: fn(&SectionRow) -> String =
+            |r| r.with_row(|p| flows_cell_narrow(p.flows, p.marks.as_ref()));
+        set(&mut self.groups, on, group);
+        set(&mut self.services, on, group);
+        set(&mut self.apps, on, section);
+        set(&mut self.blocked, on, section);
     }
 
     /// The `draft` columns while draft decisions are loaded, none
@@ -5140,7 +5196,7 @@ impl Model {
         traffic.treemap.area = crate::tui::ui::screens::traffic::treemap_area(self.size);
         // The marks file and `M` are the session's; their PCE the new profile's.
         traffic.marks = std::mem::replace(&mut self.traffic.marks, MarksStore::none());
-        traffic.marks_announced = true;
+        traffic.marks_announced = self.traffic.marks_announced;
         traffic.show_squelched = self.traffic.show_squelched;
         traffic.marks_pce = PceId {
             host: self.profile.host.clone(),
