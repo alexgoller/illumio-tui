@@ -4,6 +4,7 @@
 //! lifetime aggregates, so there is no traffic-over-time view.
 use super::context::{Context, cache_label};
 use super::error::CliError;
+use super::marked::{CliMarks, mark_cell, squelched};
 use super::output::{OutputFormat, TableRows};
 use super::traffic::{ByArg, DirectionArg, FilterArgs, TransmissionArg, cli_focus, fetch};
 use clap::{Args, ValueEnum};
@@ -12,6 +13,7 @@ use pce::app::{
     AppPeer, AppPolicyRow, AppWorkload, PolicyReason, WorkloadSummary, app_peers, app_policy,
     app_workload_filter, app_workloads, enforcement_word, label_hrefs, workload_in_app,
 };
+use pce::marks::{annotate_peers, partition};
 use pce::models::{PolicyScope, Workload};
 use pce::traffic::{Direction, DraftCounts, FocusDirection};
 use serde::Serialize;
@@ -62,6 +64,12 @@ pub struct AppArgs {
     /// view: per query one PUT on that query and more polls; changes no policy)
     #[arg(long)]
     pub draft: bool,
+    /// Keep squelched flows (marks.toml) in the peers, marked `squelch`
+    #[arg(long, conflicts_with = "no_marks")]
+    pub show_squelched: bool,
+    /// Ignore marks.toml: no mark fields, nothing left out
+    #[arg(long)]
+    pub no_marks: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -147,10 +155,14 @@ impl TableRows for Peers<'_> {
         if self.draft() {
             h.push("draft");
         }
+        if self.marked() {
+            h.push("mark");
+        }
         h
     }
     fn rows(&self) -> Vec<Vec<String>> {
         let draft = self.draft();
+        let marked = self.marked();
         self.0
             .iter()
             .map(|p| {
@@ -165,29 +177,38 @@ impl TableRows for Peers<'_> {
                 if draft {
                     row.push(DraftCounts::text(p.draft.as_ref()));
                 }
+                if marked {
+                    row.push(mark_cell(p.marks.as_ref()));
+                }
                 row
             })
             .collect()
     }
-    /// The table's, with the draft counts as numbers.
+    /// The table's, with the draft counts as numbers, then `mark`.
     fn full_headers(&self) -> Vec<&'static str> {
         let mut h = self.headers();
+        h.retain(|c| *c != "draft" && *c != "mark");
         if self.draft() {
-            h.pop();
             h.extend(super::traffic::DRAFT_COUNTS);
+        }
+        if self.marked() {
+            h.push("mark");
         }
         h
     }
     fn full_rows(&self) -> Vec<Vec<String>> {
         let draft = self.draft();
+        let marked = self.marked();
         self.0
             .iter()
             .zip(self.rows())
             .map(|(p, mut row)| {
+                let mark = if marked { row.pop() } else { None };
                 if draft {
                     row.pop();
                     row.extend(super::traffic::draft_cells(p.draft.as_ref()));
                 }
+                row.extend(mark);
                 row
             })
             .collect()
@@ -197,6 +218,10 @@ impl TableRows for Peers<'_> {
 impl Peers<'_> {
     fn draft(&self) -> bool {
         self.0.iter().any(|p| p.draft.is_some())
+    }
+
+    fn marked(&self) -> bool {
+        self.0.iter().any(|p| p.marks.is_some())
     }
 }
 
@@ -273,6 +298,31 @@ pub async fn run(ctx: &Context, args: &AppArgs) -> Result<(), CliError> {
         .collect();
     let (rows, summary) = app_workloads(&mine, &idx, &ctx.config.tier_key, Timestamp::now());
     let d = focus.direction;
+    // Marks: the peers aggregate the records kept; each side joins them.
+    let cm = CliMarks::load(ctx, args.no_marks, args.show_squelched);
+    let act = cm.active(args.draft);
+    let part = act.as_ref().map(|a| partition(&fetched.flows, a, cm.show));
+    let flows: &[pce::traffic::ResolvedFlow] = part.as_ref().map_or(&fetched.flows, |p| &p.kept);
+    let side = |dir: Direction, skip: FocusDirection| -> (Vec<AppPeer>, u64) {
+        if d == skip {
+            return (Vec::new(), 0);
+        }
+        let agg = |x: &[pce::traffic::ResolvedFlow]| app_peers(x, &focus, dir);
+        let mut rows = agg(flows);
+        let gone = match (&part, &act) {
+            (Some(p), Some(a)) => annotate_peers(&mut rows, &p.marked, a, agg),
+            _ => 0,
+        };
+        (rows, gone)
+    };
+    let (inbound, gone_in) = side(Direction::In, FocusDirection::Out);
+    let (outbound, gone_out) = side(Direction::Out, FocusDirection::In);
+    let sq = squelched(
+        part.as_ref(),
+        act.as_ref(),
+        |_, _| gone_in + gone_out,
+        |x| focus.keeps(x),
+    );
     let report = AppReport {
         app: focus.app_text(),
         direction: d,
@@ -281,16 +331,8 @@ pub async fn run(ctx: &Context, args: &AppArgs) -> Result<(), CliError> {
             summary,
             rows,
         },
-        inbound: if d == FocusDirection::Out {
-            Vec::new()
-        } else {
-            app_peers(&fetched.flows, &focus, Direction::In)
-        },
-        outbound: if d == FocusDirection::In {
-            Vec::new()
-        } else {
-            app_peers(&fetched.flows, &focus, Direction::Out)
-        },
+        inbound,
+        outbound,
         policy: PolicySection {
             scope,
             truncated: rs.truncated,
@@ -300,6 +342,7 @@ pub async fn run(ctx: &Context, args: &AppArgs) -> Result<(), CliError> {
     // `meta.truncated` is the traffic's; the workloads and the rulesets
     // say so in their sections.
     let mut meta = fetched.meta(ctx);
+    cm.fill(&mut meta, act.as_ref(), sq);
     let all_hit = fetched.cache == "hit" && wl.hit && rs.hit;
     meta.cache = cache_label(all_hit, ctx.cache_mode);
     let s = &report.workloads.summary;

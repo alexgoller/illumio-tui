@@ -3,10 +3,12 @@
 //! label-pair groups, the blocked summary or the mesh.
 use super::context::{Context, cache_label};
 use super::error::CliError;
-use super::output::{Meta, TableRows, Window, join_list};
+use super::marked::{CliMarks, FlowMark, MarkedFlow, mark_cell, squelched};
+use super::output::{Meta, SquelchedMeta, TableRows, Window, join_list};
 use clap::{Args, Subcommand, ValueEnum};
 use jiff::Timestamp;
 use jiff::civil::Date;
+use pce::marks::{annotate_groups, annotate_mesh, annotate_sections, partition};
 use pce::models::{
     ActorMatch, PolicyDecision, ServiceMatch, TrafficQuery, Transmission, WorkloadFilter,
     proto_number,
@@ -15,8 +17,8 @@ use pce::traffic::{
     AppSection, CONFIRM_MAX_RESULTS, Decisions, Direction, DraftCounts, DraftSummary, FilterExpr,
     FlowGroup, Focus, FocusDirection, MAX_TRAFFIC_MAX_RESULTS, MeshColumns, MeshRow, ResolvedFlow,
     TrafficQueryBuilder, app_header, app_sections, app_sections_both, backfill_cap,
-    compact_duration, group_by_labels, group_by_service, mesh, parse_app, parse_window,
-    resolve_actor, resolve_flows,
+    compact_duration, group_by_labels, group_by_service, in_app, keys_or_default, mesh, parse_app,
+    parse_window, resolve_actor, resolve_flows,
 };
 use pce::{KeyOrder, NameIndex};
 use serde::Serialize;
@@ -301,6 +303,13 @@ pub struct FilterArgs {
     /// status polls, still one download; it changes no policy. JSON: meta.draft
     #[arg(long)]
     pub draft: bool,
+    /// Keep squelched flows (marks.toml) in the output, marked `squelch`, instead of
+    /// leaving them out; meta.squelched still counts them
+    #[arg(long, conflicts_with = "no_marks")]
+    pub show_squelched: bool,
+    /// Ignore marks.toml: no mark fields, nothing left out, no meta.squelched
+    #[arg(long)]
+    pub no_marks: bool,
 }
 
 /// RFC 3339, or a date; a date-only `--to` means 23:59:59 of that day.
@@ -519,16 +528,27 @@ impl TableRows for DryRuns {
     }
 }
 
-/// Flows as printed: JSON is the flows themselves (every label); the
-/// table's label columns follow `order` and hide its ignored keys.
+/// Flows as printed: JSON is the flows themselves (every label), with
+/// their `mark` while marks are active; the table's label columns follow
+/// `order` and hide its ignored keys, and a last `mark` column the marks.
 struct FlowRows<'a> {
     flows: &'a [ResolvedFlow],
     order: &'a KeyOrder,
+    /// Each flow's mark, while marks are active.
+    marks: Option<Vec<Option<FlowMark>>>,
 }
 
 impl Serialize for FlowRows<'_> {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        self.flows.serialize(s)
+        match &self.marks {
+            None => self.flows.serialize(s),
+            Some(marks) => {
+                s.collect_seq(self.flows.iter().zip(marks).map(|(flow, mark)| MarkedFlow {
+                    flow,
+                    mark: mark.as_ref(),
+                }))
+            }
+        }
     }
 }
 
@@ -559,13 +579,17 @@ impl TableRows for FlowRows<'_> {
         if self.draft() {
             h.insert(8, "draft");
         }
+        if self.marks.is_some() {
+            h.push("mark");
+        }
         h
     }
     fn rows(&self) -> Vec<Vec<String>> {
         let draft = self.draft();
         self.flows
             .iter()
-            .map(|f| {
+            .enumerate()
+            .map(|(i, f)| {
                 let mut row = vec![
                     f.last_detected.clone().unwrap_or_default(),
                     f.src.display_name(),
@@ -579,6 +603,14 @@ impl TableRows for FlowRows<'_> {
                 ];
                 if draft {
                     row.insert(8, f.draft_text());
+                }
+                if let Some(marks) = &self.marks {
+                    row.push(
+                        marks[i]
+                            .as_ref()
+                            .map(|m| m.action.as_str().to_string())
+                            .unwrap_or_default(),
+                    );
                 }
                 row
             })
@@ -640,6 +672,11 @@ fn groups_draft(groups: &[FlowGroup]) -> bool {
     groups.iter().any(|g| g.draft.is_some())
 }
 
+/// Some row carries marks: the tables get a last `mark` column.
+fn groups_marked(groups: &[FlowGroup]) -> bool {
+    groups.iter().any(|g| g.marks.is_some())
+}
+
 fn group_cells(groups: &[FlowGroup]) -> Vec<Vec<String>> {
     let any = groups.iter().any(|g| g.bytes > 0);
     groups
@@ -679,28 +716,38 @@ impl TableRows for Vec<FlowGroup> {
         if groups_draft(self) {
             h.push("draft");
         }
+        if groups_marked(self) {
+            h.push("mark");
+        }
         h
     }
     fn rows(&self) -> Vec<Vec<String>> {
         let draft = groups_draft(self);
+        let marked = groups_marked(self);
         self.iter()
             .zip(group_cells(self))
             .map(|(g, mut row)| {
                 if draft {
                     row.push(DraftCounts::text(g.draft.as_ref()));
                 }
+                if marked {
+                    row.push(mark_cell(g.marks.as_ref()));
+                }
                 row
             })
             .collect()
     }
     /// The table's counts, then the connections per decision, then with
-    /// draft decisions `draft_allowed` and `draft_blocked`.
+    /// draft decisions `draft_allowed` and `draft_blocked`, then `mark`.
     fn full_headers(&self) -> Vec<&'static str> {
         let mut h = self.headers();
-        h.retain(|c| *c != "draft");
+        h.retain(|c| *c != "draft" && *c != "mark");
         h.extend(CONNS_BY_DECISION);
         if groups_draft(self) {
             h.extend(DRAFT_COUNTS);
+        }
+        if groups_marked(self) {
+            h.push("mark");
         }
         h
     }
@@ -715,6 +762,9 @@ impl TableRows for Vec<FlowGroup> {
                 row.extend(g.conns.cells());
                 if draft {
                     row.extend(draft_cells(g.draft.as_ref()));
+                }
+                if groups_marked(self) {
+                    row.push(mark_cell(g.marks.as_ref()));
                 }
                 row
             })
@@ -784,20 +834,28 @@ impl TableRows for Vec<MeshRow> {
         if mesh_draft(self) {
             h.push("draft");
         }
+        if self.iter().any(|r| r.marks.is_some()) {
+            h.push("mark");
+        }
         h
     }
     /// The table's, with the draft counts as `draft_allowed` and
-    /// `draft_blocked` numbers.
+    /// `draft_blocked` numbers, then `mark`.
     fn full_headers(&self) -> Vec<&'static str> {
         let mut h = self.headers();
+        let marked = h.last() == Some(&"mark");
+        h.retain(|c| *c != "draft" && *c != "mark");
         if mesh_draft(self) {
-            h.pop();
             h.extend(DRAFT_COUNTS);
+        }
+        if marked {
+            h.push("mark");
         }
         h
     }
     fn rows(&self) -> Vec<Vec<String>> {
         let draft = mesh_draft(self);
+        let marked = self.iter().any(|r| r.marks.is_some());
         let any = self.iter().any(|r| r.bytes > 0);
         let or_dash = |v: &Option<String>| v.clone().unwrap_or_else(|| "-".into());
         self.iter()
@@ -817,6 +875,9 @@ impl TableRows for Vec<MeshRow> {
                 if draft {
                     row.push(DraftCounts::text(r.draft.as_ref()));
                 }
+                if marked {
+                    row.push(mark_cell(r.marks.as_ref()));
+                }
                 row
             })
             .collect()
@@ -825,6 +886,7 @@ impl TableRows for Vec<MeshRow> {
     /// draft counts as numbers.
     fn full_rows(&self) -> Vec<Vec<String>> {
         let draft = mesh_draft(self);
+        let marked = self.iter().any(|r| r.marks.is_some());
         let or_empty = |v: &Option<String>| v.clone().unwrap_or_default();
         self.iter()
             .zip(self.rows())
@@ -833,10 +895,12 @@ impl TableRows for Vec<MeshRow> {
                 row[1] = or_empty(&r.process);
                 row[5] = or_empty(&r.dst_process);
                 row[8] = r.bytes.to_string();
+                let mark = if marked { row.pop() } else { None };
                 if draft {
                     row.pop();
                     row.extend(draft_cells(r.draft.as_ref()));
                 }
+                row.extend(mark);
                 row
             })
             .collect()
@@ -875,12 +939,16 @@ impl TableRows for Sections {
         if self.draft() {
             h.push("draft");
         }
+        if self.marked() {
+            h.push("mark");
+        }
         h
     }
     /// A header row is one cell: `render_table` prints it whole in the
     /// first column with the other cells empty.
     fn rows(&self) -> Vec<Vec<String>> {
         let draft = self.draft();
+        let marked = self.marked();
         let any = self
             .sections
             .iter()
@@ -917,6 +985,9 @@ impl TableRows for Sections {
                     if draft && let Some(row) = out.last_mut() {
                         row.push(DraftCounts::text(r.draft.as_ref()));
                     }
+                    if marked && let Some(row) = out.last_mut() {
+                        row.push(mark_cell(r.marks.as_ref()));
+                    }
                 }
             }
         }
@@ -925,16 +996,24 @@ impl TableRows for Sections {
     /// One row per peer, no header rows: the app and the direction are
     /// columns, the host names lists beside their counts.
     fn full_headers(&self) -> Vec<&'static str> {
-        section_csv_headers(self.draft())
+        let mut h = section_csv_headers(self.draft());
+        if self.marked() {
+            h.push("mark");
+        }
+        h
     }
     fn full_rows(&self) -> Vec<Vec<String>> {
-        let draft = self.draft();
+        let (draft, marked) = (self.draft(), self.marked());
         self.sections
             .iter()
             .flat_map(|s| {
-                s.rows
-                    .iter()
-                    .map(move |r| section_csv_row(&s.app, s.direction, r, draft))
+                s.rows.iter().map(move |r| {
+                    let mut row = section_csv_row(&s.app, s.direction, r, draft);
+                    if marked {
+                        row.push(mark_cell(r.marks.as_ref()));
+                    }
+                    row
+                })
             })
             .collect()
     }
@@ -947,6 +1026,14 @@ impl Sections {
             .iter()
             .flat_map(|s| &s.rows)
             .any(|r| r.draft.is_some())
+    }
+
+    /// Some row carries marks: a last `mark` column.
+    fn marked(&self) -> bool {
+        self.sections
+            .iter()
+            .flat_map(|s| &s.rows)
+            .any(|r| r.marks.is_some())
     }
 }
 
@@ -1298,22 +1385,67 @@ async fn query(ctx: &Context, args: &QueryArgs) -> Result<(), CliError> {
     let Some(f) = fetch(ctx, &args.filter, focus.as_ref()).await? else {
         return Ok(());
     };
+    // Marks: classify, then aggregate the records kept (all of them with
+    // --show-squelched); the marks join the rows by their keys.
+    let cm = CliMarks::load(ctx, args.filter.no_marks, args.filter.show_squelched);
+    let act = cm.active(args.filter.draft);
+    let part = act.as_ref().map(|a| partition(&f.flows, a, cm.show));
+    let flows: &[ResolvedFlow] = part.as_ref().map_or(&f.flows, |p| &p.kept);
+    let mut meta = f.meta(ctx);
     if args.blocked {
         let keys = keys_or_profile(ctx, &[]);
-        let sections = Sections {
-            sections: app_sections(&f.flows, &keys, Direction::In, Decisions::Blocked),
+        let agg = |x: &[ResolvedFlow]| app_sections(x, &keys, Direction::In, Decisions::Blocked);
+        let mut sections = Sections {
+            sections: agg(flows),
             both: false,
         };
-        ctx.emit_meta(&sections, &f.meta(ctx))
+        let sq = squelched(
+            part.as_ref(),
+            act.as_ref(),
+            |p, a| annotate_sections(&mut sections.sections, p, a, agg),
+            |x| Decisions::Blocked.keeps(x),
+        );
+        cm.fill(&mut meta, act.as_ref(), sq);
+        ctx.emit_meta(&sections, &meta)
     } else if !args.group.is_empty() {
-        ctx.emit_meta(&group_by_labels(&f.flows, &args.group), &f.meta(ctx))
+        let agg = |x: &[ResolvedFlow]| group_by_labels(x, &args.group);
+        let mut groups = agg(flows);
+        let sq = squelched(
+            part.as_ref(),
+            act.as_ref(),
+            |p, a| annotate_groups(&mut groups, p, a, agg),
+            |_| true,
+        );
+        cm.fill(&mut meta, act.as_ref(), sq);
+        ctx.emit_meta(&groups, &meta)
     } else {
         let order = ctx.config.key_order();
-        let rows = FlowRows {
-            flows: &f.flows,
-            order: &order,
+        // Flows: rows are flows.
+        let (marks, sq) = match (&part, &act) {
+            (Some(p), Some(a)) => {
+                let n = p.marked.squelched_where(|_| true);
+                (
+                    Some(
+                        p.kept_hits
+                            .iter()
+                            .map(|h| FlowMark::of(h.as_ref(), a))
+                            .collect(),
+                    ),
+                    Some(SquelchedMeta {
+                        rows: Some(n),
+                        flows: n,
+                    }),
+                )
+            }
+            _ => (None, None),
         };
-        ctx.emit_meta(&rows, &f.meta(ctx))
+        cm.fill(&mut meta, act.as_ref(), sq);
+        let rows = FlowRows {
+            flows,
+            order: &order,
+            marks,
+        };
+        ctx.emit_meta(&rows, &meta)
     }
 }
 
@@ -1323,18 +1455,58 @@ async fn groups(ctx: &Context, args: &GroupsArgs) -> Result<(), CliError> {
     let Some(f) = fetch(ctx, &args.filter, focus.as_ref()).await? else {
         return Ok(());
     };
-    match sections_for(&f.flows, &keys, args) {
-        Some(sections) => {
+    let cm = CliMarks::load(ctx, args.filter.no_marks, args.filter.show_squelched);
+    let act = cm.active(args.filter.draft);
+    let part = act.as_ref().map(|a| partition(&f.flows, a, cm.show));
+    let flows: &[ResolvedFlow] = part.as_ref().map_or(&f.flows, |p| &p.kept);
+    let decisions = Decisions::from(args.show);
+    let mut meta = f.meta(ctx);
+    match sections_for(flows, &keys, args) {
+        Some(mut sections) => {
+            // The squelched records of the sections shown: `--app`'s only.
+            let resolved = keys_or_default(&keys);
+            let app = args.filter.app.as_deref().map(parse_app);
+            let dir = match args.by {
+                ByArg::In => Some(Direction::In),
+                ByArg::Out => Some(Direction::Out),
+                _ => None,
+            };
+            let agg = |x: &[ResolvedFlow]| {
+                sections_for(x, &keys, args)
+                    .map(|s| s.sections)
+                    .unwrap_or_default()
+            };
+            let sq = squelched(
+                part.as_ref(),
+                act.as_ref(),
+                |p, a| annotate_sections(&mut sections.sections, p, a, agg),
+                |x| match &app {
+                    Some(app) => in_app(x, &resolved, app, dir, decisions),
+                    None => decisions.keeps(x),
+                },
+            );
+            cm.fill(&mut meta, act.as_ref(), sq);
             if let Some(miss) = app_miss(args, &sections) {
                 eprintln!("{miss}");
             }
-            ctx.emit_meta(&sections, &f.meta(ctx))
+            ctx.emit_meta(&sections, &meta)
         }
-        None if args.services => ctx.emit_meta(
-            &ServiceGroups(pairs_for(&f.flows, &keys, args)),
-            &f.meta(ctx),
-        ),
-        None => ctx.emit_meta(&pairs_for(&f.flows, &keys, args), &f.meta(ctx)),
+        None => {
+            let agg = |x: &[ResolvedFlow]| pairs_for(x, &keys, args);
+            let mut pairs = agg(flows);
+            let sq = squelched(
+                part.as_ref(),
+                act.as_ref(),
+                |p, a| annotate_groups(&mut pairs, p, a, agg),
+                |x| decisions.keeps(x),
+            );
+            cm.fill(&mut meta, act.as_ref(), sq);
+            if args.services {
+                ctx.emit_meta(&ServiceGroups(pairs), &meta)
+            } else {
+                ctx.emit_meta(&pairs, &meta)
+            }
+        }
     }
 }
 
@@ -1348,7 +1520,21 @@ async fn mesh_cmd(ctx: &Context, args: &MeshArgs) -> Result<(), CliError> {
         user: !args.no_user,
         process: !args.no_process,
     };
-    ctx.emit_meta(&mesh(&f.flows, &keys, cols), &f.meta(ctx))
+    let cm = CliMarks::load(ctx, args.filter.no_marks, args.filter.show_squelched);
+    let act = cm.active(args.filter.draft);
+    let part = act.as_ref().map(|a| partition(&f.flows, a, cm.show));
+    let flows: &[ResolvedFlow] = part.as_ref().map_or(&f.flows, |p| &p.kept);
+    let agg = |x: &[ResolvedFlow]| mesh(x, &keys, cols);
+    let mut rows = agg(flows);
+    let sq = squelched(
+        part.as_ref(),
+        act.as_ref(),
+        |p, a| annotate_mesh(&mut rows, p, a, agg),
+        |_| true,
+    );
+    let mut meta = f.meta(ctx);
+    cm.fill(&mut meta, act.as_ref(), sq);
+    ctx.emit_meta(&rows, &meta)
 }
 
 #[cfg(test)]
@@ -1423,6 +1609,7 @@ mod tests {
         let table = FlowRows {
             flows: &flows,
             order: idx.key_order(),
+            marks: None,
         };
         let headers = table.headers();
         let col = |h: &str| headers.iter().position(|x| *x == h).unwrap();
@@ -1443,6 +1630,7 @@ mod tests {
         let table = FlowRows {
             flows: &flows,
             order: &order,
+            marks: None,
         };
         let headers = table.headers();
         let col = |h: &str| headers.iter().position(|x| *x == h).unwrap();

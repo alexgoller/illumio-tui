@@ -6,6 +6,7 @@ pub mod error;
 pub mod events;
 pub mod generate;
 pub mod health;
+pub mod marked;
 pub mod marks;
 pub mod objects;
 pub mod output;

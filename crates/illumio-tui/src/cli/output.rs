@@ -101,6 +101,19 @@ pub struct Meta {
     /// holding an active mark): how many are active, and the file.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub marks: Option<MarksMeta>,
+    /// Traffic with an active mark: the rows squelch removed and the
+    /// squelched flow records of the view (zeros included); `gen`: the
+    /// flows only (its rules include them).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub squelched: Option<SquelchedMeta>,
+}
+
+/// `meta.squelched`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct SquelchedMeta {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rows: Option<u64>,
+    pub flows: u64,
 }
 
 /// `meta.marks`.
@@ -340,6 +353,16 @@ pub fn meta_line(meta: &Meta) -> String {
     if meta.incomplete == Some(true) {
         s.push_str(" · WARNING: incomplete, a PCE region did not respond");
     }
+    match meta.squelched {
+        Some(SquelchedMeta {
+            rows: Some(r),
+            flows,
+        }) if flows > 0 => s.push_str(&format!(" · {r} rows ({flows} flows) squelched")),
+        Some(SquelchedMeta { rows: None, flows }) if flows > 0 => {
+            s.push_str(&format!(" · {flows} squelched (rules include them)"))
+        }
+        _ => {}
+    }
     if let Some(w) = &meta.write {
         s.push_str(&format!(
             " · {} {} → {}",
@@ -446,7 +469,14 @@ mod tests {
             local_filter: None,
             warnings: None,
             marks: None,
+            squelched: None,
         };
         assert!(meta_line(&meta).contains("POST /orgs/5/labels → 201"));
+        let sq = |rows| Meta {
+            squelched: Some(SquelchedMeta { rows, flows: 52 }),
+            ..Meta::default()
+        };
+        assert!(meta_line(&sq(Some(3))).ends_with(" · 3 rows (52 flows) squelched"));
+        assert!(meta_line(&sq(None)).ends_with(" · 52 squelched (rules include them)"));
     }
 }

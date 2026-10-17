@@ -4,13 +4,15 @@
 //! global granularity.
 use super::context::{Context, cache_label};
 use super::error::CliError;
-use super::output::{TableRows, join_list};
+use super::marked::CliMarks;
+use super::output::{SquelchedMeta, TableRows, join_list};
 use super::traffic::{ByArg, DirectionArg, FilterArgs, cli_focus, fetch};
 use clap::{Args, ValueEnum};
 use pce::generate::{
     Candidate, Consolidate, Coverage, GenInput, GenRow, Proposal, RuleCounts, Stop, app_ruleset,
     candidates, keys_refusal, propose, rows,
 };
+use pce::marks::Action;
 use pce::models::PolicyScope;
 use pce::write::PortSpec;
 use serde::Serialize;
@@ -65,6 +67,10 @@ pub struct GenArgs {
     /// `consolidations`
     #[arg(long, value_name = "PORT/PROTO=any|all")]
     pub consolidate: Vec<String>,
+    /// Ignore marks.toml (the rules include squelched flows either way; only
+    /// meta.squelched reports them)
+    #[arg(long)]
+    pub no_marks: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -603,5 +609,19 @@ pub async fn run(ctx: &Context, args: &GenArgs) -> Result<(), CliError> {
     };
     let mut meta = fetched.meta(ctx);
     meta.cache = cache_label(fetched.cache == "hit" && drafts.hit, ctx.cache_mode);
+    // Marks are not policy: the rules above saw every flow. Only the app's
+    // squelched flows are counted.
+    let cm = CliMarks::load(ctx, args.no_marks, false);
+    let act = cm.active(false);
+    let sq = act.as_ref().map(|a| SquelchedMeta {
+        rows: None,
+        flows: fetched
+            .flows
+            .iter()
+            .filter(|f| focus.keeps(f))
+            .filter(|f| a.classify(f).is_some_and(|h| h.action == Action::Squelch))
+            .count() as u64,
+    });
+    cm.fill(&mut meta, act.as_ref(), sq);
     ctx.emit_meta(&report, &meta)
 }

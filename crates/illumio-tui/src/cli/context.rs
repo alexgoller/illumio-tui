@@ -18,6 +18,8 @@ pub struct Context {
     pub pce: Pce,
     pub format: OutputFormat,
     pub cache_mode: CacheMode,
+    /// `marks.toml` next to the config file in use.
+    pub marks_path: std::path::PathBuf,
     started: Instant,
 }
 
@@ -63,6 +65,7 @@ impl Context {
             pce,
             format,
             cache_mode,
+            marks_path: crate::marks::marks_path(global.config.as_deref()),
             started: Instant::now(),
         })
     }
@@ -88,6 +91,7 @@ impl Context {
             local_filter: None,
             warnings: None,
             marks: None,
+            squelched: None,
         }
     }
 
