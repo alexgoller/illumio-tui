@@ -1,0 +1,35 @@
+# nfpm config for the .deb and .rpm packages (built by .github/workflows/release.yml).
+#   VERSION=0.2.0 ARCH=amd64 BINARY=path/to/illumio-tui \
+#     nfpm package -f packaging/nfpm.yaml -p deb -t dist/
+# ARCH is the Go-style name (amd64, arm64); nfpm maps it to amd64/arm64 for
+# deb and x86_64/aarch64 for rpm. Paths are relative to the repository root.
+name: illumio-tui
+version: ${VERSION}
+release: 1
+arch: ${ARCH}
+platform: linux
+section: admin
+priority: optional
+maintainer: Alex Goller <alex@ryte.de>
+vendor: Alex Goller
+homepage: https://github.com/alexgoller/illumio-tui
+license: GPL-3.0-only
+description: |-
+  Terminal UI and CLI for the Illumio Core PCE
+  Browse workloads, labels, rulesets and traffic flows of an Illumio Core
+  Policy Compute Engine from the terminal, with cached reads and guarded writes.
+
+contents:
+  - src: ${BINARY}
+    dst: /usr/bin/illumio-tui
+    expand: true
+    file_info:
+      mode: 0755
+  - src: README.md
+    dst: /usr/share/doc/illumio-tui/README.md
+    file_info:
+      mode: 0644
+  - src: LICENSE
+    dst: /usr/share/doc/illumio-tui/LICENSE
+    file_info:
+      mode: 0644

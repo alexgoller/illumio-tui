@@ -1,8 +1,10 @@
 name: Release
 
-# Tag push (v*) builds every target and publishes a GitHub Release.
-# workflow_dispatch is a dry run: same builds, archives and SHA256SUMS are
-# uploaded as workflow artifacts, but no release is created.
+# Tag push (v*) builds every target, the .deb/.rpm packages, tests the
+# packages in distro containers, publishes a GitHub Release and updates the
+# Homebrew formula (Formula/illumio-tui.rb) on main.
+# workflow_dispatch is a dry run: same builds, archives, packages, container
+# tests and SHA256SUMS, uploaded as workflow artifacts; no release, no formula.
 on:
   push:
     tags: ["v*"]
@@ -14,6 +16,9 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   BIN: illumio-tui
+  NFPM_VERSION: 2.47.0
+  # sha256 of nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz from the nfpm release's checksums.txt.
+  NFPM_SHA256: 0660ca602b2d2d2ae4781a06c692b3eeb9d437ffea05b831d76e41f4a3188783
 
 jobs:
   build:
@@ -114,8 +119,111 @@ jobs:
           path: dist/${{ steps.package.outputs.archive }}
           if-no-files-found: error
 
-  checksums:
+  # .deb and .rpm from the already-built Linux binaries. x86_64 uses the
+  # static musl build: the gnu build links against ubuntu-22.04's glibc 2.34+
+  # and would not install-and-run on RHEL/Alma/Rocky 8 (2.28) or Debian 11
+  # (2.31). aarch64 uses the gnu build (cross image, needs only glibc 2.18).
+  packages:
     needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: "*-unknown-linux-*"
+          merge-multiple: true
+
+      - name: Install nfpm
+        run: |
+          tarball="nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz"
+          curl -fsSLo "$RUNNER_TEMP/$tarball" \
+            "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/$tarball"
+          echo "$NFPM_SHA256  $RUNNER_TEMP/$tarball" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP" nfpm
+          "$RUNNER_TEMP/nfpm" --version
+
+      - name: Build packages
+        run: |
+          set -euo pipefail
+          musl=$(ls dist/"$BIN"-*-x86_64-unknown-linux-musl.tar.gz)
+          version=${musl#"dist/$BIN-"}
+          version=${version%-x86_64-unknown-linux-musl.tar.gz}
+          mkdir -p pkg unpack
+          for pair in amd64:x86_64-unknown-linux-musl arm64:aarch64-unknown-linux-gnu; do
+            arch=${pair%%:*}
+            target=${pair#*:}
+            tar -xzf "dist/$BIN-$version-$target.tar.gz" -C unpack
+            binary="unpack/$BIN-$version-$target/$BIN"
+            file "$binary"
+            for packager in deb rpm; do
+              VERSION="$version" ARCH="$arch" BINARY="$binary" \
+                "$RUNNER_TEMP/nfpm" package -f packaging/nfpm.yaml -p "$packager" -t pkg/
+            done
+          done
+          ls -l pkg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: |
+            pkg/*.deb
+            pkg/*.rpm
+          if-no-files-found: error
+
+  # Install each package in a stock distro container and run it. Plain
+  # `docker run` rather than `container:` so the same steps work on the arm64
+  # runner.
+  package-test:
+    name: package-test (${{ matrix.image }}, ${{ matrix.arch }})
+    needs: packages
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { image: "debian:12", kind: deb, arch: amd64, runner: ubuntu-latest }
+          - { image: "ubuntu:22.04", kind: deb, arch: amd64, runner: ubuntu-latest }
+          - { image: "rockylinux:9", kind: rpm, arch: x86_64, runner: ubuntu-latest }
+          - { image: "almalinux:8", kind: rpm, arch: x86_64, runner: ubuntu-latest }
+          - { image: "debian:12", kind: deb, arch: arm64, runner: ubuntu-24.04-arm }
+          - { image: "almalinux:8", kind: rpm, arch: aarch64, runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: pkg
+
+      - name: Install and run
+        env:
+          IMAGE: ${{ matrix.image }}
+          KIND: ${{ matrix.kind }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          if [[ "$KIND" == deb ]]; then
+            pkg=$(cd pkg && ls ./*_"$ARCH".deb)
+            install="export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y /pkg/$pkg && dpkg -s $BIN && dpkg -L $BIN"
+            remove="apt-get remove -y $BIN"
+          else
+            pkg=$(cd pkg && ls ./*."$ARCH".rpm)
+            install="dnf install -y /pkg/$pkg && rpm -qi $BIN && rpm -ql $BIN"
+            remove="dnf remove -y $BIN"
+          fi
+          docker run --rm -v "$PWD/pkg:/pkg:ro" "$IMAGE" bash -euxc "
+            $install
+            test \"\$(command -v $BIN)\" = /usr/bin/$BIN
+            $BIN --version
+            $BIN --help
+            test -f /usr/share/doc/$BIN/LICENSE
+            test -f /usr/share/doc/$BIN/README.md
+            $remove
+            if command -v $BIN; then echo still installed; exit 1; fi
+          "
+
+  checksums:
+    needs: [build, packages]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -125,7 +233,7 @@ jobs:
       - name: Generate SHA256SUMS
         working-directory: dist
         run: |
-          sha256sum -- *.tar.gz *.zip > SHA256SUMS
+          sha256sum -- *.tar.gz *.zip *.deb *.rpm > SHA256SUMS
           cat SHA256SUMS
           sha256sum --check SHA256SUMS
       - uses: actions/upload-artifact@v4
@@ -135,7 +243,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: checksums
+    needs: [checksums, package-test]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -152,4 +260,55 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.zip
+            dist/*.deb
+            dist/*.rpm
             dist/SHA256SUMS
+
+  # Render Formula/illumio-tui.rb from the template with the release's
+  # sha256s and commit it to main, so `brew tap alexgoller/illumio-tui
+  # https://github.com/alexgoller/illumio-tui` picks up the new version.
+  # Pushes made with GITHUB_TOKEN start no workflows, and releases are
+  # tag-driven anyway, so this commit cannot loop. Pre-release tags
+  # (v1.2.3-rc1) are skipped.
+  homebrew:
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: homebrew-formula
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: SHA256SUMS
+          path: sums
+
+      - name: Render formula
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          packaging/homebrew/render.sh "$version" sums/SHA256SUMS > Formula/illumio-tui.rb
+          git diff --stat
+
+      - name: Commit to main
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if git diff --quiet -- Formula/illumio-tui.rb; then
+            echo "Formula already at $version"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/illumio-tui.rb
+          git commit -m "brew: illumio-tui $version"
+          for _ in 1 2 3; do
+            git push origin HEAD:main && exit 0
+            git pull --rebase origin main
+          done
+          echo "::error::could not push the formula to main"
+          exit 1
