@@ -413,6 +413,23 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   `c` clears them and `h` (not the `/` search). A filter line above the table names what is
   on and the count (`enforcement selective · unlabeled (app, env, role) · 1 of 206`), and
   says the counts are partial when the list was truncated.
+  `f` edits a label filter on one line, applied locally like the others:
+  `app=shop,crm env=prod !role=db` (a comma lists values any of which matches, a space
+  separates terms that must all match, `!` excludes, `key=-` means no label for the key,
+  quote a value with spaces: `loc="New York"`). `Ctrl-N` completes keys and values from the
+  label list; a key or value no label has is accepted and named dimmed (`no match: unknown
+  value app=shpo`); a malformed filter stays in the editor with the error and the old one
+  holds. `:filter <expr>` on Workloads sets it too (elsewhere it edits the traffic source),
+  and `c` clears it with the rest.
+  `x` groups the list by the traffic group keys (`g`; `app,env` by default) and back: one
+  section per group, its header `▾ shop | prod   12 wl  ██████  10 ok · 1 offline · 1
+  unmanaged   full 8 vis 3 idle 1` (narrow terminals drop parts from the right), a missing
+  label shown as `(no app)`. `Space` folds a section, `z` folds or unfolds all, `s` orders
+  the sections (size ↓, name A→Z, unhealthy ↓; flat, `s` still sorts the table), and
+  `Enter` on a header narrows the label filter to that group (`app=shop env=prod`, a missing
+  label as `app=-`). Search, `E m o u h`, the table sort (within each section) and the
+  detail pane keep working; grouping reuses the loaded list, no request. With writes on,
+  `X` deletes an unmanaged workload here (`x` groups).
 - **Events**: severity-coloured audit events, `f` edit severity / type / window, `S` sort by
   severity, `Enter` the event as a change diff: a header (time,
   type, severity and status, actor, API request and source), then one block per resource
@@ -450,6 +467,8 @@ the API call and byte counters at all times.
     illumio-tui labels --unused --json
     illumio-tui workloads --label app=web --online true
     illumio-tui workloads --unlabeled --json
+    illumio-tui workloads --label app=shop,crm --label env=prod --group
+    illumio-tui workloads --label '!role=db' --label loc=- --group app,env --csv
     illumio-tui workloads --offline --enforcement full
     illumio-tui policy rulesets
     illumio-tui policy rules "Web-DB"
@@ -530,6 +549,21 @@ is neither in the label model nor on any workload is warned about on stderr and 
 with `--unlabeled` (the table a `missing` column), and `meta.local_filter` names the local
 filters (`["offline", "unlabeled (app, env, role)"]`; the meta line `filtered locally: …`). CSV joins
 the `missing` keys with `; `, as its other lists.
+
+`--label` takes the app's label filter grammar, one term per flag (flags AND): `app=shop,crm`
+is any of the values. The plain terms go into the one list request as the PCE's `labels`
+parameter, whose outer list is OR and inner lists AND, so `--label app=shop,crm --label
+env=prod` sends `[[shop,prod],[crm,prod]]` (label hrefs, from the cached label list): still one
+request, and `--label k=v` alone sends exactly what it always did. More than 50 combinations
+is exit 2 before any request. `!role=db` (exclude) and `loc=-` (no `loc` label) cannot be
+asked of the PCE: they filter the answer locally and `meta.local_filter` names them
+(`labels !role=db loc=-`). `--group [keys]` groups what is listed (after every filter) by those
+label keys (comma-separated; alone, the profile's scope keys): the table prints a heading per
+group (`shop | prod · 12 workloads · healthy 10, offline 2 · full 8, visibility_only 4`), JSON
+puts `{"group_by": [...], "groups": [{"key": {"app": "shop", "env": null}, "filter": "app=shop
+env=-", "count", "health", "enforcement", "workloads": [...]}]}` in `data`, and CSV keeps one
+record per workload with a leading `group` column in the filter grammar (`app=shop env=-`),
+largest group first. Grouping is local: no extra request.
 Commands that print no table (writes, `health`, `policy rules impact`, `profile use`, a
 traffic `--dry-run`) refuse it with exit 2 before any request.
 
@@ -848,7 +882,8 @@ them for the session (not persisted; `:writes off` disarms them, `:writes` shows
 and `illumio-tui --allow-writes` starts with them on). Then the
 header shows `✎ writes` before the host and two screens take three keys: on Objects (labels,
 services, IP lists) and Workloads (unmanaged workloads only)
-`n` creates, `e` edits the selected row and `x` deletes it, and every request is shown in a
+`n` creates, `e` edits the selected row and `x` deletes it (on Workloads `X`, as `x` groups
+there), and every request is shown in a
 confirm overlay before `y` sends it once. With writes off the keys print the reason in the
 status line and send nothing. Label
 groups are read-only.

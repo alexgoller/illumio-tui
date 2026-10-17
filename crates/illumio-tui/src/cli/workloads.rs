@@ -7,6 +7,9 @@ use super::write::{
     self, WriteFlags, label_in, parse_kv, resolve_labels, resolve_workload, run_plan,
 };
 use clap::{Args, Subcommand};
+use pce::label_filter::{
+    LabelFilter, LabelTerm, MAX_COMBINATIONS, QueryError, group_filter, group_key, group_title,
+};
 use pce::models::{UNMANAGED, VenHealth, Workload, WorkloadFilter};
 use pce::write::{
     IfMissing, InterfaceSpec, LabelRemoval, LabelsPatch, WorkloadDraft, WorkloadPatch,
@@ -25,7 +28,9 @@ pub struct WorkloadsArgs {
     /// Interface IP address
     #[arg(long)]
     pub ip: Option<String>,
-    /// Label key=value; repeat to AND several
+    /// Label key=value; a comma lists values any of which matches
+    /// (app=shop,crm); repeat to AND several. !key=value excludes and
+    /// key=- means no label for the key (both filtered locally)
     #[arg(long = "label")]
     pub labels: Vec<String>,
     /// Effective enforcement: unmanaged (no VEN) asks for managed=false; a
@@ -59,6 +64,17 @@ pub struct WorkloadsArgs {
         default_missing_value = ""
     )]
     pub unlabeled: Option<Vec<String>>,
+    /// Group the listed workloads by these label keys (comma-separated);
+    /// alone, the profile's scope keys (app,env). Table: a heading per
+    /// group; JSON: data.groups; CSV: a leading group column (app=shop env=-)
+    #[arg(
+        long,
+        value_name = "KEYS",
+        num_args = 0..=1,
+        value_delimiter = ',',
+        default_missing_value = ""
+    )]
+    pub group: Option<Vec<String>>,
 }
 
 /// `workloads` lists by default; `add`, `update` and `delete` write
@@ -385,7 +401,25 @@ fn compact_age(secs: Option<u64>) -> String {
     }
 }
 
+/// Workloads printed as the list: the plain list's rows, or one group's.
+pub struct Rows<'a>(pub Vec<&'a WorkloadRow>);
+
 impl TableRows for Vec<WorkloadRow> {
+    fn headers(&self) -> Vec<&'static str> {
+        Rows(self.iter().collect()).headers()
+    }
+    fn rows(&self) -> Vec<Vec<String>> {
+        Rows(self.iter().collect()).rows()
+    }
+    fn full_headers(&self) -> Vec<&'static str> {
+        Rows(self.iter().collect()).full_headers()
+    }
+    fn full_rows(&self) -> Vec<Vec<String>> {
+        Rows(self.iter().collect()).full_rows()
+    }
+}
+
+impl TableRows for Rows<'_> {
     /// `missing` last when `--unlabeled` filled it.
     fn headers(&self) -> Vec<&'static str> {
         let mut h = vec![
@@ -401,14 +435,15 @@ impl TableRows for Vec<WorkloadRow> {
             "health",
             "href",
         ];
-        if self.iter().any(|r| r.missing_labels.is_some()) {
+        if self.0.iter().any(|r| r.missing_labels.is_some()) {
             h.push("missing");
         }
         h
     }
     fn rows(&self) -> Vec<Vec<String>> {
-        let missing = self.iter().any(|r| r.missing_labels.is_some());
-        self.iter()
+        let missing = self.0.iter().any(|r| r.missing_labels.is_some());
+        self.0
+            .iter()
             .map(|r| {
                 let w = &r.workload;
                 let mut row = vec![
@@ -442,7 +477,8 @@ impl TableRows for Vec<WorkloadRow> {
     /// Every interface address and every label; the heartbeat in seconds;
     /// the raw `enforcement_mode` last.
     fn full_rows(&self) -> Vec<Vec<String>> {
-        self.iter()
+        self.0
+            .iter()
             .zip(self.rows())
             .map(|(r, mut row)| {
                 row[2] = join_list(r.workload.interfaces.iter().map(|i| &i.address));
@@ -506,25 +542,31 @@ pub async fn run(ctx: &Context, args: &WorkloadsArgs) -> Result<(), CliError> {
         labels: Vec::new(),
         max_results: args.max_results,
     };
-    if !args.labels.is_empty() {
+    // One parser for `--label` and the app's `f`; the positive any-of
+    // terms go into the one request, `!` and `-` are applied to its answer.
+    let labels = LabelFilter::from_terms(&args.labels)
+        .map_err(|e| CliError::Args(format!("--label {e}")))?;
+    if labels.terms.iter().any(|t| !t.negate && !t.none) {
         let idx = ctx.pce.name_index(ctx.cache_mode).await?;
-        let mut hrefs = Vec::new();
-        for spec in &args.labels {
-            let (k, v) = spec.split_once('=').ok_or_else(|| {
-                CliError::Args(format!("--label expects key=value, got {spec:?}"))
+        let sets = labels
+            .query_sets(|k, v| {
+                idx.label_href(k, v).map(str::to_string).ok_or_else(|| {
+                    PceError::Invalid(format!(
+                        "unknown label {k}={v}; known values for {k}: {}",
+                        idx.values_for_key(k).join(", ")
+                    ))
+                })
+            })
+            .map_err(|e| match e {
+                QueryError::TooMany(n) => CliError::Args(format!(
+                    "--label: the any-of values make {n} label combinations; at most {MAX_COMBINATIONS} fit one request"
+                )),
+                QueryError::Unresolved(e) => e.into(),
             })?;
-            let href = idx.label_href(k.trim(), v.trim()).ok_or_else(|| {
-                let known = idx.values_for_key(k.trim());
-                PceError::Invalid(format!(
-                    "unknown label {spec}; known values for {}: {}",
-                    k.trim(),
-                    known.join(", ")
-                ))
-            })?;
-            hrefs.push(href.to_string());
-        }
-        filter.labels = vec![hrefs];
+        filter.labels = sets.unwrap_or_default();
     }
+    let local_labels: Vec<&LabelTerm> =
+        labels.terms.iter().filter(|t| t.negate || t.none).collect();
     let c = ctx.pce.workloads(&filter, ctx.cache_mode).await?;
     let warnings = match &unlabeled {
         Some(keys) if keys.as_slice() != order.first() => {
@@ -567,11 +609,201 @@ pub async fn run(ctx: &Context, args: &WorkloadsArgs) -> Result<(), CliError> {
         // Offline is the VEN health, as the app's `o`.
         .filter(|r| !args.offline || r.health == VenHealth::Offline)
         .filter(|r| r.missing_labels.as_ref().is_none_or(|m| !m.is_empty()))
+        // The query carried the plain any-of terms; `!` and `-` hold here.
+        .filter(|r| local_labels.iter().all(|t| t.keeps(&r.workload)))
         .collect();
     let mut meta = ctx.meta(cache_label(c.hit, ctx.cache_mode), c.truncated, None);
-    meta.local_filter = local_filter(args.unhealthy, args.offline, unlabeled.as_deref());
+    meta.local_filter = local_filter(
+        args.unhealthy,
+        args.offline,
+        unlabeled.as_deref(),
+        &local_labels,
+    );
     meta.warnings = Some(warnings).filter(|w| !w.is_empty());
-    ctx.emit_meta(&rows, &meta)
+    match &args.group {
+        None => ctx.emit_meta(&rows, &meta),
+        Some(named) => {
+            let keys = unlabeled_keys(
+                named,
+                &pce::traffic::keys_or_default(&ctx.config.scope_keys),
+            );
+            let grouped = Grouped::new(rows, keys);
+            // One table: a heading row per group, columns aligned across them.
+            ctx.emit_report(&grouped, &[(String::new(), &grouped)], &meta)
+        }
+    }
+}
+
+/// `workloads --group`: the listed workloads under their label groups,
+/// largest first (then by name). JSON is `{group_by, groups: [{key,
+/// filter, count, health, enforcement, workloads}]}`; the table has a
+/// heading row per group; CSV prepends a `group` column in the filter
+/// grammar (`app=shop env=-`), so a row's group pastes into `--label`.
+#[derive(Debug, Serialize)]
+pub struct Grouped {
+    pub group_by: Vec<String>,
+    pub groups: Vec<WorkloadGroup>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WorkloadGroup {
+    /// The group's value per key, `null` where its workloads have no label.
+    pub key: serde_json::Map<String, serde_json::Value>,
+    /// The filter that narrows to the group (`--label` / the app's `f`).
+    pub filter: String,
+    pub count: usize,
+    /// Workloads per VEN health, every state.
+    pub health: std::collections::BTreeMap<&'static str, usize>,
+    /// Workloads per effective enforcement (`unmanaged` without a VEN).
+    pub enforcement: std::collections::BTreeMap<String, usize>,
+    pub workloads: Vec<WorkloadRow>,
+    #[serde(skip)]
+    title: String,
+}
+
+impl Grouped {
+    pub fn new(rows: Vec<WorkloadRow>, keys: Vec<String>) -> Self {
+        let mut groups: Vec<(Vec<Option<String>>, Vec<WorkloadRow>)> = Vec::new();
+        let mut at: std::collections::HashMap<Vec<Option<String>>, usize> =
+            std::collections::HashMap::new();
+        for r in rows {
+            let k = group_key(&r.workload, &keys);
+            match at.get(&k) {
+                Some(&i) => groups[i].1.push(r),
+                None => {
+                    at.insert(k.clone(), groups.len());
+                    groups.push((k, vec![r]));
+                }
+            }
+        }
+        // Largest first, then by name with a missing label last.
+        groups.sort_by(|a, b| {
+            b.1.len().cmp(&a.1.len()).then_with(|| {
+                let name = |k: &[Option<String>]| -> Vec<(bool, String)> {
+                    k.iter()
+                        .map(|v| (v.is_none(), v.clone().unwrap_or_default().to_lowercase()))
+                        .collect()
+                };
+                name(&a.0).cmp(&name(&b.0))
+            })
+        });
+        let groups = groups
+            .into_iter()
+            .map(|(k, workloads)| {
+                let mut health: std::collections::BTreeMap<&'static str, usize> = [
+                    VenHealth::Healthy,
+                    VenHealth::Warning,
+                    VenHealth::Error,
+                    VenHealth::Offline,
+                    VenHealth::Unmanaged,
+                ]
+                .into_iter()
+                .map(|h| (h.as_str(), 0))
+                .collect();
+                let mut enforcement = std::collections::BTreeMap::new();
+                for w in &workloads {
+                    *health.entry(w.health.as_str()).or_default() += 1;
+                    if let Some(e) = &w.enforcement {
+                        *enforcement.entry(e.clone()).or_default() += 1;
+                    }
+                }
+                WorkloadGroup {
+                    key: keys
+                        .iter()
+                        .zip(&k)
+                        .map(|(key, v)| {
+                            (
+                                key.clone(),
+                                v.clone().map_or(serde_json::Value::Null, Into::into),
+                            )
+                        })
+                        .collect(),
+                    filter: group_filter(&k, &keys),
+                    count: workloads.len(),
+                    health,
+                    enforcement,
+                    title: group_title(&k, &keys),
+                    workloads,
+                }
+            })
+            .collect();
+        Self {
+            group_by: keys,
+            groups,
+        }
+    }
+}
+
+impl WorkloadGroup {
+    /// `shop | prod · 2 workloads · healthy 1, offline 1 · full 1, visibility_only 1`.
+    fn heading(&self) -> String {
+        let n = |n: usize, what: &str| format!("{what} {n}");
+        let health: Vec<String> = self
+            .health
+            .iter()
+            .filter(|(_, c)| **c > 0)
+            .map(|(h, c)| n(*c, h))
+            .collect();
+        let enforcement: Vec<String> = self
+            .enforcement
+            .iter()
+            .filter(|(e, _)| e.as_str() != UNMANAGED)
+            .map(|(e, c)| n(*c, e))
+            .collect();
+        let mut parts = vec![
+            self.title.clone(),
+            format!(
+                "{} workload{}",
+                self.count,
+                if self.count == 1 { "" } else { "s" }
+            ),
+        ];
+        if !health.is_empty() {
+            parts.push(health.join(", "));
+        }
+        if !enforcement.is_empty() {
+            parts.push(enforcement.join(", "));
+        }
+        parts.join(" · ")
+    }
+}
+
+impl TableRows for Grouped {
+    fn headers(&self) -> Vec<&'static str> {
+        self.flat().headers()
+    }
+    fn rows(&self) -> Vec<Vec<String>> {
+        let mut out = Vec::new();
+        for g in &self.groups {
+            out.push(vec![g.heading()]);
+            out.extend(Rows(g.workloads.iter().collect()).rows());
+        }
+        out
+    }
+    fn full_headers(&self) -> Vec<&'static str> {
+        let mut h = vec!["group"];
+        h.extend(self.flat().full_headers());
+        h
+    }
+    fn full_rows(&self) -> Vec<Vec<String>> {
+        let filters = self
+            .groups
+            .iter()
+            .flat_map(|g| g.workloads.iter().map(move |_| g.filter.clone()));
+        self.flat()
+            .full_rows()
+            .into_iter()
+            .zip(filters)
+            .map(|(row, f)| std::iter::once(f).chain(row).collect())
+            .collect()
+    }
+}
+
+impl Grouped {
+    /// Every workload in group order, as the plain list prints them.
+    fn flat(&self) -> Rows<'_> {
+        Rows(self.groups.iter().flat_map(|g| &g.workloads).collect())
+    }
 }
 
 /// `meta.local_filter`: the filters applied here after the one request,
@@ -580,6 +812,7 @@ fn local_filter(
     unhealthy: bool,
     offline: bool,
     unlabeled: Option<&[String]>,
+    labels: &[&LabelTerm],
 ) -> Option<Vec<String>> {
     let mut out = Vec::new();
     if unhealthy {
@@ -590,6 +823,10 @@ fn local_filter(
     }
     if let Some(keys) = unlabeled {
         out.push(format!("unlabeled ({})", keys.join(", ")));
+    }
+    if !labels.is_empty() {
+        let terms: Vec<String> = labels.iter().map(ToString::to_string).collect();
+        out.push(format!("labels {}", terms.join(" ")));
     }
     Some(out).filter(|o| !o.is_empty())
 }
@@ -642,10 +879,16 @@ mod tests {
             unlabeled_keys(&[" env".into(), "os".into(), "env".into()], &model),
             ["env", "os"]
         );
-        assert_eq!(local_filter(false, false, None), None);
+        assert_eq!(local_filter(false, false, None, &[]), None);
         assert_eq!(
-            local_filter(true, true, Some(&model)).unwrap(),
+            local_filter(true, true, Some(&model), &[]).unwrap(),
             ["unhealthy", "offline", "unlabeled (app, env, role)"]
+        );
+        let t = LabelTerm::parse("!role=db").unwrap();
+        let none = LabelTerm::parse("app=-").unwrap();
+        assert_eq!(
+            local_filter(false, false, None, &[&t, &none]).unwrap(),
+            ["labels !role=db app=-"]
         );
     }
 

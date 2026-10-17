@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+healthy 6 · warning 1 · error 0 · offline 6 · unmanaged 1  █████████████████████
+╭ Workloads ─────────────────────────────────────────────── 14 · cached 5s ago ╮
+│  hostname             ip              enforcement health    heartbeat        │
+│▸ host-1.example       10.0.1.10       full        healthy   2m ago           │
+│  host-2.example       10.0.2.20       visibility  offline   2h ago           │
+│  unmanaged-nas        10.0.3.30       unmanaged   unmanaged                  │
+│  h╭ Label filter ──────────── Ctrl-N complete · Enter apply · Esc cancel ╮   │
+│  c│▸ labels app=shop,crm !role=db env=prod▏                              │   │
+│  c│         env=prod  env=-                                              │   │
+│  c│                                                                      │   │
+│  s│comma: any of · space: all of · ! excludes · key=- no label           │   │
+│  c│local: no request · c on Workloads clears every filter                │   │
+│  p╰──────────────────────────────────────────────────────────────────────╯   │
+│  crm-prod-06.example  10.0.1.10       full        healthy   2m ago           │
+│  crm-dev-07.example   10.0.2.20       visibility  offline   2h ago           │
+│  shop-dev-08.example  10.0.1.10       full        healthy   2m ago           │
+│  crm-prod-09.example  10.0.2.20       visibility  offline   2h ago           │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ready           t/T traffic  h/H health  Enter detail  r refresh  : cmd  ? help

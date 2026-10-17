@@ -251,6 +251,45 @@ pub fn model_with_workloads() -> Model {
     m
 }
 
+/// `model_with_workloads` and ten more labelled ones (copies of the two
+/// fixture VENs, healthy and offline) in `crm | prod`, `crm | dev`, `shop
+/// | dev` and `pay | prod`: enough groups for the grouped view (`x`).
+pub fn model_with_many_workloads() -> Model {
+    let mut m = model_with_workloads();
+    let base = m.workloads.raw.clone();
+    let groups = [
+        ("crm", "prod"),
+        ("crm", "prod"),
+        ("crm", "dev"),
+        ("shop", "dev"),
+        ("crm", "prod"),
+        ("pay", "prod"),
+        ("crm", "prod"),
+        ("crm", "dev"),
+        ("shop", "dev"),
+        ("crm", "prod"),
+    ];
+    for (i, (app, env)) in groups.into_iter().enumerate() {
+        let mut w = base[i % 2].clone();
+        w.href = format!("/orgs/5/workloads/bbbb-{i}");
+        w.hostname = Some(format!("{app}-{env}-{i:02}.example"));
+        w.name = None;
+        for l in &mut w.labels {
+            match l.key.as_deref() {
+                Some("app") => l.value = Some(app.into()),
+                Some("env") => l.value = Some(env.into()),
+                _ => {}
+            }
+        }
+        if i == 3 {
+            w.enforcement_mode = Some("idle".into());
+        }
+        m.workloads.raw.push(w);
+    }
+    m.workloads.rebuild(&m.limits.key_order());
+    m
+}
+
 /// A connected model with the four fixture events loaded (age 5 s, window 24h).
 pub fn model_with_events() -> Model {
     let mut m = model_fixture();

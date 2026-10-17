@@ -311,6 +311,19 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
                 "enforcement · managed · offline · unlabeled · clear",
             ),
             more("", "local, no request; c clears them and h, not /"),
+            key("f", "label filter: app=shop,crm env=prod !role=db app=-"),
+            more(
+                "",
+                "comma: any of · space: all of · ! excludes · =- no label",
+            ),
+            more("", "Ctrl-N completes; also :filter <expr>; c clears it too"),
+            key("x", "group by the g keys (app | env): health per group"),
+            key("Space / z", "grouped: fold a group · fold or unfold all"),
+            key(
+                "s / Enter",
+                "grouped: size ↓ · name A→Z · unhealthy ↓ · narrow",
+            ),
+            more("", "Enter on a header sets the label filter to its group"),
         ],
     },
     HelpGroup {
@@ -332,6 +345,7 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
                 "n / e / x",
                 "new/edit/delete: Objects, IP lists, Workloads, Policy",
             ),
+            key("X", "Workloads: delete (x groups there)"),
             more("", "with :writes on; each request is shown first (y / n)"),
         ],
     },

@@ -1,15 +1,16 @@
 //! Workloads screen: one table of workloads and an optional detail pane for
 //! the selected one (href, OS, VEN status, enforcement, interfaces, labels).
-use crate::tui::model::{Model, WorkloadRowView, WorkloadsState};
+use crate::tui::model::{Model, WlRow, WorkloadRowView, WorkloadsState};
 use crate::tui::ui::screens::objects::{DetailLine, clip, items};
 use crate::tui::ui::theme::Theme;
 use crate::tui::ui::widgets::bars::age_text;
 use crate::tui::ui::widgets::panel::panel;
-use crate::tui::ui::widgets::table::{header_meta, render};
+use crate::tui::ui::widgets::table::{header_meta, render, render_spanning_spans};
+use crate::tui::wl_groups::{WlGroup, WlGroupRow, bar_counts, enforcement_text, health_text};
 use pce::models::{VenHealth, Workload};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use std::time::{Duration, Instant};
@@ -65,13 +66,15 @@ pub fn render_screen(model: &Model, f: &mut Frame, body: Rect) {
     .areas(area);
     f.render_widget(Paragraph::new(summary_line(model, summary.width)), summary);
     if let Some(text) = filter {
-        f.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled("filter ", t.header_style()),
-                Span::raw(text),
-            ])),
-            filter_area,
-        );
+        let mut spans = vec![Span::styled("filter ", t.header_style()), Span::raw(text)];
+        // Unknown keys and values match nothing: said, dimmed, not refused.
+        if !model.workloads.label_warnings.is_empty() {
+            spans.push(Span::styled(
+                format!(" · no match: {}", model.workloads.label_warnings.join(", ")),
+                t.dim_style(),
+            ));
+        }
+        f.render_widget(Paragraph::new(Line::from(spans)), filter_area);
     }
     render_table(model, f, table);
     if detail.height > 0 {
@@ -95,11 +98,19 @@ fn render_table(model: &Model, f: &mut Frame, area: Rect) {
             .unwrap_or_default()
     };
     let (shown, total) = (w.table.len(), w.table.rows().len());
-    let rows = if shown == total {
+    let mut rows = if shown == total {
         format!("{total}")
     } else {
         format!("{shown}/{total}")
     };
+    if w.grouped {
+        let n = w.groups.len();
+        rows = format!(
+            "{} · {n} group{} · {rows}",
+            w.group_order.label(),
+            if n == 1 { "" } else { "s" }
+        );
+    }
     let mut meta = if freshness.is_empty() {
         rows
     } else {
@@ -128,31 +139,114 @@ fn render_table(model: &Model, f: &mut Frame, area: Rect) {
         return;
     }
     let theme = t.clone();
-    render(
-        f,
-        area,
-        &w.table,
-        t,
-        panel("Workloads", &meta, t, true),
-        &move |r: &WorkloadRowView| match r.health {
-            VenHealth::Error | VenHealth::Offline => Style::new().fg(theme.bad),
-            VenHealth::Warning => Style::new().fg(theme.warn),
-            VenHealth::Unmanaged => theme.dim_style(),
-            VenHealth::Healthy if r.workload.enforcement() == Some("idle") => {
-                Style::new().fg(theme.bad)
-            }
-            VenHealth::Healthy => Style::default(),
-        },
-    );
+    let title = if w.grouped {
+        format!("Workloads by {}", w.group_keys.join(" | "))
+    } else {
+        "Workloads".to_string()
+    };
+    let block = panel(&title, &meta, t, true);
+    if w.grouped {
+        let accent = Style::new().fg(t.accent).add_modifier(Modifier::BOLD);
+        let theme2 = t.clone();
+        render_spanning_spans(
+            f,
+            area,
+            &w.sections,
+            t,
+            block,
+            &move |r: &WlGroupRow| r.member().map_or_else(Style::new, |w| row_style(w, &theme)),
+            &|r, width| match r {
+                WlGroupRow::Header { group, folded } => {
+                    Some((header_spans(group, *folded, width, &theme2), accent))
+                }
+                WlGroupRow::Member { .. } => None,
+            },
+        );
+        return;
+    }
+    render(f, area, &w.table, t, block, &move |r: &WlRow| {
+        row_style(r, &theme)
+    });
+}
+
+/// A workload row's colour: its VEN health (idle enforcement as bad).
+fn row_style(r: &WorkloadRowView, theme: &Theme) -> Style {
+    match r.health {
+        VenHealth::Error | VenHealth::Offline => Style::new().fg(theme.bad),
+        VenHealth::Warning => Style::new().fg(theme.warn),
+        VenHealth::Unmanaged => theme.dim_style(),
+        VenHealth::Healthy if r.workload.enforcement() == Some("idle") => {
+            Style::new().fg(theme.bad)
+        }
+        VenHealth::Healthy => Style::default(),
+    }
+}
+
+/// Health bar cells in a section header.
+const HEADER_BAR: usize = 10;
+
+/// A section header in `width` cells: `▾ shop | prod   12 wl  ███▒  10 ok
+/// · 1 offline   full 8 vis 3 idle 1`; `▹` when folded. Narrow, the parts
+/// go right to left: enforcement, health, bar, count; the name stays
+/// (cut at the end).
+pub fn header_spans(g: &WlGroup, folded: bool, width: usize, t: &Theme) -> Vec<Span<'static>> {
+    let name = format!("{} {}", if folded { "▹" } else { "▾" }, g.title);
+    let count = format!("{} wl", g.count());
+    let health = health_text(g);
+    let enforcement = enforcement_text(g);
+    let w = |s: &str| Span::raw(s.to_string()).width();
+    // name, then each optional part with the gap before it.
+    let parts: [(usize, usize); 4] = [
+        (3, w(&count)),
+        (2, HEADER_BAR),
+        (2, w(&health)),
+        (3, w(&enforcement)),
+    ];
+    let mut keep = parts.len();
+    while keep > 0 {
+        let total = w(&name) + parts[..keep].iter().map(|(g, n)| g + n).sum::<usize>();
+        let empty = match keep {
+            3 => health.is_empty(),
+            4 => enforcement.is_empty(),
+            _ => false,
+        };
+        if total <= width && !empty {
+            break;
+        }
+        keep -= 1;
+    }
+    let mut spans = vec![Span::raw(name)];
+    if keep >= 1 {
+        spans.push(Span::styled(format!("   {count}"), Style::new().fg(t.fg)));
+    }
+    if keep >= 2 {
+        spans.push(Span::raw("  "));
+        spans.extend(health_bar(bar_counts(g), HEADER_BAR, t));
+    }
+    if keep >= 3 {
+        spans.push(Span::styled(format!("  {health}"), Style::new().fg(t.fg)));
+    }
+    if keep >= 4 {
+        spans.push(Span::styled(format!("   {enforcement}"), t.dim_style()));
+    }
+    spans
 }
 
 fn render_detail(model: &Model, f: &mut Frame, area: Rect) {
     let t = &model.theme;
     let block = panel("Detail", "Enter hides", t, false);
     let capacity = block.inner(area).height as usize;
-    let Some(wl) = model.workloads.table.selected_item() else {
+    let Some(wl) = model.workloads.selected_row() else {
+        let note = match model.workloads.selected_group() {
+            Some(g) => format!(
+                "{} · {} workloads · Enter narrows the list to it",
+                g.title,
+                g.count()
+            ),
+            None => "no workload selected".to_string(),
+        };
         f.render_widget(
-            Paragraph::new(Span::styled("no workload selected", t.dim_style())).block(block),
+            Paragraph::new(Span::styled(note, t.dim_style())).block(block),
             area,
         );
         return;

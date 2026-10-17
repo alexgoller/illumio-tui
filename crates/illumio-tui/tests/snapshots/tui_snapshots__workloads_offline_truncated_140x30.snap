@@ -31,4 +31,4 @@ filter offline · 1 of 4 · partial: the list is truncated
 │                                                                                                                                          │
 │                                                                                                                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-ready                                              t/T traffic  h/H health  Enter detail  r refresh  E/m/o/u filter  c clear  : cmd  ? help
+ready                                    t/T traffic  h/H health  Enter detail  r refresh  x group  f label  E/m/o/u c clear  : cmd  ? help

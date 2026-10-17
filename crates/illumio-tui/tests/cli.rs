@@ -567,6 +567,176 @@ async fn workloads_with_label_filter_resolve_hrefs() {
         );
 }
 
+/// `--label k=a,b` is any of the values: the cross product of the terms
+/// in the one `labels` parameter (outer list OR, inner AND), so each
+/// invocation is exactly one list request; `!` and `-` filter its answer.
+#[tokio::test(flavor = "multi_thread")]
+async fn workloads_label_any_of_is_one_request_and_negation_is_local() {
+    use wiremock::matchers::{query_param, query_param_is_missing};
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    let body = || {
+        ResponseTemplate::new(200)
+            .set_body_string(include_str!("../../../fixtures/workloads.json"))
+            .insert_header("Content-Type", "application/json")
+    };
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .and(query_param(
+            "labels",
+            r#"[["/orgs/5/labels/1","/orgs/5/labels/3"],["/orgs/5/labels/2","/orgs/5/labels/3"]]"#,
+        ))
+        .respond_with(body())
+        .expect(1)
+        .mount(&server)
+        .await;
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "workloads",
+                "--label",
+                "role=web,db",
+                "--label",
+                "app=shop",
+                "--label",
+                "!role=db",
+            ])
+            .assert()
+            .success(),
+    );
+    // The mock answers every workload: `!role=db` drops host-2 here; the
+    // positive terms are the PCE's to apply.
+    let hrefs: Vec<&str> = out["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["href"].as_str().unwrap())
+        .collect();
+    assert!(!hrefs.contains(&"/orgs/5/workloads/aaaa-2"), "{hrefs:?}");
+    assert_eq!(hrefs.len(), 3);
+    assert_eq!(out["meta"]["local_filter"], json!(["labels !role=db"]));
+    server.verify().await;
+    server.reset().await;
+    // Only local terms: no labels parameter, and no name index either.
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .and(query_param_is_missing("labels"))
+        .respond_with(body())
+        .expect(1)
+        .mount(&server)
+        .await;
+    let out = stdout_json(
+        cmd(&server)
+            .args(["workloads", "--label", "app=-"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["meta"]["api_calls"], 1);
+    assert_eq!(out["data"].as_array().unwrap().len(), 2);
+    server.verify().await;
+    server.reset().await;
+    // Too many combinations: refused before any request.
+    mount_objects(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .respond_with(body())
+        .expect(0)
+        .mount(&server)
+        .await;
+    let a = cmd(&server)
+        .args([
+            "workloads",
+            "--label",
+            "a=1,2,3,4,5,6,7,8",
+            "--label",
+            "b=1,2,3,4,5,6,7",
+        ])
+        .assert()
+        .code(2);
+    let stderr = String::from_utf8_lossy(&a.get_output().stderr).to_string();
+    assert!(stderr.contains("56 label combinations"), "{stderr}");
+    cmd(&server)
+        .args(["workloads", "--label", "app=shop,,crm"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("empty value"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn workloads_group_prints_sections_json_groups_and_a_csv_group_column() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/workloads.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(4)
+        .mount(&server)
+        .await;
+    let out = stdout_json(
+        cmd(&server)
+            .args(["workloads", "--group"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["meta"]["api_calls"], 1, "grouping is local");
+    let data = &out["data"];
+    assert_eq!(data["group_by"], json!(["app", "env"]));
+    let groups = data["groups"].as_array().unwrap();
+    assert_eq!(groups.len(), 2);
+    assert_eq!(groups[0]["key"], json!({"app": "shop", "env": "prod"}));
+    assert_eq!(groups[0]["count"], 2);
+    assert_eq!(groups[0]["filter"], "app=shop env=prod");
+    assert_eq!(groups[0]["workloads"][0]["hostname"], "host-1.example");
+    assert_eq!(groups[0]["enforcement"]["full"], 1);
+    assert!(groups[0]["health"]["offline"].as_u64().unwrap() >= 1);
+    assert_eq!(groups[1]["key"], json!({"app": null, "env": null}));
+    assert_eq!(groups[1]["filter"], "app=- env=-");
+    assert_eq!(groups[1]["health"]["unmanaged"], 1);
+    // Named keys.
+    let out = stdout_json(
+        cmd(&server)
+            .args(["workloads", "--group", "role"])
+            .assert()
+            .success(),
+    );
+    let keys: Vec<Value> = out["data"]["groups"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|g| g["key"]["role"].clone())
+        .collect();
+    assert_eq!(keys, [json!(null), json!("db"), json!("web")]);
+    cmd(&server)
+        .args(["workloads", "--group", "--table"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("shop | prod · 2 workloads")
+                .and(predicate::str::contains(
+                    "(no app) | (no env) · 2 workloads",
+                ))
+                .and(predicate::str::contains("host-4.example")),
+        );
+    let a = cmd(&server)
+        .args(["workloads", "--group", "--csv"])
+        .assert()
+        .success();
+    let csv = String::from_utf8_lossy(&a.get_output().stdout).to_string();
+    let lines: Vec<&str> = csv.lines().collect();
+    assert!(lines[0].starts_with("group,hostname,"), "{}", lines[0]);
+    assert!(
+        lines[1].starts_with("app=shop env=prod,host-1.example,"),
+        "{}",
+        lines[1]
+    );
+    assert!(lines[3].starts_with("app=- env=-,"), "{}", lines[3]);
+    assert_eq!(lines.len(), 5, "one record per workload, no headings");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn workloads_report_ven_health_and_unhealthy_filter() {
     let server = MockServer::start().await;

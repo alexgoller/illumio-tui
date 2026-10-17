@@ -76,6 +76,9 @@ pub fn complete(
         FieldKind::MarkExpiry => cycle_words(token, &["1d", "7d", "30d", "90d", "never"]),
         FieldKind::MarkScope => cycle_words(token, &[THIS_PCE, ANY_PCE]),
         FieldKind::MarkSide => mark_side(token, &used_keys(earlier), idx, workloads),
+        FieldKind::WorkloadLabels => {
+            negatable(token, |t| workload_label_term(t, &used_keys(earlier), idx))
+        }
     };
     let mut seen = std::collections::HashSet::new();
     out.retain(|c| seen.insert(c.clone()));
@@ -317,6 +320,49 @@ fn filter_actors(
         return names;
     }
     labels(token, used, idx, &FILTER_WORDS, &named_all(&sources))
+}
+
+/// A Workloads label filter term: a bare token offers keys (`app=`) and
+/// then `key=value` pairs; `key=v1,` offers the key's other values, each
+/// as the whole term (`app=shop,crm`), and `-` (no label) last. Values
+/// with spaces or commas come quoted, as the filter reads them.
+fn workload_label_term(token: &str, used: &[String], idx: &NameIndex) -> Vec<String> {
+    let Some((k, vals)) = token.split_once('=') else {
+        return labels(token, used, idx, &[], &[])
+            .into_iter()
+            .map(|c| match c.split_once('=') {
+                Some((k, v)) if !v.is_empty() => {
+                    format!("{k}={}", pce::label_filter::quote(v))
+                }
+                _ => c,
+            })
+            .collect();
+    };
+    let (done, partial) = match vals.rfind(',') {
+        Some(i) => (&vals[..=i], &vals[i + 1..]),
+        None => ("", vals),
+    };
+    let listed: Vec<String> = done
+        .split(',')
+        .map(|v| v.trim().trim_matches('"').to_string())
+        .filter(|v| !v.is_empty())
+        .collect();
+    let keys = matching_keys(idx, k.trim(), &[]);
+    let key = keys.first().map_or(k.trim(), String::as_str);
+    let values = idx
+        .values_for_key(key)
+        .into_iter()
+        .chain(std::iter::once(pce::label_filter::NO_LABEL.to_string()))
+        .filter(|v| !listed.contains(v))
+        .map(|v| {
+            let shown = if v == pce::label_filter::NO_LABEL {
+                v.clone()
+            } else {
+                pce::label_filter::quote(&v)
+            };
+            (v, format!("{key}={done}{shown}"))
+        });
+    ranked(partial.trim_start_matches('"'), values)
 }
 
 /// A mark form's scope words.

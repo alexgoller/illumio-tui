@@ -15,6 +15,7 @@ pub mod form;
 pub mod gen_view;
 pub mod help;
 pub mod impact;
+pub mod label_editor;
 pub mod mark_form;
 pub mod marks_view;
 pub mod model;
@@ -25,6 +26,7 @@ pub mod test_support;
 pub mod traffic_marks;
 pub mod ui;
 pub mod update;
+pub mod wl_groups;
 
 pub use model::Model;
 pub use msg::{Cmd, Msg};

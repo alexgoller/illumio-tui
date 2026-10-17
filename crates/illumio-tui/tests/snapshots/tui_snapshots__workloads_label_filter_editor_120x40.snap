@@ -1,0 +1,44 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                                                                api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+healthy 6 · warning 1 · error 0 · offline 6 · unmanaged 1  ████████████████████████
+╭ Workloads ─────────────────────────────────────────────────────────────────────────────────────── 14 · cached 5s ago ╮
+│  hostname               name           ip             labels   enforcem online agent     health    heartbeat sync    │
+│▸ host-1.example         web01          10.0.1.10      app=shop full     yes    active    healthy   2m ago    applied │
+│  host-2.example                        10.0.2.20      app=shop visibili no     stopped   offline   2h ago    syncing │
+│                         unmanaged-nas  10.0.3.30               unmanage -      -         unmanaged                   │
+│  host-4.example         batch04        10.0.4.40               selectiv yes    suspended warning   1m ago    applied │
+│  crm-prod-00.example                   10.0.1.10      app=crm  full     yes    active    healthy   2m ago    applied │
+│  crm-prod-01.example                   10.0.2.20      app=crm  visibili no     stopped   offline   2h ago    syncing │
+│  crm-dev-02.example                    10.0.1.10      app=crm  full     yes    active    healthy   2m ago    applied │
+│  shop-dev-03.example                   10.0.2.20      app=shop idle     no     stopped   offline   2h ago    syncing │
+│  crm-prod-04.example                   10.0.1.10      app=crm  full     yes    active    healthy   2m ago    applied │
+│  pay-prod-05.example                   10.0.2.20      app=pay  visibili no     stopped   offline   2h ago    syncing │
+│  crm-prod-06.example                   10.0.1.10      app=crm  full     yes    active    healthy   2m ago    applied │
+│  crm-dev-07.example   ╭ Label filter ──────────── Ctrl-N complete · Enter apply · Esc cancel ╮ne   2h ago    syncing │
+│  shop-dev-08.example  │▸ labels app=shop,crm !role=db env=prod▏                              │hy   2m ago    applied │
+│  crm-prod-09.example  │         env=prod  env=-                                              │ne   2h ago    syncing │
+│                       │                                                                      │                       │
+│                       │comma: any of · space: all of · ! excludes · key=- no label           │                       │
+│                       │local: no request · c on Workloads clears every filter                │                       │
+│                       ╰──────────────────────────────────────────────────────────────────────╯                       │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ready                                                   t/T traffic  h/H health  Enter detail  r refresh  : cmd  ? help

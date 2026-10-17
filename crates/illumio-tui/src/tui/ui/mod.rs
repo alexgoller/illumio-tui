@@ -49,6 +49,7 @@ pub fn view(model: &Model, f: &mut Frame) {
             widgets::overlay::render_label_key_picker(model, picker, f, area)
         }
         Overlay::FilterEditor(e) => widgets::overlay::render_filter_editor(model, e, f, area),
+        Overlay::LabelFilter(e) => widgets::overlay::render_label_filter(model, e, f, area),
         Overlay::Confirm { reason, action } => {
             // Deleting a mark: the `:marks` list stays behind the question.
             if matches!(action, crate::tui::model::PendingAction::DeleteMark(_)) {

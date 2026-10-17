@@ -6,10 +6,15 @@ use crate::tui::app_view::AppView;
 use crate::tui::diff::ObjectDiff;
 use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::form::Form;
+use crate::tui::label_editor::LabelFilterEditor;
 use crate::tui::picker::KeyPicker;
 use crate::tui::table::{Column, SortKey, TableView};
 use crate::tui::traffic_marks::{MarkedView, Squelch, sum_marks};
 use crate::tui::ui::theme::Theme;
+use crate::tui::wl_groups::{
+    GroupOrder, WlGroup, WlGroupRow, build_groups, layout as wl_layout, member_columns,
+    order_groups,
+};
 use pce::impact::RuleActors;
 use pce::marks::{Hit, PceId, RowMarks, annotate_groups, annotate_mesh, annotate_sections};
 use pce::models::{
@@ -26,7 +31,8 @@ use pce::traffic::{
 };
 use pce::write::Plan;
 use pce::{
-    IpListSize, KeyOrder, NameIndex, RuleKind, RuleSetView, RuleView, StatsSnapshot, ip_list_size,
+    IpListSize, KeyOrder, LabelFilter, NameIndex, RuleKind, RuleSetView, RuleView, StatsSnapshot,
+    ip_list_size,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -184,6 +190,8 @@ pub enum Overlay {
         input: String,
     },
     FilterEditor(FilterEditor),
+    /// `f` on Workloads: the label filter, one line.
+    LabelFilter(LabelFilterEditor),
     Confirm {
         reason: String,
         action: PendingAction,
@@ -263,6 +271,7 @@ impl PartialEq for Overlay {
             (Overlay::GroupKeys(a), Overlay::GroupKeys(b))
             | (Overlay::LabelKeys(a), Overlay::LabelKeys(b)) => a == b,
             (Overlay::FilterEditor(a), Overlay::FilterEditor(b)) => a == b,
+            (Overlay::LabelFilter(a), Overlay::LabelFilter(b)) => a == b,
             (Overlay::AppPicker(a), Overlay::AppPicker(b)) => a == b,
             (Overlay::Form(a), Overlay::Form(b)) => a == b,
             (Overlay::MarkForm(a), Overlay::MarkForm(b)) => a == b,
@@ -4848,15 +4857,10 @@ impl WorkloadRowView {
     }
 }
 
-type RowCell = fn(&WorkloadRowView) -> String;
-type RowKey = fn(&WorkloadRowView) -> SortKey;
+type RowCell = fn(&WlRow) -> String;
+type RowKey = fn(&WlRow) -> SortKey;
 
-fn text_col(
-    title: &'static str,
-    width: u16,
-    cell: RowCell,
-    key: RowKey,
-) -> Column<WorkloadRowView> {
+fn text_col(title: &'static str, width: u16, cell: RowCell, key: RowKey) -> Column<WlRow> {
     Column {
         title,
         width,
@@ -4871,32 +4875,32 @@ fn text_col(
     }
 }
 
-fn hostname_of(r: &WorkloadRowView) -> String {
+fn hostname_of(r: &WlRow) -> String {
     r.workload.hostname.clone().unwrap_or_default()
 }
 
-fn name_of(r: &WorkloadRowView) -> String {
+fn name_of(r: &WlRow) -> String {
     r.workload.name.clone().unwrap_or_default()
 }
 
-fn ip_of(r: &WorkloadRowView) -> String {
+fn ip_of(r: &WlRow) -> String {
     r.workload.primary_ip().unwrap_or("").to_string()
 }
 
 /// The effective enforcement: `unmanaged` without a VEN, else the PCE's mode.
-fn enforcement_of(r: &WorkloadRowView) -> String {
+fn enforcement_of(r: &WlRow) -> String {
     r.workload.enforcement().unwrap_or_default().to_string()
 }
 
 /// `-` without a VEN: nothing reports flows there, whatever the PCE says.
-fn visibility_of(r: &WorkloadRowView) -> String {
+fn visibility_of(r: &WlRow) -> String {
     if r.workload.is_unmanaged() {
         return "-".into();
     }
     r.workload.visibility_level.clone().unwrap_or_default()
 }
 
-fn online_of(r: &WorkloadRowView) -> String {
+fn online_of(r: &WlRow) -> String {
     match r.workload.online {
         Some(true) => "yes",
         Some(false) => "no",
@@ -4905,7 +4909,7 @@ fn online_of(r: &WorkloadRowView) -> String {
     .to_string()
 }
 
-fn agent_of(r: &WorkloadRowView) -> String {
+fn agent_of(r: &WlRow) -> String {
     r.workload.agent_status().unwrap_or_else(|| "-".into())
 }
 
@@ -4919,7 +4923,7 @@ const MISSING_COL: usize = 12;
 /// The columns, with `missing` shown at every width while `u` (unlabeled)
 /// is on, the heartbeat giving it room below 100 columns; otherwise only
 /// on very wide terminals.
-fn workload_columns_for(unlabeled: bool) -> Vec<Column<WorkloadRowView>> {
+fn workload_columns_for(unlabeled: bool) -> Vec<Column<WlRow>> {
     let mut cols = workload_columns();
     if unlabeled {
         cols[MISSING_COL].hide_below = 0;
@@ -4928,10 +4932,10 @@ fn workload_columns_for(unlabeled: bool) -> Vec<Column<WorkloadRowView>> {
     cols
 }
 
-pub fn workload_columns() -> Vec<Column<WorkloadRowView>> {
+pub fn workload_columns() -> Vec<Column<WlRow>> {
     // Below 120 columns only hostname, ip, enforcement, heartbeat and health
     // stay, so the table is readable at 80.
-    let wide = |c: Column<WorkloadRowView>| Column {
+    let wide = |c: Column<WlRow>| Column {
         hide_below: 120,
         ..c
     };
@@ -5039,15 +5043,14 @@ pub fn workload_columns() -> Vec<Column<WorkloadRowView>> {
 
 /// The columns `/` searches: every one but `missing`, which names keys
 /// (`/role` would match every unlabeled row).
-static SEARCHED_COLUMNS: std::sync::LazyLock<Vec<Column<WorkloadRowView>>> =
-    std::sync::LazyLock::new(|| {
-        let mut cols = workload_columns();
-        cols.truncate(MISSING_COL);
-        cols
-    });
+static SEARCHED_COLUMNS: std::sync::LazyLock<Vec<Column<WlRow>>> = std::sync::LazyLock::new(|| {
+    let mut cols = workload_columns();
+    cols.truncate(MISSING_COL);
+    cols
+});
 
 /// The Workloads search: the default substring match minus `missing`.
-fn workload_matches(r: &WorkloadRowView, needle: &str) -> bool {
+fn workload_matches(r: &WlRow, needle: &str) -> bool {
     needle.is_empty()
         || SEARCHED_COLUMNS
             .iter()
@@ -5113,9 +5116,12 @@ impl WorkloadFilters {
     }
 }
 
+/// A Workloads row: shared, so the grouped view (`x`) holds the same rows.
+pub type WlRow = Arc<WorkloadRowView>;
+
 #[derive(Debug)]
 pub struct WorkloadsState {
-    pub table: TableView<WorkloadRowView>,
+    pub table: TableView<WlRow>,
     /// The workloads as fetched; `table` is a projection of these.
     pub raw: Vec<Workload>,
     /// The last read was cut short: impact counts are lower bounds.
@@ -5125,6 +5131,23 @@ pub struct WorkloadsState {
     pub unhealthy_only: bool,
     /// `E` `m` `o` `u`: local filters on top of `unhealthy_only`.
     pub filters: WorkloadFilters,
+    /// `f` / `:filter`: the label filter (`app=shop,crm !role=db`), local.
+    pub labels: LabelFilter,
+    /// The label filter's keys and values no label has (no match).
+    pub label_warnings: Vec<String>,
+    /// `x`: sections per label group instead of the flat table.
+    pub grouped: bool,
+    /// The keys the sections group by: the traffic group keys (`g`).
+    pub group_keys: Vec<String>,
+    /// `s` while grouped.
+    pub group_order: GroupOrder,
+    /// The groups whose sections show their header only (`Space`, `z`).
+    pub folded: BTreeSet<Vec<Option<String>>>,
+    /// The groups of the flat table's shown rows, while grouped; a fold or
+    /// `s` lays them out again without regrouping.
+    pub groups: Vec<Arc<WlGroup>>,
+    /// The grouped table (`x`): headers and the workloads under them.
+    pub sections: TableView<WlGroupRow>,
     /// The label model keys the last `rebuild` checked for `u`.
     model_keys: Vec<String>,
     /// Test-only fixed clock so ages in snapshots are deterministic.
@@ -5143,15 +5166,30 @@ pub struct WorkloadsState {
     pub open_on_load: Option<String>,
 }
 
+/// What the cursor is on in the grouped table, kept across a regrouping.
+enum WlCursor {
+    Header(Vec<Option<String>>),
+    Workload(String),
+}
+
 impl WorkloadsState {
     pub fn new(min_refresh: u64) -> Self {
+        let columns = workload_columns();
         Self {
-            table: TableView::new(workload_columns()).with_matcher(workload_matches),
+            sections: TableView::new(member_columns(&columns)),
+            table: TableView::new(columns).with_matcher(workload_matches),
             raw: Vec::new(),
             truncated: false,
             error: None,
             unhealthy_only: false,
             filters: WorkloadFilters::default(),
+            labels: LabelFilter::default(),
+            label_warnings: Vec::new(),
+            grouped: false,
+            group_keys: keys_or_default(&[]),
+            group_order: GroupOrder::default(),
+            folded: BTreeSet::new(),
+            groups: Vec::new(),
             model_keys: Vec::new(),
             now: None,
             counts: [0; 5],
@@ -5173,7 +5211,7 @@ impl WorkloadsState {
     }
 
     /// Recomputes the table rows (and health counts) from `raw`, labels in
-    /// `order`.
+    /// `order`, and the sections from them while grouped.
     pub fn rebuild(&mut self, order: &KeyOrder) {
         let now = self.now.unwrap_or_else(jiff::Timestamp::now);
         let views: Vec<WorkloadRowView> = self
@@ -5196,30 +5234,218 @@ impl WorkloadsState {
             .into_iter()
             .filter(|v| !self.unhealthy_only || unhealthy(v.health))
             .filter(|v| self.filters.keeps(v))
+            .filter(|v| self.labels.keeps(&v.workload))
+            .map(Arc::new)
             .collect();
         self.model_keys = order.first().to_vec();
         let unlabeled = self.filters.unlabeled;
         if (self.table.columns[MISSING_COL].hide_below == 0) != unlabeled {
-            self.table.set_columns(workload_columns_for(unlabeled));
+            let columns = workload_columns_for(unlabeled);
+            self.sections.set_columns(member_columns(&columns));
+            self.table.set_columns(columns);
         }
         self.table.set_rows(rows);
+        self.regroup();
     }
 
-    /// Any filter beyond search: `h` or `E` `m` `o` `u`.
+    /// The sections again from the flat table's shown rows (after a
+    /// filter, search, sort or key change); nothing while flat. The cursor
+    /// stays on its workload or header when still shown.
+    pub fn regroup(&mut self) {
+        if !self.grouped {
+            if !self.groups.is_empty() || !self.sections.rows().is_empty() {
+                self.groups = Vec::new();
+                self.sections.set_rows(Vec::new());
+            }
+            return;
+        }
+        let rows = self.table.rows();
+        let shown = self.table.visible().iter().map(|&i| &rows[i]);
+        self.groups = build_groups(shown, &self.group_keys, self.group_order);
+        self.relayout();
+    }
+
+    /// The sections laid out again from `groups` (a fold, `s`), the cursor
+    /// kept on its row.
+    fn relayout(&mut self) {
+        let cursor = self.cursor();
+        self.sections
+            .set_rows(wl_layout(&self.groups, &self.folded));
+        match cursor {
+            Some(WlCursor::Header(key)) => self
+                .sections
+                .select_where(|r| r.is_header() && r.group().key == key),
+            Some(WlCursor::Workload(href)) => self
+                .sections
+                .select_where(|r| r.member().is_some_and(|w| w.workload.href == href)),
+            None => {}
+        }
+    }
+
+    fn cursor(&self) -> Option<WlCursor> {
+        self.sections.selected_item().map(|r| match r {
+            WlGroupRow::Header { group, .. } => WlCursor::Header(group.key.clone()),
+            WlGroupRow::Member { row, .. } => WlCursor::Workload(row.workload.href.clone()),
+        })
+    }
+
+    /// The workload under the cursor, flat or grouped (none on a header).
+    pub fn selected_row(&self) -> Option<&WlRow> {
+        if self.grouped {
+            self.sections.selected_item().and_then(WlGroupRow::member)
+        } else {
+            self.table.selected_item()
+        }
+    }
+
+    /// The group header under the cursor, while grouped.
+    pub fn selected_group(&self) -> Option<&Arc<WlGroup>> {
+        match self.sections.selected_item() {
+            Some(WlGroupRow::Header { group, .. }) if self.grouped => Some(group),
+            _ => None,
+        }
+    }
+
+    /// Selects the workload `href` in the table on screen; whether it is
+    /// now selected (a folded section's workload is not shown).
+    pub fn select_href(&mut self, href: &str) -> bool {
+        if self.grouped {
+            self.sections
+                .select_where(|r| r.member().is_some_and(|w| w.workload.href == href));
+        } else {
+            self.table.select_where(|r| r.workload.href == href);
+        }
+        self.selected_row().is_some_and(|r| r.workload.href == href)
+    }
+
+    /// Keeps the cursor of the table on screen inside `page` rows.
+    pub fn ensure_visible(&mut self, page: usize) {
+        if self.grouped {
+            self.sections.ensure_visible(page);
+        } else {
+            self.table.ensure_visible(page);
+        }
+    }
+
+    /// `x`: flat ↔ by label group under `keys`; the cursor stays on its
+    /// workload (grouped: on its section's header when that is folded).
+    pub fn toggle_grouped(&mut self, keys: Vec<String>) {
+        let href = self.selected_row().map(|r| r.workload.href.clone());
+        let group = self.selected_group().map(|g| g.members.first().cloned());
+        self.grouped = !self.grouped;
+        self.group_keys = keys;
+        self.regroup();
+        let href = href.or_else(|| group.flatten().map(|w| w.workload.href.clone()));
+        if let Some(href) = href {
+            if self.grouped && !self.select_href(&href) {
+                let key = group_key_of(&self.raw, &href, &self.group_keys);
+                self.sections
+                    .select_where(|r| r.is_header() && Some(&r.group().key) == key.as_ref());
+            } else if !self.grouped {
+                self.select_href(&href);
+            }
+        }
+    }
+
+    /// New group keys (`g`): the sections again, folds dropped.
+    pub fn set_group_keys(&mut self, keys: Vec<String>) {
+        if keys != self.group_keys {
+            self.group_keys = keys;
+            self.folded.clear();
+            self.regroup();
+        }
+    }
+
+    /// `Space`: folds or unfolds the section under the cursor; the cursor
+    /// lands on its header.
+    pub fn toggle_fold(&mut self) {
+        let Some(key) = self.sections.selected_item().map(|r| r.group().key.clone()) else {
+            return;
+        };
+        if !self.folded.remove(&key) {
+            self.folded.insert(key.clone());
+        }
+        self.sections
+            .set_rows(wl_layout(&self.groups, &self.folded));
+        self.sections
+            .select_where(|r| r.is_header() && r.group().key == key);
+    }
+
+    /// `z`: folds every section, or unfolds them all when all are folded.
+    pub fn toggle_fold_all(&mut self) {
+        let key = self.sections.selected_item().map(|r| r.group().key.clone());
+        let all = self.groups.iter().all(|g| self.folded.contains(&g.key));
+        if all {
+            self.folded.clear();
+        } else {
+            self.folded
+                .extend(self.groups.iter().map(|g| g.key.clone()));
+        }
+        self.sections
+            .set_rows(wl_layout(&self.groups, &self.folded));
+        if let Some(key) = key {
+            self.sections
+                .select_where(|r| r.is_header() && r.group().key == key);
+        }
+    }
+
+    /// `s` while grouped: the next section order, no regrouping.
+    pub fn cycle_group_order(&mut self) -> GroupOrder {
+        self.group_order = self.group_order.next();
+        order_groups(&mut self.groups, self.group_order);
+        self.relayout();
+        self.group_order
+    }
+
+    /// Sets the label filter (`f`, `:filter`, `Enter` on a header) and
+    /// names its unknown keys and values (from `idx`, when loaded).
+    pub fn set_labels(&mut self, labels: LabelFilter, idx: Option<&NameIndex>, order: &KeyOrder) {
+        self.label_warnings = self.unknown_labels(&labels, idx);
+        self.labels = labels;
+        self.rebuild(order);
+    }
+
+    /// The keys and values of `labels` neither the label list (`idx`) nor
+    /// any loaded workload has: they match nothing.
+    pub fn unknown_labels(&self, labels: &LabelFilter, idx: Option<&NameIndex>) -> Vec<String> {
+        labels.unknown(|k| {
+            let mut values = idx.map(|i| i.values_for_key(k)).unwrap_or_default();
+            values.extend(
+                self.raw
+                    .iter()
+                    .filter_map(|w| pce::label_filter::value_of(w, k))
+                    .map(str::to_string),
+            );
+            (!values.is_empty()).then_some(values)
+        })
+    }
+
+    /// Any filter beyond search: `h`, `E` `m` `o` `u` or the label filter.
     pub fn filtered(&self) -> bool {
-        self.unhealthy_only || !self.filters.is_empty()
+        self.unhealthy_only || !self.filters.is_empty() || !self.labels.is_empty()
+    }
+
+    /// `c`: every filter off, the label filter too (not `/`).
+    pub fn clear_filters(&mut self) {
+        self.unhealthy_only = false;
+        self.filters = WorkloadFilters::default();
+        self.labels = LabelFilter::default();
+        self.label_warnings.clear();
     }
 
     /// The line above the table while a filter is on: what is active and
-    /// the rows shown of those loaded (`enforcement unmanaged · offline ·
-    /// unlabeled (app, env, role) · 24 of 206`); a truncated list says its
-    /// counts are partial.
+    /// the rows shown of those loaded (`labels app=shop,crm · enforcement
+    /// unmanaged · offline · unlabeled (app, env, role) · 24 of 206`); a
+    /// truncated list says its counts are partial.
     pub fn filter_line(&self) -> Option<String> {
         if !self.filtered() {
             return None;
         }
         let f = &self.filters;
         let mut parts: Vec<String> = Vec::new();
+        if !self.labels.is_empty() {
+            parts.push(format!("labels {}", self.labels));
+        }
         if self.unhealthy_only {
             parts.push("unhealthy".into());
         }
@@ -5254,7 +5480,15 @@ impl WorkloadsState {
     pub fn sort_by_health(&mut self) {
         let desc = self.table.sort() != Some((HEALTH_COL, true));
         self.table.sort_by(HEALTH_COL, desc);
+        self.regroup();
     }
+}
+
+/// The group of the loaded workload `href` under `keys`.
+fn group_key_of(raw: &[Workload], href: &str, keys: &[String]) -> Option<Vec<Option<String>>> {
+    raw.iter()
+        .find(|w| w.href == href)
+        .map(|w| pce::label_filter::group_key(w, keys))
 }
 
 /// The severity column, the target of `S`.
@@ -5645,6 +5879,8 @@ impl Model {
         let order = self.limits.key_order();
         self.traffic.set_key_order(&order);
         self.traffic.rebuild_views();
+        self.workloads.group_keys = keys_or_default(&self.traffic.effective_keys());
+        self.workloads.folded.clear();
         self.workloads.rebuild(&order);
         self.objects.hide_ignored = !self.limits.ignore_keys.is_empty();
         self.objects.rebuild_labels(&order);
@@ -6322,6 +6558,43 @@ mod tests {
         m.workloads.filters.unlabeled = true;
         m.workloads.rebuild(&m.limits.key_order());
         assert_eq!(m.workloads.table.columns[col].hide_below, 0);
+    }
+
+    /// 10k workloads, grouped, with a label filter and a search: a
+    /// rebuild and a regrouping per search key stay one pass each (well
+    /// under the generous bound even unoptimised; a guard against a
+    /// quadratic step, not a timing gate).
+    #[test]
+    fn grouped_workloads_at_10k_rebuild_and_search_quickly() {
+        let mut m = crate::tui::test_support::model_with_workloads();
+        let base = m.workloads.raw.clone();
+        m.workloads.raw = (0..10_000)
+            .map(|i| {
+                let mut w = base[i % 2].clone();
+                w.href = format!("/w/{i}");
+                w.hostname = Some(format!("host-{i}.example"));
+                w.labels[1].value = Some(format!("app{}", i % 300));
+                w
+            })
+            .collect();
+        let order = m.limits.key_order();
+        let start = std::time::Instant::now();
+        m.workloads.toggle_grouped(vec!["app".into(), "env".into()]);
+        m.workloads.rebuild(&order);
+        assert_eq!(m.workloads.groups.len(), 300);
+        let labels = LabelFilter::parse("app=app1,app2,app3 !role=db").unwrap();
+        m.workloads.set_labels(labels, None, &order);
+        // Odd workloads are role=db: app1 and app3 are all excluded.
+        assert_eq!(m.workloads.groups.len(), 1);
+        m.workloads.set_labels(LabelFilter::default(), None, &order);
+        m.workloads.table.start_search();
+        for c in "host-99".chars() {
+            m.workloads.table.search_push(c);
+            m.workloads.regroup();
+        }
+        let took = start.elapsed();
+        assert!(m.workloads.table.len() < 200);
+        assert!(took < Duration::from_secs(20), "{took:?}");
     }
 
     #[test]

@@ -206,6 +206,10 @@ fn help_renders_at_every_terminal_size() {
         m.screen = screen;
         models.push(m);
     }
+    let mut grouped = ts::model_with_many_workloads();
+    grouped.screen = Screen::Workloads;
+    gen_key(&mut grouped, 'x');
+    models.push(grouped);
     let mut detail = ts::model_with_events();
     detail.screen = Screen::Events;
     illumio_tui::tui::update(
@@ -291,7 +295,8 @@ fn status_hint_lists_the_edit_keys_only_with_writes() {
     m.writes = WritesState::on();
     assert!(last(&m).contains("n:new e:edit x:del"), "{}", last(&m));
     m.screen = Screen::Workloads;
-    assert!(last(&m).contains("n:new e:edit x:del"), "{}", last(&m));
+    // `x` groups the workloads: delete is `X` there.
+    assert!(last(&m).contains("n:new e:edit X:del"), "{}", last(&m));
     illumio_tui::tui::test_support::on_ip_lists_tab(&mut m);
     assert!(last(&m).contains("n:new e:edit x:del"), "{}", last(&m));
     m.screen = Screen::Traffic;
@@ -700,13 +705,123 @@ fn workloads_filtered_80x24_and_140x30() {
         "{out}"
     );
     assert!(!out.contains("missing"), "u off: {out}");
-    assert!(out.contains("E/m/o/u filter  c clear"), "{out}");
+    assert!(out.contains("x group  f label  E/m/o/u c clear"), "{out}");
     insta::assert_snapshot!("workloads_offline_truncated_140x30", out);
     m.workloads.filters.offline = false;
     m.workloads.filters.enforcement = Some("idle");
     m.workloads.rebuild(&m.limits.key_order());
     let out = render_to_string(&m, 80, 24);
     assert!(out.contains("no workloads match the filters"), "{out}");
+}
+
+#[test]
+fn workloads_grouped_120x40_and_80x24() {
+    use illumio_tui::tui::test_support as ts;
+    let mut m = ts::model_with_many_workloads();
+    m.screen = Screen::Workloads;
+    gen_key(&mut m, 'x');
+    let out = render_to_string(&m, 120, 40);
+    assert!(out.contains("Workloads by app | env"), "{out}");
+    assert!(out.contains("▾ crm | prod"), "{out}");
+    assert!(out.contains("▾ (no app) | (no env)"), "{out}");
+    assert!(out.contains("by size ↓ · 6 groups · 14"), "{out}");
+    insta::assert_snapshot!("workloads_grouped_120x40", out);
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("▾ crm | prod"), "{out}");
+    insta::assert_snapshot!("workloads_grouped_80x24", out);
+    // Folded, ordered by name, narrowed by a label filter with an
+    // unknown value: the filter line names it, dimmed.
+    gen_key(&mut m, 'z');
+    gen_key(&mut m, 's');
+    illumio_tui::tui::update(
+        &mut m,
+        illumio_tui::tui::msg::Msg::Command(illumio_tui::tui::commands::Command::Filter(
+            "app=crm,shop,nope !env=dev".into(),
+        )),
+    );
+    let out = render_to_string(&m, 120, 40);
+    assert!(
+        out.contains("filter labels app=crm,shop,nope !env=dev · 7 of 14"),
+        "{out}"
+    );
+    assert!(out.contains("no match: unknown value app=nope"), "{out}");
+    assert!(out.contains("▹ crm | prod"), "{out}");
+    insta::assert_snapshot!("workloads_grouped_folded_filtered_120x40", out);
+}
+
+#[test]
+fn workloads_label_filter_editor_80x24_and_120x40() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use illumio_tui::tui::test_support as ts;
+    let mut m = ts::model_with_many_workloads();
+    m.screen = Screen::Workloads;
+    gen_key(&mut m, 'f');
+    for c in "app=shop,crm !role=db en".chars() {
+        gen_key(&mut m, c);
+    }
+    // `en` → `env=`, then into its values.
+    for _ in 0..2 {
+        illumio_tui::tui::update(
+            &mut m,
+            illumio_tui::tui::msg::Msg::Key(KeyEvent::new(
+                KeyCode::Char('n'),
+                KeyModifiers::CONTROL,
+            )),
+        );
+    }
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("Label filter"), "{out}");
+    assert!(out.contains("app=shop,crm !role=db env=prod"), "{out}");
+    assert!(out.contains("env=-"), "the strip offers no label: {out}");
+    insta::assert_snapshot!("workloads_label_filter_editor_80x24", out);
+    let out = render_to_string(&m, 120, 40);
+    insta::assert_snapshot!("workloads_label_filter_editor_120x40", out);
+}
+
+/// The grouped Workloads view, its fold, detail pane, filter line and
+/// label filter editor never panic at any terminal size.
+#[test]
+fn grouped_workloads_render_at_every_terminal_size() {
+    use illumio_tui::tui::test_support as ts;
+    let grouped = || {
+        let mut m = ts::model_with_many_workloads();
+        m.screen = Screen::Workloads;
+        gen_key(&mut m, 'x');
+        m
+    };
+    let mut models = vec![grouped()];
+    let mut detail = grouped();
+    gen_key(&mut detail, 'j');
+    detail.workloads.show_detail = true;
+    models.push(detail);
+    let mut header_detail = grouped();
+    header_detail.workloads.show_detail = true;
+    models.push(header_detail);
+    let mut folded = grouped();
+    gen_key(&mut folded, 'z');
+    models.push(folded);
+    let mut filtered = grouped();
+    illumio_tui::tui::update(
+        &mut filtered,
+        illumio_tui::tui::msg::Msg::Command(illumio_tui::tui::commands::Command::Filter(
+            "app=crm,nope os=linux".into(),
+        )),
+    );
+    models.push(filtered);
+    let mut editor = grouped();
+    gen_key(&mut editor, 'f');
+    for c in "app=shop,crm !role=db".chars() {
+        gen_key(&mut editor, c);
+    }
+    models.push(editor);
+    for m in &models {
+        for w in 20..=130 {
+            for h in [6, 10, 16, 24, 40] {
+                let out = render_to_string(m, w, h);
+                assert!(!out.is_empty(), "{w}x{h}");
+            }
+        }
+    }
 }
 
 #[test]

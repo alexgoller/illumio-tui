@@ -340,6 +340,72 @@ pub fn render_filter_editor(model: &Model, e: &FilterEditor, f: &mut Frame, area
     f.render_widget(Paragraph::new(lines).block(block).style(t.base()), r);
 }
 
+/// `f` on Workloads: the label filter on one line, the completion strip
+/// under it while completing, then the parse error, the unknown labels
+/// (dim: they match nothing) or the syntax.
+pub fn render_label_filter(
+    model: &Model,
+    e: &crate::tui::label_editor::LabelFilterEditor,
+    f: &mut Frame,
+    area: Rect,
+) {
+    let t = &model.theme;
+    let strip = e.completion_strip();
+    let r = centered(area, 72, 6 + u16::from(strip.is_some()));
+    f.render_widget(Clear, r);
+    let block = panel(
+        "Label filter",
+        "Ctrl-N complete · Enter apply · Esc cancel",
+        t,
+        true,
+    );
+    let inner = (r.width as usize).saturating_sub(2);
+    // The end of a long filter stays in view, where the cursor is.
+    let label = "labels ";
+    let room = inner.saturating_sub(2 + label.len() + 1);
+    let shown: String = {
+        let chars: Vec<char> = e.value.chars().collect();
+        let skip = chars.len().saturating_sub(room);
+        chars[skip..].iter().collect()
+    };
+    let mut lines = vec![Line::from(vec![
+        Span::styled("▸ ", Style::new().fg(t.accent)),
+        Span::styled(label, t.header_style()),
+        Span::styled(format!("{shown}▏"), Style::new().fg(t.fg).bg(t.selected_bg)),
+    ])];
+    if let Some(strip) = strip.as_ref() {
+        let width = inner.saturating_sub(2 + label.len());
+        lines.push(completion_line(strip, 2 + label.len(), width, t));
+    }
+    lines.push(Line::from(""));
+    let note = match (&e.error, e.parse()) {
+        (Some(err), _) => Line::from(Span::styled(plain(err), Style::new().fg(t.bad))),
+        (None, Err(err)) => Line::from(Span::styled(plain(&err), t.dim_style())),
+        (None, Ok(parsed)) => {
+            let unknown = model
+                .workloads
+                .unknown_labels(&parsed, model.index().map(|i| &**i));
+            if unknown.is_empty() {
+                Line::from(Span::styled(
+                    "comma: any of · space: all of · ! excludes · key=- no label",
+                    t.dim_style(),
+                ))
+            } else {
+                Line::from(Span::styled(
+                    format!("no match: {}", unknown.join(", ")),
+                    t.dim_style(),
+                ))
+            }
+        }
+    };
+    lines.push(note);
+    lines.push(Line::from(Span::styled(
+        "local: no request · c on Workloads clears every filter",
+        t.dim_style(),
+    )));
+    f.render_widget(Paragraph::new(lines).block(block).style(t.base()), r);
+}
+
 /// Label column width inside the filter editor.
 const FILTER_LABEL_WIDTH: usize = 13;
 
@@ -1138,7 +1204,7 @@ pub fn render_diff(model: &Model, diff: &ObjectDiff, scroll: u16, f: &mut Frame,
 pub fn screen_hint(screen: Screen, writes: bool) -> &'static str {
     match (screen, writes) {
         (Screen::Objects, true) => "n:new e:edit x:del  Tab type  Enter detail",
-        (Screen::Workloads, true) => "n:new e:edit x:del  t/T traffic  Enter detail",
+        (Screen::Workloads, true) => "n:new e:edit X:del  x group  f labels  Enter",
         (Screen::Policy, true) => "n/N:new e:edit x:del  d scope  p pending",
         (Screen::Traffic, true) => "w:rule  f filter  r run  v view  g group",
         (Screen::Traffic, _) => "f filter  r run  a auto  v view  g group  / search",
@@ -1158,7 +1224,7 @@ pub fn screen_hint_more(screen: Screen, view: TrafficView) -> &'static str {
             "+/- window  ]/[ cap  x mode  o service  d decision"
         }
         (Screen::Traffic, _) => "+/- window  ]/[ cap  D draft",
-        (Screen::Workloads, _) => "E/m/o/u filter  c clear",
+        (Screen::Workloads, _) => "x group  f label  E/m/o/u c clear",
         _ => "",
     }
 }

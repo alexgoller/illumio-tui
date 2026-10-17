@@ -19,6 +19,7 @@ pub mod generate;
 pub mod impact;
 pub mod iplist_size;
 pub mod key_order;
+pub mod label_filter;
 pub mod limiter;
 pub mod marks;
 pub mod models;
@@ -35,6 +36,7 @@ pub use impact::{
 };
 pub use iplist_size::{IpListSize, ip_list_contains, ip_list_size};
 pub use key_order::KeyOrder;
+pub use label_filter::{LabelFilter, LabelTerm};
 pub use resolve::{
     NameIndex, ResolvedActor, ResolvedLabel, ResolvedService, RuleKind, RuleSetView, RuleView,
     describe_actor, describe_ingress_service,

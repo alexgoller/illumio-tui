@@ -67,6 +67,9 @@ pub enum FieldKind {
     /// A mark's side in the side grammar: labels (`key=value`, tokens
     /// apart by spaces or commas), `ipl:` and `wl:` names, `ip:`, `any`.
     MarkSide,
+    /// The Workloads label filter: terms apart by spaces, each
+    /// `[!]key=v1,v2` (`-`: no label); a term completes whole.
+    WorkloadLabels,
 }
 
 impl FieldKind {
@@ -78,6 +81,7 @@ impl FieldKind {
             }
             Self::Scope | Self::TrafficActors => &[',', '|'],
             Self::MarkSide => &[' ', ','],
+            Self::WorkloadLabels => &[' '],
             Self::Text
             | Self::LabelKey
             | Self::LabelValue
@@ -112,6 +116,7 @@ impl FieldKind {
             | Self::MarkAction
             | Self::MarkExpiry
             | Self::MarkScope => Vec::new(),
+            Self::WorkloadLabels => head.split_whitespace().map(String::from).collect(),
             Self::MarkSide => head
                 .split([' ', ','])
                 .map(str::trim)
@@ -131,7 +136,12 @@ impl FieldKind {
     fn dives(self) -> bool {
         matches!(
             self,
-            Self::Labels | Self::Scope | Self::Actors | Self::TrafficActors | Self::MarkSide
+            Self::Labels
+                | Self::Scope
+                | Self::Actors
+                | Self::TrafficActors
+                | Self::MarkSide
+                | Self::WorkloadLabels
         )
     }
 

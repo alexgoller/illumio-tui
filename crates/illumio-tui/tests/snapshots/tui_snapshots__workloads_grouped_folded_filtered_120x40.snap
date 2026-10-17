@@ -1,0 +1,44 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                                                                api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+healthy 6 · warning 1 · error 0 · offline 6 · unmanaged 1  ████████████████████████
+filter labels app=crm,shop,nope !env=dev · 7 of 14 · no match: unknown value app=nope
+╭ Workloads by app | env ────────────────────────────────────────────────── by name A→Z · 2 groups · 7 · cached 5s ago ╮
+│  hostname               name           ip              labels   enforcement     online agent     health    heartbeat │
+│  ▹ crm | prod   5 wl  ██████████  3 ok · 2 offline   full 3 vis 2                                                    │
+│▸ ▹ shop | prod   2 wl  ██████████  1 ok · 1 offline   full 1 vis 1                                                   │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+labels app=crm,shop,nope !env=dev · no match: unknown value app=nope                                             ? help

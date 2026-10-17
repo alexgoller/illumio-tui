@@ -237,6 +237,47 @@ pub fn render_spanning<T>(
     row_style: &dyn Fn(&T) -> Style,
     spanning: &dyn Fn(&T) -> Option<(String, Style)>,
 ) {
+    render_spanning_spans(f, area, view, theme, block, row_style, &|r, _| {
+        spanning(r).map(|(text, style)| (vec![Span::raw(text)], style))
+    });
+}
+
+/// A row drawn across every column: its spans and the row's style.
+pub type SpanningRow = (Vec<Span<'static>>, Style);
+
+/// `spans` cut to at most `w` cells of display width.
+fn clip_spans(spans: Vec<Span<'static>>, w: usize) -> Vec<Span<'static>> {
+    let mut out = Vec::new();
+    let mut left = w;
+    for s in spans {
+        if left == 0 {
+            break;
+        }
+        let width = s.width();
+        if width <= left {
+            left -= width;
+            out.push(s);
+        } else {
+            let text = clip_width(&s.content, left);
+            left = 0;
+            out.push(Span::styled(text, s.style));
+        }
+    }
+    out
+}
+
+/// `render_spanning` whose spanning rows are styled spans, laid out for
+/// the width they get (`spanning(row, width)`): each span's style on top
+/// of the row's.
+pub fn render_spanning_spans<T>(
+    f: &mut Frame,
+    area: Rect,
+    view: &TableView<T>,
+    theme: &Theme,
+    block: Block,
+    row_style: &dyn Fn(&T) -> Style,
+    spanning: &dyn Fn(&T, usize) -> Option<SpanningRow>,
+) {
     let inner = block.inner(area);
     f.render_widget(block, area);
     if inner.height == 0 || inner.width == 0 || render_empty(f, inner, view, theme) {
@@ -272,13 +313,10 @@ pub fn render_spanning<T>(
     for (pos, &i) in view.visible()[start..end].iter().enumerate() {
         let item = &view.rows()[i];
         let m = view.marker.and_then(|f| f(item));
-        let (text, mut style, name) = match spanning(item) {
-            Some((text, style)) => (clip_width(&text, avail), style, 0),
-            None => (
-                line_of(row_cells(view, item, &cols, &widths)),
-                row_style(item),
-                widths.first().copied().unwrap_or(0),
-            ),
+        let span_row = spanning(item, avail);
+        let mut style = match &span_row {
+            Some((_, style)) => *style,
+            None => row_style(item),
         };
         if dims_row(m) {
             style = theme.dim_style();
@@ -289,12 +327,25 @@ pub fn render_spanning<T>(
         if gutter {
             spans.push(gutter_span(m, theme));
         }
-        // A highlight colours the name cell (the first column) only.
-        let split = clip_width(&text, name).len();
-        let (head, tail) = text.split_at(split);
-        let head_style = name_style(m, theme).map_or(style, |s| style.patch(s));
-        spans.push(Span::styled(head.to_string(), head_style));
-        spans.push(Span::styled(tail.to_string(), style));
+        match span_row {
+            Some((parts, _)) => {
+                spans.extend(
+                    clip_spans(parts, avail)
+                        .into_iter()
+                        .map(|s| Span::styled(s.content, style.patch(s.style))),
+                );
+            }
+            None => {
+                let text = line_of(row_cells(view, item, &cols, &widths));
+                let name = widths.first().copied().unwrap_or(0);
+                // A highlight colours the name cell (the first column) only.
+                let split = clip_width(&text, name).len();
+                let (head, tail) = text.split_at(split);
+                let head_style = name_style(m, theme).map_or(style, |s| style.patch(s));
+                spans.push(Span::styled(head.to_string(), head_style));
+                spans.push(Span::styled(tail.to_string(), style));
+            }
+        }
         if selected {
             // The cursor row is highlighted across the whole width.
             let used: usize = spans.iter().map(Span::width).sum();
