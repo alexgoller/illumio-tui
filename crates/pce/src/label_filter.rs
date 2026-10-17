@@ -40,11 +40,12 @@ impl LabelTerm {
     /// value with a comma, or a literal `-`.
     pub fn parse(text: &str) -> Result<Self, String> {
         let t = text.trim();
-        let (negate, rest) = match t.strip_prefix('!') {
-            Some(r) => (true, r.trim_start()),
-            None => (false, t),
+        // A whole quoted term, `!` inside (`"!app=x y"`) or after (`!"app=x"`).
+        let inner = unquote_whole(t);
+        let (negate, rest) = match inner.strip_prefix('!') {
+            Some(r) => (true, unquote_whole(r.trim_start())),
+            None => (false, inner),
         };
-        let rest = unquote_whole(rest);
         let Some((key, values)) = rest.split_once('=') else {
             return Err(if rest.is_empty() {
                 format!("{t:?}: ! needs key=value")
@@ -56,7 +57,7 @@ impl LabelTerm {
         if key.is_empty() {
             return Err(format!("{t:?}: missing key before ="));
         }
-        if key.contains(['"', ',', '!']) || key.contains(char::is_whitespace) {
+        if key.contains(['"', ',', '!', '\\']) || key.contains(char::is_whitespace) {
             return Err(format!("{t:?}: bad key {key:?}"));
         }
         let mut term = LabelTerm {
@@ -79,12 +80,10 @@ impl LabelTerm {
                 term.none = true;
                 continue;
             }
+            // `""` is the empty value: only an unquoted one is a mistake.
             let v = strip_quotes(raw)?;
-            if v.is_empty() {
-                return Err(format!("{t:?}: empty value in the list"));
-            }
-            if !term.values.iter().any(|x| x == v) {
-                term.values.push(v.to_string());
+            if !term.values.contains(&v) {
+                term.values.push(v);
             }
         }
         Ok(term)
@@ -217,6 +216,15 @@ impl LabelFilter {
         self.terms.iter().any(|t| !t.for_query())
     }
 
+    /// Some key's plain terms have no value in common (`app=shop
+    /// app=crm`): no workload can match, so nothing needs asking.
+    pub fn matches_nothing(&self) -> bool {
+        matches!(
+            self.query_sets(|_, _| Ok::<String, ()>(String::new())),
+            Ok(Some(ref sets)) if sets.is_empty()
+        )
+    }
+
     /// The PCE's `labels` parameter for the positive terms without `-`:
     /// the outer list is OR, each inner list AND, so `app=shop,crm
     /// env=prod` is `[[shop,prod],[crm,prod]]` (each label resolved to its
@@ -226,23 +234,34 @@ impl LabelFilter {
         &self,
         mut resolve: impl FnMut(&str, &str) -> Result<String, E>,
     ) -> Result<Option<Vec<Vec<String>>>, QueryError<E>> {
-        let dims: Vec<&LabelTerm> = self.terms.iter().filter(|t| t.for_query()).collect();
+        // One dimension per key: terms on the same key intersect (a
+        // workload has one label per key).
+        let mut dims: Vec<(&str, Vec<&String>)> = Vec::new();
+        for t in self.terms.iter().filter(|t| t.for_query()) {
+            match dims.iter_mut().find(|(k, _)| *k == t.key) {
+                Some((_, vals)) => vals.retain(|v| t.values.contains(v)),
+                None => dims.push((&t.key, t.values.iter().collect())),
+            }
+        }
         if dims.is_empty() {
             return Ok(None);
         }
+        // An empty intersection matches nothing: no sets, never "no filter".
+        if dims.iter().any(|(_, v)| v.is_empty()) {
+            return Ok(Some(Vec::new()));
+        }
         let total = dims
             .iter()
-            .try_fold(1usize, |n, t| n.checked_mul(t.values.len()))
+            .try_fold(1usize, |n, (_, v)| n.checked_mul(v.len()))
             .unwrap_or(usize::MAX);
         if total > MAX_COMBINATIONS {
             return Err(QueryError::TooMany(total));
         }
         let mut sets: Vec<Vec<String>> = vec![Vec::new()];
-        for t in dims {
-            let hrefs = t
-                .values
+        for (key, values) in dims {
+            let hrefs = values
                 .iter()
-                .map(|v| resolve(&t.key, v))
+                .map(|v| resolve(key, v))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(QueryError::Unresolved)?;
             sets = sets
@@ -301,11 +320,16 @@ impl fmt::Display for LabelFilter {
     }
 }
 
-/// A value as the grammar reads it back: quoted when it has a space, a
-/// comma, a quote or is the literal `-`.
+/// A value as the grammar reads it back: quoted (`"` and `\\` escaped)
+/// when it is empty, the literal `-`, or has a space, comma, quote or
+/// backslash; `parse` gives the value back exactly.
 pub fn quote(v: &str) -> String {
-    if v == NO_LABEL || v.contains([',', '"']) || v.contains(char::is_whitespace) {
-        format!("\"{}\"", v.replace('"', ""))
+    if v.is_empty()
+        || v == NO_LABEL
+        || v.contains([',', '"', '\\'])
+        || v.contains(char::is_whitespace)
+    {
+        format!("\"{}\"", v.replace('\\', "\\\\").replace('"', "\\\""))
     } else {
         v.to_string()
     }
@@ -319,16 +343,29 @@ fn unquote_whole(s: &str) -> &str {
     }
 }
 
-/// `"x"` → `x`; a stray quote is an error.
-fn strip_quotes(s: &str) -> Result<&str, String> {
-    match s.strip_prefix('"') {
-        Some(r) => r
-            .strip_suffix('"')
-            .filter(|i| !i.contains('"'))
-            .ok_or_else(|| format!("unbalanced quote in {s:?}")),
-        None if s.contains('"') => Err(format!("unbalanced quote in {s:?}")),
-        None => Ok(s),
+/// `"x"` → `x` with `\"` and `\\` unescaped; a stray quote is an error.
+fn strip_quotes(s: &str) -> Result<String, String> {
+    let Some(body) = s.strip_prefix('"') else {
+        return if s.contains('"') {
+            Err(format!("unbalanced quote in {s:?}"))
+        } else {
+            Ok(s.to_string())
+        };
+    };
+    let mut out = String::new();
+    let mut chars = body.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => match chars.next() {
+                Some(e) => out.push(e),
+                None => return Err(format!("unbalanced quote in {s:?}")),
+            },
+            '"' if chars.as_str().is_empty() => return Ok(out),
+            '"' => return Err(format!("unbalanced quote in {s:?}")),
+            c => out.push(c),
+        }
     }
+    Err(format!("unbalanced quote in {s:?}"))
 }
 
 /// `s` split where `sep` matches outside double quotes; an unclosed quote
@@ -337,8 +374,13 @@ fn split_outside_quotes(s: &str, sep: impl Fn(char) -> bool) -> Result<Vec<&str>
     let mut out = Vec::new();
     let mut start = 0;
     let mut quoted = false;
+    let mut escaped = false;
     for (i, c) in s.char_indices() {
-        if c == '"' {
+        if escaped {
+            escaped = false;
+        } else if quoted && c == '\\' {
+            escaped = true;
+        } else if c == '"' {
             quoted = !quoted;
         } else if !quoted && sep(c) {
             out.push(&s[start..i]);
@@ -397,6 +439,48 @@ mod tests {
         assert_eq!(
             LabelTerm::parse("loc=New York").unwrap().values,
             ["New York"]
+        );
+    }
+
+    #[test]
+    fn quote_round_trips_quotes_backslashes_and_empty_values() {
+        for v in ["", "-", "a\"b", "c:\\temp", "x, y", "New York", "plain"] {
+            let t = LabelTerm {
+                key: "k".into(),
+                values: vec![v.to_string()],
+                none: false,
+                negate: false,
+            };
+            let back = LabelFilter::parse(&t.to_string()).unwrap();
+            assert_eq!(back.terms, [t], "{v:?}");
+        }
+        // A whole quoted term may carry its `!`, inside or before.
+        for text in ["\"!app=New York\"", "!\"app=New York\""] {
+            let t = LabelTerm::parse(text).unwrap();
+            assert!(t.negate, "{text}");
+            assert_eq!(t.values, ["New York"]);
+        }
+    }
+
+    #[test]
+    fn same_key_terms_intersect_and_an_empty_one_matches_nothing() {
+        let r = |k: &str, v: &str| -> Result<String, String> { Ok(format!("{k}:{v}")) };
+        let f = LabelFilter::parse("app=shop,crm app=crm,pay env=prod").unwrap();
+        assert_eq!(
+            f.query_sets(r).unwrap().unwrap(),
+            vec![vec!["app:crm", "env:prod"]]
+        );
+        assert!(!f.matches_nothing());
+        let none = LabelFilter::from_terms(&["app=shop", "app=crm"]).unwrap();
+        assert!(none.matches_nothing());
+        assert_eq!(none.query_sets(r).unwrap(), Some(Vec::new()));
+        // Locally too: nothing passes both.
+        assert!(!none.keeps(&wl(&[("app", "shop")])));
+        // `-` and `!` terms are not part of the query: no empty set.
+        assert!(
+            !LabelFilter::parse("app=shop app=-")
+                .unwrap()
+                .matches_nothing()
         );
     }
 

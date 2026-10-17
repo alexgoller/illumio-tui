@@ -705,7 +705,7 @@ fn workloads_filtered_80x24_and_140x30() {
         "{out}"
     );
     assert!(!out.contains("missing"), "u off: {out}");
-    assert!(out.contains("x group  f label  E/m/o/u c clear"), "{out}");
+    assert!(out.contains("h/H health  E/m/o/u  c clear"), "{out}");
     insta::assert_snapshot!("workloads_offline_truncated_140x30", out);
     m.workloads.filters.offline = false;
     m.workloads.filters.enforcement = Some("idle");

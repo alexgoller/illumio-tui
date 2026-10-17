@@ -5879,11 +5879,30 @@ impl Model {
         let order = self.limits.key_order();
         self.traffic.set_key_order(&order);
         self.traffic.rebuild_views();
-        self.workloads.group_keys = keys_or_default(&self.traffic.effective_keys());
+        self.workloads.group_keys = self.workload_group_keys();
         self.workloads.folded.clear();
         self.workloads.rebuild(&order);
         self.objects.hide_ignored = !self.limits.ignore_keys.is_empty();
         self.objects.rebuild_labels(&order);
+    }
+
+    /// The keys `x` groups the workloads by: the traffic views' (`g`),
+    /// else the profile's scope keys (`app,env` without any).
+    pub fn workload_group_keys(&self) -> Vec<String> {
+        let keys = self.traffic.effective_keys();
+        if keys.is_empty() {
+            keys_or_default(&self.limits.scope_keys)
+        } else {
+            keys
+        }
+    }
+
+    /// The label filter's unknown keys and values again, after the
+    /// workloads or the label list changed.
+    pub fn refresh_label_warnings(&mut self) {
+        let idx = self.index().cloned();
+        let w = &mut self.workloads;
+        w.label_warnings = w.unknown_labels(&w.labels, idx.as_deref());
     }
 
     /// Whether the Labels tab's usage can be counted: the workloads, the

@@ -143,7 +143,9 @@ impl Context {
                     if i > 0 {
                         writeln!(out)?;
                     }
-                    writeln!(out, "{title}")?;
+                    if !title.is_empty() {
+                        writeln!(out, "{title}")?;
+                    }
                     write_table(&mut out, *table)?;
                 }
                 eprintln!("{}", meta_line(meta));

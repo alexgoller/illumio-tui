@@ -12,6 +12,9 @@ pub struct LabelFilterEditor {
     pub error: Option<String>,
     /// The completion being cycled; any key but `Ctrl-N`/`Ctrl-P` ends it.
     pub completion: Option<Box<Completion>>,
+    /// The text's keys and values no label has, worked out once per edit
+    /// (`update` sets it), not per frame.
+    pub unknown: Vec<String>,
 }
 
 impl LabelFilterEditor {
@@ -20,6 +23,7 @@ impl LabelFilterEditor {
             value: value.to_string(),
             error: None,
             completion: None,
+            unknown: Vec::new(),
         }
     }
 

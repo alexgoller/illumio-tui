@@ -545,7 +545,9 @@ async fn workloads_with_label_filter_resolve_hrefs() {
             .assert()
             .success(),
     );
-    assert_eq!(out["data"].as_array().unwrap().len(), 4);
+    // The mock answers all four; the label filter is checked on the answer
+    // too (as the app does), so the two unlabeled ones drop.
+    assert_eq!(out["data"].as_array().unwrap().len(), 2);
     assert_eq!(out["data"][0]["hostname"], "host-1.example");
     cmd(&server)
         .args([
@@ -604,16 +606,15 @@ async fn workloads_label_any_of_is_one_request_and_negation_is_local() {
             .assert()
             .success(),
     );
-    // The mock answers every workload: `!role=db` drops host-2 here; the
-    // positive terms are the PCE's to apply.
+    // The mock answers every workload; the whole filter holds locally:
+    // only host-1 is shop, web or db, and not db.
     let hrefs: Vec<&str> = out["data"]
         .as_array()
         .unwrap()
         .iter()
         .map(|r| r["href"].as_str().unwrap())
         .collect();
-    assert!(!hrefs.contains(&"/orgs/5/workloads/aaaa-2"), "{hrefs:?}");
-    assert_eq!(hrefs.len(), 3);
+    assert_eq!(hrefs, ["/orgs/5/workloads/aaaa-1"]);
     assert_eq!(out["meta"]["local_filter"], json!(["labels !role=db"]));
     server.verify().await;
     server.reset().await;
@@ -633,6 +634,48 @@ async fn workloads_label_any_of_is_one_request_and_negation_is_local() {
     );
     assert_eq!(out["meta"]["api_calls"], 1);
     assert_eq!(out["data"].as_array().unwrap().len(), 2);
+    server.verify().await;
+    server.reset().await;
+    // Same key twice: the values intersect in the one request...
+    mount_objects(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .and(query_param("labels", r#"[["/orgs/5/labels/3"]]"#))
+        .respond_with(body())
+        .expect(1)
+        .mount(&server)
+        .await;
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "workloads",
+                "--label",
+                "app=shop,nope",
+                "--label",
+                "app=shop",
+            ])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"].as_array().unwrap().len(), 2);
+    server.verify().await;
+    server.reset().await;
+    // ...and none in common is an empty answer with no request at all,
+    // never an unfiltered list.
+    Mock::given(method("GET"))
+        .respond_with(body())
+        .expect(0)
+        .mount(&server)
+        .await;
+    let a = cmd(&server)
+        .args(["workloads", "--label", "app=shop", "--label", "app=crm"])
+        .assert()
+        .success();
+    let stderr = String::from_utf8_lossy(&a.get_output().stderr).to_string();
+    let out = stdout_json(a);
+    assert_eq!(out["data"].as_array().unwrap().len(), 0);
+    assert_eq!(out["meta"]["api_calls"], 0);
+    assert!(stderr.contains("no request sent"), "{stderr}");
     server.verify().await;
     server.reset().await;
     // Too many combinations: refused before any request.
@@ -715,7 +758,8 @@ async fn workloads_group_prints_sections_json_groups_and_a_csv_group_column() {
         .assert()
         .success()
         .stdout(
-            predicate::str::contains("shop | prod · 2 workloads")
+            predicate::str::starts_with("hostname")
+                .and(predicate::str::contains("shop | prod · 2 workloads"))
                 .and(predicate::str::contains(
                     "(no app) | (no env) · 2 workloads",
                 ))
@@ -727,6 +771,7 @@ async fn workloads_group_prints_sections_json_groups_and_a_csv_group_column() {
         .success();
     let csv = String::from_utf8_lossy(&a.get_output().stdout).to_string();
     let lines: Vec<&str> = csv.lines().collect();
+    assert!(!lines[0].is_empty());
     assert!(lines[0].starts_with("group,hostname,"), "{}", lines[0]);
     assert!(
         lines[1].starts_with("app=shop env=prod,host-1.example,"),

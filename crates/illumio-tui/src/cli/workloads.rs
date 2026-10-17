@@ -546,7 +546,10 @@ pub async fn run(ctx: &Context, args: &WorkloadsArgs) -> Result<(), CliError> {
     // terms go into the one request, `!` and `-` are applied to its answer.
     let labels = LabelFilter::from_terms(&args.labels)
         .map_err(|e| CliError::Args(format!("--label {e}")))?;
-    if labels.terms.iter().any(|t| !t.negate && !t.none) {
+    // `app=shop app=crm`: no workload has both, so nothing is asked (an
+    // empty labels parameter would mean every workload).
+    let nothing = labels.matches_nothing();
+    if !nothing && labels.terms.iter().any(|t| !t.negate && !t.none) {
         let idx = ctx.pce.name_index(ctx.cache_mode).await?;
         let sets = labels
             .query_sets(|k, v| {
@@ -567,8 +570,17 @@ pub async fn run(ctx: &Context, args: &WorkloadsArgs) -> Result<(), CliError> {
     }
     let local_labels: Vec<&LabelTerm> =
         labels.terms.iter().filter(|t| t.negate || t.none).collect();
-    let c = ctx.pce.workloads(&filter, ctx.cache_mode).await?;
-    let warnings = match &unlabeled {
+    let c = if nothing {
+        pce::Cached {
+            value: Vec::new(),
+            age: std::time::Duration::ZERO,
+            hit: false,
+            truncated: false,
+        }
+    } else {
+        ctx.pce.workloads(&filter, ctx.cache_mode).await?
+    };
+    let mut warnings = match &unlabeled {
         Some(keys) if keys.as_slice() != order.first() => {
             let seen: Vec<&str> = c
                 .value
@@ -579,6 +591,12 @@ pub async fn run(ctx: &Context, args: &WorkloadsArgs) -> Result<(), CliError> {
         }
         _ => Vec::new(),
     };
+    if nothing {
+        warnings.push(
+            "--label: a key's values have nothing in common across its terms, so no workload can match; no request sent"
+                .to_string(),
+        );
+    }
     for w in &warnings {
         eprintln!("warning: {w}");
     }
@@ -609,10 +627,16 @@ pub async fn run(ctx: &Context, args: &WorkloadsArgs) -> Result<(), CliError> {
         // Offline is the VEN health, as the app's `o`.
         .filter(|r| !args.offline || r.health == VenHealth::Offline)
         .filter(|r| r.missing_labels.as_ref().is_none_or(|m| !m.is_empty()))
-        // The query carried the plain any-of terms; `!` and `-` hold here.
-        .filter(|r| local_labels.iter().all(|t| t.keeps(&r.workload)))
+        // The whole label filter, as the app applies it: the query carried
+        // the plain any-of terms, `!` and `-` are only checked here.
+        .filter(|r| labels.keeps(&r.workload))
         .collect();
-    let mut meta = ctx.meta(cache_label(c.hit, ctx.cache_mode), c.truncated, None);
+    let cache = if nothing {
+        "none"
+    } else {
+        cache_label(c.hit, ctx.cache_mode)
+    };
+    let mut meta = ctx.meta(cache, c.truncated, None);
     meta.local_filter = local_filter(
         args.unhealthy,
         args.offline,

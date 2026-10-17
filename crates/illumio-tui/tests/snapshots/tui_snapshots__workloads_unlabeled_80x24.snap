@@ -25,4 +25,4 @@ filter unlabeled (app, env, role) · 2 of 4
 │                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-ready           t/T traffic  h/H health  Enter detail  r refresh  : cmd  ? help
+ready               t/T traffic  x group  f labels  Enter detail  : cmd  ? help

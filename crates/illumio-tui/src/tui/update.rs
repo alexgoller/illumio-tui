@@ -224,6 +224,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             model.status = StatusLine::info("ready");
             model.objects.index_failed = false;
             model.workloads.index_failed = false;
+            model.refresh_label_warnings();
             let mut cmds = Vec::new();
             // Rulesets that arrived before the names could be resolved.
             if !model.policy.raw.is_empty()
@@ -601,6 +602,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     model.rebuild_rules();
                     model.recount_labels();
                     model.refresh_confirm_impact();
+                    model.refresh_label_warnings();
                 }
                 Err(e) => {
                     model.workloads.error = Some(e.clone());
@@ -1603,6 +1605,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 && matches!(k.code, KeyCode::Char('n' | 'p')) =>
         {
             complete_field(model, &mut e, k.code == KeyCode::Char('n'));
+            label_editor_unknown(model, &mut e);
             model.overlay = Overlay::LabelFilter(e);
             Vec::new()
         }
@@ -1617,10 +1620,12 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 KeyCode::Esc => model.overlay = Overlay::None,
                 KeyCode::Backspace => {
                     e.pop();
+                    label_editor_unknown(model, &mut e);
                     model.overlay = Overlay::LabelFilter(e);
                 }
                 KeyCode::Char(c) => {
                     e.push(c);
+                    label_editor_unknown(model, &mut e);
                     model.overlay = Overlay::LabelFilter(e);
                 }
                 // A malformed filter stays in the editor; the old one holds.
@@ -2614,7 +2619,7 @@ fn apply_group_keys(model: &mut Model, keys: Vec<String>, all: bool) {
     t.treemap.zoom = None;
     t.rebuild_views();
     let mut text = format!("grouped by {}", t.effective_keys().join(","));
-    let keys = workload_group_keys(model);
+    let keys = model.workload_group_keys();
     model.workloads.set_group_keys(keys);
     if cleared {
         text.push_str(" · focus cleared: the app is not defined under the new keys");
@@ -4526,22 +4531,22 @@ fn workloads_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 return Vec::new();
             }
             KeyCode::Char('x') => {
-                let keys = workload_group_keys(model);
+                let keys = model.workload_group_keys();
                 let w = &mut model.workloads;
                 w.toggle_grouped(keys);
                 model.status = StatusLine::info(if model.workloads.grouped {
-                    format!("workloads by {}", model.workloads.group_keys.join(","))
+                    format!("grouped: {}", model.workloads.group_keys.join(","))
                 } else {
-                    "workloads: flat".to_string()
+                    "flat".to_string()
                 });
                 let page = workloads_page(model);
                 model.workloads.ensure_visible(page);
                 return Vec::new();
             }
             KeyCode::Char('f') => {
-                model.overlay = Overlay::LabelFilter(LabelFilterEditor::new(
-                    &model.workloads.labels.to_string(),
-                ));
+                let mut e = LabelFilterEditor::new(&model.workloads.labels.to_string());
+                label_editor_unknown(model, &mut e);
+                model.overlay = Overlay::LabelFilter(e);
                 return Vec::new();
             }
             KeyCode::Char(' ') if model.workloads.grouped => {
@@ -4635,15 +4640,14 @@ fn workloads_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     Vec::new()
 }
 
-/// The keys `x` groups the workloads by: the traffic views' (`g`), else
-/// the profile's scope keys (`app,env`).
-fn workload_group_keys(model: &Model) -> Vec<String> {
-    let keys = model.traffic.effective_keys();
-    if keys.is_empty() {
-        pce::traffic::keys_or_default(&model.limits.scope_keys)
-    } else {
-        keys
-    }
+/// The editor's unknown keys and values for its current text (none while
+/// it does not parse): once per edit, never per frame.
+fn label_editor_unknown(model: &Model, e: &mut LabelFilterEditor) {
+    let idx = model.index().cloned();
+    e.unknown = e
+        .parse()
+        .map(|f| model.workloads.unknown_labels(&f, idx.as_deref()))
+        .unwrap_or_default();
 }
 
 /// `Enter` on a section header: the label filter narrowed to the group
@@ -18955,6 +18959,47 @@ mod workload_group_tests {
         quiet(&mut m, key('x'));
         assert!(m.workloads.grouped);
         assert_eq!(m.overlay, Overlay::None);
+    }
+
+    #[test]
+    fn shift_x_deletes_the_grouped_workload_and_refuses_a_header() {
+        use crate::tui::edit::WriteIntent;
+        let mut m = writes_on_workloads();
+        quiet(&mut m, key('x'));
+        // shop | prod, host-1, host-2, (no app) | (no env), unmanaged-nas, host-4.
+        quiet(&mut m, code(KeyCode::End));
+        quiet(&mut m, key('k'));
+        assert_eq!(
+            m.workloads.selected_row().unwrap().workload.href,
+            "/orgs/5/workloads/aaaa-3"
+        );
+        assert_eq!(
+            update(&mut m, key('X')),
+            vec![Cmd::PlanWrite(WriteIntent::DeleteWorkload {
+                href: "/orgs/5/workloads/aaaa-3".into(),
+                name: "unmanaged-nas".into(),
+            })],
+            "the same plan, then the same confirm, as flat"
+        );
+        let mut m = writes_on_workloads();
+        quiet(&mut m, key('x'));
+        quiet(&mut m, code(KeyCode::Home));
+        assert!(m.workloads.selected_group().is_some());
+        quiet(&mut m, key('X'));
+        assert_eq!(m.status.text, "no row selected");
+        assert_eq!(m.overlay, Overlay::None);
+    }
+
+    #[test]
+    fn label_warnings_follow_a_reload() {
+        let mut m = on_workloads();
+        apply_workload_labels(&mut m, "app=crm").unwrap();
+        assert_eq!(m.workloads.label_warnings, ["unknown value app=crm"]);
+        let mut raw = m.workloads.raw.clone();
+        raw[0].labels[1].value = Some("crm".into());
+        quiet(&mut m, Msg::WorkloadsLoaded(Ok((raw, 0, false))));
+        assert!(m.workloads.label_warnings.is_empty());
+        assert_eq!(m.workloads.table.len(), 1);
     }
 
     fn writes_on_workloads() -> Model {

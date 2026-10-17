@@ -381,10 +381,8 @@ pub fn render_label_filter(
     let note = match (&e.error, e.parse()) {
         (Some(err), _) => Line::from(Span::styled(plain(err), Style::new().fg(t.bad))),
         (None, Err(err)) => Line::from(Span::styled(plain(&err), t.dim_style())),
-        (None, Ok(parsed)) => {
-            let unknown = model
-                .workloads
-                .unknown_labels(&parsed, model.index().map(|i| &**i));
+        (None, Ok(_)) => {
+            let unknown = &e.unknown;
             if unknown.is_empty() {
                 Line::from(Span::styled(
                     "comma: any of · space: all of · ! excludes · key=- no label",
@@ -1210,7 +1208,7 @@ pub fn screen_hint(screen: Screen, writes: bool) -> &'static str {
         (Screen::Traffic, _) => "f filter  r run  a auto  v view  g group  / search",
         (Screen::Policy, _) => "d scope  p pending  Enter detail  Tab pane  i impact",
         (Screen::Objects, false) => "Tab type  Enter detail  r refresh  a auto  / search",
-        (Screen::Workloads, false) => "t/T traffic  h/H health  Enter detail  r refresh",
+        (Screen::Workloads, false) => "t/T traffic  x group  f labels  Enter detail",
         (Screen::Events, _) => "f filter  r refresh  a auto  S severity  Enter detail",
     }
 }
@@ -1224,7 +1222,7 @@ pub fn screen_hint_more(screen: Screen, view: TrafficView) -> &'static str {
             "+/- window  ]/[ cap  x mode  o service  d decision"
         }
         (Screen::Traffic, _) => "+/- window  ]/[ cap  D draft",
-        (Screen::Workloads, _) => "x group  f label  E/m/o/u c clear",
+        (Screen::Workloads, _) => "h/H health  E/m/o/u  c clear",
         _ => "",
     }
 }

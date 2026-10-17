@@ -341,10 +341,7 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
     HelpGroup {
         title: "Writes",
         lines: &[
-            key(
-                "n / e / x",
-                "new/edit/delete: Objects, IP lists, Workloads, Policy",
-            ),
+            key("n / e / x", "new/edit/delete: Objects, IP lists, Policy"),
             key("X", "Workloads: delete (x groups there)"),
             more("", "with :writes on; each request is shown first (y / n)"),
         ],
@@ -826,10 +823,7 @@ mod tests {
         ("J", "in the detail: change diff ↔ raw JSON"),
         // Was one continuation line; the scroll keys are a line of their own.
         ("↑/↓ j/k", "in the detail: prev/next event"),
-        (
-            "n / e / x",
-            "new/edit/delete: Objects, IP lists, Workloads, Policy",
-        ),
+        ("n / e / x", "new/edit/delete: Objects, IP lists, Policy"),
         ("j/k Space Enter", "select · mark · diff of a pending entry"),
         ("P", "provision the marked entries, or all (writes)"),
         ("R", "revert marked entries (draft-only ones are deleted)"),

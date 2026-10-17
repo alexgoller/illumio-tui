@@ -55,6 +55,8 @@ pub const ENFORCEMENT: [(&str, &str); 4] = [
 #[derive(Debug)]
 pub struct WlGroup {
     pub key: Vec<Option<String>>,
+    /// The keys `key` is the value of (the grouping's).
+    pub keys: Vec<String>,
     /// `shop | prod`, `(no app) | prod`.
     pub title: String,
     /// Workloads per health in rank order: healthy, unmanaged, warning,
@@ -122,6 +124,7 @@ pub fn build_groups<'a>(
                 at.insert(key, groups.len());
                 groups.push(WlGroup {
                     title: group_title(&owned, keys),
+                    keys: keys.to_vec(),
                     key: owned,
                     health: [0; 5],
                     enforcement: [0; 4],
@@ -226,16 +229,37 @@ macro_rules! adapters {
 }
 adapters!(0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15);
 
+/// A member's labels without its group's own (the header names them):
+/// `app=shop env=prod role=web` under `shop | prod` is `role=web`.
+fn member_labels(r: &WlGroupRow) -> String {
+    let WlGroupRow::Member { row, group } = r else {
+        return String::new();
+    };
+    let mut text = format!(" {} ", row.labels);
+    for (k, v) in group.keys.iter().zip(&group.key) {
+        if let Some(v) = v {
+            text = text.replacen(&format!(" {k}={v} "), " ", 1);
+        }
+    }
+    text.trim().to_string()
+}
+
 /// The grouped table's columns: `src` (the flat table's, as shown at the
-/// moment: widths, which hide) reading each member row's workload.
+/// moment: widths, which hide) reading each member row's workload; the
+/// labels column leaves out the group's keys. A column past the adapters
+/// is left out (a test keeps them in step: `group_columns_read_the_member_cells`).
 pub fn member_columns(src: &[Column<WlRow>]) -> Vec<Column<WlGroupRow>> {
-    assert!(src.len() <= CELLS.len(), "add adapters for the new columns");
     src.iter()
         .enumerate()
+        .take(CELLS.len())
         .map(|(i, c)| Column {
             title: c.title,
             width: c.width,
-            cell: CELLS[i],
+            cell: if c.title == "labels" {
+                member_labels
+            } else {
+                CELLS[i]
+            },
             key: KEYS[i],
             right: c.right,
             hide_below: c.hide_below,
@@ -377,7 +401,12 @@ mod tests {
         let rows = layout(&g, &BTreeSet::new());
         for (i, c) in cols.iter().enumerate() {
             assert_eq!(c.title, src[i].title);
-            assert_eq!((c.cell)(&rows[1]), (src[i].cell)(&r[0]), "{}", c.title);
+            if c.title == "labels" {
+                // Under `shop | prod` only the role is left to say.
+                assert_eq!((c.cell)(&rows[1]), "role=web");
+            } else {
+                assert_eq!((c.cell)(&rows[1]), (src[i].cell)(&r[0]), "{}", c.title);
+            }
             assert_eq!((c.key)(&rows[1]), (src[i].key)(&r[0]), "{}", c.title);
             assert_eq!((c.cell)(&rows[0]), "", "a header has no cells");
             assert_eq!(c.narrow.is_some(), src[i].narrow.is_some());
