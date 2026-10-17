@@ -190,9 +190,12 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   group it into app sections (`flat` → `by src app` → `by dst app`): one header per app (by
   the `g` keys; an IP list or FQDN by its name) with its flow and connection counts, then its
   flows in the table's sort (set it with `s` while flat). There `s` orders the sections, `Space`
-  / `z` fold them, `Enter` on a flow opens its detail and on a header drills into the app's
-  flows; marks, the focus, `w`, `m`, `F` and `:export` work on the sections, and an app whose
-  every flow is squelched has none. **App-to-app**
+  / `z` fold them (by source and by destination app each keep their own folds), `x` keeps the
+  cursor on its flow, `Enter` on a flow opens its detail and on a header drills into the
+  app's flows (under a drill it narrows it, to a pair where one drill can say it, and
+  otherwise folds the section: `Esc` first); a flat search applies too (`flows /…` in the
+  title); marks, the focus, `w`, `m`, `F` (the section's app first) and `:export` work on the
+  sections, and an app whose every flow is squelched has none. **App-to-app**
   pairs the groups; `o` splits each pair by service (`pairs · by service`: one row per source
   group, destination group and `port/proto`, the tuple an allow rule is written for; `Enter`
   drills into that service's flows, `w` drafts that rule: consumers the source group's labels,

@@ -68,6 +68,9 @@ pub struct TableView<T> {
     /// (possibly empty); `None` keeps the default substring match over
     /// every cell.
     matcher: Option<fn(&T, &str) -> bool>,
+    /// Rows of one group (consecutive, same key) share the matcher's
+    /// verdict: it runs once per group (a sectioned table's section).
+    match_group: Option<fn(&T) -> usize>,
     /// A row's mark, drawn as a 2-cell gutter before the first column
     /// while set (marks active). Not a column: column indices, `s`, the
     /// default sort, search and `:export` do not see it.
@@ -87,6 +90,7 @@ impl<T> TableView<T> {
             searching: false,
             search_draft: String::new(),
             matcher: None,
+            match_group: None,
             marker: None,
         }
     }
@@ -94,6 +98,13 @@ impl<T> TableView<T> {
     /// The table with its own row filter in place of the substring search.
     pub fn with_matcher(mut self, matcher: fn(&T, &str) -> bool) -> Self {
         self.matcher = Some(matcher);
+        self
+    }
+
+    /// Consecutive rows with the same `group` key share the matcher's
+    /// verdict, decided on the group's first row.
+    pub fn with_match_group(mut self, group: fn(&T) -> usize) -> Self {
+        self.match_group = Some(group);
         self
     }
 
@@ -290,10 +301,22 @@ impl<T> TableView<T> {
     /// search (or matcher) and sort applied to other rows.
     pub fn visible_of(&self, rows: &[T]) -> Vec<usize> {
         let needle = self.search_text().to_lowercase();
+        let mut last: Option<(usize, bool)> = None;
         let mut vis: Vec<usize> = (0..rows.len())
             .filter(|&i| {
                 if let Some(m) = self.matcher {
-                    return m(&rows[i], &needle);
+                    let Some(group) = self.match_group else {
+                        return m(&rows[i], &needle);
+                    };
+                    let g = group(&rows[i]);
+                    return match last {
+                        Some((k, hit)) if k == g => hit,
+                        _ => {
+                            let hit = m(&rows[i], &needle);
+                            last = Some((g, hit));
+                            hit
+                        }
+                    };
                 }
                 needle.is_empty()
                     || self
@@ -304,15 +327,6 @@ impl<T> TableView<T> {
             .collect();
         self.sort_positions(rows, &mut vis);
         vis
-    }
-
-    /// Every position in `rows` (no search) in this view's sort order:
-    /// what a view laying the rows out otherwise (the Flows sections)
-    /// keeps of the table.
-    pub fn order_of(&self, rows: &[T]) -> Vec<usize> {
-        let mut all: Vec<usize> = (0..rows.len()).collect();
-        self.sort_positions(rows, &mut all);
-        all
     }
 
     /// `positions` in the sort order (stable; unchanged when unsorted).
@@ -529,5 +543,31 @@ mod tests {
         v.set_rows(vec![]);
         assert!(v.selected_item().is_none());
         assert_eq!(v.selected_index(), None);
+    }
+
+    #[test]
+    fn a_match_group_runs_the_matcher_once_per_group() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        let mut t = view()
+            .with_matcher(|r: &R, needle: &str| {
+                CALLS.fetch_add(1, Ordering::Relaxed);
+                needle.is_empty() || r.name.contains(needle)
+            })
+            .with_match_group(|r: &R| (r.n / 10) as usize);
+        // Groups by tens: the first row of a group decides for all of it.
+        t.set_rows(vec![
+            R { name: "web", n: 10 },
+            R { name: "x", n: 11 },
+            R { name: "db", n: 20 },
+            R { name: "web", n: 21 },
+            R { name: "y", n: 30 },
+        ]);
+        CALLS.store(0, Ordering::Relaxed);
+        t.start_search();
+        t.search_push('w');
+        assert_eq!(CALLS.load(Ordering::Relaxed), 3, "once per group");
+        let shown: Vec<u64> = t.visible().iter().map(|&i| t.rows()[i].n).collect();
+        assert_eq!(shown, vec![10, 11], "the group whose first row matches");
     }
 }

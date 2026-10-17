@@ -12,10 +12,10 @@ expression: out
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭ Flows · conns: lifetime ───────────────────────────────────────── by src app ╮
 │  src            src group  dst            dst group  service   conns decision│
-│▸ ▾ ipl:Corp/-  5 flows · 1301 conns · 2 blocked · 1 pot.blocked              │
-│  10.1.4.9       -/-        shop-web-p.exa shop/prod  443/tcp     700 allowed │
-│  10.1.4.9       -/-        crm-web-p.exam crm/prod   443/tcp     520 allowed │
-│  10.1.4.9       -/-        hr-web-p.examp hr/prod    443/tcp      75 pot.blk │
+│  10.1.4.9       -/-        erp-api-p.exam erp/prod   22/tcp        4 blocked │
+│  10.1.4.9       -/-        shop-db-p.exam shop/prod  5432/tcp      2 blocked │
+│  ▾ shop/prod  6 flows · 1004 conns                                           │
+│▸ shop-web-p.exa shop/prod  shop-db-p.exam shop/prod  5432/tcp    420 allowed │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭ Detail ───────────────────────────────────────────────────────── Enter shows ╮
 │select a flow and press Enter                                                 │
@@ -25,4 +25,4 @@ expression: out
 │                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-flows by src  f filter  r run  a auto  v view  g group  / search  : cmd  ? help
+by src app    f filter  r run  a auto  v view  g group  / search  : cmd  ? help

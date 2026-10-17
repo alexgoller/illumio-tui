@@ -12,17 +12,17 @@ expression: out
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭ Flows · conns: lifetime ──────────────────────────── by dst app · by flows ↓ ╮
 │  src            src group  dst            dst group  service   conns decision│
-│  10.1.4.9       -/-        shop-db-p.exam shop/prod  5432/tcp      2 blocked │
-│  shop-web-p.exa shop/prod  shop-db-p.exam shop/prod  5432/tcp     14 allowed │
-│  shop-web-p.exa shop/prod  shop-db-p.exam shop/prod  5432/tcp      7 allowed │
-│▸ ▾ crm/prod  7 flows · 1601 conns · 1 blocked                                │
+│▸ ▾ shop/prod  8 flows · 1545 conns · 2 blocked · 1 pot.blocked               │
+│  shop-web-p.exa shop/prod  shop-db-p.exam shop/prod  5432/tcp    420 allowed │
+│  shop-web-p.exa shop/prod  shop-db-p.exam shop/prod  5432/tcp    380 allowed │
+│  hr-web-p.examp hr/prod    shop-db-p.exam shop/prod  5432/tcp     16 pot.blk │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭ Detail ───────────────────────────────────────────────────────── Enter hides ╮
-│crm/prod  7 flows · 1601 conns · 1 blocked                                    │
+│shop/prod  8 flows · 1545 conns · 2 blocked · 1 pot.blocked                   │
 │Enter drills to the app's flows · Space folds · z folds all · s orders        │
 │                                                                              │
 │                                                                              │
 │                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-sections by f f filter  r run  a auto  v view  g group  / search  : cmd  ? help
+by flows ↓    f filter  r run  a auto  v view  g group  / search  : cmd  ? help

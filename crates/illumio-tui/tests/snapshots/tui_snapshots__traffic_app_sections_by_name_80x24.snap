@@ -25,4 +25,4 @@ expression: out
 │  ▾ erp/prod  in · 4 groups · 692 conns · 2 blocked · 3 pot.blocked           │
 │    erp/prod                            1521/tcp      2    590   1.6M allowed │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-sections by a f filter  r run  a auto  v view  g group  / search  : cmd  ? help
+by app A→Z    f filter  r run  a auto  v view  g group  / search  : cmd  ? help

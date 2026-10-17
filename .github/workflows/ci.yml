@@ -27,6 +27,12 @@ jobs:
         env:
           MARKS_PERF_BUDGET_MS: "1000"
         run: cargo test --release -p pce --test marks_perf -- --ignored --nocapture
+      # The sectioned views at 200k flows (x, a fold, s, a search keystroke;
+      # 100 ms each locally), release only, the same allowance.
+      - if: matrix.os == 'ubuntu-latest'
+        env:
+          SECTIONS_PERF_BUDGET_MS: "300"
+        run: cargo test --release -p illumio-tui --test sections_perf -- --ignored --nocapture
   deny:
     runs-on: ubuntu-latest
     steps:

@@ -205,11 +205,19 @@ fn render_flows(model: &Model, f: &mut Frame, area: Rect) {
     let t = &model.theme;
     let tr = &model.traffic;
     let mut meta = if tr.flows_grouped() {
-        // `by src app · by app A→Z` (the order when not the default),
-        // then the table's search; the flows keep the flat table's sort.
+        // `by src app · by app A→Z` (the order when not the default), the
+        // flat table's sort and search the flows keep (`flows /web`), then
+        // the sections' search.
         let mut parts = vec![tr.flows_state.by.label().to_string()];
         if tr.flows_state.order != SectionOrder::default() {
             parts.push(tr.flows_state.order.label().to_string());
+        }
+        if let Some((c, desc)) = tr.flows.sort() {
+            let arrow = if desc { "↓" } else { "↑" };
+            parts.push(format!("sort {} {arrow}", tr.flows.columns[c].title));
+        }
+        if !tr.flows.search_text().is_empty() {
+            parts.push(format!("flows /{}", tr.flows.search_text()));
         }
         let m = crate::tui::ui::widgets::table::header_meta(&tr.flows_grouped);
         if !m.is_empty() {

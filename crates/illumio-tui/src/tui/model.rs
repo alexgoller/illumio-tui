@@ -446,12 +446,13 @@ pub struct Range {
 
 /// A flow with its grouping text for the keys in force (`shop/prod`): a
 /// `Column`'s `fn` cannot see the keys, so the cells are computed when the
-/// rows are built.
+/// rows are built. Shared (`Arc`), so the Flows sections copy a row for a
+/// few reference counts.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FlowRow {
-    pub flow: ResolvedFlow,
-    pub src_group: String,
-    pub dst_group: String,
+    pub flow: Arc<ResolvedFlow>,
+    pub src_group: Arc<str>,
+    pub dst_group: Arc<str>,
     /// The flow's winning mark, while marks are active.
     pub mark: Option<Hit>,
 }
@@ -459,9 +460,9 @@ pub struct FlowRow {
 impl FlowRow {
     pub fn new(flow: ResolvedFlow, keys: &[String]) -> Self {
         Self {
-            src_group: group_text(&flow.src, keys),
-            dst_group: group_text(&flow.dst, keys),
-            flow,
+            src_group: group_text(&flow.src, keys).into(),
+            dst_group: group_text(&flow.dst, keys).into(),
+            flow: Arc::new(flow),
             mark: None,
         }
     }
@@ -545,8 +546,8 @@ pub fn flow_columns_of<T: FlowCells>() -> Vec<Column<T>> {
         Column {
             title: "src group",
             width: 18,
-            cell: |r| on_flow(r, |f| f.src_group.clone()),
-            key: |r| flow_key(r, |f| SortKey::Text(f.src_group.clone())),
+            cell: |r| on_flow(r, |f| f.src_group.to_string()),
+            key: |r| flow_key(r, |f| SortKey::Text(f.src_group.to_string())),
             right: false,
             hide_below: 0,
             narrow: None,
@@ -569,8 +570,8 @@ pub fn flow_columns_of<T: FlowCells>() -> Vec<Column<T>> {
         Column {
             title: "dst group",
             width: 18,
-            cell: |r| on_flow(r, |f| f.dst_group.clone()),
-            key: |r| flow_key(r, |f| SortKey::Text(f.dst_group.clone())),
+            cell: |r| on_flow(r, |f| f.dst_group.to_string()),
+            key: |r| flow_key(r, |f| SortKey::Text(f.dst_group.to_string())),
             right: false,
             hide_below: 0,
             narrow: None,
@@ -1378,8 +1379,27 @@ pub struct FlowsState {
     pub by: FlowsBy,
     /// `s` while grouped: the order of the sections.
     pub order: SectionOrder,
-    /// The apps whose sections show only their header row.
-    pub folded: BTreeSet<Vec<String>>,
+    /// The apps whose sections show only their header row, by source app
+    /// and by destination app (one app is a different section in each).
+    pub folded_src: BTreeSet<Vec<String>>,
+    pub folded_dst: BTreeSet<Vec<String>>,
+}
+
+impl FlowsState {
+    /// The folds of the grouping in force (by source app while flat).
+    pub fn folded(&self) -> &BTreeSet<Vec<String>> {
+        match self.by {
+            FlowsBy::Dst => &self.folded_dst,
+            FlowsBy::Flat | FlowsBy::Src => &self.folded_src,
+        }
+    }
+
+    fn folded_mut(&mut self) -> &mut BTreeSet<Vec<String>> {
+        match self.by {
+            FlowsBy::Dst => &mut self.folded_dst,
+            FlowsBy::Flat | FlowsBy::Src => &mut self.folded_src,
+        }
+    }
 }
 
 /// What a section row is: an app's header with its totals per direction
@@ -1407,7 +1427,7 @@ pub enum RowKind {
         row: Box<PeerRow>,
     },
     /// A flow record under its app (the Flows view's sections).
-    Flow { row: Box<FlowRow> },
+    Flow { row: Arc<FlowRow> },
 }
 
 /// One row of a sectioned table (App-to-app `in` / `out` / `both`,
@@ -1419,7 +1439,82 @@ pub struct SectionRow {
     pub kind: RowKind,
     /// The section's header and every peer row, lowercased: `/` keeps a
     /// whole section when any of it matches.
-    haystack: Arc<str>,
+    haystack: Arc<Haystack>,
+}
+
+/// What `/` searches in one section: its header and every row, lowercased.
+/// A Flows section's text is written at its first search, not at every
+/// regrouping (it covers every flow); App-to-app's is ready at once.
+#[derive(Debug, Default)]
+pub struct Haystack {
+    text: std::sync::OnceLock<Box<str>>,
+    /// A Flows section's header line and flows, until the text is built.
+    head: String,
+    flows: Vec<Arc<FlowRow>>,
+}
+
+impl Haystack {
+    fn ready(text: &str) -> Self {
+        Self {
+            text: std::sync::OnceLock::from(lowercase(text.to_string()).into_boxed_str()),
+            ..Self::default()
+        }
+    }
+
+    fn of_flows(head: String, flows: Vec<Arc<FlowRow>>) -> Self {
+        Self {
+            head,
+            flows,
+            ..Self::default()
+        }
+    }
+
+    pub fn text(&self) -> &str {
+        self.text.get_or_init(|| {
+            use std::fmt::Write as _;
+            // Written in place, names borrowed (`display_name` without its
+            // copy).
+            fn name(e: &pce::traffic::ResolvedEndpoint) -> &str {
+                [&e.hostname, &e.name, &e.fqdn, &e.ip]
+                    .into_iter()
+                    .flatten()
+                    .find(|s| !s.is_empty())
+                    .map_or("?", String::as_str)
+            }
+            let mut text = String::with_capacity(self.head.len() + self.flows.len() * 96);
+            text.push_str(&self.head);
+            for f in &self.flows {
+                let _ = write!(
+                    text,
+                    "\n{} {} {} {} {} {}",
+                    name(&f.src),
+                    f.src_group,
+                    name(&f.dst),
+                    f.dst_group,
+                    f.service_text(),
+                    f.policy_decision.as_str()
+                );
+            }
+            lowercase(text).into_boxed_str()
+        })
+    }
+}
+
+/// Two sections search alike when their texts do.
+impl PartialEq for Haystack {
+    fn eq(&self, other: &Self) -> bool {
+        self.text() == other.text()
+    }
+}
+
+/// `to_lowercase`, as the needle is; ASCII text in place.
+fn lowercase(mut text: String) -> String {
+    if text.is_ascii() {
+        text.make_ascii_lowercase();
+        text
+    } else {
+        text.to_lowercase()
+    }
 }
 
 impl SectionRow {
@@ -1503,7 +1598,7 @@ impl FlowCells for SectionRow {
 
 /// `/` on a sectioned table: the row's section matches.
 fn section_matches(r: &SectionRow, needle: &str) -> bool {
-    needle.is_empty() || r.haystack.contains(needle)
+    needle.is_empty() || r.haystack.text().contains(needle)
 }
 
 /// `allowed`, `pot.blocked`, `blocked` or `unknown`.
@@ -1532,7 +1627,7 @@ fn header_row(
             accepted: 0,
             per_flow,
         },
-        haystack: Arc::from(""),
+        haystack: Arc::default(),
     }
 }
 
@@ -1550,7 +1645,7 @@ fn push_section(
         text.push('\n');
         text.push_str(&t);
     }
-    let hay: Arc<str> = Arc::from(text.to_lowercase());
+    let hay = Arc::new(Haystack::ready(&text));
     let folded = matches!(header.kind, RowKind::Header { folded: true, .. });
     header.haystack = hay.clone();
     out.push(header);
@@ -1603,7 +1698,7 @@ pub fn section_rows(
                         arrow: arrows,
                         row: Box::new(r.clone()),
                     },
-                    haystack: Arc::from(""),
+                    haystack: Arc::default(),
                 })
             })
             .collect();
@@ -1623,62 +1718,76 @@ pub fn section_rows(
     out
 }
 
-/// One Flows section (`x`): its app's header and its flow records.
+/// One Flows section (`x`): its app's header and its flow records,
+/// kept between a fold or `s` (which only lay the sections out again).
+#[derive(Debug, Clone)]
 pub struct FlowSection {
     pub section: AppSection,
-    /// The flows in the table's sort order.
-    pub flows: Vec<FlowRow>,
+    /// The flows in the table's order (shared with the flat table's rows).
+    pub flows: Vec<Arc<FlowRow>>,
     /// The header's marks: the flows' hits, and the squelched records of
     /// the app left out (`hidden`).
     pub marks: Option<RowMarks>,
+    /// What `/` searches: the header and every flow (`Haystack`).
+    pub haystack: Arc<Haystack>,
+}
+
+impl FlowSection {
+    pub fn new(section: AppSection, flows: Vec<Arc<FlowRow>>, marks: Option<RowMarks>) -> Self {
+        let header = header_row(
+            &section.app,
+            vec![(section.direction, section.totals.clone())],
+            false,
+            None,
+            true,
+        );
+        let haystack = Arc::new(Haystack::of_flows(
+            header.header_line().unwrap_or_default(),
+            flows.clone(),
+        ));
+        Self {
+            section,
+            flows,
+            marks,
+            haystack,
+        }
+    }
 }
 
 /// The rows of the Flows view's sections (in table order): each app's
 /// header, then its flow records unless folded.
 pub fn flow_section_rows(
-    sections: Vec<FlowSection>,
+    sections: &[FlowSection],
     folded: &BTreeSet<Vec<String>>,
 ) -> Vec<SectionRow> {
     let mut out = Vec::new();
-    for FlowSection {
-        section,
-        flows,
-        marks,
-    } in sections
-    {
-        let app = section.app;
-        let header = header_row(
-            &app,
-            vec![(section.direction, section.totals)],
-            folded.contains(&app),
-            marks,
+    for fs in sections {
+        let app = &fs.section.app;
+        let is_folded = folded.contains(app);
+        let mut header = header_row(
+            app,
+            vec![(fs.section.direction, fs.section.totals.clone())],
+            is_folded,
+            fs.marks.clone(),
             true,
         );
-        let texts: Vec<String> = flows
-            .iter()
-            .map(|f| {
-                format!(
-                    "{} {} {} {} {} {}",
-                    f.src.display_name(),
-                    f.src_group,
-                    f.dst.display_name(),
-                    f.dst_group,
-                    f.service_text(),
-                    f.policy_decision.as_str()
-                )
-            })
-            .collect();
-        let rows = flows
-            .into_iter()
-            .map(|f| SectionRow {
+        header.haystack = fs.haystack.clone();
+        out.push(header);
+        if !is_folded {
+            out.extend(fs.flows.iter().map(|f| SectionRow {
                 app: app.clone(),
-                kind: RowKind::Flow { row: Box::new(f) },
-                haystack: Arc::from(""),
-            })
-            .collect();
-        push_section(&mut out, header, rows, texts.into_iter());
+                kind: RowKind::Flow { row: f.clone() },
+                haystack: fs.haystack.clone(),
+            }));
+        }
     }
     out
+}
+
+/// The search groups of a sectioned table: a section's rows share their
+/// search text, so `/` decides once per section.
+fn section_group(r: &SectionRow) -> usize {
+    Arc::as_ptr(&r.haystack) as *const u8 as usize
 }
 
 /// A flows cell: the records shown, then `~12` for the squelched ones of
@@ -2050,6 +2159,15 @@ pub struct TrafficState {
     /// under one header per app; empty while flat.
     pub flows_grouped: TableView<SectionRow>,
     pub flows_state: FlowsState,
+    /// The sections behind `apps`, `blocked` and `flows_grouped` (with
+    /// Blocked's accepted records per app): a fold or `s` lays them out
+    /// again without regrouping the flows.
+    apps_cache: Vec<AppSection>,
+    blocked_cache: (Vec<AppSection>, BTreeMap<Vec<String>, u64>),
+    flows_cache: Vec<FlowSection>,
+    /// The Flows sections were not built (another view on screen): built
+    /// when the Flows view shows again (`sync_flows_grouped`).
+    flows_stale: bool,
     pub show_detail: bool,
     pub view: TrafficView,
     /// The label keys every view groups by: the profile's scope keys at
@@ -2256,8 +2374,14 @@ impl TrafficState {
             data: None,
             seq: 0,
             flows: TableView::new(flow_columns()),
-            flows_grouped: TableView::new(flow_columns_of()).with_matcher(section_matches),
+            flows_grouped: TableView::new(flow_columns_of())
+                .with_matcher(section_matches)
+                .with_match_group(section_group),
             flows_state: FlowsState::default(),
+            apps_cache: Vec::new(),
+            blocked_cache: (Vec::new(), BTreeMap::new()),
+            flows_cache: Vec::new(),
+            flows_stale: false,
             show_detail: false,
             view: TrafficView::Flows,
             group_keys: keys_or_default(keys),
@@ -2268,9 +2392,13 @@ impl TrafficState {
             services: TableView::new(service_group_columns()),
             mesh: TableView::new(mesh_columns(MESH_ALL)),
             mesh_cols: MESH_ALL,
-            apps: TableView::new(app_columns()).with_matcher(section_matches),
+            apps: TableView::new(app_columns())
+                .with_matcher(section_matches)
+                .with_match_group(section_group),
             apps_state: AppState::default(),
-            blocked: TableView::new(blocked_columns()).with_matcher(section_matches),
+            blocked: TableView::new(blocked_columns())
+                .with_matcher(section_matches)
+                .with_match_group(section_group),
             blocked_folded: BTreeSet::new(),
             treemap: TreemapState::new(TreemapRect::default()),
             drill: None,
@@ -2533,10 +2661,18 @@ impl TrafficState {
         };
         match &r.kind {
             RowKind::Peer { row, .. } => vec![r.app.clone(), row.peer.clone()],
-            RowKind::Flow { row } => vec![
-                group_key(&row.flow.src, &self.keys),
-                group_key(&row.flow.dst, &self.keys),
-            ],
+            // The section's app first (by destination app, the destination).
+            RowKind::Flow { row } => {
+                let (src, dst) = (
+                    group_key(&row.flow.src, &self.keys),
+                    group_key(&row.flow.dst, &self.keys),
+                );
+                if dst == r.app {
+                    vec![dst, src]
+                } else {
+                    vec![src, dst]
+                }
+            }
             RowKind::Header { .. } => vec![r.app.clone()],
         }
     }
@@ -2877,106 +3013,17 @@ impl TrafficState {
         }
     }
 
-    /// App-to-app's sections (none in `pairs`) and Blocked's, from the
-    /// loaded flows, the keys in force, the state and the folds. Pure.
+    /// App-to-app's sections (none in `pairs`), Blocked's and the Flows
+    /// view's, from the loaded flows, the keys in force, the state and the
+    /// folds. Pure.
     pub fn rebuild_sections(&mut self) {
-        let (apps, apps_sq) = self.apps_rows(&self.apps_state.folded);
-        let (blocked, blocked_sq, open, accepted) = self.blocked_rows(&self.blocked_folded);
-        let grouped = self.flows_grouped_rows(&self.flows_state.folded);
-        if let Some(mv) = self.marked.as_mut() {
-            mv.sections = apps_sq;
-            mv.blocked = blocked_sq;
-            mv.blocked_open = open;
-            mv.accepted = accepted;
-        }
-        self.apps.set_rows(apps);
-        self.blocked.set_rows(blocked);
-        self.flows_grouped.set_rows(grouped);
+        self.rebuild_apps();
+        self.rebuild_blocked();
+        self.rebuild_flows_grouped();
     }
 
-    /// The Flows view's sections under `folded` (none while flat): the
-    /// flat table's rows (drilled, squelched ones left out unless `M`) in
-    /// its sort order, under their app on the grouping's side. The marks
-    /// counts are the flat view's: the same flows, so kept + squelched
-    /// still equals all; a header sums its flows' hits and the squelched
-    /// records of its app left out, and an app whose every flow is
-    /// squelched has no section.
-    fn flows_grouped_rows(&self, folded: &BTreeSet<Vec<String>>) -> Vec<SectionRow> {
-        let Some(dir) = self.flows_state.by.direction() else {
-            return Vec::new();
-        };
-        let keys = &self.keys;
-        let rows = self.flows.rows();
-        let order = self.flows.order_of(rows);
-        let sections = flow_sections(
-            order.iter().map(|&i| &rows[i].flow),
-            keys,
-            dir,
-            self.flows_state.order,
-        );
-        let ctx = self.marks_ctx();
-        let mut hidden: BTreeMap<Vec<String>, u64> = BTreeMap::new();
-        if let Some((_, mv)) = &ctx
-            && !mv.marked.keep_squelched
-        {
-            let drilled = |f: &ResolvedFlow| self.drill.as_ref().is_none_or(|d| d.matches(f, keys));
-            for f in mv.marked.squelched().filter(|f| drilled(f)) {
-                *hidden
-                    .entry(pce::traffic::sides(f, keys, dir).0)
-                    .or_default() += 1;
-            }
-        }
-        let sections = sections
-            .into_iter()
-            .map(|(section, idx)| {
-                let flows: Vec<FlowRow> = idx.iter().map(|&k| rows[order[k]].clone()).collect();
-                let marks = ctx.as_ref().map(|(a, _)| {
-                    let mut rm = RowMarks {
-                        flows: flows.len() as u64,
-                        hidden: hidden.get(&section.app).copied().unwrap_or(0),
-                        ..RowMarks::default()
-                    };
-                    for h in flows.iter().filter_map(|f| f.mark) {
-                        let i = h.action.index();
-                        rm.by_action[i] += 1;
-                        if rm.top[i]
-                            .as_ref()
-                            .is_none_or(|t| a.rank(h.mark) < a.rank(t.mark))
-                        {
-                            rm.top[i] = Some(pce::marks::TopMark {
-                                mark: h.mark,
-                                id: a.mark(h.mark).id.clone(),
-                            });
-                        }
-                    }
-                    rm
-                });
-                FlowSection {
-                    section,
-                    flows,
-                    marks,
-                }
-            })
-            .collect();
-        flow_section_rows(sections, folded)
-    }
-
-    /// App-to-app's sections in force (none in `pairs`), from `flows`.
-    fn apps_sections(&self, flows: &[ResolvedFlow]) -> Vec<AppSection> {
-        let keys = &self.keys;
-        let st = &self.apps_state;
-        let sections = match st.by {
-            By::Pairs => Vec::new(),
-            By::In => app_sections(flows, keys, Direction::In, st.decisions),
-            By::Out => app_sections(flows, keys, Direction::Out, st.decisions),
-            By::Both => app_sections_both(flows, keys, st.decisions),
-        };
-        order_sections(sections, st.order, |s| s)
-    }
-
-    /// App-to-app's rows under `folded` (none in `pairs`), the marks
-    /// joined to them, and its squelched counts.
-    fn apps_rows(&self, folded: &BTreeSet<Vec<String>>) -> (Vec<SectionRow>, Squelch) {
+    /// App-to-app's sections and their squelched counts, then its rows.
+    pub fn rebuild_apps(&mut self) {
         let mut sections = self.apps_sections(self.view_flows());
         let d = self.apps_state.decisions;
         let sq = self
@@ -2987,14 +3034,18 @@ impl TrafficState {
                 self.squelch(gone, |f| d.keeps(f))
             })
             .unwrap_or_default();
-        let both = self.apps_state.by == By::Both;
-        (section_rows(&sections, folded, both), sq)
+        if let Some(mv) = self.marked.as_mut() {
+            mv.sections = sq;
+        }
+        self.apps_cache = sections;
+        let rows = self.apps_rows(&self.apps_state.folded);
+        self.apps.set_rows(rows);
     }
 
-    /// Blocked's rows under `folded`, the marks joined to them, its
-    /// squelched counts, and its records still blocked and accepted: the
-    /// accepted ones are taken out of each header's blocked counts.
-    fn blocked_rows(&self, folded: &BTreeSet<Vec<String>>) -> (Vec<SectionRow>, Squelch, u64, u64) {
+    /// Blocked's sections, its squelched counts and its records still
+    /// blocked and accepted (the accepted ones taken out of each header's
+    /// blocked counts), then its rows.
+    pub fn rebuild_blocked(&mut self) {
         let keys = &self.keys;
         let blocked = |f: &[ResolvedFlow]| app_sections(f, keys, Direction::In, Decisions::Blocked);
         let mut sections = blocked(self.view_flows());
@@ -3020,13 +3071,147 @@ impl TrafficState {
             .iter()
             .map(|s| s.totals.blocked + s.totals.potentially_blocked)
             .sum();
-        let mut rows = section_rows(&sections, folded, false);
+        if let Some(mv) = self.marked.as_mut() {
+            mv.blocked = sq;
+            mv.blocked_open = open;
+            mv.accepted = accepted.values().sum();
+        }
+        self.blocked_cache = (sections, accepted);
+        let rows = self.blocked_rows(&self.blocked_folded);
+        self.blocked.set_rows(rows);
+    }
+
+    /// The Flows view's sections, while it shows them; otherwise none,
+    /// built when it shows again (`sync_flows_grouped`). The flat table's
+    /// rows as shown (drilled, its search and sort applied, squelched
+    /// flows left out unless `M`) under their app on the grouping's side.
+    /// The marks counts are the flat view's: the same flows, so kept +
+    /// squelched still equals all; a header sums its flows' hits and the
+    /// squelched records of its app left out, and an app whose every flow
+    /// is squelched has no section.
+    pub fn rebuild_flows_grouped(&mut self) {
+        let dir = self.flows_state.by.direction();
+        let Some(dir) = dir.filter(|_| self.view == TrafficView::Flows) else {
+            self.flows_cache = Vec::new();
+            self.flows_grouped.set_rows(Vec::new());
+            self.flows_stale = dir.is_some();
+            return;
+        };
+        self.flows_stale = false;
+        let keys = &self.keys;
+        let rows = self.flows.rows();
+        let shown = self.flows.visible();
+        let sections = flow_sections(
+            shown.iter().map(|&i| &*rows[i].flow),
+            keys,
+            dir,
+            self.flows_state.order,
+        );
+        let ctx = self.marks_ctx();
+        let mut hidden: BTreeMap<Vec<String>, u64> = BTreeMap::new();
+        if let Some((_, mv)) = &ctx
+            && !mv.marked.keep_squelched
+        {
+            let drilled = |f: &ResolvedFlow| self.drill.as_ref().is_none_or(|d| d.matches(f, keys));
+            for f in mv.marked.squelched().filter(|f| drilled(f)) {
+                *hidden
+                    .entry(pce::traffic::sides(f, keys, dir).0)
+                    .or_default() += 1;
+            }
+        }
+        let cache = sections
+            .into_iter()
+            .map(|(section, idx)| {
+                let flows: Vec<Arc<FlowRow>> = idx
+                    .iter()
+                    .map(|&k| Arc::new(rows[shown[k]].clone()))
+                    .collect();
+                let marks = ctx.as_ref().map(|(a, _)| {
+                    let mut rm = RowMarks {
+                        flows: flows.len() as u64,
+                        hidden: hidden.get(&section.app).copied().unwrap_or(0),
+                        ..RowMarks::default()
+                    };
+                    for h in flows.iter().filter_map(|f| f.mark) {
+                        let i = h.action.index();
+                        rm.by_action[i] += 1;
+                        if rm.top[i]
+                            .as_ref()
+                            .is_none_or(|t| a.rank(h.mark) < a.rank(t.mark))
+                        {
+                            rm.top[i] = Some(pce::marks::TopMark {
+                                mark: h.mark,
+                                id: a.mark(h.mark).id.clone(),
+                            });
+                        }
+                    }
+                    rm
+                });
+                FlowSection::new(section, flows, marks)
+            })
+            .collect();
+        self.flows_cache = cache;
+        let rows = flow_section_rows(&self.flows_cache, self.flows_state.folded());
+        self.flows_grouped.set_rows(rows);
+    }
+
+    /// The Flows sections, if the Flows view shows them and they were
+    /// left unbuilt while another view was on screen.
+    pub fn sync_flows_grouped(&mut self) {
+        if self.flows_stale && self.view == TrafficView::Flows {
+            self.rebuild_flows_grouped();
+        }
+    }
+
+    /// The sectioned table on screen laid out again from its sections (a
+    /// fold, `s`): no regrouping.
+    fn relayout_sections(&mut self) {
+        match self.view {
+            TrafficView::Aggregate => {
+                let rows = self.apps_rows(&self.apps_state.folded);
+                self.apps.set_rows(rows);
+            }
+            TrafficView::Blocked => {
+                let rows = self.blocked_rows(&self.blocked_folded);
+                self.blocked.set_rows(rows);
+            }
+            TrafficView::Flows => {
+                let rows = flow_section_rows(&self.flows_cache, self.flows_state.folded());
+                self.flows_grouped.set_rows(rows);
+            }
+            TrafficView::Mesh | TrafficView::Treemap => {}
+        }
+    }
+
+    /// App-to-app's sections in force (none in `pairs`), from `flows`.
+    fn apps_sections(&self, flows: &[ResolvedFlow]) -> Vec<AppSection> {
+        let keys = &self.keys;
+        let st = &self.apps_state;
+        let sections = match st.by {
+            By::Pairs => Vec::new(),
+            By::In => app_sections(flows, keys, Direction::In, st.decisions),
+            By::Out => app_sections(flows, keys, Direction::Out, st.decisions),
+            By::Both => app_sections_both(flows, keys, st.decisions),
+        };
+        order_sections(sections, st.order, |s| s)
+    }
+
+    /// App-to-app's rows under `folded` (none in `pairs`).
+    fn apps_rows(&self, folded: &BTreeSet<Vec<String>>) -> Vec<SectionRow> {
+        let both = self.apps_state.by == By::Both;
+        section_rows(&self.apps_cache, folded, both)
+    }
+
+    /// Blocked's rows under `folded`, each header with its accepted records.
+    fn blocked_rows(&self, folded: &BTreeSet<Vec<String>>) -> Vec<SectionRow> {
+        let (sections, accepted) = &self.blocked_cache;
+        let mut rows = section_rows(sections, folded, false);
         for r in &mut rows {
             if let RowKind::Header { accepted: n, .. } = &mut r.kind {
                 *n = accepted.get(&r.app).copied().unwrap_or(0);
             }
         }
-        (rows, sq, open, accepted.values().sum())
+        rows
     }
 
     /// The sectioned table on screen with every section unfolded, its
@@ -3035,12 +3220,13 @@ impl TrafficState {
         let none = BTreeSet::new();
         let (table, rows) = match self.view {
             TrafficView::Aggregate if self.apps_state.by != By::Pairs => {
-                (&self.apps, self.apps_rows(&none).0)
+                (&self.apps, self.apps_rows(&none))
             }
-            TrafficView::Blocked => (&self.blocked, self.blocked_rows(&none).0),
-            TrafficView::Flows if self.flows_grouped() => {
-                (&self.flows_grouped, self.flows_grouped_rows(&none))
-            }
+            TrafficView::Blocked => (&self.blocked, self.blocked_rows(&none)),
+            TrafficView::Flows if self.flows_grouped() => (
+                &self.flows_grouped,
+                flow_section_rows(&self.flows_cache, &none),
+            ),
             _ => return None,
         };
         let shown = table.visible_of(&rows);
@@ -3090,7 +3276,7 @@ impl TrafficState {
         if !folded.remove(&app) {
             folded.insert(app.clone());
         }
-        self.rebuild_sections();
+        self.relayout_sections();
         if let Some(t) = self.section_table_mut() {
             t.select_where(|r| r.is_header() && r.app == app);
         }
@@ -3117,7 +3303,7 @@ impl TrafficState {
         } else {
             folded.extend(headers.into_iter().map(|(a, _)| a));
         }
-        self.rebuild_sections();
+        self.relayout_sections();
         if let (Some(app), Some(t)) = (app, self.section_table_mut()) {
             t.select_where(|r| r.is_header() && r.app == app);
         }
@@ -3135,7 +3321,7 @@ impl TrafficState {
     fn folds_mut(&mut self) -> &mut BTreeSet<Vec<String>> {
         match self.view {
             TrafficView::Blocked => &mut self.blocked_folded,
-            TrafficView::Flows => &mut self.flows_state.folded,
+            TrafficView::Flows => self.flows_state.folded_mut(),
             _ => &mut self.apps_state.folded,
         }
     }
@@ -3155,7 +3341,15 @@ impl TrafficState {
             .section_table()
             .and_then(|t| t.selected_item())
             .map(|r| r.app.clone());
-        self.rebuild_sections();
+        // The same sections in another order: no regrouping.
+        if self.view == TrafficView::Flows {
+            let cache = std::mem::take(&mut self.flows_cache);
+            self.flows_cache = order_sections(cache, order, |f| &f.section);
+        } else {
+            let cache = std::mem::take(&mut self.apps_cache);
+            self.apps_cache = order_sections(cache, order, |s| s);
+        }
+        self.relayout_sections();
         if let (Some(app), Some(t)) = (app, self.section_table_mut()) {
             t.select_where(|r| r.is_header() && r.app == app);
         }
@@ -6354,7 +6548,7 @@ mod focus_tests {
         let crm = app("crm/prod");
         t.set_focus(Focus::new(crm.clone(), keys()).with_direction(FocusDirection::In));
         assert_eq!(t.flows.len(), 7);
-        assert!(t.flows.rows().iter().all(|r| r.dst_group == "crm/prod"));
+        assert!(t.flows.rows().iter().all(|r| &*r.dst_group == "crm/prod"));
         assert!(!t.groups.is_empty() && t.groups.rows().iter().all(|g| g.dst == crm));
         assert!(!t.mesh.is_empty() && t.mesh.rows().iter().all(|r| r.dst == crm));
         assert!(t.treemap.groups.iter().all(|g| g.dst == crm));

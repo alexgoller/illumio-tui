@@ -2226,7 +2226,11 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         KeyCode::Char('B') => return backfill_key(model),
         KeyCode::Char('-') => return narrow_window(model),
         KeyCode::Char(c @ (']' | '[')) => return step_cap(model, c == ']'),
-        KeyCode::Char('v') => model.traffic.view = model.traffic.view.next(),
+        KeyCode::Char('v') => {
+            model.traffic.view = model.traffic.view.next();
+            // The Flows sections are built only while they are on screen.
+            model.traffic.sync_flows_grouped();
+        }
         KeyCode::Char('a') if !model.traffic.auto.enabled => {
             model.status = auto_off_status(&model.traffic.filter)
                 .unwrap_or_else(|| model.traffic.auto.toggle());
@@ -2259,18 +2263,36 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 t.apps_state.by.prev()
             };
             t.apps.home();
-            t.rebuild_sections();
+            t.rebuild_apps();
         }
         KeyCode::Char(c @ ('x' | 'X')) if model.traffic.view == TrafficView::Flows => {
             let t = &mut model.traffic;
+            // The cursor stays on its flow (a header: that app's first flow).
+            let keep = t.selected_flow().map(|r| r.flow.clone()).or_else(|| {
+                let r = t.flows_grouped.selected_item()?;
+                let rows = t.flows_grouped.rows();
+                let at = rows.iter().position(|x| std::ptr::eq(x, r))?;
+                rows[at..]
+                    .iter()
+                    .find_map(|x| x.flow().map(|f| f.flow.clone()))
+            });
             t.flows_state.by = if c == 'x' {
                 t.flows_state.by.next()
             } else {
                 t.flows_state.by.prev()
             };
-            t.flows_grouped.home();
-            t.rebuild_sections();
-            model.status = StatusLine::info(format!("flows {}", t.flows_state.by.label()));
+            t.rebuild_flows_grouped();
+            let same = |f: &crate::tui::model::FlowRow| {
+                keep.as_ref()
+                    .is_some_and(|k| std::sync::Arc::ptr_eq(k, &f.flow))
+            };
+            if t.flows_grouped() {
+                t.flows_grouped.home();
+                t.flows_grouped.select_where(|r| r.flow().is_some_and(same));
+            } else {
+                t.flows.select_where(|r| same(r));
+            }
+            model.status = StatusLine::info(t.flows_state.by.label());
         }
         KeyCode::Char('o') if model.traffic.view == TrafficView::Aggregate => {
             let t = &mut model.traffic;
@@ -2290,7 +2312,7 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             let t = &mut model.traffic;
             t.apps_state.decisions = t.apps_state.decisions.next(t.draft_loaded());
             t.rebuild_pairs();
-            t.rebuild_sections();
+            t.rebuild_apps();
             model.status = StatusLine::info(format!("decision {}", t.apps_state.decisions.label()));
         }
         KeyCode::Char(' ') if model.traffic.section_table().is_some() => {
@@ -2301,13 +2323,33 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         }
         KeyCode::Char('s') if model.traffic.section_table().is_some() => {
             model.status = match model.traffic.cycle_section_order() {
-                Some(order) => StatusLine::info(format!("sections {}", order.label())),
+                // The order alone, so it fits beside the key hints at 80.
+                Some(order) => StatusLine::info(order.label()),
                 None => StatusLine::info("sections keep their order (by connections)"),
             };
         }
         KeyCode::Enter if model.traffic.section_table().is_some() => {
             let t = &mut model.traffic;
             match t.section_drill() {
+                // A Flows header under a drill narrows it, never widens.
+                Some(header) if t.view == TrafficView::Flows && t.drill.is_some() => {
+                    let old = t.drill.clone().unwrap_or(header.clone());
+                    match narrow_drill(&old, &header) {
+                        Some(d) if d == old => {
+                            model.status =
+                                StatusLine::info("the drill holds only this app already");
+                        }
+                        Some(d) => {
+                            t.drill = Some(d);
+                            t.rebuild_views();
+                            t.flows_grouped.home();
+                        }
+                        None => {
+                            t.toggle_fold();
+                            model.status = StatusLine::info("drill active: Esc first");
+                        }
+                    }
+                }
                 Some(drill) => {
                     t.drill = Some(drill);
                     t.view = TrafficView::Flows;
@@ -2402,6 +2444,9 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             }
         }
     }
+    // The page again: a key may have opened or closed the detail's mark
+    // line, which takes a table row.
+    let page = traffic_page(model);
     let t = &mut model.traffic;
     match t.view {
         TrafficView::Flows if t.flows_grouped() => t.flows_grouped.ensure_visible(page),
@@ -2415,6 +2460,38 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         TrafficView::Treemap => {}
     }
     Vec::new()
+}
+
+/// A Flows header's drill (`Drill::App` on one side) within the drill in
+/// force: the two combined when one drill can say it (an app on the other
+/// side makes a pair; a drill holding one app is unchanged), `None` when
+/// it cannot (an app on either side).
+fn narrow_drill(old: &Drill, header: &Drill) -> Option<Drill> {
+    let Drill::App {
+        app,
+        direction: Some(dir),
+        ..
+    } = header
+    else {
+        return None;
+    };
+    match old {
+        Drill::App {
+            app: a,
+            direction: Some(d),
+            decisions,
+        } if d != dir => Some(match d {
+            // `* → a` by source app `app`: `app → a`.
+            pce::traffic::Direction::In => Drill::Pair(app.clone(), a.clone(), *decisions),
+            pce::traffic::Direction::Out => Drill::Pair(a.clone(), app.clone(), *decisions),
+        }),
+        Drill::App {
+            direction: None, ..
+        } => None,
+        // The same side, a pair, a service, a peer or a Mesh row: every
+        // flow already has one app on each side.
+        _ => Some(old.clone()),
+    }
 }
 
 /// Enter on the Treemap: an outer tile zooms into its source; a
@@ -5128,7 +5205,7 @@ fn flow_rule_key(model: &mut Model) -> Vec<Cmd> {
             model.status = StatusLine::warn("select a flow row (a header holds a whole app)");
             return Vec::new();
         }
-        TrafficView::Flows => t.selected_flow().map(|r| r.flow.clone()),
+        TrafficView::Flows => t.selected_flow().map(|r| (*r.flow).clone()),
         TrafficView::Blocked | TrafficView::Aggregate if t.section_table().is_some() => {
             match t.section_drill() {
                 Some(d @ Drill::Peer { .. }) => {
@@ -5443,7 +5520,7 @@ mod tests {
             vec!["app", "env"],
             "the profile's scope keys"
         );
-        assert_eq!(m.traffic.flows.rows()[0].src_group, "shop/prod");
+        assert_eq!(m.traffic.flows.rows()[0].src_group.as_ref(), "shop/prod");
         quiet(&mut m, key('g'));
         let Overlay::GroupKeys(p) = &m.overlay else {
             panic!("{:?}", m.overlay)
@@ -5457,8 +5534,11 @@ mod tests {
         assert_eq!(m.overlay, Overlay::None);
         assert_eq!(m.traffic.group_keys, vec!["app", "env", "role"]);
         assert_eq!(m.status.text, "grouped by app,env,role");
-        assert_eq!(m.traffic.flows.rows()[0].src_group, "shop/prod/web");
-        assert_eq!(m.traffic.flows.rows()[0].dst_group, "shop/prod/db");
+        assert_eq!(
+            m.traffic.flows.rows()[0].src_group.as_ref(),
+            "shop/prod/web"
+        );
+        assert_eq!(m.traffic.flows.rows()[0].dst_group.as_ref(), "shop/prod/db");
         assert!(m.traffic.groups.rows().iter().all(|g| g.src.len() == 3));
         assert!(m.traffic.blocked.rows().iter().all(|b| b.app.len() == 3));
         // A non-workload endpoint shows `-` in every slot.
@@ -5469,7 +5549,7 @@ mod tests {
             .iter()
             .find(|r| r.src.ip_lists == vec!["Corp"])
             .unwrap();
-        assert_eq!(corp.src_group, "-/-/-");
+        assert_eq!(corp.src_group.as_ref(), "-/-/-");
     }
 
     #[test]
@@ -5490,7 +5570,10 @@ mod tests {
             "scope keys, tier key, then alphabetical"
         );
         assert!(m.traffic.groups.rows().iter().all(|g| g.src.len() == 5));
-        assert_eq!(m.traffic.flows.rows()[4].src_group, "crm/prod/web/fra1/us");
+        assert_eq!(
+            m.traffic.flows.rows()[4].src_group.as_ref(),
+            "crm/prod/web/fra1/us"
+        );
         // Reopening shows `all labels` checked and no key.
         quiet(&mut m, key('g'));
         let Overlay::GroupKeys(p) = &m.overlay else {
@@ -5610,7 +5693,7 @@ mod tests {
                 .flows
                 .rows()
                 .iter()
-                .any(|r| r.src_group == "fra1" || r.dst_group == "fra1"),
+                .any(|r| &*r.src_group == "fra1" || &*r.dst_group == "fra1"),
             "grouping by an ignored key still reads its values"
         );
     }
@@ -5660,7 +5743,7 @@ mod tests {
             quiet(&mut m, key(c));
         }
         quiet(&mut m, enter());
-        assert_eq!(m.traffic.flows.rows()[0].src_group, "shop/prod/-");
+        assert_eq!(m.traffic.flows.rows()[0].src_group.as_ref(), "shop/prod/-");
     }
 
     #[test]
@@ -13581,7 +13664,7 @@ mod app_sections_tests {
             None,
             "s orders the sections, no column"
         );
-        assert_eq!(m.status.text, "sections by app A→Z");
+        assert_eq!(m.status.text, "by app A→Z");
     }
 
     #[test]
@@ -14237,7 +14320,7 @@ mod focus_tests {
             match view {
                 TrafficView::Flows => {
                     assert_eq!(t.flows.len(), 7);
-                    assert!(t.flows.rows().iter().all(|r| r.dst_group == "crm/prod"));
+                    assert!(t.flows.rows().iter().all(|r| &*r.dst_group == "crm/prod"));
                 }
                 TrafficView::Aggregate => {
                     assert!(!t.groups.is_empty() && t.groups.rows().iter().all(|g| crm(&g.dst)))
@@ -17660,7 +17743,7 @@ mod section_order_tests {
     use super::*;
     use crate::tui::model::{FlowsBy, Model, RowKind, SectionRow};
     use crate::tui::test_support::model_with_rich_flows;
-    use crate::tui::traffic_marks::tests::marked_model;
+    use crate::tui::traffic_marks::tests::{RICH_MARKS, marked_model};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use pce::traffic::{Decisions, Direction, SectionOrder, group_key};
 
@@ -17739,10 +17822,7 @@ mod section_order_tests {
                     }
                 }
                 assert_eq!(m.traffic.apps.sort(), None);
-                assert_eq!(
-                    m.status.text,
-                    format!("sections {}", m.traffic.apps_state.order.label())
-                );
+                assert_eq!(m.status.text, m.traffic.apps_state.order.label());
             }
             assert_eq!(
                 seen,
@@ -17791,6 +17871,8 @@ mod section_order_tests {
         for c in by.to_string().chars() {
             quiet(&mut m, key(c));
         }
+        // The cursor on the first header (`x` keeps it on its flow).
+        m.traffic.flows_grouped.home();
         m
     }
 
@@ -17898,7 +17980,7 @@ mod section_order_tests {
         quiet(&mut m, key(' '));
         let sel = m.traffic.flows_grouped.selected_item().unwrap().clone();
         assert!(sel.is_header());
-        assert!(m.traffic.flows_state.folded.contains(&sel.app));
+        assert!(m.traffic.flows_state.folded().contains(&sel.app));
         assert!(m.traffic.apps_state.folded.is_empty(), "its own folds");
         assert!(m.traffic.flows_grouped.len() < all);
         m.traffic.rebuild_views();
@@ -17971,10 +18053,211 @@ mod section_order_tests {
     }
 
     #[test]
+    fn search_in_flows_sections_keeps_whole_sections_once_per_section() {
+        let mut m = grouped('x');
+        quiet(&mut m, key('/'));
+        for c in "shop-db-p".chars() {
+            quiet(&mut m, key(c));
+        }
+        quiet(&mut m, kc(KeyCode::Enter));
+        let t = &m.traffic;
+        let shown: Vec<SectionRow> = t
+            .flows_grouped
+            .visible()
+            .iter()
+            .map(|&i| t.flows_grouped.rows()[i].clone())
+            .collect();
+        let secs = sections(&shown);
+        assert!(!secs.is_empty());
+        for (app, flows, _, rows) in &secs {
+            assert_eq!(rows.len() as u64, *flows, "{app}: the whole section");
+            assert!(
+                rows.iter()
+                    .any(|r| r.flow().unwrap().dst.display_name() == "shop-db-p.example"),
+                "{app}"
+            );
+        }
+        assert!(secs.len() < sections(t.flows_grouped.rows()).len());
+    }
+
+    #[test]
+    fn enter_on_a_flow_keeps_the_cursor_on_screen_with_the_mark_line() {
+        let (mut m, _dir) = marked_model(RICH_MARKS);
+        m.size = (80, 24);
+        quiet(&mut m, key('x'));
+        for _ in 0..3 {
+            quiet(&mut m, key('j'));
+        }
+        assert!(m.traffic.selected_flow().is_some());
+        quiet(&mut m, kc(KeyCode::Enter));
+        assert!(m.traffic.show_detail);
+        let page = traffic_page(&m);
+        let t = &m.traffic.flows_grouped;
+        assert!(
+            t.selected_pos() >= t.offset() && t.selected_pos() < t.offset() + page,
+            "row {} not in {}..{}",
+            t.selected_pos(),
+            t.offset(),
+            t.offset() + page
+        );
+    }
+
+    #[test]
+    fn the_flows_sections_are_built_only_while_the_flows_view_shows() {
+        let mut m = grouped('x');
+        let n = m.traffic.flows_grouped.len();
+        quiet(&mut m, key('v'));
+        m.traffic.rebuild_views();
+        assert!(
+            m.traffic.flows_grouped.is_empty(),
+            "App-to-app on screen: none"
+        );
+        // App-to-app's own keys leave them alone.
+        quiet(&mut m, key('x'));
+        quiet(&mut m, key(' '));
+        assert!(m.traffic.flows_grouped.is_empty());
+        for _ in 0..4 {
+            quiet(&mut m, key('v'));
+        }
+        assert_eq!(m.traffic.view, TrafficView::Flows);
+        assert_eq!(
+            m.traffic.flows_grouped.len(),
+            n,
+            "built again on the way back"
+        );
+    }
+
+    #[test]
+    fn a_flat_search_and_sort_carry_into_the_sections_and_the_meta() {
+        let mut m = model_with_rich_flows();
+        quiet(&mut m, key('/'));
+        for c in "5432".chars() {
+            quiet(&mut m, key(c));
+        }
+        quiet(&mut m, kc(KeyCode::Enter));
+        let kept = m.traffic.flows.len();
+        assert!(kept > 0 && kept < 30);
+        quiet(&mut m, key('x'));
+        let secs = sections(m.traffic.flows_grouped.rows());
+        assert_eq!(
+            secs.iter().map(|s| s.3.len()).sum::<usize>(),
+            kept,
+            "the flat search applies"
+        );
+        m.traffic.flows.sort_by(6, true);
+        m.traffic.rebuild_views();
+        let out = crate::tui::test_support::render_to_string(&m, 120, 30);
+        assert!(
+            out.contains("by src app · sort conns ↓ · flows /5432"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn x_keeps_the_cursor_on_its_flow_and_folds_are_per_grouping() {
+        let mut m = model_with_rich_flows();
+        for _ in 0..5 {
+            quiet(&mut m, key('j'));
+        }
+        let flow = m.traffic.selected_flow().unwrap().flow.clone();
+        quiet(&mut m, key('x'));
+        assert!(std::sync::Arc::ptr_eq(
+            &m.traffic.selected_flow().unwrap().flow,
+            &flow
+        ));
+        quiet(&mut m, key('x'));
+        assert!(std::sync::Arc::ptr_eq(
+            &m.traffic.selected_flow().unwrap().flow,
+            &flow
+        ));
+        // Fold by destination app; by source app has its own folds.
+        quiet(&mut m, key(' '));
+        let dst_folds = m.traffic.flows_state.folded_dst.clone();
+        assert_eq!(dst_folds.len(), 1);
+        quiet(&mut m, key('X'));
+        assert_eq!(m.traffic.flows_state.by, FlowsBy::Src);
+        assert!(m.traffic.flows_state.folded().is_empty());
+        assert!(
+            m.traffic
+                .flows_grouped
+                .rows()
+                .iter()
+                .all(|r| !matches!(r.kind, RowKind::Header { folded: true, .. }))
+        );
+        quiet(&mut m, key('x'));
+        assert_eq!(m.traffic.flows_state.folded(), &dst_folds, "kept");
+        // Back to flat: the cursor still on a flow of the table.
+        quiet(&mut m, key('x'));
+        assert_eq!(m.traffic.flows_state.by, FlowsBy::Flat);
+        assert!(m.traffic.selected_flow().is_some());
+    }
+
+    #[test]
+    fn f_on_a_flow_by_dst_app_focuses_the_sections_app_first() {
+        let mut m = grouped('X');
+        quiet(&mut m, key('j'));
+        let r = m.traffic.flows_grouped.selected_item().unwrap().clone();
+        let f = &r.flow().unwrap().flow;
+        let keys = m.traffic.effective_keys();
+        assert_eq!(group_key(&f.dst, &keys), r.app);
+        assert_eq!(m.traffic.row_apps()[0], r.app);
+        quiet(&mut m, key('F'));
+        assert_eq!(m.traffic.focus.as_ref().map(|x| x.app.clone()), Some(r.app));
+    }
+
+    #[test]
+    fn enter_on_a_header_under_a_drill_narrows_and_never_widens() {
+        // A drill to one destination app, grouped by source app: a
+        // header narrows to the pair.
+        let mut m = model_with_rich_flows();
+        let crm = vec!["crm".to_string(), "prod".to_string()];
+        m.traffic.drill = Some(Drill::App {
+            app: crm.clone(),
+            direction: Some(Direction::In),
+            decisions: Decisions::All,
+        });
+        m.traffic.rebuild_views();
+        quiet(&mut m, key('x'));
+        m.traffic.flows_grouped.home();
+        let src = m.traffic.flows_grouped.selected_item().unwrap().app.clone();
+        let n = sections(m.traffic.flows_grouped.rows())[0].1;
+        quiet(&mut m, kc(KeyCode::Enter));
+        assert_eq!(
+            m.traffic.drill,
+            Some(Drill::Pair(src.clone(), crm.clone(), Decisions::All))
+        );
+        assert_eq!(m.traffic.flows.rows().len() as u64, n);
+        // One app on each side already: nothing changes.
+        quiet(&mut m, kc(KeyCode::Enter));
+        assert_eq!(
+            m.traffic.drill,
+            Some(Drill::Pair(src, crm.clone(), Decisions::All))
+        );
+        assert_eq!(m.status.text, "the drill holds only this app already");
+        // Either side (`both`): no single drill says it; the header folds.
+        m.traffic.drill = Some(Drill::App {
+            app: crm.clone(),
+            direction: None,
+            decisions: Decisions::All,
+        });
+        m.traffic.rebuild_views();
+        m.traffic.flows_grouped.home();
+        let before = m.traffic.drill.clone();
+        quiet(&mut m, kc(KeyCode::Enter));
+        assert_eq!(m.traffic.drill, before, "never widened");
+        assert_eq!(m.status.text, "drill active: Esc first");
+        assert!(matches!(
+            m.traffic.flows_grouped.selected_item().unwrap().kind,
+            RowKind::Header { folded: true, .. }
+        ));
+    }
+
+    #[test]
     fn m_on_a_flows_header_marks_the_app_side() {
         let dir = tempfile::tempdir().unwrap();
         let mut m = crate::tui::test_support::model_with_marks(dir.path(), "");
         quiet(&mut m, key('x'));
+        m.traffic.flows_grouped.home();
         let app = m
             .traffic
             .flows_grouped

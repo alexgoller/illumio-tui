@@ -379,7 +379,8 @@ fn flows_by_app_80x24() {
     gen_key(&mut m, 'x');
     let out = render_to_string(&m, 80, 24);
     assert!(out.contains("by src app"), "{out}");
-    assert!(out.contains("▾ ipl:Corp/-  "), "{out}");
+    // The cursor stays on the flat table's first flow, now under shop/prod.
+    assert!(out.contains("▾ shop/prod  6 flows · 1004 conns"), "{out}");
     insta::assert_snapshot!("traffic_flows_by_src_app_80x24", out);
     // By destination app, by flows, the header's detail open.
     gen_key(&mut m, 'x');
