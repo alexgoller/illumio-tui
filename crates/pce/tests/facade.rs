@@ -504,6 +504,49 @@ async fn events_are_cached_briefly_and_default_to_500_rows() {
 }
 
 #[tokio::test]
+async fn events_are_truncated_only_when_the_row_cap_is_reached() {
+    use pce::models::EventFilter;
+    // `/events` reports every retained event in X-Total-Count, not only the
+    // window's (#37): 4 rows of a 500 cap are the whole window.
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/events"))
+        .and(query_param("max_results", "500"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/events.json"))
+                .insert_header("Content-Type", "application/json")
+                .insert_header("X-Total-Count", "9000"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/events"))
+        .and(query_param("max_results", "4"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/events.json"))
+                .insert_header("Content-Type", "application/json")
+                .insert_header("X-Total-Count", "9000"),
+        )
+        .mount(&server)
+        .await;
+    let p = pce_for(&server);
+    let all = p
+        .events(&EventFilter::default(), CacheMode::Use)
+        .await
+        .unwrap();
+    assert_eq!(all.value.len(), 4);
+    assert!(!all.truncated, "4 of a 500 cap: the window is complete");
+    let capped = EventFilter {
+        max_results: Some(4),
+        ..Default::default()
+    };
+    let c = p.events(&capped, CacheMode::Use).await.unwrap();
+    assert!(c.truncated, "the cap was reached: more may exist");
+}
+
+#[tokio::test]
 async fn active_lists_are_cached_under_objects_and_dropped_by_a_write() {
     let server = MockServer::start().await;
     for (p, body) in [

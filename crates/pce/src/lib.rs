@@ -304,8 +304,16 @@ impl Pce {
         if !query.iter().any(|(k, _)| *k == "max_results") {
             query.push(("max_results", Self::DEFAULT_EVENTS_MAX_RESULTS.to_string()));
         }
-        self.cached_list("events", &path, query, self.ttls.events, mode)
-            .await
+        let cap = filter
+            .max_results
+            .unwrap_or(Self::DEFAULT_EVENTS_MAX_RESULTS) as usize;
+        let mut c = self
+            .cached_list("events", &path, query, self.ttls.events, mode)
+            .await?;
+        // `/events` counts every retained event in X-Total-Count, not only
+        // the window's (#37): only a full page means more may exist.
+        c.truncated = c.value.len() >= cap;
+        Ok(c)
     }
 
     pub async fn rule_sets(
