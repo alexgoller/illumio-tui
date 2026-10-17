@@ -542,3 +542,66 @@ pub fn batch_plan() -> pce::write::Batch {
         note: None,
     }
 }
+
+/// The rich fixture's marks: two squelches (the Corp list; shop's eu
+/// web tier to its databases on 5432), a critical on blocked flows into
+/// shop/prod's databases (it takes two flows from the squelches),
+/// erp/prod reviewed inside itself, erp/dev accepted as blocked, hr to
+/// revisit.
+pub const RICH_MARKS: &str = r#"
+[[mark]]
+id = "m-sq1"
+action = "squelch"
+src = { ip_list = "Corp" }
+dst = "any"
+comment = "scanner"
+
+[[mark]]
+id = "m-sq2"
+action = "squelch"
+src = { labels = { role = "web", loc = "eu" } }
+dst = { labels = { role = "db" } }
+service = "5432/tcp"
+comment = "app tier to its db"
+
+[[mark]]
+id = "m-crit"
+action = "critical"
+src = "any"
+dst = { labels = { app = "shop", env = "prod", role = "db" } }
+decision = "blocked"
+comment = "payments db"
+
+[[mark]]
+id = "m-rev"
+action = "reviewed"
+src = { labels = { app = "erp", env = "prod" } }
+dst = { labels = { app = "erp", env = "prod" } }
+comment = "erp inside itself"
+
+[[mark]]
+id = "m-acc"
+action = "accept-blocked"
+src = { labels = { app = "erp", env = "dev" } }
+dst = "any"
+decision = ["blocked", "potentially_blocked"]
+comment = "dev stays out (CHG-1)"
+
+[[mark]]
+id = "m-hr"
+action = "revisit"
+src = { labels = { app = "hr" } }
+dst = "any"
+comment = "ask hr"
+"#;
+
+/// The rich fixture loaded with `marks` written to `dir/marks.toml` (a
+/// temp dir the test owns; never the real config), the views rebuilt.
+pub fn model_with_marks(dir: &std::path::Path, marks: &str) -> Model {
+    let path = dir.join("marks.toml");
+    std::fs::write(&path, marks).expect("write marks.toml");
+    let mut m = model_with_rich_flows();
+    m.traffic.marks = crate::marks::MarksStore::new(path);
+    m.traffic.rebuild_views();
+    m
+}

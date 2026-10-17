@@ -1,5 +1,6 @@
 //! All TUI state. No I/O, no terminal types beyond sizes.
 use crate::cli::output::join_list;
+use crate::marks::MarksStore;
 use crate::tui::app_picker::AppPicker;
 use crate::tui::app_view::AppView;
 use crate::tui::diff::ObjectDiff;
@@ -7,8 +8,10 @@ use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::form::Form;
 use crate::tui::picker::KeyPicker;
 use crate::tui::table::{Column, SortKey, TableView};
+use crate::tui::traffic_marks::{MarkedView, Squelch, sum_marks};
 use crate::tui::ui::theme::Theme;
 use pce::impact::RuleActors;
+use pce::marks::{Hit, PceId, RowMarks, annotate_groups, annotate_mesh, annotate_sections};
 use pce::models::{
     Actor, DenyRule, Event, EventFilter, IpList, Label, LabelGroup, PendingChange, PolicyScope,
     Rule, RuleSet, Service, VenHealth, Workload,
@@ -24,7 +27,7 @@ use pce::write::Plan;
 use pce::{
     IpListSize, KeyOrder, NameIndex, RuleKind, RuleSetView, RuleView, StatsSnapshot, ip_list_size,
 };
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
@@ -439,6 +442,8 @@ pub struct FlowRow {
     pub flow: ResolvedFlow,
     pub src_group: String,
     pub dst_group: String,
+    /// The flow's winning mark, while marks are active.
+    pub mark: Option<Hit>,
 }
 
 impl FlowRow {
@@ -447,6 +452,7 @@ impl FlowRow {
             src_group: group_text(&flow.src, keys),
             dst_group: group_text(&flow.dst, keys),
             flow,
+            mark: None,
         }
     }
 }
@@ -1246,6 +1252,11 @@ pub enum RowKind {
     Header {
         totals: Vec<(Direction, Totals)>,
         folded: bool,
+        /// The section's rows' marks summed: any highlight, dimmed when all
+        /// are quiet. Boxed: a header is otherwise small.
+        marks: Option<Box<RowMarks>>,
+        /// Blocked: records accepted as blocked (left out of `totals`).
+        accepted: u64,
     },
     Peer {
         direction: Direction,
@@ -1283,12 +1294,23 @@ impl SectionRow {
     /// `▹` when folded; `← 1545 conns · …  → 1004 conns` for `both`.
     /// `None` for a peer.
     pub fn header_line(&self) -> Option<String> {
-        let RowKind::Header { totals, folded } = &self.kind else {
+        let RowKind::Header {
+            totals,
+            folded,
+            accepted,
+            ..
+        } = &self.kind
+        else {
             return None;
         };
         let parts: Vec<(Direction, &Totals)> = totals.iter().map(|(d, t)| (*d, t)).collect();
+        let accepted = if *accepted > 0 {
+            format!(" · {accepted} accepted")
+        } else {
+            String::new()
+        };
         Some(format!(
-            "{} {}  {}",
+            "{} {}  {}{accepted}",
             if *folded { "▹" } else { "▾" },
             self.app.join("/"),
             app_header(&parts)
@@ -1355,6 +1377,14 @@ pub fn section_rows(
                     .map(|s| (s.direction, s.totals.clone()))
                     .collect(),
                 folded: is_folded,
+                marks: sum_marks(
+                    group
+                        .iter()
+                        .flat_map(|s| &s.rows)
+                        .map(|r| (r.flows, r.marks.as_ref())),
+                )
+                .map(Box::new),
+                accepted: 0,
             },
             haystack: Arc::from(""),
         };
@@ -1768,6 +1798,24 @@ pub struct TrafficState {
     /// The loaded flows the focus keeps, computed once whenever the focus
     /// or the data changes (`refresh_focused`); `None` without a focus.
     focused: Option<Vec<ResolvedFlow>>,
+    /// `marks.toml` (no file until `app::run` gives the path): refreshed
+    /// at every `rebuild_views`, one `stat`, never a request.
+    pub marks: MarksStore,
+    /// The PCE the marks are scoped to: the profile's.
+    pub marks_pce: PceId,
+    /// When the marks were last judged (expiry).
+    pub marks_now: jiff::Timestamp,
+    /// `M`: squelched flows shown (dimmed `~`) instead of left out.
+    pub show_squelched: bool,
+    /// What the marks did to the result on screen; `None` without a valid
+    /// file holding an active (or draft-waiting) mark.
+    pub marked: Option<MarkedView>,
+    /// The flows the views aggregate while squelched ones are left out.
+    pub(crate) unsquelched: Option<Vec<ResolvedFlow>>,
+    /// A status the marks file asks for; `update` shows it once.
+    pub(crate) marks_notice: Option<StatusLine>,
+    /// The startup line on marks expiring soon was considered.
+    pub(crate) marks_announced: bool,
 }
 
 /// Both optional Mesh columns shown.
@@ -1930,6 +1978,17 @@ impl TrafficState {
             focus_result: None,
             unfocused: None,
             focused: None,
+            marks: MarksStore::none(),
+            marks_pce: PceId {
+                host: String::new(),
+                org: 0,
+            },
+            marks_now: jiff::Timestamp::now(),
+            show_squelched: false,
+            marked: None,
+            unsquelched: None,
+            marks_notice: None,
+            marks_announced: false,
         }
     }
 
@@ -1939,8 +1998,18 @@ impl TrafficState {
     }
 
     /// The loaded flows the focus keeps (all of them, borrowed, without
-    /// one): what every view aggregates, under the drill and `d`.
+    /// one), squelched ones left out unless `M`: what every view
+    /// aggregates, under the drill and `d`.
     pub fn view_flows(&self) -> &[ResolvedFlow] {
+        match &self.unsquelched {
+            Some(f) => f,
+            None => self.focus_flows(),
+        }
+    }
+
+    /// The loaded flows the focus keeps, marks not applied: what the
+    /// marks are matched against.
+    pub fn focus_flows(&self) -> &[ResolvedFlow] {
         match &self.focused {
             Some(f) => f,
             None => self.loaded_flows(),
@@ -2335,26 +2404,48 @@ impl TrafficState {
             .cloned()
     }
 
-    /// Recomputes every view from `data` with the keys in force. Pure;
-    /// never requests.
+    /// Recomputes every view from `data` with the keys in force. Pure
+    /// apart from one `stat` of `marks.toml` (a local file, re-read only
+    /// when it changed); never requests.
     pub fn rebuild_views(&mut self) {
         self.sync_draft_columns();
         self.keys = self.resolve_keys();
         self.refresh_focused();
-        let (shown, tree, mesh_rows) = {
+        self.refresh_marks();
+        let (shown, tree, mesh_rows, counts) = {
             let keys = &self.keys;
             let flows = self.view_flows();
+            let hits = self.marked.as_ref().map(|m| m.hits.as_slice());
+            let drilled = |f: &ResolvedFlow| self.drill.as_ref().is_none_or(|d| d.matches(f, keys));
             let shown: Vec<FlowRow> = flows
                 .iter()
-                .filter(|f| self.drill.as_ref().is_none_or(|d| d.matches(f, keys)))
-                .map(|f| FlowRow::new(f.clone(), keys))
+                .enumerate()
+                .filter(|(_, f)| drilled(f))
+                .map(|(i, f)| FlowRow {
+                    mark: hits.and_then(|h| h.get(i).copied().flatten()),
+                    ..FlowRow::new(f.clone(), keys)
+                })
                 .collect();
-            (
-                shown,
-                group_by_labels(flows, keys),
-                mesh(flows, keys, self.mesh_cols),
-            )
+            let mut tree = group_by_labels(flows, keys);
+            let cols = self.mesh_cols;
+            let mut mesh_rows = mesh(flows, keys, cols);
+            let counts = self.marks_ctx().map(|(a, mv)| {
+                annotate_groups(&mut tree, &mv.marked, &a, |f| group_by_labels(f, keys));
+                let gone = annotate_mesh(&mut mesh_rows, &mv.marked, &a, |f| mesh(f, keys, cols));
+                let flows = mv.marked.squelched_where(drilled);
+                (
+                    Squelch { rows: flows, flows },
+                    self.squelch(gone, |_| true),
+                    self.squelch(0, |_| true),
+                )
+            });
+            (shown, tree, mesh_rows, counts)
         };
+        if let (Some(mv), Some((flows, mesh, treemap))) = (self.marked.as_mut(), counts) {
+            mv.flows = flows;
+            mv.mesh = mesh;
+            mv.treemap = treemap;
+        }
         self.flows.set_rows(shown);
         self.treemap.groups = tree;
         self.mesh.set_rows(mesh_rows);
@@ -2401,18 +2492,36 @@ impl TrafficState {
     /// App-to-app's pairs, and by service while `o` is on (none while off),
     /// from the flows the focus and the decision filter keep. Pure.
     pub fn rebuild_pairs(&mut self) {
-        let (groups, services) = {
+        let (groups, services, counts) = {
             let st = &self.apps_state;
+            let keys = &self.keys;
             let flows = self.view_flows();
             let kept = st.decisions.kept(flows);
-            let groups = group_by_labels(&kept, &self.keys);
-            let services = if st.by_service {
-                group_by_service(&kept, &self.keys)
+            let mut groups = group_by_labels(&kept, keys);
+            let mut services = if st.by_service {
+                group_by_service(&kept, keys)
             } else {
                 Vec::new()
             };
-            (groups, services)
+            let d = st.decisions;
+            let counts = self.marks_ctx().map(|(a, mv)| {
+                let pairs = annotate_groups(&mut groups, &mv.marked, &a, |f| {
+                    group_by_labels(&d.kept(f), keys)
+                });
+                let by_service = annotate_groups(&mut services, &mv.marked, &a, |f| {
+                    group_by_service(&d.kept(f), keys)
+                });
+                (
+                    self.squelch(pairs, |f| d.keeps(f)),
+                    self.squelch(by_service, |f| d.keeps(f)),
+                )
+            });
+            (groups, services, counts)
         };
+        if let (Some(mv), Some((pairs, services))) = (self.marked.as_mut(), counts) {
+            mv.pairs = pairs;
+            mv.services = services;
+        }
         self.groups.set_rows(groups);
         self.services.set_rows(services);
     }
@@ -2437,45 +2546,83 @@ impl TrafficState {
     /// App-to-app's sections (none in `pairs`) and Blocked's, from the
     /// loaded flows, the keys in force, the state and the folds. Pure.
     pub fn rebuild_sections(&mut self) {
-        let apps = self.apps_rows(&self.apps_state.folded);
-        let blocked = self.blocked_rows(&self.blocked_folded);
+        let (apps, apps_sq) = self.apps_rows(&self.apps_state.folded);
+        let (blocked, blocked_sq, open, accepted) = self.blocked_rows(&self.blocked_folded);
+        if let Some(mv) = self.marked.as_mut() {
+            mv.sections = apps_sq;
+            mv.blocked = blocked_sq;
+            mv.blocked_open = open;
+            mv.accepted = accepted;
+        }
         self.apps.set_rows(apps);
         self.blocked.set_rows(blocked);
     }
 
-    /// App-to-app's rows under `folded`; none in `pairs`.
-    fn apps_rows(&self, folded: &BTreeSet<Vec<String>>) -> Vec<SectionRow> {
+    /// App-to-app's sections in force (none in `pairs`), from `flows`.
+    fn apps_sections(&self, flows: &[ResolvedFlow]) -> Vec<AppSection> {
         let keys = &self.keys;
-        let flows = self.view_flows();
         let st = &self.apps_state;
         match st.by {
             By::Pairs => Vec::new(),
-            By::In => section_rows(
-                &app_sections(flows, keys, Direction::In, st.decisions),
-                folded,
-                false,
-            ),
-            By::Out => section_rows(
-                &app_sections(flows, keys, Direction::Out, st.decisions),
-                folded,
-                false,
-            ),
-            By::Both => section_rows(&app_sections_both(flows, keys, st.decisions), folded, true),
+            By::In => app_sections(flows, keys, Direction::In, st.decisions),
+            By::Out => app_sections(flows, keys, Direction::Out, st.decisions),
+            By::Both => app_sections_both(flows, keys, st.decisions),
         }
     }
 
-    /// Blocked's rows under `folded`.
-    fn blocked_rows(&self, folded: &BTreeSet<Vec<String>>) -> Vec<SectionRow> {
-        section_rows(
-            &app_sections(
-                self.view_flows(),
-                &self.keys,
-                Direction::In,
-                Decisions::Blocked,
-            ),
-            folded,
-            false,
-        )
+    /// App-to-app's rows under `folded` (none in `pairs`), the marks
+    /// joined to them, and its squelched counts.
+    fn apps_rows(&self, folded: &BTreeSet<Vec<String>>) -> (Vec<SectionRow>, Squelch) {
+        let mut sections = self.apps_sections(self.view_flows());
+        let d = self.apps_state.decisions;
+        let sq = self
+            .marks_ctx()
+            .map(|(a, mv)| {
+                let gone =
+                    annotate_sections(&mut sections, &mv.marked, &a, |f| self.apps_sections(f));
+                self.squelch(gone, |f| d.keeps(f))
+            })
+            .unwrap_or_default();
+        let both = self.apps_state.by == By::Both;
+        (section_rows(&sections, folded, both), sq)
+    }
+
+    /// Blocked's rows under `folded`, the marks joined to them, its
+    /// squelched counts, and its records still blocked and accepted: the
+    /// accepted ones are taken out of each header's blocked counts.
+    fn blocked_rows(&self, folded: &BTreeSet<Vec<String>>) -> (Vec<SectionRow>, Squelch, u64, u64) {
+        let keys = &self.keys;
+        let blocked = |f: &[ResolvedFlow]| app_sections(f, keys, Direction::In, Decisions::Blocked);
+        let mut sections = blocked(self.view_flows());
+        let mut accepted: BTreeMap<Vec<String>, u64> = BTreeMap::new();
+        let mut sq = Squelch::default();
+        if let Some((a, mv)) = self.marks_ctx() {
+            let gone = annotate_sections(&mut sections, &mv.marked, &a, blocked);
+            sq = self.squelch(gone, |f| Decisions::Blocked.keeps(f));
+            for acc in blocked(&self.accepted_flows()) {
+                if let Some(s) = sections.iter_mut().find(|s| s.app == acc.app) {
+                    // A subset of the section's own records; saturating
+                    // all the same, so a count can never panic.
+                    s.totals.blocked = s.totals.blocked.saturating_sub(acc.totals.blocked);
+                    s.totals.potentially_blocked = s
+                        .totals
+                        .potentially_blocked
+                        .saturating_sub(acc.totals.potentially_blocked);
+                    accepted.insert(acc.app, acc.totals.flows);
+                }
+            }
+        }
+        let open = sections
+            .iter()
+            .map(|s| s.totals.blocked + s.totals.potentially_blocked)
+            .sum();
+        let mut rows = section_rows(&sections, folded, false);
+        for r in &mut rows {
+            if let RowKind::Header { accepted: n, .. } = &mut r.kind {
+                *n = accepted.get(&r.app).copied().unwrap_or(0);
+            }
+        }
+        (rows, sq, open, accepted.values().sum())
     }
 
     /// The sectioned table on screen with every section unfolded, its
@@ -2484,9 +2631,9 @@ impl TrafficState {
         let none = BTreeSet::new();
         let (table, rows) = match self.view {
             TrafficView::Aggregate if self.apps_state.by != By::Pairs => {
-                (&self.apps, self.apps_rows(&none))
+                (&self.apps, self.apps_rows(&none).0)
             }
-            TrafficView::Blocked => (&self.blocked, self.blocked_rows(&none)),
+            TrafficView::Blocked => (&self.blocked, self.blocked_rows(&none).0),
             _ => return None,
         };
         let shown = table.visible_of(&rows);
@@ -4747,6 +4894,10 @@ impl Model {
         );
         traffic.treemap.area = crate::tui::ui::screens::traffic::treemap_area(size);
         traffic.set_key_order(&KeyOrder::new(&scope_keys, crate::config::DEFAULT_TIER_KEY));
+        traffic.marks_pce = PceId {
+            host: profile.host.clone(),
+            org: profile.org_id,
+        };
         let policy = PolicyState::new(auto_refresh_min_seconds);
         let objects = ObjectsState::new(auto_refresh_min_seconds);
         let workloads = WorkloadsState::new(auto_refresh_min_seconds);
@@ -4937,6 +5088,14 @@ impl Model {
         traffic.set_key_order(&self.limits.key_order());
         traffic.seq = self.traffic.seq + 1; // a late result of the old query is stale
         traffic.treemap.area = crate::tui::ui::screens::traffic::treemap_area(self.size);
+        // The marks file and `M` are the session's; their PCE the new profile's.
+        traffic.marks = std::mem::replace(&mut self.traffic.marks, MarksStore::none());
+        traffic.marks_announced = true;
+        traffic.show_squelched = self.traffic.show_squelched;
+        traffic.marks_pce = PceId {
+            host: self.profile.host.clone(),
+            org: self.profile.org_id,
+        };
         self.traffic = traffic;
         self.policy = PolicyState::new(min);
         self.objects = ObjectsState::new(min);

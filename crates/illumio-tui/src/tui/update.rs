@@ -29,6 +29,8 @@ use pce::{CacheMode, RuleKind, WriteMethod};
 use std::time::Instant;
 
 mod generator;
+#[cfg(test)]
+mod marks_tests;
 
 /// The status and header note for a result a supercluster region did not
 /// answer.
@@ -64,6 +66,11 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
     );
     if traffic_answer && gen_open {
         generator::rebuild_gen(model);
+    }
+    // The marks file changed into (or out of) an invalid state, or marks
+    // expire soon: one status line, once.
+    if let Some(s) = model.traffic.take_marks_notice() {
+        model.status = s;
     }
     cmds
 }
@@ -2198,6 +2205,8 @@ fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             model.status = model.traffic.auto.toggle();
         }
         KeyCode::Char('w') => return flow_rule_key(model),
+        // Squelched flows shown or left out: a rebuild, no request.
+        KeyCode::Char('M') => model.status = model.traffic.toggle_squelched(),
         KeyCode::Char('g') => {
             model.overlay = Overlay::GroupKeys(open_key_picker(model));
             return Vec::new();

@@ -1098,6 +1098,9 @@ pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
         cfg.traffic_default_window.clone(),
         writes,
     );
+    // marks.toml next to the config file: read at every rebuild (a stat).
+    model.traffic.marks =
+        crate::marks::MarksStore::new(crate::marks::marks_path(global.config.as_deref()));
     model.set_label_model(
         cfg.scope_keys.clone(),
         cfg.tier_key.clone(),

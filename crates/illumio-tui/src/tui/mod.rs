@@ -19,6 +19,7 @@ pub mod msg;
 pub mod picker;
 pub mod table;
 pub mod test_support;
+pub mod traffic_marks;
 pub mod ui;
 pub mod update;
 
