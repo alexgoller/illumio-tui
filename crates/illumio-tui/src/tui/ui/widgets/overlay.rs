@@ -5,7 +5,9 @@ use crate::tui::edit::EditIntent;
 use crate::tui::event_diff::{DetailLine, detail_lines};
 use crate::tui::filter::{FIELD_NAMES, FilterEditor};
 use crate::tui::form::{Form, clip, visible_tail, wrap_rows};
-use crate::tui::help::{HelpContext, HelpPage, HelpRow, other_topics, page_rows};
+use crate::tui::help::{
+    HelpContext, HelpPage, HelpRow, fit_names, key_width, other_topics, page_rows,
+};
 use crate::tui::model::{Model, Screen, TrafficView, rule_kind_name};
 use crate::tui::picker::KeyPicker;
 use crate::tui::ui::layout::centered;
@@ -36,15 +38,7 @@ fn help_layout(model: &Model, area: Rect) -> HelpLayout {
     let ctx = HelpContext::of(model);
     let page = model.help_page;
     let rows = page_rows(page, ctx);
-    let widest_key = rows
-        .iter()
-        .map(|r| match r {
-            HelpRow::Key(k, _) => k.chars().count(),
-            _ => 0,
-        })
-        .max()
-        .unwrap_or(0);
-    let key_width = (widest_key + 2).min(24);
+    let key_width = key_width(&rows);
     let widest = rows
         .iter()
         .map(|r| match r {
@@ -54,26 +48,27 @@ fn help_layout(model: &Model, area: Rect) -> HelpLayout {
         })
         .max()
         .unwrap_or(0);
-    let footer = match page {
-        HelpPage::Context => {
-            let names: Vec<&str> = other_topics(page, ctx)
-                .iter()
-                .map(|t| t.group().title)
-                .collect();
-            Some(format!("more: {}", names.join(" · ")))
-        }
-        HelpPage::Group(t) => Some(format!(
-            "next: {} · prev: {}",
-            t.next().group().title,
-            t.prev().group().title
-        )),
-        HelpPage::All => None,
-    };
+    let has_footer = page != HelpPage::All;
     let w = (widest + 3).clamp(60, 96) as u16;
-    let h = (rows.len() + usize::from(footer.is_some()) + 2).min(u16::MAX as usize) as u16;
+    let h = (rows.len() + usize::from(has_footer) + 2).min(u16::MAX as usize) as u16;
     let rect = centered(area, w, h);
     let inner = rect.height.saturating_sub(2) as usize;
-    let footer = footer.filter(|_| inner >= 2);
+    let width = rect.width.saturating_sub(2) as usize;
+    // Only whole names: what does not fit is counted (`+N`) or left out.
+    let footer = match page {
+        _ if inner < 2 => None,
+        HelpPage::Context => {
+            let names: Vec<&str> = other_topics(page, ctx).iter().map(|t| t.title()).collect();
+            fit_names("more: ", &names, width)
+        }
+        HelpPage::Group(t) => [
+            format!("next: {} · prev: {}", t.next().title(), t.prev().title()),
+            format!("next: {}", t.next().title()),
+        ]
+        .into_iter()
+        .find(|f| f.chars().count() <= width),
+        HelpPage::All => None,
+    };
     let body = inner - usize::from(footer.is_some());
     HelpLayout {
         ctx,
@@ -90,6 +85,11 @@ fn help_layout(model: &Model, area: Rect) -> HelpLayout {
 pub fn help_last_scroll(model: &Model, size: (u16, u16)) -> usize {
     let l = help_layout(model, Rect::new(0, 0, size.0, size.1));
     l.rows.len().saturating_sub(l.body)
+}
+
+/// The page lines the help box shows at once (`PgDn` / `PgUp` step).
+pub fn help_body_rows(model: &Model, size: (u16, u16)) -> usize {
+    help_layout(model, Rect::new(0, 0, size.0, size.1)).body
 }
 
 /// The `?` help: the page's groups under their headings, scrolled; the
@@ -109,7 +109,7 @@ pub fn render_help(model: &Model, f: &mut Frame, area: Rect) {
     };
     let title = match model.help_page {
         HelpPage::Context => format!("Keys · {}", l.ctx.name()),
-        HelpPage::Group(g) => format!("Keys · {}", g.group().title),
+        HelpPage::Group(g) => format!("Keys · {}", g.title()),
         HelpPage::All => "Keys · all".to_string(),
     };
     let toggle = if model.help_page == HelpPage::All {

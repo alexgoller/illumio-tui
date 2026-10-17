@@ -4,137 +4,197 @@
 //! at a time, `a` all of them. Rendering is in `ui::widgets::overlay`.
 use crate::tui::model::{Model, Overlay, Screen, TrafficView};
 
-/// A titled group of key lines; a line with an empty key continues the one above.
-pub struct HelpGroup {
-    pub title: &'static str,
-    pub lines: &'static [(&'static str, &'static str)],
+/// Where a help line shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Show {
+    /// On every page with its group.
+    Always,
+    /// Only on a group's own page and the all page (`Tab`, `a`): steps,
+    /// costs and other detail that would clutter the context page.
+    Detail,
+    /// Only on the context page: a compact stand-in for detail lines.
+    Brief,
 }
 
-/// The groups, in the order `Tab` walks them; `HelpTopic` indexes it.
+/// One help line: its keys (empty: it continues the line above) and text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HelpLine {
+    pub key: &'static str,
+    pub text: &'static str,
+    pub show: Show,
+}
+
+const fn key(key: &'static str, text: &'static str) -> HelpLine {
+    HelpLine {
+        key,
+        text,
+        show: Show::Always,
+    }
+}
+
+const fn more(key: &'static str, text: &'static str) -> HelpLine {
+    HelpLine {
+        key,
+        text,
+        show: Show::Detail,
+    }
+}
+
+const fn brief(key: &'static str, text: &'static str) -> HelpLine {
+    HelpLine {
+        key,
+        text,
+        show: Show::Brief,
+    }
+}
+
+/// A titled group of help lines.
+pub struct HelpGroup {
+    pub title: &'static str,
+    pub lines: &'static [HelpLine],
+}
+
+/// Every group; `HelpTopic::group` finds one by its title.
 pub const HELP_GROUPS: &[HelpGroup] = &[
     HelpGroup {
         title: "Everywhere",
         lines: &[
-            (
+            key(
                 "1 2 3 4 5",
                 "Traffic · Policy · Objects · Workloads · Events",
             ),
-            ("?", "this help"),
-            ("q / Ctrl-C", "quit"),
-            ("↑ ↓ PgUp PgDn", "move in the current table (also Home End)"),
-            ("s", "cycle sort column and direction"),
-            ("/", "search in the current table (Enter keep, Esc clear)"),
-            ("r", "refresh the current screen (bypasses the cache)"),
-            ("a", "toggle auto-refresh for the current screen"),
-            ("y / n", "send / cancel a shown request"),
-            ("Esc", "close overlay / cancel"),
-            (
+            brief(":", "command prompt (Tab → Commands)"),
+            key("↑ ↓ PgUp PgDn", "move in the current table (also Home End)"),
+            brief("s / r a", "sort · search · refresh · auto-refresh"),
+            more("s", "cycle sort column and direction"),
+            more("/", "search in the current table (Enter keep, Esc clear)"),
+            more("r", "refresh the current screen (bypasses the cache)"),
+            more("a", "toggle auto-refresh for the current screen"),
+            key("y / n", "send / cancel a shown request"),
+            key("Esc", "close overlay / cancel"),
+            key("q / Ctrl-C", "quit"),
+        ],
+    },
+    HelpGroup {
+        title: "Overlay",
+        lines: &[
+            key("?", "this help"),
+            key("Esc / q", "back"),
+            key("Ctrl-C", "quit"),
+        ],
+    },
+    HelpGroup {
+        title: "Commands",
+        lines: &[
+            key(":", "command prompt: :traffic :policy :objects :workloads"),
+            key("", ":events  :iplists  :filter <expr>  :window <dur>"),
+            key("", ":profile <name>  :draft  :active  :marks  :help  :q"),
+            key("", ":unicast  unicast flows only (again: every kind)"),
+            key("", ":focus <app>  (alone: a picker of the loaded apps)"),
+            key("", ":app <app>  the app overlay (alone: the picker)"),
+            key("", ":gen <app>  the policy generator (alone: the picker)"),
+            key("", ":writes [on|off]  :export[!] <path>  :batch"),
+            key("", "(the table on screen as CSV; ! overwrites)"),
+        ],
+    },
+    HelpGroup {
+        title: "Traffic",
+        lines: &[
+            key("v", "cycle Flows · App-to-app · Mesh · Blocked · Treemap"),
+            key("f", "edit filter: window src dst svc decision transmission"),
+            more(
+                "Ctrl-N Ctrl-P",
+                "in f: complete the filter fields · cycle back",
+            ),
+            key("+ / -", "widen (re-runs the window) / narrow (no request)"),
+            more("", "window steps 1h 6h 12h 1d 2d 3d 1w 2w 4w 90d"),
+            key("B", "re-run a truncated result at a larger cap"),
+            more("", "one rung per B: 10000 25000 … 200000; y above 10000"),
+            key("] / [", "raise / lower the result cap (re-runs the query)"),
+            more("", "cap steps 500 1000 2000 5000 10000 25000 … 200000"),
+            key("g", "pick the label keys every view groups by"),
+            key(
+                "F / X",
+                "focus on the row's app (again: other side) · in/out/both",
+            ),
+            more(
+                "",
+                "Esc clears; truncated: r re-queries the app (1-2 queries)",
+            ),
+            key("A", "app overlay: peers, policy, workloads"),
+            key(
+                "D",
+                "draft decision per flow (PCE draft view; again: clear)",
+            ),
+            more(
+                "",
+                "1 PUT on the query, polls, 1 download; no policy change",
+            ),
+            more("", "Esc cancels it; no known query: asks, then re-runs"),
+            key("w", "draft allow rule from a blocked flow or row (writes)"),
+            key(
+                "m",
+                "mark the row: squelch · reviewed · critical … (marks.toml)",
+            ),
+            key("M", "show or hide squelched rows (~)"),
+            key("Enter", "drill into a row or section header"),
+            more(
                 "Units",
                 "flows: flow records; conns, bytes: their lifetime counts",
             ),
         ],
     },
     HelpGroup {
-        title: "Commands",
-        lines: &[
-            (":", "command prompt: :traffic :policy :objects :workloads"),
-            ("", ":events  :iplists  :filter <expr>  :window <dur>"),
-            ("", ":profile <name>  :draft  :active  :marks  :help  :q"),
-            ("", ":unicast  unicast flows only (again: every kind)"),
-            ("", ":focus <app>  (alone: a picker of the loaded apps)"),
-            ("", ":app <app>  the app overlay (alone: the picker)"),
-            ("", ":gen <app>  the policy generator (alone: the picker)"),
-            ("", ":writes [on|off]  :export[!] <path>  :batch"),
-            ("", "(the table on screen as CSV; ! overwrites)"),
-        ],
-    },
-    HelpGroup {
-        title: "Traffic",
-        lines: &[
-            ("v", "cycle Flows · App-to-app · Mesh · Blocked · Treemap"),
-            ("f", "edit filter: window src dst svc decision transmission"),
-            ("+ / -", "widen (re-runs the window) / narrow (no request)"),
-            ("", "window steps 1h 6h 12h 1d 2d 3d 1w 2w 4w 90d"),
-            ("B", "re-run a truncated result at a larger cap"),
-            ("", "one rung per B: 10000 25000 … 200000; y above 10000"),
-            ("] / [", "raise / lower the result cap (re-runs the query)"),
-            ("", "cap steps 500 1000 2000 5000 10000 25000 … 200000"),
-            ("g", "pick the label keys every view groups by"),
-            (
-                "F / X",
-                "focus on the row's app (again: its other side) · in/out/both",
-            ),
-            (
-                "",
-                "Esc clears; truncated: r re-queries the app (1-2 queries)",
-            ),
-            ("A", "app overlay: peers, policy, workloads"),
-            (
-                "D",
-                "draft decision per flow (PCE draft view; again: clear)",
-            ),
-            (
-                "",
-                "1 PUT on the query, polls, 1 download; no policy change",
-            ),
-            ("", "Esc cancels it; no known query: asks, then re-runs"),
-            ("w", "draft allow rule from a blocked flow or row (writes)"),
-            (
-                "m",
-                "mark the row: squelch · reviewed · critical … (marks.toml)",
-            ),
-            ("M", "show or hide squelched rows (~)"),
-            (
-                "Enter",
-                "detail (flows) · drill into a row or section header",
-            ),
-        ],
-    },
-    HelpGroup {
         title: "Flows",
-        lines: &[(
-            "x / X",
-            "flat · by src app · by dst app · back (focused: X is direction)",
-        )],
+        lines: &[
+            key(
+                "x / X",
+                "flat · by src app · by dst app · back (focused: X: direction)",
+            ),
+            key("Enter", "the flow's detail"),
+        ],
     },
     HelpGroup {
         title: "App-to-app",
         lines: &[
-            (
+            key(
                 "x / X",
-                "pairs · in · out · both · back (focused: X is direction)",
+                "pairs · in · out · both · back (focused: X: direction)",
             ),
-            ("o", "pairs by service: one row per src, dst, port/proto"),
-            (
+            key("o", "pairs by service: one row per src, dst, port/proto"),
+            key(
                 "d",
-                "decision filter: all · blocked · blocked only (· fixed by draft)",
+                "decision: all · blocked · blocked only (· fixed by draft)",
             ),
         ],
     },
     HelpGroup {
+        title: "Blocked",
+        lines: &[key(
+            "x / X / d",
+            "none here: Blocked is App-to-app's in · blocked (v to it)",
+        )],
+    },
+    HelpGroup {
         title: "Sections",
         lines: &[
-            (
+            key(
                 "Space / z",
                 "fold a section · fold or unfold all (also Blocked, Flows)",
             ),
-            (
+            key(
                 "s",
                 "order: conns ↓ · app A→Z · flows ↓ (App-to-app, Flows)",
-            ),
-            (
-                "",
-                "Blocked is App-to-app with in · blocked: x / X / d are there",
             ),
         ],
     },
     HelpGroup {
         title: "Mesh",
-        lines: &[("u / p", "show or hide the user · process columns")],
+        lines: &[key("u / p", "show or hide the user · process columns")],
     },
     HelpGroup {
         title: "Treemap",
-        lines: &[(
+        lines: &[key(
             "hjkl Enter b",
             "move · zoom, then drill · conns/bytes · Esc out",
         )],
@@ -142,41 +202,41 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
     HelpGroup {
         title: "Marks",
         lines: &[
-            (
+            key(
                 ":marks [action]",
                 "the marks: Enter edit · x delete · e +30d",
             ),
-            ("", "(an action: only its marks; Esc / q back)"),
+            more("", "(an action: only its marks; Esc / q back)"),
         ],
     },
     HelpGroup {
         title: "App overlay",
         lines: &[
-            (
+            key(
                 "Tab j/k X Enter",
                 "panel · row · direction · open (peer: its flows)",
             ),
-            (
+            key(
                 "m w r Esc",
                 "mark · draft allow rule · reload panels (asks) · back",
             ),
-            ("G", "policy generator: the rules the app's traffic needs"),
+            key("G", "policy generator: the rules the app's traffic needs"),
         ],
     },
     HelpGroup {
         title: "Generator",
         lines: &[
-            (
+            key(
                 "←/→ < > =",
                 "granularity · the row's own (*) · back to the slider",
             ),
-            ("j/k Tab q", "rows (on into outbound) · section · back"),
-            (
+            key("j/k Tab q", "rows (on into outbound) · section · back"),
+            key(
                 "Space o R p",
                 "check a row · outbound · pick the ruleset · rule list",
             ),
-            ("c", "fan-in line: one rule off · Any · All Workloads"),
-            (
+            key("c", "fan-in line: one rule off · Any · All Workloads"),
+            key(
                 "Enter r Esc",
                 "plan the writes, one confirm (writes) · re-query · back",
             ),
@@ -185,19 +245,12 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
     HelpGroup {
         title: "Forms",
         lines: &[
-            (
-                "Ctrl-N Ctrl-P",
-                "form: complete from the index · cycle back",
-            ),
-            (
-                "Ctrl-N Ctrl-P",
-                "filter: complete the filter fields · cycle back",
-            ),
-            (
+            key("Ctrl-N Ctrl-P", "complete from the index · cycle back"),
+            key(
                 "Ruleset",
-                "w form: found by the destination's scope · Tab/Ctrl-N names",
+                "w form: by the destination's scope · Tab/Ctrl-N names",
             ),
-            (
+            key(
                 "Ctrl-A Ctrl-R",
                 "w form: all labels · create the typed ruleset",
             ),
@@ -206,40 +259,41 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
     HelpGroup {
         title: "Policy",
         lines: &[
-            ("d", "toggle draft / active"),
-            ("p", "pending changes"),
-            (
+            key("d", "toggle draft / active"),
+            key("p", "pending changes"),
+            key(
                 "Tab / Enter",
                 "pane · rule detail · on a ruleset: load deny rules",
             ),
-            ("N", "new deny rule in the selected ruleset (rules pane)"),
-            ("i", "rule impact: load the workloads once (1 request)"),
+            key("N", "new deny rule in the selected ruleset (rules pane)"),
+            key("i", "rule impact: load the workloads once (1 request)"),
         ],
     },
     HelpGroup {
         title: "Pending",
         lines: &[
-            ("j/k Space Enter", "select · mark · diff of a pending entry"),
-            ("P", "provision the marked entries, or all (writes)"),
-            ("R", "revert marked entries (draft-only ones are deleted)"),
+            key("j/k Space Enter", "select · mark · diff of a pending entry"),
+            key("P", "provision the marked entries, or all (writes)"),
+            key("R", "revert marked entries (draft-only ones are deleted)"),
         ],
     },
     HelpGroup {
         title: "Objects",
         lines: &[
-            (
+            key(
                 "Tab / Enter",
                 "next tab: labels, groups, services, IP lists · detail",
             ),
-            (
+            key(
                 "f / i / u",
-                "Labels: key filter · ignored keys · unused only (PCE usage)",
+                "Labels: key filter · ignored keys · unused only",
             ),
-            (
+            more("", "(unused: by the PCE's usage flags)"),
+            key(
                 "/=text /k=text",
                 "Labels: search values only · the values of key k",
             ),
-            (
+            key(
                 "Enter",
                 "IP lists: detail: ranges · FQDNs · size · rules using it",
             ),
@@ -248,51 +302,51 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
     HelpGroup {
         title: "Workloads",
         lines: &[
-            (
+            key(
                 "t/T h H Enter",
                 "Traffic as src/dst · unhealthy · health sort · detail",
             ),
-            (
+            key(
                 "E m o u c",
                 "enforcement · managed · offline · unlabeled · clear",
             ),
-            ("", "local, no request; c clears them and h, not /"),
+            more("", "local, no request; c clears them and h, not /"),
         ],
     },
     HelpGroup {
         title: "Events",
         lines: &[
-            (
+            key(
                 "f / Enter / S",
                 "filter · event as a change diff · sort by severity",
             ),
-            ("J", "in the detail: change diff ↔ raw JSON"),
-            (
-                "",
-                "detail: ↑/↓ j/k prev/next event · ^d/^u PgDn/PgUp ^e/^y g/G scroll",
-            ),
+            key("J", "in the detail: change diff ↔ raw JSON"),
+            key("↑/↓ j/k", "in the detail: prev/next event"),
+            key("^d ^u ^e ^y g G", "in the detail: scroll (also PgDn/PgUp)"),
         ],
     },
     HelpGroup {
         title: "Writes",
         lines: &[
-            (
+            key(
                 "n / e / x",
                 "new/edit/delete: Objects, IP lists, Workloads, Policy",
             ),
-            ("", "with :writes on; each request is shown first (y / n)"),
+            more("", "with :writes on; each request is shown first (y / n)"),
         ],
     },
 ];
 
-/// A group of `HELP_GROUPS`, by its position there.
+/// A group of `HELP_GROUPS`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HelpTopic {
     Everywhere,
+    Overlay,
     Commands,
     Traffic,
     Flows,
     AppToApp,
+    Blocked,
     Sections,
     Mesh,
     Treemap,
@@ -309,13 +363,14 @@ pub enum HelpTopic {
 }
 
 impl HelpTopic {
-    /// In `HELP_GROUPS` order.
-    pub const ALL: [HelpTopic; 18] = [
+    /// The order `Tab` walks (and the footer names).
+    pub const ALL: [HelpTopic; 20] = [
         HelpTopic::Everywhere,
         HelpTopic::Commands,
         HelpTopic::Traffic,
         HelpTopic::Flows,
         HelpTopic::AppToApp,
+        HelpTopic::Blocked,
         HelpTopic::Sections,
         HelpTopic::Mesh,
         HelpTopic::Treemap,
@@ -329,20 +384,55 @@ impl HelpTopic {
         HelpTopic::Workloads,
         HelpTopic::Events,
         HelpTopic::Writes,
+        HelpTopic::Overlay,
     ];
 
+    pub fn title(self) -> &'static str {
+        match self {
+            HelpTopic::Everywhere => "Everywhere",
+            HelpTopic::Overlay => "Overlay",
+            HelpTopic::Commands => "Commands",
+            HelpTopic::Traffic => "Traffic",
+            HelpTopic::Flows => "Flows",
+            HelpTopic::AppToApp => "App-to-app",
+            HelpTopic::Blocked => "Blocked",
+            HelpTopic::Sections => "Sections",
+            HelpTopic::Mesh => "Mesh",
+            HelpTopic::Treemap => "Treemap",
+            HelpTopic::Marks => "Marks",
+            HelpTopic::AppOverlay => "App overlay",
+            HelpTopic::Generator => "Generator",
+            HelpTopic::Forms => "Forms",
+            HelpTopic::Policy => "Policy",
+            HelpTopic::Pending => "Pending",
+            HelpTopic::Objects => "Objects",
+            HelpTopic::Workloads => "Workloads",
+            HelpTopic::Events => "Events",
+            HelpTopic::Writes => "Writes",
+        }
+    }
+
+    /// The group of the same title (a test checks every topic has one).
     pub fn group(self) -> &'static HelpGroup {
-        &HELP_GROUPS[self as usize]
+        let title = self.title();
+        HELP_GROUPS
+            .iter()
+            .find(|g| g.title == title)
+            .unwrap_or(&HELP_GROUPS[0])
+    }
+
+    fn position(self) -> usize {
+        Self::ALL.iter().position(|t| *t == self).unwrap_or(0)
     }
 
     /// `Tab`: the next group, wrapping.
     pub fn next(self) -> Self {
-        Self::ALL[(self as usize + 1) % Self::ALL.len()]
+        Self::ALL[(self.position() + 1) % Self::ALL.len()]
     }
 
     /// `BackTab`: the previous group, wrapping.
     pub fn prev(self) -> Self {
-        Self::ALL[(self as usize + Self::ALL.len() - 1) % Self::ALL.len()]
+        Self::ALL[(self.position() + Self::ALL.len() - 1) % Self::ALL.len()]
     }
 }
 
@@ -359,6 +449,7 @@ pub enum HelpContext {
     Objects,
     Workloads,
     Events,
+    EventDetail,
     AppOverlay,
     Generator,
     Pending,
@@ -378,6 +469,7 @@ impl HelpContext {
             HelpContext::Objects => "Objects",
             HelpContext::Workloads => "Workloads",
             HelpContext::Events => "Events",
+            HelpContext::EventDetail => "Event detail",
             HelpContext::AppOverlay => "App overlay",
             HelpContext::Generator => "Generator",
             HelpContext::Pending => "Pending",
@@ -385,30 +477,25 @@ impl HelpContext {
         }
     }
 
-    /// The groups of the context page, its own first and `Everywhere` last.
-    /// Blocked has no keys of its own: its sections' keys come first.
+    /// The groups of the context page, its own first; a screen's page ends
+    /// with `Everywhere`, an overlay's with the short `Overlay`.
     pub fn topics(self) -> &'static [HelpTopic] {
         use HelpTopic as T;
         match self {
-            HelpContext::Flows => &[T::Flows, T::Sections, T::Traffic, T::Marks, T::Everywhere],
-            HelpContext::AppToApp => &[
-                T::AppToApp,
-                T::Sections,
-                T::Traffic,
-                T::Marks,
-                T::Everywhere,
-            ],
-            HelpContext::Blocked => &[T::Sections, T::Traffic, T::Marks, T::Everywhere],
-            HelpContext::Mesh => &[T::Mesh, T::Traffic, T::Marks, T::Everywhere],
+            HelpContext::Flows => &[T::Flows, T::Sections, T::Traffic, T::Everywhere],
+            HelpContext::AppToApp => &[T::AppToApp, T::Sections, T::Traffic, T::Everywhere],
+            HelpContext::Blocked => &[T::Blocked, T::Sections, T::Traffic, T::Everywhere],
+            HelpContext::Mesh => &[T::Mesh, T::Traffic, T::Everywhere],
             HelpContext::Treemap => &[T::Treemap, T::Traffic, T::Everywhere],
             HelpContext::Policy => &[T::Policy, T::Pending, T::Writes, T::Everywhere],
             HelpContext::Objects => &[T::Objects, T::Writes, T::Everywhere],
             HelpContext::Workloads => &[T::Workloads, T::Writes, T::Everywhere],
             HelpContext::Events => &[T::Events, T::Everywhere],
-            HelpContext::AppOverlay => &[T::AppOverlay, T::Forms, T::Marks, T::Everywhere],
-            HelpContext::Generator => &[T::Generator, T::Everywhere],
-            HelpContext::Pending => &[T::Pending, T::Policy, T::Everywhere],
-            HelpContext::Marks => &[T::Marks, T::Forms, T::Everywhere],
+            HelpContext::EventDetail => &[T::Events, T::Overlay],
+            HelpContext::AppOverlay => &[T::AppOverlay, T::Forms, T::Overlay],
+            HelpContext::Generator => &[T::Generator, T::Overlay],
+            HelpContext::Pending => &[T::Pending, T::Overlay],
+            HelpContext::Marks => &[T::Marks, T::Overlay],
         }
     }
 
@@ -423,7 +510,7 @@ impl HelpContext {
         match &model.help_return {
             Overlay::App => return HelpContext::AppOverlay,
             Overlay::Generator => return HelpContext::Generator,
-            Overlay::EventDetail { .. } => return HelpContext::Events,
+            Overlay::EventDetail { .. } => return HelpContext::EventDetail,
             Overlay::Pending => return HelpContext::Pending,
             Overlay::Marks => return HelpContext::Marks,
             _ => {}
@@ -483,6 +570,15 @@ impl HelpPage {
             }
         }
     }
+
+    /// Whether a line shows on this page.
+    fn shows(self, line: &HelpLine) -> bool {
+        match (self, line.show) {
+            (_, Show::Always) => true,
+            (HelpPage::Context, s) => s == Show::Brief,
+            (_, s) => s == Show::Detail,
+        }
+    }
 }
 
 /// A line of a help page.
@@ -502,9 +598,27 @@ pub fn page_rows(page: HelpPage, ctx: HelpContext) -> Vec<HelpRow> {
         }
         let g = t.group();
         rows.push(HelpRow::Heading(g.title));
-        rows.extend(g.lines.iter().map(|(k, d)| HelpRow::Key(k, d)));
+        rows.extend(
+            g.lines
+                .iter()
+                .filter(|l| page.shows(l))
+                .map(|l| HelpRow::Key(l.key, l.text)),
+        );
     }
     rows
+}
+
+/// The key column of `rows`: the longest key and a gap, at most 24.
+pub fn key_width(rows: &[HelpRow]) -> usize {
+    let widest = rows
+        .iter()
+        .map(|r| match r {
+            HelpRow::Key(k, _) => k.chars().count(),
+            _ => 0,
+        })
+        .max()
+        .unwrap_or(0);
+    (widest + 2).min(24)
 }
 
 /// The groups not on `page`, for its footer line.
@@ -517,40 +631,45 @@ pub fn other_topics(page: HelpPage, ctx: HelpContext) -> Vec<HelpTopic> {
         .collect()
 }
 
+/// `prefix` and as many `names` as fit in `width` columns, joined by ` · `;
+/// the rest counted as ` +N`. A name is never cut; `None` when not even
+/// the first fits.
+pub fn fit_names(prefix: &str, names: &[&str], width: usize) -> Option<String> {
+    let mut out = prefix.to_string();
+    for (i, n) in names.iter().enumerate() {
+        let sep = if i == 0 { "" } else { " · " };
+        let left = names.len() - i - 1;
+        let tail = if left > 0 {
+            format!(" +{left}")
+        } else {
+            String::new()
+        };
+        let len = out.chars().count() + sep.chars().count() + n.chars().count();
+        if len + tail.chars().count() > width {
+            if i == 0 {
+                return None;
+            }
+            out.push_str(&format!(" +{}", names.len() - i));
+            return Some(out);
+        }
+        out.push_str(sep);
+        out.push_str(n);
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn topics_index_their_groups() {
+    fn every_topic_has_its_group() {
         assert_eq!(HELP_GROUPS.len(), HelpTopic::ALL.len());
-        for (i, t) in HelpTopic::ALL.iter().enumerate() {
-            assert_eq!(*t as usize, i);
-            assert!(!t.group().lines.is_empty(), "{}", t.group().title);
-            assert_ne!(t.group().lines[0].0, "", "a group starts with a key");
-        }
-        let titles: Vec<&str> = HELP_GROUPS.iter().map(|g| g.title).collect();
-        for t in [
-            "Everywhere",
-            "Commands",
-            "Traffic",
-            "Flows",
-            "App-to-app",
-            "Sections",
-            "Mesh",
-            "Treemap",
-            "Marks",
-            "App overlay",
-            "Generator",
-            "Forms",
-            "Policy",
-            "Pending",
-            "Objects",
-            "Workloads",
-            "Events",
-            "Writes",
-        ] {
-            assert!(titles.contains(&t), "{t}");
+        for t in HelpTopic::ALL {
+            let g = t.group();
+            assert_eq!(g.title, t.title());
+            assert!(!g.lines.is_empty(), "{}", g.title);
+            assert_ne!(g.lines[0].key, "", "a group starts with a key");
         }
     }
 
@@ -587,10 +706,7 @@ mod tests {
         ("] / [", "raise / lower the result cap (re-runs the query)"),
         ("", "cap steps 500 1000 2000 5000 10000 25000 … 200000"),
         ("g", "pick the label keys every view groups by"),
-        (
-            "F / X",
-            "focus on the row's app (again: its other side) · in/out/both",
-        ),
+        ("F / X", "focus on the row's app"),
         (
             "",
             "Esc clears; truncated: r re-queries the app (1-2 queries)",
@@ -632,23 +748,12 @@ mod tests {
             "Enter r Esc",
             "plan the writes, one confirm (writes) · re-query · back",
         ),
-        (
-            "Enter",
-            "detail (flows) · drill into a row or section header",
-        ),
-        (
-            "x / X",
-            "pairs · in · out · both · back (focused: X is direction)",
-        ),
+        // Split: Enter's flow detail moved to the Flows group.
+        ("Enter", "drill into a row or section header"),
+        ("x / X", "pairs · in · out · both · back (focused: X"),
         ("o", "pairs by service: one row per src, dst, port/proto"),
-        (
-            "d",
-            "decision filter: all · blocked · blocked only (· fixed by draft)",
-        ),
-        (
-            "x / X",
-            "flat · by src app · by dst app · back (focused: X is direction)",
-        ),
+        ("d", "all · blocked · blocked only (· fixed by draft)"),
+        ("x / X", "flat · by src app · by dst app · back (focused: X"),
         (
             "Space / z",
             "fold a section · fold or unfold all (also Blocked, Flows)",
@@ -674,10 +779,7 @@ mod tests {
         ),
         ("Ctrl-N Ctrl-P", "complete from the index · cycle back"),
         ("Ctrl-N Ctrl-P", "complete the filter fields · cycle back"),
-        (
-            "Ruleset",
-            "found by the destination's scope · Tab/Ctrl-N names",
-        ),
+        ("Ruleset", "the destination's scope · Tab/Ctrl-N names"),
         ("Ctrl-A Ctrl-R", "all labels · create the typed ruleset"),
         ("d", "toggle draft / active"),
         ("p", "pending changes"),
@@ -691,10 +793,7 @@ mod tests {
             "Tab / Enter",
             "next tab: labels, groups, services, IP lists · detail",
         ),
-        (
-            "f / i / u",
-            "key filter · ignored keys · unused only (PCE usage)",
-        ),
+        ("f / i / u", "key filter · ignored keys · unused only"),
         ("/=text /k=text", "search values only · the values of key k"),
         ("Enter", "detail: ranges · FQDNs · size · rules using it"),
         (
@@ -711,10 +810,8 @@ mod tests {
             "filter · event as a change diff · sort by severity",
         ),
         ("J", "in the detail: change diff ↔ raw JSON"),
-        (
-            "",
-            "detail: ↑/↓ j/k prev/next event · ^d/^u PgDn/PgUp ^e/^y g/G scroll",
-        ),
+        // Was one continuation line; the scroll keys are a line of their own.
+        ("↑/↓ j/k", "in the detail: prev/next event"),
         (
             "n / e / x",
             "new/edit/delete: Objects, IP lists, Workloads, Policy",
@@ -729,49 +826,55 @@ mod tests {
     #[test]
     fn every_old_help_line_is_in_a_group() {
         assert_eq!(OLD_LINES.len(), 79);
-        let all: Vec<(&str, &str)> = HELP_GROUPS
-            .iter()
-            .flat_map(|g| g.lines.iter().copied())
-            .collect();
+        let all: Vec<&HelpLine> = HELP_GROUPS.iter().flat_map(|g| g.lines).collect();
         for (k, d) in OLD_LINES {
             assert!(
-                all.iter().any(|(gk, gd)| *gk == *k && gd.contains(d)),
+                all.iter()
+                    .any(|l| l.key == *k && l.show != Show::Brief && l.text.contains(d)),
                 "{k:?} {d:?}"
             );
         }
         // The prefixes are gone: a key is just the keys.
-        for (k, _) in &all {
+        for l in &all {
             for p in ["Traffic  ", "Generate ", "App      ", "Policy   ", "w form"] {
-                assert!(!k.starts_with(p), "{k}");
+                assert!(!l.key.starts_with(p), "{}", l.key);
             }
         }
     }
 
+    const CONTEXTS: [(HelpContext, &str); 14] = [
+        (HelpContext::Flows, "Flows"),
+        (HelpContext::AppToApp, "App-to-app"),
+        (HelpContext::Mesh, "Mesh"),
+        (HelpContext::Blocked, "Blocked"),
+        (HelpContext::Treemap, "Treemap"),
+        (HelpContext::Policy, "Policy"),
+        (HelpContext::Objects, "Objects"),
+        (HelpContext::Workloads, "Workloads"),
+        (HelpContext::Events, "Events"),
+        (HelpContext::EventDetail, "Events"),
+        (HelpContext::AppOverlay, "App overlay"),
+        (HelpContext::Generator, "Generator"),
+        (HelpContext::Pending, "Pending"),
+        (HelpContext::Marks, "Marks"),
+    ];
+
     #[test]
-    fn pages_put_the_context_first_and_everywhere_last_on_the_context_page() {
+    fn pages_put_the_context_first_and_the_shared_keys_last() {
         use HelpContext as C;
-        for (ctx, first) in [
-            (C::Flows, "Flows"),
-            (C::AppToApp, "App-to-app"),
-            (C::Mesh, "Mesh"),
-            (C::Blocked, "Sections"),
-            (C::Treemap, "Treemap"),
-            (C::Policy, "Policy"),
-            (C::Objects, "Objects"),
-            (C::Workloads, "Workloads"),
-            (C::Events, "Events"),
-            (C::AppOverlay, "App overlay"),
-            (C::Generator, "Generator"),
-            (C::Pending, "Pending"),
-            (C::Marks, "Marks"),
-        ] {
+        for (ctx, first) in CONTEXTS {
             let rows = page_rows(HelpPage::Context, ctx);
             assert_eq!(rows[0], HelpRow::Heading(first), "{ctx:?}");
             let last_heading = rows.iter().rev().find_map(|r| match r {
                 HelpRow::Heading(h) => Some(*h),
                 _ => None,
             });
-            assert_eq!(last_heading, Some("Everywhere"), "{ctx:?}");
+            let overlay = matches!(
+                ctx,
+                C::EventDetail | C::AppOverlay | C::Generator | C::Pending | C::Marks
+            );
+            let shared = if overlay { "Overlay" } else { "Everywhere" };
+            assert_eq!(last_heading, Some(shared), "{ctx:?}");
             let all = page_rows(HelpPage::All, ctx);
             assert_eq!(all[0], HelpRow::Heading(first), "{ctx:?}");
             let headings = all
@@ -782,6 +885,81 @@ mod tests {
         }
         assert!(other_topics(HelpPage::Context, C::Flows).contains(&HelpTopic::Commands));
         assert!(other_topics(HelpPage::All, C::Flows).is_empty());
+    }
+
+    /// The context page is short: no detail lines, at most 34 rows.
+    #[test]
+    fn context_pages_are_short_and_leave_detail_out() {
+        let details: Vec<(&str, &str)> = HELP_GROUPS
+            .iter()
+            .flat_map(|g| g.lines)
+            .filter(|l| l.show == Show::Detail)
+            .map(|l| (l.key, l.text))
+            .collect();
+        for (ctx, _) in CONTEXTS {
+            let rows = page_rows(HelpPage::Context, ctx);
+            assert!(rows.len() <= 34, "{ctx:?}: {} rows", rows.len());
+            for r in &rows {
+                if let HelpRow::Key(k, t) = r {
+                    assert!(!details.contains(&(*k, *t)), "{ctx:?}: {t}");
+                }
+            }
+        }
+        let flows = page_rows(HelpPage::Context, HelpContext::Flows);
+        assert!(flows.contains(&HelpRow::Key(":", "command prompt (Tab → Commands)")));
+        assert!(!flows.contains(&HelpRow::Heading("Marks")));
+        assert!(!flows.iter().any(|r| matches!(r, HelpRow::Key("?", _))));
+        // A group page has the detail and not the brief stand-ins.
+        let traffic = page_rows(HelpPage::Group(HelpTopic::Traffic), HelpContext::Flows);
+        assert!(
+            traffic
+                .iter()
+                .any(|r| matches!(r, HelpRow::Key("Units", _)))
+        );
+        let every = page_rows(HelpPage::Group(HelpTopic::Everywhere), HelpContext::Flows);
+        assert!(every.iter().any(|r| matches!(r, HelpRow::Key("r", _))));
+        assert!(
+            !every
+                .iter()
+                .any(|r| matches!(r, HelpRow::Key("s / r a", _)))
+        );
+    }
+
+    /// Every line of a context page fits an 80-column terminal uncut.
+    #[test]
+    fn context_pages_fit_80_columns() {
+        for (ctx, _) in CONTEXTS {
+            let rows = page_rows(HelpPage::Context, ctx);
+            let kw = key_width(&rows);
+            for r in &rows {
+                if let HelpRow::Key(_, t) = r {
+                    assert!(kw + t.chars().count() <= 78, "{ctx:?}: {t}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fit_names_never_cuts_a_name() {
+        let names = ["Commands", "Mesh", "Treemap"];
+        assert_eq!(
+            fit_names("more: ", &names, 80).as_deref(),
+            Some("more: Commands · Mesh · Treemap")
+        );
+        assert_eq!(
+            fit_names("more: ", &names, 25).as_deref(),
+            Some("more: Commands · Mesh +1")
+        );
+        assert_eq!(
+            fit_names("more: ", &names, 17).as_deref(),
+            Some("more: Commands +2")
+        );
+        assert_eq!(fit_names("more: ", &names, 10), None);
+        for w in 0..40 {
+            if let Some(s) = fit_names("more: ", &names, w) {
+                assert!(s.chars().count() <= w, "{w}: {s}");
+            }
+        }
     }
 
     #[test]
@@ -805,7 +983,7 @@ mod tests {
         );
         assert_eq!(
             HelpPage::Group(HelpTopic::Everywhere).step(ctx, false),
-            HelpPage::Group(HelpTopic::Writes),
+            HelpPage::Group(HelpTopic::Overlay),
             "wraps"
         );
         assert_eq!(HelpPage::Context.toggle_all(), HelpPage::All);

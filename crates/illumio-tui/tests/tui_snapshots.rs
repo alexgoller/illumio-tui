@@ -140,6 +140,11 @@ fn help_overlay_80x24() {
     assert!(out.contains("close overlay"), "last line visible: {out}");
     assert!(out.contains("send / cancel a shown request"), "{out}");
     assert!(out.contains("more: Commands"), "the other groups: {out}");
+    assert!(
+        !out.contains("this help"),
+        "no ? line on a screen's page: {out}"
+    );
+    assert!(out.contains("command prompt (Tab → Commands)"), "{out}");
     insta::assert_snapshot!("help_overlay_end_80x24", out);
     m.set_theme("light");
     insta::assert_snapshot!(
@@ -159,7 +164,7 @@ fn help_overlay_flows_100x40() {
     m.help_page = HelpPage::Group(illumio_tui::tui::help::HelpTopic::AppToApp);
     let out = render_to_string(&m, 100, 40);
     assert!(out.contains("Keys · App-to-app"), "{out}");
-    assert!(out.contains("next: Sections · prev: Flows"), "{out}");
+    assert!(out.contains("next: Blocked · prev: Flows"), "{out}");
     assert!(!out.contains("FLOWS"), "{out}");
     m.help_page = HelpPage::All;
     let out = render_to_string(&m, 100, 40);
@@ -167,13 +172,17 @@ fn help_overlay_flows_100x40() {
     assert!(out.contains("a back"), "{out}");
 }
 
-/// No terminal size panics the help, in its contexts and pages, scrolled
-/// to the top and to the end; drawn alone below the chrome's minimum too.
+/// No terminal size panics the help, in every context and on its pages,
+/// scrolled to the top and to the end: the help alone at every width and
+/// height (below the chrome's minimum too), the whole screen at the widths
+/// where the layout changes.
 #[test]
 fn help_renders_at_every_terminal_size() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use illumio_tui::tui::help::{HelpPage, HelpTopic};
+    use illumio_tui::tui::commands::Command;
+    use illumio_tui::tui::help::{HelpContext, HelpPage, HelpTopic};
     use illumio_tui::tui::model::{Overlay, TrafficView};
+    use illumio_tui::tui::msg::Msg;
     use illumio_tui::tui::test_support as ts;
     use illumio_tui::tui::ui::widgets::overlay::{help_last_scroll, render_help};
     let mut models = Vec::new();
@@ -201,37 +210,63 @@ fn help_renders_at_every_terminal_size() {
     detail.screen = Screen::Events;
     illumio_tui::tui::update(
         &mut detail,
-        illumio_tui::tui::msg::Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
     );
-    assert!(matches!(detail.overlay, Overlay::EventDetail { .. }));
     models.push(detail);
     models.push(app_overlay_model());
     models.push(generator_model());
-    for mut m in models {
-        gen_key(&mut m, '?');
+    let mut pending = ts::model_with_policy();
+    pending.screen = Screen::Policy;
+    pending.overlay = Overlay::Pending;
+    models.push(pending);
+    let dir = tempfile::tempdir().unwrap();
+    let mut marks = ts::model_with_marks(dir.path(), ts::RICH_MARKS);
+    illumio_tui::tui::update(&mut marks, Msg::Command(Command::Marks(None)));
+    models.push(marks);
+    let mut contexts = Vec::new();
+    for m in &mut models {
+        gen_key(m, '?');
         assert_eq!(m.overlay, Overlay::Help);
-        for page in [
-            HelpPage::Context,
-            HelpPage::Group(HelpTopic::Commands),
-            HelpPage::Group(HelpTopic::Mesh),
-            HelpPage::All,
-        ] {
-            m.help_page = page;
-            // Every width on the context page, every fifth on the others.
-            let step = if page == HelpPage::Context { 1 } else { 5 };
-            for w in (20..=130).step_by(step) {
-                for h in [1, 3, 6, 10, 16, 24, 40] {
-                    for end in [false, true] {
-                        m.help_scroll = if end { help_last_scroll(&m, (w, h)) } else { 0 };
-                        // The whole screen (the chrome draws from 16 rows)
-                        // on the context page; the help alone everywhere.
-                        if matches!(h, 16 | 24) && page == HelpPage::Context {
-                            let _ = render_to_string(&m, w, h);
+        contexts.push(HelpContext::of(m));
+    }
+    for c in [
+        HelpContext::EventDetail,
+        HelpContext::AppOverlay,
+        HelpContext::Generator,
+        HelpContext::Pending,
+        HelpContext::Marks,
+    ] {
+        assert!(contexts.contains(&c), "{c:?} in {contexts:?}");
+    }
+    let pages = [
+        HelpPage::Context,
+        HelpPage::Group(HelpTopic::Commands),
+        HelpPage::All,
+    ];
+    // The widths where the layout changes: the chrome's minimum, the tab
+    // row, 80 columns, the help box's widest.
+    let boundaries = [20, 59, 60, 61, 68, 69, 70, 80, 96, 97, 130];
+    for w in 20..=130u16 {
+        let edge = boundaries.contains(&w);
+        // Every width: the context page; at the edges every page, short
+        // and tall, and the whole screen.
+        let heights: &[u16] = if edge { &[1, 3, 16, 24, 40] } else { &[24] };
+        for &h in heights {
+            let mut term =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
+            for m in &mut models {
+                for page in pages {
+                    if !edge && page != HelpPage::Context {
+                        continue;
+                    }
+                    m.help_page = page;
+                    let last = help_last_scroll(m, (w, h));
+                    for scroll in if last == 0 { vec![0] } else { vec![0, last] } {
+                        m.help_scroll = scroll;
+                        term.draw(|f| render_help(m, f, f.area())).unwrap();
+                        if edge && page == HelpPage::Context && matches!(h, 16 | 24) {
+                            let _ = render_to_string(m, w, h);
                         }
-                        let mut term =
-                            ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h))
-                                .unwrap();
-                        term.draw(|f| render_help(&m, f, f.area())).unwrap();
                     }
                 }
             }

@@ -17,7 +17,7 @@ use crate::tui::msg::{
 };
 use crate::tui::picker::{KeyPicker, PickerOutcome};
 use crate::tui::ui::widgets::overlay::{
-    batch_report_last_scroll, confirm_batch_last_scroll, confirm_write_last_scroll,
+    batch_report_last_scroll, confirm_batch_last_scroll, confirm_write_last_scroll, help_body_rows,
     help_last_scroll,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -2930,7 +2930,7 @@ fn help_key(model: &mut Model, k: KeyEvent) {
         return;
     }
     let last = help_last_scroll(model, model.size);
-    let rows = usize::from(model.size.1.saturating_sub(3)).max(1);
+    let rows = help_body_rows(model, model.size).max(1);
     let s = model.help_scroll.min(last);
     model.help_scroll = match k.code {
         KeyCode::Down | KeyCode::Char('j') => (s + 1).min(last),
@@ -10290,7 +10290,7 @@ mod tests {
             assert!(
                 HELP_GROUPS
                     .iter()
-                    .any(|g| g.title == group && g.lines.iter().any(|(gk, _)| *gk == k)),
+                    .any(|g| g.title == group && g.lines.iter().any(|l| l.key == k)),
                 "{group} {k}"
             );
         }
@@ -10400,7 +10400,7 @@ mod tests {
         assert!(matches!(e.overlay, Overlay::EventDetail { .. }));
         update(&mut e, key('?'));
         assert_eq!(e.overlay, Overlay::Help);
-        assert_eq!(HelpContext::of(&e), HelpContext::Events);
+        assert_eq!(HelpContext::of(&e), HelpContext::EventDetail);
         update(&mut e, key('q'));
         assert!(matches!(e.overlay, Overlay::EventDetail { .. }));
         // The marks list: its keys, and back to it.

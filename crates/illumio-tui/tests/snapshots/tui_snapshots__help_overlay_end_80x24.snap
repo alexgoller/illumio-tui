@@ -2,27 +2,27 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ Keys · Flows ─────────────────────────────────────────────────── 25-45 of 45 ╮
-│w                draft allow rule from a blocked flow or row (writes)         │
-│m                mark the row: squelch · reviewed · critical … (marks.toml)   │
-│M                show or hide squelched rows (~)                              │
-│Enter            detail (flows) · drill into a row or section header          │
-│                                                                              │
-│MARKS                                                                         │
-│:marks [action]  the marks: Enter edit · x delete · e +30d                    │
-│                 (an action: only its marks; Esc / q back)                    │
-│                                                                              │
-│EVERYWHERE                                                                    │
-│1 2 3 4 5        Traffic · Policy · Objects · Workloads · Events              │
-│?                this help                                                    │
-│q / Ctrl-C       quit                                                         │
-│↑ ↓ PgUp PgDn    move in the current table (also Home End)                    │
-│s                cycle sort column and direction                              │
-│/                search in the current table (Enter keep, Esc clear)          │
-│r                refresh the current screen (bypasses the cache)              │
-│a                toggle auto-refresh for the current screen                   │
-│y / n            send / cancel a shown request                                │
-│Esc              close overlay / cancel                                       │
-│Units            flows: flow records; conns, bytes: their lifetime counts     │
-│more: Commands · App-to-app · Mesh · Treemap · App overlay · Generator · Form…│
-╰──────────────────────────── Tab next · S-Tab prev · a all · j/k scroll · Esc ╯
+╭ Keys · Flows ────────────────────────────────────────────────── 11-31 of 31 ╮
+│f              edit filter: window src dst svc decision transmission         │
+│+ / -          widen (re-runs the window) / narrow (no request)              │╮
+│B              re-run a truncated result at a larger cap                     ││
+│] / [          raise / lower the result cap (re-runs the query)              │╯
+│g              pick the label keys every view groups by                      │╮
+│F / X          focus on the row's app (again: other side) · in/out/both      ││
+│A              app overlay: peers, policy, workloads                         │╯
+│D              draft decision per flow (PCE draft view; again: clear)        │╮
+│w              draft allow rule from a blocked flow or row (writes)          ││
+│m              mark the row: squelch · reviewed · critical … (marks.toml)    ││
+│M              show or hide squelched rows (~)                               ││
+│Enter          drill into a row or section header                            ││
+│                                                                             ││
+│EVERYWHERE                                                                   │╯
+│1 2 3 4 5      Traffic · Policy · Objects · Workloads · Events               │╮
+│:              command prompt (Tab → Commands)                               ││
+│↑ ↓ PgUp PgDn  move in the current table (also Home End)                     ││
+│s / r a        sort · search · refresh · auto-refresh                        ││
+│y / n          send / cancel a shown request                                 ││
+│Esc            close overlay / cancel                                        ││
+│q / Ctrl-C     quit                                                          ││
+│more: Commands · App-to-app · Blocked · Mesh · Treemap · Marks +10           │╯
+╰─────────────────────────── Tab next · S-Tab prev · a all · j/k scroll · Esc ╯
