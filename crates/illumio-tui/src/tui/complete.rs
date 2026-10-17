@@ -72,6 +72,10 @@ pub fn complete(
             &["all", "unicast", "broadcast", "multicast"],
         ),
         FieldKind::Window => window_steps(token),
+        FieldKind::MarkAction => cycle_words(token, &pce::marks::Action::ALL.map(|a| a.as_str())),
+        FieldKind::MarkExpiry => cycle_words(token, &["1d", "7d", "30d", "90d", "never"]),
+        FieldKind::MarkScope => cycle_words(token, &[THIS_PCE, ANY_PCE]),
+        FieldKind::MarkSide => mark_side(token, &used_keys(earlier), idx, workloads),
     };
     let mut seen = std::collections::HashSet::new();
     out.retain(|c| seen.insert(c.clone()));
@@ -313,6 +317,52 @@ fn filter_actors(
         return names;
     }
     labels(token, used, idx, &FILTER_WORDS, &named_all(&sources))
+}
+
+/// A mark form's scope words.
+pub const THIS_PCE: &str = "this PCE";
+pub const ANY_PCE: &str = "any PCE";
+
+/// A fixed list cycled by `Ctrl-N`: the word after the one in the field
+/// first (so the first `Ctrl-N` changes it), else those matching the
+/// typed text, else all of them.
+fn cycle_words(token: &str, words: &[&str]) -> Vec<String> {
+    let t = token.trim();
+    if let Some(i) = words.iter().position(|w| w.eq_ignore_ascii_case(t)) {
+        return words[i + 1..]
+            .iter()
+            .chain(&words[..=i])
+            .map(|w| w.to_string())
+            .collect();
+    }
+    let hits = ranked(t, words.iter().map(|w| (w.to_string(), w.to_string())));
+    if hits.is_empty() {
+        words.iter().map(|w| w.to_string()).collect()
+    } else {
+        hits
+    }
+}
+
+/// The prefixes a mark side takes besides labels.
+const MARK_WORDS: [&str; 4] = ["wl:", "ip:", "ipl:", "any"];
+
+/// A mark side: labels, `ipl:` names from the index, `wl:` names of the
+/// loaded workloads, `ip:` (typed), `any`. Never a request.
+fn mark_side(token: &str, used: &[String], idx: &NameIndex, workloads: &[Workload]) -> Vec<String> {
+    if token
+        .get(..3)
+        .is_some_and(|h| h.eq_ignore_ascii_case("ip:"))
+    {
+        return Vec::new();
+    }
+    let sources = [
+        ("ipl:", idx.ip_list_names()),
+        ("wl:", workload_names(workloads)),
+    ];
+    if let Some(names) = prefixed(token, &sources) {
+        return names;
+    }
+    labels(token, used, idx, &MARK_WORDS, &named_all(&sources))
 }
 
 /// Hostnames and names of `workloads`, any-case sorted, blanks left out.
@@ -672,6 +722,57 @@ mod tests {
     fn ff(kind: FieldKind, token: &str, earlier: &[&str], loaded: bool) -> Vec<String> {
         let wls = if loaded { workloads() } else { Vec::new() };
         complete(kind, token, &s(earlier), &fixture_index(), &[], &wls)
+    }
+
+    #[test]
+    fn mark_fields_cycle_their_lists_and_sides_offer_the_side_grammar() {
+        assert_eq!(
+            fx(FieldKind::MarkAction, "reviewed", &[]),
+            s(&[
+                "squelch",
+                "critical",
+                "important",
+                "revisit",
+                "accept-blocked",
+                "reviewed"
+            ]),
+            "the next action first"
+        );
+        assert_eq!(
+            fx(FieldKind::MarkScope, "this PCE", &[]),
+            s(&["any PCE", "this PCE"])
+        );
+        assert_eq!(fx(FieldKind::MarkExpiry, "9", &[]), s(&["90d"]));
+        assert_eq!(
+            fx(FieldKind::MarkExpiry, "x", &[]).len(),
+            5,
+            "no match: all"
+        );
+        let side = ff(FieldKind::MarkSide, "", &[], false);
+        assert_eq!(
+            &side[..8],
+            &s(&["app=", "env=", "loc=", "role=", "wl:", "ip:", "ipl:", "any"]),
+            "keys, then the side grammar's words"
+        );
+        assert!(ff(FieldKind::MarkSide, "ipl:", &[], false).contains(&"ipl:Corp".to_string()));
+        assert!(
+            ff(FieldKind::MarkSide, "wl:", &[], true)
+                .iter()
+                .any(|c| c.starts_with("wl:")),
+            "the loaded workloads"
+        );
+        assert!(
+            ff(FieldKind::MarkSide, "ip:10", &[], false).is_empty(),
+            "typed"
+        );
+        assert!(
+            !ff(FieldKind::MarkSide, "", &["app=shop"], false).contains(&"app=".to_string()),
+            "a key used in the side is not offered again"
+        );
+        assert_eq!(
+            FieldKind::MarkSide.request("app=shop en"),
+            Some(("en".to_string(), vec!["app=shop".to_string()]))
+        );
     }
 
     #[test]

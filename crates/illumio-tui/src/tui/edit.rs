@@ -85,6 +85,9 @@ pub enum EditIntent {
     },
     /// `w` on a blocked flow: a draft allow rule pre-filled from it.
     RuleFromFlow(Box<ResolvedFlow>),
+    /// The `m` form (`Overlay::MarkForm`): it never writes to the PCE, so
+    /// nothing here builds a write from it.
+    Mark,
 }
 
 /// What `Cmd::PlanWrite` carries: the library draft or patch, or the href
@@ -335,6 +338,8 @@ pub fn start(intent: EditIntent, index: Option<&NameIndex>, prefill: FlowPrefill
         EditIntent::DeleteDenyRule { href, name } => {
             Start::Plan(WriteIntent::DeleteDenyRule { href, name })
         }
+        // The mark form is built by `mark_form`, never here.
+        EditIntent::Mark => Start::Form(Form::new("New mark", Vec::new(), EditIntent::Mark)),
         EditIntent::RuleFromFlow(f) => {
             let (fields, alt, covering) = flow_rule_fields(&f, idx, prefill);
             let mut form = Form::new("Allow rule from flow", fields, EditIntent::RuleFromFlow(f));
@@ -1887,6 +1892,8 @@ pub fn build_intent(
             let draft = rule_draft(form, need_index(index)?, org_id)?;
             Ok(Some(WriteIntent::CreateRule { ruleset, draft }))
         }
+        // `Overlay::MarkForm` submits to `marks_submit`; never here.
+        EditIntent::Mark => Err("internal: mark form".into()),
         // Deletes never open a form (`start`); a form never carries one.
         EditIntent::DeleteLabel(_)
         | EditIntent::DeleteIpList(_)
@@ -1916,6 +1923,15 @@ mod tests {
     use super::*;
     use crate::tui::test_support::fixture_index;
     use serde_json::{Value, json};
+
+    #[test]
+    fn a_mark_form_never_builds_a_write() {
+        let form = Form::new("New mark", Vec::new(), EditIntent::Mark);
+        assert_eq!(
+            build_intent(&form, None, 5),
+            Err("internal: mark form".to_string())
+        );
+    }
 
     fn labels() -> Vec<Label> {
         serde_json::from_str(include_str!("../../../../fixtures/labels.json")).unwrap()

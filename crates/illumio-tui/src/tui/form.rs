@@ -58,6 +58,15 @@ pub enum FieldKind {
     Transmission,
     /// A traffic window (the whole field): the `+`/`-` step ladder.
     Window,
+    /// A mark's action (the whole field): the six actions, cycling.
+    MarkAction,
+    /// A mark's expiry (the whole field): `1d 7d 30d 90d never`, cycling.
+    MarkExpiry,
+    /// A mark's scope (the whole field): `this PCE`, `any PCE`, cycling.
+    MarkScope,
+    /// A mark's side in the side grammar: labels (`key=value`, tokens
+    /// apart by spaces or commas), `ipl:` and `wl:` names, `ip:`, `any`.
+    MarkSide,
 }
 
 impl FieldKind {
@@ -68,12 +77,16 @@ impl FieldKind {
                 &[',']
             }
             Self::Scope | Self::TrafficActors => &[',', '|'],
+            Self::MarkSide => &[' ', ','],
             Self::Text
             | Self::LabelKey
             | Self::LabelValue
             | Self::Ruleset
             | Self::TrafficService
-            | Self::Window => &[],
+            | Self::Window
+            | Self::MarkAction
+            | Self::MarkExpiry
+            | Self::MarkScope => &[],
         }
     }
 
@@ -95,7 +108,16 @@ impl FieldKind {
             | Self::LabelValue
             | Self::Ruleset
             | Self::TrafficService
-            | Self::Window => Vec::new(),
+            | Self::Window
+            | Self::MarkAction
+            | Self::MarkExpiry
+            | Self::MarkScope => Vec::new(),
+            Self::MarkSide => head
+                .split([' ', ','])
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .map(String::from)
+                .collect(),
             Self::Labels | Self::Actors | Self::Services | Self::Decisions | Self::Transmission => {
                 tokens(head)
             }
@@ -109,7 +131,7 @@ impl FieldKind {
     fn dives(self) -> bool {
         matches!(
             self,
-            Self::Labels | Self::Scope | Self::Actors | Self::TrafficActors
+            Self::Labels | Self::Scope | Self::Actors | Self::TrafficActors | Self::MarkSide
         )
     }
 
