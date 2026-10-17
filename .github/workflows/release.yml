@@ -219,7 +219,7 @@ jobs:
             test -f /usr/share/doc/$BIN/LICENSE
             test -f /usr/share/doc/$BIN/README.md
             $remove
-            if command -v $BIN; then echo still installed; exit 1; fi
+            test ! -e /usr/bin/$BIN
           "
 
   checksums:
