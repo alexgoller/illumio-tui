@@ -645,15 +645,6 @@ fn labels_line(e: &ResolvedEndpoint, order: &KeyOrder) -> String {
     if s.is_empty() { "-".into() } else { s }
 }
 
-/// `  bytes in 117.2K out 3.9K` when the PCE reported either count.
-fn bytes_text(fl: &ResolvedFlow) -> String {
-    if !fl.has_bytes() {
-        return String::new();
-    }
-    let n = |b: Option<u64>| b.map_or_else(|| "-".to_string(), compact_count);
-    format!("  bytes in {} out {}", n(fl.bytes_in), n(fl.bytes_out))
-}
-
 /// The Flows detail: a section header's two lines, the hint while closed,
 /// else the selected flow, in columns (`columns`, see `detail_columns`)
 /// or stacked rows.
@@ -716,10 +707,13 @@ fn render_detail(model: &Model, f: &mut Frame, area: Rect, columns: bool) {
         f.render_widget(Paragraph::new(lines).block(block), area);
         return;
     }
+    // One line per row, cut with `…` where it does not fit (no wrapping:
+    // a wrapped row pushes the ones under it, the mark, out of the pane).
+    let body_w = (block.inner(area).width as usize).saturating_sub(11);
     let row = |head: &'static str, body: String| {
         Line::from(vec![
             Span::styled(format!("{head:<11}"), t.header_style()),
-            Span::raw(body),
+            Span::raw(clip_ellipsis(&body, body_w)),
         ])
     };
     let mut lines = vec![
@@ -737,24 +731,12 @@ fn render_detail(model: &Model, f: &mut Frame, area: Rect, columns: bool) {
                 fl.policy_decision.as_str()
             ),
         ),
-        row(
-            "seen",
-            format!(
-                "first {}  last {}{}  rules {}",
-                fl.first_detected.clone().unwrap_or_default(),
-                fl.last_detected.clone().unwrap_or_default(),
-                bytes_text(fl),
-                rules
-            ),
-        ),
+        row("seen", seen_text(fl, &rules)),
     ];
     if let Some(text) = mark_line(model, fl) {
         lines.push(row("mark", text));
     }
-    f.render_widget(
-        Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
-        area,
-    );
+    f.render_widget(Paragraph::new(lines).block(block), area);
 }
 
 /// How a detail cell is drawn; theme-free, so the builders are testable.
@@ -837,38 +819,45 @@ fn endpoint_cells(e: &ResolvedEndpoint, order: &KeyOrder, rows: usize) -> Vec<Ce
     };
     let hidden = body[keep..].iter().filter(|(_, n)| *n).count();
     body.truncate(keep);
+    // No heading (`ip lists`) left without the names under it.
+    if !fits && body.last().is_some_and(|(_, n)| !n) {
+        body.pop();
+    }
     // The keys shown, aligned.
     let width = body
         .iter()
-        .map(|(c, _)| c.key.chars().count())
+        .map(|(c, _)| text_width(&c.key))
         .max()
         .unwrap_or(0);
     head.extend(body.into_iter().map(|(mut c, _)| {
         if !c.key.is_empty() {
-            c.key = format!("{:<width$}", c.key);
+            c.key = pad_to(&c.key, width);
         }
         c
     }));
-    if !fits && head.len() < rows {
+    if hidden > 0 && head.len() < rows {
         head.push(Cell::new(format!("+{hidden} more"), CellStyle::Dim));
     }
     head
 }
 
-/// The service column: `5432/tcp`, `process · user` (when either is
-/// known), the reported decision, then the draft's (`draft blocked →
+/// The service column: `5432/tcp`, `process  postgres` and `user  app`
+/// (each when known), the reported decision, then the draft's (`draft blocked →
 /// allowed`, as the Flows table's draft column) when the flow has one.
 fn service_cells(fl: &ResolvedFlow) -> Vec<Cell> {
     let mut cells = vec![Cell::new(fl.service_text(), CellStyle::Plain)];
-    let who: Vec<&str> = [&fl.process_name, &fl.user_name]
+    let known = |v: &Option<String>| {
+        v.as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && !s.chars().all(|c| c == '-'))
+            .map(str::to_string)
+    };
+    let who: Vec<(&str, String)> = [("process", &fl.process_name), ("user", &fl.user_name)]
         .into_iter()
-        .flatten()
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty() && !s.chars().all(|c| c == '-'))
+        .filter_map(|(k, v)| known(v).map(|v| (k, v)))
         .collect();
-    if !who.is_empty() {
-        cells.push(Cell::new(who.join(" · "), CellStyle::Plain));
-    }
+    let width = who.iter().map(|(k, _)| text_width(k)).max().unwrap_or(0);
+    cells.extend(who.iter().map(|(k, v)| Cell::label(&pad_to(k, width), v)));
     cells.push(Cell::new(
         fl.policy_decision.as_str(),
         CellStyle::Decision(fl.policy_decision, false),
@@ -883,24 +872,36 @@ fn service_cells(fl: &ResolvedFlow) -> Vec<Cell> {
     cells
 }
 
-/// `2026-10-16T08:12:33Z` -> `2026-10-16 08:12`; anything else as given.
-fn seen_time(s: &str) -> String {
+/// `2026-10-16T08:12:33Z` -> `2026-10-16 08:12` and `true`; anything
+/// else as given and `false`.
+fn seen_time(s: &str) -> (String, bool) {
     match (s.get(..10), s.get(10..11), s.get(11..16)) {
-        (Some(day), Some("T"), Some(hm)) => format!("{day} {hm}"),
-        _ => s.to_string(),
+        (Some(day), Some("T"), Some(hm)) if day.as_bytes().get(4) == Some(&b'-') => {
+            (format!("{day} {hm}"), true)
+        }
+        _ => (s.to_string(), false),
     }
 }
 
-/// The columns' footer: `seen 2026-10-16 08:12 → 10-17 09:40 · bytes
-/// 117.2K/3.9K · rules …` (the last time without the year it shares with
-/// the first).
-fn seen_footer(fl: &ResolvedFlow, rules: &str) -> String {
-    let first = seen_time(fl.first_detected.as_deref().unwrap_or(""));
-    let mut last = seen_time(fl.last_detected.as_deref().unwrap_or(""));
-    if first.len() >= 16 && last.len() >= 16 && first.get(..5) == last.get(..5) {
-        last = last[5..].to_string();
-    }
-    let mut s = format!("seen {first} → {last}");
+/// The detail's `seen` row, both layouts: `2026-10-16 08:12 → 10-17 09:40
+/// · bytes in 117.2K out 3.9K · rules …` (the last time without the year
+/// it shares with the first; `-` for a time the PCE did not report).
+fn seen_text(fl: &ResolvedFlow, rules: &str) -> String {
+    let time = |t: &Option<String>| match t.as_deref().filter(|t| !t.is_empty()) {
+        Some(t) => seen_time(t),
+        None => ("-".to_string(), false),
+    };
+    let (first, first_iso) = time(&fl.first_detected);
+    let (mut last, last_iso) = time(&fl.last_detected);
+    let missing = |t: &Option<String>| t.as_deref().is_none_or(str::is_empty);
+    let mut s = if missing(&fl.first_detected) && missing(&fl.last_detected) {
+        "-".to_string()
+    } else {
+        if first_iso && last_iso && first.get(..5) == last.get(..5) {
+            last = last[5..].to_string();
+        }
+        format!("{first} → {last}")
+    };
     if fl.has_bytes() {
         let n = |b: Option<u64>| b.map_or_else(|| "-".to_string(), compact_count);
         s.push_str(&format!(
@@ -911,6 +912,16 @@ fn seen_footer(fl: &ResolvedFlow, rules: &str) -> String {
     }
     s.push_str(&format!(" · rules {rules}"));
     s
+}
+
+/// `s`'s display width in cells (ratatui's measure).
+fn text_width(s: &str) -> usize {
+    Span::raw(s).width()
+}
+
+/// `s` padded with spaces to `w` cells of display width.
+fn pad_to(s: &str, w: usize) -> String {
+    format!("{s}{}", " ".repeat(w.saturating_sub(text_width(s))))
 }
 
 /// `s` in at most `w` cells, its end cut to `…` when it does not fit.
@@ -995,7 +1006,7 @@ fn detail_column_lines(
     }
     let width = width as usize;
     lines.push(Line::from(Span::raw(clip_ellipsis(
-        &seen_footer(&fl.flow, rules),
+        &format!("seen {}", seen_text(&fl.flow, rules)),
         width,
     ))));
     if let Some(text) = mark_line(model, fl) {
@@ -1007,7 +1018,8 @@ fn detail_column_lines(
     lines
 }
 
-/// `s` clipped (with `…`) and padded to exactly `w` cells.
+/// `s` clipped (with `…`) and padded to exactly `w` cells. Not
+/// `widgets::table::fit`: that one cuts without `…` and leaves no gap.
 fn fit_cell(s: &str, w: usize) -> String {
     let s = clip_ellipsis(s, w.saturating_sub(1));
     let pad = w.saturating_sub(Span::raw(s.as_str()).width());
@@ -1191,6 +1203,28 @@ mod tests {
         let cells = endpoint_cells(&e, &order, 6);
         assert_eq!(texts(&cells), ["10.1.4.9", "ip lists", "Corp", "VPN"]);
         assert_eq!(cells[1].style, CellStyle::Dim);
+        // Cut: the heading never stands alone before `+N more`.
+        assert_eq!(
+            texts(&endpoint_cells(&e, &order, 3)),
+            ["10.1.4.9", "+2 more"]
+        );
+        let three = ResolvedEndpoint {
+            ip_lists: keys(&["Corp", "VPN", "Lab"]),
+            ..e.clone()
+        };
+        assert_eq!(
+            texts(&endpoint_cells(&three, &order, 4)),
+            ["10.1.4.9", "ip lists", "Corp", "+2 more"]
+        );
+    }
+
+    #[test]
+    fn label_keys_align_by_display_width() {
+        let order = KeyOrder::new(&[], "");
+        let e = ep(&[("ort", "x"), ("区域", "y")]);
+        let cells = endpoint_cells(&e, &order, 6);
+        assert_eq!(cells[2].key, "ort ");
+        assert_eq!(cells[3].key, "区域");
     }
 
     #[test]
@@ -1251,7 +1285,8 @@ mod tests {
     fn service_cells_show_process_user_decision_and_draft() {
         let mut fl = flow();
         let cells = service_cells(&fl);
-        assert_eq!(texts(&cells), ["5432/tcp", "postgres", "blocked"]);
+        // The dashes-only user is left out.
+        assert_eq!(texts(&cells), ["5432/tcp", "process  postgres", "blocked"]);
         assert_eq!(
             cells[2].style,
             CellStyle::Decision(PolicyDecision::Blocked, false)
@@ -1260,38 +1295,60 @@ mod tests {
         fl.user_name = None;
         assert_eq!(texts(&service_cells(&fl)), ["5432/tcp", "blocked"]);
         fl.user_name = Some("svc".into());
+        assert_eq!(
+            texts(&service_cells(&fl)),
+            ["5432/tcp", "user  svc", "blocked"]
+        );
+        fl.process_name = Some("java".into());
         fl.draft_policy_decision = Some(pce::models::DraftDecision::Allowed);
         let cells = service_cells(&fl);
         assert_eq!(
             texts(&cells),
-            ["5432/tcp", "svc", "blocked", "draft blocked → allowed"]
+            [
+                "5432/tcp",
+                "process  java",
+                "user     svc",
+                "blocked",
+                "draft blocked → allowed"
+            ]
         );
         assert_eq!(
-            cells[3].style,
+            cells[4].style,
             CellStyle::Decision(PolicyDecision::Allowed, true)
         );
         fl.draft_policy_decision = Some(pce::models::DraftDecision::Blocked);
         let cells = service_cells(&fl);
-        assert_eq!(cells[3].text, "draft blocked");
+        assert_eq!(cells[4].text, "draft blocked");
         assert_eq!(
-            cells[3].style,
+            cells[4].style,
             CellStyle::Decision(PolicyDecision::Blocked, false)
         );
     }
 
     #[test]
-    fn the_footer_shortens_the_times_and_drops_a_shared_year() {
+    fn the_seen_text_shortens_the_times_and_drops_a_shared_year() {
         let mut fl = flow();
         assert_eq!(
-            seen_footer(&fl, "n/a"),
-            "seen 2026-10-16 08:12 → 10-17 09:40 · bytes in 117.2K out - · rules n/a"
+            seen_text(&fl, "n/a"),
+            "2026-10-16 08:12 → 10-17 09:40 · bytes in 117.2K out - · rules n/a"
         );
         fl.last_detected = Some("2027-01-02T00:00:00Z".into());
         fl.bytes_in = None;
         assert_eq!(
-            seen_footer(&fl, "r1"),
-            "seen 2026-10-16 08:12 → 2027-01-02 00:00 · rules r1"
+            seen_text(&fl, "r1"),
+            "2026-10-16 08:12 → 2027-01-02 00:00 · rules r1"
         );
+        // Not ISO: as given, no year dropped.
+        fl.first_detected = Some("2026-10-16 garbage!".into());
+        fl.last_detected = Some("2026-10-17T09:40:00Z".into());
+        assert_eq!(
+            seen_text(&fl, "r1"),
+            "2026-10-16 garbage! → 2026-10-17 09:40 · rules r1"
+        );
+        fl.first_detected = None;
+        assert_eq!(seen_text(&fl, "r1"), "- → 2026-10-17 09:40 · rules r1");
+        fl.last_detected = Some(String::new());
+        assert_eq!(seen_text(&fl, "r1"), "- · rules r1");
     }
 
     #[test]

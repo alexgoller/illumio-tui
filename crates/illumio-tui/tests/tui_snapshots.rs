@@ -1552,9 +1552,10 @@ fn flow_detail_in_columns_120x40() {
     assert_eq!(at(2, "5432/tcp"), svc);
     assert_eq!(at(3, "10.0.1.10"), src);
     assert_eq!(at(3, "10.0.2.20"), dst);
-    assert_eq!(at(3, "postgres · postgres"), svc);
+    assert_eq!(at(3, "process  postgres"), svc);
     assert_eq!(at(4, "app   shop"), src);
-    assert_eq!(at(4, "allowed"), svc);
+    assert_eq!(at(4, "user     postgres"), svc);
+    assert_eq!(at(5, "allowed"), svc);
     assert_eq!(at(6, "role  web"), src);
     assert_eq!(at(6, "role  db"), dst);
     assert!(
@@ -1619,14 +1620,72 @@ fn flow_detail_renders_at_every_terminal_size() {
         m.traffic.show_detail = true;
     }
     for m in &models {
+        // A section header keeps its two lines; a flow gets the columns.
+        let on_flow = m.traffic.selected_flow().is_some();
         for w in 20..=130 {
             for h in [6, 10, 22, 23, 30, 31, 32, 40] {
                 let out = render_to_string(m, w, h);
+                let columns = out.contains("│SOURCE");
                 if w < 92 || h < 31 {
-                    assert!(!out.contains("│SOURCE"), "{w}x{h}: {out}");
+                    assert!(!columns, "{w}x{h}: {out}");
+                } else {
+                    assert_eq!(columns, on_flow, "{w}x{h}: {out}");
                 }
             }
         }
+    }
+}
+
+/// The stacked detail cuts its rows instead of wrapping them, so a long
+/// `seen` row never pushes the `mark` line out of the pane.
+#[test]
+fn stacked_flow_detail_keeps_the_mark_line_80x30() {
+    use illumio_tui::tui::test_support as ts;
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = ts::model_with_marks(dir.path(), ts::RICH_MARKS);
+    m.traffic.show_detail = true;
+    while m.traffic.selected_flow().is_some_and(|f| f.mark.is_none()) {
+        m.traffic.flows.select_next();
+    }
+    assert!(m.traffic.selected_flow().is_some(), "a marked flow");
+    let out = render_to_string(&m, 80, 30);
+    let pane = detail_pane(&out);
+    assert_eq!(pane.len(), 9, "8 rows and the mark line: {out}");
+    assert!(pane[7].starts_with("│mark       "), "{out}");
+    let seen = pane[6].trim_end_matches('│').trim_end();
+    assert!(seen.starts_with("│seen       "), "{out}");
+    assert!(
+        seen.ends_with('…') || seen.contains("· rules "),
+        "cut or whole: {seen}"
+    );
+    insta::assert_snapshot!("traffic_flow_detail_stacked_mark_80x30", pane.join("\n"));
+}
+
+/// In columns the table is shorter; `j` past a page keeps the cursor on
+/// screen (scrolling and drawing use the same layout), marks or not.
+#[test]
+fn the_flow_table_scrolls_with_the_columns_detail_open() {
+    use illumio_tui::tui::test_support as ts;
+    let dir = tempfile::tempdir().unwrap();
+    for mut m in [
+        ts::model_with_rich_flows(),
+        ts::model_with_marks(dir.path(), ts::RICH_MARKS),
+    ] {
+        m.traffic.show_detail = true;
+        m.size = (120, 40);
+        let n = m.traffic.flows.len();
+        for _ in 0..n - 1 {
+            gen_key(&mut m, 'j');
+            let out = render_to_string(&m, 120, 40);
+            assert!(out.contains("│SOURCE"), "{out}");
+            let table: String = out
+                .lines()
+                .take_while(|l| !l.starts_with("╭ Detail"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(table.contains("│▸"), "the cursor is on screen: {out}");
+        }
+        assert!(n > 20, "more than a page: {n}");
     }
 }
 

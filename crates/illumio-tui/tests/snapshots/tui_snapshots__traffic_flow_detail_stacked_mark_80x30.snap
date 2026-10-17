@@ -1,0 +1,13 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: "pane.join(\"\\n\")"
+---
+╭ Detail ───────────────────────────────────────────────────────── Enter hides ╮
+│src        erp-api-p.example  10.0.3.13                                       │
+│src labels app=erp datacenter=fra1 env=prod loc=eu role=api                   │
+│dst        erp-db-p.example  10.0.3.12                                        │
+│dst labels app=erp env=prod loc=eu role=db                                    │
+│svc        1521/tcp  process oracle  user oracle  allowed                     │
+│seen       2026-10-10 06:00 → 10-10 07:31 · bytes in 1.5M out 60.0K · rules n…│
+│mark       reviewed m-rev · erp inside itself · never expires                 │
+╰──────────────────────────────────────────────────────────────────────────────╯

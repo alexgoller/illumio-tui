@@ -5,9 +5,9 @@ expression: "pane.join(\"\\n\")"
 ╭ Detail ───────────────────────────────────────────────────────────────────────────────────────────────── Enter hides ╮
 │SOURCE                                    │ DESTINATION                               │ SERVICE                       │
 │host-1.example                            │ host-2.example                            │ 5432/tcp                      │
-│10.0.1.10                                 │ 10.0.2.20                                 │ postgres · postgres           │
-│app   shop                                │ app   shop                                │ allowed                       │
-│env   prod                                │ env   prod                                │                               │
+│10.0.1.10                                 │ 10.0.2.20                                 │ process  postgres             │
+│app   shop                                │ app   shop                                │ user     postgres             │
+│env   prod                                │ env   prod                                │ allowed                       │
 │role  web                                 │ role  db                                  │                               │
 │                                          │                                           │                               │
 │seen 2026-10-07 08:00 → 10-10 07:31 · bytes in 120.0K out 4.0K · rules n/a                                            │
