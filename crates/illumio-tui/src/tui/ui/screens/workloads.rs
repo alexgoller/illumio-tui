@@ -381,10 +381,11 @@ fn summary_line(model: &Model, width: u16) -> Line<'static> {
     );
     // Marks for a bulk change first: they decide what L and M change.
     let marked = model.workloads.marked.len();
-    let mark = if marked > 0 {
-        format!("{marked} marked · ")
-    } else {
-        String::new()
+    let hidden = model.workloads.marked_hidden();
+    let mark = match (marked, hidden) {
+        (0, _) => String::new(),
+        (m, 0) => format!("{m} marked · "),
+        (m, h) => format!("{m} marked ({h} hidden by the filter) · "),
     };
     let bar_w = (width as usize)
         .saturating_sub(mark.chars().count() + text.chars().count() + 2)

@@ -22,10 +22,15 @@ pub enum CliError {
     /// The data is missing rows (a PCE region did not answer): exit 4.
     #[error("{0}")]
     Incomplete(String),
-    /// A bulk write that did not change everything it planned (a refused
-    /// or unanswered request, a failed re-read): exit 4, after its report.
-    #[error("bulk write incomplete: {0}")]
-    Partial(String),
+    /// A bulk write that did not change everything it planned, after its
+    /// report: the exit code and kind follow the first reason (2 invalid,
+    /// 3 auth, 5 rate limited, 6 write refused, else 4).
+    #[error("bulk write incomplete: {message}")]
+    Bulk {
+        message: String,
+        code: i32,
+        kind: &'static str,
+    },
     /// `marks.toml`: invalid (exit 2, every problem), locked by another
     /// writer (exit 3), a mark gone (exit 2), unreadable (exit 1).
     #[error("{}", .0.lines().join("; "))]
@@ -39,7 +44,8 @@ impl CliError {
             CliError::Pce(PceError::Auth { .. }) => 3,
             CliError::Pce(PceError::RateLimited { .. }) => 5,
             CliError::Pce(PceError::Invalid(_)) => 2,
-            CliError::Pce(_) | CliError::Incomplete(_) | CliError::Partial(_) => 4,
+            CliError::Pce(_) | CliError::Incomplete(_) => 4,
+            CliError::Bulk { code, .. } => *code,
             CliError::Write(e) => write_exit_code(e),
             CliError::Io(_) | CliError::Other(_) => 1,
             CliError::Marks(e) => match e {
@@ -59,7 +65,7 @@ impl CliError {
             CliError::Io(_) => "io".into(),
             CliError::Other(_) => "error".into(),
             CliError::Incomplete(_) => "incomplete".into(),
-            CliError::Partial(_) => "write_incomplete".into(),
+            CliError::Bulk { kind, .. } => (*kind).into(),
             CliError::Marks(e) => match e {
                 MarksError::Parse(_) => "marks_invalid".into(),
                 MarksError::Locked => "marks_locked".into(),

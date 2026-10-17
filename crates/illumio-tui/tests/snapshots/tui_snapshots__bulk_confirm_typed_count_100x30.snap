@@ -8,12 +8,12 @@ expression: out
 ╭ Workloads ──────────────────────────────────────────────────────────────────── 4 · cached 5s ago ╮
 │  hostname             ip              enforcement health    heartbeat                            │
 │▸ ● h╭ Send this change to 2 workloads? ─────────────────────── type 2, then y · Esc cancel ╮     │
-│  ● h│4 workloads: 1 selective → full · 1 visibility_only → full · 1 already full (skipped) │     │
-│  ● u│· 1 unmanaged (skipped)                                                               │     │
-│  ● h│no traffic loaded: d asks the draft policy                                            │     │
-│     │d: draft check, what their recent traffic would block once enforced (1 Explorer query,│     │
-│     │several requests)                                                                     │     │
-│     │full on 2 workloads: type 2 to confirm: 1▏                                            │     │
+│  ● h│full on 2 workloads: type 2 to confirm: 1▏                                            │     │
+│  ● u│4 workloads: 1 selective → full · 1 visibility_only → full · 1 already full (skipped) │     │
+│  ● h│· 1 unmanaged (skipped)                                                               │     │
+│     │no traffic loaded: d asks the draft policy                                            │     │
+│     │d: draft check, what their recent traffic in and out would block once enforced (1     │     │
+│     │Explorer query, several requests)                                                     │     │
 │     │host-2.example  visibility_only → full                                                │     │
 │     │host-4.example  selective → full                                                      │     │
 │     │                                                                                      │     │
@@ -21,12 +21,12 @@ expression: out
 │     │host-1.example  already full                                                          │     │
 │     │unmanaged-nas   unmanaged                                                             │     │
 │     │                                                                                      │     │
-│     │before sending: 1 list read (cache bypassed); workloads changed since are skipped     │     │
+│     │before sending: 2 GETs, one per workload, past the cache; workloads changed since are │     │
+│     │skipped                                                                               │     │
 │     │1/1 PUT /orgs/5/workloads/bulk_update                                                 │     │
 │     │  bulk update 2 workloads (1/1)                                                       │     │
 │     │  e.g. {"enforcement_mode":"full","href":"/orgs/5/workloads/aaaa-2"}                  │     │
 │     ╰──────────────────────────────────────────────────────────────────────────────────────╯     │
-│                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │

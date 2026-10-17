@@ -300,7 +300,12 @@ pub struct CheckResult {
     pub flows: usize,
     /// The ones the draft policy does not allow, most connections first.
     pub blocked: Vec<ResolvedFlow>,
-    /// Requests the check made (POST, polls, the draft PUT, download).
+    /// Of `blocked`: to a target (in), from a target to another host (out).
+    pub blocked_in: usize,
+    pub blocked_out: usize,
+    /// Requests the check made (POST, polls, the draft PUT, download), as
+    /// the client counted them meanwhile: other requests at the same time
+    /// count too, hence shown as `≈`.
     pub requests: u64,
     pub truncated: bool,
     /// The window it covered (`24h`).
@@ -308,12 +313,22 @@ pub struct CheckResult {
 }
 
 impl CheckResult {
-    pub fn new(flows: &[ResolvedFlow], requests: u64, truncated: bool, window: String) -> Self {
+    pub fn new(
+        flows: &[ResolvedFlow],
+        hrefs: &[String],
+        requests: u64,
+        truncated: bool,
+        window: String,
+    ) -> Self {
         let mut blocked: Vec<ResolvedFlow> =
             flows.iter().filter(|f| would_block(f)).cloned().collect();
         blocked.sort_by_key(|f| std::cmp::Reverse(f.num_connections));
+        let set: HashSet<&str> = hrefs.iter().map(String::as_str).collect();
+        let blocked_in = blocked.iter().filter(|f| inbound(f, &set)).count();
         Self {
             flows: flows.len(),
+            blocked_out: blocked.len() - blocked_in,
+            blocked_in,
             blocked,
             requests,
             truncated,
@@ -321,14 +336,17 @@ impl CheckResult {
         }
     }
 
-    /// `12 of 340 flows (24h) would be blocked · 6 requests`.
+    /// `12 of 340 flows (24h, in and out) would be blocked: 9 in · 3 out ·
+    /// ≈6 requests`.
     pub fn text(&self) -> String {
         format!(
-            "{} of {}{} flows ({}) would be blocked · {} request{}",
+            "{} of {}{} flows ({}, in and out) would be blocked: {} in · {} out · ≈{} request{}",
             self.blocked.len(),
             if self.truncated { "≥" } else { "" },
             self.flows,
             self.window,
+            self.blocked_in,
+            self.blocked_out,
             self.requests,
             if self.requests == 1 { "" } else { "s" }
         )
@@ -387,10 +405,12 @@ pub struct BulkConfirm {
     pub scroll: u16,
     /// The count typed so far.
     pub typed: String,
-    /// `(blocked, potentially blocked)` loaded flows to the targets; `None`
-    /// without loaded traffic (or for a label change).
-    pub loaded: Option<(usize, usize)>,
+    /// The loaded traffic's blocked flows of the targets, in and out;
+    /// `None` without loaded traffic (or for a label change).
+    pub loaded: Option<LoadedCounts>,
     pub check: DraftCheck,
+    /// `plan.lines()`, made once (not per draw or key).
+    pub lines: Vec<String>,
 }
 
 impl PartialEq for BulkConfirm {
@@ -405,8 +425,9 @@ impl PartialEq for BulkConfirm {
 }
 
 impl BulkConfirm {
-    pub fn new(plan: BulkPlan, loaded: Option<(usize, usize)>) -> Self {
+    pub fn new(plan: BulkPlan, loaded: Option<LoadedCounts>, org_id: u64) -> Self {
         Self {
+            lines: plan.lines(org_id),
             plan,
             scroll: 0,
             typed: String::new(),
@@ -426,27 +447,57 @@ impl BulkConfirm {
     }
 }
 
-/// `(blocked, potentially blocked)` flows of `flows` whose destination is
-/// one of `hrefs`: the loaded traffic's view, no request.
-pub fn loaded_counts(flows: &[ResolvedFlow], hrefs: &[String]) -> (usize, usize) {
-    let set: HashSet<&str> = hrefs.iter().map(String::as_str).collect();
-    let to = |f: &&ResolvedFlow| {
-        f.dst
+/// A flow into one of the targets (its destination is one).
+fn inbound(f: &ResolvedFlow, set: &HashSet<&str>) -> bool {
+    f.dst
+        .workload_href
+        .as_deref()
+        .is_some_and(|h| set.contains(h))
+}
+
+/// A flow from one of the targets to another host.
+fn outbound(f: &ResolvedFlow, set: &HashSet<&str>) -> bool {
+    !inbound(f, set)
+        && f.src
             .workload_href
             .as_deref()
             .is_some_and(|h| set.contains(h))
-    };
-    let n = |d: PolicyDecision| {
-        flows
-            .iter()
-            .filter(to)
-            .filter(|f| f.policy_decision == d)
-            .count()
-    };
-    (
-        n(PolicyDecision::Blocked),
-        n(PolicyDecision::PotentiallyBlocked),
-    )
+}
+
+/// The loaded traffic's blocked and potentially blocked flows of the
+/// targets, in (to them) and out (from them to another host). No request.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LoadedCounts {
+    pub in_blocked: usize,
+    pub in_potentially: usize,
+    pub out_blocked: usize,
+    pub out_potentially: usize,
+}
+
+impl LoadedCounts {
+    /// `in 3 blocked · 5 potentially blocked · out 1 blocked · 0 potentially blocked`.
+    pub fn text(&self) -> String {
+        format!(
+            "in {} blocked · {} potentially blocked · out {} blocked · {} potentially blocked",
+            self.in_blocked, self.in_potentially, self.out_blocked, self.out_potentially
+        )
+    }
+}
+
+pub fn loaded_counts(flows: &[ResolvedFlow], hrefs: &[String]) -> LoadedCounts {
+    let set: HashSet<&str> = hrefs.iter().map(String::as_str).collect();
+    let mut c = LoadedCounts::default();
+    for f in flows {
+        let slot = match (inbound(f, &set), outbound(f, &set), f.policy_decision) {
+            (true, _, PolicyDecision::Blocked) => &mut c.in_blocked,
+            (true, _, PolicyDecision::PotentiallyBlocked) => &mut c.in_potentially,
+            (_, true, PolicyDecision::Blocked) => &mut c.out_blocked,
+            (_, true, PolicyDecision::PotentiallyBlocked) => &mut c.out_potentially,
+            _ => continue,
+        };
+        *slot += 1;
+    }
+    c
 }
 
 /// The profile a plan is made on: it is sent only there.
@@ -593,28 +644,36 @@ mod tests {
     }
 
     #[test]
-    fn loaded_counts_take_flows_to_the_targets() {
+    fn loaded_counts_split_in_and_out() {
         use crate::tui::test_support::model_with_flows;
         let m = model_with_flows();
         let flows = m.traffic.loaded_flows();
-        let hrefs: Vec<String> = flows
+        let dsts: Vec<String> = flows
             .iter()
             .filter_map(|f| f.dst.workload_href.clone())
             .collect();
-        let (b, p) = loaded_counts(flows, &hrefs);
+        let c = loaded_counts(flows, &dsts);
         let expect = |d| {
             flows
                 .iter()
                 .filter(|f| f.dst.workload_href.is_some() && f.policy_decision == d)
                 .count()
         };
-        assert_eq!(
-            (b, p),
-            (
-                expect(PolicyDecision::Blocked),
-                expect(PolicyDecision::PotentiallyBlocked)
-            )
-        );
-        assert_eq!(loaded_counts(flows, &[]), (0, 0));
+        assert_eq!(c.in_blocked, expect(PolicyDecision::Blocked));
+        assert_eq!(c.in_potentially, expect(PolicyDecision::PotentiallyBlocked));
+        assert_eq!(loaded_counts(flows, &[]), LoadedCounts::default());
+        // A flow's source as the target: out, unless its destination is one too.
+        let f = flows
+            .iter()
+            .find(|f| {
+                f.src.workload_href.is_some()
+                    && f.src.workload_href != f.dst.workload_href
+                    && f.policy_decision != PolicyDecision::Allowed
+            })
+            .expect("a non-allowed flow from a workload");
+        let src = vec![f.src.workload_href.clone().unwrap()];
+        let c = loaded_counts(flows, &src);
+        assert!(c.out_blocked + c.out_potentially > 0, "{c:?}");
+        assert!(c.text().starts_with("in "), "{}", c.text());
     }
 }

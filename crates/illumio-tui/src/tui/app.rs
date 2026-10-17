@@ -142,6 +142,12 @@ impl BulkFallback {
                 .collect(),
             labels_changed: unknown,
             labels_created: false,
+            reread_skipped: None,
+            failure: Some(if unknown {
+                pce::write::bulk::BulkFailure::Unanswered
+            } else {
+                pce::write::bulk::BulkFailure::Refused
+            }),
         }
     }
 }
@@ -662,6 +668,7 @@ impl Runtime {
                         let flows = pce::traffic::resolve_flows(&r.value.flows, &idx);
                         Ok(crate::tui::bulk::CheckResult::new(
                             &flows,
+                            &hrefs,
                             pce.stats().calls.saturating_sub(before),
                             r.value.truncated,
                             window_text,

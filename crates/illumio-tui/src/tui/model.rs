@@ -5219,6 +5219,8 @@ pub struct WorkloadsState {
     /// The next load is the reload after a bulk change: its report stays
     /// on the status line.
     pub keep_status: bool,
+    /// `Esc` with many marks asked once (`Esc again clears N marks`).
+    pub esc_armed: bool,
 }
 
 /// What `L` and `M` change: the marked workloads, else the group under
@@ -5266,6 +5268,7 @@ impl WorkloadsState {
             open_on_load: None,
             marked: BTreeSet::new(),
             keep_status: false,
+            esc_armed: false,
         }
     }
 
@@ -5335,6 +5338,18 @@ impl WorkloadsState {
         self.marked.clear();
         self.sync_marks();
         n
+    }
+
+    /// Marked workloads the filters (or search) hide from the table.
+    pub fn marked_hidden(&self) -> usize {
+        let rows = self.table.rows();
+        let shown = self
+            .table
+            .visible()
+            .iter()
+            .filter(|&&i| rows[i].marked.get())
+            .count();
+        self.marked.len().saturating_sub(shown)
     }
 
     /// The marked workloads still loaded (hidden by a filter or not).

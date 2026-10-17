@@ -183,7 +183,16 @@ async fn enforce_dry_run_prints_the_plan_and_the_chunks() {
     assert_eq!(d["needs_confirm_count"], true);
     assert_eq!(d["workloads"][0]["change"], "visibility_only → full");
     assert_eq!(d["skipped"][0]["reason"], "unmanaged");
-    assert_eq!(d["reads"], 1);
+    // `--yes` would send right after its own selection read: no re-read.
+    assert_eq!(d["reads"], 0);
+    assert!(
+        d["reread"]
+            .as_str()
+            .unwrap()
+            .starts_with("no re-read (the selection read ran"),
+        "{}",
+        d["reread"]
+    );
     assert_eq!(d["requests"][0]["method"], "PUT");
     assert_eq!(d["requests"][0]["path"], "/orgs/5/workloads/bulk_update");
     assert_eq!(
@@ -256,7 +265,11 @@ async fn enforce_yes_re_reads_once_sends_and_audits() {
         .assert()
         .success();
     let out = stdout_json(&a);
-    assert_eq!(out["data"]["reads"], 1);
+    assert_eq!(
+        out["data"]["reads"], 0,
+        "the selection was read moments before"
+    );
+    assert!(out["data"]["reread_skipped"].as_str().is_some());
     assert_eq!(out["data"]["steps"][0]["status"], "written");
     let items = out["data"]["items"].as_array().unwrap();
     assert_eq!(items.iter().filter(|i| i["status"] == "updated").count(), 2);
@@ -268,8 +281,8 @@ async fn enforce_yes_re_reads_once_sends_and_audits() {
         bodies(&server, BULK).await[0][0],
         json!({"href": "/orgs/5/workloads/w1", "enforcement_mode": "full", "visibility_level": "flow_drops"})
     );
-    // The selection and the re-read (past the cache): two list reads.
-    assert_eq!(count(&server, "GET", LIST).await, 2);
+    // The selection only: it was read moments before the send.
+    assert_eq!(count(&server, "GET", LIST).await, 1);
     let audit = audit_lines(state.path());
     assert_eq!(audit.len(), 1);
     assert_eq!(audit[0]["source"], "cli");
@@ -367,6 +380,14 @@ async fn relabel_dry_run_and_yes() {
         .success();
     assert_eq!(count(&server, "PUT", BULK).await, 1);
     assert_eq!(audit_lines(state.path()).len(), 1);
+    // Labels resolve through the labels list alone, never the 4-list index.
+    for p in [
+        "/api/v2/orgs/5/sec_policy/draft/label_groups",
+        "/api/v2/orgs/5/sec_policy/draft/ip_lists",
+        "/api/v2/orgs/5/sec_policy/draft/services",
+    ] {
+        assert_eq!(count(&server, "GET", p).await, 0, "{p}");
+    }
     // An unknown label is refused with the known values, nothing sent.
     let a = writer(&server, state.path())
         .args(["workloads", "relabel", "--set", "app=nope", "--yes"])
@@ -422,7 +443,8 @@ async fn csv_is_refused_and_the_table_prints_the_plan() {
         .success();
     let out = String::from_utf8_lossy(&a.get_output().stdout).to_string();
     assert!(out.contains("visibility_only → idle"), "{out}");
-    assert!(out.contains("1 re-read + 1 write: 1 bulk_update"), "{out}");
+    assert!(out.contains("no re-read (the selection read ran"), "{out}");
+    assert!(out.contains("+ 1 write: 1 bulk_update"), "{out}");
     assert!(
         out.contains(r#"[{"enforcement_mode":"idle","href":"/orgs/5/workloads/w1"}"#),
         "{out}"
@@ -461,4 +483,30 @@ async fn a_truncated_selection_is_never_sent() {
         .assert()
         .success();
     assert_eq!(stdout_json(&a)["meta"]["truncated"], true);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn nothing_to_change_prints_the_summary_and_exits_0() {
+    let server = MockServer::start().await;
+    mount_list(
+        &server,
+        json!([
+            wl(1, "full", true, json!([])),
+            wl(2, "idle", false, json!([]))
+        ]),
+    )
+    .await;
+    let state = tempfile::tempdir().unwrap();
+    let a = writer(&server, state.path())
+        .args(["workloads", "enforce", "full", "--yes"])
+        .assert()
+        .success();
+    let out = stdout_json(&a);
+    assert_eq!(out["data"]["count"], 0);
+    assert_eq!(
+        out["data"]["summary"],
+        "2 workloads: 1 already full (skipped) · 1 unmanaged (skipped)"
+    );
+    assert_eq!(count(&server, "PUT", BULK).await, 0);
+    assert!(audit_lines(state.path()).is_empty());
 }

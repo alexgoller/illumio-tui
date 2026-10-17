@@ -2860,7 +2860,8 @@ async fn plan_batch_needs_the_runtime_writer_and_sends_nothing() {
 }
 
 /// `4`, `V`, `M` to full, `Enter`, the count, `y`: one list load, then on
-/// `y` one re-read, one `bulk_update`, one reload; nothing before `y`.
+/// `y` the re-read (one GET per target: two), one `bulk_update`, one
+/// reload; nothing before `y`.
 #[tokio::test]
 async fn bulk_enforcement_from_keys_re_reads_sends_once_and_reloads_once() {
     let server = MockServer::start().await;
@@ -2872,9 +2873,23 @@ async fn bulk_enforcement_from_keys_re_reads_sends_once_and_reloads_once() {
                 .set_body_string(include_str!("../../../fixtures/workloads.json"))
                 .insert_header("Content-Type", "application/json"),
         )
-        .expect(3)
+        .expect(2)
         .mount(&server)
         .await;
+    // Two targets: the re-read is one GET each, not the list.
+    let fixture: Vec<serde_json::Value> =
+        serde_json::from_str(include_str!("../../../fixtures/workloads.json")).unwrap();
+    for w in fixture.iter().filter(|w| {
+        ["/orgs/5/workloads/aaaa-2", "/orgs/5/workloads/aaaa-4"]
+            .contains(&w["href"].as_str().unwrap())
+    }) {
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v2{}", w["href"].as_str().unwrap())))
+            .respond_with(ResponseTemplate::new(200).set_body_json(w.clone()))
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
     Mock::given(method("PUT"))
         .and(path("/api/v2/orgs/5/workloads/bulk_update"))
         .and(body_json(json!([

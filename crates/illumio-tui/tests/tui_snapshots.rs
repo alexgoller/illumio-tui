@@ -2996,7 +2996,7 @@ fn bulk_confirm_with_typed_count_100x30() {
         "host-4.example",
         "selective → full",
         "PUT /orgs/5/workloads/bulk_update",
-        "1 list read (cache bypassed)",
+        "2 GETs, one per workload, past the cache",
     ] {
         assert!(out.contains(s), "missing {s:?}:\n{out}");
     }
@@ -3045,6 +3045,8 @@ fn bulk_report_80x24() {
         ],
         labels_changed: false,
         labels_created: false,
+        reread_skipped: None,
+        failure: Some(pce::write::bulk::BulkFailure::Partial),
     };
     let _ = illumio_tui::tui::update(&mut m, Msg::BulkDone(Box::new(report)));
     let out = render_to_string(&m, 80, 24);

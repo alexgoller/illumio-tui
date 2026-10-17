@@ -4524,6 +4524,10 @@ fn workload_filter_ref(w: &pce::models::Workload, loaded: &[pce::models::Workloa
 
 fn workloads_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     let page = workloads_page(model);
+    // `Esc again clears N marks` holds for the very next key only.
+    if k.code != KeyCode::Esc {
+        model.workloads.esc_armed = false;
+    }
     if !model.workloads.table.is_searching() {
         match k.code {
             KeyCode::Char('r') => {
@@ -4592,7 +4596,7 @@ fn workloads_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 bulk::open_enforcement(model);
                 return Vec::new();
             }
-            KeyCode::Esc if bulk::clear(model) => return Vec::new(),
+            KeyCode::Esc if bulk::esc(model) => return Vec::new(),
             KeyCode::Char('z') if model.workloads.grouped => {
                 model.workloads.toggle_fold_all();
                 model.workloads.ensure_visible(page);

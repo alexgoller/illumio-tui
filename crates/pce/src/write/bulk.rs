@@ -30,6 +30,10 @@ use std::time::Duration;
 /// Workloads per `bulk_update` request.
 pub const BULK_CHUNK: usize = 100;
 
+/// Up to this many workloads the re-read is one GET each (cheaper than
+/// the list); above, one list read.
+pub const REREAD_EACH_MAX: usize = 5;
+
 /// The draft check names each target as a destination; above this many
 /// the query would be unwieldy, so it is refused (narrow the selection).
 pub const DRAFT_CHECK_MAX_TARGETS: usize = 200;
@@ -375,8 +379,12 @@ pub struct BulkPlan {
     pub creates: Vec<LabelDraft>,
     /// The profile and PCE it was planned on; it is sent only there.
     pub origin: Option<BatchOrigin>,
-    /// The list read that finds the targets again before sending.
+    /// The list read that finds the targets again before sending (for more
+    /// than [`REREAD_EACH_MAX`] workloads; fewer are read one GET each).
     pub reread: WorkloadFilter,
+    /// Send without a re-read, and why: only for a plan made from a read
+    /// moments ago in the same run (the CLI's selection).
+    pub skip_reread: Option<String>,
     /// The target count the person typed. Required when the plan enforces
     /// (full or selective) more than one workload; `execute_bulk` refuses
     /// without it.
@@ -425,8 +433,10 @@ fn plan_one(
     let edit = &change.labels;
     let replaced = |l: &BulkLabel| !l.key.is_empty() && edit.set.iter().any(|s| s.key() == l.key);
     let removed = |l: &BulkLabel| edit.remove.iter().any(|r| r.matches(l));
-    // Kept labels in their order, then the set ones; a label with no
-    // known key is always kept.
+    // Kept labels in their order, then the set ones. A label with no known
+    // key (neither the workload's entry nor the name index names it) is
+    // always kept: no key can match it, so no set or remove may drop it,
+    // and the full list the PCE replaces still carries it.
     let mut labels: Vec<String> = t
         .labels
         .iter()
@@ -528,6 +538,7 @@ pub fn plan_bulk(
         creates,
         origin,
         reread,
+        skip_reread: None,
         confirmed: None,
     })
 }
@@ -617,7 +628,26 @@ impl BulkPlan {
 
     /// Reads before the first write (the re-read): always one.
     pub fn reads(&self) -> u32 {
-        u32::from(!self.items.is_empty())
+        if self.items.is_empty() || self.skip_reread.is_some() {
+            0
+        } else if self.items.len() <= REREAD_EACH_MAX {
+            self.items.len() as u32
+        } else {
+            1
+        }
+    }
+
+    /// `1 list read`, `2 GETs (one per workload)`, `no re-read`: what the
+    /// re-read costs.
+    pub fn reread_text(&self) -> String {
+        match (&self.skip_reread, self.reads()) {
+            (Some(why), _) => format!("no re-read ({why})"),
+            (None, 0) => "no re-read".to_string(),
+            (None, n) if self.items.len() <= REREAD_EACH_MAX => {
+                format!("{}, one per workload", plural(n as usize, "GET", "GETs"))
+            }
+            _ => "1 list read".to_string(),
+        }
     }
 
     /// `1 read + 3 requests: 1 label, 2 bulk_update`.
@@ -629,7 +659,8 @@ impl BulkPlan {
         }
         parts.push(format!("{chunks} bulk_update"));
         format!(
-            "1 re-read + {}: {}",
+            "{} + {}: {}",
+            self.reread_text(),
             plural(self.creates.len() + chunks, "write", "writes"),
             parts.join(", ")
         )
@@ -658,10 +689,13 @@ impl BulkPlan {
             }
         }
         out.push(String::new());
-        out.push(
-            "before sending: 1 list read (cache bypassed); workloads changed since are skipped"
-                .to_string(),
-        );
+        out.push(match &self.skip_reread {
+            Some(why) => format!("no re-read before sending: {why}"),
+            None => format!(
+                "before sending: {}, past the cache; workloads changed since are skipped",
+                self.reread_text()
+            ),
+        });
         let reqs = self.requests(org_id);
         let n = reqs.len();
         for (i, r) in reqs.iter().enumerate() {
@@ -793,8 +827,12 @@ pub struct BulkReport {
     /// Nothing was sent (and why): a refused plan or a failed re-read.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refused: Option<String>,
-    /// List reads made (the re-read: 0 or 1).
+    /// Reads made by the re-read: one list read, or one GET per workload
+    /// for a few.
     pub reads: u32,
+    /// The re-read was skipped, and why.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reread_skipped: Option<String>,
     pub steps: Vec<BulkStep>,
     pub items: Vec<ItemResult>,
     /// A label write may have applied: labels and the label-derived
@@ -802,6 +840,52 @@ pub struct BulkReport {
     pub labels_changed: bool,
     /// A label was created.
     pub labels_created: bool,
+    /// Why it did not do everything (the first reason): what an exit code
+    /// follows. `None`: it did, or only skipped workloads the re-read found
+    /// changed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure: Option<BulkFailure>,
+}
+
+/// The kind of the first thing that stopped a bulk write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BulkFailure {
+    /// Refused before anything was read or sent (a plan from another
+    /// profile, no typed count, a bad href), or the PCE called a request
+    /// invalid.
+    Invalid,
+    /// The write guard refused (the audit log, the profile).
+    Refused,
+    Auth,
+    RateLimited,
+    /// A request failed (the re-read, a create, a chunk).
+    Pce,
+    /// A request was sent and its outcome (for some workloads) is unknown.
+    Unanswered,
+    /// The PCE refused some workloads of a chunk.
+    Partial,
+}
+
+impl BulkFailure {
+    pub fn of_pce(e: &PceError) -> Self {
+        match e {
+            PceError::Auth { .. } => Self::Auth,
+            PceError::RateLimited { .. } => Self::RateLimited,
+            PceError::Invalid(_) => Self::Invalid,
+            _ => Self::Pce,
+        }
+    }
+
+    pub fn of(e: &WriteError) -> Self {
+        match e {
+            WriteError::Refused(_) => Self::Refused,
+            WriteError::Invalid(_) => Self::Invalid,
+            WriteError::Unanswered(_) => Self::Unanswered,
+            WriteError::Pce(p) => Self::of_pce(p),
+            WriteError::AuditFailed { write, .. } => Self::of(write),
+        }
+    }
 }
 
 impl BulkReport {
@@ -887,15 +971,15 @@ impl BulkReport {
         if let Some(r) = &self.refused {
             out.push(format!("nothing sent: {r}"));
         }
-        if self.reads > 0 {
+        if let Some(why) = &self.reread_skipped {
+            out.push(format!("no re-read: {why}"));
+        } else if self.reads > 0 {
+            let reads = plural(self.reads as usize, "read", "reads");
             let dropped = self.dropped();
             out.push(if dropped > 0 {
-                format!(
-                    "re-read: 1 list read · {} skipped (changed since planned or gone)",
-                    dropped
-                )
+                format!("re-read: {reads} · {dropped} skipped (changed since planned or gone)")
             } else {
-                "re-read: 1 list read · every workload as planned".to_string()
+                format!("re-read: {reads} · every workload as planned")
             });
         }
         let n = self.steps.len();
@@ -908,10 +992,9 @@ impl BulkReport {
                     _ => "    written".to_string(),
                 },
                 (StepStatus::Partial, _, _) => "    answered: some workloads refused".to_string(),
-                (StepStatus::Unanswered, e, _) => format!(
-                    "    NOT ANSWERED, it may have applied: {}",
-                    e.as_deref().unwrap_or("")
-                ),
+                (StepStatus::Unanswered, e, _) => {
+                    format!("    NOT ANSWERED: {}", e.as_deref().unwrap_or(""))
+                }
                 (StepStatus::Failed, e, _) => format!("    FAILED: {}", e.as_deref().unwrap_or("")),
                 (StepStatus::NotSent, _, _) => "    not sent".to_string(),
             });
@@ -948,13 +1031,24 @@ impl BulkReport {
     }
 }
 
-/// Each workload of a sent chunk and its outcome from the PCE's answer:
-/// a list of `{href, status, errors}`; `updated` (or `success`) is the
-/// only success, an entry missing for a workload is a failure.
+/// What the PCE's answer says about one workload of a chunk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ItemAnswer {
+    /// `updated` (or `success`).
+    Updated,
+    /// Any other status, with the PCE's reason.
+    Refused(String),
+    /// The answer names it not: whether it applied is unknown.
+    NoResult,
+}
+
+/// Each workload of a sent chunk and what the answer says about it; `None`
+/// when the answer is no per-workload list at all (a 204, a job object):
+/// then nothing is known about any of them.
 pub(crate) fn chunk_outcomes(
     sent: Option<&Value>,
     answer: &Value,
-) -> Vec<(String, Result<(), String>)> {
+) -> Option<Vec<(String, ItemAnswer)>> {
     let hrefs: Vec<String> = match sent {
         Some(Value::Array(items)) => items
             .iter()
@@ -963,10 +1057,7 @@ pub(crate) fn chunk_outcomes(
         _ => Vec::new(),
     };
     let Value::Array(entries) = answer else {
-        return hrefs
-            .into_iter()
-            .map(|h| (h, Err("the answer was not a per-workload list".to_string())))
-            .collect();
+        return None;
     };
     let mut by_href: HashMap<&str, &Value> = HashMap::new();
     for e in entries {
@@ -974,23 +1065,25 @@ pub(crate) fn chunk_outcomes(
             by_href.insert(h, e);
         }
     }
-    hrefs
-        .into_iter()
-        .map(|h| {
-            let r = match by_href.get(h.as_str()) {
-                None => Err("no result for this workload in the answer".to_string()),
-                Some(e) => {
-                    let status = e.get("status").and_then(Value::as_str).unwrap_or("");
-                    if matches!(status, "updated" | "success") {
-                        Ok(())
-                    } else {
-                        Err(entry_error(status, e))
+    Some(
+        hrefs
+            .into_iter()
+            .map(|h| {
+                let r = match by_href.get(h.as_str()) {
+                    None => ItemAnswer::NoResult,
+                    Some(e) => {
+                        let status = e.get("status").and_then(Value::as_str).unwrap_or("");
+                        if matches!(status, "updated" | "success") {
+                            ItemAnswer::Updated
+                        } else {
+                            ItemAnswer::Refused(entry_error(status, e))
+                        }
                     }
-                }
-            };
-            (h, r)
-        })
-        .collect()
+                };
+                (h, r)
+            })
+            .collect(),
+    )
 }
 
 /// `validation_failure: enforcement_mode is invalid`.
@@ -1027,17 +1120,35 @@ fn entry_error(status: &str, e: &Value) -> String {
     }
 }
 
-/// The audit entry's `items` for a chunk: each workload and its outcome.
+/// The audit entry's `items` for a chunk: each workload and its outcome
+/// (`unknown` where the answer says nothing about it).
 pub(crate) fn audit_items(sent: Option<&Value>, answer: &Value) -> Value {
-    Value::Array(
-        chunk_outcomes(sent, answer)
+    let hrefs = || -> Vec<String> {
+        match sent {
+            Some(Value::Array(items)) => items
+                .iter()
+                .filter_map(|i| i.get("href").and_then(Value::as_str).map(str::to_string))
+                .collect(),
+            _ => Vec::new(),
+        }
+    };
+    let items: Vec<Value> = match chunk_outcomes(sent, answer) {
+        None => hrefs()
+            .into_iter()
+            .map(|h| json!({"href": h, "status": "unknown", "error": "no per-workload results in the answer"}))
+            .collect(),
+        Some(o) => o
             .into_iter()
             .map(|(href, r)| match r {
-                Ok(()) => json!({"href": href, "status": "updated"}),
-                Err(e) => json!({"href": href, "status": "failed", "error": e}),
+                ItemAnswer::Updated => json!({"href": href, "status": "updated"}),
+                ItemAnswer::Refused(e) => json!({"href": href, "status": "failed", "error": e}),
+                ItemAnswer::NoResult => {
+                    json!({"href": href, "status": "unknown", "error": "no result for this workload in the answer"})
+                }
             })
             .collect(),
-    )
+    };
+    Value::Array(items)
 }
 
 /// `body` with every `{step:i}` href replaced by `created[i]`.
@@ -1083,10 +1194,11 @@ fn error_status(e: &WriteError) -> (StepStatus, Option<u16>) {
     }
 }
 
-/// The draft check: the targets' recent traffic as destinations, every
-/// decision, evaluated against the draft policy (what full enforcement
-/// would block). One Explorer query; refused above
-/// [`DRAFT_CHECK_MAX_TARGETS`] targets.
+/// The draft check: the targets' recent traffic, in and out (each target
+/// a source or a destination: `sources_destinations_query_op` `or`), every
+/// decision, evaluated against the draft policy (what enforcement would
+/// block). One Explorer query; refused above [`DRAFT_CHECK_MAX_TARGETS`]
+/// targets.
 pub fn draft_check_query(
     hrefs: &[String],
     window: Duration,
@@ -1104,12 +1216,17 @@ pub fn draft_check_query(
     let mut b = TrafficQueryBuilder::last(window)?
         .max_results(max_results)
         .query_name("illumio-tui draft check");
-    for h in hrefs {
-        b = b.destination(vec![ActorMatch::Workload {
+    let actor = |h: &String| {
+        vec![ActorMatch::Workload {
             workload: Ref::new(h.clone()),
-        }]);
+        }]
+    };
+    for h in hrefs {
+        b = b.source(actor(h)).destination(actor(h));
     }
-    b.build()
+    let mut q = b.build()?;
+    q.sources_destinations_query_op = "or".into();
+    Ok(q)
 }
 
 /// A flow the draft policy does not allow: blocked once its destination
@@ -1124,6 +1241,31 @@ pub fn would_block(f: &ResolvedFlow) -> bool {
 }
 
 impl Writer<'_> {
+    /// The targets as the PCE holds them now, and the reads it took: one
+    /// GET each for up to [`REREAD_EACH_MAX`] (a 404 leaves it out: gone),
+    /// else one list read; never from the cache.
+    async fn reread(&self, plan: &BulkPlan) -> Result<(Vec<Workload>, u32), (PceError, u32)> {
+        if plan.items.len() > REREAD_EACH_MAX {
+            return self
+                .pce()
+                .workloads(&plan.reread, CacheMode::Bypass)
+                .await
+                .map(|c| (c.value, 1))
+                .map_err(|e| (e, 1));
+        }
+        let mut out = Vec::new();
+        let mut reads = 0;
+        for i in &plan.items {
+            reads += 1;
+            match self.pce().client().get::<Workload>(&i.href, &[]).await {
+                Ok(r) => out.push(r.body),
+                Err(PceError::NotFound { .. }) => {}
+                Err(e) => return Err((e, reads)),
+            }
+        }
+        Ok((out, reads))
+    }
+
     /// Sends `plan` (see the module doc), reporting `progress(done, of)`
     /// after each request. Never retries; stops after the first chunk with
     /// a failure. Every outcome is in the report, nothing is an `Err`.
@@ -1138,6 +1280,7 @@ impl Writer<'_> {
             change: plan.change.text(),
             refused: None,
             reads: 0,
+            reread_skipped: None,
             steps: Vec::new(),
             items: plan
                 .skipped
@@ -1152,10 +1295,12 @@ impl Writer<'_> {
                 .collect(),
             labels_changed: false,
             labels_created: false,
+            failure: None,
         };
         let org = self.pce().client().org_id();
         let not_sent = |report: &mut BulkReport, items: &[BulkItem], why: String| {
             report.refused = Some(why);
+            report.failure.get_or_insert(BulkFailure::Invalid);
             report.items.extend(items.iter().map(|i| ItemResult {
                 href: i.href.clone(),
                 name: i.name.clone(),
@@ -1195,19 +1340,34 @@ impl Writer<'_> {
             return report;
         }
 
-        // The re-read: one list read past the cache.
-        report.reads = 1;
-        let now = match self.pce().workloads(&plan.reread, CacheMode::Bypass).await {
-            Ok(c) => c.value,
-            Err(e) => {
-                not_sent(&mut report, &plan.items, format!("the re-read failed: {e}"));
-                return report;
+        // The re-read, past the cache: one GET per workload for a few, else
+        // one list read; skipped only when the plan says why (a CLI
+        // selection read moments ago in the same run).
+        let now: Vec<Workload> = if plan.skip_reread.is_some() {
+            Vec::new()
+        } else {
+            match self.reread(&plan).await {
+                Ok((ws, reads)) => {
+                    report.reads = reads;
+                    ws
+                }
+                Err((e, reads)) => {
+                    report.reads = reads;
+                    not_sent(&mut report, &plan.items, format!("the re-read failed: {e}"));
+                    report.failure = Some(BulkFailure::of_pce(&e));
+                    return report;
+                }
             }
         };
+        report.reread_skipped = plan.skip_reread.clone();
         let now: HashMap<&str, &Workload> = now.iter().map(|w| (w.href.as_str(), w)).collect();
         let placeholders: Vec<String> = (0..plan.creates.len()).map(step_placeholder).collect();
         let mut sendable: Vec<BulkItem> = Vec::new();
         for item in &plan.items {
+            if plan.skip_reread.is_some() {
+                sendable.push(item.clone());
+                continue;
+            }
             let Some(w) = now.get(item.href.as_str()) else {
                 report.items.push(ItemResult {
                     href: item.href.clone(),
@@ -1308,6 +1468,7 @@ impl Writer<'_> {
                         step.http_status = code;
                         step.error = Some(e.to_string());
                         report.labels_created |= st == StepStatus::Unanswered;
+                        report.failure.get_or_insert(BulkFailure::of(&e));
                         stopped = true;
                     }
                 }
@@ -1346,6 +1507,7 @@ impl Writer<'_> {
                 let filled: Result<(), WriteError> =
                     bodies.iter_mut().try_for_each(|b| fill_labels(b, &created));
                 if let Err(e) = filled {
+                    report.failure.get_or_insert(BulkFailure::Invalid);
                     step.status = StepStatus::Failed;
                     step.error = Some(e.to_string());
                     report
@@ -1369,41 +1531,84 @@ impl Writer<'_> {
                 Ok(Outcome::Written(w)) => {
                     step.http_status = Some(w.status);
                     step.audit_failed = w.audit_failed.clone();
-                    let outcomes = chunk_outcomes(sent.as_ref(), &w.object);
-                    let by: HashMap<&str, &Result<(), String>> =
-                        outcomes.iter().map(|(h, r)| (h.as_str(), r)).collect();
-                    let mut failed = false;
-                    for i in chunk {
-                        match by.get(i.href.as_str()) {
-                            Some(Ok(())) => report.items.push(item(i, ItemStatus::Updated, None)),
-                            Some(Err(e)) => {
-                                failed = true;
-                                report
-                                    .items
-                                    .push(item(i, ItemStatus::Failed, Some(e.clone())));
+                    let labels = plan.change.changes_labels();
+                    match chunk_outcomes(sent.as_ref(), &w.object) {
+                        // A 2xx with no per-workload list (a 204, a job
+                        // object): it may have applied, nobody knows to whom.
+                        None => {
+                            let why = format!(
+                                "answered {} without per-workload results: it may have applied, check the PCE",
+                                w.status
+                            );
+                            step.status = StepStatus::Unanswered;
+                            step.error = Some(why.clone());
+                            report.items.extend(
+                                chunk
+                                    .iter()
+                                    .map(|i| item(i, ItemStatus::Unanswered, Some(why.clone()))),
+                            );
+                            report.labels_changed |= labels;
+                            report.failure.get_or_insert(BulkFailure::Unanswered);
+                            stopped = true;
+                        }
+                        Some(outcomes) => {
+                            let by: HashMap<&str, &ItemAnswer> =
+                                outcomes.iter().map(|(h, r)| (h.as_str(), r)).collect();
+                            let (mut refused, mut unknown, mut applied) = (false, false, false);
+                            for i in chunk {
+                                match by.get(i.href.as_str()) {
+                                    Some(ItemAnswer::Updated) => {
+                                        applied = true;
+                                        report.items.push(item(i, ItemStatus::Updated, None));
+                                    }
+                                    Some(ItemAnswer::Refused(e)) => {
+                                        refused = true;
+                                        report.items.push(item(
+                                            i,
+                                            ItemStatus::Failed,
+                                            Some(e.clone()),
+                                        ));
+                                    }
+                                    Some(ItemAnswer::NoResult) | None => {
+                                        unknown = true;
+                                        report.items.push(item(
+                                            i,
+                                            ItemStatus::Unanswered,
+                                            Some(
+                                                "no result for this workload in the answer: it may have applied, check the PCE"
+                                                    .into(),
+                                            ),
+                                        ));
+                                    }
+                                }
                             }
-                            None => {
-                                failed = true;
-                                report.items.push(item(
-                                    i,
-                                    ItemStatus::Failed,
-                                    Some("no result for this workload".into()),
-                                ));
+                            step.status = match (refused, unknown, applied) {
+                                (false, false, _) => StepStatus::Written,
+                                (false, true, false) => StepStatus::Unanswered,
+                                _ => StepStatus::Partial,
+                            };
+                            if unknown && !refused {
+                                step.error = Some(
+                                    "some workloads have no result in the answer: they may have applied"
+                                        .into(),
+                                );
                             }
+                            report.labels_changed |= labels && (applied || unknown);
+                            if refused {
+                                report.failure.get_or_insert(BulkFailure::Partial);
+                            } else if unknown {
+                                report.failure.get_or_insert(BulkFailure::Unanswered);
+                            } else if step.audit_failed.is_some() {
+                                report.failure.get_or_insert(BulkFailure::Refused);
+                            }
+                            stopped = refused || unknown || step.audit_failed.is_some();
                         }
                     }
-                    let any_ok = outcomes.iter().any(|(_, r)| r.is_ok());
-                    step.status = if failed {
-                        StepStatus::Partial
-                    } else {
-                        StepStatus::Written
-                    };
-                    report.labels_changed |= plan.change.changes_labels() && any_ok;
-                    stopped = failed || step.audit_failed.is_some();
                 }
                 Ok(Outcome::Skipped { .. }) => {
                     step.status = StepStatus::Failed;
                     step.error = Some("the writer skipped the chunk".into());
+                    report.failure.get_or_insert(BulkFailure::Pce);
                     report
                         .items
                         .extend(chunk.iter().map(|i| item(i, ItemStatus::NotSent, None)));
@@ -1414,6 +1619,7 @@ impl Writer<'_> {
                     step.status = st;
                     step.http_status = code;
                     step.error = Some(e.to_string());
+                    report.failure.get_or_insert(BulkFailure::of(&e));
                     let (each, why) = if st == StepStatus::Unanswered {
                         report.labels_changed |= plan.change.changes_labels();
                         (ItemStatus::Unanswered, None)
@@ -1645,7 +1851,7 @@ mod tests {
             .collect();
         assert_eq!(sizes, vec![100, 100, 50]);
         assert_eq!(reqs[2].summary, "bulk update 50 workloads (3/3)");
-        assert_eq!(p.cost_text(), "1 re-read + 3 writes: 3 bulk_update");
+        assert_eq!(p.cost_text(), "1 list read + 3 writes: 3 bulk_update");
     }
 
     #[test]
@@ -1707,15 +1913,30 @@ mod tests {
             {"href": "/w/1", "status": "updated"},
             {"href": "/w/2", "status": "validation_failure", "errors": [{"token": "x", "message": "bad mode"}]},
         ]);
-        let o = chunk_outcomes(Some(&sent), &answer);
-        assert_eq!(o[0], ("/w/1".into(), Ok(())));
+        let o = chunk_outcomes(Some(&sent), &answer).unwrap();
+        assert_eq!(o[0], ("/w/1".into(), ItemAnswer::Updated));
         assert_eq!(
             o[1],
-            ("/w/2".into(), Err("validation_failure: bad mode".into()))
+            (
+                "/w/2".into(),
+                ItemAnswer::Refused("validation_failure: bad mode".into())
+            )
         );
-        assert!(o[2].1.is_err(), "missing entry is a failure");
-        let none = chunk_outcomes(Some(&sent), &Value::Null);
-        assert!(none.iter().all(|(_, r)| r.is_err()));
+        assert_eq!(
+            o[2].1,
+            ItemAnswer::NoResult,
+            "missing: unknown, not refused"
+        );
+        assert_eq!(chunk_outcomes(Some(&sent), &Value::Null), None);
+        assert_eq!(
+            chunk_outcomes(Some(&sent), &json!({"href": "/jobs/1"})),
+            None
+        );
+        assert_eq!(audit_items(Some(&sent), &answer)[2]["status"], "unknown");
+        assert_eq!(
+            audit_items(Some(&sent), &Value::Null)[0]["status"],
+            "unknown"
+        );
         assert_eq!(
             audit_items(Some(&sent), &answer)[1],
             json!({"href": "/w/2", "status": "failed", "error": "validation_failure: bad mode"})
@@ -1746,6 +1967,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(q.destinations.include.len(), 2);
+        assert_eq!(q.sources.include.len(), 2, "outbound too");
+        assert_eq!(q.sources_destinations_query_op, "or");
         assert_eq!(q.max_results, 1000);
         let many: Vec<String> = (0..=DRAFT_CHECK_MAX_TARGETS)
             .map(|i| format!("/orgs/5/workloads/{i}"))

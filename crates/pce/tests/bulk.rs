@@ -64,12 +64,20 @@ fn targets(list: &Value) -> Vec<BulkTarget> {
     ws.iter().map(|w| BulkTarget::of(w, &idx)).collect()
 }
 
+/// The list, and each workload by its href (the re-read of a few).
 async fn mount_list(server: &MockServer, list: &Value) {
     Mock::given(method("GET"))
         .and(path("/api/v2/orgs/5/workloads"))
         .respond_with(ResponseTemplate::new(200).set_body_json(list.clone()))
         .mount(server)
         .await;
+    for w in list.as_array().unwrap() {
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v2{}", w["href"].as_str().unwrap())))
+            .respond_with(ResponseTemplate::new(200).set_body_json(w.clone()))
+            .mount(server)
+            .await;
+    }
 }
 
 /// Answers every chunk with `updated` for each workload it carries.
@@ -609,4 +617,244 @@ async fn an_unanswered_chunk_may_have_applied_and_is_never_retried() {
     assert!(report.status_text().contains("it may have applied"));
     assert_eq!(audit.entries()[0].phase.as_deref(), Some("sent"));
     assert_eq!(requests(&server, "PUT", BULK).await.len(), 1, "no retry");
+}
+
+/// Sends an enforcement change to 120 workloads (two chunks) whose first
+/// chunk is answered with `answer`; the report and the list reads after.
+async fn answered_with(answer: ResponseTemplate, labels: bool) -> (pce::write::BulkReport, usize) {
+    let server = MockServer::start().await;
+    let list = Value::Array((0..120).map(|n| wl(n, "idle", json!([]))).collect());
+    mount_list(&server, &list).await;
+    Mock::given(method("PUT"))
+        .and(path(BULK))
+        .respond_with(answer)
+        .expect(1)
+        .mount(&server)
+        .await;
+    let pce = pce_for(&server);
+    // A cached list before: the send must drop it.
+    pce.workloads(&WorkloadFilter::default(), CacheMode::Use)
+        .await
+        .unwrap();
+    let g = guard(MemoryAudit::new());
+    let change = if labels {
+        BulkChange::relabel(LabelEdit {
+            set: vec![LabelSet::Existing(BulkLabel {
+                href: "/orgs/5/labels/3".into(),
+                key: "app".into(),
+                value: "shop".into(),
+            })],
+            remove: vec![],
+        })
+    } else {
+        BulkChange::enforce(EnforcementMode::VisibilityOnly, None)
+    };
+    let plan = plan_bulk(
+        &targets(&list),
+        &change,
+        WorkloadFilter::default(),
+        origin(),
+    )
+    .unwrap();
+    let report = pce.writer(&g).execute_bulk(plan, &mut |_, _| {}).await;
+    pce.workloads(&WorkloadFilter::default(), CacheMode::Use)
+        .await
+        .unwrap();
+    let lists = requests(&server, "GET", "/api/v2/orgs/5/workloads")
+        .await
+        .len();
+    server.verify().await;
+    (report, lists)
+}
+
+fn assert_unknown(report: &pce::write::BulkReport, code: &str) {
+    use pce::write::bulk::BulkFailure;
+    assert_eq!(
+        report.steps[0].status,
+        StepStatus::Unanswered,
+        "{:?}",
+        report.steps
+    );
+    assert_eq!(
+        report.steps[1].status,
+        StepStatus::NotSent,
+        "no further chunk"
+    );
+    let err = report.steps[0].error.as_deref().unwrap();
+    assert!(
+        err.contains(&format!(
+            "answered {code} without per-workload results: it may have applied"
+        )),
+        "{err}"
+    );
+    assert_eq!(
+        report
+            .items
+            .iter()
+            .filter(|i| i.status == ItemStatus::Unanswered)
+            .count(),
+        100
+    );
+    assert_eq!(report.updated(), 0);
+    assert_eq!(report.failure, Some(BulkFailure::Unanswered));
+    assert!(report.status_text().contains("it may have applied"));
+    assert!(report.lines().iter().any(|l| l.contains("NOT ANSWERED")));
+}
+
+#[tokio::test]
+async fn a_204_is_an_unknown_outcome_and_drops_the_caches() {
+    let (report, lists) = answered_with(ResponseTemplate::new(204), false).await;
+    assert_unknown(&report, "204");
+    // Before, the re-read, after: the cached list was dropped.
+    assert_eq!(lists, 3);
+}
+
+#[tokio::test]
+async fn a_202_job_object_is_an_unknown_outcome() {
+    let (report, _) = answered_with(
+        ResponseTemplate::new(202).set_body_json(json!({"href": "/orgs/5/jobs/1"})),
+        true,
+    )
+    .await;
+    assert_unknown(&report, "202");
+    assert!(report.labels_changed, "a label change may have applied");
+}
+
+#[tokio::test]
+async fn a_200_object_is_an_unknown_outcome() {
+    let (report, lists) = answered_with(
+        ResponseTemplate::new(200).set_body_json(json!({"status": "ok"})),
+        true,
+    )
+    .await;
+    assert_unknown(&report, "200");
+    assert!(report.labels_changed);
+    assert_eq!(lists, 3);
+}
+
+#[tokio::test]
+async fn a_workload_missing_from_the_answer_is_unknown_not_failed() {
+    let (report, _) = answered_with(
+        ResponseTemplate::new(200).set_body_json(json!([
+            {"href": "/orgs/5/workloads/w0", "status": "updated"}
+        ])),
+        false,
+    )
+    .await;
+    assert_eq!(report.updated(), 1);
+    assert_eq!(
+        report
+            .items
+            .iter()
+            .filter(|i| i.status == ItemStatus::Unanswered)
+            .count(),
+        99
+    );
+    assert!(report.items.iter().all(|i| i.status != ItemStatus::Failed));
+    assert_eq!(report.steps[0].status, StepStatus::Partial);
+    assert_eq!(report.steps[1].status, StepStatus::NotSent);
+    assert_eq!(
+        report.failure,
+        Some(pce::write::bulk::BulkFailure::Unanswered)
+    );
+}
+
+#[tokio::test]
+async fn a_few_workloads_are_re_read_one_get_each_and_a_skip_reads_nothing() {
+    let server = MockServer::start().await;
+    let list = Value::Array((0..3).map(|n| wl(n, "idle", json!([]))).collect());
+    mount_list(&server, &list).await;
+    Mock::given(method("PUT"))
+        .and(path(BULK))
+        .respond_with(all_updated)
+        .mount(&server)
+        .await;
+    let pce = pce_for(&server);
+    let g = guard(MemoryAudit::new());
+    let change = BulkChange::enforce(EnforcementMode::VisibilityOnly, None);
+    let plan = plan_bulk(
+        &targets(&list),
+        &change,
+        WorkloadFilter::default(),
+        origin(),
+    )
+    .unwrap();
+    assert_eq!(plan.reread_text(), "3 GETs, one per workload");
+    let report = pce.writer(&g).execute_bulk(plan, &mut |_, _| {}).await;
+    assert_eq!(report.reads, 3);
+    assert_eq!(report.updated(), 3);
+    assert_eq!(
+        requests(&server, "GET", "/api/v2/orgs/5/workloads")
+            .await
+            .len(),
+        0
+    );
+    assert_eq!(
+        requests(&server, "GET", "/api/v2/orgs/5/workloads/w1")
+            .await
+            .len(),
+        1
+    );
+    // Skipped (the CLI's fresh selection): no read at all.
+    let before = server.received_requests().await.unwrap().len();
+    let mut plan = plan_bulk(
+        &targets(&list),
+        &change,
+        WorkloadFilter::default(),
+        origin(),
+    )
+    .unwrap();
+    plan.skip_reread = Some("read 3 ms before".into());
+    assert_eq!(plan.reads(), 0);
+    let report = pce.writer(&g).execute_bulk(plan, &mut |_, _| {}).await;
+    assert_eq!(report.reads, 0);
+    assert_eq!(report.updated(), 3);
+    assert_eq!(
+        server.received_requests().await.unwrap().len(),
+        before + 1,
+        "the PUT only"
+    );
+    assert!(
+        report
+            .lines()
+            .iter()
+            .any(|l| l == "no re-read: read 3 ms before")
+    );
+}
+
+#[tokio::test]
+async fn refusals_and_guard_failures_have_their_kinds() {
+    use pce::write::bulk::BulkFailure;
+    let server = MockServer::start().await;
+    let list = Value::Array((0..3).map(|n| wl(n, "idle", json!([]))).collect());
+    mount_list(&server, &list).await;
+    let pce = pce_for(&server);
+    let g = guard(MemoryAudit::new());
+    let full = BulkChange::enforce(EnforcementMode::Full, None);
+    let plan = plan_bulk(&targets(&list), &full, WorkloadFilter::default(), origin()).unwrap();
+    let report = pce.writer(&g).execute_bulk(plan, &mut |_, _| {}).await;
+    assert_eq!(report.failure, Some(BulkFailure::Invalid), "no typed count");
+    // A failed re-read: the PCE's kind.
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&server)
+        .await;
+    let pce = pce_for(&server);
+    let plan = plan_bulk(
+        &targets(&list),
+        &BulkChange::enforce(EnforcementMode::VisibilityOnly, None),
+        WorkloadFilter::default(),
+        origin(),
+    )
+    .unwrap();
+    let report = pce.writer(&g).execute_bulk(plan, &mut |_, _| {}).await;
+    assert_eq!(report.failure, Some(BulkFailure::Auth));
+    assert!(
+        report
+            .refused
+            .as_deref()
+            .unwrap()
+            .starts_with("the re-read failed")
+    );
 }

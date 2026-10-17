@@ -106,7 +106,10 @@ pub async fn relabel(ctx: &Context, a: &WorkloadRelabelArgs) -> Result<(), CliEr
         remove: remove.clone(),
     };
     BulkChange::relabel(shape).validate()?;
-    let idx = ctx.pce.name_index(ctx.cache_mode).await?;
+    // The labels list alone (one read, cached for the selection's
+    // `--label` too) resolves them and names the workloads' label keys.
+    let labels = ctx.pce.labels(ctx.cache_mode).await?.value;
+    let idx = NameIndex::new(&labels, &[], &[], &[]);
     let set = set
         .into_iter()
         .map(|(k, v)| match idx.label_href(&k, &v) {
@@ -148,8 +151,11 @@ pub struct BulkDryRun {
     pub needs_confirm_count: bool,
     pub workloads: Vec<BulkItem>,
     pub skipped: Vec<BulkSkip>,
-    /// The list read before the first write (the re-read).
+    /// The reads before the first write (the re-read: one list read, one
+    /// GET per workload for a few, or none).
     pub reads: u32,
+    /// What the re-read is (`1 list read`, `no re-read: …`).
+    pub reread: String,
     pub requests: Vec<WriteRequest>,
 }
 
@@ -283,6 +289,7 @@ async fn send(
     confirm_count: Option<usize>,
     idx: &NameIndex,
 ) -> Result<(), CliError> {
+    let selected_at = std::time::Instant::now();
     let sel = select(ctx, args, ctx.cache_mode).await?;
     let mut warnings = sel.warnings.clone();
     // A cut selection is not what the filters mean: never sent.
@@ -311,6 +318,14 @@ async fn send(
     let origin = Some(BatchOrigin::of(guard.context()));
     let mut plan = plan_bulk(&targets, &change, sel.filter.clone(), origin)?;
     let count = plan.items.len();
+    let org = ctx.config.org_id;
+    // Nothing to change: the summary, exit 0, nothing sent.
+    if count == 0 {
+        for w in &warnings {
+            eprintln!("warning: {w}");
+        }
+        return emit_plan(ctx, &plan, &change, flags.dry_run, &sel, warnings, org);
+    }
     if let Some(n) = confirm_count
         && n != count
     {
@@ -327,33 +342,21 @@ async fn send(
         )));
     }
     plan.confirmed = confirm_count;
+    // The selection was read moments ago in this very run (not from a
+    // cache): reading the same list again before sending adds a request
+    // and nothing else.
+    let ago = selected_at.elapsed();
+    if !sel.hit && ago < RECENT {
+        plan.skip_reread = Some(format!(
+            "the selection read ran {} ms before, in this run",
+            ago.as_millis()
+        ));
+    }
     for w in &warnings {
         eprintln!("warning: {w}");
     }
-    let org = ctx.config.org_id;
     if flags.dry_run {
-        let data = BulkDryRun {
-            dry_run: true,
-            change: change.text(),
-            summary: plan.summary(),
-            count,
-            needs_confirm_count: plan.needs_count(),
-            reads: plan.reads(),
-            requests: plan.requests(org),
-            workloads: plan.items.clone(),
-            skipped: plan.skipped.clone(),
-        };
-        let mut meta = ctx.meta(cache_label(sel.hit, ctx.cache_mode), sel.truncated, None);
-        meta.local_filter = sel.local_filter.clone();
-        meta.warnings = Some(warnings).filter(|w| !w.is_empty());
-        let summary = format!("{} · {}", data.summary, plan.cost_text());
-        let requests = RequestRows(&data.requests);
-        let rows = PlanRows(&data);
-        return ctx.emit_report(
-            &data,
-            &[(summary, &rows), ("requests".to_string(), &requests)],
-            &meta,
-        );
+        return emit_plan(ctx, &plan, &change, true, &sel, warnings, org);
     }
     let report = ctx
         .pce
@@ -388,8 +391,135 @@ async fn send(
         ],
         &meta,
     )?;
-    if report.stopped() {
-        return Err(CliError::Partial(status));
+    if let Some(e) = exit_error(&report, status) {
+        return Err(e);
     }
     Ok(())
+}
+
+/// A selection read at most this long before the send is not read again.
+const RECENT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// The plan as `--dry-run` prints it (also a plan with nothing to change,
+/// with or without `--yes`).
+fn emit_plan(
+    ctx: &Context,
+    plan: &pce::write::BulkPlan,
+    change: &BulkChange,
+    dry_run: bool,
+    sel: &super::workloads::Selection,
+    warnings: Vec<String>,
+    org: u64,
+) -> Result<(), CliError> {
+    let data = BulkDryRun {
+        dry_run,
+        change: change.text(),
+        summary: plan.summary(),
+        count: plan.items.len(),
+        needs_confirm_count: plan.needs_count(),
+        reads: plan.reads(),
+        reread: plan.reread_text(),
+        requests: plan.requests(org),
+        workloads: plan.items.clone(),
+        skipped: plan.skipped.clone(),
+    };
+    let mut meta = ctx.meta(cache_label(sel.hit, ctx.cache_mode), sel.truncated, None);
+    meta.local_filter = sel.local_filter.clone();
+    meta.warnings = Some(warnings).filter(|w| !w.is_empty());
+    let summary = if plan.items.is_empty() {
+        format!("{} · nothing sent", data.summary)
+    } else {
+        format!("{} · {}", data.summary, plan.cost_text())
+    };
+    let requests = RequestRows(&data.requests);
+    let rows = PlanRows(&data);
+    ctx.emit_report(
+        &data,
+        &[(summary, &rows), ("requests".to_string(), &requests)],
+        &meta,
+    )
+}
+
+/// The exit a sent bulk write ends with: none when it did everything (or
+/// only skipped workloads the re-read found changed, some updated); else
+/// the first reason's code: 2 invalid, 3 auth, 5 rate limited, 6 refused by
+/// the write guard, 4 anything else (a failed request, an unknown outcome,
+/// refused workloads, or nothing updated because every workload changed).
+fn exit_error(report: &BulkReport, status: String) -> Option<CliError> {
+    use pce::write::bulk::BulkFailure as F;
+    let (code, kind) = match report.failure {
+        Some(F::Invalid) => (2, "invalid"),
+        Some(F::Refused) => (6, "write_refused"),
+        Some(F::Auth) => (3, "auth"),
+        Some(F::RateLimited) => (5, "rate_limited"),
+        Some(F::Pce | F::Unanswered | F::Partial) => (4, "write_incomplete"),
+        None if report.updated() == 0 && report.dropped() > 0 => (4, "write_skipped"),
+        None => return None,
+    };
+    Some(CliError::Bulk {
+        message: status,
+        code,
+        kind,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pce::write::bulk::{BulkFailure, ItemResult, ItemStatus};
+
+    fn report(failure: Option<BulkFailure>, statuses: &[ItemStatus]) -> BulkReport {
+        BulkReport {
+            target: "t".into(),
+            change: "c".into(),
+            refused: None,
+            reads: 1,
+            reread_skipped: None,
+            steps: Vec::new(),
+            items: statuses
+                .iter()
+                .map(|s| ItemResult {
+                    href: "/orgs/5/workloads/a".into(),
+                    name: "a".into(),
+                    change: String::new(),
+                    status: *s,
+                    error: None,
+                })
+                .collect(),
+            labels_changed: false,
+            labels_created: false,
+            failure,
+        }
+    }
+
+    fn exit(r: &BulkReport) -> Option<(i32, String)> {
+        exit_error(r, "s".into()).map(|e| (e.exit_code(), e.kind()))
+    }
+
+    #[test]
+    fn exits_follow_the_first_reason() {
+        use ItemStatus as S;
+        for (f, code, kind) in [
+            (BulkFailure::Invalid, 2, "invalid"),
+            (BulkFailure::Refused, 6, "write_refused"),
+            (BulkFailure::Auth, 3, "auth"),
+            (BulkFailure::RateLimited, 5, "rate_limited"),
+            (BulkFailure::Pce, 4, "write_incomplete"),
+            (BulkFailure::Unanswered, 4, "write_incomplete"),
+            (BulkFailure::Partial, 4, "write_incomplete"),
+        ] {
+            assert_eq!(
+                exit(&report(Some(f), &[S::NotSent])),
+                Some((code, kind.to_string()))
+            );
+        }
+        // Every workload changed since the selection: nothing updated.
+        assert_eq!(
+            exit(&report(None, &[S::Changed, S::Missing])),
+            Some((4, "write_skipped".to_string()))
+        );
+        // Some updated, some changed: a warning only.
+        assert_eq!(exit(&report(None, &[S::Updated, S::Changed])), None);
+        assert_eq!(exit(&report(None, &[S::Updated])), None);
+    }
 }

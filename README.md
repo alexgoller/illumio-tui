@@ -432,7 +432,9 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   `X` deletes an unmanaged workload here (`x` groups).
   `Space` marks the workload under the cursor (`●` in its row; on a group header `Space`
   still folds), `V` marks the group under the cursor (grouped) or every workload shown (flat),
-  again unmarks them, and `Esc` clears the marks; the summary line counts them (`3 marked`).
+  again unmarks them, and `Esc` clears the marks (after closing the detail pane; above 20
+  marks it asks once: `Esc again clears N marks`); the summary line counts them (`3 marked`,
+  `5 marked (2 hidden by the filter)`).
   Marks survive filters, search, sort and `x`. With writes on, `L` sets labels and `M` the
   enforcement of the marked workloads, else of the group under the cursor (on its header),
   else of the row: see [Bulk labels and enforcement](#bulk-labels-and-enforcement).
@@ -969,17 +971,20 @@ enforcement mode (idle, visibility_only, selective, full) and the visibility lev
 `Enter` opens one confirm listing every workload's change and every request. Full or
 selective on more than one workload needs the workload count typed before `y` is accepted.
 For an enforcement change the confirm says how many blocked and potentially blocked flows
-of the loaded traffic go to these workloads (local, no request), and `d` runs a draft
-check on demand: one Explorer query of their traffic as destinations over the traffic
-filter's window, evaluated against the draft policy (POST, polls, the draft PUT, the
-download; counted and shown, `Esc` cancels it), listing what would be blocked. It never
-runs by itself.
+of the loaded traffic these workloads have, in (to them) and out (from them to other hosts),
+locally with no request; and `d` runs a draft check on demand: one Explorer query of their
+traffic in and out (each workload a source or a destination) over the traffic filter's
+window, evaluated against the draft policy (POST, polls, the draft PUT, the download;
+`Esc` cancels it), listing what would be blocked, split in and out, with the requests it
+took (`≈`: the client's count meanwhile). It never runs by itself.
 
-`y` sends: first one list read with the cache bypassed; a workload whose labels,
-enforcement, visibility or VEN changed since the plan is skipped and reported (never
-overwritten), one that is gone too. Then the label creates, then the chunks one at a time,
+`y` sends: first the re-read, past the cache (one GET per workload for up to five, else
+one list read); a workload whose labels, enforcement, visibility or VEN changed since the
+plan is skipped and reported (never overwritten), one that is gone too. Then the label creates, then the chunks one at a time,
 throttled; each chunk's answer is read per workload and the send stops after a chunk with
-any failure. Every request is one audit entry (a chunk's lists each workload's outcome);
+any failure. A 2xx answer without per-workload results (a 204, a job object), or one that
+leaves a workload out, is `not answered` for those workloads: it may have applied, the send
+stops, nothing is retried, and the caches are dropped as after a write. Every request is one audit entry (a chunk's lists each workload's outcome);
 quitting, `:profile` and `:writes` wait while it is sent. The status line says
 `updated 12 of 14 · 1 failed · 1 changed since planned, skipped`; the report (opened when
 something failed, else `:batch`) lists each request and each workload. A full success
@@ -988,9 +993,13 @@ screen and the usage flags as after any relabel).
 
 The CLI takes the list filters (`--label` any-of / `!` / `-`, `--enforcement`, `--hostname`,
 `--name`, `--ip`, `--managed`, `--online`, `--unhealthy`, `--offline`, `--unlabeled`) to
-select the workloads: one list request (the name index from the cache for labels), then the
-plan; `--dry-run` prints each workload's change and every chunked request body, `--yes`
-sends it (re-read, creates, chunks, as above), neither is exit 2. A truncated selection
+select the workloads: one list request (plus the labels list, one read, when `--label` or
+`relabel` names labels), then the plan; `--dry-run` prints each workload's change and every
+chunked request body, `--yes` sends it (creates, chunks, as above), neither is exit 2. The
+CLI sends right after its own selection read, so it reads nothing again (the plan says
+`no re-read (the selection read ran N ms before, in this run)`); a selection older than five
+seconds is re-read as in the TUI. A plan with nothing to change prints its summary and exits
+0. A truncated selection
 (more workloads match than the read returned) is refused with `--yes` (exit 2): narrow the
 filters or raise `--max-results`.
 
@@ -1007,9 +1016,12 @@ not create labels). A dry run's `data` is `{dry_run, change, summary, count,
 needs_confirm_count, workloads, skipped, reads, requests}`; a sent one is the report:
 `steps` (each request: status, HTTP status, error) and `items` (each workload: `updated`,
 `failed` with the PCE's reason, `not_sent`, `unanswered`, `changed` or `missing` by the
-re-read, `skipped` by the plan). Anything not updated that was planned (a refused or
-unanswered chunk, a failed re-read) is exit 4 (`write_incomplete`) after the report;
-workloads skipped by the re-read alone are a warning.
+re-read, `skipped` by the plan). Anything not updated that was planned exits non-zero after
+the report, by its first reason: 2 (`invalid`: a refusal or a request the PCE called
+invalid), 3 (`auth`), 5 (`rate_limited`), 6 (`write_refused`: the write guard), else 4
+(`write_incomplete`: a failed request, refused workloads, an unknown outcome). Workloads
+skipped by the re-read are a warning while some were updated; none updated because every
+one changed is exit 4 (`write_skipped`).
 
 ### Policy editing in the TUI
 

@@ -106,32 +106,7 @@ fn confirm_layout(model: &Model, c: &BulkConfirm, area: Rect) -> ConfirmLayout {
         }
     };
     let plan = &c.plan;
-    pin(&plan.summary(), warn);
-    if c.checkable() {
-        pin(
-            &match c.loaded {
-                Some((b, p)) => format!(
-                    "loaded traffic to these workloads: {b} blocked · {p} potentially blocked flows"
-                ),
-                None => "no traffic loaded: d asks the draft policy".to_string(),
-            },
-            t.base(),
-        );
-        let check = match &c.check {
-            DraftCheck::Idle => {
-                "d: draft check, what their recent traffic would block once enforced (1 Explorer query, several requests)".to_string()
-            }
-            DraftCheck::Running { .. } => "draft check running … Esc cancels it".to_string(),
-            DraftCheck::Done(r) => format!("draft check: {}", r.text()),
-            DraftCheck::Failed(e) => format!("draft check failed: {e}"),
-        };
-        let style = match &c.check {
-            DraftCheck::Done(r) if !r.blocked.is_empty() => Style::new().fg(t.bad),
-            DraftCheck::Failed(_) => Style::new().fg(t.bad),
-            _ => t.dim_style(),
-        };
-        pin(&check, style);
-    }
+    // The typed count first: on a short terminal it is what must show.
     if plan.needs_count() {
         let n = plan.items.len();
         let mode = plan
@@ -145,6 +120,30 @@ fn confirm_layout(model: &Model, c: &BulkConfirm, area: Rect) -> ConfirmLayout {
         };
         pin(&text, Style::new().fg(t.bad).add_modifier(Modifier::BOLD));
     }
+    pin(&plan.summary(), warn);
+    if c.checkable() {
+        pin(
+            &match c.loaded {
+                Some(l) => format!("loaded traffic of these workloads: {}", l.text()),
+                None => "no traffic loaded: d asks the draft policy".to_string(),
+            },
+            t.base(),
+        );
+        let check = match &c.check {
+            DraftCheck::Idle => {
+                "d: draft check, what their recent traffic in and out would block once enforced (1 Explorer query, several requests)".to_string()
+            }
+            DraftCheck::Running { .. } => "draft check running … Esc cancels it".to_string(),
+            DraftCheck::Done(r) => format!("draft check: {}", r.text()),
+            DraftCheck::Failed(e) => format!("draft check failed: {e}"),
+        };
+        let style = match &c.check {
+            DraftCheck::Done(r) if !r.blocked.is_empty() => Style::new().fg(t.bad),
+            DraftCheck::Failed(_) => Style::new().fg(t.bad),
+            _ => t.dim_style(),
+        };
+        pin(&check, style);
+    }
     let mut content: Vec<String> = Vec::new();
     if let DraftCheck::Done(r) = &c.check
         && !r.blocked.is_empty()
@@ -156,7 +155,7 @@ fn confirm_layout(model: &Model, c: &BulkConfirm, area: Rect) -> ConfirmLayout {
         content.extend(r.top(5).into_iter().map(|l| format!("  {l}")));
         content.push(String::new());
     }
-    content.extend(plan.lines(model.profile.org_id));
+    content.extend(c.lines.iter().cloned());
     let content: Vec<String> = content
         .iter()
         .flat_map(|l| wrap_chars(&plain(l), width))

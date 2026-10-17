@@ -60,13 +60,31 @@ pub(super) fn toggle_scope(model: &mut Model) {
     ));
 }
 
-/// `Esc` on Workloads: clears the marks; `false` when there were none.
-pub(super) fn clear(model: &mut Model) -> bool {
-    let n = model.workloads.clear_marks();
-    if n > 0 {
-        model.status = StatusLine::info(format!("{n} marks cleared"));
+/// More marks than this: `Esc` asks once before clearing them.
+const ESC_ASKS_ABOVE: usize = 20;
+
+/// `Esc` on Workloads (no search open): closes the detail pane first; else
+/// clears the marks (more than 20: on a second `Esc`). `false`: nothing to
+/// do here.
+pub(super) fn esc(model: &mut Model) -> bool {
+    let w = &mut model.workloads;
+    if w.show_detail {
+        w.show_detail = false;
+        return true;
     }
-    n > 0
+    let n = w.marked.len();
+    if n == 0 {
+        return false;
+    }
+    if n > ESC_ASKS_ABOVE && !w.esc_armed {
+        w.esc_armed = true;
+        model.status = StatusLine::warn(format!("Esc again clears {n} marks"));
+        return true;
+    }
+    w.esc_armed = false;
+    w.clear_marks();
+    model.status = StatusLine::info(format!("{n} marks cleared"));
+    true
 }
 
 /// The targets of `L` / `M` as the plan sees them, with what names them;
@@ -143,7 +161,8 @@ fn confirm(model: &mut Model, targets: &[BulkTarget], change: &BulkChange) -> Re
     } else {
         StatusLine::info("review the change: y sends it, Esc cancels")
     };
-    model.overlay = Overlay::ConfirmBulk(Box::new(BulkConfirm::new(plan, loaded)));
+    let org = model.profile.org_id;
+    model.overlay = Overlay::ConfirmBulk(Box::new(BulkConfirm::new(plan, loaded, org)));
     Ok(())
 }
 
@@ -669,7 +688,7 @@ mod tests {
         let [Cmd::BulkDraftCheck { seq, .. }] = &cmds[..] else {
             panic!("{cmds:?}");
         };
-        let r = CheckResult::new(&[], 5, false, "24h".into());
+        let r = CheckResult::new(&[], &[], 5, false, "24h".into());
         quiet(
             &mut m,
             Msg::BulkCheckDone {
@@ -678,11 +697,9 @@ mod tests {
             },
         );
         assert_eq!(confirm(&m).check, DraftCheck::Done(Box::new(r)));
-        assert!(
-            m.status
-                .text
-                .contains("0 of 0 flows (24h) would be blocked · 5 requests")
-        );
+        assert!(m.status.text.contains(
+            "0 of 0 flows (24h, in and out) would be blocked: 0 in · 0 out · ≈5 requests"
+        ));
         // Esc now closes the confirm; nothing sent.
         quiet(&mut m, code(KeyCode::Esc));
         assert_eq!(m.overlay, Overlay::None);
@@ -766,6 +783,8 @@ mod tests {
             ],
             labels_changed: labels,
             labels_created: false,
+            reread_skipped: None,
+            failure: stopped.then_some(pce::write::bulk::BulkFailure::Partial),
         }
     }
 
@@ -850,6 +869,81 @@ mod tests {
         .unwrap();
         let c = confirm(&m);
         assert_eq!(c.loaded, Some(expect));
-        assert!(expect.0 + expect.1 > 0, "the fixture has blocked flows");
+        assert!(
+            expect.in_blocked + expect.in_potentially > 0,
+            "the fixture has blocked flows"
+        );
+    }
+
+    #[test]
+    fn esc_closes_the_detail_first_and_asks_once_above_twenty_marks() {
+        let mut m = on_workloads(false);
+        quiet(&mut m, key(' '));
+        m.workloads.show_detail = true;
+        quiet(&mut m, code(KeyCode::Esc));
+        assert!(!m.workloads.show_detail);
+        assert_eq!(m.workloads.marked.len(), 1, "the detail went first");
+        let many: Vec<String> = (0..25).map(|i| format!("/orgs/5/workloads/x{i}")).collect();
+        m.workloads.toggle_marks(&many);
+        quiet(&mut m, code(KeyCode::Esc));
+        assert_eq!(m.status.text, "Esc again clears 26 marks");
+        assert_eq!(m.workloads.marked.len(), 26);
+        // Another key in between: asked again.
+        quiet(&mut m, key('j'));
+        quiet(&mut m, code(KeyCode::Esc));
+        assert_eq!(m.workloads.marked.len(), 26);
+        quiet(&mut m, code(KeyCode::Esc));
+        assert!(m.workloads.marked.is_empty());
+        assert_eq!(m.status.text, "26 marks cleared");
+    }
+
+    #[test]
+    fn the_summary_counts_marks_the_filter_hides() {
+        let mut m = on_workloads(false);
+        quiet(&mut m, key('V'));
+        assert_eq!(m.workloads.marked_hidden(), 0);
+        crate::tui::update::apply_workload_labels(&mut m, "app=shop").unwrap();
+        assert_eq!(m.workloads.marked_hidden(), 2);
+        let out = crate::tui::test_support::render_to_string(&m, 120, 30);
+        assert!(out.contains("4 marked (2 hidden by the filter)"), "{out}");
+    }
+
+    #[test]
+    fn an_unknown_outcome_says_it_may_have_applied_and_reloads() {
+        let mut m = on_workloads(true);
+        quiet(&mut m, key('V'));
+        let mut r = report(true, true);
+        r.steps[0].status = pce::write::bulk::StepStatus::Unanswered;
+        r.steps[0].error = Some(
+            "answered 204 without per-workload results: it may have applied, check the PCE".into(),
+        );
+        for i in &mut r.items {
+            i.status = ItemStatus::Unanswered;
+            i.error = None;
+        }
+        r.failure = Some(pce::write::bulk::BulkFailure::Unanswered);
+        let cmds = update(&mut m, Msg::BulkDone(Box::new(r)));
+        assert!(
+            cmds.contains(&Cmd::LoadWorkloads(CacheMode::Bypass)),
+            "{cmds:?}"
+        );
+        assert!(
+            m.status
+                .text
+                .contains("2 not answered · it may have applied: check the PCE"),
+            "{}",
+            m.status.text
+        );
+        assert_eq!(m.overlay, Overlay::BatchReport { scroll: 0 });
+        assert!(
+            m.batch_report
+                .as_ref()
+                .unwrap()
+                .iter()
+                .any(|l| l.contains("NOT ANSWERED: answered 204 without per-workload results")),
+            "{:?}",
+            m.batch_report
+        );
+        assert_eq!(m.workloads.marked.len(), 4, "kept: the outcome is unknown");
     }
 }

@@ -614,7 +614,9 @@ pub async fn select(
     // empty labels parameter would mean every workload).
     let nothing = labels.matches_nothing();
     if !nothing && labels.terms.iter().any(|t| !t.negate && !t.none) {
-        let idx = ctx.pce.name_index(ctx.cache_mode).await?;
+        // The labels list alone resolves them (one read, cached).
+        let labels_list = ctx.pce.labels(ctx.cache_mode).await?.value;
+        let idx = pce::NameIndex::new(&labels_list, &[], &[], &[]);
         let sets = labels
             .query_sets(|k, v| {
                 idx.label_href(k, v).map(str::to_string).ok_or_else(|| {

@@ -9,7 +9,7 @@ expression: out
 │ ╭ Batch result ──────────────────────────────────────────────── Esc closes ╮ │
 │▸│sent to demo (pce.example, org 5)                                         │ │
 │ │enforcement full (visibility kept)                                        │ │
-│ │re-read: 1 list read · 1 skipped (changed since planned or gone)          │ │
+│ │re-read: 1 read · 1 skipped (changed since planned or gone)               │ │
 │ │1/1 bulk update 2 workloads (1/1)                                         │ │
 │ │    answered: some workloads refused                                      │ │
 │ │                                                                          │ │
