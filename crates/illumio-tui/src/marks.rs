@@ -629,14 +629,16 @@ fn has_comments(text: &str) -> bool {
             }
             St::Basic if b[i] == b'"' || b[i] == b'\n' => st = St::Normal,
             St::Literal if b[i] == b'\'' || b[i] == b'\n' => st = St::Normal,
+            // Up to two more quotes before the closing three are content
+            // (`"""say "hi""""`): the string ends after all of them.
             St::MlBasic if at(i, b"\"\"\"") => {
                 st = St::Normal;
-                i += 3;
+                i += closing_run(b, i, b'"');
                 continue;
             }
             St::MlLiteral if at(i, b"'''") => {
                 st = St::Normal;
-                i += 3;
+                i += closing_run(b, i, b'\'');
                 continue;
             }
             _ => {}
@@ -644,6 +646,12 @@ fn has_comments(text: &str) -> bool {
         i += 1;
     }
     false
+}
+
+/// The length of a multi-line string's closing run at `i`: the three
+/// delimiter quotes plus at most two quotes of content before them.
+fn closing_run(b: &[u8], i: usize, quote: u8) -> usize {
+    b[i..].iter().take(5).take_while(|&&c| c == quote).count()
 }
 
 /// The 1-based line and column (in characters) of byte `at` of `text`.
@@ -1329,6 +1337,21 @@ created_on = "pce.example.com"
             .unwrap();
         assert_eq!(again.backup, None, "no comment left: no second backup");
         assert_eq!(fs::read_to_string(&bak).unwrap(), "old");
+    }
+
+    #[test]
+    fn quotes_before_a_multi_line_closing_delimiter_are_content() {
+        // TOML: up to two quotes next to the closing `"""` / `'''` are
+        // content, so the string ends after them and a trailing comment
+        // is still a comment.
+        assert!(has_comments("c = \"\"\"he said \"hi\"\"\"\" # note\n"));
+        assert!(has_comments("c = \"\"\"x\"\"\"\"\" # note\n"));
+        assert!(has_comments("c = '''it's 'q''''' # note\n"));
+        assert!(has_comments("c = '''x'''' # note\n"));
+        assert!(!has_comments(
+            "c = \"\"\"he said \"hi\"\"\"\"\nd = \"# no\"\n"
+        ));
+        assert!(!has_comments("c = '''x'''''\nd = '# no'\n"));
     }
 
     #[test]
