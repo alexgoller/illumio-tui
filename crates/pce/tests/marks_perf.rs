@@ -109,8 +109,14 @@ fn two_hundred_thousand_flows_against_two_hundred_marks_in_under_300_ms() {
         p.hits
     );
     assert!(p.hits > 0, "the marks match something");
+    // 300 ms on a developer machine; shared CI runners are slower and noisy,
+    // so CI sets MARKS_PERF_BUDGET_MS to catch only gross regressions.
+    let budget: u128 = std::env::var("MARKS_PERF_BUDGET_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(300);
     assert!(
-        took.as_millis() < 300,
-        "200k flows x 200 marks took {took:?}"
+        took.as_millis() < budget,
+        "200k flows x 200 marks took {took:?} (budget {budget} ms)"
     );
 }

@@ -20,9 +20,12 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
-      # The marks speed budget (200k flows x 200 marks under 300 ms), release
-      # only, on one runner (shared macOS runners are too noisy to time).
+      # The marks speed check (200k flows x 200 marks; 300 ms locally),
+      # release only, on one runner. Shared runners are about 2x slower and
+      # noisy, so CI guards only against gross regressions.
       - if: matrix.os == 'ubuntu-latest'
+        env:
+          MARKS_PERF_BUDGET_MS: "1000"
         run: cargo test --release -p pce --test marks_perf -- --ignored --nocapture
   deny:
     runs-on: ubuntu-latest
