@@ -1,0 +1,44 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: "render_to_string(&m, 100, 40)"
+---
+ illumio╭ Keys · Flows ─────────────────────────────────────────────────────── 1-37 of 45 ╮ 20.8 KB
+  1 Traf│FLOWS                                                                            │
+╭ Filter│x / X            flat · by src app · by dst app · back (focused: X is direction) │bounded ╮
+│window │                                                                                 │        │
+╰───────│SECTIONS                                                                         │────────╯
+╭ Result│Space / z        fold a section · fold or unfold all (also Blocked, Flows)       │ 3s ago ╮
+│4 flows│s                order: conns ↓ · app A→Z · flows ↓ (App-to-app, Flows)          │████████│
+╰───────│                 Blocked is App-to-app with in · blocked: x / X / d are there    │────────╯
+╭ Flows │                                                                                 │────────╮
+│  src  │TRAFFIC                                                                          │        │
+│▸ host-│v                cycle Flows · App-to-app · Mesh · Blocked · Treemap             │        │
+│  10.1.│f                edit filter: window src dst svc decision transmission           │        │
+│  unman│+ / -            widen (re-runs the window) / narrow (no request)                │        │
+│  host-│                 window steps 1h 6h 12h 1d 2d 3d 1w 2w 4w 90d                    │        │
+│       │B                re-run a truncated result at a larger cap                       │        │
+│       │                 one rung per B: 10000 25000 … 200000; y above 10000             │        │
+│       │] / [            raise / lower the result cap (re-runs the query)                │        │
+│       │                 cap steps 500 1000 2000 5000 10000 25000 … 200000               │        │
+│       │g                pick the label keys every view groups by                        │        │
+│       │F / X            focus on the row's app (again: its other side) · in/out/both    │        │
+│       │                 Esc clears; truncated: r re-queries the app (1-2 queries)       │        │
+│       │A                app overlay: peers, policy, workloads                           │        │
+│       │D                draft decision per flow (PCE draft view; again: clear)          │        │
+│       │                 1 PUT on the query, polls, 1 download; no policy change         │        │
+│       │                 Esc cancels it; no known query: asks, then re-runs              │        │
+│       │w                draft allow rule from a blocked flow or row (writes)            │        │
+│       │m                mark the row: squelch · reviewed · critical … (marks.toml)      │        │
+│       │M                show or hide squelched rows (~)                                 │        │
+│       │Enter            detail (flows) · drill into a row or section header             │        │
+│       │                                                                                 │        │
+╰───────│MARKS                                                                            │────────╯
+╭ Detail│:marks [action]  the marks: Enter edit · x delete · e +30d                       │r shows ╮
+│select │                 (an action: only its marks; Esc / q back)                       │        │
+│       │                                                                                 │        │
+│       │EVERYWHERE                                                                       │        │
+│       │1 2 3 4 5        Traffic · Policy · Objects · Workloads · Events                 │        │
+│       │?                this help                                                       │        │
+│       │q / Ctrl-C       quit                                                            │        │
+╰───────│more: Commands · App-to-app · Mesh · Treemap · App overlay · Generator · Forms ·…│────────╯
+ready   ╰─────────────────────────────── Tab next · S-Tab prev · a all · j/k scroll · Esc ╯  ? help

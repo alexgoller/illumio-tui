@@ -5523,8 +5523,11 @@ pub struct Model {
     pub writes: WritesState,
     /// First help line shown; `Overlay::Help` is reopened at the top.
     pub help_scroll: usize,
-    /// The overlay `?` was pressed in (the app view, the generator): closing
-    /// the help goes back to it.
+    /// The help's groups: the context page (`?`), one group (`Tab`), all (`a`).
+    pub help_page: crate::tui::help::HelpPage,
+    /// The overlay `?` was pressed in (the app view, the generator, an
+    /// event's detail, pending changes, the marks): closing the help goes
+    /// back to it, and the help opens on its keys.
     pub help_return: Overlay,
     /// Number of background tasks in flight; the runtime ticks at 250 ms while > 0.
     pub busy: usize,
@@ -5608,6 +5611,7 @@ impl Model {
             status: StatusLine::info("connecting…"),
             writes,
             help_scroll: 0,
+            help_page: crate::tui::help::HelpPage::Context,
             help_return: Overlay::None,
             busy: 0,
             switching: false,

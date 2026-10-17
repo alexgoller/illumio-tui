@@ -2,27 +2,27 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ Keys ────────────────────────────────── 1-22 of 79 · j/k scroll · Esc closes ╮
-│1 2 3 4 5                Traffic · Policy · Objects · Workloads · Events      │
-│:                        command prompt: :traffic :policy :objects :workloads │
-│                         :events  :iplists  :filter <expr>  :window <dur>     │
-│                         :profile <name>  :draft  :active  :marks  :help  :q  │
-│                         :unicast  unicast flows only (again: every kind)     │
-│                         :focus <app>  (alone: a picker of the loaded apps)   │
-│                         :app <app>  the app overlay (alone: the picker)      │
-│                         :gen <app>  the policy generator (alone: the picker) │
-│                         :writes [on|off]  :export[!] <path>  :batch          │
-│                         (the table on screen as CSV; ! overwrites)           │
-│?                        this help                                            │
-│q / Ctrl-C               quit                                                 │
-│↑ ↓ PgUp PgDn Home End   move in the current table                            │
-│s                        cycle sort column and direction                      │
-│/                        search in the current table (Enter keep, Esc clear)  │
-│r                        refresh the current screen (bypasses the cache)      │
-│a                        toggle auto-refresh for the current screen           │
-│Traffic  v               cycle Flows · App-to-app · Mesh · Blocked · Treemap  │
-│Traffic  f               edit filter: window src dst svc decision transmission│
-│Traffic  + / -           widen (re-runs the window) / narrow (no request)     │
-│                         window steps 1h 6h 12h 1d 2d 3d 1w 2w 4w 90d         │
-│Traffic  B               re-run a truncated result at a larger cap            │
-╰──────────────────────────────────────────────────────────────────────────────╯
+╭ Keys · Flows ──────────────────────────────────────────────────── 1-21 of 45 ╮
+│FLOWS                                                                         │
+│x / X            flat · by src app · by dst app · back (focused: X is directio│
+│                                                                              │
+│SECTIONS                                                                      │
+│Space / z        fold a section · fold or unfold all (also Blocked, Flows)    │
+│s                order: conns ↓ · app A→Z · flows ↓ (App-to-app, Flows)       │
+│                 Blocked is App-to-app with in · blocked: x / X / d are there │
+│                                                                              │
+│TRAFFIC                                                                       │
+│v                cycle Flows · App-to-app · Mesh · Blocked · Treemap          │
+│f                edit filter: window src dst svc decision transmission        │
+│+ / -            widen (re-runs the window) / narrow (no request)             │
+│                 window steps 1h 6h 12h 1d 2d 3d 1w 2w 4w 90d                 │
+│B                re-run a truncated result at a larger cap                    │
+│                 one rung per B: 10000 25000 … 200000; y above 10000          │
+│] / [            raise / lower the result cap (re-runs the query)             │
+│                 cap steps 500 1000 2000 5000 10000 25000 … 200000            │
+│g                pick the label keys every view groups by                     │
+│F / X            focus on the row's app (again: its other side) · in/out/both │
+│                 Esc clears; truncated: r re-queries the app (1-2 queries)    │
+│A                app overlay: peers, policy, workloads                        │
+│more: Commands · App-to-app · Mesh · Treemap · App overlay · Generator · Form…│
+╰──────────────────────────── Tab next · S-Tab prev · a all · j/k scroll · Esc ╯

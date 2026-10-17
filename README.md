@@ -147,7 +147,10 @@ too, and `heartbeat_age_secs`). Sectioned views (App-to-app `in`/`out`/`both`, B
 every peer, folded sections included, in the columns of `traffic groups --by ... --csv`; Flows
 by app exports every flow, folded sections included, in the Flows columns after a `section`
 column naming its app; the Treemap has no table.
-`?` shows the full key map (`j`/`k` scroll it), `Esc` closes overlays, `q` or `Ctrl-C` quits. The mouse wheel
+`?` shows the keys of where you are first (the traffic view, Policy, an event's detail,
+the app overlay, the generator…), then related groups and the keys that work everywhere;
+`Tab` / `Shift-Tab` step through the other groups one at a time, `a` shows them all and
+`j`/`k` scroll. `Esc` closes overlays, `q` or `Ctrl-C` quits. The mouse wheel
 scrolls the current table and a click on a tab switches screen; on a terminal narrower than
 the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
 

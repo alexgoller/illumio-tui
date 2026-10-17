@@ -2,51 +2,51 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: "render_styled(&m, 80, 24)"
 ---
-╭ Keys ───────────────────────────────── 58-79 of 79 · j/k scroll · Esc closes ╮
-    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @2:Rgb(150, 50, 180)/Rgb(250, 250, 247) @6:Rgb(0, 102, 204)/Rgb(250, 250, 247) @41:Rgb(120, 124, 136)/Rgb(250, 250, 247) @78:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│w form   Ctrl-A Ctrl-R   all labels · create the typed ruleset                │
-    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @26:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│Policy   d               toggle draft / active                                │
-    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @26:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│Policy   p               pending changes                                      │
-    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @26:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│Policy   Tab / Enter     pane · rule detail · on a ruleset: load deny rules   │
-    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @26:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│Policy   N               new deny rule in the selected ruleset (rules pane)   │
-    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @26:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│Policy   i               rule impact: load the workloads once (1 request)     │
-    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @26:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│Objects  Tab / Enter     next tab: labels, groups, services, IP lists · detail│
-    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @26:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│Labels   f / i / u       key filter · ignored keys · unused only (PCE usage)  │
-    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @26:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│Labels   /=text /k=text  search values only · the values of key k             │
-    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @26:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│IP lists Enter           detail: ranges · FQDNs · size · rules using it       │
-    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @26:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│Workloads t/T h H Enter  Traffic as src/dst · unhealthy · health sort · detail│
-    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @26:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│Workloads E m o u c      enforcement · managed · offline · unlabeled · clear  │
-    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @26:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│                         local, no request; c clears them and h, not /        │
-    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @26:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│Events   f / Enter / S   filter · event as a change diff · sort by severity   │
-    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @26:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│Events   J               in the detail: change diff ↔ raw JSON                │
-    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @26:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│                         detail: ↑/↓ j/k prev/next event · ^d/^u PgDn/PgUp ^e/│
-    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @26:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│n / e / x (writes)       new/edit/delete: Objects, IP lists, Workloads, Policy│
-    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @26:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│Pending  j/k Space Enter select · mark · diff of a pending entry              │
-    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @26:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│Pending  P               provision the marked entries, or all (writes)        │
-    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @26:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│Pending  R               revert marked entries (draft-only ones are deleted)  │
-    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @26:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│y / n                    send / cancel a shown request                        │
-    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @26:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-│Esc                      close overlay / cancel                               │
-    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @26:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-╰──────────────────────────────────────────────────────────────────────────────╯
-    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+╭ Keys · Flows ─────────────────────────────────────────────────── 25-45 of 45 ╮
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @2:Rgb(150, 50, 180)/Rgb(250, 250, 247) @14:Rgb(0, 102, 204)/Rgb(250, 250, 247) @67:Rgb(120, 124, 136)/Rgb(250, 250, 247) @78:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│w                draft allow rule from a blocked flow or row (writes)         │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @18:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│m                mark the row: squelch · reviewed · critical … (marks.toml)   │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @18:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│M                show or hide squelched rows (~)                              │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @18:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│Enter            detail (flows) · drill into a row or section header          │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @18:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│                                                                              │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│MARKS                                                                         │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(150, 50, 180)/Rgb(250, 250, 247) @6:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│:marks [action]  the marks: Enter edit · x delete · e +30d                    │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @18:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│                 (an action: only its marks; Esc / q back)                    │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @18:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│                                                                              │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│EVERYWHERE                                                                    │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(150, 50, 180)/Rgb(250, 250, 247) @11:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│1 2 3 4 5        Traffic · Policy · Objects · Workloads · Events              │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @18:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│?                this help                                                    │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @18:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│q / Ctrl-C       quit                                                         │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @18:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│↑ ↓ PgUp PgDn    move in the current table (also Home End)                    │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @18:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│s                cycle sort column and direction                              │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @18:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│/                search in the current table (Enter keep, Esc clear)          │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @18:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│r                refresh the current screen (bypasses the cache)              │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @18:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│a                toggle auto-refresh for the current screen                   │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @18:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│y / n            send / cancel a shown request                                │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @18:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│Esc              close overlay / cancel                                       │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @18:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│Units            flows: flow records; conns, bytes: their lifetime counts     │
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @18:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+│more: Commands · App-to-app · Mesh · Treemap · App overlay · Generator · Form…│
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(120, 124, 136)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
+╰──────────────────────────── Tab next · S-Tab prev · a all · j/k scroll · Esc ╯
+    @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @29:Rgb(120, 124, 136)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)

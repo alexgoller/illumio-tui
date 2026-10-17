@@ -13,6 +13,7 @@ pub mod export;
 pub mod filter;
 pub mod form;
 pub mod gen_view;
+pub mod help;
 pub mod impact;
 pub mod mark_form;
 pub mod marks_view;

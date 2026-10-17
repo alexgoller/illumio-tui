@@ -5,6 +5,7 @@ use crate::tui::edit::EditIntent;
 use crate::tui::event_diff::{DetailLine, detail_lines};
 use crate::tui::filter::{FIELD_NAMES, FilterEditor};
 use crate::tui::form::{Form, clip, visible_tail, wrap_rows};
+use crate::tui::help::{HelpContext, HelpPage, HelpRow, other_topics, page_rows};
 use crate::tui::model::{Model, Screen, TrafficView, rule_kind_name};
 use crate::tui::picker::KeyPicker;
 use crate::tui::ui::layout::centered;
@@ -20,269 +21,135 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
 
-pub const HELP_LINES: &[(&str, &str)] = &[
-    (
-        "1 2 3 4 5",
-        "Traffic · Policy · Objects · Workloads · Events",
-    ),
-    (":", "command prompt: :traffic :policy :objects :workloads"),
-    ("", ":events  :iplists  :filter <expr>  :window <dur>"),
-    ("", ":profile <name>  :draft  :active  :marks  :help  :q"),
-    ("", ":unicast  unicast flows only (again: every kind)"),
-    ("", ":focus <app>  (alone: a picker of the loaded apps)"),
-    ("", ":app <app>  the app overlay (alone: the picker)"),
-    ("", ":gen <app>  the policy generator (alone: the picker)"),
-    ("", ":writes [on|off]  :export[!] <path>  :batch"),
-    ("", "(the table on screen as CSV; ! overwrites)"),
-    ("?", "this help"),
-    ("q / Ctrl-C", "quit"),
-    ("↑ ↓ PgUp PgDn Home End", "move in the current table"),
-    ("s", "cycle sort column and direction"),
-    ("/", "search in the current table (Enter keep, Esc clear)"),
-    ("r", "refresh the current screen (bypasses the cache)"),
-    ("a", "toggle auto-refresh for the current screen"),
-    (
-        "Traffic  v",
-        "cycle Flows · App-to-app · Mesh · Blocked · Treemap",
-    ),
-    (
-        "Traffic  f",
-        "edit filter: window src dst svc decision transmission",
-    ),
-    (
-        "Traffic  + / -",
-        "widen (re-runs the window) / narrow (no request)",
-    ),
-    ("", "window steps 1h 6h 12h 1d 2d 3d 1w 2w 4w 90d"),
-    ("Traffic  B", "re-run a truncated result at a larger cap"),
-    ("", "one rung per B: 10000 25000 … 200000; y above 10000"),
-    (
-        "Traffic  ] / [",
-        "raise / lower the result cap (re-runs the query)",
-    ),
-    ("", "cap steps 500 1000 2000 5000 10000 25000 … 200000"),
-    ("Traffic  g", "pick the label keys every view groups by"),
-    (
-        "Traffic  F / X",
-        "focus on the row's app (again: its other side) · in/out/both",
-    ),
-    (
-        "",
-        "Esc clears; truncated: r re-queries the app (1-2 queries)",
-    ),
-    ("Traffic  A", "app overlay: peers, policy, workloads"),
-    (
-        "Traffic  D",
-        "draft decision per flow (PCE draft view; again: clear)",
-    ),
-    (
-        "",
-        "1 PUT on the query, polls, 1 download; no policy change",
-    ),
-    ("", "Esc cancels it; no known query: asks, then re-runs"),
-    (
-        "Units",
-        "flows: flow records; conns, bytes: their lifetime counts",
-    ),
-    (
-        "App      Tab j/k X Enter",
-        "panel · row · direction · open (peer: its flows)",
-    ),
-    (
-        "App      m w r Esc",
-        "mark · draft allow rule · reload panels (asks) · back",
-    ),
-    (
-        "App      G",
-        "policy generator: the rules the app's traffic needs",
-    ),
-    (
-        "Generate ←/→ < > =",
-        "granularity · the row's own (*) · back to the slider",
-    ),
-    (
-        "Generate j/k Tab q",
-        "rows (on into outbound) · section · back",
-    ),
-    (
-        "Generate Space o R p",
-        "check a row · outbound · pick the ruleset · rule list",
-    ),
-    (
-        "Generate c",
-        "fan-in line: one rule off · Any · All Workloads",
-    ),
-    (
-        "Generate Enter r Esc",
-        "plan the writes, one confirm (writes) · re-query · back",
-    ),
-    (
-        "Traffic  Enter",
-        "detail (flows) · drill into a row or section header",
-    ),
-    (
-        "App-to-app x / X",
-        "pairs · in · out · both · back (focused: X is direction)",
-    ),
-    (
-        "App-to-app o",
-        "pairs by service: one row per src, dst, port/proto",
-    ),
-    (
-        "App-to-app d",
-        "decision filter: all · blocked · blocked only (· fixed by draft)",
-    ),
-    (
-        "Flows    x / X",
-        "flat · by src app · by dst app · back (focused: X is direction)",
-    ),
-    (
-        "Sections Space / z",
-        "fold a section · fold or unfold all (also Blocked, Flows)",
-    ),
-    (
-        "Sections s",
-        "order: conns ↓ · app A→Z · flows ↓ (App-to-app, Flows)",
-    ),
-    ("Mesh     u / p", "show or hide the user · process columns"),
-    (
-        "Treemap  hjkl Enter b",
-        "move · zoom, then drill · conns/bytes · Esc out",
-    ),
-    (
-        "Traffic  w",
-        "draft allow rule from a blocked flow or row (writes)",
-    ),
-    (
-        "Traffic  m",
-        "mark the row: squelch · reviewed · critical … (marks.toml)",
-    ),
-    ("Traffic  M", "show or hide squelched rows (~)"),
-    (
-        "",
-        ":marks [action]  the marks: Enter edit · x delete · e +30d",
-    ),
-    (
-        "Form     Ctrl-N Ctrl-P",
-        "complete from the index · cycle back",
-    ),
-    (
-        "Filter   Ctrl-N Ctrl-P",
-        "complete the filter fields · cycle back",
-    ),
-    (
-        "w form   Ruleset",
-        "found by the destination's scope · Tab/Ctrl-N names",
-    ),
-    (
-        "w form   Ctrl-A Ctrl-R",
-        "all labels · create the typed ruleset",
-    ),
-    ("Policy   d", "toggle draft / active"),
-    ("Policy   p", "pending changes"),
-    (
-        "Policy   Tab / Enter",
-        "pane · rule detail · on a ruleset: load deny rules",
-    ),
-    (
-        "Policy   N",
-        "new deny rule in the selected ruleset (rules pane)",
-    ),
-    (
-        "Policy   i",
-        "rule impact: load the workloads once (1 request)",
-    ),
-    (
-        "Objects  Tab / Enter",
-        "next tab: labels, groups, services, IP lists · detail",
-    ),
-    (
-        "Labels   f / i / u",
-        "key filter · ignored keys · unused only (PCE usage)",
-    ),
-    (
-        "Labels   /=text /k=text",
-        "search values only · the values of key k",
-    ),
-    (
-        "IP lists Enter",
-        "detail: ranges · FQDNs · size · rules using it",
-    ),
-    (
-        "Workloads t/T h H Enter",
-        "Traffic as src/dst · unhealthy · health sort · detail",
-    ),
-    (
-        "Workloads E m o u c",
-        "enforcement · managed · offline · unlabeled · clear",
-    ),
-    ("", "local, no request; c clears them and h, not /"),
-    (
-        "Events   f / Enter / S",
-        "filter · event as a change diff · sort by severity",
-    ),
-    ("Events   J", "in the detail: change diff ↔ raw JSON"),
-    (
-        "",
-        "detail: ↑/↓ j/k prev/next event · ^d/^u PgDn/PgUp ^e/^y g/G scroll",
-    ),
-    (
-        "n / e / x (writes)",
-        "new/edit/delete: Objects, IP lists, Workloads, Policy",
-    ),
-    (
-        "Pending  j/k Space Enter",
-        "select · mark · diff of a pending entry",
-    ),
-    (
-        "Pending  P",
-        "provision the marked entries, or all (writes)",
-    ),
-    (
-        "Pending  R",
-        "revert marked entries (draft-only ones are deleted)",
-    ),
-    ("y / n", "send / cancel a shown request"),
-    ("Esc", "close overlay / cancel"),
-];
-
-/// The first help line shown when scrolled to the end, for a terminal
-/// `height` rows tall (the box is as tall as the lines allow, borders included).
-pub fn help_last_scroll(height: u16) -> usize {
-    let rows = (HELP_LINES.len() + 2)
-        .min(height as usize)
-        .saturating_sub(2);
-    HELP_LINES.len().saturating_sub(rows)
+/// The help box for `area`: its page, rectangle, key column and the rows
+/// left for the page once the footer line is in.
+struct HelpLayout {
+    ctx: HelpContext,
+    rows: Vec<HelpRow>,
+    rect: Rect,
+    key_width: usize,
+    footer: Option<String>,
+    body: usize,
 }
 
+fn help_layout(model: &Model, area: Rect) -> HelpLayout {
+    let ctx = HelpContext::of(model);
+    let page = model.help_page;
+    let rows = page_rows(page, ctx);
+    let widest_key = rows
+        .iter()
+        .map(|r| match r {
+            HelpRow::Key(k, _) => k.chars().count(),
+            _ => 0,
+        })
+        .max()
+        .unwrap_or(0);
+    let key_width = (widest_key + 2).min(24);
+    let widest = rows
+        .iter()
+        .map(|r| match r {
+            HelpRow::Key(_, d) => key_width + d.chars().count(),
+            HelpRow::Heading(h) => h.chars().count(),
+            HelpRow::Blank => 0,
+        })
+        .max()
+        .unwrap_or(0);
+    let footer = match page {
+        HelpPage::Context => {
+            let names: Vec<&str> = other_topics(page, ctx)
+                .iter()
+                .map(|t| t.group().title)
+                .collect();
+            Some(format!("more: {}", names.join(" · ")))
+        }
+        HelpPage::Group(t) => Some(format!(
+            "next: {} · prev: {}",
+            t.next().group().title,
+            t.prev().group().title
+        )),
+        HelpPage::All => None,
+    };
+    let w = (widest + 3).clamp(60, 96) as u16;
+    let h = (rows.len() + usize::from(footer.is_some()) + 2).min(u16::MAX as usize) as u16;
+    let rect = centered(area, w, h);
+    let inner = rect.height.saturating_sub(2) as usize;
+    let footer = footer.filter(|_| inner >= 2);
+    let body = inner - usize::from(footer.is_some());
+    HelpLayout {
+        ctx,
+        rows,
+        rect,
+        key_width,
+        footer,
+        body,
+    }
+}
+
+/// The first help line shown when scrolled to the end of the current page,
+/// for a terminal of `size` (columns, rows).
+pub fn help_last_scroll(model: &Model, size: (u16, u16)) -> usize {
+    let l = help_layout(model, Rect::new(0, 0, size.0, size.1));
+    l.rows.len().saturating_sub(l.body)
+}
+
+/// The `?` help: the page's groups under their headings, scrolled; the
+/// title names the context or group, the footer the other groups, the
+/// bottom border the help's keys. Lines are cut at the box, never wrapped.
 pub fn render_help(model: &Model, f: &mut Frame, area: Rect) {
     let t = &model.theme;
-    let total = HELP_LINES.len();
-    let r = centered(area, area.width.min(84), (total as u16) + 2);
+    let l = help_layout(model, area);
+    let r = l.rect;
     f.render_widget(Clear, r);
-    let rows = r.height.saturating_sub(2) as usize;
-    let first = model.help_scroll.min(help_last_scroll(area.height));
-    let meta = if total > rows {
-        format!(
-            "{}-{} of {total} · j/k scroll · Esc closes",
-            first + 1,
-            (first + rows).min(total)
-        )
+    let total = l.rows.len();
+    let first = model.help_scroll.min(total.saturating_sub(l.body));
+    let meta = if total > l.body {
+        format!("{}-{} of {total}", first + 1, (first + l.body).min(total))
     } else {
-        "Esc closes".to_string()
+        String::new()
     };
-    let block = panel("Keys", &meta, t, true);
-    let lines: Vec<Line> = HELP_LINES
+    let title = match model.help_page {
+        HelpPage::Context => format!("Keys · {}", l.ctx.name()),
+        HelpPage::Group(g) => format!("Keys · {}", g.group().title),
+        HelpPage::All => "Keys · all".to_string(),
+    };
+    let toggle = if model.help_page == HelpPage::All {
+        "a back"
+    } else {
+        "a all"
+    };
+    let keys = format!(" Tab next · S-Tab prev · {toggle} · j/k scroll · Esc ");
+    let block = panel(&title, &meta, t, true)
+        .title_bottom(Line::from(Span::styled(keys, t.dim_style())).right_aligned());
+    let inner_width = r.width.saturating_sub(2) as usize;
+    let kw = l.key_width;
+    let mut lines: Vec<Line> = l
+        .rows
         .iter()
         .skip(first)
-        .take(rows)
-        .map(|(k, d)| {
-            Line::from(vec![
-                Span::styled(format!("{k:<25}"), t.header_style()),
+        .take(l.body)
+        .map(|row| match row {
+            HelpRow::Heading(h) => Line::from(Span::styled(
+                h.to_uppercase(),
+                t.title_style().add_modifier(Modifier::BOLD),
+            )),
+            HelpRow::Key(k, d) => Line::from(vec![
+                Span::styled(
+                    format!("{:<kw$}", clip(k, kw.saturating_sub(1))),
+                    t.header_style(),
+                ),
                 Span::styled(*d, t.base()),
-            ])
+            ]),
+            HelpRow::Blank => Line::default(),
         })
         .collect();
+    if let Some(footer) = &l.footer {
+        // The footer stays on the box's last row.
+        lines.resize(l.body, Line::default());
+        lines.push(Line::from(Span::styled(
+            clip(footer, inner_width),
+            t.dim_style(),
+        )));
+    }
     f.render_widget(Paragraph::new(lines).block(block).style(t.base()), r);
 }
 

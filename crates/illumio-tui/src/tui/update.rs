@@ -5,6 +5,7 @@ use crate::tui::commands::{self, Command};
 use crate::tui::edit::{self, EditIntent, RulesetTarget, Start, WriteIntent};
 use crate::tui::filter::{FilterEditor, TrafficFilter};
 use crate::tui::form::{Completing, FieldKind, Form, FormEvent};
+use crate::tui::help::{HelpContext, HelpPage};
 use crate::tui::model::{
     By, Connection, Dir, Drill, EventsFilterEdit, Model, ObjectKind, ObjectsState, Overlay,
     PceUsage, PendingAction, PolicyPane, PolicyState, QueryState, Range, Screen, SectionRow,
@@ -1500,21 +1501,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     }
     match model.overlay.clone() {
         Overlay::Help => {
-            let last = help_last_scroll(model.size.1);
-            match k.code {
-                KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q') => {
-                    model.overlay = std::mem::replace(&mut model.help_return, Overlay::None);
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    model.help_scroll = (model.help_scroll + 1).min(last);
-                }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    model.help_scroll = model.help_scroll.saturating_sub(1);
-                }
-                KeyCode::End | KeyCode::Char('G') => model.help_scroll = last,
-                KeyCode::Home | KeyCode::Char('g') => model.help_scroll = 0,
-                _ => {}
-            }
+            help_key(model, k);
             Vec::new()
         }
         Overlay::Prompt { mut input } => match k.code {
@@ -1709,6 +1696,10 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             let next = match k.code {
                 KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => {
                     model.overlay = Overlay::None;
+                    return Vec::new();
+                }
+                KeyCode::Char('?') => {
+                    open_help(model);
                     return Vec::new();
                 }
                 // Diff ↔ raw JSON, from the top: the line counts differ.
@@ -1982,6 +1973,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 KeyCode::Char('P') => return provision_key(model),
                 KeyCode::Char('R') => return revert_key(model),
                 KeyCode::Enter => return pending_diff(model),
+                KeyCode::Char('?') => open_help(model),
                 _ => {}
             }
             Vec::new()
@@ -2900,16 +2892,55 @@ fn rebuild_app_traffic(model: &mut Model) {
     }
 }
 
-/// `?` / `:help`: the help at its top. Opened over the app view or the
-/// generator, closing it goes back there.
+/// `?` / `:help`: the help at its top, on the keys of where it was opened
+/// (`help::HelpContext::of`). Opened over the app view, the generator, an
+/// event's detail, the pending changes or the marks, closing it goes back there.
 pub(super) fn open_help(model: &mut Model) {
     model.help_scroll = 0;
-    model.help_return = match model.overlay {
-        Overlay::App => Overlay::App,
-        Overlay::Generator => Overlay::Generator,
+    model.help_page = HelpPage::Context;
+    model.help_return = match &model.overlay {
+        o @ (Overlay::App
+        | Overlay::Generator
+        | Overlay::EventDetail { .. }
+        | Overlay::Pending
+        | Overlay::Marks) => o.clone(),
         _ => Overlay::None,
     };
     model.overlay = Overlay::Help;
+}
+
+/// The help's keys: `Esc` / `?` / `q` close it (back to where it was
+/// opened), `Tab` / `BackTab` one group at a time, `a` all groups (again:
+/// the context page), the scroll keys within the page. Others do nothing.
+fn help_key(model: &mut Model, k: KeyEvent) {
+    let ctx = HelpContext::of(model);
+    let page = model.help_page;
+    match k.code {
+        KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q') => {
+            model.overlay = std::mem::replace(&mut model.help_return, Overlay::None);
+            return;
+        }
+        KeyCode::Tab => model.help_page = page.step(ctx, true),
+        KeyCode::BackTab => model.help_page = page.step(ctx, false),
+        KeyCode::Char('a') => model.help_page = page.toggle_all(),
+        _ => {}
+    }
+    if model.help_page != page {
+        model.help_scroll = 0;
+        return;
+    }
+    let last = help_last_scroll(model, model.size);
+    let rows = usize::from(model.size.1.saturating_sub(3)).max(1);
+    let s = model.help_scroll.min(last);
+    model.help_scroll = match k.code {
+        KeyCode::Down | KeyCode::Char('j') => (s + 1).min(last),
+        KeyCode::Up | KeyCode::Char('k') => s.saturating_sub(1),
+        KeyCode::PageDown => (s + rows).min(last),
+        KeyCode::PageUp => s.saturating_sub(rows),
+        KeyCode::End | KeyCode::Char('G') => last,
+        KeyCode::Home | KeyCode::Char('g') => 0,
+        _ => s,
+    };
 }
 
 /// The overlay's keys: `Esc` / `q` close, `Tab` / `BackTab` panels, `j` /
@@ -10217,8 +10248,8 @@ mod tests {
 
     #[test]
     fn policy_and_traffic_edit_keys_wait_for_a_write_in_flight() {
+        use crate::tui::help::HELP_GROUPS;
         use crate::tui::test_support::{model_with_flows, model_with_policy};
-        use crate::tui::ui::widgets::overlay::HELP_LINES;
         let busy = "a write is already in progress";
         let mut m = writes_on(model_with_policy());
         m.screen = Screen::Policy;
@@ -10245,90 +10276,150 @@ mod tests {
         assert!(update(&mut t, key('w')).is_empty());
         assert_eq!(t.status.text, busy);
         assert_eq!(t.overlay, Overlay::None);
-        // Every new key is in the help.
-        let keys: Vec<&str> = HELP_LINES.iter().map(|(k, _)| *k).collect();
-        for k in [
-            "Traffic  w",
-            "w form   Ctrl-A Ctrl-R",
-            "w form   Ruleset",
-            "Form     Ctrl-N Ctrl-P",
-            "Filter   Ctrl-N Ctrl-P",
-            "Policy   N",
-            "Pending  j/k Space Enter",
-            "Pending  P",
-            "Pending  R",
+        // Every new key is in the help, in its group.
+        for (group, k) in [
+            ("Traffic", "w"),
+            ("Forms", "Ctrl-A Ctrl-R"),
+            ("Forms", "Ruleset"),
+            ("Forms", "Ctrl-N Ctrl-P"),
+            ("Policy", "N"),
+            ("Pending", "j/k Space Enter"),
+            ("Pending", "P"),
+            ("Pending", "R"),
         ] {
-            assert!(keys.contains(&k), "{k}");
+            assert!(
+                HELP_GROUPS
+                    .iter()
+                    .any(|g| g.title == group && g.lines.iter().any(|(gk, _)| *gk == k)),
+                "{group} {k}"
+            );
         }
     }
 
     #[test]
     fn help_scrolls_to_its_last_line_and_reopens_at_the_top() {
-        use crate::tui::ui::widgets::overlay::{HELP_LINES, help_last_scroll};
+        use crate::tui::help::{HelpTopic, page_rows};
+        use crate::tui::ui::widgets::overlay::help_last_scroll;
         let mut m = model_fixture(); // 80x24
-        assert_eq!(HELP_LINES.len(), 79);
-        assert!(HELP_LINES.iter().any(|(k, _)| *k == "Flows    x / X"));
-        assert!(HELP_LINES.iter().any(|(k, _)| *k == "Sections s"));
-        assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  M"));
-        assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  m"));
-        assert!(HELP_LINES.iter().any(|(k, _)| *k == "App      m w r Esc"));
-        assert!(
-            HELP_LINES
-                .iter()
-                .any(|(_, d)| d.starts_with(":marks [action]"))
-        );
-        assert!(HELP_LINES.iter().any(|(k, _)| *k == "Events   J"));
-        assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  A"));
-        assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  D"));
-        assert!(
-            !HELP_LINES.iter().any(|(k, _)| k.contains("App      t")),
-            "the timeline is gone"
-        );
-        assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  F / X"));
-        assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  + / -"));
-        assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  B"));
-        assert!(HELP_LINES.iter().any(|(k, _)| *k == "Traffic  ] / ["));
-        assert!(HELP_LINES.iter().any(|(k, _)| *k == "Labels   f / i / u"));
-        assert!(
-            HELP_LINES
-                .iter()
-                .any(|(k, _)| *k == "Treemap  hjkl Enter b")
-        );
-        assert!(HELP_LINES.iter().any(|(k, _)| *k == "Mesh     u / p"));
-        assert!(
-            HELP_LINES
-                .iter()
-                .any(|(_, d)| *d == ":writes [on|off]  :export[!] <path>  :batch")
-        );
-        assert!(HELP_LINES.iter().any(|(k, _)| *k == "IP lists Enter"));
-        assert!(HELP_LINES.iter().any(|(k, _)| *k == "Workloads E m o u c"));
-        assert!(
-            HELP_LINES
-                .iter()
-                .any(|(_, d)| *d == "new/edit/delete: Objects, IP lists, Workloads, Policy")
-        );
         update(&mut m, key('?'));
-        let last = help_last_scroll(24);
-        assert_eq!(last, 57, "79 lines, 22 rows inside the box");
-        assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app x / X"));
-        assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app o"));
-        assert!(HELP_LINES.iter().any(|(k, _)| *k == "App-to-app d"));
-        assert!(HELP_LINES.iter().any(|(k, _)| *k == "Sections Space / z"));
-
-        for _ in 0..57 {
+        assert_eq!(HelpContext::of(&m), HelpContext::Flows);
+        // The Flows page: Flows, Sections, Traffic, Marks, Everywhere.
+        let rows = page_rows(HelpPage::Context, HelpContext::Flows).len();
+        let last = help_last_scroll(&m, m.size);
+        assert_eq!(last, rows - 21, "21 rows inside the box above its footer");
+        for _ in 0..rows + 5 {
             update(&mut m, key('j'));
         }
-        assert_eq!(m.help_scroll, last);
+        assert_eq!(m.help_scroll, last, "clamped to the page");
         update(&mut m, key('k'));
         assert_eq!(m.help_scroll, last - 1);
         update(&mut m, key('G'));
         assert_eq!(m.help_scroll, last);
         update(&mut m, key('g'));
         assert_eq!(m.help_scroll, 0);
+        update(&mut m, kc(KeyCode::PageDown));
+        assert_eq!(m.help_scroll, 21.min(last));
+        update(&mut m, kc(KeyCode::PageUp));
+        assert_eq!(m.help_scroll, 0);
+        // Tab: one group at a time from the one after Flows; scroll resets.
+        update(&mut m, key('G'));
+        update(&mut m, kc(KeyCode::Tab));
+        assert_eq!(m.help_page, HelpPage::Group(HelpTopic::AppToApp));
+        assert_eq!(m.help_scroll, 0);
+        assert_eq!(help_last_scroll(&m, m.size), 0, "one short group fits");
+        update(&mut m, key('j'));
+        assert_eq!(m.help_scroll, 0, "nothing to scroll");
+        update(&mut m, kc(KeyCode::BackTab));
+        update(&mut m, kc(KeyCode::BackTab));
+        assert_eq!(m.help_page, HelpPage::Group(HelpTopic::Traffic));
+        // a: every group; again: the context page.
+        update(&mut m, key('a'));
+        assert_eq!(m.help_page, HelpPage::All);
+        update(&mut m, key('G'));
+        assert!(m.help_scroll > last, "all groups are longer");
+        update(&mut m, key('a'));
+        assert_eq!(m.help_page, HelpPage::Context);
+        assert_eq!(m.help_scroll, 0);
+        // Other keys are swallowed.
+        let screen = m.screen;
+        update(&mut m, key('2'));
+        assert_eq!(m.screen, screen);
+        assert_eq!(m.overlay, Overlay::Help);
+        update(&mut m, key('a'));
         update(&mut m, key('G'));
         update(&mut m, kc(KeyCode::Esc));
+        assert_eq!(m.overlay, Overlay::None);
         update(&mut m, key('?'));
         assert_eq!(m.help_scroll, 0, "the help reopens at the top");
+        assert_eq!(m.help_page, HelpPage::Context, "on the context page");
+    }
+
+    #[test]
+    fn help_opens_on_the_keys_of_its_context() {
+        use crate::tui::test_support::{model_with_events, model_with_flows, model_with_policy};
+        let mut m = model_with_flows();
+        for (view, ctx) in [
+            (TrafficView::Flows, HelpContext::Flows),
+            (TrafficView::Aggregate, HelpContext::AppToApp),
+            (TrafficView::Mesh, HelpContext::Mesh),
+            (TrafficView::Blocked, HelpContext::Blocked),
+            (TrafficView::Treemap, HelpContext::Treemap),
+        ] {
+            m.traffic.view = view;
+            update(&mut m, key('?'));
+            assert_eq!(HelpContext::of(&m), ctx, "{view:?}");
+            update(&mut m, kc(KeyCode::Esc));
+            assert_eq!(m.overlay, Overlay::None);
+        }
+        let mut p = model_with_policy();
+        p.screen = Screen::Policy;
+        update(&mut p, key('?'));
+        assert_eq!(HelpContext::of(&p), HelpContext::Policy);
+        update(&mut p, kc(KeyCode::Esc));
+        p.policy.pending = Some(pending_fixture());
+        p.overlay = Overlay::Pending;
+        update(&mut p, key('?'));
+        assert_eq!(p.overlay, Overlay::Help);
+        assert_eq!(HelpContext::of(&p), HelpContext::Pending);
+        update(&mut p, kc(KeyCode::Esc));
+        assert_eq!(p.overlay, Overlay::Pending, "back to the pending changes");
+        for (screen, ctx) in [
+            (Screen::Objects, HelpContext::Objects),
+            (Screen::Workloads, HelpContext::Workloads),
+            (Screen::Events, HelpContext::Events),
+        ] {
+            let mut m = model_fixture();
+            m.screen = screen;
+            update(&mut m, key('?'));
+            assert_eq!(HelpContext::of(&m), ctx, "{screen:?}");
+        }
+        // An event's detail: the Events keys, and back to the detail.
+        let mut e = model_with_events();
+        e.screen = Screen::Events;
+        update(&mut e, kc(KeyCode::Enter));
+        assert!(matches!(e.overlay, Overlay::EventDetail { .. }));
+        update(&mut e, key('?'));
+        assert_eq!(e.overlay, Overlay::Help);
+        assert_eq!(HelpContext::of(&e), HelpContext::Events);
+        update(&mut e, key('q'));
+        assert!(matches!(e.overlay, Overlay::EventDetail { .. }));
+        // The marks list: its keys, and back to it.
+        let mut k = model_with_flows();
+        update(&mut k, Msg::Command(Command::Marks(None)));
+        assert_eq!(k.overlay, Overlay::Marks);
+        update(&mut k, key('?'));
+        assert_eq!(HelpContext::of(&k), HelpContext::Marks);
+        update(&mut k, kc(KeyCode::Esc));
+        assert_eq!(k.overlay, Overlay::Marks);
+        // `:help` from the prompt: the screen's keys.
+        let mut c = model_with_flows();
+        update(&mut c, key(':'));
+        for ch in "help".chars() {
+            update(&mut c, key(ch));
+        }
+        update(&mut c, kc(KeyCode::Enter));
+        assert_eq!(c.overlay, Overlay::Help);
+        assert_eq!(HelpContext::of(&c), HelpContext::Flows);
     }
 
     #[test]

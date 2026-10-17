@@ -125,20 +125,118 @@ fn help_overlay_80x24() {
     let mut m = model_fixture();
     m.overlay = Overlay::Help;
     let out = render_to_string(&m, 80, 24);
-    assert!(out.contains("1 2 3 4 5"), "first page: {out}");
-    assert!(out.contains("move in the current table"), "{out}");
-    assert!(out.contains("j/k scroll"), "{out}");
+    assert!(
+        out.contains("Keys · Flows"),
+        "the context in the title: {out}"
+    );
+    assert!(out.contains("FLOWS"), "its group first: {out}");
+    assert!(out.contains("flat · by src app"), "{out}");
+    assert!(out.contains("SECTIONS"), "{out}");
+    assert!(out.contains("Tab next · S-Tab prev · a all"), "{out}");
     insta::assert_snapshot!("help_overlay_80x24", out);
-    m.help_scroll = help_last_scroll(24);
+    m.help_scroll = help_last_scroll(&m, (80, 24));
     let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("EVERYWHERE"), "the last group: {out}");
     assert!(out.contains("close overlay"), "last line visible: {out}");
     assert!(out.contains("send / cancel a shown request"), "{out}");
+    assert!(out.contains("more: Commands"), "the other groups: {out}");
     insta::assert_snapshot!("help_overlay_end_80x24", out);
     m.set_theme("light");
     insta::assert_snapshot!(
         "help_overlay_end_light_styled_80x24",
         render_styled(&m, 80, 24)
     );
+}
+
+#[test]
+fn help_overlay_flows_100x40() {
+    use illumio_tui::tui::help::HelpPage;
+    use illumio_tui::tui::model::Overlay;
+    let mut m = model_with_flows();
+    m.overlay = Overlay::Help;
+    insta::assert_snapshot!("help_overlay_flows_100x40", render_to_string(&m, 100, 40));
+    // Tab: the next group alone; a: every group.
+    m.help_page = HelpPage::Group(illumio_tui::tui::help::HelpTopic::AppToApp);
+    let out = render_to_string(&m, 100, 40);
+    assert!(out.contains("Keys · App-to-app"), "{out}");
+    assert!(out.contains("next: Sections · prev: Flows"), "{out}");
+    assert!(!out.contains("FLOWS"), "{out}");
+    m.help_page = HelpPage::All;
+    let out = render_to_string(&m, 100, 40);
+    assert!(out.contains("Keys · all"), "{out}");
+    assert!(out.contains("a back"), "{out}");
+}
+
+/// No terminal size panics the help, in its contexts and pages, scrolled
+/// to the top and to the end; drawn alone below the chrome's minimum too.
+#[test]
+fn help_renders_at_every_terminal_size() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use illumio_tui::tui::help::{HelpPage, HelpTopic};
+    use illumio_tui::tui::model::{Overlay, TrafficView};
+    use illumio_tui::tui::test_support as ts;
+    use illumio_tui::tui::ui::widgets::overlay::{help_last_scroll, render_help};
+    let mut models = Vec::new();
+    for view in [
+        TrafficView::Flows,
+        TrafficView::Aggregate,
+        TrafficView::Mesh,
+        TrafficView::Blocked,
+        TrafficView::Treemap,
+    ] {
+        let mut m = ts::model_with_rich_flows();
+        m.traffic.view = view;
+        models.push(m);
+    }
+    for (mut m, screen) in [
+        (ts::model_with_policy(), Screen::Policy),
+        (ts::model_with_objects(), Screen::Objects),
+        (ts::model_with_workloads(), Screen::Workloads),
+        (ts::model_with_events(), Screen::Events),
+    ] {
+        m.screen = screen;
+        models.push(m);
+    }
+    let mut detail = ts::model_with_events();
+    detail.screen = Screen::Events;
+    illumio_tui::tui::update(
+        &mut detail,
+        illumio_tui::tui::msg::Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+    );
+    assert!(matches!(detail.overlay, Overlay::EventDetail { .. }));
+    models.push(detail);
+    models.push(app_overlay_model());
+    models.push(generator_model());
+    for mut m in models {
+        gen_key(&mut m, '?');
+        assert_eq!(m.overlay, Overlay::Help);
+        for page in [
+            HelpPage::Context,
+            HelpPage::Group(HelpTopic::Commands),
+            HelpPage::Group(HelpTopic::Mesh),
+            HelpPage::All,
+        ] {
+            m.help_page = page;
+            // Every width on the context page, every fifth on the others.
+            let step = if page == HelpPage::Context { 1 } else { 5 };
+            for w in (20..=130).step_by(step) {
+                for h in [1, 3, 6, 10, 16, 24, 40] {
+                    for end in [false, true] {
+                        m.help_scroll = if end { help_last_scroll(&m, (w, h)) } else { 0 };
+                        // The whole screen (the chrome draws from 16 rows)
+                        // on the context page; the help alone everywhere.
+                        if matches!(h, 16 | 24) && page == HelpPage::Context {
+                            let _ = render_to_string(&m, w, h);
+                        }
+                        let mut term =
+                            ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h))
+                                .unwrap();
+                        term.draw(|f| render_help(&m, f, f.area())).unwrap();
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[test]

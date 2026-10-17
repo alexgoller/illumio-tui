@@ -588,11 +588,14 @@ mod tests {
         update(&mut m, Msg::Command(Command::App(Some("shop/prod".into()))));
         assert_eq!(update(&mut m, key('?')), Vec::new());
         assert_eq!(m.overlay, Overlay::Help);
+        use crate::tui::help::HelpContext;
+        assert_eq!(HelpContext::of(&m), HelpContext::AppOverlay);
         update(&mut m, Msg::Key(KeyEvent::from(KeyCode::Esc)));
         assert_eq!(m.overlay, Overlay::App, "back to the app view");
         update(&mut m, key('G'));
         assert_eq!(update(&mut m, key('?')), Vec::new());
         assert_eq!(m.overlay, Overlay::Help);
+        assert_eq!(HelpContext::of(&m), HelpContext::Generator);
         update(&mut m, key('?'));
         assert_eq!(m.overlay, Overlay::Generator, "back to the generator");
         update(&mut m, key('q'));

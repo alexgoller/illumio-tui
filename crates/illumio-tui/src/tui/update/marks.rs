@@ -502,6 +502,7 @@ pub(super) fn overlay_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 Overlay::None
             };
         }
+        KeyCode::Char('?') => super::open_help(model),
         KeyCode::Enter => {
             if let Some(r) = v.selected() {
                 let mf = MarkForm::edit(&r.mark, &pce, false);
