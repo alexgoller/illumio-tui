@@ -21,25 +21,34 @@ pub struct Context {
     started: Instant,
 }
 
+/// What a profile is resolved from: the config file, the flags and the
+/// environment (with `--env-file`).
+pub fn config_inputs(
+    global: &GlobalArgs,
+) -> Result<(config::ConfigFile, Overrides, HashMap<String, String>), CliError> {
+    let path = global
+        .config
+        .clone()
+        .unwrap_or_else(config::default_config_path);
+    let file = config::load_config_file(&path)?;
+    let real: HashMap<String, String> = std::env::vars().collect();
+    let env = match &global.env_file {
+        Some(p) => config::merge_env(config::load_env_file(p)?, real),
+        None => real,
+    };
+    let overrides = Overrides {
+        profile: global.profile.clone(),
+        host: global.host.clone(),
+        port: global.pce_port,
+        org_id: global.org_id,
+        tls_verify: if global.insecure { Some(false) } else { None },
+    };
+    Ok((file, overrides, env))
+}
+
 impl Context {
     pub fn new(global: &GlobalArgs) -> Result<Self, CliError> {
-        let path = global
-            .config
-            .clone()
-            .unwrap_or_else(config::default_config_path);
-        let file = config::load_config_file(&path)?;
-        let real: HashMap<String, String> = std::env::vars().collect();
-        let env = match &global.env_file {
-            Some(p) => config::merge_env(config::load_env_file(p)?, real),
-            None => real,
-        };
-        let overrides = Overrides {
-            profile: global.profile.clone(),
-            host: global.host.clone(),
-            port: global.pce_port,
-            org_id: global.org_id,
-            tls_verify: if global.insecure { Some(false) } else { None },
-        };
+        let (file, overrides, env) = config_inputs(global)?;
         let resolved = config::resolve(&file, &overrides, &env)?;
         let pce = Pce::new(PceClient::new(resolved.client_config())?)
             .with_key_order(resolved.key_order());
@@ -78,6 +87,7 @@ impl Context {
             usage: None,
             local_filter: None,
             warnings: None,
+            marks: None,
         }
     }
 

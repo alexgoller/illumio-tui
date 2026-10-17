@@ -272,11 +272,22 @@ pub fn merge_env(
     merged
 }
 
-pub fn resolve(
+/// The profile `resolve` uses, and its PCE: the host and org id from the
+/// same flags, environment and file, without credentials (`marks` scopes
+/// marks to it and needs no secret).
+#[derive(Debug, Clone)]
+pub struct Identity {
+    pub profile_name: String,
+    pub profile: Profile,
+    pub host: String,
+    pub org_id: u64,
+}
+
+pub fn identity(
     file: &ConfigFile,
     overrides: &Overrides,
     env: &HashMap<String, String>,
-) -> Result<ResolvedConfig, ConfigError> {
+) -> Result<Identity, ConfigError> {
     let env_str = |k: &str| {
         env.get(k)
             .map(|s| s.trim().to_string())
@@ -318,14 +329,6 @@ pub fn resolve(
                 "no PCE host: pass --host, set PCE_HOST, or add host to the profile".into(),
             )
         })?;
-    let port = if let Some(p) = overrides.port {
-        p
-    } else if let Some(raw) = env_str("PCE_PORT") {
-        raw.parse::<u16>()
-            .map_err(|_| ConfigError::Message(format!("PCE_PORT is not a number: {raw:?}")))?
-    } else {
-        profile.port.unwrap_or(443)
-    };
     let org_id = if let Some(o) = overrides.org_id {
         o
     } else if let Some(raw) = env_str("PCE_ORG_ID") {
@@ -337,6 +340,39 @@ pub fn resolve(
                 "no org id: pass --org-id, set PCE_ORG_ID, or add org_id to the profile".into(),
             )
         })?
+    };
+    Ok(Identity {
+        profile_name,
+        profile,
+        host,
+        org_id,
+    })
+}
+
+pub fn resolve(
+    file: &ConfigFile,
+    overrides: &Overrides,
+    env: &HashMap<String, String>,
+) -> Result<ResolvedConfig, ConfigError> {
+    let env_str = |k: &str| {
+        env.get(k)
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    };
+
+    let Identity {
+        profile_name,
+        profile,
+        host,
+        org_id,
+    } = identity(file, overrides, env)?;
+    let port = if let Some(p) = overrides.port {
+        p
+    } else if let Some(raw) = env_str("PCE_PORT") {
+        raw.parse::<u16>()
+            .map_err(|_| ConfigError::Message(format!("PCE_PORT is not a number: {raw:?}")))?
+    } else {
+        profile.port.unwrap_or(443)
     };
     let scheme = env_str("PCE_SCHEME")
         .or_else(|| profile.scheme.clone())

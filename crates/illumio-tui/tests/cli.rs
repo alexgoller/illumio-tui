@@ -91,6 +91,12 @@ fn every_flag_has_help_text() {
         vec!["workloads", "add", "--help"],
         vec!["workloads", "update", "--help"],
         vec!["workloads", "delete", "--help"],
+        vec!["marks", "--help"],
+        vec!["marks", "list", "--help"],
+        vec!["marks", "add", "--help"],
+        vec!["marks", "rm", "--help"],
+        vec!["marks", "export", "--help"],
+        vec!["marks", "import", "--help"],
     ] {
         let out = Command::cargo_bin("illumio-tui")
             .unwrap()

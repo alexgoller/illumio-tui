@@ -6,6 +6,7 @@ pub mod error;
 pub mod events;
 pub mod generate;
 pub mod health;
+pub mod marks;
 pub mod objects;
 pub mod output;
 pub mod policy;
@@ -112,6 +113,12 @@ pub enum Command {
     /// Manage connection profiles
     #[command(subcommand)]
     Profile(profile::ProfileCmd),
+    /// Flow marks in marks.toml: squelch, reviewed, critical … (local file, no request)
+    ///
+    /// Marks are applied to every traffic result (traffic, app; gen reports them): squelched
+    /// flows are left out, the others carry their mark. --no-marks ignores the file.
+    #[command(subcommand)]
+    Marks(marks::MarksCmd),
 }
 
 /// The command's name for `--csv`'s refusal when it prints no table (a
@@ -137,6 +144,7 @@ fn csv_refusal(command: &Command) -> Option<&'static str> {
         Command::Policy(P::Revert(_)) => Some("policy revert"),
         Command::Traffic(t) if t.filter().dry_run => Some("traffic --dry-run"),
         Command::Profile(profile::ProfileCmd::Use { .. }) => Some("profile use"),
+        Command::Marks(marks::MarksCmd::Export(_)) => Some("marks export"),
         _ => None,
     }
 }
@@ -153,6 +161,9 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
     if let Command::Profile(p) = &command {
         return profile::run(&global, p);
     }
+    if let Command::Marks(m) = &command {
+        return marks::run(&global, m);
+    }
     let ctx = Context::new(&global)?;
     match command {
         Command::Health => health::run(&ctx).await,
@@ -166,6 +177,6 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
         Command::Gen(a) => generate::run(&ctx, &a).await,
         Command::Policy(p) => policy::run(&ctx, &p).await,
         Command::Traffic(t) => traffic::run(&ctx, &t).await,
-        Command::Profile(_) => unreachable!("handled above"),
+        Command::Profile(_) | Command::Marks(_) => unreachable!("handled above"),
     }
 }

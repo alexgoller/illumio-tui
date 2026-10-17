@@ -1,6 +1,7 @@
 //! CLI errors and their exit codes: 1 generic, 2 arguments/config, 3 auth,
 //! 4 PCE error, 5 rate limited, 6 write refused.
 use crate::config::ConfigError;
+use crate::marks::MarksError;
 use pce::PceError;
 use pce::write::WriteError;
 
@@ -21,6 +22,10 @@ pub enum CliError {
     /// The data is missing rows (a PCE region did not answer): exit 4.
     #[error("{0}")]
     Incomplete(String),
+    /// `marks.toml`: invalid (exit 2, every problem), locked by another
+    /// writer (exit 3), a mark gone (exit 2), unreadable (exit 1).
+    #[error("{}", .0.lines().join("; "))]
+    Marks(crate::marks::MarksError),
 }
 
 impl CliError {
@@ -33,6 +38,11 @@ impl CliError {
             CliError::Pce(_) | CliError::Incomplete(_) => 4,
             CliError::Write(e) => write_exit_code(e),
             CliError::Io(_) | CliError::Other(_) => 1,
+            CliError::Marks(e) => match e {
+                MarksError::Parse(_) | MarksError::Gone(_) => 2,
+                MarksError::Locked => 3,
+                MarksError::Io(_) => 1,
+            },
         }
     }
 
@@ -45,6 +55,12 @@ impl CliError {
             CliError::Io(_) => "io".into(),
             CliError::Other(_) => "error".into(),
             CliError::Incomplete(_) => "incomplete".into(),
+            CliError::Marks(e) => match e {
+                MarksError::Parse(_) => "marks_invalid".into(),
+                MarksError::Locked => "marks_locked".into(),
+                MarksError::Gone(_) => "marks_gone".into(),
+                MarksError::Io(_) => "io".into(),
+            },
         }
     }
 

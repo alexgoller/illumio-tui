@@ -48,7 +48,7 @@ pub struct WriteMeta {
 /// counts. `labels --unused` (meta) and the TUI's `u` (header, status) say it.
 pub const USAGE_FROM_COUNTS: &str = "workloads, rules and scopes only";
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct Meta {
     pub profile: String,
     pub elapsed_ms: u128,
@@ -97,6 +97,17 @@ pub struct Meta {
     /// printed to stderr): `workloads --unlabeled` with an unknown key.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warnings: Option<Vec<String>>,
+    /// The marks applied (`marks` commands, and traffic with a valid file
+    /// holding an active mark): how many are active, and the file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub marks: Option<MarksMeta>,
+}
+
+/// `meta.marks`.
+#[derive(Debug, Clone, Serialize)]
+pub struct MarksMeta {
+    pub active: usize,
+    pub file: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -434,6 +445,7 @@ mod tests {
             usage: None,
             local_filter: None,
             warnings: None,
+            marks: None,
         };
         assert!(meta_line(&meta).contains("POST /orgs/5/labels → 201"));
     }

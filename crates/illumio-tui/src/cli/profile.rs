@@ -92,6 +92,7 @@ fn emit<T: Serialize + TableRows>(global: &GlobalArgs, data: &T) -> Result<(), C
         usage: None,
         local_filter: None,
         warnings: None,
+        marks: None,
     };
     let mut out = std::io::stdout().lock();
     match choose_format(global.json, global.table, global.csv) {
