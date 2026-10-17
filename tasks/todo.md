@@ -360,3 +360,18 @@ Spec: docs/superpowers/specs/2026-10-11-traffic-views-design.md · Plan: docs/su
 - 80x24 snapshots: default, incomplete, outbound, rule list, override deny / no target; 120x40: outbound role·ports, rule list.
 - Gate green, 1376 tests; `git diff main -- '*Cargo.toml' Cargo.lock` empty.
 - No live smoke: the implementer was told not to contact any PCE. Nothing was written to any PCE.
+
+## Flow marks 1: model, file and CLI (plan docs/superpowers/plans/2026-10-17-flow-marks-1-model-cli.md)
+- [x] Task 1 pce::marks: actions, sides, services, matching, precedence, ids
+- [x] Task 2 partition, row annotations, speed budget
+- [x] Task 3 marks.toml and MarksStore
+- [x] Task 4 illumio-tui marks list|add|rm|export|import
+- [x] Task 5 traffic, app and gen apply marks
+- [x] Task 6 tracking, smoke, gate
+
+## Review (Flow marks 1)
+- `pce::marks` (pure): six actions with strongest-first precedence, sides (`any`, labels, `wl:`, `ip:`, `ipl:`) and their text grammar, services, `decision` and `draft_decision`, PCE scope, UTC expiry, specificity tie-breaks, FNV-1a `m-`/`h-` ids; `partition` (borrowed unless a flow is left out) and `annotate_groups|mesh|sections|peers` joining each mark's subset to the view's rows by key, aggregators unchanged.
+- `illumio-tui::marks`: `marks.toml` next to the config in use, every problem positioned, unknown fields kept, writes as operations under `marks.toml.lock` (create_new, stale after 10 s) from a fresh read, temp file + rename, 0600/0700 on Unix, one `.bak` before comments are dropped, an invalid file never written.
+- CLI: `illumio-tui marks list|add|rm|export|import` (no profile needed, no request); `traffic query|groups|mesh` and `app` apply marks (`meta.squelched`, `meta.marks`, `mark` on rows, `mark` column, `--show-squelched`, `--no-marks`, an invalid file a warning, exit 0); `gen` only reports `meta.squelched.flows`, its proposal unchanged.
+- Gate green, 1497 tests (1 ignored: the release speed test, which passes: 200k flows x 200 marks under 300 ms, the whole test 0.34 s with setup); `git diff main -- '*Cargo.toml' Cargo.lock` empty; nothing under `src/tui/` changed.
+- No live smoke: the implementer was told not to contact any PCE. Nothing was written to any PCE.
