@@ -211,6 +211,10 @@ pub struct FlowGroup {
     /// What the draft policy would change, with draft decisions loaded.
     #[serde(flatten)]
     pub draft: Option<DraftCounts>,
+    /// What the marks say about the row (`pce::marks::annotate_*`);
+    /// flattened into JSON as `mark`, `marks` and `squelched`.
+    #[serde(flatten)]
+    pub marks: Option<crate::marks::RowMarks>,
 }
 
 impl FlowGroup {
@@ -275,6 +279,7 @@ fn group<'a>(
             blocked: 0,
             conns: ConnsByDecision::default(),
             draft: None,
+            marks: None,
         });
         g.flows += 1;
         DraftCounts::add(&mut g.draft, f);

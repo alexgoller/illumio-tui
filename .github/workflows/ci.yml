@@ -20,6 +20,8 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      # The marks speed budget (200k flows x 200 marks under 300 ms), release only.
+      - run: cargo test --release -p pce --test marks_perf -- --ignored
   deny:
     runs-on: ubuntu-latest
     steps:

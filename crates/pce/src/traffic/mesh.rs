@@ -31,6 +31,10 @@ pub struct MeshRow {
     /// (`draft_allowed`, `draft_blocked` in JSON).
     #[serde(flatten)]
     pub draft: Option<DraftCounts>,
+    /// What the marks say about the row (`pce::marks::annotate_*`);
+    /// flattened into JSON as `mark`, `marks` and `squelched`.
+    #[serde(flatten)]
+    pub marks: Option<crate::marks::RowMarks>,
 }
 
 /// Which optional columns take part in the grouping.
@@ -150,6 +154,7 @@ pub fn mesh(flows: &[ResolvedFlow], keys: &[String], cols: MeshColumns) -> Vec<M
             potentially_blocked: 0,
             blocked: 0,
             draft: None,
+            marks: None,
         });
         row.flows += 1;
         DraftCounts::add(&mut row.draft, f);

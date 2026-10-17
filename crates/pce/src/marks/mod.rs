@@ -10,6 +10,12 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 
+mod partition;
+pub use partition::{
+    Marked, MarkedFlows, Marker, Partition, RowMarks, TopMark, annotate_groups, annotate_mesh,
+    annotate_peers, annotate_sections, partition,
+};
+
 /// What a mark says about its flows. `Ord` is precedence: the strongest
 /// first, so a highlight (and a quiet action) always beats squelch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]

@@ -330,6 +330,7 @@ mod tests {
             blocked: 0,
             conns: Default::default(),
             draft: None,
+            marks: None,
         }
     }
 

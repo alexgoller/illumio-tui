@@ -199,6 +199,10 @@ pub struct PeerRow {
     pub app_hosts: usize,
     /// The newest flow's last detection.
     pub last_detected: Option<String>,
+    /// What the marks say about the row (`pce::marks::annotate_*`);
+    /// flattened into JSON as `mark`, `marks` and `squelched`.
+    #[serde(flatten)]
+    pub marks: Option<crate::marks::RowMarks>,
 }
 
 /// The one name when there is one host, else `N hosts`.
@@ -366,6 +370,7 @@ pub fn app_sections(
                         app_names: Vec::new(),
                         app_hosts: 0,
                         last_detected: None,
+                        marks: None,
                     },
                     Seen::default(),
                 )

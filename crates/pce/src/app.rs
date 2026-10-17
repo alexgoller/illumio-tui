@@ -22,6 +22,10 @@ pub struct AppPeer {
     /// What the draft policy would change, with draft decisions loaded.
     #[serde(flatten)]
     pub draft: Option<crate::traffic::DraftCounts>,
+    /// What the marks say about the row (`pce::marks::annotate_*`);
+    /// flattened into JSON as `mark`, `marks` and `squelched`.
+    #[serde(flatten)]
+    pub marks: Option<crate::marks::RowMarks>,
 }
 
 impl AppPeer {
@@ -76,6 +80,7 @@ pub fn app_peers(flows: &[ResolvedFlow], focus: &Focus, side: Direction) -> Vec<
                 connections: g.connections,
                 bytes: g.bytes,
                 draft: g.draft,
+                marks: None,
             });
         }
     }
