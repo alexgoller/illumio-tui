@@ -247,7 +247,7 @@ fn member_labels(r: &WlGroupRow) -> String {
 /// The grouped table's columns: `src` (the flat table's, as shown at the
 /// moment: widths, which hide) reading each member row's workload; the
 /// labels column leaves out the group's keys. A column past the adapters
-/// is left out (a test keeps them in step: `group_columns_read_the_member_cells`).
+/// is left out (a test keeps them in step: `member_columns_read_the_member_cells`).
 pub fn member_columns(src: &[Column<WlRow>]) -> Vec<Column<WlGroupRow>> {
     src.iter()
         .enumerate()
