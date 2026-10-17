@@ -6,10 +6,6 @@ services, unmanaged workloads and policy (rulesets, rules, provisioning) are opt
 
 Documentation: https://alexgoller.github.io/illumio-tui/
 
-This README describes `main`. Since v0.2.0, `main` adds IP list rows and fan-in
-consolidation to the policy generator and event-to-event navigation in the Events
-detail; they ship with the next release.
-
 Screenshots and a short recording: https://alexgoller.github.io/illumio-tui/#screens
 
 ## Install
@@ -29,13 +25,13 @@ prebuilt binaries from the GitHub Release (static musl build on Linux x86_64).
 Download the `.deb` for your architecture (`amd64` or `arm64`) from the
 [release page](https://github.com/alexgoller/illumio-tui/releases), then:
 
-    sudo apt install ./illumio-tui_0.2.0-1_amd64.deb
+    sudo apt install ./illumio-tui_0.3.0-1_amd64.deb
 
 ### RHEL, Rocky, Alma, Fedora
 
 Download the `.rpm` (`x86_64` or `aarch64`) from the release page, then:
 
-    sudo dnf install ./illumio-tui-0.2.0-1.x86_64.rpm
+    sudo dnf install ./illumio-tui-0.3.0-1.x86_64.rpm
 
 Both packages install `/usr/bin/illumio-tui` with no dependencies (the x86_64
 binary is static, the arm64 one needs glibc 2.18 or newer) and are tested on
@@ -65,11 +61,11 @@ covering all of them:
 | Windows x86_64 | `illumio-tui-<version>-x86_64-pc-windows-msvc.zip` |
 
 Download the archive for your platform and `SHA256SUMS`, then verify and
-install (example: macOS Apple Silicon, version 0.2.0):
+install (example: macOS Apple Silicon, version 0.3.0):
 
     sha256sum --check --ignore-missing SHA256SUMS      # macOS: shasum -a 256 -c --ignore-missing SHA256SUMS
-    tar -xzf illumio-tui-0.2.0-aarch64-apple-darwin.tar.gz
-    install -m 755 illumio-tui-0.2.0-aarch64-apple-darwin/illumio-tui ~/.local/bin/   # any directory on PATH
+    tar -xzf illumio-tui-0.3.0-aarch64-apple-darwin.tar.gz
+    install -m 755 illumio-tui-0.3.0-aarch64-apple-darwin/illumio-tui ~/.local/bin/   # any directory on PATH
     illumio-tui --version
 
 macOS may quarantine binaries downloaded with a browser; clear it with
@@ -82,7 +78,7 @@ the hash with `Get-FileHash illumio-tui-<version>-x86_64-pc-windows-msvc.zip`
 
 1. Bump `version` in `[workspace.package]` of the root `Cargo.toml` and run
    `cargo check` so `Cargo.lock` follows.
-2. Commit, then tag and push: `git tag v0.2.0 && git push --tags`.
+2. Commit, then tag and push: `git tag v0.3.0 && git push --tags`.
 
 The `Release` workflow builds all targets, builds the `.deb`/`.rpm` packages
 (nfpm, `packaging/nfpm.yaml`) and install-tests them in Debian, Ubuntu, Rocky
