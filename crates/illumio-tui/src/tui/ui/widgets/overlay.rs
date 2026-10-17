@@ -145,6 +145,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "Traffic  w",
         "draft allow rule from a blocked flow or row (writes)",
     ),
+    ("Traffic  M", "show or hide squelched rows (~)"),
     (
         "Form     Ctrl-N Ctrl-P",
         "complete from the index · cycle back",

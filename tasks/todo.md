@@ -376,3 +376,19 @@ Spec: docs/superpowers/specs/2026-10-11-traffic-views-design.md · Plan: docs/su
 - Gate green, 1497 tests (1 ignored: the release speed test, which passes: 200k flows x 200 marks under 300 ms, the whole test 0.34 s with setup); `git diff main -- '*Cargo.toml' Cargo.lock` empty; nothing under `src/tui/` changed.
 - Live smoke (run by the integrator, read-only, on demo100 with a temp `XDG_CONFIG_HOME`): `marks add` squelch + critical, the file mode 0600; `traffic query --dst app=ordering` → `meta.squelched {rows: 21, flows: 21}`, 35 critical rows, no extra requests for the marks. Nothing was written to any PCE.
 - Review fixes: `parse_expiry` and `MarkOp::Extend` use checked arithmetic (a huge `<N>d` is `too far`, never a panic); comments are detected with a small TOML lexer (a `#` inside a string is text, a trailing `# …` is a comment), so the `.bak` holding hand comments is never replaced by a later write; `traffic groups --app X` says `all of "X"'s flows are squelched (--show-squelched shows them)` when squelch emptied the app; the perf step runs on Ubuntu only and prints its time (153 ms locally); `"any"` sides case-insensitive; a duplicate hand mark says `duplicates mark N`; CLI rule errors name the flag (`--pce`, `--decision`); `marks list` shows `(no comment)`; `marks import` warns on a missing comment, refuses duplicate ids in one file, reads `.JSON`/`.Toml`, gives TOML errors with line and column (the file's parser too); `meta.marks.waiting_draft` when `draft_decision` marks wait for `--draft`; an empty hostname counts as absent for `wl:`; the directory is synced after the rename (Unix), and a failed stat after a successful write is not an error; CLI tests use a per-call config directory; new CLI tests for `--draft` gating and `--by both --app`.
+
+## Flow marks 2: TUI display (plan docs/superpowers/plans/2026-10-17-flow-marks-2-display.md)
+- [x] Task 1 TrafficState applies marks; M
+- [x] Task 2 gutter, metas, Blocked accepted, treemap, detail
+- [x] Task 3 app overlay, generator header
+- [x] Task 4 help, tracking, gate
+
+## Review (Flow marks 2)
+- `TrafficState` stats `marks.toml` at every `rebuild_views` (re-read only when it changed), partitions the focused flows, leaves squelched ones out of every view (`M` shows them, dimmed `~`), joins the marks to every view's rows and keeps per-view `squelched {rows, flows}`; a flow both critical and squelched surfaces everywhere.
+- Drawing: the 2-cell gutter (`●` `◆` `≈` `✓` `~`) only while a mark is active, the name cell red/amber for highlights, quiet rows dimmed, `1 ~1` in partly squelched flows cells (`:export` writes the count), the panel metas (`4 rows (9 flows) squelched · M shows them`, `marks off: marks.toml invalid`, `N marks wait for the draft decision (D)`), Blocked's accepted records out of the header counts (`· 2 accepted`), treemap highlight glyphs, the Flows detail's `mark` line.
+- App overlay: peers of the kept flows with the gutter, `Inbound · 2 peers (5 flows) squelched`, `M` there too; generator: rows and proposal unchanged by marks (tested equal), header ` · 5 squelched (rules include them)`. Both stat the file when they open.
+- Notices: an invalid file gives one warn status, valid again an info; the first load announces marks expiring within 3 days. `:profile` keeps the file, `M` and the announcement, and scopes marks to the new PCE.
+- Part 1 nit: `has_comments` treats up to two quotes before a multi-line string's closing delimiter as content.
+- Snapshots: 3 new at 120x34 (pairs, Blocked, pairs with `M`), 2 new at 80x24 (Flows, pairs), the 3 help snapshots (75 lines); size sweeps cover marked traffic views, sections, `M`, the detail, the app overlay and the generator. Every existing snapshot unchanged.
+- Gate green, 1526 tests (1 ignored: the release speed test); `git diff main -- '*Cargo.toml' Cargo.lock` empty.
+- No marks key sends a request; nothing was written to any PCE.

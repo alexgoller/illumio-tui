@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ Keys ───────────────────────────────── 53-74 of 74 · j/k scroll · Esc closes ╮
+╭ Keys ───────────────────────────────── 54-75 of 75 · j/k scroll · Esc closes ╮
 │w form   Ctrl-A Ctrl-R   all labels · create the typed ruleset                │
 │Policy   d               toggle draft / active                                │
 │Policy   p               pending changes                                      │

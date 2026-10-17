@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ Keys ────────────────────────────────── 1-22 of 74 · j/k scroll · Esc closes ╮
+╭ Keys ────────────────────────────────── 1-22 of 75 · j/k scroll · Esc closes ╮
 │1 2 3 4 5                Traffic · Policy · Objects · Workloads · Events      │
 │:                        command prompt: :traffic :policy :objects :workloads │
 │                         :events  :iplists  :filter <expr>  :window <dur>     │
