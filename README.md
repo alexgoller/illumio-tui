@@ -430,6 +430,12 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   label as `app=-`). Search, `E m o u h`, the table sort (within each section) and the
   detail pane keep working; grouping reuses the loaded list, no request. With writes on,
   `X` deletes an unmanaged workload here (`x` groups).
+  `Space` marks the workload under the cursor (`●` in its row; on a group header `Space`
+  still folds), `V` marks the group under the cursor (grouped) or every workload shown (flat),
+  again unmarks them, and `Esc` clears the marks; the summary line counts them (`3 marked`).
+  Marks survive filters, search, sort and `x`. With writes on, `L` sets labels and `M` the
+  enforcement of the marked workloads, else of the group under the cursor (on its header),
+  else of the row: see [Bulk labels and enforcement](#bulk-labels-and-enforcement).
 - **Events**: severity-coloured audit events, `f` edit severity / type / window, `S` sort by
   severity, `Enter` the event as a change diff: a header (time,
   type, severity and status, actor, API request and source), then one block per resource
@@ -758,6 +764,8 @@ IP lists and services are written to draft and wait for provisioning
     illumio-tui workloads add printer-1 --ip 10.0.0.50/24 --label app=print --yes
     illumio-tui workloads update printer-1 --add-label env=lab --yes
     illumio-tui workloads delete printer-1 --yes
+    illumio-tui workloads enforce full --label app=shop --yes --confirm-count 14
+    illumio-tui workloads relabel --set env=prod --label app=shop --yes
 
 `--port` takes `P/PROTO`, `P-Q/PROTO` (`443/tcp`, `8000-8100/udp`, `53/17`)
 or a protocol name (`tcp`, `udp`, `icmp`, `icmpv6`); a bare number such as
@@ -943,6 +951,65 @@ request's errors and the notifications. With `--json` each event gains
 IP lists, services; cached, counted in `meta.api_calls`) to show names for hrefs; ruleset
 names come from the event. Plain `events` sends no extra request. Names are today's: after a
 rename, older events show the new name.
+
+### Bulk labels and enforcement
+
+One change to many workloads, sent as `PUT /orgs/N/workloads/bulk_update` in chunks of 100.
+On Workloads (with `:writes on`), `L` opens a form with one field per label key (the
+profile's scope keys and tier key, then the other keys the targets have), each showing
+the targets' common value or `(mixed: N)`: empty keeps the key, a value sets it (replacing
+that key's label), `-` removes it; `Ctrl-N` completes values and `Ctrl-A` creates a typed
+label that does not exist yet (one POST before the bulk requests, its href put in them).
+Managed and unmanaged workloads take labels alike; only `labels` is sent. `M` picks the
+enforcement mode (idle, visibility_only, selective, full) and the visibility level
+(default: each workload keeps its own) and shows the change as you move
+(`14 workloads: 9 visibility_only → full · 3 already full (skipped) · 2 unmanaged
+(skipped)`); unmanaged workloads are skipped.
+
+`Enter` opens one confirm listing every workload's change and every request. Full or
+selective on more than one workload needs the workload count typed before `y` is accepted.
+For an enforcement change the confirm says how many blocked and potentially blocked flows
+of the loaded traffic go to these workloads (local, no request), and `d` runs a draft
+check on demand: one Explorer query of their traffic as destinations over the traffic
+filter's window, evaluated against the draft policy (POST, polls, the draft PUT, the
+download; counted and shown, `Esc` cancels it), listing what would be blocked. It never
+runs by itself.
+
+`y` sends: first one list read with the cache bypassed; a workload whose labels,
+enforcement, visibility or VEN changed since the plan is skipped and reported (never
+overwritten), one that is gone too. Then the label creates, then the chunks one at a time,
+throttled; each chunk's answer is read per workload and the send stops after a chunk with
+any failure. Every request is one audit entry (a chunk's lists each workload's outcome);
+quitting, `:profile` and `:writes` wait while it is sent. The status line says
+`updated 12 of 14 · 1 failed · 1 changed since planned, skipped`; the report (opened when
+something failed, else `:batch`) lists each request and each workload. A full success
+clears the marks; the workload list reloads once (and the labels, a draft result on
+screen and the usage flags as after any relabel).
+
+The CLI takes the list filters (`--label` any-of / `!` / `-`, `--enforcement`, `--hostname`,
+`--name`, `--ip`, `--managed`, `--online`, `--unhealthy`, `--offline`, `--unlabeled`) to
+select the workloads: one list request (the name index from the cache for labels), then the
+plan; `--dry-run` prints each workload's change and every chunked request body, `--yes`
+sends it (re-read, creates, chunks, as above), neither is exit 2. A truncated selection
+(more workloads match than the read returned) is refused with `--yes` (exit 2): narrow the
+filters or raise `--max-results`.
+
+    illumio-tui workloads enforce full --label app=shop --label env=prod --dry-run
+    illumio-tui workloads enforce full --label app=shop --label env=prod --yes --confirm-count 14
+    illumio-tui workloads enforce visibility_only --visibility flow_drops --enforcement idle --yes
+    illumio-tui workloads relabel --set env=prod,role=- --label app=shop --dry-run
+    illumio-tui workloads relabel --add-label loc=eu --remove-label env=dev --hostname web --yes
+
+`enforce` full or selective on more than one workload needs `--confirm-count N` matching
+the number of workloads that change (the dry run prints it as `count`); a mismatch or a
+missing count is exit 2 before any write. A label `relabel` names must exist (the CLI does
+not create labels). A dry run's `data` is `{dry_run, change, summary, count,
+needs_confirm_count, workloads, skipped, reads, requests}`; a sent one is the report:
+`steps` (each request: status, HTTP status, error) and `items` (each workload: `updated`,
+`failed` with the PCE's reason, `not_sent`, `unanswered`, `changed` or `missing` by the
+re-read, `skipped` by the plan). Anything not updated that was planned (a refused or
+unanswered chunk, a failed re-read) is exit 4 (`write_incomplete`) after the report;
+workloads skipped by the re-read alone are a warning.
 
 ### Policy editing in the TUI
 

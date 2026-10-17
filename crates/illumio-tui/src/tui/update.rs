@@ -31,6 +31,7 @@ use pce::write::{
 use pce::{CacheMode, RuleKind, WriteMethod};
 use std::time::Instant;
 
+mod bulk;
 mod generator;
 mod marks;
 #[cfg(test)]
@@ -584,13 +585,20 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     w.raw = rows;
                     w.truncated = truncated;
                     w.error = None;
+                    // Marks of workloads gone (deleted elsewhere) go with them.
+                    let loaded: std::collections::HashSet<&str> =
+                        w.raw.iter().map(|x| x.href.as_str()).collect();
+                    w.marked.retain(|h| loaded.contains(h.as_str()));
                     w.rebuild(&order);
                     w.loaded_at = Some(Instant::now());
                     w.auto.from_tick = false;
                     w.age_secs = age;
                     w.show_detail &= w.selected_row().is_some();
-                    model.status =
-                        StatusLine::info(format!("{} workloads", model.workloads.table.len()));
+                    // The reload after a bulk change keeps its report on the line.
+                    if !std::mem::take(&mut model.workloads.keep_status) {
+                        model.status =
+                            StatusLine::info(format!("{} workloads", model.workloads.table.len()));
+                    }
                     // `Enter` on a workload in the app overlay before the list was here.
                     if let Some(href) = model.workloads.open_on_load.take() {
                         let w = &mut model.workloads;
@@ -607,6 +615,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 Err(e) => {
                     model.workloads.error = Some(e.clone());
                     model.workloads.open_on_load = None;
+                    model.workloads.keep_status = false;
                     let tripped = model.workloads.auto.take_tick_failure();
                     fail(model, "could not load workloads", &e, tripped);
                 }
@@ -956,6 +965,11 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             target,
             results,
         } => batch_done(model, &kinds, &summaries, &target, &results),
+        Msg::BulkDone(report) => bulk::bulk_done(model, &report),
+        Msg::BulkCheckDone { seq, result } => {
+            bulk::check_done(model, seq, result);
+            Vec::new()
+        }
         Msg::BatchProgress { done, of } => {
             if model.batch_sending {
                 model.status = StatusLine::info(format!("sending: {done} of {of} answered …"));
@@ -1809,6 +1823,11 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             model.overlay = Overlay::Form(form);
             Vec::new()
         }
+        Overlay::Form(form) if matches!(form.intent, EditIntent::BulkLabels(_)) => {
+            bulk::labels_key(model, form, k)
+        }
+        Overlay::EnforcePicker(p) => bulk::picker_key(model, p, k),
+        Overlay::ConfirmBulk(c) => bulk::confirm_key(model, c, k),
         Overlay::Form(mut form) => match form.on_key(k) {
             FormEvent::Continue => {
                 model.overlay = Overlay::Form(form);
@@ -4257,7 +4276,9 @@ fn reload_kind_after_write(model: &mut Model, kind: pce::write::ObjectKind) -> V
         pce::write::ObjectKind::Service => {
             load_objects(model, ObjectKind::Services, CacheMode::Bypass)
         }
-        pce::write::ObjectKind::Workload => load_workloads(model, CacheMode::Bypass),
+        pce::write::ObjectKind::Workload | pce::write::ObjectKind::WorkloadBulk => {
+            load_workloads(model, CacheMode::Bypass)
+        }
         // A draft write changes the draft view only; the reload keeps the
         // write's report in the status line.
         pce::write::ObjectKind::RuleSet
@@ -4549,11 +4570,29 @@ fn workloads_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 model.overlay = Overlay::LabelFilter(e);
                 return Vec::new();
             }
-            KeyCode::Char(' ') if model.workloads.grouped => {
+            // Grouped, on a header: fold; on a workload (flat or grouped): mark.
+            KeyCode::Char(' ') if model.workloads.selected_group().is_some() => {
                 model.workloads.toggle_fold();
                 model.workloads.ensure_visible(page);
                 return Vec::new();
             }
+            KeyCode::Char(' ') => {
+                bulk::toggle_row(model);
+                return Vec::new();
+            }
+            KeyCode::Char('V') => {
+                bulk::toggle_scope(model);
+                return Vec::new();
+            }
+            KeyCode::Char('L') => {
+                bulk::open_labels(model);
+                return Vec::new();
+            }
+            KeyCode::Char('M') => {
+                bulk::open_enforcement(model);
+                return Vec::new();
+            }
+            KeyCode::Esc if bulk::clear(model) => return Vec::new(),
             KeyCode::Char('z') if model.workloads.grouped => {
                 model.workloads.toggle_fold_all();
                 model.workloads.ensure_visible(page);
@@ -18788,6 +18827,11 @@ mod workload_group_tests {
         let mut m = on_workloads();
         quiet(&mut m, key('x'));
         quiet(&mut m, key('j')); // host-1 under shop | prod
+        // On a workload Space marks it (#47); on the header it folds.
+        quiet(&mut m, key(' '));
+        assert_eq!(headers(&m)[0], ("shop | prod".to_string(), false));
+        assert_eq!(m.workloads.marked.len(), 1);
+        m.workloads.sections.home(); // the shop | prod header
         quiet(&mut m, key(' '));
         assert_eq!(headers(&m)[0], ("shop | prod".to_string(), true));
         assert!(m.workloads.selected_group().is_some(), "on its header");

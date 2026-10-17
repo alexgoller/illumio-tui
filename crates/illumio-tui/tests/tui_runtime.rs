@@ -2858,3 +2858,124 @@ async fn plan_batch_needs_the_runtime_writer_and_sends_nothing() {
             .is_empty()
     );
 }
+
+/// `4`, `V`, `M` to full, `Enter`, the count, `y`: one list load, then on
+/// `y` one re-read, one `bulk_update`, one reload; nothing before `y`.
+#[tokio::test]
+async fn bulk_enforcement_from_keys_re_reads_sends_once_and_reloads_once() {
+    let server = MockServer::start().await;
+    mount_lists(&server, 1, 1, 1).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/workloads.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(3)
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v2/orgs/5/workloads/bulk_update"))
+        .and(body_json(json!([
+            {"href": "/orgs/5/workloads/aaaa-2", "enforcement_mode": "full"},
+            {"href": "/orgs/5/workloads/aaaa-4", "enforcement_mode": "full"},
+        ])))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {"href": "/orgs/5/workloads/aaaa-2", "status": "updated"},
+            {"href": "/orgs/5/workloads/aaaa-4", "status": "updated"},
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let audit = MemoryAudit::new();
+    let mut keys = vec![
+        (400, ch('4')),
+        (300, ch('V')),
+        (20, ch('M')),
+        (20, ch('j')),
+        (20, ch('j')),
+        (20, KeyCode::Enter),
+        // Refused before the count, and with a wrong one.
+        (20, ch('y')),
+        (20, ch('1')),
+        (20, ch('y')),
+        (20, KeyCode::Backspace),
+        (20, ch('2')),
+    ];
+    keys.push((20, ch('y')));
+    keys.push((600, KeyCode::F(12)));
+    let model = key_session(
+        &server,
+        writes_model(),
+        Some(tui_guard(audit.clone())),
+        keys,
+    )
+    .await;
+    assert!(
+        model.status.text.starts_with("updated 2 of 2"),
+        "{}",
+        model.status.text
+    );
+    assert!(
+        model.workloads.marked.is_empty(),
+        "a sent change clears the marks"
+    );
+    assert!(!model.batch_sending);
+    let entries = audit.entries();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].source, "tui");
+    assert_eq!(entries[0].path, "/orgs/5/workloads/bulk_update");
+    assert_eq!(
+        entries[0].items.as_ref().unwrap().as_array().unwrap().len(),
+        2
+    );
+    assert!(
+        model.batch_report.as_ref().unwrap()[0].starts_with("sent to t (h, org 5)"),
+        "{:?}",
+        model.batch_report
+    );
+    assert_eq!(model.busy, 0);
+    server.verify().await;
+}
+
+/// The runtime without a guard: the bulk change is refused, nothing read
+/// or sent, and the answer still arrives.
+#[tokio::test]
+async fn bulk_without_the_runtime_writer_sends_nothing() {
+    let server = MockServer::start().await;
+    let (mut rt, _tx) = Runtime::new(pce_for(&server), writes_model());
+    let ws: Vec<pce::models::Workload> =
+        serde_json::from_str(include_str!("../../../fixtures/workloads.json")).unwrap();
+    let idx = pce::NameIndex::default();
+    let targets: Vec<pce::write::BulkTarget> = ws
+        .iter()
+        .map(|w| pce::write::BulkTarget::of(w, &idx))
+        .collect();
+    let plan = pce::write::plan_bulk(
+        &targets,
+        &pce::write::BulkChange::enforce(pce::write::EnforcementMode::Idle, None),
+        pce::models::WorkloadFilter::default(),
+        Some(pce::write::BatchOrigin {
+            profile: "t".into(),
+            host: "h".into(),
+            org_id: 5,
+        }),
+    )
+    .unwrap();
+    rt.execute(Cmd::ExecuteBulk(Box::new(plan)));
+    let model = run_loop(&mut rt, Box::pin(wait(300)), &mut |_| {}).await;
+    assert!(
+        model.status.text.starts_with("nothing sent: writes"),
+        "{}",
+        model.status.text
+    );
+    assert!(
+        server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .is_empty()
+    );
+    assert_eq!(model.busy, 0);
+}

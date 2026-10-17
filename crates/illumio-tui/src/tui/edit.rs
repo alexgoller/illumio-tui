@@ -88,6 +88,9 @@ pub enum EditIntent {
     /// The `m` form (`Overlay::MarkForm`): it never writes to the PCE, so
     /// nothing here builds a write from it.
     Mark,
+    /// `L` on Workloads: labels for one, the marked or a group's workloads
+    /// (`crate::tui::bulk`); its submit plans a bulk write, not a `WriteIntent`.
+    BulkLabels(Box<crate::tui::bulk::BulkLabelsCtx>),
 }
 
 /// What `Cmd::PlanWrite` carries: the library draft or patch, or the href
@@ -340,6 +343,10 @@ pub fn start(intent: EditIntent, index: Option<&NameIndex>, prefill: FlowPrefill
         }
         // The mark form is built by `mark_form`, never here.
         EditIntent::Mark => Start::Form(Form::new("New mark", Vec::new(), EditIntent::Mark)),
+        // The bulk labels form is built by `bulk::labels_form`, never here.
+        EditIntent::BulkLabels(ctx) => {
+            Start::Form(Form::new("Labels", Vec::new(), EditIntent::BulkLabels(ctx)))
+        }
         EditIntent::RuleFromFlow(f) => {
             let (fields, alt, covering) = flow_rule_fields(&f, idx, prefill);
             let mut form = Form::new("Allow rule from flow", fields, EditIntent::RuleFromFlow(f));
@@ -1894,6 +1901,8 @@ pub fn build_intent(
         }
         // `Overlay::MarkForm` submits to `marks_submit`; never here.
         EditIntent::Mark => Err("internal: mark form".into()),
+        // `update::bulk` plans its submit; never here.
+        EditIntent::BulkLabels(_) => Err("internal: bulk labels form".into()),
         // Deletes never open a form (`start`); a form never carries one.
         EditIntent::DeleteLabel(_)
         | EditIntent::DeleteIpList(_)
@@ -1998,7 +2007,10 @@ mod tests {
     fn label_create_and_value_edit() {
         let mut f = form(EditIntent::CreateLabel);
         assert_eq!(
-            f.fields.iter().map(|x| x.label).collect::<Vec<_>>(),
+            f.fields
+                .iter()
+                .map(|x| x.label.as_ref())
+                .collect::<Vec<_>>(),
             vec!["Key", "Value"]
         );
         set(&mut f, "Key", " app ");
@@ -2469,7 +2481,10 @@ mod tests {
         let f = form(EditIntent::UpdateRuleSet(sets[0].clone()));
         assert_eq!(f.title, "Edit ruleset Shop-Prod");
         assert_eq!(
-            f.fields.iter().map(|x| x.label).collect::<Vec<_>>(),
+            f.fields
+                .iter()
+                .map(|x| x.label.as_ref())
+                .collect::<Vec<_>>(),
             vec!["Name", "Description", "Enabled", "Scopes"]
         );
         assert_eq!(f.value("Description"), "Ringfence");
@@ -2573,7 +2588,10 @@ mod tests {
         });
         assert_eq!(f.title, "New allow rule in ruleset 100");
         assert_eq!(
-            f.fields.iter().map(|x| x.label).collect::<Vec<_>>(),
+            f.fields
+                .iter()
+                .map(|x| x.label.as_ref())
+                .collect::<Vec<_>>(),
             vec![
                 "Providers",
                 "Consumers",
@@ -2618,7 +2636,10 @@ mod tests {
         });
         assert_eq!(d.title, "New deny rule in ruleset 100");
         assert_eq!(
-            d.fields.iter().map(|x| x.label).collect::<Vec<_>>(),
+            d.fields
+                .iter()
+                .map(|x| x.label.as_ref())
+                .collect::<Vec<_>>(),
             vec![
                 "Providers",
                 "Consumers",
@@ -2825,7 +2846,10 @@ mod tests {
         let f = flow_form(&flows[1]); // Corp -> host-1 (app=shop, env=prod, role=web), 8443/tcp
         assert_eq!(f.title, "Allow rule from flow");
         assert_eq!(
-            f.fields.iter().map(|x| x.label).collect::<Vec<_>>(),
+            f.fields
+                .iter()
+                .map(|x| x.label.as_ref())
+                .collect::<Vec<_>>(),
             vec![
                 "Ruleset",
                 "Providers",

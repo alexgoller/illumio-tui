@@ -64,6 +64,17 @@ pub struct WorkloadsArgs {
         default_missing_value = ""
     )]
     pub unlabeled: Option<Vec<String>>,
+}
+
+/// `workloads` lists by default; `add`, `update` and `delete` write
+/// unmanaged workloads.
+#[derive(Args, Debug)]
+#[command(args_conflicts_with_subcommands = true)]
+pub struct WorkloadsCmd {
+    #[command(subcommand)]
+    pub action: Option<WorkloadsAction>,
+    #[command(flatten)]
+    pub list: WorkloadsArgs,
     /// Group the listed workloads by these label keys (comma-separated);
     /// alone, the profile's scope keys (app,env). Table: a heading per
     /// group; JSON: data.groups; CSV: a leading group column (app=shop env=-)
@@ -77,17 +88,6 @@ pub struct WorkloadsArgs {
     pub group: Option<Vec<String>>,
 }
 
-/// `workloads` lists by default; `add`, `update` and `delete` write
-/// unmanaged workloads.
-#[derive(Args, Debug)]
-#[command(args_conflicts_with_subcommands = true)]
-pub struct WorkloadsCmd {
-    #[command(subcommand)]
-    pub action: Option<WorkloadsAction>,
-    #[command(flatten)]
-    pub list: WorkloadsArgs,
-}
-
 #[derive(Subcommand, Debug)]
 pub enum WorkloadsAction {
     /// Create an unmanaged workload (needs writes = true in the profile)
@@ -96,6 +96,49 @@ pub enum WorkloadsAction {
     Update(WorkloadUpdateArgs),
     /// Delete an unmanaged workload
     Delete(WorkloadDeleteArgs),
+    /// Set the enforcement mode (and visibility level) of every workload the
+    /// filters select, in bulk_update requests of 100; unmanaged ones are skipped
+    Enforce(WorkloadEnforceArgs),
+    /// Set or remove labels on every workload the filters select, managed
+    /// and unmanaged, in bulk_update requests of 100
+    Relabel(WorkloadRelabelArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct WorkloadEnforceArgs {
+    /// The enforcement mode
+    #[arg(value_parser = ["idle", "visibility_only", "selective", "full"])]
+    pub mode: String,
+    /// The visibility level; without it each workload keeps its own
+    #[arg(long, value_parser = ["flow_summary", "flow_drops", "flow_off", "enhanced_data_collection"])]
+    pub visibility: Option<String>,
+    /// The number of workloads that change: required with --yes for full or
+    /// selective on more than one (the dry run prints it)
+    #[arg(long, value_name = "N")]
+    pub confirm_count: Option<usize>,
+    #[command(flatten)]
+    pub select: WorkloadsArgs,
+    #[command(flatten)]
+    pub write: WriteFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct WorkloadRelabelArgs {
+    /// Labels per key, comma-separated: key=value sets it (replacing that
+    /// key's label), key=- removes it; other keys are kept
+    #[arg(long, value_delimiter = ',', value_name = "KEY=VALUE,KEY=-")]
+    pub set: Vec<String>,
+    /// Label key=value to set (repeatable; as --set)
+    #[arg(long = "add-label")]
+    pub add_labels: Vec<String>,
+    /// Label to remove: key (whatever its value), or key=value (only from
+    /// workloads that have that value) (repeatable)
+    #[arg(long = "remove-label")]
+    pub remove_labels: Vec<String>,
+    #[command(flatten)]
+    pub select: WorkloadsArgs,
+    #[command(flatten)]
+    pub write: WriteFlags,
 }
 
 #[derive(Args, Debug)]
@@ -166,10 +209,12 @@ pub struct WorkloadDeleteArgs {
 
 pub async fn workloads_cmd(ctx: &Context, cmd: &WorkloadsCmd) -> Result<(), CliError> {
     match &cmd.action {
-        None => run(ctx, &cmd.list).await,
+        None => run(ctx, &cmd.list, cmd.group.as_deref()).await,
         Some(WorkloadsAction::Add(a)) => workload_add(ctx, a).await,
         Some(WorkloadsAction::Update(a)) => workload_update(ctx, a).await,
         Some(WorkloadsAction::Delete(a)) => workload_delete(ctx, a).await,
+        Some(WorkloadsAction::Enforce(a)) => super::bulk::enforce(ctx, a).await,
+        Some(WorkloadsAction::Relabel(a)) => super::bulk::relabel(ctx, a).await,
     }
 }
 
@@ -520,7 +565,26 @@ fn enforcement_query(
     }
 }
 
-pub async fn run(ctx: &Context, args: &WorkloadsArgs) -> Result<(), CliError> {
+/// The workloads the list filters select: one list request (the plain
+/// any-of `--label` terms resolved through the name index, cached), the
+/// local filters applied to its answer.
+pub struct Selection {
+    /// The query the request carried.
+    pub filter: WorkloadFilter,
+    pub rows: Vec<WorkloadRow>,
+    pub hit: bool,
+    pub truncated: bool,
+    /// No workload can match: no request was sent.
+    pub nothing: bool,
+    pub warnings: Vec<String>,
+    pub local_filter: Option<Vec<String>>,
+}
+
+pub async fn select(
+    ctx: &Context,
+    args: &WorkloadsArgs,
+    mode: pce::CacheMode,
+) -> Result<Selection, CliError> {
     let (enforcement_mode, managed) = enforcement_query(args.enforcement.as_deref(), args.managed)?;
     // `online` is the PCE's flag; offline is the VEN health (a stale
     // heartbeat too), so `--offline` is never sent as `online=false`.
@@ -578,7 +642,7 @@ pub async fn run(ctx: &Context, args: &WorkloadsArgs) -> Result<(), CliError> {
             truncated: false,
         }
     } else {
-        ctx.pce.workloads(&filter, ctx.cache_mode).await?
+        ctx.pce.workloads(&filter, mode).await?
     };
     let mut warnings = match &unlabeled {
         Some(keys) if keys.as_slice() != order.first() => {
@@ -596,9 +660,6 @@ pub async fn run(ctx: &Context, args: &WorkloadsArgs) -> Result<(), CliError> {
             "--label: a key's values have nothing in common across its terms, so no workload can match; no request sent"
                 .to_string(),
         );
-    }
-    for w in &warnings {
-        eprintln!("warning: {w}");
     }
     let now = jiff::Timestamp::now();
     let rows: Vec<WorkloadRow> = c
@@ -631,20 +692,41 @@ pub async fn run(ctx: &Context, args: &WorkloadsArgs) -> Result<(), CliError> {
         // the plain any-of terms, `!` and `-` are only checked here.
         .filter(|r| labels.keeps(&r.workload))
         .collect();
-    let cache = if nothing {
+    Ok(Selection {
+        filter,
+        rows,
+        hit: c.hit,
+        truncated: c.truncated,
+        nothing,
+        warnings,
+        local_filter: local_filter(
+            args.unhealthy,
+            args.offline,
+            unlabeled.as_deref(),
+            &local_labels,
+        ),
+    })
+}
+
+pub async fn run(
+    ctx: &Context,
+    args: &WorkloadsArgs,
+    group: Option<&[String]>,
+) -> Result<(), CliError> {
+    let sel = select(ctx, args, ctx.cache_mode).await?;
+    for w in &sel.warnings {
+        eprintln!("warning: {w}");
+    }
+    let cache = if sel.nothing {
         "none"
     } else {
-        cache_label(c.hit, ctx.cache_mode)
+        cache_label(sel.hit, ctx.cache_mode)
     };
-    let mut meta = ctx.meta(cache, c.truncated, None);
-    meta.local_filter = local_filter(
-        args.unhealthy,
-        args.offline,
-        unlabeled.as_deref(),
-        &local_labels,
-    );
-    meta.warnings = Some(warnings).filter(|w| !w.is_empty());
-    match &args.group {
+    let mut meta = ctx.meta(cache, sel.truncated, None);
+    meta.local_filter = sel.local_filter;
+    meta.warnings = Some(sel.warnings).filter(|w| !w.is_empty());
+    let rows = sel.rows;
+    match group {
         None => ctx.emit_meta(&rows, &meta),
         Some(named) => {
             let keys = unlabeled_keys(

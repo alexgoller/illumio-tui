@@ -319,6 +319,20 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
             more("", "Ctrl-N completes; also :filter <expr>; c clears it too"),
             key("x", "group by the g keys (app | env): health per group"),
             key("Space / z", "grouped: fold a group · fold or unfold all"),
+            more("", "Space folds on a group header; on a workload it marks"),
+            key(
+                "Space V Esc",
+                "mark the row (●) · the group or all shown · clear",
+            ),
+            key("L / M", "labels · enforcement of the marked (writes)"),
+            more(
+                "",
+                "none marked: the group under the cursor (header), else the row",
+            ),
+            more(
+                "",
+                "marks survive filters, search, sort and x; a sent change clears",
+            ),
             key(
                 "s / Enter",
                 "grouped: size ↓ · name A→Z · unhealthy ↓ · narrow",
@@ -344,6 +358,19 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
             key("n / e / x", "new/edit/delete: Objects, IP lists, Policy"),
             key("X", "Workloads: delete (x groups there)"),
             more("", "with :writes on; each request is shown first (y / n)"),
+            more(
+                "L / M",
+                "Workloads: labels · enforcement of many, one confirm",
+            ),
+            more("", "full/selective on several: type the count, then y"),
+            more(
+                "",
+                "d on the confirm: draft check (1 Explorer query, asked)",
+            ),
+            more(
+                "",
+                "sent: 1 re-read (changed ones skipped), bulk_update by 100",
+            ),
         ],
     },
 ];

@@ -81,6 +81,71 @@ async fn collect_batch(
     results
 }
 
+/// What a bulk report says when the send could not report itself (no
+/// guard, or its task failed): taken from the plan before it is sent.
+struct BulkFallback {
+    target: String,
+    change: String,
+    items: Vec<(String, String, String)>,
+}
+
+impl BulkFallback {
+    fn of(plan: &pce::write::BulkPlan, p: &ProfileInfo) -> Self {
+        Self {
+            target: format!("{} ({}, org {})", p.name, p.host, p.org_id),
+            change: plan.change.text(),
+            items: plan
+                .items
+                .iter()
+                .map(|i| (i.href.clone(), i.name.clone(), i.change.clone()))
+                .collect(),
+        }
+    }
+
+    /// Nothing sent (`unknown` false), or an outcome nobody knows.
+    fn report(self, why: &str, unknown: bool) -> pce::write::BulkReport {
+        use pce::write::bulk::{BulkStep, ItemResult, StepStatus};
+        let status = if unknown {
+            pce::write::ItemStatus::Unanswered
+        } else {
+            pce::write::ItemStatus::NotSent
+        };
+        pce::write::BulkReport {
+            target: self.target,
+            change: self.change,
+            refused: (!unknown).then(|| why.to_string()),
+            reads: 0,
+            steps: if unknown {
+                vec![BulkStep {
+                    method: pce::WriteMethod::Put,
+                    path: "workloads/bulk_update".into(),
+                    summary: "bulk update".into(),
+                    status: StepStatus::Unanswered,
+                    href: None,
+                    http_status: None,
+                    error: Some(why.to_string()),
+                    audit_failed: None,
+                }]
+            } else {
+                Vec::new()
+            },
+            items: self
+                .items
+                .into_iter()
+                .map(|(href, name, change)| ItemResult {
+                    href,
+                    name,
+                    change,
+                    status,
+                    error: None,
+                })
+                .collect(),
+            labels_changed: unknown,
+            labels_created: false,
+        }
+    }
+}
+
 /// What a `:profile` switch built off the event loop: the new client, what
 /// the model needs to know about it and what its write guard is built from,
 /// or the error to show.
@@ -529,6 +594,84 @@ impl Runtime {
                     let _ = tx.send(Msg::Stats(pce.stats()));
                 });
             }
+            Cmd::ExecuteBulk(plan) => {
+                self.model.busy += 1;
+                let (pce, tx) = self.task_ctx();
+                let guard = self.writer.clone();
+                let fallback = BulkFallback::of(&plan, &self.model.profile);
+                tokio::spawn(async move {
+                    // The send goes on its own task: a panic there still
+                    // ends in an answer (the outcome then unknown).
+                    let progress = tx.clone();
+                    let worker = {
+                        let pce = pce.clone();
+                        tokio::spawn(async move {
+                            let guard = guard?;
+                            let mut each = move |done: usize, of: usize| {
+                                let _ = progress.send(Msg::BatchProgress { done, of });
+                            };
+                            // The re-read, the label creates, one chunk at a time.
+                            Some(pce.writer(&guard).execute_bulk(*plan, &mut each).await)
+                        })
+                    };
+                    let report = match worker.await {
+                        Ok(Some(r)) => r,
+                        Ok(None) => fallback.report(WRITES_OFF, false),
+                        Err(e) => fallback.report(
+                            &format!(
+                                "the sending task failed ({e}); what it sent is unknown: check the audit log and the PCE"
+                            ),
+                            true,
+                        ),
+                    };
+                    let _ = tx.send(Msg::BulkDone(Box::new(report)));
+                    let _ = tx.send(Msg::Stats(pce.stats()));
+                });
+            }
+            Cmd::BulkDraftCheck {
+                seq,
+                hrefs,
+                window,
+                window_text,
+                max_results,
+                cancel,
+            } => {
+                self.model.busy += 1;
+                let (pce, tx) = self.task_ctx();
+                let index = self.model.index().cloned();
+                tokio::spawn(async move {
+                    let before = pce.stats().calls;
+                    let result = async {
+                        let idx =
+                            index.ok_or_else(|| "the name index is not loaded".to_string())?;
+                        let query =
+                            pce::write::bulk::draft_check_query(&hrefs, window, max_results)
+                                .map_err(|e| e.to_string())?;
+                        // Its own slot: the draft result on Traffic stays.
+                        let r = pce
+                            .traffic_eval(
+                                "bulk",
+                                &query,
+                                pce::Evaluation::Draft(None),
+                                CacheMode::Bypass,
+                                &cancel,
+                                None,
+                            )
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        let flows = pce::traffic::resolve_flows(&r.value.flows, &idx);
+                        Ok(crate::tui::bulk::CheckResult::new(
+                            &flows,
+                            pce.stats().calls.saturating_sub(before),
+                            r.value.truncated,
+                            window_text,
+                        ))
+                    }
+                    .await;
+                    let _ = tx.send(Msg::BulkCheckDone { seq, result });
+                    let _ = tx.send(Msg::Stats(pce.stats()));
+                });
+            }
             Cmd::LoadDiff {
                 change,
                 kind,
@@ -822,6 +965,8 @@ impl Runtime {
                 | Msg::DiffLoaded(_)
                 | Msg::BatchPlanned(_)
                 | Msg::BatchDone { .. }
+                | Msg::BulkDone(_)
+                | Msg::BulkCheckDone { .. }
         );
         let cmds = update(&mut self.model, msg);
         if task_result {

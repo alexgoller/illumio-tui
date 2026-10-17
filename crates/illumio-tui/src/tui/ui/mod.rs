@@ -92,6 +92,8 @@ pub fn view(model: &Model, f: &mut Frame) {
         Overlay::BatchReport { scroll } => {
             widgets::overlay::render_batch_report(model, *scroll, f, area)
         }
+        Overlay::EnforcePicker(p) => widgets::bulk::render_picker(model, p, f, area),
+        Overlay::ConfirmBulk(c) => widgets::bulk::render_confirm(model, c, f, area),
         Overlay::Diff { diff, scroll } => {
             widgets::overlay::render_diff(model, diff, *scroll, f, area)
         }

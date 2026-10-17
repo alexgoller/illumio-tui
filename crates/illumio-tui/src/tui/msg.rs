@@ -176,6 +176,14 @@ pub enum Msg {
         target: String,
         results: Vec<StepResult>,
     },
+    /// What became of a sent bulk workload change (`Cmd::ExecuteBulk`):
+    /// always arrives, also when the sending task failed.
+    BulkDone(Box<pce::write::BulkReport>),
+    /// The confirm's draft check (`Cmd::BulkDraftCheck`) for check `seq`.
+    BulkCheckDone {
+        seq: u64,
+        result: Result<crate::tui::bulk::CheckResult, String>,
+    },
     /// `done` of the `of` steps of the batch being sent have an answer.
     BatchProgress {
         done: usize,
@@ -284,6 +292,22 @@ pub enum Cmd {
     /// `y` on the batch confirm: send every step once, in order, stopping
     /// at the first failure.
     ExecuteBatch(Batch),
+    /// `y` on the bulk confirm: the re-read (one list read past the
+    /// cache), the label creates, the `bulk_update` chunks; answered with
+    /// `Msg::BulkDone`.
+    ExecuteBulk(Box<pce::write::BulkPlan>),
+    /// `d` on the bulk confirm: one Explorer query of the targets' traffic
+    /// (as destinations) over `window`, with the draft decision; answered
+    /// with `Msg::BulkCheckDone`. Never sent without the key.
+    BulkDraftCheck {
+        seq: u64,
+        hrefs: Vec<String>,
+        window: Duration,
+        /// The window as typed (`24h`), for the result's text.
+        window_text: String,
+        max_results: u32,
+        cancel: CancellationToken,
+    },
     /// The draft and active list of one kind (cached) for a pending IP list, service or ruleset.
     LoadDiff {
         change: PendingChange,
@@ -412,6 +436,25 @@ impl PartialEq for Cmd {
             ) => pa.request() == pb.request() && ka == kb,
             (Cmd::PlanBatch { input: a, .. }, Cmd::PlanBatch { input: b, .. }) => a == b,
             (Cmd::ExecuteBatch(a), Cmd::ExecuteBatch(b)) => a.lines() == b.lines(),
+            (Cmd::ExecuteBulk(a), Cmd::ExecuteBulk(b)) => {
+                a.hrefs() == b.hrefs() && a.change == b.change && a.confirmed == b.confirmed
+            }
+            (
+                Cmd::BulkDraftCheck {
+                    seq: a,
+                    hrefs: ha,
+                    window: wa,
+                    max_results: ma,
+                    ..
+                },
+                Cmd::BulkDraftCheck {
+                    seq: b,
+                    hrefs: hb,
+                    window: wb,
+                    max_results: mb,
+                    ..
+                },
+            ) => a == b && ha == hb && wa == wb && ma == mb,
             (
                 Cmd::LoadDiff {
                     change: ca,

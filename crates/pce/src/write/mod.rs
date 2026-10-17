@@ -6,6 +6,7 @@
 pub mod actors;
 pub mod audit;
 pub mod batch;
+pub mod bulk;
 pub mod guard;
 pub mod ip_lists;
 pub mod labels;
@@ -26,6 +27,10 @@ use serde_json::Value;
 pub use actors::{ActorKind, ActorRef, ServiceRef};
 pub use audit::{AuditEntry, AuditSink, JsonlAudit, MemoryAudit, NullAudit};
 pub use batch::{Batch, BatchInput, BatchOrigin, BatchStep, StepResult, step_placeholder};
+pub use bulk::{
+    BULK_CHUNK, BulkChange, BulkLabel, BulkPlan, BulkReport, BulkTarget, EnforcementMode,
+    ItemStatus, LabelEdit, LabelSet, VisibilityLevel, plan_bulk,
+};
 pub use guard::{WriteContext, WriteGuard, WriteRefused};
 pub use ip_lists::{IpListDraft, IpListPatch};
 pub use labels::LabelDraft;
@@ -50,6 +55,9 @@ pub enum ObjectKind {
     IpList,
     Service,
     Workload,
+    /// `PUT workloads/bulk_update`: many workloads in one request; the
+    /// answer lists each one's outcome and names no object to re-fetch.
+    WorkloadBulk,
     RuleSet,
     Rule,
     DenyRule,
@@ -75,6 +83,9 @@ impl ObjectKind {
                 &["objects:", "usage:", "draft:"]
             }
             ObjectKind::Workload => &["workloads", "usage:", "draft:"],
+            // An enforcement change moves no workload between scopes; the
+            // executor drops `usage:` and `draft:` after a label change.
+            ObjectKind::WorkloadBulk => &["workloads"],
             ObjectKind::RuleSet | ObjectKind::Rule | ObjectKind::DenyRule => {
                 &["policy:", "usage:", "draft:"]
             }
@@ -104,6 +115,7 @@ impl ObjectKind {
             ObjectKind::IpList => "ip_list",
             ObjectKind::Service => "service",
             ObjectKind::Workload => "workload",
+            ObjectKind::WorkloadBulk => "workload_bulk",
             ObjectKind::RuleSet => "rule_set",
             ObjectKind::Rule => "rule",
             ObjectKind::DenyRule => "deny_rule",
@@ -484,6 +496,9 @@ impl<'a> Writer<'a> {
         let href = body_href.unwrap_or_else(|| request.path.clone());
         entry.status = Some(resp.status);
         entry.href = Some(href.clone());
+        if kind == ObjectKind::WorkloadBulk {
+            entry.items = Some(bulk::audit_items(request.body.as_ref(), &resp.body));
+        }
         let mut warnings = Vec::new();
         let mut audit_failed = None;
         if let Err(e) = audit.append(&entry) {
@@ -504,8 +519,9 @@ impl<'a> Writer<'a> {
             // Re-fetching the collection path would load the whole list.
             warnings.push("response carried no href; object not re-fetched".into());
             resp.body
-        } else if resp.body.is_null() && kind.whole_policy() {
-            // The path is an action (`sec_policy/delete`), not an object.
+        } else if resp.body.is_null() && (kind.whole_policy() || kind == ObjectKind::WorkloadBulk) {
+            // The path is an action (`sec_policy/delete`,
+            // `workloads/bulk_update`), not an object.
             Value::Null
         } else if resp.body.is_null() {
             match self.fetch(&href).await {
@@ -550,6 +566,7 @@ impl<'a> Writer<'a> {
             href: None,
             error: None,
             phase: None,
+            items: None,
             source: c.source.clone(),
         }
     }
@@ -583,6 +600,10 @@ mod tests {
             ObjectKind::Workload.cache_prefixes(),
             &["workloads", "usage:", "draft:"]
         );
+        // A bulk enforcement change moves no workload between scopes; the
+        // bulk executor drops `usage:` and `draft:` after a label change.
+        assert_eq!(ObjectKind::WorkloadBulk.cache_prefixes(), &["workloads"]);
+        assert!(!ObjectKind::WorkloadBulk.pending() && !ObjectKind::WorkloadBulk.whole_policy());
         assert_eq!(
             ObjectKind::RuleSet.cache_prefixes(),
             &["policy:", "usage:", "draft:"]

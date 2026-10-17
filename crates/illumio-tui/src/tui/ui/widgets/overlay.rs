@@ -495,6 +495,9 @@ pub fn render_form(model: &Model, form: &Form, f: &mut Frame, area: Rect) {
         ),
         None => lines.push(Line::from(Span::styled(
             match (&form.alt, form.expanded) {
+                _ if matches!(form.intent, EditIntent::BulkLabels(_)) => {
+                    "empty keeps · - removes · Ctrl-N values · Ctrl-A new label"
+                }
                 _ if !matches!(form.intent, EditIntent::RuleFromFlow(_)) => "* required",
                 (_, false) => "* required · Ctrl-N names · Ctrl-R new ruleset · Ctrl-A all labels",
                 (_, true) => "* required · Ctrl-N names · Ctrl-R new ruleset · Ctrl-A model view",
@@ -766,7 +769,7 @@ pub fn confirm_write_last_scroll(plan: &Plan, kind: ObjectKind, area: Rect) -> u
 }
 
 /// `line` in pieces of at most `width` characters; an empty line stays one.
-fn wrap_chars(line: &str, width: usize) -> Vec<String> {
+pub(crate) fn wrap_chars(line: &str, width: usize) -> Vec<String> {
     let chars: Vec<char> = line.chars().collect();
     if chars.is_empty() || width == 0 {
         return vec![line.to_string()];
@@ -896,7 +899,7 @@ pub fn confirm_batch_last_scroll(batch: &Batch, area: Rect) -> usize {
 }
 
 /// The keys of a scrolled box, and how many lines are still below.
-fn scroll_meta(below: usize, keys: &str) -> String {
+pub(crate) fn scroll_meta(below: usize, keys: &str) -> String {
     if below > 0 {
         format!("↓ {below} more · j/k scroll · {keys}")
     } else {
@@ -1202,7 +1205,7 @@ pub fn render_diff(model: &Model, diff: &ObjectDiff, scroll: u16, f: &mut Frame,
 pub fn screen_hint(screen: Screen, writes: bool) -> &'static str {
     match (screen, writes) {
         (Screen::Objects, true) => "n:new e:edit x:del  Tab type  Enter detail",
-        (Screen::Workloads, true) => "n:new e:edit X:del  x group  f labels  Enter",
+        (Screen::Workloads, true) => "Space mark  L labels  M enforce  n/e/X  x group",
         (Screen::Policy, true) => "n/N:new e:edit x:del  d scope  p pending",
         (Screen::Traffic, true) => "w:rule  f filter  r run  v view  g group",
         (Screen::Traffic, _) => "f filter  r run  a auto  v view  g group  / search",

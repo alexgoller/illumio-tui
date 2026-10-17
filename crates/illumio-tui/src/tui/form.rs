@@ -11,8 +11,8 @@ use std::borrow::Cow;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Field {
-    /// "Name", "Ranges".
-    pub label: &'static str,
+    /// "Name", "Ranges"; a label key in the bulk labels form.
+    pub label: Cow<'static, str>,
     pub value: String,
     /// Example input shown under the field (or what to type, such as the
     /// scope a `w` form's ruleset needs).
@@ -303,13 +303,13 @@ fn joined(head: &str, token: &str) -> String {
 
 impl Field {
     pub fn new(
-        label: &'static str,
+        label: impl Into<Cow<'static, str>>,
         value: impl Into<String>,
         hint: impl Into<Cow<'static, str>>,
         required: bool,
     ) -> Self {
         Self {
-            label,
+            label: label.into(),
             value: value.into(),
             hint: hint.into(),
             required,
@@ -513,6 +513,8 @@ impl Completing for Form {
             let key = match (&self.intent, self.fields.iter().find(|f| f.label == "Key")) {
                 (_, Some(f)) => f.value.trim().to_string(),
                 (EditIntent::UpdateLabel(l), None) => l.key.clone(),
+                // The bulk labels form: a field per key, named by it.
+                (EditIntent::BulkLabels(_), None) => field.label.to_string(),
                 _ => String::new(),
             };
             earlier = vec![key];

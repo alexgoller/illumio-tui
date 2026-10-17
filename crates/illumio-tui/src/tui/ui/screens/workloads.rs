@@ -379,10 +379,24 @@ fn summary_line(model: &Model, width: u16) -> Line<'static> {
     let text = format!(
         "healthy {healthy} · warning {warning} · error {error} · offline {offline} · unmanaged {unmanaged}"
     );
+    // Marks for a bulk change first: they decide what L and M change.
+    let marked = model.workloads.marked.len();
+    let mark = if marked > 0 {
+        format!("{marked} marked · ")
+    } else {
+        String::new()
+    };
     let bar_w = (width as usize)
-        .saturating_sub(text.chars().count() + 2)
+        .saturating_sub(mark.chars().count() + text.chars().count() + 2)
         .min(24);
-    let mut spans = vec![Span::raw(text)];
+    let mut spans = Vec::new();
+    if marked > 0 {
+        spans.push(Span::styled(
+            mark,
+            Style::new().fg(t.accent).add_modifier(Modifier::BOLD),
+        ));
+    }
+    spans.push(Span::raw(text));
     if bar_w >= 4 {
         spans.push(Span::raw("  "));
         spans.extend(health_bar(

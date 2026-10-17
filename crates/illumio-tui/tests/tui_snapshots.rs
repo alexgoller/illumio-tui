@@ -295,8 +295,12 @@ fn status_hint_lists_the_edit_keys_only_with_writes() {
     m.writes = WritesState::on();
     assert!(last(&m).contains("n:new e:edit x:del"), "{}", last(&m));
     m.screen = Screen::Workloads;
-    // `x` groups the workloads: delete is `X` there.
-    assert!(last(&m).contains("n:new e:edit X:del"), "{}", last(&m));
+    // `x` groups the workloads: delete is `X` there; the bulk keys lead.
+    assert!(
+        last(&m).contains("Space mark  L labels  M enforce  n/e/X"),
+        "{}",
+        last(&m)
+    );
     illumio_tui::tui::test_support::on_ip_lists_tab(&mut m);
     assert!(last(&m).contains("n:new e:edit x:del"), "{}", last(&m));
     m.screen = Screen::Traffic;
@@ -2887,6 +2891,192 @@ fn screens_render_at_every_terminal_size() {
     for m in &models {
         for w in 20..=130 {
             for h in [6, 24] {
+                let _ = render_to_string(m, w, h);
+            }
+        }
+    }
+}
+
+/// Workloads with writes on, every workload marked (`V`), nothing sent.
+fn bulk_model() -> illumio_tui::tui::model::Model {
+    use illumio_tui::tui::model::{Screen, WritesState};
+    let mut m = model_with_workloads();
+    m.screen = Screen::Workloads;
+    m.writes = WritesState::on();
+    bulk_key(&mut m, KeyCodeAlias::Char('V'));
+    m
+}
+
+type KeyCodeAlias = crossterm::event::KeyCode;
+
+fn bulk_key(m: &mut illumio_tui::tui::model::Model, c: KeyCodeAlias) {
+    use crossterm::event::{KeyEvent, KeyModifiers};
+    use illumio_tui::tui::msg::Msg;
+    let cmds = illumio_tui::tui::update(m, Msg::Key(KeyEvent::new(c, KeyModifiers::NONE)));
+    assert!(cmds.is_empty(), "{cmds:?}");
+}
+
+/// `M` moved to full, then Enter: the confirm with the typed count.
+fn bulk_confirm_model() -> illumio_tui::tui::model::Model {
+    let mut m = bulk_model();
+    bulk_key(&mut m, KeyCodeAlias::Char('M'));
+    bulk_key(&mut m, KeyCodeAlias::Char('j'));
+    bulk_key(&mut m, KeyCodeAlias::Char('j'));
+    bulk_key(&mut m, KeyCodeAlias::Enter);
+    m
+}
+
+#[test]
+fn bulk_marked_rows_80x24() {
+    let mut m = bulk_model();
+    bulk_key(&mut m, KeyCodeAlias::Char('j'));
+    bulk_key(&mut m, KeyCodeAlias::Char(' ')); // unmark host-2
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("3 marked"), "{out}");
+    assert!(out.contains("● host-1.example"), "{out}");
+    assert!(!out.contains("● host-2.example"), "{out}");
+    insta::assert_snapshot!("bulk_marked_rows_80x24", out);
+    // Grouped (`x`): the same marks on the members.
+    bulk_key(&mut m, KeyCodeAlias::Char('x'));
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("● host-1.example"), "{out}");
+    assert!(out.contains("3 marked"), "{out}");
+}
+
+#[test]
+fn bulk_labels_form_80x24() {
+    let mut m = bulk_model();
+    bulk_key(&mut m, KeyCodeAlias::Char('L'));
+    for c in "brandnew".chars() {
+        bulk_key(&mut m, KeyCodeAlias::Char(c));
+    }
+    bulk_key(&mut m, KeyCodeAlias::Tab);
+    bulk_key(&mut m, KeyCodeAlias::Char('-'));
+    let out = render_to_string(&m, 80, 24);
+    for s in [
+        "Labels · 4 marked (4 workloads)",
+        "now (mixed: 2)",
+        "app=brandnew is no label: Ctrl-A",
+        "Ctrl-A new label",
+    ] {
+        assert!(out.contains(s), "missing {s:?}:\n{out}");
+    }
+    insta::assert_snapshot!("bulk_labels_form_80x24", out);
+}
+
+#[test]
+fn bulk_enforcement_picker_80x24() {
+    let mut m = bulk_model();
+    bulk_key(&mut m, KeyCodeAlias::Char('M'));
+    bulk_key(&mut m, KeyCodeAlias::Char('j'));
+    bulk_key(&mut m, KeyCodeAlias::Char('j'));
+    let out = render_to_string(&m, 80, 24);
+    for s in [
+        "Enforcement · 4 marked",
+        "● full",
+        "● keep each workload's level",
+        "4 workloads: 1 selective → full · 1 visibility_only → full",
+        "1 unmanaged (skipped)",
+    ] {
+        assert!(out.contains(s), "missing {s:?}:\n{out}");
+    }
+    insta::assert_snapshot!("bulk_enforcement_picker_80x24", out);
+}
+
+#[test]
+fn bulk_confirm_with_typed_count_100x30() {
+    let mut m = bulk_confirm_model();
+    bulk_key(&mut m, KeyCodeAlias::Char('1'));
+    let out = render_to_string(&m, 100, 30);
+    for s in [
+        "Send this change to 2 workloads?",
+        "full on 2 workloads: type 2 to confirm: 1",
+        "no traffic loaded: d asks the draft policy",
+        "type 2, then y",
+        "host-4.example",
+        "selective → full",
+        "PUT /orgs/5/workloads/bulk_update",
+        "1 list read (cache bypassed)",
+    ] {
+        assert!(out.contains(s), "missing {s:?}:\n{out}");
+    }
+    insta::assert_snapshot!("bulk_confirm_typed_count_100x30", out);
+}
+
+#[test]
+fn bulk_report_80x24() {
+    use illumio_tui::tui::msg::Msg;
+    use pce::write::bulk::{BulkStep, ItemResult, ItemStatus, StepStatus};
+    let mut m = bulk_model();
+    let item = |n: &str, status, error: Option<&str>| ItemResult {
+        href: format!("/orgs/5/workloads/{n}"),
+        name: format!("{n}.example"),
+        change: "visibility_only → full".into(),
+        status,
+        error: error.map(str::to_string),
+    };
+    let report = pce::write::BulkReport {
+        target: "demo (pce.example, org 5)".into(),
+        change: "enforcement full (visibility kept)".into(),
+        refused: None,
+        reads: 1,
+        steps: vec![BulkStep {
+            method: pce::WriteMethod::Put,
+            path: "/orgs/5/workloads/bulk_update".into(),
+            summary: "bulk update 2 workloads (1/1)".into(),
+            status: StepStatus::Partial,
+            href: None,
+            http_status: Some(200),
+            error: None,
+            audit_failed: None,
+        }],
+        items: vec![
+            item("host-1", ItemStatus::Updated, None),
+            item(
+                "host-2",
+                ItemStatus::Failed,
+                Some("validation_failure: bad mode"),
+            ),
+            item("host-4", ItemStatus::Changed, None),
+            ItemResult {
+                change: String::new(),
+                ..item("host-3", ItemStatus::Skipped, Some("unmanaged"))
+            },
+        ],
+        labels_changed: false,
+        labels_created: false,
+    };
+    let _ = illumio_tui::tui::update(&mut m, Msg::BulkDone(Box::new(report)));
+    let out = render_to_string(&m, 80, 24);
+    for s in [
+        "sent to demo (pce.example, org 5)",
+        "FAILED: validation_failure",
+        "changed since planned, skipped",
+        "skipped: unmanaged",
+    ] {
+        assert!(out.contains(s), "missing {s:?}:\n{out}");
+    }
+    insta::assert_snapshot!("bulk_report_80x24", out);
+}
+
+#[test]
+fn bulk_overlays_survive_every_size() {
+    let mut models = vec![bulk_model()];
+    let mut form = bulk_model();
+    bulk_key(&mut form, KeyCodeAlias::Char('L'));
+    models.push(form);
+    let mut picker = bulk_model();
+    bulk_key(&mut picker, KeyCodeAlias::Char('M'));
+    models.push(picker);
+    let mut confirm = bulk_confirm_model();
+    bulk_key(&mut confirm, KeyCodeAlias::Char('2'));
+    models.push(confirm);
+    let mut grouped = bulk_model();
+    bulk_key(&mut grouped, KeyCodeAlias::Char('x'));
+    models.push(grouped);
+    for m in &models {
+        for w in 20..=130 {
+            for h in [6, 24, 40] {
                 let _ = render_to_string(m, w, h);
             }
         }

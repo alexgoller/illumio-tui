@@ -250,6 +250,12 @@ pub enum Overlay {
     BatchReport {
         scroll: u16,
     },
+    /// `M` on Workloads: the enforcement mode and visibility level for the
+    /// targets, with the change it makes.
+    EnforcePicker(Box<crate::tui::bulk::EnforcePicker>),
+    /// A planned bulk workload change: every change, the typed count when
+    /// it enforces several workloads, the draft check (`d`); `y` sends it.
+    ConfirmBulk(Box<crate::tui::bulk::BulkConfirm>),
     /// A pending IP list or service against its active version.
     Diff {
         diff: ObjectDiff,
@@ -298,6 +304,8 @@ impl PartialEq for Overlay {
                 },
             ) => ba.lines() == bb.lines() && sa == sb,
             (Overlay::BatchReport { scroll: a }, Overlay::BatchReport { scroll: b }) => a == b,
+            (Overlay::EnforcePicker(a), Overlay::EnforcePicker(b)) => a == b,
+            (Overlay::ConfirmBulk(a), Overlay::ConfirmBulk(b)) => a == b,
             (
                 Overlay::Confirm {
                     reason: ra,
@@ -4811,6 +4819,29 @@ impl IpListsState {
     }
 }
 
+/// Whether a Workloads row is marked for a bulk change (`Space`, `V`): set
+/// from `WorkloadsState::marked` (the truth, by href) on every rebuild and
+/// mark change, read by the hostname cell (`●`). Atomic so the shared row
+/// (flat and grouped tables hold the same `Arc`) changes without a rebuild.
+#[derive(Debug, Default)]
+pub struct MarkFlag(std::sync::atomic::AtomicBool);
+
+impl MarkFlag {
+    pub fn get(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn set(&self, on: bool) {
+        self.0.store(on, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+impl Clone for MarkFlag {
+    fn clone(&self) -> Self {
+        Self(std::sync::atomic::AtomicBool::new(self.get()))
+    }
+}
+
 /// A workload with its derived health and display strings, computed once per
 /// rebuild so the column `fn` pointers stay pure.
 #[derive(Debug, Clone)]
@@ -4830,6 +4861,8 @@ pub struct WorkloadRowView {
     /// The label model's keys (scope keys, then the tier key) this workload
     /// has no label for: non-empty means unlabeled (`u`).
     pub missing: Vec<String>,
+    /// Marked for a bulk change.
+    pub marked: MarkFlag,
 }
 
 impl WorkloadRowView {
@@ -4851,6 +4884,7 @@ impl WorkloadRowView {
             labels: workload.label_text(order),
             label_list: join_list(workload.label_entries(order)),
             missing: workload.missing_label_keys(order.first()),
+            marked: MarkFlag::default(),
             health,
             workload,
         }
@@ -4877,6 +4911,19 @@ fn text_col(title: &'static str, width: u16, cell: RowCell, key: RowKey) -> Colu
 
 fn hostname_of(r: &WlRow) -> String {
     r.workload.hostname.clone().unwrap_or_default()
+}
+
+/// The hostname cell: `● ` first on a row marked for a bulk change.
+fn hostname_cell(r: &WlRow) -> String {
+    marked_cell(r, hostname_of(r))
+}
+
+fn marked_cell(r: &WlRow, text: String) -> String {
+    if r.marked.get() {
+        format!("● {text}")
+    } else {
+        text
+    }
 }
 
 fn name_of(r: &WlRow) -> String {
@@ -4942,11 +4989,12 @@ pub fn workload_columns() -> Vec<Column<WlRow>> {
     vec![
         Column {
             // A workload without a hostname is still identifiable when the name column is hidden.
-            narrow: Some(|r| r.workload.display_name()),
+            narrow: Some(|r| marked_cell(r, r.workload.display_name())),
             narrow_width: 20,
             full_title: None,
-            full: None,
-            ..text_col("hostname", 22, hostname_of, |r| {
+            // `:export` writes the hostname, never the mark.
+            full: Some(hostname_of),
+            ..text_col("hostname", 22, hostname_cell, |r| {
                 SortKey::Text(hostname_of(r))
             })
         },
@@ -5164,6 +5212,22 @@ pub struct WorkloadsState {
     /// `Enter` on a workload in the app overlay while this list loads: the
     /// workload selected, its detail open, once the list arrives.
     pub open_on_load: Option<String>,
+    /// Workloads marked for a bulk change (`Space`, `V`), by href: they
+    /// survive filters, search, sort and grouping; a reload drops the ones
+    /// gone, a sent change and `Esc` clear them.
+    pub marked: BTreeSet<String>,
+    /// The next load is the reload after a bulk change: its report stays
+    /// on the status line.
+    pub keep_status: bool,
+}
+
+/// What `L` and `M` change: the marked workloads, else the group under
+/// the cursor, else the row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BulkSource {
+    Marked,
+    Group,
+    Row,
 }
 
 /// What the cursor is on in the grouped table, kept across a regrouping.
@@ -5200,6 +5264,107 @@ impl WorkloadsState {
             index_failed: false,
             auto: AutoRefresh::new(min_refresh),
             open_on_load: None,
+            marked: BTreeSet::new(),
+            keep_status: false,
+        }
+    }
+
+    /// The rows' `●` from `marked` (the flat and grouped tables share them).
+    pub fn sync_marks(&self) {
+        for r in self.table.rows() {
+            r.marked.set(self.marked.contains(&r.workload.href));
+        }
+    }
+
+    /// `Space` on a workload: marks it, or unmarks it; whether it is now marked.
+    pub fn toggle_mark(&mut self, href: &str) -> bool {
+        let on = if self.marked.remove(href) {
+            false
+        } else {
+            self.marked.insert(href.to_string());
+            true
+        };
+        self.sync_marks();
+        on
+    }
+
+    /// `V`: the hrefs it marks: grouped, the group under the cursor (on a
+    /// header or one of its workloads); flat, every workload shown.
+    pub fn mark_scope(&self) -> Vec<String> {
+        if self.grouped {
+            let key = match self.sections.selected_item() {
+                Some(WlGroupRow::Header { group, .. }) => Some(group.key.clone()),
+                Some(WlGroupRow::Member { row, .. }) => {
+                    group_key_of(&self.raw, &row.workload.href, &self.group_keys)
+                }
+                None => None,
+            };
+            return self
+                .groups
+                .iter()
+                .find(|g| Some(&g.key) == key.as_ref())
+                .map(|g| g.members.iter().map(|m| m.workload.href.clone()).collect())
+                .unwrap_or_default();
+        }
+        let rows = self.table.rows();
+        self.table
+            .visible()
+            .iter()
+            .map(|&i| rows[i].workload.href.clone())
+            .collect()
+    }
+
+    /// `V`: marks every href of `scope`, or unmarks them when all are
+    /// marked already; `(count, now marked)`.
+    pub fn toggle_marks(&mut self, scope: &[String]) -> (usize, bool) {
+        let all = !scope.is_empty() && scope.iter().all(|h| self.marked.contains(h));
+        for h in scope {
+            if all {
+                self.marked.remove(h);
+            } else {
+                self.marked.insert(h.clone());
+            }
+        }
+        self.sync_marks();
+        (scope.len(), !all)
+    }
+
+    /// `Esc` or a sent change: no marks; how many there were.
+    pub fn clear_marks(&mut self) -> usize {
+        let n = self.marked.len();
+        self.marked.clear();
+        self.sync_marks();
+        n
+    }
+
+    /// The marked workloads still loaded (hidden by a filter or not).
+    pub fn marked_workloads(&self) -> Vec<&Workload> {
+        self.raw
+            .iter()
+            .filter(|w| self.marked.contains(&w.href))
+            .collect()
+    }
+
+    /// What `L` and `M` change: the marked workloads, else the group under
+    /// the cursor (on its header), else the row; with what names them
+    /// (`3 marked`, `group shop | prod`, `host-1`). Empty: nothing.
+    pub fn bulk_targets(&self) -> (Vec<&Workload>, String, BulkSource) {
+        if !self.marked.is_empty() {
+            let ws = self.marked_workloads();
+            let what = format!("{} marked", ws.len());
+            return (ws, what, BulkSource::Marked);
+        }
+        if let Some(g) = self.selected_group() {
+            let ws = g.members.iter().map(|m| &m.workload).collect();
+            return (ws, format!("group {}", g.title), BulkSource::Group);
+        }
+        match self.selected_row() {
+            Some(r) => (
+                vec![&r.workload],
+                r.workload.display_name(),
+                BulkSource::Row,
+            ),
+            None => (Vec::new(), String::new(), BulkSource::Row),
         }
     }
 
@@ -5245,6 +5410,7 @@ impl WorkloadsState {
             self.table.set_columns(columns);
         }
         self.table.set_rows(rows);
+        self.sync_marks();
         self.regroup();
     }
 
@@ -5776,6 +5942,9 @@ pub struct Model {
     /// The batch on its way (planned, confirmed, sent) came from the
     /// generator: its confirm, report and end return there.
     pub batch_from_gen: bool,
+    /// The last bulk confirm's draft check (`d`); a late answer for an
+    /// older one is dropped.
+    pub bulk_check_seq: u64,
     pub quit: bool,
     pub started: Instant,
 }
@@ -5852,6 +6021,7 @@ impl Model {
             batch_sending: false,
             batch_report: None,
             batch_from_gen: false,
+            bulk_check_seq: 0,
             quit: false,
             started: Instant::now(),
         }

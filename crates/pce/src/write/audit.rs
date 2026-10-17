@@ -28,6 +28,10 @@ pub struct AuditEntry {
     /// `"sent"` when the request left but no response arrived.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub phase: Option<String>,
+    /// A `bulk_update` chunk: each workload and its outcome
+    /// (`{href, status, error}`), from the PCE's answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub items: Option<Value>,
     /// `cli` or `tui`.
     pub source: String,
 }
@@ -188,6 +192,7 @@ mod tests {
             href: Some("/orgs/5/labels/9".into()),
             error: None,
             phase: None,
+            items: None,
             source: "cli".into(),
         }
     }

@@ -1,5 +1,6 @@
 pub mod app_overlay;
 pub mod bars;
+pub mod bulk;
 pub mod generator;
 pub mod marks;
 pub mod overlay;

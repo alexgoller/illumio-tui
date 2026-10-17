@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui ✎ writes · pce.example · org 5 ●             api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+4 marked · healthy 1 · warning 1 · error 0 · offline 1 · unmanaged 1  ██████████
+╭ Worklo╭ Enforcement · 4 marked ───── Tab column · Enter review · Esc ╮5s ago ╮
+│  hostn│Enforcement mode                                              │       │
+│▸ ● hos│  ○ idle                                                      │       │
+│  ● hos│  ○ visibility_only                                           │       │
+│  ● unm│  ○ selective                                                 │       │
+│  ● hos│▸ ● full                                                      │       │
+│       │Visibility                                                    │       │
+│       │  ● keep each workload's level                                │       │
+│       │  ○ flow_summary                                              │       │
+│       │  ○ flow_drops                                                │       │
+│       │  ○ flow_off                                                  │       │
+│       │  ○ enhanced_data_collection                                  │       │
+│       │                                                              │       │
+│       │4 workloads: 1 selective → full · 1 visibility_only → full · 1│       │
+│       │already full (skipped) · 1 unmanaged (skipped)                │       │
+│       │full and selective block what the policy does not allow; on   │       │
+│       │several workloads the confirm asks for their count            │       │
+│       ╰──────────────────────────────────────────────────────────────╯       │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+pick the mode (a Space mark  L labels  M enforce  n/e/X  x group  : cmd  ? help
