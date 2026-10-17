@@ -126,6 +126,9 @@ pub struct MarksView {
     pub path: String,
     pub active: usize,
     pub expired: usize,
+    /// Opened from the app overlay (`m` on an invalid file): `Esc` goes
+    /// back there.
+    pub from_app: bool,
 }
 
 /// `12d left`; under a day `<1d left`.
@@ -149,6 +152,7 @@ impl MarksView {
             path: String::new(),
             active: 0,
             expired: 0,
+            from_app: false,
         }
     }
 
@@ -176,7 +180,7 @@ impl MarksView {
                     let mut stronger = 0u64;
                     for f in flows.iter().filter(|f| m.matches(f)) {
                         n += 1;
-                        if active.classify(f).is_some_and(|h| h.mark != i) {
+                        if active.classify(f).is_some_and(|h| h.action < m.action) {
                             stronger += 1;
                         }
                     }

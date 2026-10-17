@@ -7,7 +7,8 @@ use crate::tui::complete::{ANY_PCE, THIS_PCE};
 use crate::tui::edit::EditIntent;
 use crate::tui::form::{Field, FieldKind, Form};
 use pce::marks::{
-    Action, Mark, PceScope, ServiceSpec, Side, parse_decision, parse_expiry, parse_side, side_text,
+    Action, Mark, PceId, PceScope, ServiceSpec, Side, parse_decision, parse_expiry, parse_side,
+    side_text,
 };
 use pce::models::PolicyDecision;
 use pce::traffic::{Decisions, Direction, Focus, MeshColumns, ResolvedEndpoint};
@@ -83,6 +84,9 @@ pub struct MarkCtx {
     pub rows: RowsOf,
     /// The profile's host: `this PCE`.
     pub host: String,
+    /// The profile's org, when editing: a mark limited to another org of
+    /// this host is not `this PCE`.
+    pub org: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -191,8 +195,13 @@ pub fn endpoint_side(ep: &ResolvedEndpoint, keys: &[String]) -> SidePrefill {
 /// and `Ctrl-T` offer its labels and kinds.
 pub fn group_side(group: &[String], keys: &[String], ep: Option<&ResolvedEndpoint>) -> SidePrefill {
     let labelled = ep.is_some_and(|e| e.is_workload() && !e.labels.is_empty());
+    // An unlabelled endpoint (an IP, an IP list, an unlabelled host, an
+    // FQDN) is its own side, as on the Flows view.
+    if let Some(e) = ep.filter(|_| !labelled) {
+        return endpoint_side(e, keys);
+    }
     let first = group.first().map(String::as_str).unwrap_or("");
-    let text = if labelled {
+    let text = if let Some(e) = ep.filter(|_| labelled) {
         let m: BTreeMap<String, Vec<String>> = keys
             .iter()
             .zip(group)
@@ -200,10 +209,11 @@ pub fn group_side(group: &[String], keys: &[String], ep: Option<&ResolvedEndpoin
             .map(|(k, v)| (k.clone(), vec![v.clone()]))
             .collect();
         if m.is_empty() {
-            "any".to_string()
-        } else {
-            quote_side(m)
+            // No key in force: the endpoint itself (`wl:<host>`, `Ctrl-A`
+            // its labels), never `any`, which is wider than the row.
+            return endpoint_side(e, &[]);
         }
+        quote_side(m)
     } else if let Some(l) = first.strip_prefix("ipl:") {
         format!("ipl:{l}")
     } else if first.parse::<std::net::IpAddr>().is_ok() {
@@ -260,11 +270,34 @@ fn decision_list(d: &[PolicyDecision]) -> String {
     d.iter().map(|d| d.as_str()).collect::<Vec<_>>().join(", ")
 }
 
-fn scope_text(scope: Option<&PceScope>, host: &str) -> String {
+/// `this PCE` only for this host and org; another org of this host is
+/// `host (org N)`, as `scope_of` reads it back.
+fn scope_text(scope: Option<&PceScope>, pce: &PceId) -> String {
     match scope {
         None => ANY_PCE.into(),
-        Some(s) if s.host.eq_ignore_ascii_case(host) => THIS_PCE.into(),
+        Some(s) if s.covers(pce) => THIS_PCE.into(),
+        Some(PceScope { host, org: Some(o) }) => format!("{host} (org {o})"),
         Some(s) => s.host.clone(),
+    }
+}
+
+/// `host (org N)`: the host and the org.
+fn host_org(v: &str) -> Option<(String, u64)> {
+    let (host, rest) = v.split_once(" (org ")?;
+    let org = rest.strip_suffix(')')?.trim().parse().ok()?;
+    Some((host.trim().to_string(), org))
+}
+
+/// A row's service as a mark takes it: a port on a protocol without
+/// ports (`1234/47`, `0/icmp` as reported) becomes the protocol alone.
+pub fn service_prefill(service: &str) -> String {
+    let t = service.trim();
+    if t.is_empty() || ServiceSpec::parse(t).is_ok() {
+        return t.to_string();
+    }
+    match t.split_once('/') {
+        Some((_, proto)) if ServiceSpec::parse(proto).is_ok() => proto.trim().to_string(),
+        _ => t.to_string(),
     }
 }
 
@@ -336,7 +369,7 @@ impl MarkForm {
                 p.action,
                 &p.src,
                 &p.dst,
-                &p.service,
+                &service_prefill(&p.service),
                 &p.decision,
                 &p.draft,
                 p.action.default_expiry(),
@@ -362,6 +395,7 @@ impl MarkForm {
                 kinds: [p.src.kinds, p.dst.kinds],
                 rows: p.rows,
                 host: host.to_string(),
+                org: None,
             },
             preview: Vec::new(),
         }
@@ -369,7 +403,8 @@ impl MarkForm {
 
     /// The mark `m` edits (`:marks` Enter): its fields, its comment
     /// offered for change. `extend` (`e`): the comment only, prefilled.
-    pub fn edit(m: &Mark, host: &str, extend: bool) -> Self {
+    pub fn edit(m: &Mark, pce: &PceId, extend: bool) -> Self {
+        let host = pce.host.as_str();
         let side = |s: &Side| SidePrefill {
             text: side_text(s),
             alt: None,
@@ -385,7 +420,7 @@ impl MarkForm {
             &decision_list(&m.decisions),
             &decision_list(&m.draft_decisions),
             &expires_text(m.expires),
-            &scope_text(m.scope.as_ref(), host),
+            &scope_text(m.scope.as_ref(), pce),
             &m.comment,
             host,
         );
@@ -410,6 +445,7 @@ impl MarkForm {
                 kinds: [src.kinds, dst.kinds],
                 rows: RowsOf::Flows,
                 host: host.to_string(),
+                org: Some(pce.org),
             },
             preview: Vec::new(),
         }
@@ -476,6 +512,42 @@ impl MarkForm {
         }
     }
 
+    /// The Scope field: `any PCE` (or empty), `this PCE` (the edited
+    /// mark's org kept when it is this org), `host (org N)`, or a host (the
+    /// edited mark's org kept on the same host). Whole words only: a host
+    /// named `anyhost` is a host.
+    fn scope_of(&self, old: Option<&Mark>) -> Option<PceScope> {
+        let v = self.value(SCOPE);
+        let word = v.to_ascii_lowercase();
+        let old = old.and_then(|m| m.scope.as_ref());
+        if word.is_empty() || word == "any" || word == ANY_PCE.to_ascii_lowercase() {
+            return None;
+        }
+        if word == "this" || word == THIS_PCE.to_ascii_lowercase() {
+            let org = old
+                .filter(|s| s.host.eq_ignore_ascii_case(&self.ctx.host))
+                .and_then(|s| s.org)
+                .filter(|o| Some(*o) == self.ctx.org);
+            return Some(PceScope {
+                host: self.ctx.host.clone(),
+                org,
+            });
+        }
+        if let Some((host, org)) = host_org(v) {
+            return Some(PceScope {
+                host,
+                org: Some(org),
+            });
+        }
+        let org = old
+            .filter(|s| s.host.eq_ignore_ascii_case(v))
+            .and_then(|s| s.org);
+        Some(PceScope {
+            host: v.to_string(),
+            org,
+        })
+    }
+
     /// The mark the fields describe, checked as the file checks one; the
     /// first problem names its field. The edited mark keeps its id, org
     /// (on the same PCE) and creation.
@@ -519,22 +591,8 @@ impl MarkForm {
             now,
         )
         .map_err(|e| field("Expires", e))?;
-        let scope_v = self.value(SCOPE);
-        let host = if scope_v.is_empty() || scope_v.to_lowercase().starts_with("any") {
-            None
-        } else if scope_v.to_lowercase().starts_with("this") {
-            Some(self.ctx.host.clone())
-        } else {
-            Some(scope_v.to_string())
-        };
         let old = self.ctx.editing.as_ref();
-        let org = old
-            .and_then(|m| m.scope.as_ref())
-            .filter(|s| {
-                host.as_deref()
-                    .is_some_and(|h| s.host.eq_ignore_ascii_case(h))
-            })
-            .and_then(|s| s.org);
+        let scope = self.scope_of(old);
         let m = Mark {
             id: old.map(|m| m.id.clone()).unwrap_or_default(),
             action,
@@ -543,7 +601,7 @@ impl MarkForm {
             services,
             decisions: decisions("Decision", self.value(DECISION))?,
             draft_decisions: decisions("Draft", self.value(DRAFT))?,
-            scope: host.map(|host| PceScope { host, org }),
+            scope,
             expires,
             comment: self.value(COMMENT).to_string(),
             created: old.and_then(|m| m.created),
@@ -631,6 +689,33 @@ mod tests {
         assert_eq!(g(&["ipl:Corp", "-"], None), "ipl:Corp");
         assert_eq!(g(&["10.0.3.30", "-"], None), "ip:10.0.3.30");
         assert_eq!(g(&["unmanaged-nas", "-"], None), "wl:unmanaged-nas");
+    }
+
+    #[test]
+    fn a_group_without_keys_is_its_endpoint_and_an_fqdn_is_never_a_host() {
+        let ep = wl("web-01", &[("role", "web")]);
+        let v: Vec<String> = vec!["-".into(), "-".into()];
+        let p = group_side(&v, &keys(), Some(&ep));
+        assert_eq!(p.text, "wl:web-01", "not any: the row is narrower");
+        assert_eq!(p.alt.as_deref(), Some("role=web"));
+        let fqdn = ResolvedEndpoint {
+            fqdn: Some("x.example".into()),
+            ..Default::default()
+        };
+        let g = group_side(&["x.example".to_string()], &keys(), Some(&fqdn));
+        assert_eq!(
+            (g.text.as_str(), g.note),
+            ("any", Some("fqdn cannot be marked"))
+        );
+        let corp = ResolvedEndpoint {
+            ip: Some("10.1.4.9".into()),
+            ip_lists: vec!["Corp".into()],
+            ..Default::default()
+        };
+        assert_eq!(
+            group_side(&["ipl:Corp".to_string()], &keys(), Some(&corp)).text,
+            "ipl:Corp"
+        );
     }
 
     fn form() -> MarkForm {
@@ -724,6 +809,51 @@ mod tests {
         assert_eq!(f.form.value("Service"), "5432/tcp", "not a side: nothing");
     }
 
+    fn pce(org: u64) -> PceId {
+        PceId {
+            host: "pce.example".into(),
+            org,
+        }
+    }
+
+    #[test]
+    fn a_port_on_a_protocol_without_ports_prefills_the_protocol() {
+        assert_eq!(service_prefill("5432/tcp"), "5432/tcp");
+        assert_eq!(service_prefill("icmp"), "icmp");
+        assert_eq!(service_prefill("1234/47"), "47");
+        assert_eq!(service_prefill("0/icmp"), "icmp");
+        assert_eq!(service_prefill(""), "");
+    }
+
+    #[test]
+    fn scope_is_whole_words_and_another_org_is_not_this_pce() {
+        let mut m = form().mark(now()).unwrap();
+        m.id = "m-abc123".into();
+        m.comment = "why".into();
+        m.scope = Some(PceScope {
+            host: "pce.example".into(),
+            org: Some(7),
+        });
+        let mut e = MarkForm::edit(&m, &pce(5), false);
+        assert_eq!(e.form.value("Scope"), "pce.example (org 7)");
+        assert_eq!(e.mark(now()).unwrap().scope, m.scope, "round-trips");
+        e.form.fields[SCOPE].value = THIS_PCE.into();
+        assert_eq!(
+            e.mark(now()).unwrap().scope.unwrap().org,
+            None,
+            "this PCE: not org 7"
+        );
+        e.form.fields[SCOPE].value = "anyhost.example".into();
+        assert_eq!(
+            e.mark(now()).unwrap().scope.unwrap().host,
+            "anyhost.example"
+        );
+        e.form.fields[SCOPE].value = "thishost".into();
+        assert_eq!(e.mark(now()).unwrap().scope.unwrap().host, "thishost");
+        e.form.fields[SCOPE].value = "any".into();
+        assert_eq!(e.mark(now()).unwrap().scope, None);
+    }
+
     #[test]
     fn editing_keeps_the_id_org_and_creation_and_extend_asks_only_why() {
         let mut m = form().mark(now()).unwrap();
@@ -734,7 +864,7 @@ mod tests {
             org: Some(5),
         });
         m.created = Some(now());
-        let mut e = MarkForm::edit(&m, "pce.example", false);
+        let mut e = MarkForm::edit(&m, &pce(5), false);
         assert_eq!(e.form.value("Scope"), THIS_PCE);
         assert_eq!(e.form.value("Comment"), "first reason");
         e.form.fields[COMMENT].value = "second reason".into();
@@ -743,7 +873,7 @@ mod tests {
         assert_eq!(back.scope.unwrap().org, Some(5));
         assert_eq!(back.created, Some(now()));
         assert_eq!(back.expires, m.expires, "the date round-trips");
-        let x = MarkForm::edit(&m, "pce.example", true);
+        let x = MarkForm::edit(&m, &pce(5), true);
         assert_eq!(x.form.fields.len(), 1);
         assert_eq!(x.comment(), "first reason");
     }

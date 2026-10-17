@@ -362,7 +362,23 @@ fn mark_side(token: &str, used: &[String], idx: &NameIndex, workloads: &[Workloa
     if let Some(names) = prefixed(token, &sources) {
         return names;
     }
-    labels(token, used, idx, &MARK_WORDS, &named_all(&sources))
+    // `app="my` matches values as typed; a value with a separator comes
+    // back quoted, as the side grammar reads it.
+    let token = token.replacen("=\"", "=", 1);
+    labels(&token, used, idx, &MARK_WORDS, &named_all(&sources))
+        .into_iter()
+        .map(|c| quote_label(&c))
+        .collect()
+}
+
+/// `key=value` with the value quoted when it holds a side separator.
+fn quote_label(c: &str) -> String {
+    match c.split_once('=') {
+        Some((k, v)) if v.contains([' ', ',', '|', '"', '\\']) => {
+            format!("{k}=\"{}\"", v.replace('\\', "\\\\").replace('"', "\\\""))
+        }
+        _ => c.to_string(),
+    }
 }
 
 /// Hostnames and names of `workloads`, any-case sorted, blanks left out.
@@ -773,6 +789,22 @@ mod tests {
             FieldKind::MarkSide.request("app=shop en"),
             Some(("en".to_string(), vec!["app=shop".to_string()]))
         );
+    }
+
+    #[test]
+    fn mark_side_quotes_label_values_with_separators() {
+        let label = |n: usize, k: &str, v: &str| -> Label {
+            serde_json::from_value(serde_json::json!({
+                "href": format!("/orgs/5/labels/{n}"), "key": k, "value": v, "deleted": false
+            }))
+            .unwrap()
+        };
+        let labels = vec![label(1, "app", "my shop"), label(2, "app", "crm")];
+        let idx = NameIndex::new(&labels, &[], &[], &[]);
+        let c = |t: &str| complete(FieldKind::MarkSide, t, &[], &idx, &[], &[]);
+        assert_eq!(c("app="), s(&["app=crm", "app=\"my shop\""]));
+        assert_eq!(c("app=\"my"), s(&["app=\"my shop\""]));
+        assert!(pce::marks::parse_side("app=\"my shop\"").is_ok());
     }
 
     #[test]

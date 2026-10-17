@@ -26,15 +26,32 @@ pub fn render_mark_form(model: &Model, mf: &MarkForm, f: &mut Frame, area: Rect)
     let r = centered(area, 96, u16::try_from(rows).unwrap_or(u16::MAX));
     f.render_widget(Clear, r);
     let inner_w = (r.width as usize).saturating_sub(2);
-    let value_w = VALUE_W.min(inner_w.saturating_sub(2 + LABEL_W + 4));
-    let hint_w = inner_w.saturating_sub(2 + LABEL_W + value_w + 3);
+    // The value column, and the most a long value may take from a short
+    // hint on its own row.
+    let room = inner_w.saturating_sub(2 + LABEL_W + 4);
+    let value_w = VALUE_W.min(room);
     let block = panel(&form.title, "Tab next · Enter saves · Esc cancels", t, true);
     let mut lines: Vec<Line> = Vec::new();
     for (i, field) in form.fields.iter().enumerate() {
         let on = i == form.active;
-        let shown = plain(&visible_tail(&field.value, value_w));
+        let strip = form.completion_strip().filter(|_| on);
+        let hint = plain(&field.hint);
+        let need = field.value.chars().count() + 1;
+        let row_w = if strip.is_none() && need > value_w {
+            need.min(room.saturating_sub(hint.chars().count()))
+                .max(value_w)
+        } else {
+            value_w
+        };
+        let hint_w = inner_w.saturating_sub(2 + LABEL_W + row_w + 3);
+        // The focused value shows its end (the cursor), the others start.
+        let shown = if on {
+            plain(&visible_tail(&field.value, row_w))
+        } else {
+            plain(&clip(&field.value, row_w))
+        };
         let value = format!("{shown}{}", if on { "▏" } else { "" });
-        let pad = (value_w + 1).saturating_sub(value.chars().count());
+        let pad = (row_w + 1).saturating_sub(value.chars().count());
         let mut spans = vec![
             Span::styled(if on { "▸ " } else { "  " }, Style::new().fg(t.accent)),
             Span::styled(
@@ -51,12 +68,9 @@ pub fn render_mark_form(model: &Model, mf: &MarkForm, f: &mut Frame, area: Rect)
             ),
             Span::raw(" ".repeat(pad + 2)),
         ];
-        match form.completion_strip().filter(|_| on) {
+        match strip {
             Some(s) => spans.extend(completion_line(&s, 0, hint_w, t).spans),
-            None => spans.push(Span::styled(
-                clip(&plain(&field.hint), hint_w),
-                t.dim_style(),
-            )),
+            None => spans.push(Span::styled(clip(&hint, hint_w), t.dim_style())),
         }
         lines.push(Line::from(spans));
     }

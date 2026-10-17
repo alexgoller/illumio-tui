@@ -17,7 +17,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use pce::marks::Action;
 use pce::traffic::{
     Decisions, Direction, FlowGroup, MeshRow, ResolvedFlow, app_sections, app_sections_both,
-    group_by_labels, group_by_service, mesh,
+    group_by_labels, group_by_service, group_key, mesh,
 };
 use std::collections::BTreeMap;
 
@@ -192,7 +192,17 @@ fn mesh_prefill(t: &TrafficState, r: &MeshRow) -> Prefill {
     let rep = t.first_flow(|f| drill.matches(f, &t.keys));
     let service = r.service_text();
     Prefill {
-        what: format!("Mesh · {} → {} {service}", r.src.join("/"), r.dst.join("/")),
+        what: format!(
+            "Mesh · {} → {} {service}{}",
+            r.src.join("/"),
+            r.dst.join("/"),
+            // A mark has no user or process: it covers every one.
+            if t.mesh_cols.user || t.mesh_cols.process {
+                " · user/process not part of a mark"
+            } else {
+                ""
+            }
+        ),
         action: Action::Reviewed,
         src: group_side(&r.src, &t.keys, rep.as_ref().map(|f| &f.src)),
         dst: group_side(&r.dst, &t.keys, rep.as_ref().map(|f| &f.dst)),
@@ -228,7 +238,13 @@ fn section_prefill(t: &TrafficState, r: &SectionRow, blocked: bool) -> Option<Pr
                 [(d, _)] => *d,
                 _ => Direction::In,
             };
-            let (_, app_ep) = split(rep.as_ref(), dir);
+            // The representative flow may run either way under a `both`
+            // header: the app's endpoint is the one in the app's group.
+            let app_ep = rep.as_ref().and_then(|f| {
+                [&f.dst, &f.src]
+                    .into_iter()
+                    .find(|ep| group_key(ep, &t.keys) == r.app)
+            });
             let app = group_side(&r.app, &t.keys, app_ep);
             let (src, dst) = match dir {
                 Direction::In => (any_side(), app),
@@ -267,6 +283,27 @@ fn section_prefill(t: &TrafficState, r: &SectionRow, blocked: bool) -> Option<Pr
         draft,
         rows: RowsOf::Sections(dir_of_view, decisions),
     })
+}
+
+/// Of `flows`, those the view `rows` names can hold: its decision filter
+/// applied (pairs, services, sections), the app overlay's side of the app.
+fn in_view(rows: &RowsOf, flows: Vec<ResolvedFlow>) -> Vec<ResolvedFlow> {
+    match rows {
+        RowsOf::Flows | RowsOf::Mesh(_) => flows,
+        RowsOf::Pairs(d) | RowsOf::Services(d) | RowsOf::Sections(_, d) => {
+            flows.into_iter().filter(|f| d.keeps(f)).collect()
+        }
+        RowsOf::Peers(focus, dir) => flows
+            .into_iter()
+            .filter(|f| {
+                let ep = match dir {
+                    Direction::In => &f.dst,
+                    Direction::Out => &f.src,
+                };
+                group_key(ep, &focus.keys) == focus.app
+            })
+            .collect(),
+    }
 }
 
 /// The rows of the view `rows` names that hold one of `flows`: the view's
@@ -309,6 +346,9 @@ pub(crate) fn preview(t: &TrafficState, mf: &MarkForm, now: jiff::Timestamp) -> 
     if matched.is_empty() {
         return vec!["matches nothing in this result".into()];
     }
+    // Rows and flows of one set: the flows the view's rows can hold.
+    let all = matched.len();
+    let matched = in_view(&mf.ctx.rows, matched);
     let rows = rows_of(t, &mf.ctx.rows, &matched);
     let squelch = draft.action == Action::Squelch;
     let mut first = format!(
@@ -316,6 +356,9 @@ pub(crate) fn preview(t: &TrafficState, mf: &MarkForm, now: jiff::Timestamp) -> 
         plural(rows, "row", "rows"),
         plural(matched.len(), "flow", "flows")
     );
+    if all > matched.len() {
+        first.push_str(&format!(" (+{} outside this view)", all - matched.len()));
+    }
     if squelch {
         first.push_str(" · hides them (M shows)");
     }
@@ -339,8 +382,10 @@ pub(crate) fn preview(t: &TrafficState, mf: &MarkForm, now: jiff::Timestamp) -> 
     }
     let mut winners: BTreeMap<usize, u64> = BTreeMap::new();
     for f in &matched {
+        // Only a stronger action takes a flow away; a more specific mark
+        // of the same action leaves it the same.
         if let Some(h) = active.classify(f)
-            && h.mark != at
+            && h.action < draft.action
         {
             *winners.entry(h.mark).or_default() += 1;
         }
@@ -386,7 +431,11 @@ fn close(model: &mut Model, origin: MarkOrigin) {
     };
 }
 
+/// The `:marks` rows again from the file as it is now: a write refused
+/// (a mark deleted elsewhere, an invalid file) leaves the store behind the
+/// file, so one `stat` first (the views rebuilt if it changed).
 fn rebuild_view(model: &mut Model) {
+    super::rebuild_app_traffic(model); // `sync_marks` first
     if let Some(v) = model.marks_view.as_mut() {
         v.rebuild(&model.traffic, jiff::Timestamp::now());
     }
@@ -408,6 +457,7 @@ pub(super) fn open_marks(model: &mut Model, action: Option<&str>) -> Vec<Cmd> {
     // The file as it is now (one `stat`; the views rebuilt if it changed).
     model.traffic.sync_marks();
     let mut v = crate::tui::marks_view::MarksView::new(filter);
+    v.from_app = matches!(model.overlay, Overlay::App);
     v.rebuild(&model.traffic, jiff::Timestamp::now());
     model.marks_view = Some(v);
     model.overlay = Overlay::Marks;
@@ -428,12 +478,18 @@ pub(super) fn overlay_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         v.table.ensure_visible(page);
         return Vec::new();
     }
-    let host = model.profile.host.clone();
+    let pce = model.traffic.marks_pce.clone();
     match k.code {
-        KeyCode::Esc | KeyCode::Char('q') => model.overlay = Overlay::None,
+        KeyCode::Esc | KeyCode::Char('q') => {
+            model.overlay = if v.from_app && model.app_view.is_some() {
+                Overlay::App
+            } else {
+                Overlay::None
+            };
+        }
         KeyCode::Enter => {
             if let Some(r) = v.selected() {
-                let mf = MarkForm::edit(&r.mark, &host, false);
+                let mf = MarkForm::edit(&r.mark, &pce, false);
                 open_form(model, mf);
             }
         }
@@ -444,7 +500,12 @@ pub(super) fn overlay_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                         "delete {} ({}, {})? y/n",
                         r.mark.id,
                         r.mark.action.as_str(),
-                        plural(r.hit_count as usize, "flow", "flows")
+                        // An inactive mark has no hits here, not zero.
+                        if r.active {
+                            plural(r.hit_count as usize, "flow", "flows")
+                        } else {
+                            "–".into()
+                        }
                     ),
                     action: crate::tui::model::PendingAction::DeleteMark(r.mark.id.clone()),
                 };
@@ -456,7 +517,7 @@ pub(super) fn overlay_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     StatusLine::info(format!("{} never expires: nothing to extend", r.mark.id));
             }
             Some(r) => {
-                let mf = MarkForm::edit(&r.mark, &host, true);
+                let mf = MarkForm::edit(&r.mark, &pce, true);
                 open_form(model, mf);
             }
             None => {}
@@ -499,8 +560,10 @@ pub(super) fn form_key(model: &mut Model, mut mf: MarkForm, k: KeyEvent) -> Vec<
     if ctrl && matches!(k.code, KeyCode::Char('n' | 'p')) {
         complete_field(model, &mut mf.form, k.code == KeyCode::Char('n'));
     } else if ctrl && k.code == KeyCode::Char('t') {
+        mf.form.completion = None;
         mf.cycle_kind();
     } else if ctrl && k.code == KeyCode::Char('a') {
+        mf.form.completion = None;
         mf.swap_labels();
     } else {
         match mf.form.on_key(k) {
@@ -568,7 +631,10 @@ fn submit(model: &mut Model, mut mf: MarkForm) -> Vec<Cmd> {
             } else {
                 ""
             };
-            model.status = StatusLine::info(if mf.ctx.extend {
+            model.status = StatusLine::info(if mf.ctx.extend && done.ids.is_empty() {
+                // Made `never` elsewhere since `:marks` showed it.
+                format!("{id} now never expires: nothing extended")
+            } else if mf.ctx.extend {
                 format!("mark {id} extended by 30 days{backup}")
             } else {
                 format!(
@@ -579,6 +645,9 @@ fn submit(model: &mut Model, mut mf: MarkForm) -> Vec<Cmd> {
             });
         }
         Err(e) => {
+            // The file may have changed under the refused write: one
+            // `stat`, the views (and the app overlay) rebuilt if it did.
+            super::rebuild_app_traffic(model);
             mf.form.error = Some(e.to_string());
             model.overlay = Overlay::MarkForm(Box::new(mf));
         }

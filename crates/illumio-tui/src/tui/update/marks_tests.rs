@@ -682,3 +682,267 @@ fn colon_marks_works_without_traffic_loaded() {
     quiet(&mut m, key('m'));
     assert_eq!(m.overlay, Overlay::None);
 }
+
+#[test]
+fn a_both_header_takes_the_app_side_from_the_apps_own_endpoint() {
+    use crate::tui::model::{By, RowKind};
+    use pce::traffic::group_key;
+    let (mut m, _dir) = marked_model(RICH_MARKS);
+    m.traffic.view = TrafficView::Aggregate;
+    m.traffic.apps_state.by = By::Both;
+    m.traffic.rebuild_sections();
+    let headers: Vec<(Vec<String>, usize)> = m
+        .traffic
+        .apps
+        .rows()
+        .iter()
+        .filter_map(|r| match &r.kind {
+            RowKind::Header { totals, .. } => Some((r.app.clone(), totals.len())),
+            _ => None,
+        })
+        .collect();
+    let mut outbound_first = 0;
+    for (app, dirs) in headers {
+        m.traffic
+            .apps
+            .select_where(|r| r.app == app && matches!(r.kind, RowKind::Header { .. }));
+        let drill = m.traffic.section_drill().unwrap();
+        let keys = m.traffic.keys.clone();
+        let rep = m.traffic.first_flow(|f| drill.matches(f, &keys)).unwrap();
+        let outbound = group_key(&rep.dst, &keys) != app;
+        let app_ep = if outbound { &rep.src } else { &rep.dst };
+        // The bug: both directions, the first flow outbound, a labelled app.
+        if dirs == 2 && outbound && app_ep.is_workload() {
+            outbound_first += 1;
+        }
+        quiet(&mut m, key('m'));
+        let (src, dst) = (
+            form(&m).form.value("Source").to_string(),
+            form(&m).form.value("Destination").to_string(),
+        );
+        let app_side = if src == "any" { dst } else { src };
+        if app_ep.is_workload() {
+            let want: Vec<String> = keys
+                .iter()
+                .zip(&app)
+                .filter(|(_, v)| v.as_str() != "-")
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect();
+            assert_eq!(app_side, want.join(" "), "{app:?}");
+        } else {
+            // An address group: the address itself, never a label.
+            assert!(!app_side.contains('='), "{app:?}: {app_side}");
+        }
+        quiet(&mut m, kc(KeyCode::Esc));
+    }
+    assert!(
+        outbound_first > 0,
+        "a both header whose first flow is outbound"
+    );
+}
+
+#[test]
+fn a_same_action_mark_is_not_counted_as_stronger() {
+    // m-shop is more specific than both m-all and the new mark below.
+    let text = r#"
+[[mark]]
+id = "m-all"
+action = "squelch"
+src = "any"
+dst = "any"
+comment = "all"
+
+[[mark]]
+id = "m-shop"
+action = "squelch"
+src = { labels = { app = "shop", env = "prod" } }
+dst = { labels = { app = "shop", env = "prod" } }
+service = "5432/tcp"
+decision = ["allowed", "potentially_blocked", "blocked"]
+pce = "pce.example"
+comment = "shop"
+"#;
+    let (mut m, _dir) = marked_model(text);
+    command(&mut m, "marks");
+    let hits: Vec<String> = view(&m)
+        .table
+        .rows()
+        .iter()
+        .map(|r| r.hits.clone())
+        .collect();
+    assert_eq!(hits.len(), 2, "{hits:?}");
+    assert!(hits.iter().all(|h| !h.contains("stronger")), "{hits:?}");
+    quiet(&mut m, kc(KeyCode::Esc));
+    // A new squelch over shop's flows: the other squelches do not "keep" them.
+    quiet(&mut m, key('M'));
+    quiet(&mut m, key('m'));
+    assert!(matches!(m.overlay, Overlay::MarkForm(_)), "{:?}", m.status);
+    for _ in 0..(COMMENT - crate::tui::mark_form::ACTION) {
+        quiet(&mut m, kc(KeyCode::BackTab));
+    }
+    quiet(&mut m, ctrl('u'));
+    typed(&mut m, "squelch");
+    assert_eq!(form(&m).preview.len(), 1, "{:?}", form(&m).preview);
+}
+
+#[test]
+fn a_mark_deleted_elsewhere_leaves_the_list_after_the_refused_write() {
+    let (mut m, dir) = marked_model(RICH_MARKS);
+    command(&mut m, "marks");
+    // Another instance removes m-sq1 while the list is open.
+    let path = dir.path().join("marks.toml");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let rest = &text[text.find("[[mark]]\nid = \"m-sq2\"").unwrap()..];
+    std::fs::write(&path, rest).unwrap();
+    quiet(&mut m, key('x'));
+    quiet(&mut m, key('y'));
+    assert_eq!(m.status.text, "mark m-sq1 was deleted elsewhere");
+    assert_eq!(m.overlay, Overlay::Marks);
+    assert!(
+        view(&m).table.rows().iter().all(|r| r.mark.id != "m-sq1"),
+        "the list read the file again"
+    );
+    assert_eq!(m.traffic.marks.set().unwrap().marks.len(), 5);
+}
+
+#[test]
+fn extending_a_mark_made_never_elsewhere_says_nothing_was_extended() {
+    let soon = (jiff::Timestamp::now() + jiff::SignedDuration::from_hours(48)).to_string();
+    let base = "[[mark]]\nid = \"m-soon01\"\naction = \"squelch\"\nsrc = { ip_list = \"Corp\" }\ndst = \"any\"\ncomment = \"scanner\"\n";
+    let with_expiry = format!("{base}expires = \"{soon}\"\n");
+    let (mut m, dir) = marked_model(&with_expiry);
+    command(&mut m, "marks");
+    quiet(&mut m, key('e'));
+    assert!(form(&m).ctx.extend);
+    std::fs::write(dir.path().join("marks.toml"), base).unwrap();
+    typed(&mut m, " again");
+    quiet(&mut m, kc(KeyCode::Enter));
+    assert_eq!(
+        m.status.text,
+        "m-soon01 now never expires: nothing extended"
+    );
+    assert_eq!(m.overlay, Overlay::Marks);
+    assert_eq!(view(&m).table.rows()[0].expires, "never");
+}
+
+#[test]
+fn marks_opened_from_the_app_overlay_returns_there() {
+    use crate::tui::commands::Command;
+    let (mut m, _dir) = marked_model("[[mark]]\naction = \"squelch\"\nsrc = \"any\"\n");
+    update(&mut m, Msg::Command(Command::App(Some("shop/prod".into()))));
+    assert_eq!(m.overlay, Overlay::App);
+    quiet(&mut m, key('m'));
+    assert_eq!(m.overlay, Overlay::Marks, "the problems");
+    quiet(&mut m, kc(KeyCode::Esc));
+    assert_eq!(m.overlay, Overlay::App, "back where it came from");
+}
+
+#[test]
+fn the_preview_counts_rows_and_flows_over_the_views_flows() {
+    use crate::tui::mark_form::{ACTION, DECISION, DST, SERVICE};
+    let (mut m, _dir) = marked_model(RICH_MARKS);
+    m.traffic.view = TrafficView::Blocked;
+    quiet(&mut m, key('j'));
+    quiet(&mut m, key('m'));
+    // Everything, any decision: Blocked's rows hold only blocked flows.
+    let set = |m: &mut Model, field: usize, text: &str| {
+        if let Overlay::MarkForm(f) = &mut m.overlay {
+            f.form.active = field;
+        }
+        quiet(m, ctrl('u'));
+        typed(m, text);
+    };
+    set(&mut m, ACTION, "reviewed");
+    set(&mut m, SRC, "any");
+    set(&mut m, DST, "any");
+    set(&mut m, SERVICE, "");
+    set(&mut m, DECISION, "");
+    let blocked = m
+        .traffic
+        .loaded_flows()
+        .iter()
+        .filter(|f| pce::traffic::Decisions::Blocked.keeps(f))
+        .count();
+    let all = m.traffic.loaded_flows().len();
+    assert!(
+        form(&m).preview[0].contains(&format!(
+            "{blocked} flows in this result (+{} outside this view)",
+            all - blocked
+        )),
+        "{:?}",
+        form(&m).preview
+    );
+}
+
+#[test]
+fn a_mesh_row_with_user_or_process_says_the_mark_covers_them_all() {
+    let (mut m, _dir) = marked_model(RICH_MARKS);
+    m.traffic.view = TrafficView::Mesh;
+    m.traffic.mesh_cols = pce::traffic::MeshColumns::default();
+    m.traffic.rebuild_views();
+    quiet(&mut m, key('m'));
+    assert!(!form(&m).form.title.contains("user/process"));
+    quiet(&mut m, kc(KeyCode::Esc));
+    m.traffic.mesh_cols.process = true;
+    m.traffic.rebuild_views();
+    quiet(&mut m, key('m'));
+    assert!(
+        form(&m)
+            .form
+            .title
+            .ends_with(" · user/process not part of a mark"),
+        "{}",
+        form(&m).form.title
+    );
+}
+
+#[test]
+fn deleting_an_inactive_mark_says_it_has_no_hits_here() {
+    let text = format!(
+        "{RICH_MARKS}\n[[mark]]\nid = \"m-else\"\naction = \"squelch\"\nsrc = \"any\"\ndst = \"any\"\npce = \"other.example\"\ncomment = \"elsewhere\"\n"
+    );
+    let (mut m, _dir) = marked_model(&text);
+    command(&mut m, "marks");
+    m.marks_view
+        .as_mut()
+        .unwrap()
+        .table
+        .select_where(|r| r.mark.id == "m-else");
+    quiet(&mut m, key('x'));
+    assert!(
+        matches!(&m.overlay, Overlay::Confirm { reason, .. } if reason == "delete m-else (squelch, –)? y/n"),
+        "{:?}",
+        m.overlay
+    );
+}
+
+#[test]
+fn ctrl_t_and_ctrl_a_end_a_completion_and_long_values_show_their_start() {
+    let (mut m, _dir) = marked_model(RICH_MARKS);
+    quiet(&mut m, key('m'));
+    if let Overlay::MarkForm(f) = &mut m.overlay {
+        f.form.active = crate::tui::mark_form::DST;
+    }
+    quiet(&mut m, ctrl('n'));
+    assert!(form(&m).form.completion.is_some());
+    quiet(&mut m, ctrl('t'));
+    assert!(form(&m).form.completion.is_none());
+    quiet(&mut m, ctrl('t'));
+    while form(&m).form.value("Destination") != "app=crm env=prod" {
+        quiet(&mut m, ctrl('t'));
+    }
+    quiet(&mut m, ctrl('n'));
+    quiet(&mut m, ctrl('a'));
+    assert!(form(&m).form.completion.is_none());
+    // Ctrl-A swapped in every label (a value longer than the column): the
+    // unfocused row shows its start, using the room of its short hint.
+    while form(&m).form.value("Destination") != "app=crm datacenter=fra1 env=prod loc=us role=web" {
+        quiet(&mut m, ctrl('a'));
+    }
+    quiet(&mut m, kc(KeyCode::Tab));
+    let out = crate::tui::test_support::render_to_string(&m, 100, 30);
+    assert!(
+        out.contains("app=crm datacenter=fra1 env=prod loc"),
+        "{out}"
+    );
+}

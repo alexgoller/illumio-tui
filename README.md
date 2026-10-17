@@ -304,7 +304,8 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   matters (`●` `◆` in a gutter before the row; the strongest mark wins, so a squelch never hides
   a critical flow). The form is prefilled from the row (the labels under the keys in force,
   else `wl:`, `ipl:` or `ip:`; `Ctrl-A` every label of the endpoint, `Ctrl-T` another kind,
-  `Ctrl-U` clears a field), defaults to this PCE and an expiry by action (squelch and
+  `Ctrl-U` clears a field; `Decision` matches the reported decision, `Draft` the draft one once
+  `D` has loaded it), defaults to this PCE and an expiry by action (squelch and
   accept-blocked 90 days, reviewed 30, revisit 7, critical and important never), previews what
   it matches in the loaded result, and needs a comment: why. `Enter` saves to `marks.toml`
   next to `config.toml`. Marks change nothing on the PCE and send no request. Squelched flows
@@ -312,8 +313,8 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   hidden) and the panel says `4 rows (9 flows) squelched · M shows them`; `M` shows them,
   dimmed `~`. Blocked counts the flows accepted as blocked apart (`10 blocked flows · 2
   accepted`). `:marks` lists every mark with its hits (`Enter` edit, `x` delete, `e` 30 more
-  days); expired marks stay in the file, greyed. The generator's rules ignore marks; its
-  header counts the squelched flows.
+  days, asking why again); expired marks stay in the file, greyed. The generator's rules
+  ignore marks; its header counts the squelched flows.
 - **Policy**: `d` toggle draft / active, `p` pending changes (`Enter` on one shows its diff against active), `Tab` switch panes, `Enter` rule
   detail, or on a ruleset load its deny rules. Rules are listed in evaluation order: override
   deny, allow, deny. With writes on, `n` / `e` / `x` create, edit and delete rulesets and rules
