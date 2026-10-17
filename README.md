@@ -1019,7 +1019,7 @@ needs_confirm_count, workloads, skipped, reads, requests}`; a sent one is the re
 re-read, `skipped` by the plan). Anything not updated that was planned exits non-zero after
 the report, by its first reason: 2 (`invalid`: a refusal or a request the PCE called
 invalid), 3 (`auth`), 5 (`rate_limited`), 6 (`write_refused`: the write guard), else 4
-(`write_incomplete`: a failed request, refused workloads, an unknown outcome). Workloads
+(`write_incomplete`: a failed request, refused workloads, an unknown outcome; `audit_failed`: a write applied but its audit entry could not be written). Workloads
 skipped by the re-read are a warning while some were updated; none updated because every
 one changed is exit 4 (`write_skipped`).
 

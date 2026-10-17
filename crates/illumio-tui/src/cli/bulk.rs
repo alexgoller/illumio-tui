@@ -342,16 +342,8 @@ async fn send(
         )));
     }
     plan.confirmed = confirm_count;
-    // The selection was read moments ago in this very run (not from a
-    // cache): reading the same list again before sending adds a request
-    // and nothing else.
-    let ago = selected_at.elapsed();
-    if !sel.hit && ago < RECENT {
-        plan.skip_reread = Some(format!(
-            "the selection read ran {} ms before, in this run",
-            ago.as_millis()
-        ));
-    }
+    // Read past the cache moments ago in this very run: no re-read.
+    plan.selection_read(selected_at, sel.hit);
     for w in &warnings {
         eprintln!("warning: {w}");
     }
@@ -396,9 +388,6 @@ async fn send(
     }
     Ok(())
 }
-
-/// A selection read at most this long before the send is not read again.
-const RECENT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// The plan as `--dry-run` prints it (also a plan with nothing to change,
 /// with or without `--yes`).
@@ -453,7 +442,10 @@ fn exit_error(report: &BulkReport, status: String) -> Option<CliError> {
         Some(F::Auth) => (3, "auth"),
         Some(F::RateLimited) => (5, "rate_limited"),
         Some(F::Pce | F::Unanswered | F::Partial) => (4, "write_incomplete"),
+        Some(F::AuditFailed) => (4, "audit_failed"),
         None if report.updated() == 0 && report.dropped() > 0 => (4, "write_skipped"),
+        // A stopped send always names a reason; should one not, still 4.
+        None if report.stopped() => (4, "write_incomplete"),
         None => return None,
     };
     Some(CliError::Bulk {
@@ -507,6 +499,7 @@ mod tests {
             (BulkFailure::Pce, 4, "write_incomplete"),
             (BulkFailure::Unanswered, 4, "write_incomplete"),
             (BulkFailure::Partial, 4, "write_incomplete"),
+            (BulkFailure::AuditFailed, 4, "audit_failed"),
         ] {
             assert_eq!(
                 exit(&report(Some(f), &[S::NotSent])),
@@ -521,5 +514,10 @@ mod tests {
         // Some updated, some changed: a warning only.
         assert_eq!(exit(&report(None, &[S::Updated, S::Changed])), None);
         assert_eq!(exit(&report(None, &[S::Updated])), None);
+        // Backstop: stopped without a named reason is still 4.
+        assert_eq!(
+            exit(&report(None, &[S::Updated, S::NotSent])),
+            Some((4, "write_incomplete".to_string()))
+        );
     }
 }

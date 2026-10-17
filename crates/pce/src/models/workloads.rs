@@ -56,6 +56,10 @@ pub struct Workload {
     pub agent: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ven: Option<Ref>,
+    /// The PCE marks a removed workload `deleted: true` (a list may still
+    /// return it); a bulk re-read treats it as gone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted: Option<bool>,
 }
 
 /// The effective enforcement of a workload without a VEN. The PCE reports

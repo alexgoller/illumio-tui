@@ -93,7 +93,14 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
 
 fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
     match msg {
-        Msg::Key(k) => on_key(model, k),
+        Msg::Key(k) => {
+            // `Esc again clears N marks` holds for the very next key only,
+            // whatever it does (a screen switch, `?`, `:` too).
+            if k.code != KeyCode::Esc {
+                model.workloads.esc_armed = false;
+            }
+            on_key(model, k)
+        }
         Msg::Mouse(me) => on_mouse(model, me),
         Msg::Resize(w, h) => {
             model.size = (w, h);
@@ -4524,10 +4531,6 @@ fn workload_filter_ref(w: &pce::models::Workload, loaded: &[pce::models::Workloa
 
 fn workloads_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     let page = workloads_page(model);
-    // `Esc again clears N marks` holds for the very next key only.
-    if k.code != KeyCode::Esc {
-        model.workloads.esc_armed = false;
-    }
     if !model.workloads.table.is_searching() {
         match k.code {
             KeyCode::Char('r') => {

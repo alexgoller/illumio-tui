@@ -804,7 +804,12 @@ async fn a_few_workloads_are_re_read_one_get_each_and_a_skip_reads_nothing() {
         origin(),
     )
     .unwrap();
-    plan.skip_reread = Some("read 3 ms before".into());
+    plan.selection_read(std::time::Instant::now(), false);
+    assert!(
+        plan.skip_reread()
+            .unwrap()
+            .starts_with("the selection read ran")
+    );
     assert_eq!(plan.reads(), 0);
     let report = pce.writer(&g).execute_bulk(plan, &mut |_, _| {}).await;
     assert_eq!(report.reads, 0);
@@ -818,8 +823,24 @@ async fn a_few_workloads_are_re_read_one_get_each_and_a_skip_reads_nothing() {
         report
             .lines()
             .iter()
-            .any(|l| l == "no re-read: read 3 ms before")
+            .any(|l| l.starts_with("no re-read: the selection read ran"))
     );
+    // From the cache, or too old: the re-read stays.
+    let mut p = plan_bulk(
+        &targets(&list),
+        &change,
+        WorkloadFilter::default(),
+        origin(),
+    )
+    .unwrap();
+    p.selection_read(std::time::Instant::now(), true);
+    assert_eq!(p.skip_reread(), None);
+    let old = std::time::Instant::now()
+        .checked_sub(Duration::from_secs(6))
+        .unwrap();
+    p.selection_read(old, false);
+    assert_eq!(p.skip_reread(), None);
+    assert_eq!(p.reads(), 3);
 }
 
 #[tokio::test]
@@ -857,4 +878,214 @@ async fn refusals_and_guard_failures_have_their_kinds() {
             .unwrap()
             .starts_with("the re-read failed")
     );
+}
+
+#[tokio::test]
+async fn a_404_on_the_per_href_re_read_is_missing_and_the_rest_proceed() {
+    let server = MockServer::start().await;
+    let list = Value::Array((0..3).map(|n| wl(n, "idle", json!([]))).collect());
+    // w1 is gone: no mock for it (404); w2 comes back deleted.
+    for (n, body) in [
+        (0, wl(0, "idle", json!([]))),
+        (2, {
+            let mut w = wl(2, "idle", json!([]));
+            w["deleted"] = json!(true);
+            w
+        }),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v2/orgs/5/workloads/w{n}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(&server)
+            .await;
+    }
+    Mock::given(method("PUT"))
+        .and(path(BULK))
+        .respond_with(all_updated)
+        .expect(1)
+        .mount(&server)
+        .await;
+    let pce = pce_for(&server);
+    let g = guard(MemoryAudit::new());
+    let plan = plan_bulk(
+        &targets(&list),
+        &BulkChange::enforce(EnforcementMode::VisibilityOnly, None),
+        WorkloadFilter::default(),
+        origin(),
+    )
+    .unwrap();
+    let report = pce.writer(&g).execute_bulk(plan, &mut |_, _| {}).await;
+    assert_eq!(report.reads, 3);
+    let status = |h: &str| report.items.iter().find(|i| i.href == h).unwrap().status;
+    assert_eq!(status("/orgs/5/workloads/w0"), ItemStatus::Updated);
+    assert_eq!(status("/orgs/5/workloads/w1"), ItemStatus::Missing);
+    assert_eq!(
+        status("/orgs/5/workloads/w2"),
+        ItemStatus::Missing,
+        "deleted: gone"
+    );
+    assert_eq!(
+        requests(&server, "PUT", BULK).await[0],
+        json!([{"href": "/orgs/5/workloads/w0", "enforcement_mode": "visibility_only"}])
+    );
+    assert_eq!(report.failure, None);
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn a_deleted_workload_in_the_list_re_read_is_missing() {
+    let server = MockServer::start().await;
+    let list = Value::Array((0..7).map(|n| wl(n, "idle", json!([]))).collect());
+    let mut now = list.clone();
+    now[3]["deleted"] = json!(true);
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(now))
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path(BULK))
+        .respond_with(all_updated)
+        .expect(1)
+        .mount(&server)
+        .await;
+    let pce = pce_for(&server);
+    let g = guard(MemoryAudit::new());
+    let plan = plan_bulk(
+        &targets(&list),
+        &BulkChange::enforce(EnforcementMode::VisibilityOnly, None),
+        WorkloadFilter::default(),
+        origin(),
+    )
+    .unwrap();
+    let report = pce.writer(&g).execute_bulk(plan, &mut |_, _| {}).await;
+    assert_eq!(report.reads, 1);
+    assert_eq!(report.updated(), 6);
+    assert_eq!(
+        report
+            .items
+            .iter()
+            .find(|i| i.href == "/orgs/5/workloads/w3")
+            .unwrap()
+            .status,
+        ItemStatus::Missing
+    );
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn a_500_on_the_second_re_read_get_sends_nothing() {
+    let server = MockServer::start().await;
+    let list = Value::Array((0..3).map(|n| wl(n, "idle", json!([]))).collect());
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads/w0"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(wl(0, "idle", json!([]))))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads/w1"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+    let pce = pce_for(&server);
+    let audit = MemoryAudit::new();
+    let g = guard(audit.clone());
+    let plan = plan_bulk(
+        &targets(&list),
+        &BulkChange::enforce(EnforcementMode::VisibilityOnly, None),
+        WorkloadFilter::default(),
+        origin(),
+    )
+    .unwrap();
+    let report = pce.writer(&g).execute_bulk(plan, &mut |_, _| {}).await;
+    assert_eq!(report.failure, Some(pce::write::bulk::BulkFailure::Pce));
+    assert_eq!(report.reads, 2, "stopped at the failing GET");
+    assert!(
+        report
+            .refused
+            .as_deref()
+            .unwrap()
+            .starts_with("the re-read failed")
+    );
+    assert!(report.items.iter().all(|i| i.status == ItemStatus::NotSent));
+    assert!(requests(&server, "PUT", BULK).await.is_empty());
+    assert!(
+        requests(&server, "GET", "/api/v2/orgs/5/workloads/w2")
+            .await
+            .is_empty()
+    );
+    assert!(audit.entries().is_empty());
+}
+
+/// Accepts the check, refuses every append: a write applies unaudited.
+struct UnwritableAfter;
+
+impl pce::write::AuditSink for UnwritableAfter {
+    fn check_writable(&self) -> std::io::Result<()> {
+        Ok(())
+    }
+    fn append(&self, _: &pce::write::AuditEntry) -> std::io::Result<()> {
+        Err(std::io::Error::other("disk full"))
+    }
+    fn location(&self) -> String {
+        "test".into()
+    }
+}
+
+#[tokio::test]
+async fn a_label_create_that_fails_after_the_write_names_why_it_stopped() {
+    use pce::write::bulk::BulkFailure;
+    let list = json!([wl(0, "idle", json!([]))]);
+    let change = BulkChange::relabel(LabelEdit {
+        set: vec![LabelSet::Create(LabelDraft::new("app", "shop"))],
+        remove: vec![],
+    });
+    // The create answers an href that is no label: stopped, failure Pce.
+    let server = MockServer::start().await;
+    mount_list(&server, &list).await;
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/labels"))
+        .respond_with(
+            ResponseTemplate::new(201).set_body_json(json!({"href": "/orgs/5/workloads/oops"})),
+        )
+        .mount(&server)
+        .await;
+    let pce = pce_for(&server);
+    let g = guard(MemoryAudit::new());
+    let plan = plan_bulk(
+        &targets(&list),
+        &change,
+        WorkloadFilter::default(),
+        origin(),
+    )
+    .unwrap();
+    let report = pce.writer(&g).execute_bulk(plan, &mut |_, _| {}).await;
+    assert!(report.stopped());
+    assert_eq!(report.failure, Some(BulkFailure::Pce));
+    assert!(requests(&server, "PUT", BULK).await.is_empty());
+    // The create applies but its audit entry fails: stopped, AuditFailed.
+    let server = MockServer::start().await;
+    mount_list(&server, &list).await;
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/labels"))
+        .respond_with(
+            ResponseTemplate::new(201).set_body_json(json!({"href": "/orgs/5/labels/99"})),
+        )
+        .mount(&server)
+        .await;
+    let pce = pce_for(&server);
+    let g = WriteGuard::new(true, Box::new(UnwritableAfter), ctx("lab")).unwrap();
+    let plan = plan_bulk(
+        &targets(&list),
+        &change,
+        WorkloadFilter::default(),
+        origin(),
+    )
+    .unwrap();
+    let report = pce.writer(&g).execute_bulk(plan, &mut |_, _| {}).await;
+    assert!(report.stopped());
+    assert_eq!(report.failure, Some(BulkFailure::AuditFailed));
+    assert!(report.steps[0].audit_failed.is_some());
+    assert_eq!(report.steps[1].status, StepStatus::NotSent);
+    assert!(requests(&server, "PUT", BULK).await.is_empty());
 }

@@ -30,6 +30,10 @@ use std::time::Duration;
 /// Workloads per `bulk_update` request.
 pub const BULK_CHUNK: usize = 100;
 
+/// A selection read at most this long before the send is not read again
+/// ([`BulkPlan::selection_read`]).
+pub const RECENT_READ: Duration = Duration::from_secs(5);
+
 /// Up to this many workloads the re-read is one GET each (cheaper than
 /// the list); above, one list read.
 pub const REREAD_EACH_MAX: usize = 5;
@@ -382,9 +386,10 @@ pub struct BulkPlan {
     /// The list read that finds the targets again before sending (for more
     /// than [`REREAD_EACH_MAX`] workloads; fewer are read one GET each).
     pub reread: WorkloadFilter,
-    /// Send without a re-read, and why: only for a plan made from a read
-    /// moments ago in the same run (the CLI's selection).
-    pub skip_reread: Option<String>,
+    /// Send without a re-read, and why: set only by
+    /// [`BulkPlan::selection_read`] for a plan made from a read moments
+    /// ago in the same run (the CLI's selection).
+    skip_reread: Option<String>,
     /// The target count the person typed. Required when the plan enforces
     /// (full or selective) more than one workload; `execute_bulk` refuses
     /// without it.
@@ -559,6 +564,25 @@ fn counted<'a>(texts: impl Iterator<Item = &'a str>) -> Vec<(usize, &'a str)> {
 }
 
 impl BulkPlan {
+    /// The plan was made from a list read started at `at` (`hit`: answered
+    /// from the cache). Read past the cache at most [`RECENT_READ`] ago, it
+    /// is as fresh as a re-read would be: the send skips the re-read and
+    /// the plan says why. Older, or from the cache: the re-read stays.
+    pub fn selection_read(&mut self, at: std::time::Instant, hit: bool) {
+        let ago = at.elapsed();
+        self.skip_reread = (!hit && ago <= RECENT_READ).then(|| {
+            format!(
+                "the selection read ran {} ms before, in this run",
+                ago.as_millis()
+            )
+        });
+    }
+
+    /// Why the send skips the re-read, if it does.
+    pub fn skip_reread(&self) -> Option<&str> {
+        self.skip_reread.as_deref()
+    }
+
     /// Full or selective on more than one workload: the count must be
     /// typed before it is sent.
     pub fn needs_count(&self) -> bool {
@@ -865,6 +889,9 @@ pub enum BulkFailure {
     Unanswered,
     /// The PCE refused some workloads of a chunk.
     Partial,
+    /// A write applied but its audit entry could not be written: the send
+    /// stopped after it.
+    AuditFailed,
 }
 
 impl BulkFailure {
@@ -1360,7 +1387,12 @@ impl Writer<'_> {
             }
         };
         report.reread_skipped = plan.skip_reread.clone();
-        let now: HashMap<&str, &Workload> = now.iter().map(|w| (w.href.as_str(), w)).collect();
+        // A workload the PCE reports deleted is gone, as one not returned.
+        let now: HashMap<&str, &Workload> = now
+            .iter()
+            .filter(|w| w.deleted != Some(true))
+            .map(|w| (w.href.as_str(), w))
+            .collect();
         let placeholders: Vec<String> = (0..plan.creates.len()).map(step_placeholder).collect();
         let mut sendable: Vec<BulkItem> = Vec::new();
         for item in &plan.items {
@@ -1452,7 +1484,11 @@ impl Writer<'_> {
                                 step.error =
                                     Some(format!("created, but its href is unusable: {e}"));
                                 report.labels_created = true;
+                                report.failure.get_or_insert(BulkFailure::Pce);
                             }
+                        }
+                        if step.audit_failed.is_some() {
+                            report.failure.get_or_insert(BulkFailure::AuditFailed);
                         }
                         stopped |=
                             step.status != StepStatus::Written || step.audit_failed.is_some();
@@ -1599,7 +1635,7 @@ impl Writer<'_> {
                             } else if unknown {
                                 report.failure.get_or_insert(BulkFailure::Unanswered);
                             } else if step.audit_failed.is_some() {
-                                report.failure.get_or_insert(BulkFailure::Refused);
+                                report.failure.get_or_insert(BulkFailure::AuditFailed);
                             }
                             stopped = refused || unknown || step.audit_failed.is_some();
                         }

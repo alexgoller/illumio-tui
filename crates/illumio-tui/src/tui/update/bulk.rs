@@ -892,6 +892,13 @@ mod tests {
         quiet(&mut m, key('j'));
         quiet(&mut m, code(KeyCode::Esc));
         assert_eq!(m.workloads.marked.len(), 26);
+        // A screen switch and back in between: asked again too.
+        let _ = update(&mut m, key('1'));
+        let _ = update(&mut m, key('4'));
+        assert!(!m.workloads.esc_armed);
+        quiet(&mut m, code(KeyCode::Esc));
+        assert_eq!(m.workloads.marked.len(), 26);
+        assert!(m.workloads.esc_armed);
         quiet(&mut m, code(KeyCode::Esc));
         assert!(m.workloads.marked.is_empty());
         assert_eq!(m.status.text, "26 marks cleared");
