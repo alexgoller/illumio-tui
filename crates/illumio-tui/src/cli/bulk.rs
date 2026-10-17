@@ -8,7 +8,7 @@ use super::error::CliError;
 use super::output::{TableRows, WriteMeta};
 use super::workloads::{WorkloadEnforceArgs, WorkloadRelabelArgs, WorkloadsArgs, select};
 use super::write::{self, WriteFlags, parse_kv, similar, with_similar};
-use pce::write::bulk::{BulkItem, BulkReport, BulkSkip, StepStatus};
+use pce::write::bulk::{BulkItem, BulkReport, BulkSkip, COUNT_ABOVE, StepStatus};
 use pce::write::{
     BatchOrigin, BulkChange, BulkLabel, BulkTarget, EnforcementMode, LabelEdit, LabelRemoval,
     LabelSet, VisibilityLevel, WriteGuard, WriteRequest, plan_bulk,
@@ -16,8 +16,20 @@ use pce::write::{
 use pce::{NameIndex, WriteMethod};
 use serde::Serialize;
 
+/// No filter and no `--all`: refused before any request, so a bare
+/// command never reaches every workload by accident.
+fn scope_check(select: &WorkloadsArgs, all: bool) -> Result<(), CliError> {
+    if all || select.narrows() {
+        return Ok(());
+    }
+    Err(CliError::Write(pce::write::WriteError::invalid(
+        "no filter selects the workloads: pass filters (--label, --hostname, --enforcement, ...) or --all to change every workload; nothing sent",
+    )))
+}
+
 pub async fn enforce(ctx: &Context, a: &WorkloadEnforceArgs) -> Result<(), CliError> {
     let guard = write::prepare(ctx, &a.write)?;
+    scope_check(&a.select, a.all)?;
     let mode = EnforcementMode::parse(&a.mode)
         .ok_or_else(|| CliError::Args(format!("unknown enforcement mode {:?}", a.mode)))?;
     let visibility = a
@@ -90,6 +102,7 @@ fn relabel_specs(a: &WorkloadRelabelArgs) -> Result<Specs, CliError> {
 
 pub async fn relabel(ctx: &Context, a: &WorkloadRelabelArgs) -> Result<(), CliError> {
     let guard = write::prepare(ctx, &a.write)?;
+    scope_check(&a.select, a.all)?;
     let (set, remove) = relabel_specs(a)?;
     // The shape first (a key set twice, set and removed): before any request.
     let shape = LabelEdit {
@@ -334,11 +347,13 @@ async fn send(
         )));
     }
     if plan.needs_count() && flags.yes && confirm_count.is_none() {
+        // Why, without the count itself: the dry run shows it.
+        let why = match change.enforcement {
+            Some(m) if m.enforces() => format!("{} on more than one workload", m.as_str()),
+            _ => format!("more than {COUNT_ABOVE} workloads"),
+        };
         return Err(CliError::Args(format!(
-            "{} on more than one workload: pass --confirm-count with the number of workloads that change (--dry-run shows it); nothing sent",
-            change
-                .enforcement
-                .map_or("enforcement", EnforcementMode::as_str)
+            "{why}: pass --confirm-count with the number of workloads that change (--dry-run shows it); nothing sent"
         )));
     }
     plan.confirmed = confirm_count;

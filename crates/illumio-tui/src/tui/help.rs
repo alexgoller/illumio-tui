@@ -362,7 +362,10 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
                 "L / M",
                 "Workloads: labels · enforcement of many, one confirm",
             ),
-            more("", "full/selective on several: type the count, then y"),
+            more(
+                "",
+                "full/selective on 2+ or any change on 26+: type the count",
+            ),
             more(
                 "",
                 "d on the confirm: draft check (1 Explorer query, asked)",

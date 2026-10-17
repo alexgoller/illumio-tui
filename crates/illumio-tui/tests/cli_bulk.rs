@@ -146,14 +146,14 @@ fn three() -> Value {
 async fn writes_off_or_no_flag_refuse_before_any_request() {
     let server = MockServer::start().await;
     let a = cmd(&server)
-        .args(["--json", "workloads", "enforce", "full", "--yes"])
+        .args(["--json", "workloads", "enforce", "--all", "full", "--yes"])
         .assert()
         .code(6);
     let out = String::from_utf8_lossy(&a.get_output().stderr).to_string();
     assert!(out.contains("write_refused"), "{out}");
     let state = tempfile::tempdir().unwrap();
     writer(&server, state.path())
-        .args(["workloads", "relabel", "--set", "app=shop"])
+        .args(["workloads", "relabel", "--all", "--set", "app=shop"])
         .assert()
         .code(2);
     assert!(server.received_requests().await.unwrap().is_empty());
@@ -218,7 +218,7 @@ async fn full_on_several_needs_the_matching_count() {
     mount_list(&server, three()).await;
     let state = tempfile::tempdir().unwrap();
     let a = writer(&server, state.path())
-        .args(["workloads", "enforce", "full", "--yes"])
+        .args(["workloads", "enforce", "--all", "full", "--yes"])
         .assert()
         .code(2);
     let err = String::from_utf8_lossy(&a.get_output().stderr).to_string();
@@ -227,6 +227,7 @@ async fn full_on_several_needs_the_matching_count() {
         .args([
             "workloads",
             "enforce",
+            "--all",
             "selective",
             "--yes",
             "--confirm-count",
@@ -255,6 +256,7 @@ async fn enforce_yes_re_reads_once_sends_and_audits() {
         .args([
             "workloads",
             "enforce",
+            "--all",
             "full",
             "--visibility",
             "flow_drops",
@@ -307,7 +309,15 @@ async fn two_hundred_fifty_workloads_go_in_three_requests() {
         .await;
     let state = tempfile::tempdir().unwrap();
     let a = writer(&server, state.path())
-        .args(["workloads", "enforce", "idle", "--yes"])
+        .args([
+            "workloads",
+            "enforce",
+            "--all",
+            "idle",
+            "--yes",
+            "--confirm-count",
+            "250",
+        ])
         .assert()
         .success();
     let out = stdout_json(&a);
@@ -347,6 +357,7 @@ async fn relabel_dry_run_and_yes() {
         .args([
             "workloads",
             "relabel",
+            "--all",
             "--set",
             "app=shop,env=-",
             "--dry-run",
@@ -370,6 +381,7 @@ async fn relabel_dry_run_and_yes() {
         .args([
             "workloads",
             "relabel",
+            "--all",
             "--add-label",
             "app=shop",
             "--remove-label",
@@ -390,7 +402,14 @@ async fn relabel_dry_run_and_yes() {
     }
     // An unknown label is refused with the known values, nothing sent.
     let a = writer(&server, state.path())
-        .args(["workloads", "relabel", "--set", "app=nope", "--yes"])
+        .args([
+            "workloads",
+            "relabel",
+            "--all",
+            "--set",
+            "app=nope",
+            "--yes",
+        ])
         .assert()
         .code(2);
     let err = String::from_utf8_lossy(&a.get_output().stderr).to_string();
@@ -413,7 +432,7 @@ async fn a_refused_workload_exits_4_after_the_report() {
         .await;
     let state = tempfile::tempdir().unwrap();
     let a = writer(&server, state.path())
-        .args(["workloads", "enforce", "idle", "--yes"])
+        .args(["workloads", "enforce", "--all", "idle", "--yes"])
         .assert()
         .code(4);
     let out = stdout_json(&a);
@@ -429,7 +448,14 @@ async fn csv_is_refused_and_the_table_prints_the_plan() {
     let server = MockServer::start().await;
     cmd(&server)
         .env("ILLUMIO_WRITES", "1")
-        .args(["--csv", "workloads", "enforce", "idle", "--dry-run"])
+        .args([
+            "--csv",
+            "workloads",
+            "enforce",
+            "--all",
+            "idle",
+            "--dry-run",
+        ])
         .assert()
         .code(2);
     assert!(server.received_requests().await.unwrap().is_empty());
@@ -438,7 +464,14 @@ async fn csv_is_refused_and_the_table_prints_the_plan() {
     let a = cmd(&server)
         .env("ILLUMIO_WRITES", "1")
         .env("XDG_STATE_HOME", state.path())
-        .args(["--table", "workloads", "enforce", "idle", "--dry-run"])
+        .args([
+            "--table",
+            "workloads",
+            "enforce",
+            "--all",
+            "idle",
+            "--dry-run",
+        ])
         .assert()
         .success();
     let out = String::from_utf8_lossy(&a.get_output().stdout).to_string();
@@ -461,6 +494,7 @@ async fn a_truncated_selection_is_never_sent() {
         .args([
             "workloads",
             "enforce",
+            "--all",
             "idle",
             "--max-results",
             "3",
@@ -475,6 +509,7 @@ async fn a_truncated_selection_is_never_sent() {
         .args([
             "workloads",
             "enforce",
+            "--all",
             "idle",
             "--max-results",
             "3",
@@ -498,7 +533,7 @@ async fn nothing_to_change_prints_the_summary_and_exits_0() {
     .await;
     let state = tempfile::tempdir().unwrap();
     let a = writer(&server, state.path())
-        .args(["workloads", "enforce", "full", "--yes"])
+        .args(["workloads", "enforce", "--all", "full", "--yes"])
         .assert()
         .success();
     let out = stdout_json(&a);
@@ -509,4 +544,108 @@ async fn nothing_to_change_prints_the_summary_and_exits_0() {
     );
     assert_eq!(count(&server, "PUT", BULK).await, 0);
     assert!(audit_lines(state.path()).is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn no_filter_needs_all_and_sends_nothing() {
+    let server = MockServer::start().await;
+    let state = tempfile::tempdir().unwrap();
+    for args in [
+        vec!["workloads", "enforce", "idle", "--yes"],
+        vec!["workloads", "enforce", "idle", "--dry-run"],
+        vec!["workloads", "relabel", "--set", "app=shop", "--yes"],
+        vec![
+            "workloads",
+            "relabel",
+            "--set",
+            "app=shop",
+            "--max-results",
+            "5",
+            "--dry-run",
+        ],
+    ] {
+        let a = writer(&server, state.path()).args(&args).assert().code(2);
+        let err = String::from_utf8_lossy(&a.get_output().stderr).to_string();
+        assert!(err.contains("\"kind\":\"invalid\""), "{args:?}: {err}");
+        assert!(err.contains("--all"), "{err}");
+    }
+    assert!(server.received_requests().await.unwrap().is_empty());
+    // With --all: read and planned.
+    mount_list(&server, three()).await;
+    let a = writer(&server, state.path())
+        .args(["workloads", "enforce", "idle", "--all", "--dry-run"])
+        .assert()
+        .success();
+    assert_eq!(stdout_json(&a)["data"]["count"], 2);
+    // --all with filters: the filters still apply.
+    let a = writer(&server, state.path())
+        .args([
+            "workloads",
+            "enforce",
+            "idle",
+            "--all",
+            "--managed",
+            "true",
+            "--dry-run",
+        ])
+        .assert()
+        .success();
+    assert_eq!(stdout_json(&a)["data"]["count"], 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn more_than_twenty_five_workloads_need_the_count() {
+    let server = MockServer::start().await;
+    mount_index(&server).await;
+    let list = Value::Array(
+        (0..26)
+            .map(|n| wl(n, "visibility_only", true, json!([])))
+            .collect(),
+    );
+    mount_list(&server, list).await;
+    Mock::given(method("PUT"))
+        .and(path(BULK))
+        .respond_with(all_updated)
+        .mount(&server)
+        .await;
+    let state = tempfile::tempdir().unwrap();
+    let a = writer(&server, state.path())
+        .args(["workloads", "enforce", "idle", "--all", "--yes"])
+        .assert()
+        .code(2);
+    let err = String::from_utf8_lossy(&a.get_output().stderr).to_string();
+    assert!(
+        err.contains("more than 25 workloads: pass --confirm-count"),
+        "{err}"
+    );
+    writer(&server, state.path())
+        .args([
+            "workloads",
+            "relabel",
+            "--all",
+            "--set",
+            "app=shop",
+            "--yes",
+        ])
+        .assert()
+        .code(2);
+    assert_eq!(count(&server, "PUT", BULK).await, 0);
+    let a = writer(&server, state.path())
+        .args(["workloads", "enforce", "idle", "--all", "--dry-run"])
+        .assert()
+        .success();
+    assert_eq!(stdout_json(&a)["data"]["needs_confirm_count"], true);
+    writer(&server, state.path())
+        .args([
+            "workloads",
+            "enforce",
+            "idle",
+            "--all",
+            "--yes",
+            "--confirm-count",
+            "26",
+        ])
+        .assert()
+        .success();
+    assert_eq!(count(&server, "PUT", BULK).await, 1);
 }

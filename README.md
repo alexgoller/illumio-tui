@@ -969,7 +969,9 @@ enforcement mode (idle, visibility_only, selective, full) and the visibility lev
 (skipped)`); unmanaged workloads are skipped.
 
 `Enter` opens one confirm listing every workload's change and every request. Full or
-selective on more than one workload needs the workload count typed before `y` is accepted.
+selective on more than one workload, and any change to more than 25 workloads, needs the
+workload count typed before `y` is accepted (the confirm says which: `full on 3 workloads`,
+`30 workloads (more than 25)`); the library refuses such a plan without it too.
 For an enforcement change the confirm says how many blocked and potentially blocked flows
 of the loaded traffic these workloads have, in (to them) and out (from them to other hosts),
 locally with no request; and `d` runs a draft check on demand: one Explorer query of their
@@ -1005,13 +1007,17 @@ filters or raise `--max-results`.
 
     illumio-tui workloads enforce full --label app=shop --label env=prod --dry-run
     illumio-tui workloads enforce full --label app=shop --label env=prod --yes --confirm-count 14
-    illumio-tui workloads enforce visibility_only --visibility flow_drops --enforcement idle --yes
+    illumio-tui workloads enforce visibility_only --visibility flow_drops --enforcement idle --yes --confirm-count 40
+    illumio-tui workloads enforce visibility_only --all --dry-run
     illumio-tui workloads relabel --set env=prod,role=- --label app=shop --dry-run
     illumio-tui workloads relabel --add-label loc=eu --remove-label env=dev --hostname web --yes
 
-`enforce` full or selective on more than one workload needs `--confirm-count N` matching
-the number of workloads that change (the dry run prints it as `count`); a mismatch or a
-missing count is exit 2 before any write. A label `relabel` names must exist (the CLI does
+`enforce` and `relabel` refuse without a filter (exit 2, `invalid`, before any request)
+unless `--all` is given; `--all` with filters is allowed and the filters still apply, so
+`--all` only says "every match is meant" (a dry run needs it as well). Full or selective on
+more than one workload, and any change to more than 25 workloads, needs `--confirm-count N`
+matching the number of workloads that change (the dry run prints it as `count`); a mismatch
+or a missing count is exit 2 before any write. A label `relabel` names must exist (the CLI does
 not create labels). A dry run's `data` is `{dry_run, change, summary, count,
 needs_confirm_count, workloads, skipped, reads, requests}`; a sent one is the report:
 `steps` (each request: status, HTTP status, error) and `items` (each workload: `updated`,

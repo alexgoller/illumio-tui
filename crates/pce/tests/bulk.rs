@@ -208,13 +208,15 @@ async fn a_chunk_with_a_failure_stops_the_send() {
     let pce = pce_for(&server);
     let audit = MemoryAudit::new();
     let g = guard(audit.clone());
-    let plan = plan_bulk(
+    let mut plan = plan_bulk(
         &targets(&list),
         &BulkChange::enforce(EnforcementMode::Idle, None),
         WorkloadFilter::default(),
         origin(),
     )
     .unwrap();
+    // More than 25: the count is typed.
+    plan.confirmed = Some(plan.items.len());
     let report = pce.writer(&g).execute_bulk(plan, &mut |_, _| {}).await;
     assert_eq!(report.updated(), 99);
     let failed: Vec<_> = report
@@ -266,13 +268,15 @@ async fn a_refused_chunk_fails_its_workloads_and_stops() {
     let pce = pce_for(&server);
     let audit = MemoryAudit::new();
     let g = guard(audit.clone());
-    let plan = plan_bulk(
+    let mut plan = plan_bulk(
         &targets(&list),
         &BulkChange::enforce(EnforcementMode::VisibilityOnly, None),
         WorkloadFilter::default(),
         origin(),
     )
     .unwrap();
+    // More than 25: the count is typed.
+    plan.confirmed = Some(plan.items.len());
     let report = pce.writer(&g).execute_bulk(plan, &mut |_, _| {}).await;
     assert_eq!(report.steps[0].status, StepStatus::Failed);
     assert_eq!(report.steps[0].http_status, Some(406));
@@ -596,13 +600,15 @@ async fn an_unanswered_chunk_may_have_applied_and_is_never_retried() {
     let pce = pce_for(&server);
     let audit = MemoryAudit::new();
     let g = guard(audit.clone());
-    let plan = plan_bulk(
+    let mut plan = plan_bulk(
         &targets(&list),
         &BulkChange::enforce(EnforcementMode::VisibilityOnly, None),
         WorkloadFilter::default(),
         origin(),
     )
     .unwrap();
+    // More than 25: the count is typed.
+    plan.confirmed = Some(plan.items.len());
     let report = pce.writer(&g).execute_bulk(plan, &mut |_, _| {}).await;
     assert_eq!(report.steps[0].status, StepStatus::Unanswered);
     assert_eq!(report.steps[1].status, StepStatus::NotSent);
@@ -649,13 +655,15 @@ async fn answered_with(answer: ResponseTemplate, labels: bool) -> (pce::write::B
     } else {
         BulkChange::enforce(EnforcementMode::VisibilityOnly, None)
     };
-    let plan = plan_bulk(
+    let mut plan = plan_bulk(
         &targets(&list),
         &change,
         WorkloadFilter::default(),
         origin(),
     )
     .unwrap();
+    // More than 25: the count is typed.
+    plan.confirmed = Some(plan.items.len());
     let report = pce.writer(&g).execute_bulk(plan, &mut |_, _| {}).await;
     pce.workloads(&WorkloadFilter::default(), CacheMode::Use)
         .await
@@ -1088,4 +1096,34 @@ async fn a_label_create_that_fails_after_the_write_names_why_it_stopped() {
     assert!(report.steps[0].audit_failed.is_some());
     assert_eq!(report.steps[1].status, StepStatus::NotSent);
     assert!(requests(&server, "PUT", BULK).await.is_empty());
+}
+
+#[tokio::test]
+async fn twenty_six_workloads_without_the_count_are_refused_by_the_library() {
+    let server = MockServer::start().await;
+    let list = Value::Array(
+        (0..26)
+            .map(|n| wl(n, "visibility_only", json!([])))
+            .collect(),
+    );
+    let pce = pce_for(&server);
+    let g = guard(MemoryAudit::new());
+    let plan = plan_bulk(
+        &targets(&list),
+        &BulkChange::enforce(EnforcementMode::Idle, None),
+        WorkloadFilter::default(),
+        origin(),
+    )
+    .unwrap();
+    let report = pce.writer(&g).execute_bulk(plan, &mut |_, _| {}).await;
+    assert!(
+        report
+            .refused
+            .as_deref()
+            .unwrap()
+            .contains("26 workloads (more than 25) needs that count typed first"),
+        "{:?}",
+        report.refused
+    );
+    assert!(server.received_requests().await.unwrap().is_empty());
 }

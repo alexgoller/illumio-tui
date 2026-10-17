@@ -30,6 +30,11 @@ use std::time::Duration;
 /// Workloads per `bulk_update` request.
 pub const BULK_CHUNK: usize = 100;
 
+/// A change to more workloads than this, whatever it is, needs their count
+/// typed first ([`BulkPlan::needs_count`]), as full or selective on more
+/// than one does.
+pub const COUNT_ABOVE: usize = 25;
+
 /// A selection read at most this long before the send is not read again
 /// ([`BulkPlan::selection_read`]).
 pub const RECENT_READ: Duration = Duration::from_secs(5);
@@ -586,7 +591,19 @@ impl BulkPlan {
     /// Full or selective on more than one workload: the count must be
     /// typed before it is sent.
     pub fn needs_count(&self) -> bool {
-        self.change.enforces() && self.items.len() > 1
+        self.count_reason().is_some()
+    }
+
+    /// Why the count must be typed: `full on 3 workloads` (full or
+    /// selective on more than one), `30 workloads (more than 25)` (any
+    /// change above [`COUNT_ABOVE`]); `None` when it need not be.
+    pub fn count_reason(&self) -> Option<String> {
+        let n = self.items.len();
+        match self.change.enforcement {
+            Some(m) if m.enforces() && n > 1 => Some(format!("{} on {n} workloads", m.as_str())),
+            _ if n > COUNT_ABOVE => Some(format!("{n} workloads (more than {COUNT_ABOVE})")),
+            _ => None,
+        }
     }
 
     /// The hrefs of the workloads it changes.
@@ -1350,11 +1367,8 @@ impl Writer<'_> {
             })
         } else if plan.needs_count() && plan.confirmed != Some(plan.items.len()) {
             Some(format!(
-                "{} on {} workloads needs that count typed first",
-                plan.change
-                    .enforcement
-                    .map_or("enforcement", EnforcementMode::as_str),
-                plan.items.len()
+                "{} needs that count typed first",
+                plan.count_reason().unwrap_or_default()
             ))
         } else {
             plan.items
@@ -1768,6 +1782,27 @@ mod tests {
             &BulkChange::enforce(EnforcementMode::VisibilityOnly, None),
         );
         assert!(!vis.needs_count(), "visibility_only blocks nothing");
+    }
+
+    #[test]
+    fn more_than_twenty_five_workloads_need_the_count_whatever_the_change() {
+        let ts: Vec<BulkTarget> = (0..26)
+            .map(|n| target(n, "visibility_only", true, vec![]))
+            .collect();
+        let idle = BulkChange::enforce(EnforcementMode::Idle, None);
+        let p = plan(&ts, &idle);
+        assert!(p.needs_count());
+        assert_eq!(p.count_reason().unwrap(), "26 workloads (more than 25)");
+        let p = plan(&ts[..25], &idle);
+        assert!(!p.needs_count(), "25: no count");
+        let relabel = BulkChange::relabel(LabelEdit {
+            set: vec![LabelSet::Existing(label("/orgs/5/labels/1", "app", "shop"))],
+            remove: vec![],
+        });
+        assert!(plan(&ts, &relabel).needs_count());
+        assert!(!plan(&ts[..25], &relabel).needs_count());
+        let full = plan(&ts[..2], &BulkChange::enforce(EnforcementMode::Full, None));
+        assert_eq!(full.count_reason().unwrap(), "full on 2 workloads");
     }
 
     #[test]

@@ -66,6 +66,23 @@ pub struct WorkloadsArgs {
     pub unlabeled: Option<Vec<String>>,
 }
 
+impl WorkloadsArgs {
+    /// Any filter that narrows the selection (`--max-results` is a cap,
+    /// not a filter).
+    pub fn narrows(&self) -> bool {
+        self.hostname.is_some()
+            || self.name.is_some()
+            || self.ip.is_some()
+            || !self.labels.is_empty()
+            || self.enforcement.is_some()
+            || self.online.is_some()
+            || self.managed.is_some()
+            || self.unhealthy
+            || self.offline
+            || self.unlabeled.is_some()
+    }
+}
+
 /// `workloads` lists by default; `add`, `update` and `delete` write
 /// unmanaged workloads.
 #[derive(Args, Debug)]
@@ -116,6 +133,10 @@ pub struct WorkloadEnforceArgs {
     /// selective on more than one (the dry run prints it)
     #[arg(long, value_name = "N")]
     pub confirm_count: Option<usize>,
+    /// Every workload the read returns when no filter narrows it (needed
+    /// without filters; with filters it changes nothing)
+    #[arg(long)]
+    pub all: bool,
     #[command(flatten)]
     pub select: WorkloadsArgs,
     #[command(flatten)]
@@ -135,6 +156,10 @@ pub struct WorkloadRelabelArgs {
     /// workloads that have that value) (repeatable)
     #[arg(long = "remove-label")]
     pub remove_labels: Vec<String>,
+    /// Every workload the read returns when no filter narrows it (needed
+    /// without filters; with filters it changes nothing)
+    #[arg(long)]
+    pub all: bool,
     #[command(flatten)]
     pub select: WorkloadsArgs,
     #[command(flatten)]

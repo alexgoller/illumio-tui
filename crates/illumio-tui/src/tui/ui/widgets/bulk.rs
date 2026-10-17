@@ -107,16 +107,12 @@ fn confirm_layout(model: &Model, c: &BulkConfirm, area: Rect) -> ConfirmLayout {
     };
     let plan = &c.plan;
     // The typed count first: on a short terminal it is what must show.
-    if plan.needs_count() {
+    if let Some(why) = plan.count_reason() {
         let n = plan.items.len();
-        let mode = plan
-            .change
-            .enforcement
-            .map_or("enforcement", EnforcementMode::as_str);
         let text = if c.count_ok() {
-            format!("{mode} on {n} workloads: count typed, y sends")
+            format!("{why}: count typed, y sends")
         } else {
-            format!("{mode} on {n} workloads: type {n} to confirm: {}▏", c.typed)
+            format!("{why}: type {n} to confirm: {}▏", c.typed)
         };
         pin(&text, Style::new().fg(t.bad).add_modifier(Modifier::BOLD));
     }

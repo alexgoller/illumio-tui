@@ -953,4 +953,74 @@ mod tests {
         );
         assert_eq!(m.workloads.marked.len(), 4, "kept: the outcome is unknown");
     }
+
+    /// Workloads with `n` copies of the first fixture VEN (visibility_only).
+    fn with_n(n: usize) -> Model {
+        let mut m = on_workloads(true);
+        let base = m.workloads.raw[0].clone();
+        m.workloads.raw = (0..n)
+            .map(|i| {
+                let mut w = base.clone();
+                w.href = format!("/orgs/5/workloads/n{i}");
+                w.hostname = Some(format!("n{i}.example"));
+                w.enforcement_mode = Some("visibility_only".into());
+                w
+            })
+            .collect();
+        let order = m.limits.key_order();
+        m.workloads.rebuild(&order);
+        m
+    }
+
+    #[test]
+    fn more_than_twenty_five_need_the_count_for_any_change() {
+        // 26, idle: the count, worded by size.
+        let mut m = with_n(26);
+        quiet(&mut m, key('V'));
+        quiet(&mut m, key('M'));
+        while EnforcementMode::ALL[picker(&m).mode] != EnforcementMode::Idle {
+            quiet(&mut m, key('k'));
+        }
+        quiet(&mut m, code(KeyCode::Enter));
+        assert!(confirm(&m).plan.needs_count());
+        assert_eq!(
+            confirm(&m).plan.count_reason().unwrap(),
+            "26 workloads (more than 25)"
+        );
+        quiet(&mut m, key('y'));
+        assert!(
+            matches!(m.overlay, Overlay::ConfirmBulk(_)),
+            "y waits for the count"
+        );
+        let out = crate::tui::test_support::render_to_string(&m, 100, 30);
+        assert!(
+            out.contains("26 workloads (more than 25): type 26 to confirm"),
+            "{out}"
+        );
+        quiet(&mut m, key('2'));
+        quiet(&mut m, key('6'));
+        let cmds = update(&mut m, key('y'));
+        let [Cmd::ExecuteBulk(plan)] = &cmds[..] else {
+            panic!("{cmds:?}");
+        };
+        assert_eq!(plan.confirmed, Some(26));
+        // 26, a relabel: the count too.
+        let mut m = with_n(26);
+        quiet(&mut m, key('V'));
+        quiet(&mut m, key('L'));
+        quiet(&mut m, key('-')); // remove app
+        quiet(&mut m, code(KeyCode::Enter));
+        assert!(confirm(&m).plan.needs_count());
+        // 25, idle: none.
+        let mut m = with_n(25);
+        quiet(&mut m, key('V'));
+        quiet(&mut m, key('M'));
+        while EnforcementMode::ALL[picker(&m).mode] != EnforcementMode::Idle {
+            quiet(&mut m, key('k'));
+        }
+        quiet(&mut m, code(KeyCode::Enter));
+        assert!(!confirm(&m).plan.needs_count());
+        let cmds = update(&mut m, key('y'));
+        assert!(matches!(&cmds[..], [Cmd::ExecuteBulk(_)]));
+    }
 }
