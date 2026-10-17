@@ -802,6 +802,11 @@ pub struct TreemapState {
     /// Where the tiles go: the Traffic table area minus its border for the
     /// terminal size (`ui::screens::traffic::treemap_area`).
     pub area: TreemapRect,
+    /// The highlight (critical, important, revisit) of each pair with one,
+    /// by (source, destination) text, and of each source: the glyph its
+    /// tile shows before its label. Computed at relayout, never per draw.
+    pub highlights: BTreeMap<(String, String), pce::marks::Marker>,
+    pub source_highlights: BTreeMap<String, pce::marks::Marker>,
 }
 
 impl TreemapState {
@@ -814,6 +819,20 @@ impl TreemapState {
             groups: Vec::new(),
             has_bytes: false,
             area,
+            highlights: BTreeMap::new(),
+            source_highlights: BTreeMap::new(),
+        }
+    }
+
+    /// The highlight a tile shows: a destination by its pair, a source by
+    /// the strongest of its pairs.
+    pub fn highlight(&self, src: &str, dst: Option<&str>) -> Option<pce::marks::Marker> {
+        match dst {
+            Some(d) => self
+                .highlights
+                .get(&(src.to_string(), d.to_string()))
+                .copied(),
+            None => self.source_highlights.get(src).copied(),
         }
     }
 
@@ -1075,14 +1094,14 @@ pub fn group_columns() -> Vec<Column<FlowGroup>> {
         Column {
             title: "flows",
             width: 6,
-            cell: |g| g.flows.to_string(),
+            cell: |g| flows_cell(g.flows, g.marks.as_ref()),
             key: |g| SortKey::Num(g.flows),
             right: true,
             hide_below: 0,
             narrow: None,
             narrow_width: 5,
             full_title: None,
-            full: None,
+            full: Some(|g| g.flows.to_string()),
         },
         Column {
             title: "conns",
@@ -1429,6 +1448,16 @@ pub fn section_rows(
     out
 }
 
+/// A flows cell: the records shown, then `~12` for the squelched ones of
+/// the row left out (its sort key stays the shown count; `:export` writes
+/// the count alone).
+fn flows_cell(flows: u64, m: Option<&RowMarks>) -> String {
+    match m.map(|m| m.hidden).filter(|h| *h > 0) {
+        Some(h) => format!("{flows} ~{h}"),
+        None => flows.to_string(),
+    }
+}
+
 /// Bytes as `1.2K`, `-` when none were reported.
 fn bytes_text(b: u64) -> String {
     if b == 0 { "-".into() } else { compact_count(b) }
@@ -1481,14 +1510,14 @@ pub fn app_columns() -> Vec<Column<SectionRow>> {
         Column {
             title: "flows",
             width: 6,
-            cell: |r| r.with_row(|p| p.flows.to_string()),
+            cell: |r| r.with_row(|p| flows_cell(p.flows, p.marks.as_ref())),
             key: no_sort,
             right: true,
             hide_below: 0,
             narrow: None,
             narrow_width: 5,
             full_title: None,
-            full: None,
+            full: Some(|r| r.with_row(|p| p.flows.to_string())),
         },
         Column {
             title: "conns",
@@ -1577,14 +1606,14 @@ pub fn blocked_columns() -> Vec<Column<SectionRow>> {
         Column {
             title: "flows",
             width: 6,
-            cell: |r| r.with_row(|p| p.flows.to_string()),
+            cell: |r| r.with_row(|p| flows_cell(p.flows, p.marks.as_ref())),
             key: no_sort,
             right: true,
             hide_below: 0,
             narrow: None,
             narrow_width: 5,
             full_title: None,
-            full: None,
+            full: Some(|r| r.with_row(|p| p.flows.to_string())),
         },
         Column {
             title: "conns",
@@ -2768,6 +2797,27 @@ impl TrafficState {
             None => layout(groups, tm.area, tm.weight),
         };
         tm.cursor = tm.cursor.min(tm.targets().len().saturating_sub(1));
+        tm.highlights.clear();
+        tm.source_highlights.clear();
+        for g in &tm.groups {
+            let Some(m) = g
+                .marks
+                .as_ref()
+                .and_then(RowMarks::marker)
+                .filter(|m| m.action().is_some_and(|a| a.is_highlight()))
+            else {
+                continue;
+            };
+            let src = g.src.join("/");
+            tm.highlights.insert((src.clone(), g.dst.join("/")), m);
+            let strongest = |x: pce::marks::Marker| x.action();
+            match tm.source_highlights.get(&src) {
+                Some(old) if strongest(*old) <= strongest(m) => {}
+                _ => {
+                    tm.source_highlights.insert(src, m);
+                }
+            }
+        }
     }
 
     /// `u` / `p` on the Mesh view: show or hide a column, regroup, and start

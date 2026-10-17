@@ -2,9 +2,10 @@
 //! widths come from the column definitions; `width == 0` fills the rest.
 use crate::tui::table::{Column, TableView};
 use crate::tui::ui::theme::Theme;
+use pce::marks::Marker;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Cell, Paragraph, Row, Table, TableState};
 
@@ -60,6 +61,44 @@ fn render_empty<T>(f: &mut Frame, inner: Rect, view: &TableView<T>, theme: &Them
         inner,
     );
     true
+}
+
+/// The gutter glyph's style: critical `bad` bold, important `warn`,
+/// revisit `accent`, the quiet ones and squelch dim. Decision columns keep
+/// their colours.
+pub fn marker_style(m: Marker, t: &Theme) -> Style {
+    match m {
+        Marker::Critical => Style::new().fg(t.bad).add_modifier(Modifier::BOLD),
+        Marker::Important => Style::new().fg(t.warn),
+        Marker::Revisit => Style::new().fg(t.accent),
+        _ => t.dim_style(),
+    }
+}
+
+/// A whole row is dimmed when every flow in it is accepted, reviewed or
+/// (shown) squelched.
+pub fn dims_row(m: Option<Marker>) -> bool {
+    matches!(
+        m,
+        Some(Marker::Accepted | Marker::Reviewed | Marker::Squelched)
+    )
+}
+
+/// The name cell's colour: critical `bad`, important `warn`.
+pub fn name_style(m: Option<Marker>, t: &Theme) -> Option<Style> {
+    match m {
+        Some(Marker::Critical) => Some(Style::new().fg(t.bad)),
+        Some(Marker::Important) => Some(Style::new().fg(t.warn)),
+        _ => None,
+    }
+}
+
+/// The gutter of one row: the glyph and a space, or two spaces.
+fn gutter_span(m: Option<Marker>, t: &Theme) -> Span<'static> {
+    match m {
+        Some(m) => Span::styled(format!("{} ", m.glyph()), marker_style(m, t)),
+        None => Span::raw("  "),
+    }
 }
 
 /// `s` cut to at most `w` cells of display width (ratatui's measure).
@@ -120,7 +159,7 @@ pub fn render<T>(
         return;
     }
     let cols = visible_columns(&view.columns, area.width);
-    let constraints: Vec<Constraint> = cols
+    let mut constraints: Vec<Constraint> = cols
         .iter()
         .map(|&(_, w, _)| {
             if w == 0 {
@@ -131,12 +170,16 @@ pub fn render<T>(
         })
         .collect();
     let widths: Vec<usize> = cols.iter().map(|&(_, w, _)| w as usize).collect();
-    let header = Row::new(
-        cols.iter()
-            .map(|&(ci, _, _)| Cell::from(view.columns[ci].title))
-            .collect::<Vec<_>>(),
-    )
-    .style(theme.header_style());
+    let mut titles: Vec<Cell> = cols
+        .iter()
+        .map(|&(ci, _, _)| Cell::from(view.columns[ci].title))
+        .collect();
+    // The marks' gutter: one cell and the column spacing, before the first column.
+    if view.marker.is_some() {
+        constraints.insert(0, Constraint::Length(1));
+        titles.insert(0, Cell::from(""));
+    }
+    let header = Row::new(titles).style(theme.header_style());
     let height = inner.height.saturating_sub(1) as usize; // minus header row
     let start = view.offset().min(view.visible().len());
     let end = (start + height).min(view.visible().len());
@@ -144,7 +187,30 @@ pub fn render<T>(
         .iter()
         .map(|&i| {
             let item = &view.rows()[i];
-            Row::new(row_cells(view, item, &cols, &widths)).style(row_style(item))
+            let mut cells: Vec<Cell> = row_cells(view, item, &cols, &widths)
+                .into_iter()
+                .map(Cell::from)
+                .collect();
+            let Some(marker) = view.marker else {
+                return Row::new(cells).style(row_style(item));
+            };
+            let m = marker(item);
+            if let (Some(first), Some(s)) = (cells.first_mut(), name_style(m, theme)) {
+                *first = first.clone().style(s);
+            }
+            cells.insert(
+                0,
+                Cell::from(Span::styled(
+                    m.map(Marker::glyph).unwrap_or(" "),
+                    m.map_or_else(Style::new, |m| marker_style(m, theme)),
+                )),
+            );
+            let style = if dims_row(m) {
+                theme.dim_style()
+            } else {
+                row_style(item)
+            };
+            Row::new(cells).style(style)
         })
         .collect();
     let table = Table::new(rows, constraints)
@@ -177,7 +243,9 @@ pub fn render_spanning<T>(
         return;
     }
     let cols = visible_columns(&view.columns, area.width);
-    let avail = inner.width.saturating_sub(2) as usize;
+    // Two cells of cursor, two of the marks' gutter while it is drawn.
+    let gutter = view.marker.is_some();
+    let avail = inner.width.saturating_sub(if gutter { 4 } else { 2 }) as usize;
     let fixed: usize =
         cols.iter().map(|c| c.1 as usize).sum::<usize>() + cols.len().saturating_sub(1);
     let fill = avail.saturating_sub(fixed).max(8);
@@ -195,7 +263,7 @@ pub fn render_spanning<T>(
             .collect(),
     );
     let mut lines = vec![Line::from(Span::styled(
-        format!("  {header}"),
+        format!("{}{header}", if gutter { "    " } else { "  " }),
         theme.header_style(),
     ))];
     let height = inner.height.saturating_sub(1) as usize;
@@ -203,21 +271,40 @@ pub fn render_spanning<T>(
     let end = (start + height).min(view.visible().len());
     for (pos, &i) in view.visible()[start..end].iter().enumerate() {
         let item = &view.rows()[i];
-        let (text, mut style) = match spanning(item) {
-            Some((text, style)) => (clip_width(&text, avail), style),
+        let m = view.marker.and_then(|f| f(item));
+        let (text, mut style, name) = match spanning(item) {
+            Some((text, style)) => (clip_width(&text, avail), style, 0),
             None => (
                 line_of(row_cells(view, item, &cols, &widths)),
                 row_style(item),
+                widths.first().copied().unwrap_or(0),
             ),
         };
+        if dims_row(m) {
+            style = theme.dim_style();
+        }
         let selected = start + pos == view.selected_pos();
-        let mut line = format!("{}{text}", if selected { "▸ " } else { "  " });
+        let cursor = if selected { "▸ " } else { "  " };
+        let mut spans = vec![Span::styled(cursor, style)];
+        if gutter {
+            spans.push(gutter_span(m, theme));
+        }
+        // A highlight colours the name cell (the first column) only.
+        let split = clip_width(&text, name).len();
+        let (head, tail) = text.split_at(split);
+        let head_style = name_style(m, theme).map_or(style, |s| style.patch(s));
+        spans.push(Span::styled(head.to_string(), head_style));
+        spans.push(Span::styled(tail.to_string(), style));
         if selected {
             // The cursor row is highlighted across the whole width.
-            style = style.patch(theme.selected_style());
-            line = fit(&line, inner.width as usize, false);
+            let used: usize = spans.iter().map(Span::width).sum();
+            let pad = (inner.width as usize).saturating_sub(used);
+            spans.push(Span::styled(" ".repeat(pad), style));
+            for s in &mut spans {
+                s.style = s.style.patch(theme.selected_style());
+            }
         }
-        lines.push(Line::from(Span::styled(line, style)));
+        lines.push(Line::from(spans));
     }
     f.render_widget(Paragraph::new(lines), inner);
 }
@@ -266,6 +353,116 @@ mod tests {
                 full: None,
             },
         ]
+    }
+
+    /// The cells of `buf` on the line holding `needle`: `(symbol, style)`.
+    fn line_with(
+        buf: &ratatui::buffer::Buffer,
+        needle: &str,
+    ) -> Vec<(String, ratatui::style::Color, Modifier)> {
+        (0..buf.area.height)
+            .map(|y| {
+                (0..buf.area.width)
+                    .map(|x| {
+                        let c = &buf[(x, y)];
+                        (c.symbol().to_string(), c.fg, c.modifier)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .find(|l| {
+                l.iter()
+                    .map(|c| c.0.as_str())
+                    .collect::<String>()
+                    .contains(needle)
+            })
+            .unwrap_or_else(|| panic!("no line with {needle}"))
+    }
+
+    fn marked(n: &u32) -> Option<Marker> {
+        match n {
+            1 => Some(Marker::Critical),
+            2 => Some(Marker::Reviewed),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn the_marks_gutter_draws_glyphs_colours_the_name_cell_and_dims_quiet_rows() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        use ratatui::widgets::Block;
+        let t = Theme::dark();
+        let mut v = TableView::new(cols());
+        v.set_rows(vec![1, 2, 3]);
+        v.marker = Some(marked);
+        let mut term = Terminal::new(TestBackend::new(60, 6)).unwrap();
+        let ok = Style::new().fg(t.ok);
+        term.draw(|f| render(f, f.area(), &v, &t, Block::bordered(), &|_| ok))
+            .unwrap();
+        let buf = term.backend().buffer();
+        let crit = line_with(buf, "n1");
+        let glyph = crit.iter().find(|c| c.0 == "●").unwrap();
+        assert_eq!(glyph.1, t.bad);
+        assert!(glyph.2.contains(Modifier::BOLD));
+        let name = crit.iter().find(|c| c.0 == "n").unwrap();
+        assert_eq!(name.1, t.bad, "the name cell takes the highlight");
+        let other = crit.iter().rev().find(|c| c.0 == "1").unwrap();
+        assert_eq!(other.1, t.ok, "the other cells keep the row's colour");
+        let rev = line_with(buf, "n2");
+        assert!(rev.iter().any(|c| c.0 == "✓"));
+        assert!(
+            rev.iter().filter(|c| c.0 == "n").all(|c| c.1 == t.dim),
+            "dimmed"
+        );
+        let plain = line_with(buf, "n3");
+        assert!(plain.iter().filter(|c| c.0 == "n").all(|c| c.1 == t.ok));
+        // Without a marker there is no gutter: the first cell starts after
+        // the cursor's two cells.
+        v.marker = None;
+        term.draw(|f| render(f, f.area(), &v, &t, Block::bordered(), &|_| ok))
+            .unwrap();
+        let text: String = line_with(term.backend().buffer(), "n3")
+            .iter()
+            .map(|c| c.0.clone())
+            .collect();
+        assert!(text.starts_with("│  n3"), "{text}");
+    }
+
+    #[test]
+    fn the_spanning_table_draws_the_gutter_too() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        use ratatui::widgets::Block;
+        let t = Theme::dark();
+        let mut v = TableView::new(cols());
+        v.set_rows(vec![1, 2, 3]);
+        v.marker = Some(marked);
+        let mut term = Terminal::new(TestBackend::new(60, 6)).unwrap();
+        term.draw(|f| {
+            render_spanning(
+                f,
+                f.area(),
+                &v,
+                &t,
+                Block::bordered(),
+                &|_| Style::new(),
+                &|n| (*n == 3).then(|| (format!("header {n}"), Style::new().fg(t.accent))),
+            )
+        })
+        .unwrap();
+        let buf = term.backend().buffer();
+        let crit: String = line_with(buf, "n1").iter().map(|c| c.0.clone()).collect();
+        assert!(crit.starts_with("│▸ ● n1"), "{crit}");
+        let name = line_with(buf, "n1")
+            .into_iter()
+            .find(|c| c.0 == "n")
+            .unwrap();
+        assert_eq!(name.1, t.bad);
+        let header: String = line_with(buf, "header 3")
+            .iter()
+            .map(|c| c.0.clone())
+            .collect();
+        assert!(header.starts_with("│    header 3"), "{header}");
     }
 
     #[test]

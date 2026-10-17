@@ -2,9 +2,9 @@
 //! rebuild (one `stat` of a local file, never a request), the result on
 //! screen split by them (squelched flows left out of every view unless
 //! `M`), and what each view's meta says about them.
-use crate::tui::model::{StatusLine, TrafficState, TrafficView};
-use pce::marks::{Action, ActiveMarks, Hit, Marked, RowMarks, partition};
-use pce::traffic::ResolvedFlow;
+use crate::tui::model::{FlowRow, RowKind, SectionRow, StatusLine, TrafficState, TrafficView};
+use pce::marks::{Action, ActiveMarks, Hit, Marked, Marker, RowMarks, partition};
+use pce::traffic::{FlowGroup, MeshRow, ResolvedFlow};
 use std::borrow::Cow;
 
 /// A view's `squelched {rows, flows}`: the rows squelch removed (or, with
@@ -60,6 +60,29 @@ pub struct MarkedView {
     pub accepted: u64,
 }
 
+/// The Flows view's gutter: the flow's own hit.
+pub fn flow_marker(r: &FlowRow) -> Option<Marker> {
+    r.mark.map(|h| Marker::of(h.action))
+}
+
+/// App-to-app pairs' (and by service) gutter.
+pub fn group_marker(g: &FlowGroup) -> Option<Marker> {
+    g.marks.as_ref().and_then(RowMarks::marker)
+}
+
+/// The Mesh view's gutter.
+pub fn mesh_marker(r: &MeshRow) -> Option<Marker> {
+    r.marks.as_ref().and_then(RowMarks::marker)
+}
+
+/// A sectioned table's gutter: a header shows its rows' marks summed.
+pub fn section_marker(r: &SectionRow) -> Option<Marker> {
+    match &r.kind {
+        RowKind::Header { marks, .. } => marks.as_deref().and_then(RowMarks::marker),
+        RowKind::Peer { row, .. } => row.marks.as_ref().and_then(RowMarks::marker),
+    }
+}
+
 /// A section header's marks: its rows' records per action summed, so a
 /// header shows any highlight of its rows and is dimmed only when all are.
 pub fn sum_marks<'a>(
@@ -98,6 +121,14 @@ impl TrafficState {
         let mv = self.marked.as_ref()?;
         let a = self.active_marks().filter(|a| !a.is_empty())?;
         Some((a, mv))
+    }
+
+    /// The hit of the selected flow (Flows) and the weaker marks it also
+    /// matches.
+    pub fn flow_marks(&self, f: &ResolvedFlow) -> Vec<usize> {
+        self.active_marks()
+            .map(|a| a.matching(f))
+            .unwrap_or_default()
     }
 
     /// One `stat` of `marks.toml` (parsed again only when it changed),
@@ -180,6 +211,16 @@ impl TrafficState {
         };
         self.unsquelched = unsquelched;
         self.marked = marked;
+        // The gutter is drawn while a mark is active, and only then.
+        let on = self.marked.as_ref().is_some_and(|m| m.active > 0);
+        self.flows.marker = on.then_some(flow_marker as fn(&FlowRow) -> Option<Marker>);
+        let groups = on.then_some(group_marker as fn(&FlowGroup) -> Option<Marker>);
+        self.groups.marker = groups;
+        self.services.marker = groups;
+        self.mesh.marker = on.then_some(mesh_marker as fn(&MeshRow) -> Option<Marker>);
+        let sections = on.then_some(section_marker as fn(&SectionRow) -> Option<Marker>);
+        self.apps.marker = sections;
+        self.blocked.marker = sections;
     }
 
     /// A status the marks file asked for (invalid, valid again, marks
@@ -449,6 +490,90 @@ pub(crate) mod tests {
             m.traffic.marks_meta(TrafficView::Flows).as_deref(),
             Some("1 mark wait for the draft decision (D)")
         );
+    }
+
+    #[test]
+    fn partly_squelched_rows_show_the_hidden_records_beside_the_count() {
+        let (m, _dir) = marked_model(RICH_MARKS);
+        let t = &m.traffic;
+        let dev = t
+            .groups
+            .rows()
+            .iter()
+            .find(|g| g.src.join("/") == "shop/dev" && g.dst.join("/") == "shop/dev")
+            .unwrap();
+        let col = t
+            .groups
+            .columns
+            .iter()
+            .position(|c| c.title == "flows")
+            .unwrap();
+        assert_eq!(t.groups.cell(dev, col), "1 ~1");
+        assert_eq!(
+            t.groups.full_cells(dev)[col],
+            "1",
+            ":export writes the count"
+        );
+        assert!(t.groups.marker.is_some() && t.flows.marker.is_some());
+        let plain = crate::tui::test_support::model_with_rich_flows();
+        assert!(plain.traffic.groups.marker.is_none(), "no marks, no gutter");
+    }
+
+    #[test]
+    fn the_panels_say_what_is_squelched_and_the_detail_names_the_mark() {
+        use crate::tui::test_support::render_to_string;
+        let (mut m, _dir) = marked_model(RICH_MARKS);
+        m.traffic.view = TrafficView::Aggregate;
+        let out = render_to_string(&m, 160, 40);
+        assert!(
+            out.contains("4 rows (9 flows) squelched · M shows them"),
+            "{out}"
+        );
+        m.traffic.view = TrafficView::Blocked;
+        let out = render_to_string(&m, 160, 40);
+        assert!(out.contains("10 blocked flows · 2 accepted"), "{out}");
+        assert!(out.contains("· 2 pot.blocked · 2 accepted"), "{out}");
+        m.traffic.view = TrafficView::Treemap;
+        let out = render_to_string(&m, 160, 40);
+        assert!(out.contains("9 flows squelched · M shows them"), "{out}");
+        assert_eq!(
+            m.traffic.treemap.highlight("shop/dev", Some("shop/prod")),
+            Some(Marker::Critical)
+        );
+        assert_eq!(
+            m.traffic.treemap.highlight("hr/prod", None),
+            Some(Marker::Revisit)
+        );
+        assert_eq!(
+            m.traffic.treemap.highlight("erp/prod", None),
+            None,
+            "reviewed is no highlight"
+        );
+        assert!(out.contains("◆ hr/"), "{out}");
+        // The Flows detail: Corp's blocked flow into the shop database is
+        // critical and squelched by the Corp mark too.
+        m.traffic.view = TrafficView::Flows;
+        m.traffic.show_detail = true;
+        m.traffic
+            .flows
+            .select_where(|r| !r.src.ip_lists.is_empty() && r.port == Some(5432));
+        let out = render_to_string(&m, 160, 40);
+        assert!(
+            out.contains("mark       critical m-crit · payments db · never expires · also matches: m-sq1 (squelch)"),
+            "{out}"
+        );
+        assert!(
+            out.contains("9 rows (9 flows) squelched · M shows them"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn an_invalid_file_says_marks_off_in_the_panel() {
+        use crate::tui::test_support::render_to_string;
+        let (m, _dir) = marked_model("[[mark]]\naction = \"squelch\"\n");
+        let out = render_to_string(&m, 120, 34);
+        assert!(out.contains("marks off: marks.toml invalid"), "{out}");
     }
 
     #[test]

@@ -2105,6 +2105,40 @@ fn generator_fan_in_all_workloads_rule_list_80x24() {
     insta::assert_snapshot!("generator_fan_in_all_workloads_rule_list_80x24", out);
 }
 
+/// Marks at the standard size: the Flows view with its gutter and the
+/// detail's mark line, App-to-app's pairs.
+#[test]
+fn traffic_marks_80x24() {
+    use illumio_tui::tui::model::TrafficView;
+    use illumio_tui::tui::test_support::{RICH_MARKS, model_with_marks};
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = model_with_marks(dir.path(), RICH_MARKS);
+    insta::assert_snapshot!("traffic_marks_flows_80x24", render_to_string(&m, 80, 24));
+    m.traffic.view = TrafficView::Aggregate;
+    insta::assert_snapshot!("traffic_marks_pairs_80x24", render_to_string(&m, 80, 24));
+}
+
+#[test]
+fn traffic_marks_pairs_and_blocked_120x34() {
+    use illumio_tui::tui::model::TrafficView;
+    use illumio_tui::tui::test_support::{RICH_MARKS, model_with_marks};
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = model_with_marks(dir.path(), RICH_MARKS);
+    m.traffic.view = TrafficView::Aggregate;
+    insta::assert_snapshot!("traffic_marks_pairs_120x34", render_to_string(&m, 120, 34));
+    m.traffic.view = TrafficView::Blocked;
+    insta::assert_snapshot!(
+        "traffic_marks_blocked_120x34",
+        render_to_string(&m, 120, 34)
+    );
+    m.traffic.toggle_squelched();
+    m.traffic.view = TrafficView::Aggregate;
+    insta::assert_snapshot!(
+        "traffic_marks_pairs_shown_120x34",
+        render_to_string(&m, 120, 34)
+    );
+}
+
 /// No terminal size panics the generator: every width from 20 to 130 and a
 /// few heights, in its main states (rows, outbound at a role stop, a fan-in
 /// line off and switched on, the rule list).
@@ -2135,6 +2169,7 @@ fn generator_renders_at_every_terminal_size() {
 #[test]
 fn screens_render_at_every_terminal_size() {
     use illumio_tui::tui::test_support as ts;
+    let dir = tempfile::tempdir().unwrap(); // marks.toml for the marked models
     let views = "vvvvv"; // Flows → App-to-app → Mesh → Blocked → Treemap → Flows
     let mut models: Vec<illumio_tui::tui::model::Model> = vec![
         ts::model_with_policy(),
@@ -2154,6 +2189,19 @@ fn screens_render_at_every_terminal_size() {
         gen_key(&mut x, 'v');
         gen_key(&mut x, 'x');
         models.push(x);
+        // The same views with marks: the gutter, the metas, `M`, the
+        // sections and the Flows detail's mark line.
+        for keys in ["", "x", "M", "xM"] {
+            let mut mk = ts::model_with_marks(dir.path(), ts::RICH_MARKS);
+            for c in views[..i].chars() {
+                gen_key(&mut mk, c);
+            }
+            for c in keys.chars() {
+                gen_key(&mut mk, c);
+            }
+            mk.traffic.show_detail = true;
+            models.push(mk);
+        }
     }
     for m in &models {
         for w in 20..=130 {

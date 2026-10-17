@@ -26,7 +26,14 @@ pub struct TrafficLayout {
 /// Shared by `view` and `update` (for page sizes): filter bar 3, stats 3,
 /// table takes the rest, detail 8 (0 when the terminal is short).
 pub fn layout(body: Rect) -> TrafficLayout {
-    let detail_h = if body.height >= 20 { 8 } else { 0 };
+    layout_with(body, 0)
+}
+
+/// `layout` with `extra` lines for the detail pane (its `mark` line while
+/// marks are active); the table gives them up, so the treemap's area (the
+/// two together) is the same.
+pub fn layout_with(body: Rect, extra: u16) -> TrafficLayout {
+    let detail_h = if body.height >= 20 { 8 + extra } else { 0 };
     let rows = Layout::vertical([
         Constraint::Length(3),
         Constraint::Length(3),
@@ -65,7 +72,10 @@ pub fn table_rows(body: Rect) -> usize {
 }
 
 pub fn render(model: &Model, f: &mut Frame, body: Rect) {
-    let l = layout(body);
+    // The open detail's `mark` line, while marks are active; a closed
+    // detail ("press Enter") needs none, so the table keeps its rows.
+    let marks_on = model.traffic.marked.as_ref().is_some_and(|m| m.active > 0);
+    let l = layout_with(body, u16::from(marks_on && model.traffic.show_detail));
     render_filter_bar(model, f, l.filter);
     render_stats(model, f, l.stats);
     match model.traffic.view {
@@ -189,6 +199,13 @@ fn render_flows(model: &Model, f: &mut Frame, area: Rect) {
         }
         None => TrafficView::Flows.title().to_string(),
     };
+    if let Some(m) = model.traffic.marks_meta(TrafficView::Flows) {
+        meta = if meta.is_empty() {
+            m
+        } else {
+            format!("{m} · {meta}")
+        };
+    }
     let title = unit_title(&title, &meta, area.width);
     let block = panel(&title, &meta, t, true);
     let theme = t.clone();
@@ -229,8 +246,15 @@ fn view_meta<T>(model: &Model, by: &str, view: &TableView<T>) -> String {
     if st != Decisions::All {
         parts.push(st.label().to_string());
     }
-    parts.push(format!("keys {}", model.traffic.effective_keys().join(",")));
-    parts.push("Enter drills".into());
+    // The marks' counts take the place of the keys and the Enter hint, so
+    // the title keeps its room.
+    match model.traffic.marks_meta(model.traffic.view) {
+        Some(m) => parts.push(m),
+        None => {
+            parts.push(format!("keys {}", model.traffic.effective_keys().join(",")));
+            parts.push("Enter drills".into());
+        }
+    }
     let meta = crate::tui::ui::widgets::table::header_meta(view);
     if !meta.is_empty() {
         parts.push(meta);
@@ -298,8 +322,13 @@ fn render_groups(model: &Model, f: &mut Frame, area: Rect) {
 fn render_mesh(model: &Model, f: &mut Frame, area: Rect) {
     let t = &model.theme;
     let meta = crate::tui::ui::widgets::table::header_meta(&model.traffic.mesh);
+    // The marks' counts take the place of the key hints.
+    let hints = model
+        .traffic
+        .marks_meta(TrafficView::Mesh)
+        .unwrap_or_else(|| "u user · p process · Enter drills".into());
     let meta = format!(
-        "keys {} · u user · p process · Enter drills{}{}",
+        "keys {} · {hints}{}{}",
         model.traffic.effective_keys().join(","),
         if meta.is_empty() { "" } else { " · " },
         meta
@@ -323,7 +352,11 @@ fn render_treemap(model: &Model, f: &mut Frame, area: Rect) {
         Some(z) => format!("{} ▸ {}", TrafficView::Treemap.title(), z.join("/")),
         None => TrafficView::Treemap.title().to_string(),
     };
-    let block = panel_spans(&title, treemap_meta(tm, t), t, true);
+    let mut meta = treemap_meta(tm, t);
+    if let Some(m) = model.traffic.marks_meta(TrafficView::Treemap) {
+        meta.push(Span::styled(format!(" · {m}"), t.dim_style()));
+    }
+    let block = panel_spans(&title, meta, t, true);
     let inner = block.inner(area);
     f.render_widget(block, area);
     if tm.tiles.is_empty() {
@@ -337,9 +370,16 @@ fn render_treemap(model: &Model, f: &mut Frame, area: Rect) {
     let is_cur = |outer: usize, inner_i: Option<usize>| {
         cur.is_some_and(|c| c.outer == outer && c.inner == inner_i)
     };
+    // A tile whose pair (or a source with a pair) has a highlight shows
+    // its glyph before the label. Zoomed, the tiles are the destinations.
+    let zoom = tm.zoom.as_ref().map(|z| z.join("/"));
     for (i, tile) in tm.tiles.iter().enumerate() {
         if tile.children.is_empty() {
-            draw_fill(f, inner, tile, t, is_cur(i, None));
+            let mark = match &zoom {
+                Some(z) => tm.highlight(z, Some(&tile.label)),
+                None => tm.highlight(&tile.label, None),
+            };
+            draw_fill(f, inner, tile, t, is_cur(i, None), mark);
             continue;
         }
         let r = cells(tile.rect).intersection(inner);
@@ -350,7 +390,11 @@ fn render_treemap(model: &Model, f: &mut Frame, area: Rect) {
         if is_cur(i, None) {
             style = style.add_modifier(Modifier::REVERSED);
         }
-        let label = clip_text(&tile.label, r.width.saturating_sub(2) as usize);
+        let label = match tm.highlight(&tile.label, None) {
+            Some(m) => format!("{} {}", m.glyph(), tile.label),
+            None => tile.label.clone(),
+        };
+        let label = clip_text(&label, r.width.saturating_sub(2) as usize);
         f.render_widget(
             Block::bordered()
                 .border_style(style)
@@ -358,7 +402,8 @@ fn render_treemap(model: &Model, f: &mut Frame, area: Rect) {
             r,
         );
         for (j, c) in tile.children.iter().enumerate() {
-            draw_fill(f, inner, c, t, is_cur(i, Some(j)));
+            let mark = tm.highlight(&tile.label, Some(&c.label));
+            draw_fill(f, inner, c, t, is_cur(i, Some(j)), mark);
         }
     }
 }
@@ -393,8 +438,16 @@ fn clip_text(s: &str, n: usize) -> String {
 }
 
 /// A filled tile: `▒` in the decision colour, the label on the first row
-/// when it fits with a cell either side, the weight on the second.
-fn draw_fill(f: &mut Frame, clip: Rect, tile: &Tile, t: &Theme, cursor: bool) {
+/// when it fits with a cell either side (after the glyph of its
+/// highlight), the weight on the second.
+fn draw_fill(
+    f: &mut Frame,
+    clip: Rect,
+    tile: &Tile,
+    t: &Theme,
+    cursor: bool,
+    mark: Option<pce::marks::Marker>,
+) {
     let r = cells(tile.rect).intersection(clip);
     if r.is_empty() {
         return;
@@ -419,7 +472,11 @@ fn draw_fill(f: &mut Frame, clip: Rect, tile: &Tile, t: &Theme, cursor: bool) {
             _ => Line::from(Span::styled("▒".repeat(w), fill)),
         }
     };
-    let mut lines = vec![row(Some(tile.label.clone()))];
+    let label = match mark {
+        Some(m) => format!("{} {}", m.glyph(), tile.label),
+        None => tile.label.clone(),
+    };
+    let mut lines = vec![row(Some(label))];
     if r.height >= 2 {
         lines.push(row(Some(compact_count(tile.weight))));
     }
@@ -443,6 +500,38 @@ fn render_blocked(model: &Model, f: &mut Frame, area: Rect) {
         &model.traffic.blocked,
         &move |_| bad,
     );
+}
+
+/// The selected flow's mark: `squelch m-7k2q9x · Nagios NRPE, known ·
+/// expires 2027-01-15 (UTC)`, then `also matches: m-… (reviewed)` for the
+/// weaker marks that match too. `None` without a hit.
+fn mark_line(model: &Model, fl: &crate::tui::model::FlowRow) -> Option<String> {
+    let hit = fl.mark?;
+    let set = model.traffic.marks.set()?;
+    let m = set.marks.get(hit.mark)?;
+    let comment = if m.comment.trim().is_empty() {
+        "(no comment)".to_string()
+    } else {
+        m.comment.clone()
+    };
+    let mut s = format!(
+        "{} {} · {comment} · {}",
+        hit.action.as_str(),
+        m.id,
+        pce::marks::expiry_text(m.expires)
+    );
+    let others: Vec<String> = model
+        .traffic
+        .flow_marks(&fl.flow)
+        .into_iter()
+        .filter(|i| *i != hit.mark)
+        .filter_map(|i| set.marks.get(i))
+        .map(|o| format!("{} ({})", o.id, o.action.as_str()))
+        .collect();
+    if !others.is_empty() {
+        s.push_str(&format!(" · also matches: {}", others.join(", ")));
+    }
+    Some(s)
 }
 
 /// `name  ip`, then the IP lists the endpoint belongs to.
@@ -507,7 +596,7 @@ fn render_detail(model: &Model, f: &mut Frame, area: Rect) {
             Span::raw(body),
         ])
     };
-    let lines = vec![
+    let mut lines = vec![
         row("src", endpoint_line(&fl.src)),
         row("src labels", labels_line(&fl.src, &order)),
         row("dst", endpoint_line(&fl.dst)),
@@ -533,6 +622,9 @@ fn render_detail(model: &Model, f: &mut Frame, area: Rect) {
             ),
         ),
     ];
+    if let Some(text) = mark_line(model, fl) {
+        lines.push(row("mark", text));
+    }
     f.render_widget(
         Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
         area,

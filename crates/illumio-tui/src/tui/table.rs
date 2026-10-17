@@ -68,6 +68,10 @@ pub struct TableView<T> {
     /// (possibly empty); `None` keeps the default substring match over
     /// every cell.
     matcher: Option<fn(&T, &str) -> bool>,
+    /// A row's mark, drawn as a 2-cell gutter before the first column
+    /// while set (marks active). Not a column: column indices, `s`, the
+    /// default sort, search and `:export` do not see it.
+    pub marker: Option<fn(&T) -> Option<pce::marks::Marker>>,
 }
 
 impl<T> TableView<T> {
@@ -83,6 +87,7 @@ impl<T> TableView<T> {
             searching: false,
             search_draft: String::new(),
             matcher: None,
+            marker: None,
         }
     }
 
