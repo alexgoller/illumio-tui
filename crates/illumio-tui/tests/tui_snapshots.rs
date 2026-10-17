@@ -2104,3 +2104,62 @@ fn generator_fan_in_all_workloads_rule_list_80x24() {
     }
     insta::assert_snapshot!("generator_fan_in_all_workloads_rule_list_80x24", out);
 }
+
+/// No terminal size panics the generator: every width from 20 to 130 and a
+/// few heights, in its main states (rows, outbound at a role stop, a fan-in
+/// line off and switched on, the rule list).
+#[test]
+fn generator_renders_at_every_terminal_size() {
+    let states: [(&dyn Fn() -> illumio_tui::tui::model::Model, &str); 5] = [
+        (&generator_model, ""),
+        (&generator_model, "ol"),
+        (&generator_fan_model, ""),
+        (&generator_fan_model, "c"),
+        (&generator_model, "p"),
+    ];
+    for (make, keys) in states {
+        let mut m = make();
+        for c in keys.chars() {
+            gen_key(&mut m, c);
+        }
+        for w in 20..=130 {
+            for h in [6, 10, 24, 40] {
+                let _ = render_to_string(&m, w, h);
+            }
+        }
+    }
+}
+
+/// No terminal size panics any screen, traffic view or the app overlay:
+/// widths 20 to 130, a short and a normal height.
+#[test]
+fn screens_render_at_every_terminal_size() {
+    use illumio_tui::tui::test_support as ts;
+    let views = "vvvvv"; // Flows → App-to-app → Mesh → Blocked → Treemap → Flows
+    let mut models: Vec<illumio_tui::tui::model::Model> = vec![
+        ts::model_with_policy(),
+        ts::model_with_objects(),
+        ts::model_with_ip_lists(),
+        ts::model_with_workloads(),
+        ts::model_with_events(),
+        app_overlay_model(),
+    ];
+    for i in 0..views.len() {
+        let mut m = ts::model_with_rich_flows();
+        for c in views[..i].chars() {
+            gen_key(&mut m, c);
+        }
+        models.push(m);
+        let mut x = ts::model_with_rich_flows();
+        gen_key(&mut x, 'v');
+        gen_key(&mut x, 'x');
+        models.push(x);
+    }
+    for m in &models {
+        for w in 20..=130 {
+            for h in [6, 24] {
+                let _ = render_to_string(m, w, h);
+            }
+        }
+    }
+}

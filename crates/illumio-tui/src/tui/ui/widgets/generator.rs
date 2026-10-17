@@ -102,7 +102,10 @@ fn row_line<'a>(
         .iter()
         .map(|f| Span::raw(format!("⚠ {f} ")).width())
         .sum();
-    if used + all <= width {
+    if flags.is_empty() {
+        // Nothing to add: a row that is already wider than the panel is cut
+        // by the panel itself.
+    } else if used + all <= width {
         for f in flags {
             spans.push(Span::styled(format!("⚠ {f} "), Style::new().fg(t.warn)));
         }
