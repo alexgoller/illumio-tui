@@ -1,7 +1,8 @@
 //! App sections: the loaded flows grouped under each app (a group of the
 //! `g` keys), inbound or outbound, one row per peer group and service.
 //! App-to-app's `in` / `out` / `both` states, the Blocked view and the CLI's
-//! `traffic groups --by` all read these. Pure; no requests.
+//! `traffic groups --by` all read these; the Flows view's app sections
+//! (`flow_sections`) share their totals and order. Pure; no requests.
 use super::aggregate::{
     ConnsByDecision, Dominant, DraftCounts, dominant, group_key, keys_or_default, tally,
 };
@@ -99,6 +100,37 @@ impl Decisions {
     }
 }
 
+/// The order of the sections (`s` on a sectioned view): by connections
+/// (the default), by app name, or by flow records. The rows inside a
+/// section keep theirs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SectionOrder {
+    #[default]
+    Connections,
+    Name,
+    Flows,
+}
+
+impl SectionOrder {
+    /// `connections ↓` → `app A→Z` → `flows ↓` → `connections ↓`.
+    pub fn next(self) -> Self {
+        match self {
+            SectionOrder::Connections => SectionOrder::Name,
+            SectionOrder::Name => SectionOrder::Flows,
+            SectionOrder::Flows => SectionOrder::Connections,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SectionOrder::Connections => "by conns ↓",
+            SectionOrder::Name => "by app A→Z",
+            SectionOrder::Flows => "by flows ↓",
+        }
+    }
+}
+
 /// A section's or an app's counters.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Totals {
@@ -149,6 +181,30 @@ impl Totals {
             }
         }
         s
+    }
+
+    /// `12 flows · 412 conns · 1 blocked`: a Flows section's header.
+    pub fn flows_text(&self) -> String {
+        format!(
+            "{} flow{} · {}",
+            self.flows,
+            if self.flows == 1 { "" } else { "s" },
+            self.counts_text()
+        )
+    }
+
+    /// One flow record counted (the groups are counted by the caller).
+    fn add_flow(&mut self, f: &ResolvedFlow) {
+        self.flows += 1;
+        self.connections += f.num_connections;
+        self.bytes += f.bytes();
+        tally(
+            f.policy_decision,
+            &mut self.allowed,
+            &mut self.potentially_blocked,
+            &mut self.blocked,
+        );
+        DraftCounts::add(&mut self.draft, f);
     }
 
     fn add_row(&mut self, r: &PeerRow) {
@@ -398,7 +454,7 @@ pub fn app_sections(
             row.last_detected = f.last_detected.clone();
         }
     }
-    let mut out: Vec<AppSection> = apps
+    let out: Vec<AppSection> = apps
         .into_iter()
         .map(|(app, rows)| {
             let mut rows: Vec<PeerRow> = rows.into_values().map(|(r, _)| r).collect();
@@ -423,18 +479,45 @@ pub fn app_sections(
             }
         })
         .collect();
-    sort_sections(&mut out);
-    out
+    order_sections(out, SectionOrder::Connections, |s| s)
 }
 
-fn sort_sections(s: &mut [AppSection]) {
-    s.sort_by(|a, b| {
-        b.totals
-            .connections
-            .cmp(&a.totals.connections)
-            .then_with(|| a.app.cmp(&b.app))
-            .then_with(|| a.direction.cmp(&b.direction))
+/// `items` (each with its section, `section`) in `order`: consecutive
+/// sections of one app (`both`: in, then out) stay together and weigh
+/// together; ties by app. A stable sort: what `order` cannot tell apart
+/// keeps its place.
+pub fn order_sections<T>(
+    items: Vec<T>,
+    order: SectionOrder,
+    section: impl Fn(&T) -> &AppSection,
+) -> Vec<T> {
+    // (app, flows, connections, its sections)
+    let mut apps: Vec<(Vec<String>, u64, u64, Vec<T>)> = Vec::new();
+    for it in items {
+        let s = section(&it);
+        let (flows, conns) = (s.totals.flows, s.totals.connections);
+        match apps.last_mut() {
+            Some(last) if last.0 == s.app => {
+                last.1 += flows;
+                last.2 += conns;
+                last.3.push(it);
+            }
+            _ => apps.push((s.app.clone(), flows, conns, vec![it])),
+        }
+    }
+    apps.sort_by(|a, b| {
+        match order {
+            SectionOrder::Connections => b.2.cmp(&a.2),
+            SectionOrder::Flows => b.1.cmp(&a.1),
+            SectionOrder::Name => {
+                a.0.join("/")
+                    .to_lowercase()
+                    .cmp(&b.0.join("/").to_lowercase())
+            }
+        }
+        .then_with(|| a.0.cmp(&b.0))
     });
+    apps.into_iter().flat_map(|(_, _, _, s)| s).collect()
 }
 
 /// Both directions: for each app its inbound section then its outbound
@@ -450,15 +533,47 @@ pub fn app_sections_both(
             by_app.entry(s.app.clone()).or_default().push(s);
         }
     }
-    let mut apps: Vec<(u64, Vec<String>, Vec<AppSection>)> = by_app
+    let grouped = by_app.into_values().flatten().collect();
+    order_sections(grouped, SectionOrder::Connections, |s| s)
+}
+
+/// The Flows view's app sections (`x`): one per app on `direction`'s side
+/// of `flows` (`sides`; every flow, no decision filter), in `order`. Each
+/// section has no peer rows; with it come the positions in `flows` of its
+/// flow records, in their order. Its totals are App-to-app's for the same
+/// flows.
+pub fn flow_sections<'a>(
+    flows: impl IntoIterator<Item = &'a ResolvedFlow>,
+    keys: &[String],
+    direction: Direction,
+    order: SectionOrder,
+) -> Vec<(AppSection, Vec<usize>)> {
+    let keys = keys_or_default(keys);
+    type Acc = (Totals, BTreeSet<Vec<String>>, Vec<usize>);
+    let mut apps: BTreeMap<Vec<String>, Acc> = BTreeMap::new();
+    for (i, f) in flows.into_iter().enumerate() {
+        let (app, peer) = sides(f, &keys, direction);
+        let (totals, peers, idx) = apps.entry(app).or_default();
+        totals.add_flow(f);
+        peers.insert(peer);
+        idx.push(i);
+    }
+    let out = apps
         .into_iter()
-        .map(|(app, secs)| {
-            let conns = secs.iter().map(|s| s.totals.connections).sum();
-            (conns, app, secs)
+        .map(|(app, (mut totals, peers, idx))| {
+            totals.groups = peers.len();
+            (
+                AppSection {
+                    app,
+                    direction,
+                    rows: Vec::new(),
+                    totals,
+                },
+                idx,
+            )
         })
         .collect();
-    apps.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
-    apps.into_iter().flat_map(|(_, _, s)| s).collect()
+    order_sections(out, order, |(s, _)| s)
 }
 
 #[cfg(test)]
@@ -875,6 +990,154 @@ mod tests {
             only.iter()
                 .all(|f| f.policy_decision == PolicyDecision::Blocked)
         );
+    }
+
+    #[test]
+    fn the_section_order_cycles_connections_name_flows() {
+        let o = SectionOrder::default();
+        assert_eq!(o, SectionOrder::Connections);
+        let seen: Vec<SectionOrder> = std::iter::successors(Some(o), |o| Some(o.next()))
+            .take(4)
+            .collect();
+        assert_eq!(
+            seen,
+            vec![
+                SectionOrder::Connections,
+                SectionOrder::Name,
+                SectionOrder::Flows,
+                SectionOrder::Connections
+            ]
+        );
+        assert_eq!(SectionOrder::Connections.label(), "by conns ↓");
+        assert_eq!(SectionOrder::Name.label(), "by app A→Z");
+        assert_eq!(SectionOrder::Flows.label(), "by flows ↓");
+    }
+
+    #[test]
+    fn order_sections_sorts_by_name_or_flows_and_keeps_the_rows() {
+        let f = rich_flows();
+        let by_conns = app_sections(&f, &app_env(), Direction::In, Decisions::All);
+        let by_name = order_sections(by_conns.clone(), SectionOrder::Name, |s| s);
+        let names: Vec<String> = by_name.iter().map(AppSection::app_text).collect();
+        let mut sorted = names.clone();
+        sorted.sort_by_key(|n| n.to_lowercase());
+        assert_eq!(names, sorted);
+        let by_flows = order_sections(by_conns.clone(), SectionOrder::Flows, |s| s);
+        assert!(
+            by_flows
+                .windows(2)
+                .all(|w| w[0].totals.flows >= w[1].totals.flows)
+        );
+        // The same sections, each with its rows in their order.
+        for s in &by_flows {
+            let same = by_conns.iter().find(|c| c.app == s.app).unwrap();
+            assert_eq!(s, same);
+        }
+        let back = order_sections(by_name, SectionOrder::Connections, |s| s);
+        assert_eq!(back, by_conns, "connections is the default order");
+    }
+
+    #[test]
+    fn both_keeps_an_apps_two_sections_together_in_every_order() {
+        let f = rich_flows();
+        let both = app_sections_both(&f, &app_env(), Decisions::All);
+        for order in [SectionOrder::Name, SectionOrder::Flows] {
+            let o = order_sections(both.clone(), order, |s| s);
+            assert_eq!(o.len(), both.len());
+            for w in o.windows(2) {
+                if w[0].app == w[1].app {
+                    assert_eq!(
+                        (w[0].direction, w[1].direction),
+                        (Direction::In, Direction::Out)
+                    );
+                }
+            }
+            let apps: Vec<&Vec<String>> = o.iter().map(|s| &s.app).collect();
+            let mut dedup = apps.clone();
+            dedup.dedup();
+            let distinct: BTreeSet<&Vec<String>> = apps.iter().copied().collect();
+            assert_eq!(dedup.len(), distinct.len(), "{order:?}");
+        }
+        // By flows, an app weighs its two directions together.
+        let o = order_sections(both, SectionOrder::Flows, |s| s);
+        let mut seen: Vec<(Vec<String>, u64)> = Vec::new();
+        for s in &o {
+            match seen.last_mut() {
+                Some((a, n)) if *a == s.app => *n += s.totals.flows,
+                _ => seen.push((s.app.clone(), s.totals.flows)),
+            }
+        }
+        let weights: Vec<u64> = seen.iter().map(|(_, n)| *n).collect();
+        assert!(weights.windows(2).all(|w| w[0] >= w[1]), "{weights:?}");
+    }
+
+    #[test]
+    fn flow_sections_put_each_flow_under_its_app_in_input_order() {
+        let f = rich_flows();
+        let k = app_env();
+        for d in [Direction::In, Direction::Out] {
+            let s = flow_sections(&f, &k, d, SectionOrder::Connections);
+            let sections = app_sections(&f, &k, d, Decisions::All);
+            // The same apps, order and totals as App-to-app's sections.
+            assert_eq!(
+                s.iter()
+                    .map(|(s, _)| (s.app.clone(), s.totals.clone()))
+                    .collect::<Vec<_>>(),
+                sections
+                    .iter()
+                    .map(|s| (s.app.clone(), s.totals.clone()))
+                    .collect::<Vec<_>>(),
+                "{d:?}"
+            );
+            let mut all: Vec<usize> = Vec::new();
+            for (sec, idx) in &s {
+                assert!(sec.rows.is_empty());
+                assert_eq!(idx.len() as u64, sec.totals.flows);
+                assert!(idx.windows(2).all(|w| w[0] < w[1]), "input order kept");
+                for &i in idx {
+                    assert_eq!(sides(&f[i], &k, d).0, sec.app);
+                }
+                all.extend(idx);
+            }
+            all.sort_unstable();
+            assert_eq!(all, (0..f.len()).collect::<Vec<_>>(), "every flow once");
+        }
+        let by_name = flow_sections(&f, &k, Direction::Out, SectionOrder::Name);
+        let names: Vec<String> = by_name.iter().map(|(s, _)| s.app_text()).collect();
+        let mut sorted = names.clone();
+        sorted.sort_by_key(|n| n.to_lowercase());
+        assert_eq!(names, sorted);
+        assert_eq!(
+            by_name[0].0.totals.flows_text(),
+            format!(
+                "{} flow{} · {}",
+                by_name[0].0.totals.flows,
+                if by_name[0].0.totals.flows == 1 {
+                    ""
+                } else {
+                    "s"
+                },
+                by_name[0].0.totals.counts_text()
+            )
+        );
+    }
+
+    #[test]
+    fn the_flows_header_counts_flows_and_connections() {
+        let t = Totals {
+            groups: 4,
+            flows: 12,
+            connections: 1545,
+            blocked: 2,
+            ..Totals::default()
+        };
+        assert_eq!(t.flows_text(), "12 flows · 1545 conns · 2 blocked");
+        let one = Totals {
+            flows: 1,
+            connections: 3,
+            ..Totals::default()
+        };
+        assert_eq!(one.flows_text(), "1 flow · 3 conns");
     }
 
     fn row_app() -> Vec<String> {

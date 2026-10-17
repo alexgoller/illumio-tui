@@ -1,7 +1,8 @@
 //! `:export <path>`: the table on screen as CSV, through the CLI's
 //! `--csv` writer. The rows as shown (search and filters applied, in sort
 //! order; folded sections export every peer), every column whatever the
-//! width, each cell whole; sectioned views as `traffic groups --csv`. No
+//! width, each cell whole; sectioned views as `traffic groups --csv`, the
+//! Flows view by app as its flows with a `section` column. No
 //! request: `update` turns the table into `Cmd::Export`, the runtime
 //! writes the file with `write`.
 use crate::cli::output::TableRows;
@@ -22,6 +23,7 @@ pub fn current_table(model: &Model) -> Result<Csv, String> {
         Screen::Traffic => {
             let t = &model.traffic;
             match (t.view, t.unfolded_section_rows()) {
+                (TrafficView::Flows, Some(rows)) => flow_sections(&t.flows_grouped, &rows),
                 (_, Some(rows)) => sections(&rows),
                 (TrafficView::Flows, _) => t.flows.export(),
                 (TrafficView::Mesh, _) => t.mesh.export(),
@@ -63,6 +65,29 @@ fn sections(rows: &[SectionRow]) -> Csv {
         })
         .collect();
     (section_csv_headers(draft), rows)
+}
+
+/// The Flows view by app (`x`): one row per flow, as the flat table
+/// exports it, after a `section` column naming the flow's app; the header
+/// rows are left out.
+fn flow_sections(table: &TableView<SectionRow>, rows: &[SectionRow]) -> Csv {
+    let mut titles = vec!["section"];
+    titles.extend(
+        table
+            .columns
+            .iter()
+            .map(|c| c.full_title.unwrap_or(c.title)),
+    );
+    let rows = rows
+        .iter()
+        .filter(|r| r.flow().is_some())
+        .map(|r| {
+            let mut cells = vec![r.app.join("/")];
+            cells.extend(table.full_cells(r));
+            cells
+        })
+        .collect();
+    (titles, rows)
 }
 
 /// The rows of `table` as shown (search and sort applied).

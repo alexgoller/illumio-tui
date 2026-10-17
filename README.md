@@ -144,8 +144,9 @@ column, whatever the terminal width, each cell whole; `~/` is the home directory
 format as the CLI's `--csv`, and sends nothing; it refuses an existing file, `:export! <path>`
 overwrites it. Cells match the CLI's for the same data (Workloads: every label, ignored keys
 too, and `heartbeat_age_secs`). Sectioned views (App-to-app `in`/`out`/`both`, Blocked) export
-every peer, folded sections included, in the columns of `traffic groups --by ... --csv`; the
-Treemap has no table.
+every peer, folded sections included, in the columns of `traffic groups --by ... --csv`; Flows
+by app exports every flow, folded sections included, in the Flows columns after a `section`
+column naming its app; the Treemap has no table.
 `?` shows the full key map (`j`/`k` scroll it), `Esc` closes overlays, `q` or `Ctrl-C` quits. The mouse wheel
 scrolls the current table and a click on a tab switches screen; on a terminal narrower than
 the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
@@ -185,7 +186,13 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   (`app,env` by default) until `g` opens the picker (`Space` toggles a key, `all labels` takes
   every key the flows carry, typing edits the list as text, `Enter` applies, for this session).
   **Flows** shows each side's group (`shop/prod`; `-` for an IP list or FQDN, whose name is in
-  the name column) and, on `Enter`, a detail with both label sets and the bytes. **App-to-app**
+  the name column) and, on `Enter`, a detail with both label sets and the bytes; `x` / `X`
+  group it into app sections (`flat` → `by src app` → `by dst app`): one header per app (by
+  the `g` keys; an IP list or FQDN by its name) with its flow and connection counts, then its
+  flows in the table's sort (set it with `s` while flat). There `s` orders the sections, `Space`
+  / `z` fold them, `Enter` on a flow opens its detail and on a header drills into the app's
+  flows; marks, the focus, `w`, `m`, `F` and `:export` work on the sections, and an app whose
+  every flow is squelched has none. **App-to-app**
   pairs the groups; `o` splits each pair by service (`pairs · by service`: one row per source
   group, destination group and `port/proto`, the tuple an allow rule is written for; `Enter`
   drills into that service's flows, `w` drafts that rule: consumers the source group's labels,
@@ -198,7 +205,10 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   the sections (`pairs · by service · blocked` lists just the tuples still blocked, the ones an
   allow rule is missing for; `Enter` drills into the flows the row counts; the Treemap keeps
   every flow), `Space` / `z` fold a section or
-  all, `/` keeps whole sections, and `Enter` drills into a pair, a peer row or a whole app.
+  all, `s` orders the sections (connections ↓, app name A→Z, flows ↓; the rows inside keep
+  theirs; the order shows in the title, e.g. `in · by app A→Z`, survives `g`, `r`, `+`/`-` and
+  `f`, and `:profile` resets it; in `pairs` `s` sorts the table), `/` keeps whole sections, and
+  `Enter` drills into a pair, a peer row or a whole app.
   **Mesh** lists user, process, source, destination, service and destination process like the
   Illumio UI's mesh (`u` / `p` hide the user / process column and merge rows, `Enter` drills).
   **Blocked** is App-to-app with `in` and `blocked`: each destination app with the sources

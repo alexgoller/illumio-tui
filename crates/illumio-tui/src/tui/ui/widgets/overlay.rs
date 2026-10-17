@@ -133,8 +133,16 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "decision filter: all · blocked · blocked only (· fixed by draft)",
     ),
     (
+        "Flows    x / X",
+        "flat · by src app · by dst app · back (focused: X is direction)",
+    ),
+    (
         "Sections Space / z",
-        "fold a section · fold or unfold all (also Blocked)",
+        "fold a section · fold or unfold all (also Blocked, Flows)",
+    ),
+    (
+        "Sections s",
+        "order: conns ↓ · app A→Z · flows ↓ (App-to-app, Flows)",
     ),
     ("Mesh     u / p", "show or hide the user · process columns"),
     (

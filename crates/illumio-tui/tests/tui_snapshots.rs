@@ -360,6 +360,38 @@ fn app_to_app_sections_in_and_both_80x24() {
 }
 
 #[test]
+fn app_to_app_sections_by_name_80x24() {
+    use illumio_tui::tui::model::TrafficView;
+    use illumio_tui::tui::test_support::model_with_rich_flows;
+    let mut m = model_with_rich_flows();
+    m.traffic.view = TrafficView::Aggregate;
+    gen_key(&mut m, 'x');
+    gen_key(&mut m, 's');
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("in · by app A→Z"), "{out}");
+    insta::assert_snapshot!("traffic_app_sections_by_name_80x24", out);
+}
+
+#[test]
+fn flows_by_app_80x24() {
+    use illumio_tui::tui::test_support::model_with_rich_flows;
+    let mut m = model_with_rich_flows();
+    gen_key(&mut m, 'x');
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("by src app"), "{out}");
+    assert!(out.contains("▾ ipl:Corp/-  "), "{out}");
+    insta::assert_snapshot!("traffic_flows_by_src_app_80x24", out);
+    // By destination app, by flows, the header's detail open.
+    gen_key(&mut m, 'x');
+    gen_key(&mut m, 's');
+    gen_key(&mut m, 's');
+    m.traffic.show_detail = true;
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("by dst app · by flows ↓"), "{out}");
+    insta::assert_snapshot!("traffic_flows_by_dst_app_80x24", out);
+}
+
+#[test]
 fn app_to_app_hints_x_o_and_d_where_the_status_line_has_room() {
     use illumio_tui::tui::model::TrafficView;
     use illumio_tui::tui::test_support::model_with_rich_flows;
@@ -2271,9 +2303,19 @@ fn screens_render_at_every_terminal_size() {
         gen_key(&mut x, 'v');
         gen_key(&mut x, 'x');
         models.push(x);
+        // Sections in another order (`s`), Flows by app (`x`, `X`), a
+        // folded section and a header's detail.
+        for keys in ["vxs", "vxxxss", "x", "Xss", "xjz", "xz"] {
+            let mut g = ts::model_with_rich_flows();
+            for c in views[..i].chars().chain(keys.chars()) {
+                gen_key(&mut g, c);
+            }
+            g.traffic.show_detail = true;
+            models.push(g);
+        }
         // The same views with marks: the gutter, the metas, `M`, the
         // sections and the Flows detail's mark line.
-        for keys in ["", "x", "M", "xM"] {
+        for keys in ["", "x", "M", "xM", "xs", "Xj"] {
             let mut mk = ts::model_with_marks(dir.path(), ts::RICH_MARKS);
             for c in views[..i].chars() {
                 gen_key(&mut mk, c);

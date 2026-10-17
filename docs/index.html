@@ -175,8 +175,8 @@ illumio-tui 0.3.0</code></pre>
       <h3>Five views of one traffic result</h3>
       <p>All five group flows by the same label keys: your profile's scope keys (<code>app,env</code> by default) until <code>g</code> opens the key picker, which also offers <em>all labels</em>.</p>
       <ul>
-        <li><strong>Flows</strong>: each side's group and, on <code>Enter</code>, both label sets and the bytes.</li>
-        <li><strong>App-to-app</strong>: group pairs with allowed, potentially blocked and blocked counts; <code>o</code> splits each pair by port/proto (one row per allow rule to write); <code>Enter</code> drills into a pair's flows.</li>
+        <li><strong>Flows</strong>: each side's group and, on <code>Enter</code>, both label sets and the bytes; <code>x</code> groups the flows app by app, by source or destination app, each section with its flow and connection counts (<code>Space</code> / <code>z</code> fold, <code>Enter</code> on a header drills into the app).</li>
+        <li><strong>App-to-app</strong>: group pairs with allowed, potentially blocked and blocked counts; <code>o</code> splits each pair by port/proto (one row per allow rule to write); <code>x</code> switches to sections per app (in, out or both), which <code>s</code> orders by connections, app name or flows; <code>Enter</code> drills into a pair's flows.</li>
         <li><strong>Mesh</strong>: user, process, source, destination, service and destination process; <code>u</code> / <code>p</code> hide the user / process column and merge rows.</li>
         <li><strong>Blocked</strong>: blocked and potentially blocked flows by destination group and service.</li>
         <li><strong>Treemap</strong>: each source a box, its destinations tiles sized by connections (<code>b</code> for bytes) and coloured by decision; <code>hjkl</code> move, <code>Enter</code> zooms and drills.</li>

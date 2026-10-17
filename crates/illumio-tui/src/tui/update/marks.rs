@@ -34,6 +34,14 @@ pub(super) fn mark_key(model: &mut Model) -> Vec<Cmd> {
         return Vec::new();
     }
     let prefill = match t.view {
+        TrafficView::Flows if t.flows_grouped() => {
+            t.flows_grouped
+                .selected_item()
+                .and_then(|r| match r.flow() {
+                    Some(f) => Some(flow_prefill(t, f)),
+                    None => section_prefill(t, r, false),
+                })
+        }
         TrafficView::Flows => t.flows.selected_item().map(|r| flow_prefill(t, r)),
         TrafficView::Aggregate if t.apps_state.by == By::Pairs => {
             t.pairs_table().selected_item().map(|g| pair_prefill(t, g))
@@ -229,7 +237,12 @@ fn section_prefill(t: &TrafficState, r: &SectionRow, blocked: bool) -> Option<Pr
             _ => None,
         }
     };
-    let view = if blocked { "Blocked" } else { "App-to-app" };
+    let (view, rows) = match t.view {
+        TrafficView::Blocked => ("Blocked", RowsOf::Sections(dir_of_view, decisions)),
+        // A Flows section's rows are its flows.
+        TrafficView::Flows => ("Flows", RowsOf::Flows),
+        _ => ("App-to-app", RowsOf::Sections(dir_of_view, decisions)),
+    };
     let app_text = r.app.join("/");
     let (src, dst, service, what) = match &r.kind {
         RowKind::Header { totals, .. } => {
@@ -268,6 +281,8 @@ fn section_prefill(t: &TrafficState, r: &SectionRow, blocked: bool) -> Option<Pr
                 Direction::Out => (app, peer, row.service.clone(), what),
             }
         }
+        // A flow is marked as on the flat Flows view (`flow_prefill`).
+        RowKind::Flow { .. } => return None,
     };
     Some(Prefill {
         what,
@@ -281,7 +296,7 @@ fn section_prefill(t: &TrafficState, r: &SectionRow, blocked: bool) -> Option<Pr
         service,
         decision,
         draft,
-        rows: RowsOf::Sections(dir_of_view, decisions),
+        rows,
     })
 }
 

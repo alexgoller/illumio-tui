@@ -91,6 +91,7 @@ pub fn section_marker(r: &SectionRow) -> Option<Marker> {
     match &r.kind {
         RowKind::Header { marks, .. } => marks.as_deref().and_then(row_marker),
         RowKind::Peer { row, .. } => row.marks.as_ref().and_then(row_marker),
+        RowKind::Flow { row } => flow_marker(row),
     }
 }
 
@@ -262,6 +263,7 @@ impl TrafficState {
         let sections = on.then_some(section_marker as fn(&SectionRow) -> Option<Marker>);
         self.apps.marker = sections;
         self.blocked.marker = sections;
+        self.flows_grouped.marker = sections;
         self.sync_marks_columns(on);
     }
 

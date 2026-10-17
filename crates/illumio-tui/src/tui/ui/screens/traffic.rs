@@ -7,7 +7,7 @@ use crate::tui::ui::widgets::panel::{panel, panel_spans};
 use pce::KeyOrder;
 use pce::models::PolicyDecision;
 use pce::traffic::treemap::{Rect as TreemapRect, Tile, Weight};
-use pce::traffic::{Decisions, ResolvedEndpoint, ResolvedFlow, compact_count};
+use pce::traffic::{Decisions, ResolvedEndpoint, ResolvedFlow, SectionOrder, compact_count};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -203,7 +203,22 @@ fn render_stats(model: &Model, f: &mut Frame, area: Rect) {
 
 fn render_flows(model: &Model, f: &mut Frame, area: Rect) {
     let t = &model.theme;
-    let mut meta = crate::tui::ui::widgets::table::header_meta(&model.traffic.flows);
+    let tr = &model.traffic;
+    let mut meta = if tr.flows_grouped() {
+        // `by src app · by app A→Z` (the order when not the default),
+        // then the table's search; the flows keep the flat table's sort.
+        let mut parts = vec![tr.flows_state.by.label().to_string()];
+        if tr.flows_state.order != SectionOrder::default() {
+            parts.push(tr.flows_state.order.label().to_string());
+        }
+        let m = crate::tui::ui::widgets::table::header_meta(&tr.flows_grouped);
+        if !m.is_empty() {
+            parts.push(m);
+        }
+        parts.join(" · ")
+    } else {
+        crate::tui::ui::widgets::table::header_meta(&tr.flows)
+    };
     let title = match &model.traffic.drill {
         Some(drill) => {
             let badge = "Esc clears";
@@ -223,18 +238,29 @@ fn render_flows(model: &Model, f: &mut Frame, area: Rect) {
             format!("{m} · {meta}")
         };
     }
-    let title = unit_title(&title, &meta, area.width);
-    let block = panel(&title, &meta, t, true);
     let theme = t.clone();
     // A flow whose verdict the draft changes is drawn in its draft colour, bold.
-    crate::tui::ui::widgets::table::render(f, area, &model.traffic.flows, t, block, &move |fl| {
-        match fl.draft_change() {
-            Some(d) => theme
-                .decision_style(d.class())
-                .add_modifier(ratatui::style::Modifier::BOLD),
-            None => theme.decision_style(fl.policy_decision),
-        }
-    });
+    let style = move |fl: &ResolvedFlow| match fl.draft_change() {
+        Some(d) => theme
+            .decision_style(d.class())
+            .add_modifier(ratatui::style::Modifier::BOLD),
+        None => theme.decision_style(fl.policy_decision),
+    };
+    if tr.flows_grouped() {
+        render_sections(
+            model,
+            f,
+            area,
+            &title,
+            &meta,
+            &tr.flows_grouped,
+            &move |r| r.flow().map_or_else(Style::new, |fl| style(fl)),
+        );
+        return;
+    }
+    let title = unit_title(&title, &meta, area.width);
+    let block = panel(&title, &meta, t, true);
+    crate::tui::ui::widgets::table::render(f, area, &tr.flows, t, block, &move |fl| style(fl));
 }
 
 /// The count unit beside a traffic table's title, where it fits.
@@ -260,6 +286,14 @@ pub fn unit_title(title: &str, meta: &str, width: u16) -> String {
 fn view_meta<T>(model: &Model, by: &str, view: &TableView<T>) -> String {
     let st = model.traffic.section_decisions();
     let mut parts = vec![by.to_string()];
+    // App-to-app's sections in another order than by connections.
+    let order = model.traffic.apps_state.order;
+    if model.traffic.view == TrafficView::Aggregate
+        && model.traffic.apps_state.by != By::Pairs
+        && order != SectionOrder::default()
+    {
+        parts.push(order.label().to_string());
+    }
     if st != Decisions::All {
         parts.push(st.label().to_string());
     }
@@ -587,10 +621,32 @@ fn render_detail(model: &Model, f: &mut Frame, area: Rect) {
         t,
         false,
     );
+    // A Flows section's header: what it holds and what the keys do.
+    if let Some(line) = model
+        .traffic
+        .flows_grouped
+        .selected_item()
+        .filter(|_| model.traffic.flows_grouped() && model.traffic.show_detail)
+        .and_then(|r| r.header_line())
+    {
+        let lines = vec![
+            Line::from(Span::raw(
+                line.trim_start_matches(['▾', '▹', ' ']).to_string(),
+            )),
+            Line::from(Span::styled(
+                "Enter drills to the app's flows · Space folds · z folds all · s orders",
+                t.dim_style(),
+            )),
+        ];
+        f.render_widget(
+            Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
+            area,
+        );
+        return;
+    }
     let Some(fl) = model
         .traffic
-        .flows
-        .selected_item()
+        .selected_flow()
         .filter(|_| model.traffic.show_detail)
     else {
         f.render_widget(

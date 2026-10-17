@@ -36,8 +36,8 @@ pub use query::{
 };
 pub use resolved::{DraftSummary, ResolvedEndpoint, ResolvedFlow, resolve_flows};
 pub use sections::{
-    AppSection, Decisions, Direction, PEER_NAMES, PeerRow, Totals, app_header, app_sections,
-    app_sections_both, in_app, in_peer,
+    AppSection, Decisions, Direction, PEER_NAMES, PeerRow, SectionOrder, Totals, app_header,
+    app_sections, app_sections_both, flow_sections, in_app, in_peer, order_sections, sides,
 };
 pub use steps::{
     CAP_STEPS, WINDOW_STEPS, backfill_cap, next_cap, next_window, prev_cap, prev_window,

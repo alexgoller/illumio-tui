@@ -302,14 +302,28 @@ impl<T> TableView<T> {
                         .any(|c| (c.cell)(&rows[i]).to_lowercase().contains(&needle))
             })
             .collect();
+        self.sort_positions(rows, &mut vis);
+        vis
+    }
+
+    /// Every position in `rows` (no search) in this view's sort order:
+    /// what a view laying the rows out otherwise (the Flows sections)
+    /// keeps of the table.
+    pub fn order_of(&self, rows: &[T]) -> Vec<usize> {
+        let mut all: Vec<usize> = (0..rows.len()).collect();
+        self.sort_positions(rows, &mut all);
+        all
+    }
+
+    /// `positions` in the sort order (stable; unchanged when unsorted).
+    fn sort_positions(&self, rows: &[T], positions: &mut [usize]) {
         if let Some((col, desc)) = self.sort {
             let key = self.columns[col].key;
-            vis.sort_by(|&a, &b| {
+            positions.sort_by(|&a, &b| {
                 let o = key(&rows[a]).cmp(&key(&rows[b]));
                 if desc { o.reverse() } else { o }
             });
         }
-        vis
     }
 
     fn apply(&mut self) {
