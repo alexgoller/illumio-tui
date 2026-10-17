@@ -3,29 +3,29 @@
 class IllumioTui < Formula
   desc "Terminal UI and CLI for the Illumio Core PCE"
   homepage "https://github.com/alexgoller/illumio-tui"
-  version "0.2.0"
+  version "0.3.0"
   license "GPL-3.0-only"
 
   on_macos do
     on_arm do
-      url "https://github.com/alexgoller/illumio-tui/releases/download/v0.2.0/illumio-tui-0.2.0-aarch64-apple-darwin.tar.gz"
-      sha256 "82abe239e23e84ebbc887d8615f88132248bd5a53e48fa7a107a8c5b9744d277"
+      url "https://github.com/alexgoller/illumio-tui/releases/download/v0.3.0/illumio-tui-0.3.0-aarch64-apple-darwin.tar.gz"
+      sha256 "9916bc67ce08c4734cdfc1acecf6283edba86550b25fb85033c08fb2324aaa45"
     end
     on_intel do
-      url "https://github.com/alexgoller/illumio-tui/releases/download/v0.2.0/illumio-tui-0.2.0-x86_64-apple-darwin.tar.gz"
-      sha256 "d334fa57e67efe9986f30029119a575af6bfdc677d81bc53b98409f15121aa19"
+      url "https://github.com/alexgoller/illumio-tui/releases/download/v0.3.0/illumio-tui-0.3.0-x86_64-apple-darwin.tar.gz"
+      sha256 "e8cf9846ed013e71e01b2fe3656631b8064d39f857569706fa98d114ad06a5e0"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/alexgoller/illumio-tui/releases/download/v0.2.0/illumio-tui-0.2.0-aarch64-unknown-linux-gnu.tar.gz"
-      sha256 "b1642b377a80ef4d92ef98d969bd3d31c5ad7b7437ac7cb32cf7684dc907aa22"
+      url "https://github.com/alexgoller/illumio-tui/releases/download/v0.3.0/illumio-tui-0.3.0-aarch64-unknown-linux-gnu.tar.gz"
+      sha256 "34452368fa6341302df3e3b67e73f9bc743550313928ca2ae56a22887bfb005d"
     end
     on_intel do
       # The static musl build: no glibc floor, runs on any x86_64 Linux.
-      url "https://github.com/alexgoller/illumio-tui/releases/download/v0.2.0/illumio-tui-0.2.0-x86_64-unknown-linux-musl.tar.gz"
-      sha256 "c7c9c0546ce5e3aa0793dfe26d0961f0661debf895ab54c3829e0daba2c26862"
+      url "https://github.com/alexgoller/illumio-tui/releases/download/v0.3.0/illumio-tui-0.3.0-x86_64-unknown-linux-musl.tar.gz"
+      sha256 "241bbfbf36eb7ae8e32d0b1627d8bf86069501ff78463a3b70c058c6449a84ec"
     end
   end
 
