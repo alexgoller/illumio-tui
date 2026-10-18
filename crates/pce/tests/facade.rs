@@ -193,6 +193,53 @@ async fn workloads_pass_filters_and_cache_per_filter() {
 }
 
 #[tokio::test]
+async fn a_filtered_read_ignores_the_collection_total() {
+    use pce::models::WorkloadFilter;
+    // The PCE's X-Total-Count is the whole collection's size, whatever the
+    // filters: a one-host read is complete below the row cap.
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .and(query_param("hostname", "web-8"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!([{"href": "/orgs/5/workloads/1", "hostname": "web-8"}]))
+                .insert_header("X-Total-Count", "206"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .and(query_param("hostname", "web"))
+        .and(query_param("max_results", "1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!([{"href": "/orgs/5/workloads/1", "hostname": "web-8"}]))
+                .insert_header("X-Total-Count", "206"),
+        )
+        .mount(&server)
+        .await;
+    let p = pce_for(&server);
+    let one = WorkloadFilter {
+        hostname: Some("web-8".into()),
+        ..Default::default()
+    };
+    assert!(!p.workloads(&one, CacheMode::Use).await.unwrap().truncated);
+    let capped = WorkloadFilter {
+        hostname: Some("web".into()),
+        max_results: Some(1),
+        ..Default::default()
+    };
+    assert!(
+        p.workloads(&capped, CacheMode::Use)
+            .await
+            .unwrap()
+            .truncated,
+        "the row cap was reached: more may match"
+    );
+}
+
+#[tokio::test]
 async fn policy_reads_use_scope_and_cache() {
     use pce::models::PolicyScope;
     let server = MockServer::start().await;

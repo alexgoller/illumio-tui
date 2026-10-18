@@ -654,7 +654,14 @@ impl Pce {
             .find(|(k, _)| *k == "max_results")
             .and_then(|(_, v)| v.parse().ok())
             .unwrap_or(u64::from(DEFAULT_MAX_RESULTS));
-        let truncated = resp.total_count.is_some_and(|t| t > len) || len >= max;
+        // X-Total-Count is the collection's size, not the filtered match
+        // count (demo100: 206 workloads for a one-host `hostname=` read),
+        // so it only tells of a cut on an unfiltered read; a filtered one
+        // is cut only when it fills the row cap.
+        let filtered = query
+            .iter()
+            .any(|(k, _)| !matches!(*k, "max_results" | "usage"));
+        let truncated = len >= max || (!filtered && resp.total_count.is_some_and(|t| t > len));
         self.cache
             .insert(&cache_key, (resp.body.clone(), truncated), ttl);
         Ok(Cached {

@@ -3308,20 +3308,10 @@ async fn csv_is_a_usage_error_with_json_table_and_where_there_is_no_table() {
     }
 }
 async fn mount_app(server: &MockServer, posts: u64) {
-    mount_app_counting(server, posts, None).await;
-}
-
-/// `mount_app`; `total` sets `X-Total-Count` on the workloads and rulesets
-/// answers (more than they hold: both reads are truncated).
-async fn mount_app_counting(server: &MockServer, posts: u64, total: Option<u64>) {
     let answer = |body: &str| {
-        let r = ResponseTemplate::new(200)
+        ResponseTemplate::new(200)
             .set_body_string(body)
-            .insert_header("Content-Type", "application/json");
-        match total {
-            Some(n) => r.insert_header("X-Total-Count", n.to_string().as_str()),
-            None => r,
-        }
+            .insert_header("Content-Type", "application/json")
     };
     mount_traffic(server, posts).await;
     Mock::given(method("GET"))
@@ -3343,7 +3333,39 @@ async fn mount_app_counting(server: &MockServer, posts: u64, total: Option<u64>)
 #[tokio::test(flavor = "multi_thread")]
 async fn app_reports_truncated_workloads_and_rulesets_in_their_sections() {
     let server = MockServer::start().await;
-    mount_app_counting(&server, 4, Some(50_000)).await;
+    // A label-filtered workloads read is cut only when it fills the row cap
+    // (X-Total-Count is the whole collection's size); the unfiltered
+    // rulesets read is cut when the total exceeds the rows.
+    let mut fixture: Vec<Value> =
+        serde_json::from_str(include_str!("../../../fixtures/workloads.json")).unwrap();
+    let one = fixture.swap_remove(0);
+    let full: Vec<Value> = (0..10_000)
+        .map(|i| {
+            let mut w = one.clone();
+            w["href"] = format!("/orgs/5/workloads/w{i}").into();
+            w
+        })
+        .collect();
+    mount_traffic(&server, 4).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(full)
+                .insert_header("X-Total-Count", "50000"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/sec_policy/draft/rule_sets"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/rule_sets.json"))
+                .insert_header("Content-Type", "application/json")
+                .insert_header("X-Total-Count", "50000"),
+        )
+        .mount(&server)
+        .await;
     let out = stdout_json(
         cmd(&server)
             .args(["app", "shop/prod", "--window", "1h"])
