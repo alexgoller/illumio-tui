@@ -13,6 +13,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Border plus ten rows of detail.
@@ -148,6 +149,7 @@ fn render_table(model: &Model, f: &mut Frame, area: Rect) {
     if w.grouped {
         let accent = Style::new().fg(t.accent).add_modifier(Modifier::BOLD);
         let theme2 = t.clone();
+        let cols = HeaderCols::of(&w.groups);
         render_spanning_spans(
             f,
             area,
@@ -157,7 +159,7 @@ fn render_table(model: &Model, f: &mut Frame, area: Rect) {
             &move |r: &WlGroupRow| r.member().map_or_else(Style::new, |w| row_style(w, &theme)),
             &|r, width| match r {
                 WlGroupRow::Header { group, folded } => {
-                    Some((header_spans(group, *folded, width, &theme2), accent))
+                    Some((header_spans(group, *folded, cols, width, &theme2), accent))
                 }
                 WlGroupRow::Member { .. } => None,
             },
@@ -185,22 +187,75 @@ fn row_style(r: &WorkloadRowView, theme: &Theme) -> Style {
 /// Health bar cells in a section header.
 const HEADER_BAR: usize = 10;
 
+/// The widest name, count, health and enforcement text over the section
+/// headers: each header pads its parts to them and keeps the parts that
+/// fit at those widths, so every header shows the same columns, lined up
+/// down the list, folded or not. A name over [`NAME_MAX`] cells keeps its
+/// own width.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HeaderCols {
+    name: usize,
+    count: usize,
+    health: usize,
+    enforcement: usize,
+}
+
+/// The widest name the header columns pad to.
+const NAME_MAX: usize = 40;
+
+impl HeaderCols {
+    pub fn of(groups: &[Arc<WlGroup>]) -> Self {
+        groups.iter().fold(Self::default(), |c, g| Self {
+            name: c.name.max(cells(&name_text(g, false)).min(NAME_MAX)),
+            count: c.count.max(cells(&count_text(g))),
+            health: c.health.max(cells(&health_text(g))),
+            enforcement: c.enforcement.max(cells(&enforcement_text(g))),
+        })
+    }
+}
+
+fn cells(s: &str) -> usize {
+    Span::raw(s.to_string()).width()
+}
+
+/// `s` with spaces up to `n` cells.
+fn pad(s: String, n: usize) -> String {
+    let fill = n.saturating_sub(cells(&s));
+    s + &" ".repeat(fill)
+}
+
+fn name_text(g: &WlGroup, folded: bool) -> String {
+    format!("{} {}", if folded { "▹" } else { "▾" }, g.title)
+}
+
+fn count_text(g: &WlGroup) -> String {
+    format!("{} wl", g.count())
+}
+
 /// A section header in `width` cells: `▾ shop | prod   12 wl  ███▒  10 ok
-/// · 1 offline   full 8 vis 3 idle 1`; `▹` when folded. Narrow, the parts
-/// go right to left: enforcement, health, bar, count; the name stays
-/// (cut at the end).
-pub fn header_spans(g: &WlGroup, folded: bool, width: usize, t: &Theme) -> Vec<Span<'static>> {
-    let name = format!("{} {}", if folded { "▹" } else { "▾" }, g.title);
-    let count = format!("{} wl", g.count());
+/// · 1 offline   full 8 vis 3 idle 1`; `▹` when folded. The name, count
+/// and health pad to `cols`, and the parts kept are those that fit at
+/// `cols`, so the parts line up across headers.
+/// Narrow, the parts go right to left: enforcement, health, bar, count;
+/// the name stays (cut at the end).
+pub fn header_spans(
+    g: &WlGroup,
+    folded: bool,
+    cols: HeaderCols,
+    width: usize,
+    t: &Theme,
+) -> Vec<Span<'static>> {
+    let name = pad(name_text(g, folded), cols.name);
+    let count = pad(count_text(g), cols.count);
     let health = health_text(g);
     let enforcement = enforcement_text(g);
-    let w = |s: &str| Span::raw(s.to_string()).width();
+    let w = |s: &str| cells(s);
     // name, then each optional part with the gap before it.
     let parts: [(usize, usize); 4] = [
         (3, w(&count)),
         (2, HEADER_BAR),
-        (2, w(&health)),
-        (3, w(&enforcement)),
+        (2, w(&health).max(cols.health)),
+        (3, w(&enforcement).max(cols.enforcement)),
     ];
     let mut keep = parts.len();
     while keep > 0 {
@@ -224,6 +279,12 @@ pub fn header_spans(g: &WlGroup, folded: bool, width: usize, t: &Theme) -> Vec<S
         spans.extend(health_bar(bar_counts(g), HEADER_BAR, t));
     }
     if keep >= 3 {
+        // Padded only when the enforcement follows: no trailing blanks.
+        let health = if keep >= 4 {
+            pad(health, cols.health)
+        } else {
+            health
+        };
         spans.push(Span::styled(format!("  {health}"), Style::new().fg(t.fg)));
     }
     if keep >= 4 {
@@ -462,5 +523,43 @@ mod tests {
         let mut none = row(2, "x");
         none.workload.enforcement_mode = None;
         assert_eq!(health(&none), "unmanaged");
+    }
+
+    fn group(title: &str, members: usize, health: [usize; 5]) -> Arc<WlGroup> {
+        Arc::new(WlGroup {
+            key: vec![Some(title.into())],
+            keys: vec!["app".into()],
+            title: title.into(),
+            health,
+            enforcement: [members, 0, 0, 0],
+            members: (0..members).map(|_| Arc::new(row(0, "full"))).collect(),
+        })
+    }
+
+    /// Where each part starts: the text before `needle` in cells.
+    fn at(spans: &[Span], needle: &str) -> usize {
+        let line: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        cells(&line[..line.find(needle).unwrap()])
+    }
+
+    #[test]
+    fn section_headers_line_their_parts_up_folded_or_not() {
+        let t = Theme::dark();
+        let groups = [
+            group("crm", 3, [3, 0, 0, 0, 0]),
+            group("payment-gateway | Production", 12, [10, 0, 1, 1, 0]),
+        ];
+        let cols = HeaderCols::of(&groups);
+        let a = header_spans(&groups[0], true, cols, 200, &t);
+        let b = header_spans(&groups[1], false, cols, 200, &t);
+        assert_eq!(at(&a, "3 wl"), at(&b, "12 wl"), "count");
+        assert_eq!(at(&a, "█"), at(&b, "█"), "bar");
+        assert_eq!(at(&a, "3 ok"), at(&b, "10 ok"), "health");
+        assert_eq!(at(&a, "full 3"), at(&b, "full 12"), "enforcement");
+        // Narrow, the parts still drop right to left, without trailing blanks.
+        let narrow = header_spans(&groups[0], false, cols, 50, &t);
+        let line: String = narrow.iter().map(|s| s.content.as_ref()).collect();
+        assert!(!line.contains("full"), "{line}");
+        assert_eq!(line.trim_end(), line, "{line}");
     }
 }
