@@ -14,6 +14,7 @@ pub mod app;
 pub mod auth;
 pub mod cache;
 pub mod client;
+pub mod enforcement;
 pub mod error;
 pub mod explain;
 pub mod generate;

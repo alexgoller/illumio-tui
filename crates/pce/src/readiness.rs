@@ -522,7 +522,7 @@ pub fn accepted(marks: Option<&ActiveMarks>, f: &ResolvedFlow) -> bool {
 }
 
 /// The would-block flows as tuples: peer group and service.
-fn tuples(flows: &[&ResolvedFlow], keys: &[String], dir: Direction) -> Vec<Gap> {
+pub(crate) fn tuples(flows: &[&ResolvedFlow], keys: &[String], dir: Direction) -> Vec<Gap> {
     group_by_service_refs(flows.iter().copied(), keys)
         .into_iter()
         .map(|g| {
