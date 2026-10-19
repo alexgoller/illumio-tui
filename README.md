@@ -273,7 +273,7 @@ Five screens: `1` Traffic, `2` Policy, `3` Objects, `4` Workloads, `5` Events. T
 takes `:traffic`, `:policy`, `:objects`, `:workloads`, `:events`, `:iplists` (Objects on its
 IP lists tab), `:filter <expr>`, `:window <dur>`, `:profile <name>`, `:writes [on|off]`,
 `:export <path>`, `:draft`, `:active`, `:unicast`, `:focus [app]`, `:app [app]`, `:gen [app]`,
-`:batch`, `:help` and `:q` (each described below). `:export <path>` writes the table on
+`:readiness`, `:enforce [app]`, `:batch`, `:help` and `:q` (each described below). `:export <path>` writes the table on
 screen as CSV (the rows shown, with the search and filters applied and in sort order; every
 column, whatever the terminal width, each cell whole; `~/` is the home directory), the same
 format as the CLI's `--csv`, and sends nothing; it refuses an existing file, `:export! <path>`
@@ -1286,6 +1286,25 @@ rollback). A workload changed by someone else since, gone, not moved by that cha
 `unanswered`/`pending` move did not apply (`not applied`) is skipped and listed in `skipped`,
 never overwritten. The rollback writes its own record with `rollback_of`; no record is ever
 deleted.
+
+In the TUI, `:readiness` lists every app of the result on screen with its verdict, workloads,
+flows, would-block connections, coverage, pending changes and warnings (`s` sorts, `/`
+searches; `not evaluated` until `D`, which goes through `D`'s own confirm). `Enter` on an
+app, `:enforce <app>` (`:enforce` alone: the picker) or `e` in the app overlay opens the
+**enforcement overlay**: five steps on the left, the selected one's detail on the right
+(`Tab` or `1`-`5`). 1 Readiness: the numbers, the verdict, the warnings. 2 Rules: the gaps;
+`G` opens the generator for the app, `w` the allow-rule form for the gap's tuple, `m` the
+mark form as `accept-blocked`. 3 Provision: the app's pending changes; `P` provisions them
+through the usual preview. 4 Enforce: `j`/`k` full or selective, `v` the visibility level,
+`Enter` the bulk confirm (typed count); an app that is not ready asks for the word `enforce`
+first. The change record is written exactly as the CLI writes it (the directory checked
+before any request, the record before the send, the results after it; a record that cannot
+be updated opens loudly with the record to keep). 5 Watch: `r` runs the blocked-since query
+(one query, only on `r`), `R` re-reads the workloads and previews the rollback, `y` sends it;
+a record already rolled back is refused. Opening either overlay sends nothing when the
+workloads, pending changes and draft rulesets are loaded (else one cached read each, counted
+in the header); after a write the steps re-evaluate from the reloaded data, and nothing
+refreshes by itself.
 
 ### Policy editing in the TUI
 
