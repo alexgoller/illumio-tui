@@ -236,6 +236,12 @@ impl PortSpec {
     }
 }
 
+/// Interface properties besides `name`, `address` and `cidr_block` that a
+/// workload PUT accepts (workloads_interfaces.schema.json; live 406 for
+/// `network_detection_mode` on demo100, #49).
+const WRITABLE_INTERFACE_EXTRAS: [&str; 3] =
+    ["default_gateway_address", "friendly_name", "link_state"];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterfaceSpec {
     pub name: String,
@@ -280,15 +286,15 @@ impl InterfaceSpec {
         }
     }
 
-    /// Extras the PCE reports but does not accept back (`network`,
-    /// `loopback`, `href`) and null extras are not sent.
+    /// Only the extras the PCE's interface schema accepts back are sent
+    /// (it rejects any other property: `network_detection_mode`,
+    /// `network`, `loopback`, `public_ip` … are reported, not writable);
+    /// null extras are not sent either.
     pub fn to_json(&self) -> Value {
         let mut v = Value::Object(
             self.extra
                 .iter()
-                .filter(|(k, v)| {
-                    !v.is_null() && !matches!(k.as_str(), "network" | "loopback" | "href")
-                })
+                .filter(|(k, v)| !v.is_null() && WRITABLE_INTERFACE_EXTRAS.contains(&k.as_str()))
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect(),
         );
@@ -491,6 +497,26 @@ mod tests {
         assert_eq!(
             shown,
             vec!["icmp", "22/tcp", "443/tcp", "8000-8010/tcp", "53/udp"]
+        );
+    }
+
+    #[test]
+    fn an_interface_sent_back_carries_only_writable_properties() {
+        // As demo100 reports an interface (the 406 of #49 named the mode).
+        let read: crate::models::Interface = serde_json::from_value(json!({
+            "name": "eth0", "address": "10.0.1.198", "cidr_block": 26,
+            "default_gateway_address": "10.0.1.193", "friendly_name": null,
+            "link_state": "up", "loopback": false,
+            "network": {"href": "/orgs/1/networks/n", "name": "Corporate"},
+            "network_detection_mode": "single_private_brn", "public_ip": null
+        }))
+        .unwrap();
+        assert_eq!(
+            InterfaceSpec::from_interface(&read).to_json(),
+            json!({
+                "name": "eth0", "address": "10.0.1.198", "cidr_block": 26,
+                "default_gateway_address": "10.0.1.193", "link_state": "up"
+            })
         );
     }
 }
