@@ -58,7 +58,7 @@ pub struct ReadinessReport {
     pub apps: Vec<AppReadiness>,
 }
 
-struct Apps<'a>(&'a [AppReadiness]);
+pub(crate) struct Apps<'a>(pub &'a [AppReadiness]);
 
 impl TableRows for Apps<'_> {
     fn units(&self) -> Option<&'static str> {
@@ -166,7 +166,7 @@ impl TableRows for Apps<'_> {
     }
 }
 
-struct Gaps<'a>(&'a [Gap]);
+pub(crate) struct Gaps<'a>(pub &'a [Gap]);
 
 impl TableRows for Gaps<'_> {
     fn headers(&self) -> Vec<&'static str> {
@@ -292,7 +292,25 @@ async fn fetch_apps(
     })
 }
 
-pub async fn run(ctx: &Context, args: &ReadinessArgs) -> Result<(), CliError> {
+/// Everything readiness read and judged: the report, the
+/// workloads read (and when it started), and the meta so far.
+pub(crate) struct Evaluated {
+    pub report: ReadinessReport,
+    pub workloads: pce::Cached<Vec<pce::models::Workload>>,
+    /// When the workloads read started: a send right after it may skip
+    /// the bulk re-read (`BulkPlan::selection_read`).
+    pub workloads_read_at: std::time::Instant,
+    /// Each `--app`'s labels (as the traffic query and the workloads read
+    /// name them).
+    pub app_labels: Vec<Vec<ActorMatch>>,
+    /// The name index the flows were resolved with.
+    pub index: Arc<NameIndex>,
+    pub meta: super::output::Meta,
+}
+
+/// Runs readiness (the requests and the judgement) without printing:
+/// `run`, and `enforce` before a move.
+pub(crate) async fn evaluate(ctx: &Context, args: &ReadinessArgs) -> Result<Evaluated, CliError> {
     let keys = keys_or_default(&ctx.config.scope_keys);
     let mut apps: Vec<GroupKey> = Vec::new();
     for a in &args.apps {
@@ -306,15 +324,15 @@ pub async fn run(ctx: &Context, args: &ReadinessArgs) -> Result<(), CliError> {
     // The apps' labels, checked before any traffic request (exit 2 with
     // the closest values), and the workload filter they make.
     let mut label_groups = Vec::new();
+    let mut app_labels_ = Vec::new();
     let fetched = if narrowed {
         let idx = ctx.pce.name_index(ctx.cache_mode).await?;
-        let mut matches = Vec::new();
         for app in &apps {
             let m = app_labels(app, &keys, &idx).map_err(CliError::Args)?;
             label_groups.push(pce::app::label_hrefs(&m));
-            matches.push(m);
+            app_labels_.push(m);
         }
-        fetch_apps(ctx, args, &matches, idx).await?
+        fetch_apps(ctx, args, &app_labels_, idx).await?
     } else {
         fetch(ctx, &filter(args), None)
             .await?
@@ -324,6 +342,7 @@ pub async fn run(ctx: &Context, args: &ReadinessArgs) -> Result<(), CliError> {
         labels: label_groups,
         ..WorkloadFilter::default()
     };
+    let workloads_read_at = std::time::Instant::now();
     let wl = ctx.pce.workloads(&wl_filter, ctx.cache_mode).await?;
     let pending = ctx.pce.pending_changes(ctx.cache_mode).await?;
     let rs = ctx
@@ -371,6 +390,19 @@ pub async fn run(ctx: &Context, args: &ReadinessArgs) -> Result<(), CliError> {
             meta.warnings.get_or_insert_with(Vec::new).push(what.into());
         }
     }
+    Ok(Evaluated {
+        report,
+        workloads: wl,
+        workloads_read_at,
+        app_labels: app_labels_,
+        index: fetched.index.clone(),
+        meta,
+    })
+}
+
+pub async fn run(ctx: &Context, args: &ReadinessArgs) -> Result<(), CliError> {
+    let narrowed = !args.apps.is_empty();
+    let Evaluated { report, meta, .. } = evaluate(ctx, args).await?;
     let apps_table = Apps(&report.apps);
     let mut tables: Vec<(String, &dyn TableRows)> = vec![(
         format!(

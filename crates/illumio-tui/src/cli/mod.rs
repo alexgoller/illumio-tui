@@ -4,6 +4,7 @@ pub mod app;
 pub mod bulk;
 pub mod completions;
 pub mod context;
+pub mod enforce;
 pub mod error;
 pub mod events;
 pub mod generate;
@@ -119,6 +120,26 @@ pub enum Command {
     /// squelch or accept-blocked mark), needs_provision (pending changes in rulesets whose scope
     /// covers the app, or whose rules reach its workloads), ready; enforced when every managed workload is in full enforcement.
     Readiness(readiness::ReadinessArgs),
+    /// Move one app to enforcement, watch what is blocked since, roll back (change records)
+    ///
+    /// --to full|selective: readiness for the app first (one Explorer query narrowed to the
+    /// app, re-evaluated against the draft: one PUT update_rules; the workloads, pending
+    /// changes and draft rulesets, cached; the object lists, cached); refused (exit 6) unless
+    /// the verdict is ready or enforced, or --force. Then the bulk move of the app's managed
+    /// workloads: one PUT bulk_update per 100 (plus a re-read when the workloads came from the
+    /// cache), with --dry-run / --yes and --confirm-count as `workloads enforce`. Writes a
+    /// change record to $XDG_STATE_HOME/illumio-tui/enforcements/ (else
+    /// ~/.local/state/illumio-tui/enforcements/).
+    ///
+    /// --watch: one Explorer query (blocked flows only, the app on either side) from the
+    /// change time (the app's newest record, or --since) to now. Exit 0 when none, exit 7
+    /// (blocked_since_enforcement) when some. Read-only; runs only when asked.
+    ///
+    /// --rollback: one workloads list read of the app past the cache, then one PUT
+    /// bulk_update per (mode, visibility) of the record's `before` (per 100). A workload no
+    /// longer as the move set it was changed by someone else: skipped and reported. Writes a
+    /// rollback record; no record is ever deleted.
+    Enforce(enforce::EnforceArgs),
     /// Rulesets, rules, deny rules, pending changes, provisioning
     #[command(subcommand)]
     Policy(policy::PolicyCmd),
@@ -167,6 +188,7 @@ fn csv_refusal(command: &Command) -> Option<&'static str> {
         Command::Traffic(t) if t.filter().is_some_and(|f| f.dry_run) => Some("traffic --dry-run"),
         Command::Profile(profile::ProfileCmd::Use { .. }) => Some("profile use"),
         Command::Marks(marks::MarksCmd::Export(_)) => Some("marks export"),
+        Command::Enforce(a) if !a.watch => Some("enforce --to/--rollback"),
         _ => None,
     }
 }
@@ -201,6 +223,7 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
         Command::App(a) => app::run(&ctx, &a).await,
         Command::Gen(a) => generate::run(&ctx, &a).await,
         Command::Readiness(a) => readiness::run(&ctx, &a).await,
+        Command::Enforce(a) => enforce::run(&ctx, &a).await,
         Command::Policy(p) => policy::run(&ctx, &p).await,
         Command::Traffic(t) => traffic::run(&ctx, &t).await,
         Command::Profile(_) | Command::Marks(_) | Command::Completions(_) => {

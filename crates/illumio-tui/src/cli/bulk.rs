@@ -172,7 +172,7 @@ pub struct BulkDryRun {
     pub requests: Vec<WriteRequest>,
 }
 
-struct PlanRows<'a>(&'a BulkDryRun);
+pub(crate) struct PlanRows<'a>(pub &'a BulkDryRun);
 
 impl TableRows for PlanRows<'_> {
     fn headers(&self) -> Vec<&'static str> {
@@ -194,7 +194,7 @@ impl TableRows for PlanRows<'_> {
     }
 }
 
-struct RequestRows<'a>(&'a [WriteRequest]);
+pub(crate) struct RequestRows<'a>(pub &'a [WriteRequest]);
 
 impl TableRows for RequestRows<'_> {
     fn headers(&self) -> Vec<&'static str> {
@@ -229,7 +229,7 @@ impl TableRows for RequestRows<'_> {
     }
 }
 
-struct StepRows<'a>(&'a BulkReport);
+pub(crate) struct StepRows<'a>(pub &'a BulkReport);
 
 impl TableRows for StepRows<'_> {
     fn headers(&self) -> Vec<&'static str> {
@@ -267,7 +267,7 @@ impl TableRows for StepRows<'_> {
     }
 }
 
-struct ItemRows<'a>(&'a BulkReport);
+pub(crate) struct ItemRows<'a>(pub &'a BulkReport);
 
 impl TableRows for ItemRows<'_> {
     fn headers(&self) -> Vec<&'static str> {
@@ -337,25 +337,9 @@ async fn send(
         for w in &warnings {
             eprintln!("warning: {w}");
         }
-        return emit_plan(ctx, &plan, &change, flags.dry_run, &sel, warnings, org);
+        return emit_plan(ctx, &plan, flags.dry_run, &sel, warnings, org);
     }
-    if let Some(n) = confirm_count
-        && n != count
-    {
-        return Err(CliError::Args(format!(
-            "--confirm-count {n} does not match: {count} workloads would change; nothing sent"
-        )));
-    }
-    if plan.needs_count() && flags.yes && confirm_count.is_none() {
-        // Why, without the count itself: the dry run shows it.
-        let why = match change.enforcement {
-            Some(m) if m.enforces() => format!("{} on more than one workload", m.as_str()),
-            _ => format!("more than {COUNT_ABOVE} workloads"),
-        };
-        return Err(CliError::Args(format!(
-            "{why}: pass --confirm-count with the number of workloads that change (--dry-run shows it); nothing sent"
-        )));
-    }
+    check_count(&plan, flags.yes, confirm_count)?;
     plan.confirmed = confirm_count;
     // Read past the cache moments ago in this very run: no re-read.
     plan.selection_read(selected_at, sel.hit);
@@ -363,7 +347,7 @@ async fn send(
         eprintln!("warning: {w}");
     }
     if flags.dry_run {
-        return emit_plan(ctx, &plan, &change, true, &sel, warnings, org);
+        return emit_plan(ctx, &plan, true, &sel, warnings, org);
     }
     let report = ctx
         .pce
@@ -372,14 +356,7 @@ async fn send(
         .await;
     let mut meta = ctx.meta("none", sel.truncated, None);
     meta.local_filter = sel.local_filter.clone();
-    if let Some(last) = report.steps.iter().rev().find(|s| s.http_status.is_some()) {
-        meta.write = Some(WriteMeta {
-            method: WriteMethod::Put,
-            path: format!("/orgs/{org}/workloads/bulk_update"),
-            status: last.http_status.unwrap_or_default(),
-            audit: guard.audit_location(),
-        });
-    }
+    meta.write = write_meta(&report, org, guard);
     let dropped = report.dropped();
     if dropped > 0 {
         warnings.push(format!(
@@ -404,20 +381,40 @@ async fn send(
     Ok(())
 }
 
-/// The plan as `--dry-run` prints it (also a plan with nothing to change,
-/// with or without `--yes`).
-fn emit_plan(
-    ctx: &Context,
+/// The typed count, before any write: `--confirm-count` must match the
+/// plan's count, and `--yes` needs it when the plan does (full or
+/// selective on more than one workload, or more than 25).
+pub(crate) fn check_count(
     plan: &pce::write::BulkPlan,
-    change: &BulkChange,
-    dry_run: bool,
-    sel: &super::workloads::Selection,
-    warnings: Vec<String>,
-    org: u64,
+    yes: bool,
+    confirm_count: Option<usize>,
 ) -> Result<(), CliError> {
-    let data = BulkDryRun {
+    let count = plan.items.len();
+    if let Some(n) = confirm_count
+        && n != count
+    {
+        return Err(CliError::Args(format!(
+            "--confirm-count {n} does not match: {count} workloads would change; nothing sent"
+        )));
+    }
+    if plan.needs_count() && yes && confirm_count.is_none() {
+        // Why, without the count itself: the dry run shows it.
+        let why = match plan.change.enforcement {
+            Some(m) if m.enforces() => format!("{} on more than one workload", m.as_str()),
+            _ => format!("more than {COUNT_ABOVE} workloads"),
+        };
+        return Err(CliError::Args(format!(
+            "{why}: pass --confirm-count with the number of workloads that change (--dry-run shows it); nothing sent"
+        )));
+    }
+    Ok(())
+}
+
+/// `--dry-run`'s data for `plan`.
+pub(crate) fn dry_run_data(plan: &pce::write::BulkPlan, dry_run: bool, org: u64) -> BulkDryRun {
+    BulkDryRun {
         dry_run,
-        change: change.text(),
+        change: plan.change.text(),
         summary: plan.summary(),
         count: plan.items.len(),
         needs_confirm_count: plan.needs_count(),
@@ -426,7 +423,35 @@ fn emit_plan(
         requests: plan.requests(org),
         workloads: plan.items.clone(),
         skipped: plan.skipped.clone(),
-    };
+    }
+}
+
+/// The meta's `write`: the last answered bulk request.
+pub(crate) fn write_meta(report: &BulkReport, org: u64, guard: &WriteGuard) -> Option<WriteMeta> {
+    report
+        .steps
+        .iter()
+        .rev()
+        .find(|s| s.http_status.is_some())
+        .map(|last| WriteMeta {
+            method: WriteMethod::Put,
+            path: format!("/orgs/{org}/workloads/bulk_update"),
+            status: last.http_status.unwrap_or_default(),
+            audit: guard.audit_location(),
+        })
+}
+
+/// The plan as `--dry-run` prints it (also a plan with nothing to change,
+/// with or without `--yes`).
+fn emit_plan(
+    ctx: &Context,
+    plan: &pce::write::BulkPlan,
+    dry_run: bool,
+    sel: &super::workloads::Selection,
+    warnings: Vec<String>,
+    org: u64,
+) -> Result<(), CliError> {
+    let data = dry_run_data(plan, dry_run, org);
     let mut meta = ctx.meta(cache_label(sel.hit, ctx.cache_mode), sel.truncated, None);
     meta.local_filter = sel.local_filter.clone();
     meta.warnings = Some(warnings).filter(|w| !w.is_empty());
@@ -449,7 +474,7 @@ fn emit_plan(
 /// the first reason's code: 2 invalid, 3 auth, 5 rate limited, 6 refused by
 /// the write guard, 4 anything else (a failed request, an unknown outcome,
 /// refused workloads, or nothing updated because every workload changed).
-fn exit_error(report: &BulkReport, status: String) -> Option<CliError> {
+pub(crate) fn exit_error(report: &BulkReport, status: String) -> Option<CliError> {
     use pce::write::bulk::BulkFailure as F;
     let (code, kind) = match report.failure {
         Some(F::Invalid) => (2, "invalid"),

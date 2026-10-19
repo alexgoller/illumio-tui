@@ -1,5 +1,6 @@
 //! CLI errors and their exit codes: 1 generic, 2 arguments/config, 3 auth,
-//! 4 PCE error, 5 rate limited, 6 write refused.
+//! 4 PCE error, 5 rate limited, 6 write refused, 7 blocked since an
+//! enforcement (`enforce --watch`).
 use crate::config::ConfigError;
 use crate::marks::MarksError;
 use pce::PceError;
@@ -31,6 +32,14 @@ pub enum CliError {
         code: i32,
         kind: &'static str,
     },
+    /// A write refused before anything was sent, with why (`enforce` on
+    /// an app that is not ready, a record from another PCE): exit 6.
+    #[error("{0}")]
+    Refused(String),
+    /// `enforce --watch` found flows blocked since the change: exit 7,
+    /// after the report.
+    #[error("{0}")]
+    Blocked(String),
     /// `marks.toml`: invalid (exit 2, every problem), locked by another
     /// writer (exit 3), a mark gone (exit 2), unreadable (exit 1).
     #[error("{}", .0.lines().join("; "))]
@@ -46,6 +55,8 @@ impl CliError {
             CliError::Pce(PceError::Invalid(_)) => 2,
             CliError::Pce(_) | CliError::Incomplete(_) => 4,
             CliError::Bulk { code, .. } => *code,
+            CliError::Refused(_) => 6,
+            CliError::Blocked(_) => 7,
             CliError::Write(e) => write_exit_code(e),
             CliError::Io(_) | CliError::Other(_) => 1,
             CliError::Marks(e) => match e {
@@ -66,6 +77,8 @@ impl CliError {
             CliError::Other(_) => "error".into(),
             CliError::Incomplete(_) => "incomplete".into(),
             CliError::Bulk { kind, .. } => (*kind).into(),
+            CliError::Refused(_) => "write_refused".into(),
+            CliError::Blocked(_) => "blocked_since_enforcement".into(),
             CliError::Marks(e) => match e {
                 MarksError::Parse(_) => "marks_invalid".into(),
                 MarksError::Locked => "marks_locked".into(),
@@ -137,6 +150,13 @@ mod tests {
         });
         assert_eq!(wrapped.exit_code(), 6);
         assert_eq!(wrapped.kind(), "write_refused");
+        let r = CliError::Refused("not ready".into());
+        assert_eq!((r.exit_code(), r.kind().as_str()), (6, "write_refused"));
+        let b = CliError::Blocked("2 flows".into());
+        assert_eq!(
+            (b.exit_code(), b.kind().as_str()),
+            (7, "blocked_since_enforcement")
+        );
         assert!(wrapped.to_string().contains("audit"));
     }
 }
