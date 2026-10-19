@@ -76,6 +76,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
     );
     let ours_before = enforce::is_ours(&model.overlay);
     let data = enforce::is_data(&msg);
+    let write = enforce::is_write(&msg);
     let mut cmds = on_msg(model, msg);
     // A traffic answer that lands under the open app overlay (or one of its
     // prompts): its peers follow (no request).
@@ -104,7 +105,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
     }
     // `:readiness` and the enforcement overlay: back after a step's form or
     // confirm, and re-evaluated when data lands.
-    cmds.extend(enforce::after_msg(model, ours_before, data));
+    cmds.extend(enforce::after_msg(model, ours_before, data, write));
     // The marks file changed into (or out of) an invalid state, or marks
     // expire soon: shown once, beside an info status; a warning or an
     // error on the line keeps it waiting.

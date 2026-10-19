@@ -165,7 +165,9 @@ async fn enforce_task(
     tx: TaskTx,
 ) -> crate::tui::enforce::EnforceOutcome {
     use crate::tui::enforce::{self as e, EnforceOutcome};
+    let app = send.app.clone();
     let refused = |fallback: BulkFallback, why: &str| EnforceOutcome {
+        app: app.clone(),
         report: fallback.report(why, false),
         record: None,
         record_error: None,
@@ -176,7 +178,7 @@ async fn enforce_task(
     if let Err(why) = e::probe(&send.dir) {
         return refused(fallback, &why);
     }
-    let afters = e::afters(&[(send.target.clone(), &plan)]);
+    let afters = pce::enforcement::afters(&[(send.target.clone(), &plan)]);
     let mut rec = pce::enforcement::ChangeRecord::of_move(
         &send.app,
         &send.origin,
@@ -211,6 +213,7 @@ async fn enforce_task(
     };
     let record_error = e::record_after(&path, &rec, &afters, &report.items);
     EnforceOutcome {
+        app: send.app.clone(),
         report,
         record: Some(path),
         record_error,
@@ -228,7 +231,9 @@ async fn rollback_task(
     fallbacks: Vec<BulkFallback>,
 ) -> crate::tui::enforce::RollbackOutcome {
     use crate::tui::enforce::{self as e, RollbackOutcome};
+    let app = send.app.clone();
     let refused = |fallbacks: Vec<BulkFallback>, why: &str| RollbackOutcome {
+        app: app.clone(),
         reports: fallbacks
             .into_iter()
             .map(|f| f.report(why, false))
@@ -244,7 +249,7 @@ async fn rollback_task(
     }
     let plans: Vec<(pce::enforcement::ModeState, &pce::write::BulkPlan)> =
         send.plans.iter().map(|(t, p)| (t.clone(), p)).collect();
-    let afters = e::afters(&plans);
+    let afters = pce::enforcement::afters(&plans);
     let mut rb = pce::enforcement::ChangeRecord::of_move(
         &send.app,
         &send.origin,
@@ -270,7 +275,7 @@ async fn rollback_task(
                     continue;
                 }
                 let r = pce.writer(&guard).execute_bulk(plan, &mut |_, _| {}).await;
-                failed = e::group_failed(&r);
+                failed = r.failed();
                 out.push(Some(r));
             }
             out
@@ -298,6 +303,7 @@ async fn rollback_task(
     let results: Vec<_> = reports.iter().flat_map(|r| r.items.clone()).collect();
     let record_error = e::record_after(&path, &rb, &afters, &results);
     RollbackOutcome {
+        app: send.app.clone(),
         reports,
         record: Some(path),
         record_error,
@@ -813,16 +819,20 @@ impl Runtime {
                     let _ = tx.send(Msg::Stats(pce.stats()));
                 });
             }
-            Cmd::RollbackRead { seq, filter } => {
+            Cmd::RollbackRead { seq, filter, dir } => {
                 self.model.busy += 1;
                 let (pce, tx) = self.task_ctx();
                 tokio::spawn(async move {
-                    // Past the cache: what the workloads are now.
-                    let result = pce
-                        .workloads(&filter, CacheMode::Bypass)
-                        .await
-                        .map(|c| (c.value, c.truncated))
-                        .map_err(|e| e.to_string());
+                    // The records' place first, before any request; then
+                    // past the cache: what the workloads are now.
+                    let result = match crate::tui::enforce::probe(&dir) {
+                        Err(e) => Err(e),
+                        Ok(()) => pce
+                            .workloads(&filter, CacheMode::Bypass)
+                            .await
+                            .map(|c| (c.value, c.truncated))
+                            .map_err(|e| e.to_string()),
+                    };
                     let _ = tx.send(Msg::RollbackRead { seq, result });
                     let _ = tx.send(Msg::Stats(pce.stats()));
                 });
@@ -840,22 +850,16 @@ impl Runtime {
                 let index = self.model.index().cloned();
                 tokio::spawn(async move {
                     let result = async {
-                        use pce::models::{PolicyDecision, Transmission};
                         let idx =
                             index.ok_or_else(|| "the name index is not loaded".to_string())?;
                         let m = pce::traffic::app_labels(&app, &keys, &idx)?;
-                        let mut q = pce::traffic::TrafficQueryBuilder::between(
+                        let q = pce::enforcement::watch_query(
                             since,
                             jiff::Timestamp::now(),
+                            m,
+                            max_results,
                         )
-                        .transmission(&[Transmission::Unicast])
-                        .decisions(vec![PolicyDecision::Blocked])
-                        .max_results(max_results)
-                        .source(m.clone())
-                        .destination(m)
-                        .build()
                         .map_err(|e| e.to_string())?;
-                        q.sources_destinations_query_op = "or".into();
                         // Its own slot: the result on Traffic stays.
                         let r = pce
                             .traffic_slot("watch", &q, CacheMode::Bypass, &cancel, None)

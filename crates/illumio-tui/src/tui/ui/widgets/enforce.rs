@@ -7,8 +7,7 @@ use crate::tui::ui::theme::Theme;
 use crate::tui::ui::widgets::panel::panel;
 use crate::tui::ui::widgets::table::{clip_width, fit as fit_cells};
 use pce::readiness::{AppReadiness, Verdict};
-use pce::traffic::{compact_count, keys_or_default};
-use pce::write::{BulkChange, BulkTarget, plan_bulk};
+use pce::traffic::compact_count;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -59,6 +58,20 @@ fn notes(model: &Model) -> Vec<(String, Style)> {
             "not evaluated: D evaluates the result on screen against the draft".into(),
             Style::new().fg(t.warn),
         ));
+    }
+    if let Some(d) = model.traffic.data.as_ref() {
+        if let Some(what) = d.filter.narrowing() {
+            out.push((
+                format!("filtered ({what}): the verdicts rest on part of the flows"),
+                Style::new().fg(t.warn),
+            ));
+        }
+        if d.truncated || d.incomplete {
+            out.push((
+                "the result is truncated or incomplete: flows are missing".into(),
+                Style::new().fg(t.warn),
+            ));
+        }
     }
     if model.traffic.focus_result.is_some() {
         out.push((
@@ -438,6 +451,7 @@ fn readiness_lines<'a>(model: &Model, v: &EnforceView, _w: usize) -> (Vec<Line<'
             ));
         }
     }
+    partial_lines(v, &mut lines, t);
     if r.verdict == Verdict::NotEvaluated {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
@@ -446,6 +460,19 @@ fn readiness_lines<'a>(model: &Model, v: &EnforceView, _w: usize) -> (Vec<Line<'
         )));
     }
     (lines, hint)
+}
+
+/// Why the result may miss flows of the app (a move is then typed
+/// through).
+fn partial_lines<'a>(v: &EnforceView, lines: &mut Vec<Line<'a>>, t: &Theme) {
+    for (i, why) in v.partial.iter().enumerate() {
+        lines.push(kv(
+            if i == 0 { "Partial" } else { "" },
+            why.clone(),
+            Style::new().fg(t.warn),
+            t,
+        ));
+    }
 }
 
 fn scroll_list<'a>(rows: Vec<Line<'a>>, cursor: usize, height: usize) -> Vec<Line<'a>> {
@@ -600,36 +627,6 @@ fn provision_lines<'a>(
     (lines, hint)
 }
 
-/// The move as planned now (locally): `2 workloads: 1 visibility_only →
-/// full · 1 already full`.
-fn plan_text(model: &Model, v: &EnforceView) -> String {
-    let Some(idx) = model.index() else {
-        return "-".into();
-    };
-    if model.workloads.loaded_at.is_none() {
-        return "the workloads are loading".into();
-    }
-    let keys = keys_or_default(&model.limits.scope_keys);
-    let targets: Vec<BulkTarget> = model
-        .workloads
-        .raw
-        .iter()
-        .filter(|w| w.deleted != Some(true))
-        .filter(|w| pce::readiness::workload_group(w, &keys, idx).as_ref() == Some(&v.app))
-        .map(|w| BulkTarget::of(w, idx))
-        .collect();
-    if targets.is_empty() {
-        return "no workloads".into();
-    }
-    plan_bulk(
-        &targets,
-        &BulkChange::enforce(v.mode, v.visibility_level()),
-        Default::default(),
-        None,
-    )
-    .map_or_else(|e| e.to_string(), |p| p.summary())
-}
-
 fn enforce_lines<'a>(model: &Model, v: &EnforceView, _w: usize) -> (Vec<Line<'a>>, String) {
     let t = &model.theme;
     let radio = |on: bool| if on { "(●)" } else { "( )" };
@@ -642,7 +639,7 @@ fn enforce_lines<'a>(model: &Model, v: &EnforceView, _w: usize) -> (Vec<Line<'a>
             t,
         ),
         kv("Visibility", v.visibility_text().to_string(), t.base(), t),
-        kv("Plan", plan_text(model, v), t.base(), t),
+        kv("Plan", v.plan_text.clone(), t.base(), t),
     ];
     if !full {
         lines.push(kv(
@@ -656,6 +653,14 @@ fn enforce_lines<'a>(model: &Model, v: &EnforceView, _w: usize) -> (Vec<Line<'a>
     let (gate, style) = match &v.readiness {
         _ if missing.any() => (
             format!("waiting for {}", missing.text()),
+            Style::new().fg(t.warn),
+        ),
+        Some(r) if r.verdict.allows_enforcement() && !v.partial.is_empty() => (
+            format!(
+                "{} on a partial result: Enter, then type {}",
+                r.verdict.text(),
+                crate::tui::enforce::ENFORCE_WORD
+            ),
             Style::new().fg(t.warn),
         ),
         Some(r) if r.verdict.allows_enforcement() => (
@@ -673,6 +678,7 @@ fn enforce_lines<'a>(model: &Model, v: &EnforceView, _w: usize) -> (Vec<Line<'a>
         None => ("-".into(), t.dim_style()),
     };
     lines.push(kv("Readiness", gate, style, t));
+    partial_lines(v, &mut lines, t);
     if let Some(typed) = &v.typing {
         lines.push(Line::from(""));
         lines.push(Line::from(vec![

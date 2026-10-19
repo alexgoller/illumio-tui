@@ -11,11 +11,12 @@ use crate::tui::enforce::{
     Step, Watch, WatchResult, compute, origin_of,
 };
 use crate::tui::mark_form::{MarkForm, MarkOrigin, Prefill, RowsOf, group_side};
-use pce::enforcement::{RecordReadiness, blocked_since, plan_rollback};
+use pce::enforcement::{
+    RecordReadiness, RollbackPlans, app_workloads, blocked_since, plan_rollback, rollback_plans,
+};
 use pce::models::WorkloadFilter;
-use pce::readiness::{Gap, accepted, draft_allows, is_unicast, workload_group};
+use pce::readiness::{Gap, accepted, draft_allows, is_unicast};
 use pce::traffic::{TrafficQueryBuilder, group_key, keys_or_default};
-use pce::write::bulk::COUNT_ABOVE;
 use pce::write::{BulkChange, BulkTarget, VisibilityLevel, plan_bulk};
 use tokio_util::sync::CancellationToken;
 
@@ -42,12 +43,26 @@ pub(super) fn is_data(msg: &Msg) -> bool {
     )
 }
 
+/// A write's answer: what it dropped (pending changes after a rule write)
+/// is asked for again once the overlay is back.
+pub(super) fn is_write(msg: &Msg) -> bool {
+    matches!(
+        msg,
+        Msg::WriteDone { .. }
+            | Msg::BulkDone(_)
+            | Msg::BatchDone { .. }
+            | Msg::EnforceDone(_)
+            | Msg::RollbackDone(_)
+    )
+}
+
 /// After every message: a confirm the overlay planned is forgotten once
 /// it closes; the overlay a step left comes back once nothing is open and
 /// no write is on its way; an open overlay re-evaluates when data landed
-/// or it was just (re)opened, and asks for what a write dropped (pending
-/// changes after a rule write), counted.
-pub(super) fn after_msg(model: &mut Model, ours_before: bool, data: bool) -> Vec<Cmd> {
+/// or it was just (re)opened, and after a write asks for what the write
+/// dropped (pending changes after a rule write), counted. Reopening after
+/// the help or a cancelled form asks for nothing.
+pub(super) fn after_msg(model: &mut Model, ours_before: bool, data: bool, write: bool) -> Vec<Cmd> {
     if !matches!(model.overlay, Overlay::ConfirmBulk(_)) {
         model.enforce_send = None;
     }
@@ -69,7 +84,7 @@ pub(super) fn after_msg(model: &mut Model, ours_before: bool, data: bool) -> Vec
         return Vec::new();
     }
     let mut cmds = Vec::new();
-    if !ours_before {
+    if write {
         cmds = ensure_loads(model);
     }
     if data || !ours_before {
@@ -92,11 +107,45 @@ pub(super) fn refresh(model: &mut Model) {
                 return;
             };
             let r = compute(model, std::slice::from_ref(&app), true).pop();
+            let partial = crate::tui::enforce::partial_reasons(model, &app, r.as_ref());
             if let Some(v) = model.enforce_view.as_mut() {
                 v.set_readiness(r);
+                v.partial = partial;
             }
+            refresh_plan(model);
         }
         _ => {}
+    }
+}
+
+/// Step 4's plan text again (data landed, or the target changed): the
+/// app's workloads planned locally, no request.
+fn refresh_plan(model: &mut Model) {
+    let text = match (model.index(), model.enforce_view.as_ref()) {
+        (Some(idx), Some(v)) if model.workloads.loaded_at.is_some() => {
+            let keys = keys_or_default(&model.limits.scope_keys);
+            let none = pce::NameIndex::default();
+            let targets: Vec<BulkTarget> = app_workloads(&model.workloads.raw, &v.app, &keys, idx)
+                .into_iter()
+                .map(|w| BulkTarget::of(w, &none))
+                .collect();
+            if targets.is_empty() {
+                "no workloads".to_string()
+            } else {
+                plan_bulk(
+                    &targets,
+                    &BulkChange::enforce(v.mode, v.visibility_level()),
+                    WorkloadFilter::default(),
+                    None,
+                )
+                .map_or_else(|e| e.to_string(), |p| p.summary())
+            }
+        }
+        (Some(_), Some(_)) => "the workloads are loading".to_string(),
+        _ => "-".to_string(),
+    };
+    if let Some(v) = model.enforce_view.as_mut() {
+        v.plan_text = text;
     }
 }
 
@@ -219,12 +268,17 @@ pub(super) fn open_enforce(model: &mut Model, app: GroupKey, back: Overlay) -> V
     }
     let mut v = match model.enforce_view.take() {
         Some(v) if v.app == app => v,
-        _ => {
+        old => {
+            // Another app: its watch query on the way is cancelled.
+            if let Some(mut old) = old {
+                old.drop_watch();
+            }
             model.enforce_seq += 1;
             EnforceView::new(app, model.enforce_seq)
         }
     };
     v.typing = None;
+    v.drop_rollback();
     v.load_record(model.records_dir.as_deref(), &origin_of(&model.profile));
     model.enforce_back = None;
     model.enforce_view = Some(v);
@@ -361,8 +415,14 @@ pub(super) fn enforce_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => v.step = v.step.next(),
         KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => v.step = v.step.prev(),
         KeyCode::Char(c @ '1'..='5') => v.step = Step::ALL[c as usize - '1' as usize],
-        KeyCode::Down | KeyCode::Char('j') => v.move_cursor(1),
-        KeyCode::Up | KeyCode::Char('k') => v.move_cursor(-1),
+        KeyCode::Down | KeyCode::Char('j') => {
+            v.move_cursor(1);
+            refresh_plan(model);
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            v.move_cursor(-1);
+            refresh_plan(model);
+        }
         KeyCode::Char('?') => open_help(model),
         KeyCode::Char('D') => return draft_from(model),
         KeyCode::Char('G') if step == Step::Rules => return gen_key(model),
@@ -371,6 +431,7 @@ pub(super) fn enforce_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         KeyCode::Char('P') if step == Step::Provision => return provision_app_key(model),
         KeyCode::Char('v') if step == Step::Enforce => {
             v.visibility = (v.visibility + 1) % (VisibilityLevel::ALL.len() + 1);
+            refresh_plan(model);
         }
         KeyCode::Enter if step == Step::Enforce => return review_key(model),
         KeyCode::Char('r') if step == Step::Watch => return watch_key(model),
@@ -384,6 +445,10 @@ pub(super) fn enforce_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
 /// the app overlay), else to the screen.
 fn close_enforce(model: &mut Model) {
     model.enforce_back = None;
+    if let Some(v) = model.enforce_view.as_mut() {
+        v.drop_rollback();
+        v.typing = None;
+    }
     let back = std::mem::replace(&mut model.enforce_return, Overlay::None);
     model.overlay = match back {
         Overlay::Readiness if model.readiness_view.is_some() => Overlay::Readiness,
@@ -574,13 +639,21 @@ fn review_key(model: &mut Model) -> Vec<Cmd> {
     let Some(r) = &v.readiness else {
         return Vec::new();
     };
-    if !r.verdict.allows_enforcement() {
-        v.typing = Some(String::new());
+    if v.needs_word() {
+        let why = if r.verdict.allows_enforcement() {
+            format!(
+                "{} rests on a partial result ({})",
+                r.verdict.text(),
+                v.partial.join("; ")
+            )
+        } else {
+            format!("is not ready ({})", r.verdict.text())
+        };
         model.status = StatusLine::warn(format!(
-            "{} is not ready ({}): type {ENFORCE_WORD} and Enter to move it anyway; Esc cancels",
-            r.app,
-            r.verdict.text()
+            "{} {why}: type {ENFORCE_WORD} and Enter to move it anyway; Esc cancels",
+            r.app
         ));
+        v.typing = Some(String::new());
         return Vec::new();
     }
     review(model, false);
@@ -622,8 +695,27 @@ fn typing_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
 
 /// The move planned locally and opened in the bulk confirm: the app's
 /// workloads as the Workloads screen holds them, re-read by the app's
-/// labels on `y`. `forced`: readiness did not allow it (typed through).
+/// labels on `y`. `forced`: readiness did not allow it, or rests on a
+/// partial result (typed through). What readiness reads is checked again:
+/// it may have gone while the word was typed.
 fn review(model: &mut Model, forced: bool) {
+    let missing = Missing::of(model);
+    if missing.any() {
+        model.status = StatusLine::warn(format!(
+            "readiness is not complete (loading {}): nothing sent",
+            missing.text()
+        ));
+        return;
+    }
+    if !forced
+        && model
+            .enforce_view
+            .as_ref()
+            .is_none_or(EnforceView::needs_word)
+    {
+        model.status = StatusLine::warn(format!("type {ENFORCE_WORD} first: nothing sent"));
+        return;
+    }
     let Some(dir) = model.records_dir.clone() else {
         model.status = StatusLine::error(
             "no $XDG_STATE_HOME or $HOME to place the change records; nothing sent",
@@ -646,12 +738,8 @@ fn review(model: &mut Model, forced: bool) {
         return;
     };
     let keys = keys_or_default(&model.limits.scope_keys);
-    let targets: Vec<BulkTarget> = model
-        .workloads
-        .raw
-        .iter()
-        .filter(|w| w.deleted != Some(true))
-        .filter(|w| workload_group(w, &keys, &idx).as_ref() == Some(&v.app))
+    let targets: Vec<BulkTarget> = app_workloads(&model.workloads.raw, &v.app, &keys, &idx)
+        .into_iter()
         .map(|w| BulkTarget::of(w, &idx))
         .collect();
     if targets.is_empty() {
@@ -763,6 +851,8 @@ pub(super) fn start_watch(model: &mut Model) -> Vec<Cmd> {
     let Some(since) = v.record.as_ref().and_then(|(_, r)| r.at_time()) else {
         return Vec::new();
     };
+    // One at a time: a query still on its way is cancelled.
+    v.drop_watch();
     let cancel = CancellationToken::new();
     v.watch = Watch::Running {
         seq,
@@ -877,6 +967,12 @@ fn rollback_key(model: &mut Model) -> Vec<Cmd> {
         ));
         return Vec::new();
     }
+    let Some(dir) = model.records_dir.clone() else {
+        model.status = StatusLine::error(
+            "no $XDG_STATE_HOME or $HOME to place the change records; nothing sent",
+        );
+        return Vec::new();
+    };
     let filter = match app_filter(model, &v.app) {
         Ok(f) => f,
         Err(e) => {
@@ -891,7 +987,8 @@ fn rollback_key(model: &mut Model) -> Vec<Cmd> {
     v.rollback_reading = true;
     v.requests += 1;
     model.status = StatusLine::info("rollback: reading the app's workloads (1 request)…");
-    vec![Cmd::RollbackRead { seq, filter }]
+    // The records' place is probed before the read, as the CLI does.
+    vec![Cmd::RollbackRead { seq, filter, dir }]
 }
 
 /// `shop_prod-20261019T100000.000Z.json`.
@@ -907,9 +1004,10 @@ pub(super) fn rollback_read_done(
     seq: u64,
     result: Result<(Vec<Workload>, bool), String>,
 ) {
-    let idx = model.index().cloned().unwrap_or_default();
     let org = batch_origin(&model.profile);
-    let Some(v) = model.enforce_view.as_mut().filter(|v| v.seq == seq) else {
+    // Only into the overlay of the app that asked, while it is open.
+    let open = model.overlay == Overlay::Enforce;
+    let Some(v) = model.enforce_view.as_mut().filter(|v| open && v.seq == seq) else {
         return;
     };
     if !std::mem::take(&mut v.rollback_reading) {
@@ -940,29 +1038,17 @@ pub(super) fn rollback_read_done(
             return;
         }
     };
-    let mut plans = Vec::new();
-    for g in &rp.groups {
-        let targets: Vec<BulkTarget> = g
-            .workloads
-            .iter()
-            .map(|w| BulkTarget::of(w, &idx))
-            .collect();
-        match plan_bulk(
-            &targets,
-            &BulkChange::enforce(g.mode, g.visibility),
-            filter.clone(),
-            Some(org.clone()),
-        ) {
-            Ok(p) if !p.items.is_empty() => plans.push((g.target(), p)),
-            Ok(_) => {}
-            Err(e) => {
-                model.status = StatusLine::warn(format!("rollback: {e}; nothing sent"));
-                return;
-            }
+    let RollbackPlans {
+        plans,
+        count,
+        needs_count,
+    } = match rollback_plans(&rp, &filter, Some(org)) {
+        Ok(p) => p,
+        Err(e) => {
+            model.status = StatusLine::warn(format!("rollback: {e}; nothing sent"));
+            return;
         }
-    }
-    let count: usize = plans.iter().map(|(_, p)| p.items.len()).sum();
-    let needs_count = plans.iter().any(|(_, p)| p.needs_count()) || count > COUNT_ABOVE;
+    };
     model.status = if count == 0 {
         StatusLine::warn(format!(
             "rollback: nothing to restore ({} skipped); Esc closes",
@@ -1085,18 +1171,22 @@ pub(super) fn enforce_done(model: &mut Model, o: crate::tui::enforce::EnforceOut
         model
             .status
             .text
-            .push_str(&format!(" · record {}", file_name(p)));
+            .push_str(&format!(" · {}: record {}", o.app, file_name(p)));
     }
     let origin = origin_of(&model.profile);
-    if let Some(v) = model.enforce_view.as_mut() {
+    // Only the overlay of the app that was moved.
+    if let Some(v) = model
+        .enforce_view
+        .as_mut()
+        .filter(|v| v.app_text() == o.app)
+    {
         v.load_record(model.records_dir.as_deref(), &origin);
         if o.record.is_some() && o.report.touched() {
             v.step = Step::Watch;
         }
     }
     if let Some(e) = o.record_error {
-        model.status = StatusLine::error("CHANGE RECORD NOT UPDATED: save the record shown");
-        model.overlay = Overlay::Error(e);
+        show_record_error(model, &e);
     }
     cmds
 }
@@ -1135,17 +1225,36 @@ pub(super) fn rollback_done(
         cmds.extend(load_workloads(model, CacheMode::Bypass));
     }
     let origin = origin_of(&model.profile);
-    if let Some(v) = model.enforce_view.as_mut() {
+    if let Some(v) = model
+        .enforce_view
+        .as_mut()
+        .filter(|v| v.app_text() == o.app)
+    {
         v.load_record(model.records_dir.as_deref(), &origin);
     }
     if let Some(e) = o.record_error {
-        model.status = StatusLine::error("CHANGE RECORD NOT UPDATED: save the record shown");
-        if is_ours(&model.overlay) {
-            model.enforce_back = Some(model.overlay.clone());
-        }
-        model.overlay = Overlay::Error(e);
+        show_record_error(model, &e);
     }
     cmds
+}
+
+/// A record that could not be updated: the whole text (where the record
+/// was saved instead, the record itself) in the scrollable report viewer,
+/// before the send's own report; the overlay comes back once it is read.
+fn show_record_error(model: &mut Model, text: &str) {
+    let mut lines: Vec<String> = text.lines().map(String::from).collect();
+    lines.push(String::new());
+    lines.extend(model.batch_report.take().unwrap_or_default());
+    model.batch_report = Some(lines);
+    model.status =
+        StatusLine::error("CHANGE RECORD NOT UPDATED: the report says where the record was saved");
+    if is_ours(&model.overlay) {
+        model.enforce_back = Some(model.overlay.clone());
+    } else if model.enforce_view.is_some() && model.enforce_back.is_none() {
+        model.enforce_back = Some(Overlay::Enforce);
+    }
+    model.batch_from_gen = false;
+    model.overlay = Overlay::BatchReport { scroll: 0 };
 }
 
 #[cfg(test)]

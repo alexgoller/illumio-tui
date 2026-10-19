@@ -3148,3 +3148,231 @@ async fn enforce_app_without_a_writable_record_place_sends_nothing() {
     assert!(audit.entries().is_empty());
     assert_eq!(model.busy, 0);
 }
+
+/// A rollback of `(href, mode now, mode restored)`s as one group each.
+fn rollback_cmd(dir: &std::path::Path, groups: &[(&str, &str, &str)]) -> Cmd {
+    use illumio_tui::tui::enforce::RollbackSend;
+    use pce::enforcement::{ModeState, RecordOrigin};
+    let ws: Vec<pce::models::Workload> =
+        serde_json::from_str(include_str!("../../../fixtures/workloads.json")).unwrap();
+    let idx = pce::NameIndex::default();
+    let plans = groups
+        .iter()
+        .map(|(href, now, to)| {
+            let mut w = ws.iter().find(|w| w.href == *href).unwrap().clone();
+            w.enforcement_mode = Some((*now).into());
+            let mode = pce::write::EnforcementMode::parse(to).unwrap();
+            let plan = pce::write::plan_bulk(
+                &[pce::write::BulkTarget::of(&w, &idx)],
+                &pce::write::BulkChange::enforce(mode, None),
+                pce::models::WorkloadFilter::default(),
+                Some(pce::write::BatchOrigin {
+                    profile: "t".into(),
+                    host: "h".into(),
+                    org_id: 5,
+                }),
+            )
+            .unwrap();
+            (ModeState::target(mode, None), plan)
+        })
+        .collect();
+    Cmd::ExecuteRollback(Box::new(RollbackSend {
+        app: "shop/prod".into(),
+        record_path: dir.join("shop_prod-20261019T100000.000Z.json"),
+        plans,
+        dir: dir.to_path_buf(),
+        origin: RecordOrigin {
+            profile: "t".into(),
+            pce: "h".into(),
+            org_id: 5,
+        },
+    }))
+}
+
+/// Without the runtime's guard, or without a place for its record: the
+/// rollback is refused before any request, nothing written.
+#[tokio::test]
+async fn rollback_sends_nothing_without_the_guard_or_a_writable_record_place() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (mut rt, _tx) = Runtime::new(pce_for(&server), writes_model());
+    rt.execute(rollback_cmd(
+        dir.path(),
+        &[("/orgs/5/workloads/aaaa-2", "full", "visibility_only")],
+    ));
+    let model = run_loop(&mut rt, Box::pin(wait(300)), &mut |_| {}).await;
+    assert!(
+        model
+            .status
+            .text
+            .starts_with("rollback: nothing sent: writes off"),
+        "{}",
+        model.status.text
+    );
+    assert_eq!(
+        std::fs::read_dir(dir.path()).unwrap().count(),
+        0,
+        "no record"
+    );
+    let file = dir.path().join("not-a-dir");
+    std::fs::write(&file, "x").unwrap();
+    let audit = MemoryAudit::new();
+    let (mut rt, _tx) =
+        Runtime::with_writer(pce_for(&server), writes_model(), tui_guard(audit.clone()));
+    rt.execute(rollback_cmd(
+        &file,
+        &[("/orgs/5/workloads/aaaa-2", "full", "visibility_only")],
+    ));
+    let model = run_loop(&mut rt, Box::pin(wait(300)), &mut |_| {}).await;
+    assert!(
+        model
+            .status
+            .text
+            .contains("nothing sent: change records cannot be written"),
+        "{}",
+        model.status.text
+    );
+    assert!(
+        server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .is_empty()
+    );
+    assert!(audit.entries().is_empty());
+    assert_eq!(model.busy, 0);
+}
+
+/// A group that fails stops the rollback: the next is not sent; the
+/// rollback record names the original and each workload's result.
+#[tokio::test]
+async fn rollback_stops_after_a_failed_group_and_records_the_results() {
+    let server = MockServer::start().await;
+    let fixture: Vec<serde_json::Value> =
+        serde_json::from_str(include_str!("../../../fixtures/workloads.json")).unwrap();
+    let mut w2 = fixture
+        .iter()
+        .find(|w| w["href"] == "/orgs/5/workloads/aaaa-2")
+        .unwrap()
+        .clone();
+    w2["enforcement_mode"] = json!("full");
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads/aaaa-2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(w2))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads/aaaa-4"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .expect(0)
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v2/orgs/5/workloads/bulk_update"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!([{"token": "invalid"}])))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let audit = MemoryAudit::new();
+    let (mut rt, _tx) =
+        Runtime::with_writer(pce_for(&server), writes_model(), tui_guard(audit.clone()));
+    rt.execute(rollback_cmd(
+        dir.path(),
+        &[
+            ("/orgs/5/workloads/aaaa-2", "full", "visibility_only"),
+            ("/orgs/5/workloads/aaaa-4", "full", "selective"),
+        ],
+    ));
+    let model = run_loop(&mut rt, Box::pin(wait(600)), &mut |_| {}).await;
+    assert!(
+        model.status.text.contains("an earlier group failed"),
+        "{}",
+        model.status.text
+    );
+    let files: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    assert_eq!(files.len(), 1, "{files:?}");
+    let rec = pce::enforcement::read_record(&files[0]).unwrap();
+    assert!(
+        rec.rollback_of
+            .as_deref()
+            .unwrap()
+            .ends_with("shop_prod-20261019T100000.000Z.json")
+    );
+    let results: Vec<(&str, &str)> = rec
+        .workloads
+        .iter()
+        .map(|w| (w.href.as_str(), w.result.as_str()))
+        .collect();
+    assert_eq!(
+        results,
+        vec![
+            ("/orgs/5/workloads/aaaa-2", "failed"),
+            ("/orgs/5/workloads/aaaa-4", "not_sent"),
+        ]
+    );
+    assert!(!model.writes.in_flight && !model.batch_sending);
+    assert_eq!(model.busy, 0);
+    server.verify().await;
+}
+
+/// `r` on Watch: blocked unicast flows only, the app on either side
+/// (`or`), past the cache in its own slot: a second `r` asks again.
+#[tokio::test]
+async fn the_watch_query_asks_for_blocked_unicast_flows_past_the_cache_each_time() {
+    use wiremock::matchers::body_partial_json;
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    const QHREF: &str = "/orgs/5/traffic_flows/async_queries/w-1";
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/traffic_flows/async_queries"))
+        .and(body_partial_json(json!({
+            "policy_decisions": ["blocked"],
+            "sources_destinations_query_op": "or",
+            "destinations": {"exclude": [{"transmission": "broadcast"}, {"transmission": "multicast"}]},
+        })))
+        .respond_with(
+            ResponseTemplate::new(202).set_body_json(json!({"href": QHREF, "status": "queued"})),
+        )
+        .expect(2)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "completed", "result": {"href": format!("{QHREF}/download")}, "matches_count": 0})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}/download")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+    let pce = pce_for(&server);
+    let mut m = model();
+    m.connection = Connection::Connected {
+        index: Some(pce.name_index(pce::CacheMode::Use).await.unwrap()),
+        index_age_secs: 0,
+    };
+    let (mut rt, _tx) = Runtime::new(pce, m);
+    for seq in [1, 2] {
+        rt.execute(Cmd::WatchBlocked {
+            seq,
+            app: pce::traffic::parse_app("shop/prod"),
+            keys: vec!["app".into(), "env".into()],
+            since: jiff::Timestamp::now() - jiff::SignedDuration::from_hours(1),
+            max_results: 500,
+            cancel: tokio_util::sync::CancellationToken::new(),
+        });
+    }
+    let model = run_loop(&mut rt, Box::pin(wait(1500)), &mut |_| {}).await;
+    assert!(
+        model.traffic.data.is_none(),
+        "the Traffic result is not touched"
+    );
+    assert_eq!(model.busy, 0);
+    server.verify().await;
+}

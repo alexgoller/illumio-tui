@@ -246,10 +246,8 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
                 "Enter s / D",
                 "the app's steps · sort · search · draft decision",
             ),
-            key(
-                "Tab 1-5 j/k",
-                "steps: Readiness Rules Provision Enforce Watch",
-            ),
+            key("Tab 1-5 h/l", "steps (also ←/→): Readiness Rules … Watch"),
+            key("j/k q Esc", "rows · back (to the list or the app overlay)"),
             key(
                 "G w m",
                 "Rules: generator · rule for the gap · accept-blocked",

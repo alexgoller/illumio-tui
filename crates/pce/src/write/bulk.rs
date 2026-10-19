@@ -967,6 +967,14 @@ impl BulkReport {
             })
     }
 
+    /// It failed (a refusal, a PCE or network failure, a partial send, a
+    /// missing audit entry) or changed nothing because every workload
+    /// changed since: what the CLI exits non-zero on, and what stops a
+    /// rollback's next group.
+    pub fn failed(&self) -> bool {
+        self.failure.is_some() || (self.updated() == 0 && self.dropped() > 0) || self.stopped()
+    }
+
     /// Workloads skipped by the re-read (changed or gone).
     pub fn dropped(&self) -> usize {
         self.count(ItemStatus::Changed) + self.count(ItemStatus::Missing)

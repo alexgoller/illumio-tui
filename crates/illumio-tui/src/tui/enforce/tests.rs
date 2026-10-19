@@ -1,6 +1,6 @@
 use super::*;
 use crate::tui::test_support::*;
-use pce::enforcement::{RecordWorkload, read_record};
+use pce::enforcement::{RecordWorkload, afters, read_record, write_record};
 use pce::models::DraftDecision;
 use pce::traffic::parse_app;
 
@@ -301,5 +301,10 @@ fn the_record_is_written_pending_first_and_then_with_the_results() {
     let gone = dir.path().join("gone").join("r.json");
     let loud = record_after(&gone, &rec, &afters, &results).unwrap();
     assert!(loud.starts_with("CHANGE RECORD NOT UPDATED"), "{loud}");
-    assert!(loud.contains("\"updated\""), "{loud}");
+    assert!(loud.contains("a rollback can still use it"), "{loud}");
+    assert!(loud.contains("\"updated\""), "the whole record: {loud}");
+    // Saved beside the records' directory instead.
+    let saved = pce::enforcement::unsaved_path(&gone);
+    assert!(loud.contains(&saved.display().to_string()), "{loud}");
+    assert_eq!(read_record(&saved).unwrap().workloads[0].result, "updated");
 }

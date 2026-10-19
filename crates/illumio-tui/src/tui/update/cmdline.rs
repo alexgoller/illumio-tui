@@ -2,6 +2,9 @@
 use super::*;
 
 pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
+    // A command goes somewhere else: the enforcement overlay a step left
+    // does not come back over it.
+    model.enforce_back = None;
     match cmd {
         Command::Screen(s) => switch(model, s),
         Command::IpLists => {

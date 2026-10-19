@@ -25,16 +25,17 @@ use super::write::{self, WriteFlags};
 use clap::{ArgGroup, Args};
 use jiff::Timestamp;
 use pce::enforcement::{
-    BlockedSince, ChangeRecord, ModeState, RecordOrigin, RecordReadiness, RollbackSkip,
-    default_records_dir, newest_record, plan_rollback, probe_dir, read_record, rewrite_record,
-    rolled_back_by, write_record,
+    BlockedSince, ChangeRecord, ModeState, RecordOrigin, RecordReadiness, RollbackPlans,
+    RollbackSkip, app_workloads, default_records_dir, newest_record, plan_rollback, probe_dir,
+    read_record, rewrite_record, rollback_plans, rolled_back_by, watch_query, with_results,
+    write_pending,
 };
-use pce::models::{PolicyDecision, Transmission, WorkloadFilter};
-use pce::readiness::{AppReadiness, workload_group};
+use pce::models::WorkloadFilter;
+use pce::readiness::AppReadiness;
 use pce::traffic::{TrafficQueryBuilder, app_labels, keys_or_default, parse_app, resolve_flows};
-use pce::write::bulk::{BulkReport, COUNT_ABOVE, ItemResult};
+use pce::write::bulk::{BulkReport, ItemResult};
 use pce::write::{
-    BatchOrigin, BulkChange, BulkPlan, BulkTarget, EnforcementMode, VisibilityLevel, plan_bulk,
+    BatchOrigin, BulkChange, BulkTarget, EnforcementMode, VisibilityLevel, plan_bulk,
 };
 use pce::{CacheMode, NameIndex};
 use serde::Serialize;
@@ -129,7 +130,7 @@ fn writable_records_dir() -> Result<PathBuf, CliError> {
 /// that never finishes (a crash, a kill) still leaves one a rollback can
 /// use. Refused (nothing sent) when it cannot be written.
 fn record_before(dir: &Path, rec: &ChangeRecord) -> Result<PathBuf, CliError> {
-    write_record(dir, &rec.clone().pending(), Timestamp::now()).map_err(|e| {
+    write_pending(dir, rec, Timestamp::now()).map_err(|e| {
         CliError::Refused(format!(
             "the change record could not be written in {}: {e}; nothing sent",
             dir.display()
@@ -306,12 +307,8 @@ async fn enforce(ctx: &Context, a: &EnforceArgs) -> Result<(), CliError> {
     // plan's selection.
     let keys = keys_or_default(&ctx.config.scope_keys);
     let none = NameIndex::default();
-    let targets: Vec<BulkTarget> = ev
-        .workloads
-        .value
-        .iter()
-        .filter(|w| w.deleted != Some(true))
-        .filter(|w| workload_group(w, &keys, &ev.index).as_ref() == Some(&r.key))
+    let targets: Vec<BulkTarget> = app_workloads(&ev.workloads.value, &r.key, &keys, &ev.index)
+        .into_iter()
         .map(|w| BulkTarget::of(w, &none))
         .collect();
     if targets.is_empty() {
@@ -391,11 +388,7 @@ async fn enforce(ctx: &Context, a: &EnforceArgs) -> Result<(), CliError> {
         .writer(&guard)
         .execute_bulk(plan, &mut |_, _| {})
         .await;
-    let rec = ChangeRecord {
-        workloads: ChangeRecord::of_move(&r.app, &origin(ctx), at, None, &afters, &report.items)
-            .workloads,
-        ..rec
-    };
+    let rec = with_results(&rec, &afters, &report.items);
     let record_err = record_after(&path, &rec, &mut warnings);
     let record = Some(path.display().to_string());
     let data = EnforceOutput {
@@ -551,26 +544,12 @@ async fn rollback(ctx: &Context, a: &EnforceArgs) -> Result<(), CliError> {
     let mut warnings = Vec::new();
     refuse_truncated(wl.truncated, a.write.yes, &mut warnings)?;
     let rp = plan_rollback(&rec, &wl.value);
-    let none = NameIndex::default();
-    let mut plans: Vec<(ModeState, BulkPlan)> = Vec::new();
-    for g in &rp.groups {
-        let targets: Vec<BulkTarget> = g
-            .workloads
-            .iter()
-            .map(|w| BulkTarget::of(w, &none))
-            .collect();
-        let plan = plan_bulk(
-            &targets,
-            &BulkChange::enforce(g.mode, g.visibility),
-            filter.clone(),
-            Some(BatchOrigin::of(guard.context())),
-        )?;
-        plans.push((g.target(), plan));
-    }
-    plans.retain(|(_, p)| !p.items.is_empty());
-    let count: usize = plans.iter().map(|(_, p)| p.items.len()).sum();
     // The typed count covers the whole rollback.
-    let needs = plans.iter().any(|(_, p)| p.needs_count()) || count > COUNT_ABOVE;
+    let RollbackPlans {
+        plans,
+        count,
+        needs_count: needs,
+    } = rollback_plans(&rp, &filter, Some(BatchOrigin::of(guard.context())))?;
     if let Some(n) = a.confirm_count
         && n != count
     {
@@ -595,10 +574,12 @@ async fn rollback(ctx: &Context, a: &EnforceArgs) -> Result<(), CliError> {
         rollback_record: None,
     };
     let mut results: Vec<ItemResult> = Vec::new();
-    let afters: Vec<_> = plans
-        .iter()
-        .flat_map(|(to, p)| p.items.iter().map(|i| (i.clone(), to.clone())))
-        .collect();
+    let afters = pce::enforcement::afters(
+        &plans
+            .iter()
+            .map(|(to, p)| (to.clone(), p))
+            .collect::<Vec<_>>(),
+    );
     let mut failed: Option<CliError> = None;
     let mut written = None;
     let at = Timestamp::now();
@@ -637,8 +618,7 @@ async fn rollback(ctx: &Context, a: &EnforceArgs) -> Result<(), CliError> {
     }
     let mut record_err = None;
     if let Some(p) = rb_path {
-        rb.workloads =
-            ChangeRecord::of_move(&rec.app, &origin(ctx), at, None, &afters, &results).workloads;
+        rb = with_results(&rb, &afters, &results);
         record_err = record_after(&p, &rb, &mut warnings);
         out.rollback_record = Some(p.display().to_string());
     }
@@ -742,14 +722,7 @@ async fn watch(ctx: &Context, a: &EnforceArgs) -> Result<(), CliError> {
     let app = parse_app(&a.app);
     let idx = ctx.pce.name_index(ctx.cache_mode).await?;
     let m = app_labels(&app, &keys, &idx).map_err(CliError::Args)?;
-    let mut q = TrafficQueryBuilder::between(since, now)
-        .transmission(&[Transmission::Unicast])
-        .decisions(vec![PolicyDecision::Blocked])
-        .max_results(cap)
-        .source(m.clone())
-        .destination(m)
-        .build()?;
-    q.sources_destinations_query_op = "or".into();
+    let q = watch_query(since, now, m, cap)?;
     let r = ctx
         .pce
         .traffic(&q, ctx.cache_mode, &CancellationToken::new(), None)

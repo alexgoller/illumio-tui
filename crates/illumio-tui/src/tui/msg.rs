@@ -333,11 +333,13 @@ pub enum Cmd {
         plan: Box<pce::write::BulkPlan>,
         send: Box<crate::tui::enforce::EnforceSend>,
     },
-    /// `R` on step 5: the app's workloads now (one list read past the
-    /// cache); answered with `Msg::RollbackRead`.
+    /// `R` on step 5: the records' directory `dir` probed first (as the
+    /// CLI does, before any request), then the app's workloads now (one
+    /// list read past the cache); answered with `Msg::RollbackRead`.
     RollbackRead {
         seq: u64,
         filter: WorkloadFilter,
+        dir: std::path::PathBuf,
     },
     /// `y` on the rollback preview: the records' directory probed, the
     /// rollback record written, each group's bulk send in order (stopping
@@ -490,9 +492,17 @@ impl PartialEq for Cmd {
                     && sa == sb
             }
             (
-                Cmd::RollbackRead { seq: a, filter: fa },
-                Cmd::RollbackRead { seq: b, filter: fb },
-            ) => a == b && fa == fb,
+                Cmd::RollbackRead {
+                    seq: a,
+                    filter: fa,
+                    dir: da,
+                },
+                Cmd::RollbackRead {
+                    seq: b,
+                    filter: fb,
+                    dir: db,
+                },
+            ) => a == b && fa == fb && da == db,
             (Cmd::ExecuteRollback(a), Cmd::ExecuteRollback(b)) => {
                 a.record_path == b.record_path
                     && a.plans.len() == b.plans.len()

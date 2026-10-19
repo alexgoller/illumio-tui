@@ -939,6 +939,8 @@ pub(super) fn scroll_focused(model: &mut Model, down: bool) {
 
 pub(super) fn switch(model: &mut Model, s: Screen) -> Vec<Cmd> {
     model.screen = s;
+    // Another screen: the enforcement overlay a step left stays closed.
+    model.enforce_back = None;
     // Leaving the Policy screen drops Explain's pending `Enter`.
     if s != Screen::Policy {
         model.policy.jump = None;

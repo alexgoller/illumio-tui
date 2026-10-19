@@ -1,7 +1,9 @@
 //! `:readiness` and the enforcement overlay's keys (#55, #56).
 use super::*;
 use crate::tui::enforce::tests::{all_allowed, loaded, write_move};
-use crate::tui::enforce::{EnforceOutcome, EnforceView, RollbackOutcome, WatchOutcome};
+use crate::tui::enforce::{
+    ENFORCE_WORD, EnforceOutcome, EnforceView, Missing, RollbackOutcome, WatchOutcome,
+};
 use crate::tui::model::WritesState;
 use crate::tui::test_support::{model_with_window, with_draft_loaded};
 use pce::models::PolicyDecision;
@@ -298,6 +300,7 @@ fn a_ready_app_goes_to_the_bulk_confirm_and_y_sends_it_with_a_record() {
     let cmds = update(
         &mut m,
         Msg::EnforceDone(Box::new(EnforceOutcome {
+            app: "shop/prod".into(),
             report: report(&[("/orgs/5/workloads/aaaa-2", ItemStatus::Updated)]),
             record: Some(path.clone()),
             record_error: None,
@@ -325,15 +328,235 @@ fn a_record_that_could_not_be_updated_opens_loudly() {
     update(
         &mut m,
         Msg::EnforceDone(Box::new(EnforceOutcome {
+            app: "shop/prod".into(),
             report: report(&[("/orgs/5/workloads/aaaa-2", ItemStatus::Updated)]),
             record: Some(dir.path().join("x.json")),
-            record_error: Some("CHANGE RECORD NOT UPDATED: x.json …".into()),
+            record_error: Some(format!(
+                "CHANGE RECORD NOT UPDATED: x.json …\nsaved as /state/x.unsaved.json\n\n{}",
+                "{\n  \"app\": \"shop/prod\",\n".repeat(200)
+            )),
         })),
     );
-    assert!(matches!(&m.overlay, Overlay::Error(e) if e.starts_with("CHANGE RECORD")));
+    // The whole record, in the scrollable report viewer, before the send's report.
+    assert_eq!(m.overlay, Overlay::BatchReport { scroll: 0 });
+    let lines = m.batch_report.as_ref().unwrap();
+    assert!(lines[0].starts_with("CHANGE RECORD NOT UPDATED"));
+    assert!(lines.len() > 400, "nothing cut: {}", lines.len());
+    assert!(
+        lines.iter().any(|l| l.starts_with("sent to")),
+        "the send's report follows"
+    );
     assert_eq!(m.status.kind, StatusKind::Error);
+    quiet(&mut m, kc(KeyCode::Down));
+    assert_eq!(m.overlay, Overlay::BatchReport { scroll: 1 });
     quiet(&mut m, kc(KeyCode::Esc));
     assert_eq!(m.overlay, Overlay::Enforce, "back once read");
+}
+
+/// A result that may miss the app's flows: `ready` is not trusted, the
+/// move is typed through and recorded as forced.
+#[test]
+fn a_ready_verdict_on_a_partial_result_is_typed_through() {
+    type Cause = Box<dyn Fn(&mut Model)>;
+    let causes: Vec<(&str, Cause)> = vec![
+        (
+            "the traffic filter narrows",
+            Box::new(|m: &mut Model| {
+                let d = m.traffic.data.as_mut().unwrap();
+                d.filter.decisions = vec![PolicyDecision::Allowed];
+            }),
+        ),
+        (
+            "hit its cap",
+            Box::new(|m: &mut Model| m.traffic.data.as_mut().unwrap().truncated = true),
+        ),
+        (
+            "did not answer",
+            Box::new(|m: &mut Model| m.traffic.data.as_mut().unwrap().incomplete = true),
+        ),
+        (
+            "focused on crm/prod",
+            Box::new(|m: &mut Model| {
+                let keys = vec!["app".to_string(), "env".to_string()];
+                let d = crate::tui::model::TrafficData {
+                    flows: m.traffic.loaded_flows().to_vec(),
+                    truncated: false,
+                    incomplete: false,
+                    elapsed: std::time::Duration::ZERO,
+                    cache_hit: false,
+                    fetched_at: std::time::Instant::now(),
+                    filter: m.traffic.filter.clone(),
+                    range: None,
+                    hrefs: Vec::new(),
+                    draft: m.traffic.data.as_ref().unwrap().draft,
+                };
+                m.traffic.apply_focused(
+                    Focus::new(pce::traffic::parse_app("crm/prod"), keys),
+                    1,
+                    d,
+                );
+            }),
+        ),
+        (
+            "no flow of the app",
+            Box::new(|m: &mut Model| {
+                let d = m.traffic.data.as_mut().unwrap();
+                d.flows.retain(|f| {
+                    let k = vec!["app".to_string(), "env".to_string()];
+                    pce::traffic::group_key(&f.src, &k) != pce::traffic::parse_app("shop/prod")
+                        && pce::traffic::group_key(&f.dst, &k)
+                            != pce::traffic::parse_app("shop/prod")
+                });
+            }),
+        ),
+    ];
+    for (why, make) in causes {
+        let dir = tempfile::tempdir().unwrap();
+        let mut base = all_allowed();
+        make(&mut base);
+        base.traffic.rebuild_views();
+        let mut m = on_shop(base, dir.path());
+        let v = ev(&m);
+        assert!(
+            v.partial.iter().any(|p| p.contains(why)),
+            "{why}: {:?}",
+            v.partial
+        );
+        assert_eq!(
+            v.step_state(crate::tui::enforce::Step::Enforce, &Missing::default()),
+            if v.readiness.as_ref().unwrap().verdict.allows_enforcement() {
+                "partial"
+            } else {
+                "blocked"
+            },
+            "{why}"
+        );
+        quiet(&mut m, key('4'));
+        quiet(&mut m, kc(KeyCode::Enter));
+        assert_eq!(ev(&m).typing.as_deref(), Some(""), "{why}: the word first");
+        typed(&mut m, ENFORCE_WORD);
+        quiet(&mut m, kc(KeyCode::Enter));
+        assert!(matches!(m.overlay, Overlay::ConfirmBulk(_)), "{why}");
+        assert!(m.enforce_send.as_ref().unwrap().readiness.forced, "{why}");
+    }
+}
+
+#[test]
+fn the_typed_move_checks_again_what_readiness_reads() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = on_shop(loaded(), dir.path());
+    quiet(&mut m, key('4'));
+    quiet(&mut m, kc(KeyCode::Enter));
+    typed(&mut m, ENFORCE_WORD);
+    // The pending list goes (a write dropped it) while the word is typed.
+    m.policy.pending = None;
+    m.policy.pending_loading = true;
+    quiet(&mut m, kc(KeyCode::Enter));
+    assert_eq!(m.overlay, Overlay::Enforce);
+    assert!(m.enforce_send.is_none());
+    assert!(
+        m.status.text.starts_with("readiness is not complete"),
+        "{}",
+        m.status.text
+    );
+}
+
+#[test]
+fn answers_land_only_in_the_overlay_that_asked() {
+    let dir = tempfile::tempdir().unwrap();
+    write_move(dir.path(), "pce.example", "2026-10-19T10:00:00Z");
+    let mut m = on_shop(loaded(), dir.path());
+    quiet(&mut m, key('5'));
+    update(&mut m, key('R'));
+    let seq = ev(&m).seq;
+    // Closed meanwhile: the re-read's answer is dropped, reopening is clean.
+    quiet(&mut m, kc(KeyCode::Esc));
+    let wl = m.workloads.raw.clone();
+    quiet(
+        &mut m,
+        Msg::RollbackRead {
+            seq,
+            result: Ok((wl.clone(), false)),
+        },
+    );
+    quiet(
+        &mut m,
+        Msg::Command(Command::Enforce(Some("shop/prod".into()))),
+    );
+    assert!(ev(&m).rollback.is_none() && !ev(&m).rollback_reading);
+    // A move of another app does not touch this overlay.
+    m.writes.in_flight = true;
+    let before = ev(&m).step;
+    update(
+        &mut m,
+        Msg::EnforceDone(Box::new(EnforceOutcome {
+            app: "crm/prod".into(),
+            report: report(&[("/orgs/5/workloads/aaaa-2", ItemStatus::Updated)]),
+            record: Some(dir.path().join("crm_prod-x.json")),
+            record_error: None,
+        })),
+    );
+    assert_eq!(ev(&m).step, before);
+}
+
+#[test]
+fn a_command_or_a_screen_switch_keeps_the_overlay_from_coming_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = on_shop(loaded(), dir.path());
+    quiet(&mut m, key('2'));
+    update(&mut m, key('G'));
+    assert_eq!(m.overlay, Overlay::Generator);
+    assert_eq!(m.enforce_back, Some(Overlay::Enforce));
+    update(
+        &mut m,
+        Msg::Command(Command::Screen(crate::tui::model::Screen::Policy)),
+    );
+    assert!(m.enforce_back.is_none());
+    m.overlay = Overlay::None;
+    quiet(&mut m, Msg::Tick(std::time::Instant::now()));
+    assert_eq!(m.overlay, Overlay::None);
+    // A screen key too.
+    let mut m = on_shop(loaded(), dir.path());
+    quiet(&mut m, key('2'));
+    update(&mut m, key('G'));
+    quiet(&mut m, kc(KeyCode::Esc));
+    assert_eq!(m.overlay, Overlay::Enforce, "back from the generator");
+    update(&mut m, key('G'));
+    m.overlay = Overlay::None;
+    update(
+        &mut m,
+        Msg::SwitchScreen(crate::tui::model::Screen::Workloads),
+    );
+    assert_eq!(m.overlay, Overlay::None);
+}
+
+#[test]
+fn reopening_after_the_help_asks_for_nothing_and_a_replaced_watch_is_cancelled() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = on_shop(loaded(), dir.path());
+    // A write dropped the pending list: only a write's answer asks again.
+    m.policy.pending = None;
+    quiet(&mut m, key('?'));
+    quiet(&mut m, kc(KeyCode::Esc));
+    assert_eq!(m.overlay, Overlay::Enforce);
+    // The watch: a second start cancels the first.
+    let now = jiff::Timestamp::now();
+    let at = jiff::Timestamp::from_second(now.as_second() - 600).unwrap();
+    write_move(dir.path(), "pce.example", &at.to_string());
+    m.policy.pending = Some(Vec::new());
+    quiet(&mut m, kc(KeyCode::Esc));
+    quiet(
+        &mut m,
+        Msg::Command(Command::Enforce(Some("shop/prod".into()))),
+    );
+    quiet(&mut m, key('5'));
+    let first = update(&mut m, key('r'));
+    let [Cmd::WatchBlocked { cancel, .. }] = first.as_slice() else {
+        panic!("{first:?}");
+    };
+    let second = start_watch(&mut m);
+    assert!(cancel.is_cancelled(), "the first query is cancelled");
+    assert!(matches!(second.as_slice(), [Cmd::WatchBlocked { .. }]));
 }
 
 #[test]
@@ -508,6 +731,7 @@ fn rollback_re_reads_previews_and_sends_on_y() {
         vec![Cmd::RollbackRead {
             seq,
             filter: pce::app::app_workload_filter(&shop_hrefs()),
+            dir: dir.path().to_path_buf(),
         }]
     );
     // The workload is still as the move set it.
@@ -533,6 +757,7 @@ fn rollback_re_reads_previews_and_sends_on_y() {
     let cmds = update(
         &mut m,
         Msg::RollbackDone(Box::new(RollbackOutcome {
+            app: "shop/prod".into(),
             reports: vec![report(&[("/orgs/5/workloads/aaaa-2", ItemStatus::Updated)])],
             record: None,
             record_error: None,

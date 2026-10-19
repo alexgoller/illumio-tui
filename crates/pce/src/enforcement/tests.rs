@@ -474,3 +474,46 @@ fn records_by_origin_rollbacks_found_rewrites_and_the_probe() {
     assert!(probe_dir(&blocked).is_err());
     assert!(probe_dir(&blocked.join("enforcements")).is_err());
 }
+
+#[test]
+fn the_watch_query_asks_for_the_apps_blocked_unicast_flows_on_either_side() {
+    use crate::models::ActorMatch;
+    let t = |s: &str| -> Timestamp { s.parse().unwrap() };
+    let labels = vec![
+        ActorMatch::Label {
+            label: crate::models::Ref::new("/orgs/5/labels/3"),
+        },
+        ActorMatch::Label {
+            label: crate::models::Ref::new("/orgs/5/labels/4"),
+        },
+    ];
+    let q = watch_query(
+        t("2026-10-19T10:00:00Z"),
+        t("2026-10-19T12:00:00Z"),
+        labels,
+        500,
+    )
+    .unwrap();
+    let j = serde_json::to_value(&q).unwrap();
+    // Unicast: broadcast and multicast excluded on the destination side.
+    assert_eq!(
+        j["destinations"]["exclude"],
+        serde_json::json!([{"transmission": "broadcast"}, {"transmission": "multicast"}])
+    );
+    assert_eq!(j["policy_decisions"], serde_json::json!(["blocked"]));
+    assert_eq!(j["sources_destinations_query_op"], "or");
+    assert_eq!(j["max_results"], 500);
+    assert_eq!(
+        q.sources.include, q.destinations.include,
+        "the app on both sides"
+    );
+    assert!(
+        watch_query(
+            t("2026-10-19T12:00:00Z"),
+            t("2026-10-19T10:00:00Z"),
+            vec![],
+            5
+        )
+        .is_err()
+    );
+}

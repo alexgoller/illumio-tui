@@ -476,6 +476,9 @@ fn emit_plan(
 /// refused workloads, or nothing updated because every workload changed).
 pub(crate) fn exit_error(report: &BulkReport, status: String) -> Option<CliError> {
     use pce::write::bulk::BulkFailure as F;
+    if !report.failed() {
+        return None;
+    }
     let (code, kind) = match report.failure {
         Some(F::Invalid) => (2, "invalid"),
         Some(F::Refused) => (6, "write_refused"),

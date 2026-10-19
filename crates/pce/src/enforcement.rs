@@ -15,10 +15,18 @@
 //! and report, choosing the newest record, planning a rollback from a
 //! re-read, and grouping the blocked flows `--watch` reports.
 use crate::marks::ActiveMarks;
-use crate::models::{PolicyDecision, Workload};
-use crate::readiness::{AppReadiness, Gap, accepted, is_unicast, tuples};
-use crate::traffic::{Direction, GroupKey, ResolvedFlow, group_key, keys_or_default};
-use crate::write::bulk::{BulkItem, EnforcementMode, ItemResult, ItemStatus, VisibilityLevel};
+use crate::models::{
+    ActorMatch, PolicyDecision, TrafficQuery, Transmission, Workload, WorkloadFilter,
+};
+use crate::readiness::{AppReadiness, Gap, accepted, is_unicast, tuples, workload_group};
+use crate::resolve::NameIndex;
+use crate::traffic::{
+    Direction, GroupKey, ResolvedFlow, TrafficQueryBuilder, group_key, keys_or_default,
+};
+use crate::write::bulk::{
+    BulkItem, COUNT_ABOVE, EnforcementMode, ItemResult, ItemStatus, VisibilityLevel,
+};
+use crate::write::{BatchOrigin, BulkChange, BulkPlan, BulkTarget, WriteError, plan_bulk};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::io::{self, Write};
@@ -647,6 +655,150 @@ pub fn blocked_since(
             .then_with(|| a.service.cmp(&b.service))
     });
     out
+}
+
+/// The app's workloads in `ws` (not deleted, of the app under `keys`):
+/// what a move selects. The CLI and the TUI select the same way.
+pub fn app_workloads<'a>(
+    ws: &'a [Workload],
+    app: &GroupKey,
+    keys: &[String],
+    idx: &NameIndex,
+) -> Vec<&'a Workload> {
+    ws.iter()
+        .filter(|w| w.deleted != Some(true))
+        .filter(|w| workload_group(w, keys, idx).as_ref() == Some(app))
+        .collect()
+}
+
+/// The blocked-since query of `--watch` and the TUI's Watch step: unicast
+/// flows from `since` to `until` whose reported decision is `blocked`,
+/// the app (`labels`) on either side (`or`), at most `cap` rows.
+pub fn watch_query(
+    since: Timestamp,
+    until: Timestamp,
+    labels: Vec<ActorMatch>,
+    cap: u32,
+) -> crate::Result<TrafficQuery> {
+    let mut q = TrafficQueryBuilder::between(since, until)
+        .transmission(&[Transmission::Unicast])
+        .decisions(vec![PolicyDecision::Blocked])
+        .max_results(cap)
+        .source(labels.clone())
+        .destination(labels)
+        .build()?;
+    q.sources_destinations_query_op = "or".into();
+    Ok(q)
+}
+
+/// A rollback's bulk plans, one per `(mode, visibility)` that restores
+/// something, and whether its count must be typed.
+#[derive(Debug, Clone)]
+pub struct RollbackPlans {
+    pub plans: Vec<(ModeState, BulkPlan)>,
+    /// The workloads restored.
+    pub count: usize,
+    /// Several to full or selective, or more than 25: the typed count
+    /// covers the whole rollback.
+    pub needs_count: bool,
+}
+
+/// The bulk plans of `rp`, each re-reading the app's workloads by `reread`.
+pub fn rollback_plans(
+    rp: &RollbackPlan,
+    reread: &WorkloadFilter,
+    origin: Option<BatchOrigin>,
+) -> Result<RollbackPlans, WriteError> {
+    let none = NameIndex::default();
+    let mut plans: Vec<(ModeState, BulkPlan)> = Vec::new();
+    for g in &rp.groups {
+        let targets: Vec<BulkTarget> = g
+            .workloads
+            .iter()
+            .map(|w| BulkTarget::of(w, &none))
+            .collect();
+        let plan = plan_bulk(
+            &targets,
+            &BulkChange::enforce(g.mode, g.visibility),
+            reread.clone(),
+            origin.clone(),
+        )?;
+        plans.push((g.target(), plan));
+    }
+    plans.retain(|(_, p)| !p.items.is_empty());
+    let count: usize = plans.iter().map(|(_, p)| p.items.len()).sum();
+    let needs_count = plans.iter().any(|(_, p)| p.needs_count()) || count > COUNT_ABOVE;
+    Ok(RollbackPlans {
+        plans,
+        count,
+        needs_count,
+    })
+}
+
+/// Each planned workload with the state its plan sets it to.
+pub fn afters(plans: &[(ModeState, &BulkPlan)]) -> Vec<(BulkItem, ModeState)> {
+    plans
+        .iter()
+        .flat_map(|(to, p)| p.items.iter().map(move |i| (i.clone(), to.clone())))
+        .collect()
+}
+
+/// The record written before the send: `rec` with every workload
+/// `pending`, as a new file in `dir`.
+pub fn write_pending(dir: &Path, rec: &ChangeRecord, now: Timestamp) -> io::Result<PathBuf> {
+    write_record(dir, &rec.clone().pending(), now)
+}
+
+/// `rec` with each workload's result from `results` (the bulk reports'
+/// items; none: `not_sent`).
+pub fn with_results(
+    rec: &ChangeRecord,
+    afters: &[(BulkItem, ModeState)],
+    results: &[ItemResult],
+) -> ChangeRecord {
+    let origin = RecordOrigin {
+        profile: rec.profile.clone(),
+        pce: rec.pce.clone(),
+        org_id: rec.org_id,
+    };
+    ChangeRecord {
+        workloads: ChangeRecord::of_move(
+            &rec.app,
+            &origin,
+            Timestamp::now(),
+            None,
+            afters,
+            results,
+        )
+        .workloads,
+        ..rec.clone()
+    }
+}
+
+/// Where a record that could not be rewritten at `path` is saved instead:
+/// beside the records' directory (the state directory),
+/// `<file stem>.unsaved.json`.
+pub fn unsaved_path(path: &Path) -> PathBuf {
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let state = dir.parent().unwrap_or(dir);
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("record");
+    state.join(format!("{stem}.unsaved.json"))
+}
+
+/// Saves `rec` at [`unsaved_path`] of `path` (a new file); its path.
+pub fn write_unsaved(path: &Path, rec: &ChangeRecord) -> io::Result<PathBuf> {
+    let to = unsaved_path(path);
+    let body = serde_json::to_vec_pretty(rec).map_err(io::Error::other)?;
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&to)?;
+    f.write_all(&body)?;
+    f.sync_all()?;
+    Ok(to)
 }
 
 #[cfg(test)]

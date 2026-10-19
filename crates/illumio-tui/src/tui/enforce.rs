@@ -9,10 +9,11 @@
 use crate::tui::model::Model;
 use pce::enforcement::{
     BlockedSince, ChangeRecord, ModeState, RecordOrigin, RecordReadiness, RollbackSkip,
-    newest_record, probe_dir, rewrite_record, rolled_back_by, write_record,
+    newest_record, probe_dir, rewrite_record, rolled_back_by, with_results, write_pending,
+    write_unsaved,
 };
 use pce::readiness::{AppReadiness, ReadinessInput, Verdict, readiness};
-use pce::traffic::{GroupKey, ResolvedFlow};
+use pce::traffic::{Focus, GroupKey, ResolvedFlow, keys_or_default};
 use pce::write::bulk::{BulkItem, BulkReport, ItemResult};
 use pce::write::{BulkPlan, EnforcementMode, VisibilityLevel};
 use std::path::{Path, PathBuf};
@@ -139,6 +140,45 @@ pub fn compute(model: &Model, apps: &[GroupKey], gaps: bool) -> Vec<AppReadiness
         now: model.workloads.now.unwrap_or_else(jiff::Timestamp::now),
     };
     readiness(&input, apps)
+}
+
+/// Why the result on screen may not hold every flow of `app`, so that a
+/// `ready` verdict on it is not to be trusted: a filter narrower than the
+/// window and the cap, a truncated or incomplete result, a focused result
+/// for another app, no flow of the app at all. Empty: the result is whole
+/// for the app. A move on a partial result is typed through, as a move of
+/// an app that is not ready.
+pub fn partial_reasons(model: &Model, app: &GroupKey, r: Option<&AppReadiness>) -> Vec<String> {
+    let t = &model.traffic;
+    let Some(d) = t.data.as_ref() else {
+        return vec!["no traffic loaded".into()];
+    };
+    let mut out = Vec::new();
+    if let Some(what) = d.filter.narrowing() {
+        out.push(format!("the traffic filter narrows the flows ({what})"));
+    }
+    if d.truncated {
+        out.push(format!(
+            "the result hit its cap ({}): flows are missing",
+            d.filter.max_results
+        ));
+    }
+    if d.incomplete {
+        out.push("a PCE region did not answer: flows are missing".into());
+    }
+    let keys = keys_or_default(&model.limits.scope_keys);
+    if let Some(f) = &t.focus_result
+        && !f.covers(&Focus::new(app.clone(), keys))
+    {
+        out.push(format!(
+            "the result is focused on {}: other apps' flows are partial",
+            f.focus.app_text()
+        ));
+    }
+    if r.is_some_and(|r| r.evidence.flows == 0) {
+        out.push("no flow of the app in the result".into());
+    }
+    out
 }
 
 /// The order `s` cycles the readiness rows through.
@@ -357,6 +397,12 @@ pub struct EnforceView {
     /// The re-read before a rollback is on its way.
     pub rollback_reading: bool,
     pub rollback: Option<RollbackPreview>,
+    /// Why the result on screen may miss flows of the app
+    /// ([`partial_reasons`]); a move then needs the typed word.
+    pub partial: Vec<String>,
+    /// Step 4's plan as it stands (computed when data or the target
+    /// changes, not every frame).
+    pub plan_text: String,
     /// Requests this overlay sent (loads, `D`, the watch query, the
     /// rollback re-read); the writes are counted by the write layer.
     pub requests: u32,
@@ -379,8 +425,34 @@ impl EnforceView {
             watch: Watch::Idle,
             rollback_reading: false,
             rollback: None,
+            partial: Vec::new(),
+            plan_text: String::new(),
             requests: 0,
         }
+    }
+
+    /// A watch query on its way is cancelled and forgotten.
+    pub fn drop_watch(&mut self) {
+        if let Watch::Running { cancel, .. } = &self.watch {
+            cancel.cancel();
+        }
+        self.watch = Watch::Idle;
+    }
+
+    /// The rollback preview, and a re-read on its way, are forgotten.
+    pub fn drop_rollback(&mut self) {
+        self.rollback = None;
+        self.rollback_reading = false;
+    }
+
+    /// A move would need the typed word: readiness does not allow it, or
+    /// the result it rests on is partial.
+    pub fn needs_word(&self) -> bool {
+        !self.partial.is_empty()
+            || self
+                .readiness
+                .as_ref()
+                .is_none_or(|r| !r.verdict.allows_enforcement())
     }
 
     pub fn app_text(&self) -> String {
@@ -462,7 +534,7 @@ impl EnforceView {
                     .and_then(|(p, _)| rolled_back_by(dir, p).ok().flatten());
                 // A new record (a move since): the old watch is stale.
                 if rec.as_ref().map(|(p, _)| p) != self.record.as_ref().map(|(p, _)| p) {
-                    self.watch = Watch::Idle;
+                    self.drop_watch();
                 }
                 self.record = rec;
             }
@@ -491,7 +563,13 @@ impl EnforceView {
             Step::Provision if r.pending.count == 0 => "0 pending".into(),
             Step::Provision => format!("{} pending", r.pending.count),
             Step::Enforce if r.verdict == Verdict::Enforced => "enforced".into(),
-            Step::Enforce if r.verdict.allows_enforcement() && !missing.any() => "ready".into(),
+            Step::Enforce if r.verdict.allows_enforcement() && !missing.any() => {
+                if self.partial.is_empty() {
+                    "ready".into()
+                } else {
+                    "partial".into()
+                }
+            }
             Step::Enforce | Step::Watch => "blocked".into(),
         }
     }
@@ -552,19 +630,11 @@ pub fn probe(dir: &Path) -> Result<(), String> {
     })
 }
 
-/// Each planned workload with the state the plan sets it to.
-pub fn afters(plans: &[(ModeState, &BulkPlan)]) -> Vec<(BulkItem, ModeState)> {
-    plans
-        .iter()
-        .flat_map(|(to, p)| p.items.iter().map(move |i| (i.clone(), to.clone())))
-        .collect()
-}
-
 /// Before the send: the record with every workload `pending`, so a send
 /// that never finishes still leaves one a rollback can use. `Err`: it
 /// could not be written (nothing may be sent).
 pub fn record_before(dir: &Path, rec: &ChangeRecord) -> Result<PathBuf, String> {
-    write_record(dir, &rec.clone().pending(), jiff::Timestamp::now()).map_err(|e| {
+    write_pending(dir, rec, jiff::Timestamp::now()).map_err(|e| {
         format!(
             "the change record could not be written in {}: {e}; nothing sent",
             dir.display()
@@ -572,41 +642,30 @@ pub fn record_before(dir: &Path, rec: &ChangeRecord) -> Result<PathBuf, String> 
     })
 }
 
-/// After the send: the record with the results. `Some`: the loud text when
-/// it could not be rewritten, with the whole record to keep.
+/// After the send: the record with the results. `Some`: what to show
+/// when it could not be rewritten: the pending record still on disk (a
+/// rollback can use it: it checks each workload as it is now), where the
+/// record with the results was saved instead, and that record in full.
 pub fn record_after(
     path: &Path,
     rec: &ChangeRecord,
     afters: &[(BulkItem, ModeState)],
     results: &[ItemResult],
 ) -> Option<String> {
-    let rec = ChangeRecord {
-        workloads: ChangeRecord::of_move(
-            &rec.app,
-            &RecordOrigin {
-                profile: rec.profile.clone(),
-                pce: rec.pce.clone(),
-                org_id: rec.org_id,
-            },
-            jiff::Timestamp::now(),
-            None,
-            afters,
-            results,
-        )
-        .workloads,
-        ..rec.clone()
-    };
+    let rec = with_results(rec, afters, results);
     let e = rewrite_record(path, &rec).err()?;
+    let saved = match write_unsaved(path, &rec) {
+        Ok(p) => format!("The record with the results was saved as {}.", p.display()),
+        Err(e) => format!("It could not be saved elsewhere either ({e}): keep the record below."),
+    };
+    let json = serde_json::to_string_pretty(&rec).unwrap_or_else(|e| format!("(unprintable: {e})"));
     Some(format!(
-        "CHANGE RECORD NOT UPDATED: {} still lists every workload as pending ({e}). Save the record below: a rollback needs it.\n\n{}",
-        path.display(),
-        serde_json::to_string_pretty(&rec).unwrap_or_else(|e| format!("(unprintable: {e})"))
+        "CHANGE RECORD NOT UPDATED: {} could not be rewritten with the results ({e}).\n\
+         It still lists every workload as pending: a rollback can still use it (it checks \
+         each workload as it is now and skips one the move did not apply to).\n\
+         {saved}\n\n{json}",
+        path.display()
     ))
-}
-
-/// A sent rollback group failed or changed nothing: the next is not sent.
-pub fn group_failed(r: &BulkReport) -> bool {
-    r.failure.is_some() || r.stopped() || (r.updated() == 0 && r.dropped() > 0)
 }
 
 /// What the watch query brought back.
@@ -623,6 +682,8 @@ pub struct WatchOutcome {
 /// written or updated.
 #[derive(Debug)]
 pub struct EnforceOutcome {
+    /// The app moved (`shop/prod`): only its overlay takes the answer.
+    pub app: String,
     pub report: BulkReport,
     pub record: Option<PathBuf>,
     pub record_error: Option<String>,
@@ -631,6 +692,8 @@ pub struct EnforceOutcome {
 /// A rollback's answer: each group's report, the rollback record.
 #[derive(Debug)]
 pub struct RollbackOutcome {
+    /// The app rolled back.
+    pub app: String,
     pub reports: Vec<BulkReport>,
     pub record: Option<PathBuf>,
     pub record_error: Option<String>,
