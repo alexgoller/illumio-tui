@@ -215,7 +215,7 @@ async fn allow_writes_is_still_accepted_and_changes_nothing() {
 }
 
 /// Every write subcommand, with arguments that would otherwise be valid.
-const ALL_WRITES: [&[&str]; 28] = [
+const ALL_WRITES: [&[&str]; 32] = [
     &["labels", "add", "a=b"],
     &["labels", "update", "/orgs/5/labels/1", "--value", "x"],
     &["labels", "delete", "/orgs/5/labels/1"],
@@ -365,6 +365,30 @@ const ALL_WRITES: [&[&str]; 28] = [
     ],
     &["policy", "provision", "--all"],
     &["policy", "revert", "--all"],
+    &[
+        "policy",
+        "rules",
+        "enable",
+        "/orgs/5/sec_policy/draft/rule_sets/1/sec_rules/2",
+    ],
+    &[
+        "policy",
+        "rules",
+        "disable",
+        "/orgs/5/sec_policy/draft/rule_sets/1/deny_rules/3",
+    ],
+    &[
+        "policy",
+        "rulesets",
+        "enable",
+        "/orgs/5/sec_policy/draft/rule_sets/1",
+    ],
+    &[
+        "policy",
+        "rulesets",
+        "disable",
+        "/orgs/5/sec_policy/draft/rule_sets/1",
+    ],
 ];
 
 #[tokio::test(flavor = "multi_thread")]
@@ -3551,5 +3575,114 @@ mod managed_labels {
                 .all(|r| r.method.as_str() == "GET")
         );
         assert!(audit_lines(state.path()).is_empty());
+    }
+}
+
+/// `policy rules enable|disable` and `policy rulesets enable|disable` (#52).
+mod toggle {
+    use super::policy::{DENY_8, RS_100, RULE_2, fixture_rule_sets, mount_get, mount_lists};
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rules_disable_plans_enabled_only_and_enable_on_an_enabled_rule_is_skipped() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_get(&server, RULE_2, fixture_rule_sets()[0]["rules"][1].clone()).await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args(["policy", "rules", "disable", RULE_2, "--dry-run"])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["method"], "PUT");
+        assert_eq!(out["data"]["path"], RULE_2);
+        assert_eq!(out["data"]["body"], json!({"enabled": false}));
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args(["policy", "rules", "enable", RULE_2, "--dry-run"])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["skipped"], true);
+        assert!(
+            server
+                .received_requests()
+                .await
+                .unwrap()
+                .iter()
+                .all(|r| r.method.as_str() == "GET")
+        );
+        assert!(
+            audit_lines(state.path()).is_empty(),
+            "dry runs are not audited"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_deny_rule_disables_with_yes_once_and_is_audited() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        let deny: Value =
+            serde_json::from_str(include_str!("../../../fixtures/deny_rules.json")).unwrap();
+        mount_get(&server, DENY_8, deny[1].clone()).await;
+        Mock::given(method("PUT"))
+            .and(path(format!("/api/v2{DENY_8}")))
+            .and(body_json(json!({"enabled": false})))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let a = writer(&server, state.path())
+            .args(["policy", "rules", "disable", DENY_8, "--yes"])
+            .assert()
+            .success();
+        assert_no_secret(&a);
+        let out = stdout_json(a);
+        assert_eq!(out["meta"]["write"]["method"], "PUT");
+        assert_eq!(out["meta"]["write"]["status"], 204);
+        let lines = audit_lines(state.path());
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0]["path"], DENY_8);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rulesets_enable_and_disable_by_name_or_href() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_lists(&server).await;
+        mount_get(&server, RS_100, fixture_rule_sets()[0].clone()).await;
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args(["policy", "rulesets", "disable", "shop-prod", "--dry-run"])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["method"], "PUT");
+        assert_eq!(out["data"]["path"], RS_100);
+        assert_eq!(out["data"]["body"], json!({"enabled": false}));
+        let out = stdout_json(
+            writer(&server, state.path())
+                .args(["policy", "rulesets", "enable", RS_100, "--dry-run"])
+                .assert()
+                .success(),
+        );
+        assert_eq!(out["data"]["skipped"], true);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_wrong_href_shape_is_exit_2_before_any_request() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        for href in [
+            RS_100,
+            "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/../2",
+        ] {
+            let a = writer(&server, state.path())
+                .args(["policy", "rules", "enable", href, "--dry-run"])
+                .assert()
+                .code(2);
+            assert_eq!(stderr_json(&a)["error"]["kind"], "invalid", "{href}");
+        }
+        assert!(server.received_requests().await.unwrap().is_empty());
     }
 }

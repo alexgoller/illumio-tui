@@ -1154,6 +1154,9 @@ mod rule_form_ruleset_tests;
 mod section_order_tests;
 #[cfg(test)]
 mod tests;
+/// `t` on Policy: a rule or ruleset enabled ↔ disabled (issue #52).
+#[cfg(test)]
+mod toggle_tests;
 #[cfg(test)]
 mod window_step_tests;
 #[cfg(test)]

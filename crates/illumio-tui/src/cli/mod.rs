@@ -175,11 +175,11 @@ fn csv_refusal(command: &Command) -> Option<&'static str> {
             Some("workloads add/update/delete/enforce/relabel")
         }
         Command::Policy(P::Rulesets(c)) if c.action.is_some() => {
-            Some("policy rulesets add/update/delete")
+            Some("policy rulesets add/update/delete/enable/disable")
         }
         Command::Policy(P::Rules(c)) => match c.action {
             Some(RulesAction::Impact(_)) => Some("policy rules impact"),
-            Some(_) => Some("policy rules add/update/delete"),
+            Some(_) => Some("policy rules add/update/delete/enable/disable"),
             None => None,
         },
         Command::Policy(P::DenyRules(_)) => Some("policy deny-rules"),

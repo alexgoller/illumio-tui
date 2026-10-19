@@ -519,8 +519,9 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
 - **Policy**: `d` toggle draft / active, `p` pending changes (`Enter` on one shows its diff against active), `Tab` switch panes, `Enter` rule
   detail, or on a ruleset load its deny rules. Rules are listed in evaluation order: override
   deny, allow, deny. With writes on, `n` / `e` / `x` create, edit and delete rulesets and rules
-  in draft (`N` a deny rule), and the pending overlay marks with `Space`, provisions with `P`
-  and reverts the marked changes with `R`.
+  in draft (`N` a deny rule), `t` enables or disables the selected rule (allow or deny) or
+  ruleset (a draft change; disabled ones show dimmed with `✗`), and the pending overlay marks
+  with `Space`, provisions with `P` and reverts the marked changes with `R`.
   `i` reads the workload list once (unless the Workloads screen already did) for rule impact:
   the rule detail says how many workloads the rule matches (`impact      12 providers · 3
   consumers`, `≥` when the list was truncated) and the size of each IP list it names, the
@@ -1018,6 +1019,8 @@ its name), and refused when the PCE has none.
     illumio-tui policy rules add Web-Tier --provider app=web --consumer iplist:Corp --service 443/tcp --yes --json
     illumio-tui policy rules update /orgs/1/sec_policy/draft/rule_sets/7/sec_rules/9 --add-consumer '!iplist:Guest' --dry-run
     illumio-tui policy deny-rules add Web-Tier --provider all --consumer iplist:Any --service 23/tcp --override --yes
+    illumio-tui policy rules disable /orgs/1/sec_policy/draft/rule_sets/7/sec_rules/9 --dry-run
+    illumio-tui policy rulesets enable Web-Tier --yes
     illumio-tui policy provision --all --dry-run
     illumio-tui policy provision Web-Tier --description "web tier v2" --yes
     illumio-tui policy revert Web-Tier /orgs/1/sec_policy/draft/ip_lists/21 --dry-run
@@ -1052,6 +1055,13 @@ keys that change; a changed provider, consumer or service list is sent whole
 with the untouched entries exactly as the PCE returned them, and a
 `--remove-*` that matches nothing is exit 2. Virtual service and virtual
 server actors are not supported. A ruleset `PUT` never carries its rules.
+
+`policy rules enable|disable <href>` flips one rule's `enabled` (an allow
+rule's `sec_rules` href or a deny rule's `deny_rules` href) and `policy
+rulesets enable|disable <name|href>` a ruleset's; the `PUT` carries
+`enabled` only, and a rule or ruleset already in that state is `skipped`.
+Like every policy write it is a draft change until provisioned. (`rules
+update --enabled/--disabled` does the same with other edits.)
 
 `--impact` on `policy rules add|update` and `policy deny-rules add|update` reports what the
 rule will touch, before anything is sent: with `--dry-run`, `data` is the request plus
@@ -1314,7 +1324,9 @@ On the Policy screen, in the draft scope, the same three keys edit policy:
 on the rulesets pane `n` opens a new ruleset (Name, Description, Enabled
 `y`/`n`, Scopes), `e` edits the selected one and `x` deletes it; on the
 rules pane `n` adds an allow rule and `N` a deny rule to the selected
-ruleset, `e` edits the selected rule (allow or deny) and `x` deletes it. The
+ruleset, `e` edits the selected rule (allow or deny) and `x` deletes it;
+`t` on either pane flips the selected ruleset's or rule's `enabled` (one
+`PUT` of `enabled`, shown first, `y` sends it; it then shows in Pending). The
 rules pane title shows the selected ruleset's scopes
 (`Rules · app=shop, env=prod | app=shop, env=staging`, or `Scopeless`). In
 the active scope the keys say `switch to draft to edit policy`.

@@ -67,6 +67,18 @@ pub enum RulesetsAction {
     Update(RulesetUpdateArgs),
     /// Delete a ruleset and its rules
     Delete(RulesetDeleteArgs),
+    /// Enable a ruleset (a draft change; provision to apply it)
+    Enable(RulesetToggleArgs),
+    /// Disable a ruleset (a draft change; provision to apply it)
+    Disable(RulesetToggleArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct RulesetToggleArgs {
+    /// Ruleset name (case-insensitive) or href
+    pub ruleset: String,
+    #[command(flatten)]
+    pub write: WriteFlags,
 }
 
 #[derive(Args, Debug)]
@@ -143,6 +155,18 @@ pub enum RulesAction {
     Delete(RuleDeleteArgs),
     /// Report one rule's impact (workloads matched as providers and consumers), addressed by href
     Impact(RuleImpactArgs),
+    /// Enable an allow or deny rule, addressed by href (a draft change; provision to apply it)
+    Enable(RuleToggleArgs),
+    /// Disable an allow or deny rule, addressed by href (a draft change; provision to apply it)
+    Disable(RuleToggleArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct RuleToggleArgs {
+    /// Rule href: /orgs/N/sec_policy/draft/rule_sets/ID/sec_rules/ID (or deny_rules/ID)
+    pub rule: String,
+    #[command(flatten)]
+    pub write: WriteFlags,
 }
 
 #[derive(Subcommand, Debug)]
@@ -560,6 +584,8 @@ pub async fn run(ctx: &Context, cmd: &PolicyCmd) -> Result<(), CliError> {
             Some(RulesetsAction::Add(a)) => ruleset_add(ctx, a).await,
             Some(RulesetsAction::Update(a)) => ruleset_update(ctx, a).await,
             Some(RulesetsAction::Delete(a)) => ruleset_delete(ctx, a).await,
+            Some(RulesetsAction::Enable(a)) => ruleset_toggle(ctx, a, true).await,
+            Some(RulesetsAction::Disable(a)) => ruleset_toggle(ctx, a, false).await,
         },
         PolicyCmd::Rules(c) => match &c.action {
             None => rules(ctx, &c.list).await,
@@ -567,6 +593,8 @@ pub async fn run(ctx: &Context, cmd: &PolicyCmd) -> Result<(), CliError> {
             Some(RulesAction::Update(a)) => rule_update(ctx, a).await,
             Some(RulesAction::Delete(a)) => rule_delete(ctx, a).await,
             Some(RulesAction::Impact(a)) => rule_impact_one(ctx, a).await,
+            Some(RulesAction::Enable(a)) => rule_toggle(ctx, a, true).await,
+            Some(RulesAction::Disable(a)) => rule_toggle(ctx, a, false).await,
         },
         PolicyCmd::DenyRules(action) => match action {
             DenyRulesAction::Add(a) => deny_rule_add(ctx, a).await,
@@ -1228,6 +1256,48 @@ async fn ruleset_delete(ctx: &Context, a: &RulesetDeleteArgs) -> Result<(), CliE
     let guard = write::prepare(ctx, &a.write)?;
     let href = ruleset_href(ctx, &a.ruleset).await?;
     let plan = ctx.pce.writer(&guard).plan_delete_rule_set(&href)?;
+    run_plan(ctx, &a.write, &guard, plan).await
+}
+
+/// `policy rulesets enable|disable`: a `PUT` of `enabled` only; a ruleset
+/// already in that state plans nothing.
+async fn ruleset_toggle(ctx: &Context, a: &RulesetToggleArgs, on: bool) -> Result<(), CliError> {
+    let guard = write::prepare(ctx, &a.write)?;
+    let href = ruleset_href(ctx, &a.ruleset).await?;
+    let patch = RuleSetPatch {
+        enabled: Some(on),
+        ..RuleSetPatch::default()
+    };
+    let plan = ctx
+        .pce
+        .writer(&guard)
+        .plan_update_rule_set(&href, &patch)
+        .await?;
+    run_plan(ctx, &a.write, &guard, plan).await
+}
+
+/// `policy rules enable|disable <href>`: an allow rule (`sec_rules`) or a
+/// deny rule (`deny_rules`) by its href, a `PUT` of `enabled` only; one
+/// already in that state plans nothing.
+async fn rule_toggle(ctx: &Context, a: &RuleToggleArgs, on: bool) -> Result<(), CliError> {
+    let guard = write::prepare(ctx, &a.write)?;
+    let deny = a.rule.contains("/deny_rules/");
+    let child = if deny { "deny_rules" } else { "sec_rules" };
+    let href = checked_nested_href(&a.rule, "rule_sets", child, ctx.config.org_id)?;
+    let w = ctx.pce.writer(&guard);
+    let plan = if deny {
+        let patch = DenyRulePatch {
+            enabled: Some(on),
+            ..DenyRulePatch::default()
+        };
+        w.plan_update_deny_rule(&href, &patch).await?
+    } else {
+        let patch = RulePatch {
+            enabled: Some(on),
+            ..RulePatch::default()
+        };
+        w.plan_update_rule(&href, &patch).await?
+    };
     run_plan(ctx, &a.write, &guard, plan).await
 }
 

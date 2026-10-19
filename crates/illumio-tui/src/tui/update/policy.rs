@@ -85,6 +85,7 @@ pub(super) fn policy_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 return Vec::new();
             }
             KeyCode::Char('i') => return impact_key(model),
+            KeyCode::Char('t') => return toggle_key(model),
             KeyCode::Char(c @ ('n' | 'e' | 'x')) => return policy_edit_key(model, c),
             // `N` (a deny rule) is bound on the rules pane only.
             KeyCode::Char('N') if model.policy.pane == PolicyPane::Rules => {
@@ -345,6 +346,67 @@ pub(super) fn policy_edit_key(model: &mut Model, c: char) -> Vec<Cmd> {
         return Vec::new();
     };
     begin_edit(model, intent)
+}
+
+/// `t`: the selected ruleset (rulesets pane) or rule (rules pane, allow or
+/// deny) flipped between enabled and disabled. A draft change planned at
+/// once (one `PUT` of `enabled` only); the confirm shows it, `y` sends it,
+/// and it shows in Pending until provisioned. Draft only.
+pub(super) fn toggle_key(model: &mut Model) -> Vec<Cmd> {
+    if writes_refused(model) {
+        return Vec::new();
+    }
+    if model.policy.scope == PolicyScope::Active {
+        model.status = StatusLine::warn("switch to draft to edit policy");
+        return Vec::new();
+    }
+    let Some(intent) = toggle_intent(&model.policy) else {
+        model.status = StatusLine::warn("no row selected");
+        return Vec::new();
+    };
+    begin_start(model, Start::Plan(intent))
+}
+
+/// The write `t` plans for the focused row: `enabled` flipped, nothing else.
+pub(super) fn toggle_intent(p: &PolicyState) -> Option<WriteIntent> {
+    match p.pane {
+        PolicyPane::RuleSets => {
+            let rs = p.selected_rule_set()?;
+            Some(WriteIntent::UpdateRuleSet {
+                href: rs.href.clone(),
+                patch: pce::write::RuleSetPatch {
+                    enabled: Some(!rs.enabled),
+                    ..Default::default()
+                },
+            })
+        }
+        PolicyPane::Rules => {
+            let v = p.rules.selected_item()?;
+            Some(rule_toggle(&v.href, v.kind, v.enabled))
+        }
+    }
+}
+
+/// An allow or deny rule's `enabled` flipped.
+pub(super) fn rule_toggle(href: &str, kind: RuleKind, enabled: bool) -> WriteIntent {
+    let href = href.to_string();
+    if kind == RuleKind::Allow {
+        WriteIntent::UpdateRule {
+            href,
+            patch: pce::write::RulePatch {
+                enabled: Some(!enabled),
+                ..Default::default()
+            },
+        }
+    } else {
+        WriteIntent::UpdateDenyRule {
+            href,
+            patch: pce::write::DenyRulePatch {
+                enabled: Some(!enabled),
+                ..Default::default()
+            },
+        }
+    }
 }
 
 /// `n` a new ruleset; `e` / `x` the selected one.

@@ -97,6 +97,8 @@ pub fn render_screen(model: &Model, f: &mut Frame, body: Rect) {
         t,
         panel(&title, &rules_meta, t, p.pane == PolicyPane::Rules),
         &move |r| match r.kind {
+            // A disabled rule is dimmed, as a disabled ruleset is.
+            _ if !r.enabled => theme.dim_style(),
             RuleKind::Allow => Style::default(),
             RuleKind::Deny => Style::new().fg(theme.warn),
             RuleKind::OverrideDeny => Style::new().fg(theme.bad),

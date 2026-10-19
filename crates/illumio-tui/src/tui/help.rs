@@ -311,6 +311,7 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
                 "pane · rule detail · on a ruleset: load deny rules",
             ),
             key("N", "new deny rule in the selected ruleset (rules pane)"),
+            key("t", "enable ↔ disable the rule or ruleset (draft, writes)"),
             key("i", "rule impact: load the workloads once (1 request)"),
         ],
     },
