@@ -194,6 +194,29 @@ pub struct Flow {
     pub extra: Map<String, Value>,
 }
 
+impl Flow {
+    /// The deny rules some PCE versions list beside `rules`
+    /// (`deny_rules`, `override_deny_rules`, `enforcement_boundaries`), as
+    /// hrefs. Read leniently: entries without an href are skipped.
+    pub fn deny_rule_hrefs(&self) -> Vec<String> {
+        let href = |v: &Value| match v {
+            Value::String(s) => Some(s.clone()),
+            Value::Object(m) => m.get("href").and_then(Value::as_str).map(str::to_string),
+            _ => None,
+        };
+        [
+            "deny_rules",
+            "override_deny_rules",
+            "enforcement_boundaries",
+        ]
+        .iter()
+        .filter_map(|k| self.extra.get(*k)?.as_array())
+        .flatten()
+        .filter_map(href)
+        .collect()
+    }
+}
+
 fn unknown_decision() -> PolicyDecision {
     PolicyDecision::Unknown
 }

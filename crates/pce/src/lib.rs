@@ -15,6 +15,7 @@ pub mod auth;
 pub mod cache;
 pub mod client;
 pub mod error;
+pub mod explain;
 pub mod generate;
 pub mod impact;
 pub mod iplist_size;

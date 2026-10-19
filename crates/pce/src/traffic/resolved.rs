@@ -90,6 +90,9 @@ pub struct ResolvedFlow {
     pub flow_direction: Option<String>,
     pub first_detected: Option<String>,
     pub last_detected: Option<String>,
+    /// The rules behind the flow, filled by a draft evaluation: the hrefs
+    /// (or `essential:<name>`) of `rules`, then those of the deny rules
+    /// some PCEs list beside it (`override_deny_rules`, …).
     pub rules: Vec<String>,
     /// Bytes the destination received (`dst_bi`), when the PCE reported it.
     pub bytes_in: Option<u64>,
@@ -224,7 +227,15 @@ pub fn resolve_flows(flows: &[Flow], idx: &NameIndex) -> Vec<ResolvedFlow> {
                 .timestamp_range
                 .as_ref()
                 .and_then(|t| t.last_detected.clone()),
-            rules: f.rules.iter().filter_map(|r| r.text()).collect(),
+            rules: {
+                let mut rules: Vec<String> = f.rules.iter().filter_map(|r| r.text()).collect();
+                for h in f.deny_rule_hrefs() {
+                    if !rules.contains(&h) {
+                        rules.push(h);
+                    }
+                }
+                rules
+            },
             bytes_in: f.dst_bi,
             bytes_out: f.dst_bo,
         })
@@ -421,5 +432,28 @@ pub(crate) mod tests {
         assert_eq!(f[2].proto, "icmp");
         assert_eq!(f[2].service_text(), "icmp");
         assert_eq!(f[2].src.display_name(), "unmanaged-nas");
+    }
+
+    #[test]
+    fn deny_rules_beside_rules_join_the_rules() {
+        let mut raw: Vec<Flow> =
+            serde_json::from_str(include_str!("../../../../fixtures/traffic_flows.json")).unwrap();
+        let f = &mut raw[3];
+        let deny = "/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8";
+        f.extra.insert(
+            "override_deny_rules".into(),
+            serde_json::json!([{"href": deny}, {"nohref": 1}]),
+        );
+        f.extra
+            .insert("enforcement_boundaries".into(), serde_json::json!([]));
+        let r = resolve_flows(&raw, &index());
+        assert_eq!(
+            r[3].rules,
+            vec![
+                "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/2".to_string(),
+                deny.to_string()
+            ]
+        );
+        assert!(r[0].rules.is_empty());
     }
 }
