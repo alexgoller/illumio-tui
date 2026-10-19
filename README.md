@@ -378,6 +378,17 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   (the draft stays on screen until its rule is written), while a query runs, or where `D`
   would ask first (no query of this session behind the result, a large window or cap); if
   draft decisions were dropped, the status then says `draft cleared: D re-evaluates`.
+  `E` **explains** the flow under the cursor (Flows, an App-to-app pair holding one flow, the
+  app overlay's Inbound and Outbound rows): which rule allows or blocks it. It shows the
+  reported decision and, once `D` has run, the draft one, then each rule the PCE names for the
+  flow after that draft evaluation, resolved through the loaded draft policy: allow, deny or
+  override deny, ruleset and scope, consumers → providers, services, enabled. A rule the
+  loaded policy does not hold keeps its href. With no rule it says `no rule allows this flow`,
+  with the destination's enforcement from the loaded workloads (enforced: blocked; visibility:
+  potentially blocked), and `w` drafts the allow rule. Explain sends nothing: before the draft
+  evaluation it says so, and `D` there asks first (the same PUT, polls and download as `D`).
+  `Enter` opens the selected rule on the Policy screen in the draft, its ruleset and rule
+  selected (a policy or deny rules still to load are selected when they land); `Esc` goes back.
   `m` **marks** the row under the cursor (Flows, App-to-app pairs and sections, Mesh, Blocked,
   the app overlay's Inbound and Outbound): `squelch` hides known noise, `reviewed` and
   `accept-blocked` dim what you have judged, `critical`, `important` and `revisit` flag what
@@ -534,11 +545,21 @@ the API call and byte counters at all times.
     illumio-tui traffic mesh --window 1h --no-user --json
     illumio-tui traffic query --window 30d --dry-run
     illumio-tui traffic query --window 24h --backfill --json
+    illumio-tui traffic explain --src app=web --dst app=db --port 5432 --proto tcp --json
     illumio-tui workloads --csv > workloads.csv
     illumio-tui traffic groups --window 24h --by in --csv > peers.csv
     illumio-tui profile list
     illumio-tui profile use prod
     illumio-tui completions zsh > ~/.zfunc/_illumio-tui
+
+`traffic explain` answers which rule allows or blocks the flows of one source, destination
+and port: one Explorer query narrowed to them, evaluated against the draft (one POST, polls,
+one PUT `update_rules`, polls, one download; it changes no policy), then the draft rulesets
+(one GET, only when a flow names a rule) and the deny rules of a ruleset that does not carry
+them inline (one GET each). JSON: `data.flows[]` with `reported`, `draft`, `verdict` and
+`rules[]` (`kind` allow, deny, override_deny or essential, `ruleset`, `scopes`, `consumers`,
+`providers`, `services`, `enabled`; `resolved: false` keeps an href the policy does not hold);
+`meta.cost` says what it requested.
 
 JSON output (default when piped) is `{"data": ..., "meta": {...}}` where
 `meta` reports API calls, bytes (decompressed: downloads are gzip-compressed on the wire, so
