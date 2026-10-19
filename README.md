@@ -582,7 +582,9 @@ with `--yes`; without it the run stops at 10000 and stderr names the next cap.
 `meta.cap_steps` lists every cap tried (`[200, 10000]`) and `meta.api_calls` every request
 (at least 3 per query). `--max-slices` was removed with time slices and exits 2.
 Errors go to stderr as JSON. Exit codes: 1 generic, 2 arguments or
-config, 3 auth, 4 PCE error, 5 rate limited, 6 write refused by the guard.
+config, 3 auth, 4 PCE error, 5 rate limited, 6 write refused (by the guard, or `enforce` on an
+app that is not ready), 7 flows blocked since an enforcement (`enforce --watch`,
+`blocked_since_enforcement`).
 
 `--csv` (beside `--table` and `--json`, exclusive with both) prints the same table as RFC 4180
 CSV for spreadsheets: a header row, `,` separators, quotes only around cells holding `,`, `"`
@@ -1122,6 +1124,51 @@ invalid), 3 (`auth`), 5 (`rate_limited`), 6 (`write_refused`: the write guard), 
 (`write_incomplete`: a failed request, refused workloads, an unknown outcome; `audit_failed`: a write applied but its audit entry could not be written). Workloads
 skipped by the re-read are a warning while some were updated; none updated because every
 one changed is exit 4 (`write_skipped`).
+
+### Enforce an app
+
+`illumio-tui enforce <app>` takes one app (`shop/prod`, one value per scope key) from ready to
+enforced, watches what is blocked afterwards, and rolls back exactly. The flow:
+
+    illumio-tui readiness --app shop/prod                      # verdict, gaps, pending
+    illumio-tui enforce shop/prod --to full --dry-run          # readiness again, the plan
+    illumio-tui enforce shop/prod --to full --yes --confirm-count 14
+    illumio-tui enforce shop/prod --watch                      # exit 7 when something is blocked
+    illumio-tui enforce shop/prod --rollback --dry-run
+    illumio-tui enforce shop/prod --rollback --yes --confirm-count 14
+
+`--to full|selective [--visibility LEVEL] [--window 7d] [--force]` runs readiness for the app
+first (one Explorer query narrowed to the app, re-evaluated against the draft, and the cached
+workloads, pending changes and draft rulesets: as `readiness --app`). A verdict other than
+`ready` or `enforced` is refused with exit 6 (`write_refused`) before any write, dry run or
+not; the message lists the blockers (the would-block tuples, the pending changes). `--force`
+moves it anyway and says so in `meta.warnings` and the record. The move is the bulk
+enforcement of the app's managed workloads with every guard of `workloads enforce` (armed
+writes, `--dry-run` or `--yes`, `--confirm-count`, the audit log, one `bulk_update` per 100,
+a re-read when the workloads came from the cache). `data` holds `readiness` (the app's
+report), `plan` (dry run) or `bulk` (the report), and `record`.
+
+Each move that changed something (also a partial one) writes a **change record**,
+`$XDG_STATE_HOME/illumio-tui/enforcements/<app>-<UTC time>.json` (else
+`~/.local/state/illumio-tui/enforcements/`), atomically: `app`, `profile`, `pce`, `org_id`, `at`
+(when it was sent), `to`, `readiness` (`verdict`, `coverage`, `window`, `flows`, `forced`) and
+each planned workload's `href`, `hostname`, `before` and `after` (`mode`, `visibility`) and
+`result` (`updated`, `failed`, `unanswered`, `not_sent`, `changed`, `missing`). No credentials.
+
+`--watch [--since <record path|RFC 3339 time>]` runs one Explorer query, blocked flows only,
+the app on either side, from the change time (the app's newest record by default) to now, and
+lists them as tuples (direction, peer, service, flows, connections). Flows a `squelch` or
+`accept-blocked` mark accepts are counted (`accepted`) but do not alert (`--no-marks`: they
+do). Exit 0 when there are none, 7 (`blocked_since_enforcement`) when there are, after the
+report. A window over 7d needs `--yes`. It runs only when asked; nothing polls.
+
+`--rollback [--record <path>]` takes the app's newest move record (never a rollback record)
+unless one is named, refuses a record of another PCE or org (exit 6), reads the app's
+workloads once past the cache, and restores each workload still as the move set it to its
+`before`, one `bulk_update` per `(mode, visibility)` (per 100), with the same guards (the
+typed count covers the whole rollback). A workload changed by someone else since, gone, or
+not moved by that change is skipped and listed in `skipped`, never overwritten. The rollback
+writes its own record with `rollback_of`; no record is ever deleted.
 
 ### Policy editing in the TUI
 
