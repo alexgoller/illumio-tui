@@ -257,6 +257,17 @@ pub fn flow_columns_of<T: FlowCells>() -> Vec<Column<T>> {
 /// The title of the column a view gains while draft decisions are loaded.
 pub const DRAFT_COLUMN: &str = "draft";
 
+/// `cols` with the group columns narrowed to make room for the 13-cell
+/// draft column at 120 columns.
+pub fn make_room_for_draft<T>(mut cols: Vec<Column<T>>) -> Vec<Column<T>> {
+    for c in &mut cols {
+        if matches!(c.title, "src group" | "dst group") {
+            c.width = 11;
+        }
+    }
+    cols
+}
+
 /// The Flows view's `draft` column.
 pub fn draft_flow_column() -> Column<FlowRow> {
     draft_flow_column_of()
@@ -266,9 +277,18 @@ pub fn draft_flow_column() -> Column<FlowRow> {
 pub fn draft_flow_column_of<T: FlowCells>() -> Column<T> {
     Column {
         title: DRAFT_COLUMN,
-        // `pot.blocked → allowed/bnd`, the longest known text.
-        width: 26,
-        cell: |r| on_flow(r, |f| f.flow.draft_text()),
+        // `→ pot.blocked`, the longest known text: the reported decision
+        // is the column beside it.
+        width: 13,
+        cell: |r| {
+            on_flow(r, |f| {
+                match (&f.flow.draft_policy_decision, f.flow.draft_change()) {
+                    (_, Some(d)) => format!("→ {}", pce::traffic::short_decision(d.as_str())),
+                    (Some(d), None) => pce::traffic::short_decision(d.as_str()),
+                    (None, None) => String::new(),
+                }
+            })
+        },
         key: |r| {
             flow_key(r, |f| {
                 SortKey::Text(

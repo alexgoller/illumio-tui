@@ -2179,8 +2179,23 @@ fn traffic_draft_flows_pairs_and_sections() {
     let mut m = with_draft_loaded(model_with_rich_flows());
     let out = render_to_string(&m, 160, 48);
     assert!(out.contains("draft ✓"), "{out}");
-    assert!(out.contains("blocked → allowed"), "{out}");
+    assert!(out.contains("→ allowed"), "{out}");
     insta::assert_snapshot!("traffic_draft_flows_160x48", out);
+    // At 120 columns the draft values are whole, not cut with `…`.
+    let out = render_to_string(&m, 120, 36);
+    assert!(out.contains("→ allowed"), "{out}");
+    assert!(out.contains("→ block"), "{out}");
+    assert!(
+        !out.contains("→ allowed…") && !out.contains("allowed →"),
+        "{out}"
+    );
+    assert!(
+        out.lines()
+            .filter(|l| l.contains("→ "))
+            .all(|l| !l.contains('…') || !l.split("→ ").nth(1).unwrap_or("").contains('…')),
+        "{out}"
+    );
+    insta::assert_snapshot!("traffic_draft_flows_120x36", out);
     let out = render_to_string(&m, 80, 24);
     assert!(out.contains("→ block"), "{out}");
     insta::assert_snapshot!("traffic_draft_flows_80x24", out);

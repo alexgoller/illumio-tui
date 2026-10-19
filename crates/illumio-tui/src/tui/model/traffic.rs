@@ -897,10 +897,21 @@ impl TrafficState {
             self.apps_state.decisions = Decisions::All;
         }
         if shows_draft(&self.flows) != draft {
-            self.flows
-                .set_columns(with_draft(flow_columns(), draft_flow_column(), draft));
+            self.flows.set_columns(with_draft(
+                if draft {
+                    make_room_for_draft(flow_columns())
+                } else {
+                    flow_columns()
+                },
+                draft_flow_column(),
+                draft,
+            ));
             self.flows_grouped.set_columns(with_draft(
-                flow_columns_of(),
+                if draft {
+                    make_room_for_draft(flow_columns_of())
+                } else {
+                    flow_columns_of()
+                },
                 draft_flow_column_of(),
                 draft,
             ));

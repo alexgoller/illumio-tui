@@ -34,7 +34,7 @@ pub use query::{
     CONFIRM_MAX_RESULTS, CONFIRM_WINDOW, DEFAULT_TRAFFIC_MAX_RESULTS, DEFAULT_WINDOW,
     MAX_TRAFFIC_MAX_RESULTS, QueryCost, TrafficQueryBuilder, format_timestamp, parse_window,
 };
-pub use resolved::{DraftSummary, ResolvedEndpoint, ResolvedFlow, resolve_flows};
+pub use resolved::{DraftSummary, ResolvedEndpoint, ResolvedFlow, resolve_flows, short_decision};
 pub use sections::{
     AppSection, Decisions, Direction, PEER_NAMES, PeerRow, SectionOrder, Totals, app_header,
     app_sections, app_sections_both, flow_sections, in_app, in_peer, order_sections, sides,
