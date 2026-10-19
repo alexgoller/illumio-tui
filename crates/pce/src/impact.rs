@@ -464,6 +464,43 @@ pub fn rule_impact_with(
     inputs: &ImpactInputs,
     labels: &[HashSet<&str>],
 ) -> Impact {
+    evaluate(scopes, actors, inputs, labels).0
+}
+
+/// The workloads behind an impact's counts: indices into the evaluated
+/// list, in list order, one side each.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Matched {
+    pub providers: Vec<usize>,
+    pub consumers: Vec<usize>,
+}
+
+impl Matched {
+    pub fn side(&self, side: Side) -> &[usize] {
+        match side {
+            Side::Provider => &self.providers,
+            Side::Consumer => &self.consumers,
+        }
+    }
+}
+
+/// `rule_impact` and the workloads it counted (`Matched`), for a list of
+/// them: the same evaluation, no request.
+pub fn rule_matches(
+    scopes: &[Vec<Actor>],
+    actors: &RuleActors,
+    inputs: &ImpactInputs,
+) -> (Impact, Matched) {
+    let labels = workload_labels(inputs.workloads);
+    evaluate(scopes, actors, inputs, &labels)
+}
+
+fn evaluate(
+    scopes: &[Vec<Actor>],
+    actors: &RuleActors,
+    inputs: &ImpactInputs,
+    labels: &[HashSet<&str>],
+) -> (Impact, Matched) {
     debug_assert_eq!(labels.len(), inputs.workloads.len());
     let (providers, consumers) = (&actors.providers[..], &actors.consumers[..]);
     let unscoped_consumers = actors.unscoped_consumers;
@@ -541,14 +578,24 @@ pub fn rule_impact_with(
             }
         }
     }
-    Impact {
+    let impact = Impact {
         providers: all_p.len(),
         consumers: all_c.len(),
         per_scope,
         ip_lists,
         unsupported,
         truncated: inputs.truncated,
-    }
+    };
+    let sorted = |set: HashSet<usize>| {
+        let mut v: Vec<usize> = set.into_iter().collect();
+        v.sort_unstable();
+        v
+    };
+    let matched = Matched {
+        providers: sorted(all_p),
+        consumers: sorted(all_c),
+    };
+    (impact, matched)
 }
 
 /// Where one label is referenced in what is loaded. A label is unused when
@@ -789,6 +836,47 @@ mod tests {
             (4, 2),
             "no scopes at all is one empty scope"
         );
+    }
+
+    #[test]
+    fn rule_matches_names_the_workloads_behind_the_counts() {
+        let sets = rule_sets();
+        let idx = index();
+        let w = workloads();
+        let inputs = ImpactInputs {
+            workloads: &w,
+            index: &idx,
+            truncated: false,
+        };
+        let shop = &sets[0];
+        // The override deny rule: role=db providers, all consumers, in app=shop env=prod.
+        let (i, m) = rule_matches(
+            &shop.scopes,
+            &RuleActors::of_deny(&shop.deny_rules[1]),
+            &inputs,
+        );
+        assert_eq!((i.providers, i.consumers), (1, 2));
+        assert_eq!(m.side(Side::Provider), [1], "host-2, role=db");
+        assert_eq!(m.side(Side::Consumer), [0, 1], "both shop/prod hosts");
+        assert_eq!(
+            i,
+            rule_impact(
+                &shop.scopes,
+                &RuleActors::of_deny(&shop.deny_rules[1]),
+                &inputs
+            )
+        );
+        // An IP list consumer: no workload on that side.
+        let (_, m) = rule_matches(&shop.scopes, &RuleActors::of_rule(&shop.rules[1]), &inputs);
+        assert_eq!(m.providers, [0]);
+        assert!(m.consumers.is_empty());
+        let infra = &sets[1];
+        let (_, m) = rule_matches(
+            &infra.scopes,
+            &RuleActors::of_rule(&infra.rules[0]),
+            &inputs,
+        );
+        assert_eq!(m.providers, [0, 1, 2, 3], "list order");
     }
 
     #[test]

@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/policy_tools_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭ ╭ Consumers of override_deny role=db ← All workloads 22/tcp ── 2 workloads ╮ ╮
+│ │▸ consumers 2 · providers 1 (Tab)                                         │g│
+│▸│                                                                          │ │
+│ │  hostname                 labels                   enforcement     online│ │
+│ │▸ host-1.example           app=shop env=prod role=w full            yes   │ │
+│ │  host-2.example           app=shop env=prod role=d visibility_only no    │ │
+╰─│                                                                          │─╯
+╭ │                                                                          │─╮
+│ │                                                                          │ │
+│▸│                                                                          │2│
+│ │                                                                          │1│
+│ │                                                                          │0│
+│ │                                                                          │0│
+│ │                                                                          │ │
+│ │                                                                          │ │
+│ │                                                                          │ │
+│ │                                                                          │ │
+│ │                                                                          │ │
+│ │Tab side · / search · Enter workload · :export <path> · Esc close         │ │
+│ ╰──────────────────────────────────────────────────────────────────────────╯ │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ready       d scope  p pending  Enter detail  Tab pane  i impact  : cmd  ? help

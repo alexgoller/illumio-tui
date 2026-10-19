@@ -35,8 +35,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub use impact::{
-    Impact, ImpactInputs, IpListRef, LabelUsage, RuleActors, ScopeImpact, Side, label_usage,
-    rule_impact, rule_impact_with, workload_labels,
+    Impact, ImpactInputs, IpListRef, LabelUsage, Matched, RuleActors, ScopeImpact, Side,
+    label_usage, rule_impact, rule_impact_with, rule_matches, workload_labels,
 };
 pub use iplist_size::{IpListSize, ip_list_contains, ip_list_size};
 pub use key_order::KeyOrder;

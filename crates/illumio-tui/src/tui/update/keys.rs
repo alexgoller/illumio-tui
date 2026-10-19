@@ -657,8 +657,16 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 Vec::new()
             }
             KeyCode::Char('i') => impact_key(model),
+            KeyCode::Char('I') => {
+                let href = match &model.overlay {
+                    Overlay::RuleDetail(r) => r.href.clone(),
+                    _ => String::new(),
+                };
+                open_matched(model, &href)
+            }
             _ => Vec::new(),
         },
+        Overlay::Matched => matched_key(model, k),
         Overlay::Error(_) => {
             if matches!(k.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) {
                 model.overlay = Overlay::None;

@@ -1148,6 +1148,9 @@ mod focus_tests;
 /// The Labels tab's `f` key filter, `=` searches, `i` and `u` (issue #9).
 #[cfg(test)]
 mod label_filter_tests;
+/// `I` on Policy: the workloads behind a rule's impact (issue #53).
+#[cfg(test)]
+mod matched_tests;
 #[cfg(test)]
 mod rule_form_ruleset_tests;
 /// `f` on Policy: the rule search across rulesets (issue #51).

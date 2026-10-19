@@ -323,6 +323,11 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
                 "search list: open the rule in its ruleset (f: back)",
             ),
             key("i", "rule impact: load the workloads once (1 request)"),
+            key("I", "rule impact: the matched workloads, per side (Tab)"),
+            more(
+                "",
+                "/ search · Enter: the workload on Workloads · :export <path>",
+            ),
         ],
     },
     HelpGroup {

@@ -11,8 +11,8 @@ use super::write::{
 use crate::tui::diff::{Sign, diff_object_kind, load_diff};
 use clap::{Args, Subcommand};
 use pce::impact::{
-    Impact, ImpactInputs, RuleActors, is_rule_href, rule_impact, rule_impact_with,
-    rule_set_href_of, workload_labels,
+    Impact, ImpactInputs, RuleActors, Side, is_rule_href, rule_impact, rule_impact_with,
+    rule_matches, rule_set_href_of, workload_labels,
 };
 use pce::models::{
     DenyRule, PendingChange, PolicyScope, ResolveLabelsAs, RuleSet, Workload, WorkloadFilter,
@@ -321,6 +321,9 @@ pub struct RuleDeleteArgs {
 pub struct RuleImpactArgs {
     /// Rule or deny rule href: /orgs/N/sec_policy/draft/rule_sets/ID/sec_rules/ID (or deny_rules/ID)
     pub rule: String,
+    /// List the workloads matched on one side (hostname, labels, enforcement, online) instead of the counts
+    #[arg(long, value_parser = ["providers", "consumers"])]
+    pub list: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -730,6 +733,81 @@ async fn rules(ctx: &Context, args: &RulesArgs) -> Result<(), CliError> {
     ctx.emit(&out, cache_label(c.hit, ctx.cache_mode), truncated, None)
 }
 
+/// One workload `policy rules impact --list` matched.
+#[derive(Debug, Serialize)]
+pub struct MatchedWorkload {
+    pub href: String,
+    pub hostname: Option<String>,
+    pub name: Option<String>,
+    /// `key=value` per label, keys in the profile's order.
+    pub labels: Vec<String>,
+    /// The effective enforcement: `unmanaged` without a VEN.
+    pub enforcement: String,
+    pub online: Option<bool>,
+}
+
+impl MatchedWorkload {
+    fn new(w: &Workload, order: &pce::KeyOrder) -> Self {
+        Self {
+            href: w.href.clone(),
+            hostname: w.hostname.clone(),
+            name: w.name.clone(),
+            labels: w.label_entries(order),
+            enforcement: w.enforcement().unwrap_or_default().to_string(),
+            online: w.online,
+        }
+    }
+}
+
+/// `policy rules impact <href> --list <side>`: that side's workloads, and
+/// what the list cannot show (`note`: IP lists, virtual services).
+#[derive(Debug, Serialize)]
+pub struct MatchedOut {
+    pub rule: String,
+    pub side: &'static str,
+    pub count: usize,
+    pub note: Option<String>,
+    /// The workload read was cut short: a lower bound.
+    pub truncated: bool,
+    pub workloads: Vec<MatchedWorkload>,
+}
+
+impl TableRows for MatchedOut {
+    fn headers(&self) -> Vec<&'static str> {
+        vec!["hostname", "name", "labels", "enforcement", "online"]
+    }
+    fn rows(&self) -> Vec<Vec<String>> {
+        self.workloads
+            .iter()
+            .map(|w| {
+                vec![
+                    w.hostname.clone().unwrap_or_default(),
+                    w.name.clone().unwrap_or_default(),
+                    w.labels.join(" "),
+                    w.enforcement.clone(),
+                    w.online.map(|o| o.to_string()).unwrap_or_default(),
+                ]
+            })
+            .collect()
+    }
+    fn full_headers(&self) -> Vec<&'static str> {
+        let mut h = self.headers();
+        h.push("href");
+        h
+    }
+    fn full_rows(&self) -> Vec<Vec<String>> {
+        self.workloads
+            .iter()
+            .zip(self.rows())
+            .map(|(w, mut row)| {
+                row[2] = join_list(&w.labels);
+                row.push(w.href.clone());
+                row
+            })
+            .collect()
+    }
+}
+
 /// One rule `policy search` found, with its ruleset.
 #[derive(Debug, Serialize)]
 pub struct SearchRow {
@@ -1010,6 +1088,43 @@ async fn rule_impact_one(ctx: &Context, a: &RuleImpactArgs) -> Result<(), CliErr
         index: idx.as_ref(),
         truncated: w.truncated,
     };
+    if let Some(side) = a.list.as_deref() {
+        let side = if side == "consumers" {
+            Side::Consumer
+        } else {
+            Side::Provider
+        };
+        let (impact, matched) = rule_matches(&rs.scopes, &actors, &inputs);
+        let (side_actors, as_workloads) = match side {
+            Side::Provider => (&actors.providers, actors.providers_as_workloads),
+            Side::Consumer => (&actors.consumers, actors.consumers_as_workloads),
+        };
+        let note = crate::tui::impact_list::side_note(side_actors, as_workloads, &idx, side);
+        let order = ctx.config.key_order();
+        let out = MatchedOut {
+            rule: rule.href.clone(),
+            side: crate::tui::impact_list::side_word(side),
+            count: matched.side(side).len(),
+            note,
+            truncated: impact.truncated,
+            workloads: matched
+                .side(side)
+                .iter()
+                .map(|&i| MatchedWorkload::new(&w.value[i], &order))
+                .collect(),
+        };
+        if ctx.format != super::output::OutputFormat::Json
+            && let Some(n) = &out.note
+        {
+            eprintln!("note: {n}");
+        }
+        return ctx.emit(
+            &out,
+            cache_label(c.hit, ctx.cache_mode),
+            c.truncated || w.truncated,
+            None,
+        );
+    }
     let impact = rule_impact(&rs.scopes, &actors, &inputs);
     let out = RuleOut {
         rule,

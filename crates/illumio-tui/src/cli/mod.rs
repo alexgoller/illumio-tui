@@ -177,8 +177,9 @@ fn csv_refusal(command: &Command) -> Option<&'static str> {
         Command::Policy(P::Rulesets(c)) if c.action.is_some() => {
             Some("policy rulesets add/update/delete/enable/disable")
         }
-        Command::Policy(P::Rules(c)) => match c.action {
-            Some(RulesAction::Impact(_)) => Some("policy rules impact"),
+        Command::Policy(P::Rules(c)) => match &c.action {
+            Some(RulesAction::Impact(a)) if a.list.is_none() => Some("policy rules impact"),
+            Some(RulesAction::Impact(_)) => None,
             Some(_) => Some("policy rules add/update/delete/enable/disable"),
             None => None,
         },

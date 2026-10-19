@@ -529,6 +529,10 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   counted (virtual services, a side resolved as `virtual_services`), and a rule's confirm
   overlay shows the same for the rule about to be written. Impact uses the ruleset's scopes, unscoped consumers, label groups (with
   their sub-groups), exclusions, `all` and workload actors; IP lists are sized, never expanded.
+  `I` (rules pane or rule detail, once the workloads are cached) lists the workloads behind the
+  counts, providers first and `Tab` the consumers: hostname, labels, enforcement, online; `/`
+  searches it, `:export <path>` writes it as CSV, `Enter` shows the workload on Workloads. A
+  side of IP lists says so (addresses, not workloads: nothing to list). No request.
   `f` searches rules across every loaded ruleset (draft or active, no request): `app=shop,crm`
   (a label in a scope, consumer or provider, directly or through a label group; a comma is any
   of), `ipl:Corp`, `svc:PostgreSQL` or `svc:443/tcp` (inline ports and service objects that
@@ -641,6 +645,7 @@ the API call and byte counters at all times.
     illumio-tui policy rules "Web-DB"
     illumio-tui policy rules "Web-DB" --impact --json
     illumio-tui policy rules impact /orgs/1/sec_policy/draft/rule_sets/7/sec_rules/3
+    illumio-tui policy rules impact /orgs/1/sec_policy/draft/rule_sets/7/sec_rules/3 --list consumers --csv
     illumio-tui policy search --label app=shop,crm --service 443/tcp --table
     illumio-tui policy search ipl:Corp deny --csv > corp-deny.csv
     illumio-tui iplists --table
@@ -719,7 +724,7 @@ a `diff` column, one diff line per line of the cell). `traffic groups --by ...` 
 counts and their names. The meta line always goes to
 stderr, so a redirect holds only CSV. `--csv` sends the same requests as the table;
 `workloads`, `labels`, `label-groups`, `services`, `iplists`, `events`, `policy rulesets`,
-`policy rules`, `policy search`, `policy pending`, `traffic query`/`groups`/`mesh`, `app` (with `--section`),
+`policy rules`, `policy rules impact --list`, `policy search`, `policy pending`, `traffic query`/`groups`/`mesh`, `app` (with `--section`),
 `gen` and `profile list` take it.
 
 `workloads` shows the effective enforcement: `unmanaged` for a workload without a VEN, which
@@ -902,7 +907,10 @@ are unchanged.
 virtual services, a side resolved as `virtual_services` only, a label group unknown to the
 index) and `truncated`. `policy rules impact <rule-href>` prints one rule the same way (exit
 2 for an href of the wrong shape, 4 when the rule is not found). It costs one workloads read,
-through the cache; `meta.truncated` includes it. `iplists` gives every list a `size`: `v4` and
+through the cache; `meta.truncated` includes it. With `--list providers|consumers` it prints
+that side's workloads instead (`hostname`, `name`, `labels`, `enforcement`, `online`; CSV adds
+the `href`; JSON `{"side", "count", "note", "truncated", "workloads": [...]}`); a side of IP
+lists lists nothing and `note` (stderr with `--table`/`--csv`) says why. `iplists` gives every list a `size`: `v4` and
 `v6` address counts as strings, `unbounded` (the included `0.0.0.0/0` or `::/0`, else `null`),
 `ranges` and `fqdns`.
 

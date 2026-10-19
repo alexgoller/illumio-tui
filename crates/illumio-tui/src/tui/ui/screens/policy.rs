@@ -228,6 +228,115 @@ pub fn render_rule_filter(
     f.render_widget(Paragraph::new(lines).block(block).style(t.base()), r);
 }
 
+/// The matched list's areas: the box, its side and note lines, the table,
+/// the key line. Shared by the overlay and `update` (page size).
+pub struct MatchedLayout {
+    pub rect: Rect,
+    pub head: Rect,
+    pub table: Rect,
+    pub foot: Rect,
+}
+
+pub fn matched_layout(area: Rect) -> MatchedLayout {
+    let w = area.width.saturating_sub(4).min(120);
+    let h = area.height.saturating_sub(4);
+    let rect = crate::tui::ui::layout::centered(area, w, h);
+    let inner = Rect::new(
+        rect.x + 1,
+        rect.y + 1,
+        rect.width.saturating_sub(2),
+        rect.height.saturating_sub(2),
+    );
+    let [head, table, foot] = Layout::vertical([
+        Constraint::Length(2),
+        Constraint::Min(1),
+        Constraint::Length(1),
+    ])
+    .areas(inner);
+    MatchedLayout {
+        rect,
+        head,
+        table,
+        foot,
+    }
+}
+
+/// `I`: one side's matched workloads under the rule: the side line
+/// (`▸ providers 1 · consumers 2`), what the list cannot show (IP lists:
+/// nothing to list, and why), the table, then the keys or the `:` line.
+pub fn render_matched(model: &Model, f: &mut Frame, area: Rect) {
+    use crate::tui::impact_list::{other, side_word};
+    use ratatui::text::{Line, Span};
+    use ratatui::widgets::{Block, Clear, Paragraph};
+    let Some(v) = model.policy.matched.as_ref() else {
+        return;
+    };
+    let t = &model.theme;
+    let l = matched_layout(area);
+    f.render_widget(Clear, l.rect);
+    let n = v.table.len();
+    let ge = if v.truncated { "≥" } else { "" };
+    let mut meta = format!("{ge}{n} {}", if n == 1 { "workload" } else { "workloads" });
+    let sort_meta = header_meta(&v.table);
+    if !sort_meta.is_empty() {
+        meta = format!("{sort_meta} · {meta}");
+    }
+    let room = (l.rect.width as usize).saturating_sub(7 + meta.chars().count());
+    let title = cut(
+        &format!("{} of {}", capitalized(side_word(v.side)), v.rule),
+        room,
+    );
+    f.render_widget(panel(&title, &meta, t, true), l.rect);
+    let count = |side| {
+        let n = v.rows(side).len();
+        format!("{} {ge}{n}", side_word(side))
+    };
+    let mut head = vec![Line::from(vec![
+        Span::styled("▸ ", Style::new().fg(t.accent)),
+        Span::styled(count(v.side), t.header_style()),
+        Span::styled(format!(" · {} (Tab)", count(other(v.side))), t.dim_style()),
+    ])];
+    let note = match (v.note(v.side), v.truncated) {
+        (Some(n), _) => n.to_string(),
+        (None, true) => "the workload list was truncated: a lower bound".to_string(),
+        (None, false) => String::new(),
+    };
+    head.push(Line::from(Span::styled(
+        cut(&note, l.head.width as usize),
+        t.dim_style(),
+    )));
+    f.render_widget(Paragraph::new(head).style(t.base()), l.head);
+    let theme = t.clone();
+    render(f, l.table, &v.table, t, Block::default(), &move |r| {
+        if r.online == Some(false) {
+            theme.dim_style()
+        } else {
+            Style::default()
+        }
+    });
+    let foot = match &v.prompt {
+        Some(input) => Line::from(vec![
+            Span::styled(":", Style::new().fg(t.accent)),
+            Span::styled(format!("{input}▏"), Style::new().fg(t.fg).bg(t.selected_bg)),
+        ]),
+        None => Line::from(Span::styled(
+            cut(
+                "Tab side · / search · Enter workload · :export <path> · Esc close",
+                l.foot.width as usize,
+            ),
+            t.dim_style(),
+        )),
+    };
+    f.render_widget(Paragraph::new(foot).style(t.base()), l.foot);
+}
+
+fn capitalized(s: &str) -> String {
+    let mut c = s.chars();
+    c.next()
+        .map(|f| f.to_uppercase().chain(c).collect())
+        .unwrap_or_default()
+}
+
 /// `Rules · app=shop, env=prod | app=shop, env=staging`: the selected
 /// ruleset's scopes as its form shows them, `Scopeless` when it has none, cut
 /// with `…` to `width` characters. Plain `Rules` with no ruleset selected.

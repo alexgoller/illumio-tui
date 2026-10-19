@@ -225,6 +225,9 @@ pub enum Overlay {
     LabelKeys(KeyPicker),
     /// The selected policy rule in full.
     RuleDetail(RuleView),
+    /// `I`: the workloads behind a rule's impact; its state is
+    /// `PolicyState::matched`.
+    Matched,
     /// Pending (unprovisioned) changes; the list lives in `PolicyState::pending`.
     Pending,
     /// A failure too long for the status line, or an authentication failure.
@@ -297,7 +300,8 @@ impl PartialEq for Overlay {
             | (Overlay::Generator, Overlay::Generator)
             | (Overlay::Marks, Overlay::Marks)
             | (Overlay::Readiness, Overlay::Readiness)
-            | (Overlay::Enforce, Overlay::Enforce) => true,
+            | (Overlay::Enforce, Overlay::Enforce)
+            | (Overlay::Matched, Overlay::Matched) => true,
             (Overlay::Prompt { input: a }, Overlay::Prompt { input: b })
             | (Overlay::Error(a), Overlay::Error(b)) => a == b,
             (Overlay::GroupKeys(a), Overlay::GroupKeys(b))
@@ -454,6 +458,7 @@ impl PolicyState {
             last_search: String::new(),
             found: TableView::new(found_columns()),
             found_deny_unloaded: 0,
+            matched: None,
         }
     }
 

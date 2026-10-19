@@ -102,6 +102,15 @@ pub(super) fn policy_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             }
             KeyCode::Char('i') => return impact_key(model),
             KeyCode::Char('t') => return toggle_key(model),
+            KeyCode::Char('I') if model.policy.pane == PolicyPane::Rules => {
+                let href = model
+                    .policy
+                    .rules
+                    .selected_item()
+                    .map(|r| r.href.clone())
+                    .unwrap_or_default();
+                return open_matched(model, &href);
+            }
             KeyCode::Char(c @ ('n' | 'e' | 'x')) => return policy_edit_key(model, c),
             // `N` (a deny rule) is bound on the rules pane only.
             KeyCode::Char('N') if model.policy.pane == PolicyPane::Rules => {
@@ -678,4 +687,115 @@ pub fn counted_rulesets(n: usize) -> String {
     } else {
         format!("{n} rulesets")
     }
+}
+
+/// `I` on the rules pane or in a rule's detail: the workloads its impact
+/// counted, providers first (`Tab` the consumers). From the cached
+/// workloads only: without them it says to press `i`, and asks nothing.
+pub(super) fn open_matched(model: &mut Model, href: &str) -> Vec<Cmd> {
+    use pce::impact::Side;
+    if href.is_empty() {
+        model.status = StatusLine::warn("no rule selected");
+        return Vec::new();
+    }
+    match crate::tui::impact_list::build(model, href, Side::Provider) {
+        Ok(v) => {
+            model.policy.matched = Some(v);
+            model.overlay = Overlay::Matched;
+        }
+        Err(e) => model.status = StatusLine::warn(e),
+    }
+    Vec::new()
+}
+
+/// Rows of the matched list's table on screen.
+fn matched_page(model: &Model) -> usize {
+    let area = ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1);
+    crate::tui::ui::screens::policy::matched_layout(area)
+        .table
+        .height
+        .saturating_sub(1)
+        .max(1) as usize
+}
+
+/// Keys of the matched list: `Tab` the other side, `/` search, `Enter`
+/// the workload on Workloads, `:export <path>` (typed after `:`) the list
+/// as CSV, `Esc`/`q` close; the table keys move. Never a request.
+pub(super) fn matched_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
+    use crate::tui::impact_list::other;
+    let page = matched_page(model);
+    let Some(v) = model.policy.matched.as_mut() else {
+        model.overlay = Overlay::None;
+        return Vec::new();
+    };
+    if let Some(input) = v.prompt.as_mut() {
+        match k.code {
+            KeyCode::Esc => v.prompt = None,
+            KeyCode::Backspace => {
+                input.pop();
+            }
+            KeyCode::Char('u') if k.modifiers.contains(KeyModifiers::CONTROL) => input.clear(),
+            KeyCode::Char(c) => input.push(c),
+            KeyCode::Enter => {
+                let input = v.prompt.take().unwrap_or_default();
+                return match commands::parse(&input) {
+                    Ok(Command::Export { path, force }) => {
+                        let (headers, rows) = v.table.export();
+                        vec![Cmd::Export {
+                            path,
+                            force,
+                            headers,
+                            rows,
+                        }]
+                    }
+                    Ok(_) => {
+                        model.status = StatusLine::warn("only :export <path> works in this list");
+                        Vec::new()
+                    }
+                    Err(e) => {
+                        model.status = StatusLine::error(e);
+                        Vec::new()
+                    }
+                };
+            }
+            _ => {}
+        }
+        return Vec::new();
+    }
+    if v.table.is_searching() {
+        drive_table(&mut v.table, k, page);
+        return Vec::new();
+    }
+    match k.code {
+        KeyCode::Esc | KeyCode::Char('q') => {
+            model.policy.matched = None;
+            model.overlay = Overlay::None;
+        }
+        KeyCode::Tab | KeyCode::BackTab => {
+            let side = other(v.side);
+            v.show(side);
+        }
+        KeyCode::Char(':') => v.prompt = Some(String::new()),
+        KeyCode::Enter => {
+            let Some(row) = v.table.selected_item().cloned() else {
+                return Vec::new();
+            };
+            model.policy.matched = None;
+            model.overlay = Overlay::None;
+            let cmds = switch(model, Screen::Workloads);
+            if model.workloads.select_href(&row.href) {
+                let page = workloads_page(model);
+                model.workloads.ensure_visible(page);
+                model.status = StatusLine::info(row.hostname);
+            } else {
+                model.status = StatusLine::warn(format!(
+                    "{} is hidden by the Workloads filters or search (c, Esc clear them)",
+                    row.hostname
+                ));
+            }
+            return cmds;
+        }
+        _ => drive_table(&mut v.table, k, page),
+    }
+    Vec::new()
 }

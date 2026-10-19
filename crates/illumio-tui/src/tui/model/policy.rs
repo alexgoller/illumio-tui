@@ -398,6 +398,8 @@ pub struct PolicyState {
     /// Rulesets whose deny rules are not loaded (no inline list, the
     /// endpoint not fetched): the search could not look at them.
     pub found_deny_unloaded: usize,
+    /// `I`: the open list of a rule's matched workloads (`Overlay::Matched`).
+    pub matched: Option<crate::tui::impact_list::MatchedView>,
 }
 
 /// One loaded rule that names an IP list, for the IP lists tab.

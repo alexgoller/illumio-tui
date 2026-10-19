@@ -317,3 +317,107 @@ async fn policy_search_by_workload_name_reads_the_workloads_once() {
     assert_eq!(out["data"], json!([]));
     assert_eq!(gets(&server, "/api/v2/orgs/5/workloads").await, 1);
 }
+
+const DENY_8: &str = "/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8";
+const RULE_2: &str = "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/2";
+
+#[tokio::test(flavor = "multi_thread")]
+async fn impact_list_prints_one_sides_workloads_from_one_workloads_read() {
+    let server = MockServer::start().await;
+    mount_policy(&server).await;
+    mount_workloads(&server).await;
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "--json",
+                "policy",
+                "rules",
+                "impact",
+                DENY_8,
+                "--list",
+                "providers",
+            ])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"]["side"], "providers");
+    assert_eq!(out["data"]["count"], 1);
+    assert_eq!(out["data"]["note"], Value::Null);
+    let w = &out["data"]["workloads"][0];
+    assert_eq!(w["hostname"], "host-2.example");
+    assert_eq!(w["enforcement"], "visibility_only");
+    assert_eq!(w["online"], false);
+    assert_eq!(w["labels"], json!(["app=shop", "env=prod", "role=db"]));
+    assert_eq!(gets(&server, "/api/v2/orgs/5/workloads").await, 1);
+    let a = cmd(&server)
+        .args([
+            "--csv",
+            "policy",
+            "rules",
+            "impact",
+            DENY_8,
+            "--list",
+            "consumers",
+        ])
+        .assert()
+        .success();
+    let text = stdout(&a);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[0], "hostname,name,labels,enforcement,online,href");
+    assert_eq!(
+        lines[1],
+        "host-1.example,web01,app=shop; env=prod; role=web,full,true,/orgs/5/workloads/aaaa-1"
+    );
+    assert_eq!(lines.len(), 3);
+    assert_eq!(gets(&server, "/api/v2/orgs/5/workloads").await, 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn impact_list_explains_an_ip_list_side() {
+    let server = MockServer::start().await;
+    mount_policy(&server).await;
+    mount_workloads(&server).await;
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "--json",
+                "policy",
+                "rules",
+                "impact",
+                RULE_2,
+                "--list",
+                "consumers",
+            ])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"]["workloads"], json!([]));
+    assert_eq!(
+        out["data"]["note"],
+        "the consumers are IP lists (Corp): addresses, not workloads; nothing to list"
+    );
+    let a = cmd(&server)
+        .args([
+            "--table",
+            "policy",
+            "rules",
+            "impact",
+            RULE_2,
+            "--list",
+            "consumers",
+        ])
+        .assert()
+        .success();
+    assert!(stderr(&a).contains("note: the consumers are IP lists (Corp)"));
+    // Without --list the impact prints no table: --csv is refused before any request.
+    let before = server.received_requests().await.unwrap().len();
+    cmd(&server)
+        .args(["--csv", "policy", "rules", "impact", RULE_2])
+        .assert()
+        .code(2);
+    cmd(&server)
+        .args(["policy", "rules", "impact", RULE_2, "--list", "both"])
+        .assert()
+        .code(2);
+    assert_eq!(server.received_requests().await.unwrap().len(), before);
+}

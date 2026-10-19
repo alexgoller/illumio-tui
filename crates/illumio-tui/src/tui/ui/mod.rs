@@ -60,6 +60,7 @@ pub fn view(model: &Model, f: &mut Frame) {
             widgets::overlay::render_confirm(model, reason, f, area)
         }
         Overlay::RuleDetail(rule) => widgets::overlay::render_rule_detail(model, rule, f, area),
+        Overlay::Matched => screens::policy::render_matched(model, f, area),
         Overlay::Pending => widgets::overlay::render_pending(model, f, area),
         Overlay::Error(text) => widgets::overlay::render_error(model, text, f, area),
         Overlay::EventsEditor {
