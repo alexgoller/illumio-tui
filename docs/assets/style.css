@@ -279,3 +279,42 @@ pre.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 600px) {
   :not(pre) > code { white-space: normal; overflow-wrap: anywhere; }
 }
+
+/* ---------- hero highlights ---------- */
+.features {
+  list-style: none; padding: 0; margin: 0 0 2rem;
+  display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line);
+  grid-template-columns: minmax(0, 1fr); max-width: 760px;
+}
+@media (min-width: 640px) { .features { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.features li { background: var(--panel); padding: .7rem .9rem; font-size: .92rem; color: var(--muted); }
+.features a { display: flex; align-items: baseline; gap: .55rem; color: var(--text); text-decoration: none; font: 700 .9rem/1.4 var(--mono); }
+.features a:hover b { color: var(--title); }
+.features kbd { color: var(--title); border: 1px solid var(--line); padding: 0 .35em; font-weight: 500; }
+.features span { display: block; margin-top: .15rem; }
+
+/* ---------- workflows ---------- */
+.wf { border-top: 1px dashed var(--line); padding-top: 1.75rem; margin-top: 2.25rem; }
+.panel .wf h3 { margin-top: 0; }
+.wf h3 .num { color: var(--muted); font-weight: 500; margin-right: .6em; }
+.wf kbd {
+  font-size: .86em; padding: .02em .35em;
+  border: 1px solid var(--line); border-bottom-width: 2px;
+  color: var(--title); white-space: nowrap;
+}
+.wf pre kbd { border: 0; padding: 0; font-size: inherit; }
+.story { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .45rem 1.1rem; margin: 0 0 1.5rem; max-width: 92ch; }
+.story dt { font: 600 .78rem/1.9 var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.story dd { margin: 0; }
+@media (max-width: 600px) {
+  .story { grid-template-columns: minmax(0, 1fr); gap: .1rem; }
+  .story dd { margin-bottom: .6rem; }
+}
+.g.bad { color: var(--bad); }
+.g.info { color: var(--title); }
+.steps li { margin: .5rem 0; }
+
+/* ---------- CLI recipes ---------- */
+.recipes { display: grid; grid-template-columns: minmax(0, 1fr); }
+.recipe { min-width: 0; border-top: 1px dashed var(--line); padding-top: 1.25rem; margin-top: 1rem; }
+.panel .recipe h3 { margin-top: 0; }

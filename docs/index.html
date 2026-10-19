@@ -27,11 +27,14 @@
     <nav aria-label="Sections">
       <a href="#install"><kbd>1</kbd>install</a>
       <a href="#screens"><kbd>2</kbd>screens</a>
-      <a href="#cli"><kbd>3</kbd>cli</a>
-      <a href="#writes"><kbd>4</kbd>writes</a>
-      <a href="#configure"><kbd>5</kbd>configure</a>
-      <a href="#protection"><kbd>6</kbd>protection</a>
-      <a href="#roadmap"><kbd>7</kbd>roadmap</a>
+      <a href="#workflows"><kbd>3</kbd>workflows</a>
+      <a href="#start"><kbd>4</kbd>start</a>
+      <a href="#cli"><kbd>5</kbd>cli</a>
+      <a href="#recipes"><kbd>6</kbd>recipes</a>
+      <a href="#writes"><kbd>7</kbd>writes</a>
+      <a href="#configure"><kbd>8</kbd>configure</a>
+      <a href="#protection"><kbd>9</kbd>protection</a>
+      <a href="#roadmap"><kbd>10</kbd>roadmap</a>
     </nav>
   </div>
 </header>
@@ -41,6 +44,15 @@
   <div class="wrap">
     <h1>The Illumio PCE at terminal speed.</h1>
     <p class="promise">Traffic, policy, labels, IP lists, workloads and events in a btop-style terminal UI and a scriptable CLI. Every request is one you caused, every one is counted, and writes happen only when you arm them.</p>
+
+    <ul class="features" aria-label="Highlights">
+      <li><a href="#wf-explain"><kbd>E</kbd><b>Explain</b></a><span>which rule allows or blocks a flow, and a jump to it</span></li>
+      <li><a href="#wf-gen"><kbd>G</kbd><b>Generate</b></a><span>the allow rules an app&rsquo;s traffic needs, fan-in ports folded</span></li>
+      <li><a href="#wf-draft"><kbd>D</kbd><b>Draft</b></a><span>what your draft policy would decide, per flow, before provisioning</span></li>
+      <li><a href="#wf-enforce"><kbd>$</kbd><b>Readiness &rarr; enforce</b></a><span>a verdict per app, a gate, a watch and an exact rollback</span></li>
+      <li><a href="#wf-marks"><kbd>m</kbd><b>Marks</b></a><span>squelch known noise, flag what matters, locally</span></li>
+      <li><a href="#wf-bulk"><kbd>M</kbd><b>Bulk</b></a><span>labels and enforcement for many workloads, one confirm</span></li>
+    </ul>
 
     <div class="decision-bar" role="img" aria-label="Decision colours: allowed, potentially blocked, blocked"><span class="a"></span><span class="p"></span><span class="b"></span></div>
 
@@ -192,8 +204,301 @@ illumio-tui 0.3.5</code></pre>
   </div>
 </section>
 
+<section class="panel" id="workflows" aria-labelledby="workflows-h">
+  <h2 id="workflows-h"><span class="key">3</span>Workflows</h2>
+  <p class="lede">Seven jobs you do on a PCE every week, each as keys and commands, shot on a demo PCE.</p>
+  <p>Every screenshot and recording below is real: one TUI session and a handful of CLI runs against a shared demo PCE, read-only. Writes were armed only to reach the confirm screens, and every confirm was answered with <code>n</code>. The whole TUI session, from start to the last screenshot, cost 29 requests: the header counts them.</p>
+
+  <article class="wf" id="wf-marks" aria-labelledby="wf-marks-h">
+    <h3 id="wf-marks-h"><span class="num">1</span>Find and silence noise: flow marks</h3>
+    <dl class="story">
+      <dt>problem</dt><dd>Nagios checks every host on 5666/tcp. Every view is full of it, and you have judged it long ago.</dd>
+      <dt>keys</dt><dd><kbd>m</kbd> on a row, <kbd>Tab</kbd> through the form, <kbd>Enter</kbd> saves; <kbd>M</kbd> shows what is squelched; <code>:marks</code> lists, edits and extends. CLI: <code>marks add</code>, <code>list</code>, <code>export</code>, <code>import</code>.</dd>
+      <dt>you see</dt><dd>One squelch on <code>app=monitoring &rarr; any 5666/tcp</code> takes 119 flows out of every view (<em>5301 of 5420 flows (119 squelched)</em>). A <code>critical</code> mark puts <span class="g bad">&#9679;</span> on pos/PCI&harr;pos/PCI, a <code>revisit</code> puts <span class="g info">&#9670;</span> on ordering/Development with its 311 blocked flows and expires in 7 days on its own.</dd>
+      <dt>PCE cost</dt><dd>None. Marks live in <code>marks.toml</code> next to the config and apply to the TUI and the CLI&rsquo;s traffic commands alike.</dd>
+    </dl>
+    <div class="shots">
+      <figure class="shot">
+        <img src="assets/wf-mark-form.png" alt="The New mark form over the App-to-app view for pos/PCI to pos/PCI: action critical, source and destination prefilled as app=pos env=PCI, expiry never, scope this PCE, a comment naming the owner, and a preview saying it matches 1 row and 157 flows" width="2216" height="1352" loading="lazy">
+        <figcaption><kbd>m</kbd> on a pair: prefilled from the row, previews its matches, asks why.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="assets/wf-marks.png" alt="The App-to-app view with 12 rows (119 flows) squelched in the title, a red dot before pos/PCI to pos/PCI and a blue diamond before ordering/Development, and the status line confirming the revisit mark saved for 325 flows" width="2216" height="1352" loading="lazy">
+        <figcaption>The gutter: <span class="g bad">&#9679;</span> critical, <span class="g info">&#9670;</span> revisit; the squelched rows are gone, and the title says how many.</figcaption>
+      </figure>
+    </div>
+<pre><code><span class="p">$ </span>illumio-tui marks add --action squelch --src app=monitoring --dst any \
+    --service 5666/tcp --comment "Nagios NRPE checks, known and wanted"
+<span class="p">$ </span>illumio-tui marks export --format toml &gt; team-marks.toml   <span class="c"># share it; marks import reads it</span></code></pre>
+  </article>
+
+  <article class="wf" id="wf-draft" aria-labelledby="wf-draft-h">
+    <h3 id="wf-draft-h"><span class="num">2</span>What would my draft do? <kbd>D</kbd></h3>
+    <dl class="story">
+      <dt>problem</dt><dd>The draft holds new rules. Before you provision, you want to know which blocked flows they fix and what they leave blocked, on real traffic.</dd>
+      <dt>keys</dt><dd><kbd>D</kbd> on any traffic view; <kbd>D</kbd> again goes back to the reported decisions; <kbd>Esc</kbd> cancels while it runs. CLI: <code>--draft</code>.</dd>
+      <dt>you see</dt><dd>The Result header says <em>draft &#10003; 409 fixed</em>. App-to-app gains a <code>draft</code> column (<em>66 would allow</em>, <em>+40 allow -24 block</em>); Blocked gets <em>draft allows N</em> per section: here syslog into soc/Production, 94 blocked flows of which the draft allows 93. Flows shows <code>blocked &rarr; allowed</code> per flow.</dd>
+      <dt>PCE cost</dt><dd>14 requests here: one PUT on the query you already ran, status polls and one download. No new query, no policy change, no armed writes. Cached for 2 minutes.</dd>
+    </dl>
+    <div class="shots">
+      <figure class="shot">
+        <img src="assets/wf-draft-pairs.png" alt="App-to-app with a draft column after D: 66 would allow, +40 allow -24 block, 72 would block and so on per pair; the Result header says draft 409 fixed; the status line says draft: 409 blocked flows fixed" width="2216" height="1352" loading="lazy">
+        <figcaption>App-to-app after <kbd>D</kbd>: per pair, what the draft would allow and block.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="assets/wf-draft-blocked.png" alt="The Blocked view, inbound, soc/Production section: 13 groups, 94 blocked, draft allows 93, then syslog 514/udp and 514/tcp rows from pos/PCI, swift, ordering, packaging and others, each 'N would allow'" width="2216" height="1352" loading="lazy">
+        <figcaption>Blocked: the syslog ruleset in the draft fixes 93 of 94 blocked flows into soc/Production.</figcaption>
+      </figure>
+    </div>
+  </article>
+
+  <article class="wf" id="wf-explain" aria-labelledby="wf-explain-h">
+    <h3 id="wf-explain-h"><span class="num">3</span>Why is this flow allowed? <kbd>E</kbd></h3>
+    <dl class="story">
+      <dt>problem</dt><dd>A VDI desktop reaches a domain controller on 53/udp. Which rule allows it, and where does that rule live?</dd>
+      <dt>keys</dt><dd><kbd>E</kbd> on a flow (Flows, a one-flow pair, the app screen&rsquo;s peers); <kbd>j</kbd>/<kbd>k</kbd> pick a rule; <kbd>Enter</kbd> opens it on Policy, ruleset and rule selected; <kbd>w</kbd> drafts a rule when none allows it. CLI: <code>traffic explain</code>.</dd>
+      <dt>you see</dt><dd><em>allowed by 1 rule (draft)</em>: allow, All workloads &rarr; role=dc, the services, ruleset <em>12. activedirectory | prod</em>, scope app=ad &amp; env=Production. <kbd>Enter</kbd> lands on that ruleset with the rule selected.</dd>
+      <dt>PCE cost</dt><dd>None for <kbd>E</kbd>: it reads the rule hrefs the PCE put on the flow after <kbd>D</kbd> and resolves them through the loaded draft policy. Without <kbd>D</kbd> first, it says so and offers it. The CLI makes one narrowed query with the draft evaluation: 11 requests.</dd>
+    </dl>
+    <figure class="shot tour">
+      <video controls muted playsinline preload="metadata" poster="assets/wf-explain.png" width="2216" height="1352">
+        <source src="assets/tour-explain.mp4" type="video/mp4">
+        <a href="assets/tour-explain.gif">Watch the explain recording as a GIF</a>.
+      </video>
+      <figcaption><kbd>E</kbd> on win-endpoint-2 &rarr; acd-dc02-prd 53/udp (dns.exe), then <kbd>Enter</kbd> jumps to <em>12. activedirectory | prod</em> on the Policy screen. <a href="assets/tour-explain.gif">GIF version</a>.</figcaption>
+    </figure>
+    <figure class="shot">
+      <img src="assets/wf-cli-explain.png" alt="Two traffic explain runs. payment to ad on 53/udp: six flows, two reported blocked, all allowed in the draft by one allow rule in 12. activedirectory | prod, All workloads to role=dc. pos/Staging to infra-mgmt on 7680/tcp: three flows, no rule allows this flow in the draft, one of them blocked now" width="2900" height="776" loading="lazy">
+      <figcaption>The same answer on the CLI, flow by flow: a blocked DNS flow the draft fixes, and a 7680/tcp flow no rule allows.</figcaption>
+    </figure>
+  </article>
+
+  <article class="wf" id="wf-gen" aria-labelledby="wf-gen-h">
+    <h3 id="wf-gen-h"><span class="num">4</span>Policy from traffic: the generator</h3>
+    <dl class="story">
+      <dt>problem</dt><dd>infra-mgmt/Production is two NTP servers. Seven apps query them on 123/udp, one more peer uses 7680/tcp. You want the allow rules for exactly that, without seven near-identical rules.</dd>
+      <dt>keys</dt><dd><kbd>A</kbd> on a row (or <code>:app infra-mgmt/Production</code>) opens the app screen, <kbd>G</kbd> (or <code>:gen</code>) the generator. <kbd>h</kbd>/<kbd>l</kbd> or <kbd>&larr;</kbd>/<kbd>&rarr;</kbd> move the slider from <em>app&middot;all</em> to <em>role&middot;all</em>; <kbd>c</kbd> on the fan-in line cycles <em>off &rarr; Any &rarr; All Workloads</em>; <kbd>Space</kbd> checks a peer; <kbd>p</kbd> previews every rule; <kbd>Enter</kbd> plans the writes into one confirm; <kbd>n</kbd> cancels it. CLI: <code>gen</code>, read-only.</dd>
+      <dt>you see</dt><dd>The fan-in line <em>123/udp from 7 peers (NTP?)</em>. With <kbd>c</kbd> on <em>Any</em>, one rule from the built-in Any IP list covers the port, with its catch spelled out: destination only for pos/PCI, 6 managed peers keep their own rules for their outbound. Checking pos/Staging takes coverage from 24 to 27 of 27 flows. <kbd>Enter</kbd>: <em>4 requests: 1 rule_set, 3 rules &middot; planned with 1 read</em>, each with method, path and body.</dd>
+      <dt>PCE cost</dt><dd>The app screen 1 request, the generator 0 (the draft rulesets were cached), the plan 1 read. The same traffic result feeds all of it.</dd>
+    </dl>
+    <figure class="shot tour">
+      <video controls muted playsinline preload="metadata" poster="assets/wf-gen-fanin.png" width="2216" height="1352">
+        <source src="assets/tour-gen.mp4" type="video/mp4">
+        <a href="assets/tour-gen.gif">Watch the generator recording as a GIF</a>.
+      </video>
+      <figcaption><kbd>G</kbd> from the app screen, the slider, <kbd>c</kbd> through Any and All Workloads, <kbd>Space</kbd> on pos/Staging, <kbd>p</kbd>, <kbd>Enter</kbd> to the confirm and <kbd>n</kbd>: nothing was sent. <a href="assets/tour-gen.gif">GIF version</a>.</figcaption>
+    </figure>
+    <div class="shots">
+      <figure class="shot">
+        <img src="assets/wf-app.png" alt="The app screen for infra-mgmt/Production: 2 workloads in selective, 2 active VENs, inbound peers on 123/udp and 7680/tcp with allowed and blocked marks and draft deltas, no outbound flows, the rulesets that cover the app and the two inf-time workloads; header says draft: 8 blocked flows fixed, 1 req" width="2216" height="1352" loading="lazy">
+        <figcaption><kbd>A</kbd>: the app screen, peers in and out, its policy and workloads.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="assets/wf-gen-preview.png" alt="The generator preview: a new ruleset RF-infra-mgmt-Production and three rules, NTP from the six checked app peers, 7680/tcp from pos/Staging, and 123/udp from the Any IP list with its warnings; 3 rules covering 27 of 27 flows, nothing not covered" width="2216" height="1352" loading="lazy">
+        <figcaption><kbd>p</kbd>: every rule, its description, and what it also allows.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="assets/wf-gen-confirm.png" alt="The Send these requests overlay: 4 requests, 1 rule_set and 3 rules, planned with 1 read; step 1 POST to the draft rule_sets with the full JSON body, step 2 POST to the new ruleset's sec_rules; y send all, n cancel" width="2216" height="1352" loading="lazy">
+        <figcaption>The single confirm: every request in order, bodies in full. It was answered with <kbd>n</kbd>.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="assets/wf-gen-fanin.png" alt="The generator for infra-mgmt/Production at the app ports stop: the fan-in line 123/udp from 7 peers consolidated to Any as one rule, with warnings, and one row per peer app with checkboxes, services and would-allow counts" width="2216" height="1352" loading="lazy">
+        <figcaption><kbd>c</kbd>: seven NTP clients, one rule from Any, the catch first.</figcaption>
+      </figure>
+    </div>
+<pre><code><span class="p">$ </span>illumio-tui gen infra-mgmt/Production --window 24h --json \
+    | jq -c '.data.consolidations[] | {service, peers, reason}'
+{"service":"123/udp","peers":7,"reason":"infra:ntp"}</code></pre>
+  </article>
+
+  <article class="wf" id="wf-bulk" aria-labelledby="wf-bulk-h">
+    <h3 id="wf-bulk-h"><span class="num">5</span>Bulk labels and enforcement on Workloads</h3>
+    <dl class="story">
+      <dt>problem</dt><dd>The shared infrastructure apps (NTP, monitoring, syslog) should move to full enforcement together, and one of them carries two different <code>loc</code> labels.</dd>
+      <dt>keys</dt><dd><kbd>4</kbd>, <kbd>x</kbd> groups by app and env, <kbd>f</kbd> filters by label (<code>app=infra-mgmt,monitoring,soc env=Production</code>), <kbd>V</kbd> on a group header marks the group, <kbd>Space</kbd> marks one workload, <kbd>M</kbd> picks the enforcement mode, <kbd>L</kbd> the labels; <kbd>Enter</kbd> reviews; <kbd>Esc</kbd> cancels. CLI: <code>workloads enforce</code> and <code>workloads relabel</code>.</dd>
+      <dt>you see</dt><dd><em>6 of 206</em> in three groups with VEN health and enforcement per group. <kbd>M</kbd> &rarr; full: <em>2 workloads: 2 selective &rarr; full</em>; the confirm wants the count typed (full on more than one workload), shows the loaded traffic these workloads would block (<em>in 9 blocked</em>), offers <kbd>d</kbd> for a draft check, and lists the one <code>bulk_update</code>. <kbd>L</kbd> shows each key&rsquo;s common value or <em>(mixed: 2)</em>.</dd>
+      <dt>PCE cost</dt><dd>Grouping, filtering, marking and planning: none (one workload list, cached). Sending would re-read the 2 workloads first and skip any changed since the plan.</dd>
+    </dl>
+    <div class="shots">
+      <figure class="shot">
+        <img src="assets/wf-workloads-filter.png" alt="Workloads grouped by app and env with the label filter overlay open: app=infra-mgmt,monitoring,soc env=Production, with the grammar help: comma any of, space all of, ! excludes, key=- no label; local, no request" width="2216" height="1352" loading="lazy">
+        <figcaption><kbd>x</kbd> then <kbd>f</kbd>: comma is any of, space all of, <code>!</code> excludes.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="assets/wf-workloads-enforce.png" alt="The Send this change to 2 workloads overlay: full on 2 workloads, type 2 to confirm; 2 selective to full; loaded traffic in 9 blocked; d for a draft check; both inf-time workloads listed; 2 GETs before sending; 1 PUT bulk_update with an example body" width="2216" height="1352" loading="lazy">
+        <figcaption><kbd>M</kbd> &rarr; full &rarr; <kbd>Enter</kbd>: the typed count, the traffic it would block, the request. <kbd>Esc</kbd>: <em>cancelled, nothing sent</em>.</figcaption>
+      </figure>
+    </div>
+<pre><code><span class="p">$ </span>illumio-tui workloads relabel --set loc=ny --label app=infra-mgmt --dry-run
+2 workloads: 1 to relabel (loc=ny) · 1 labels already so (skipped) · no re-read (the selection read ran 223 ms before, in this run) + 1 write: 1 bulk_update
+workload        change                      href
+inf-time01-prd  loc=ca → loc=ny             /orgs/5636114/workloads/621e8a92-...
+inf-time02-prd  skipped: labels already so  /orgs/5636114/workloads/bd1b6de4-...</code></pre>
+  </article>
+
+  <article class="wf" id="wf-enforce" aria-labelledby="wf-enforce-h">
+    <h3 id="wf-enforce-h"><span class="num">6</span>From visibility to enforcement: readiness, enforce, watch, rollback</h3>
+    <dl class="story">
+      <dt>problem</dt><dd>Which apps can go to full enforcement today, what stops the others, and how do you undo a move exactly?</dd>
+      <dt>commands</dt><dd><code>readiness</code> for every app, <code>readiness --app X</code> for its gaps and pending changes, <code>enforce X --to full --dry-run</code> then <code>--yes --confirm-count N</code>, <code>enforce X --watch</code>, <code>enforce X --rollback</code>. CLI today; the TUI overlay follows in <a href="https://github.com/alexgoller/illumio-tui/issues/55">#55</a>.</dd>
+      <dt>you see</dt><dd>All 23 labelled apps of the demo PCE are <code>needs_rules</code>; the closest is infra-mgmt/Production at 90.3% of its connections covered by the draft. <code>--app</code> names the two gaps (7680/tcp from pos/Staging, 8080/tcp out to rfc1918) and the two pending rulesets. <code>enforce</code> refuses with exit 6 and the blockers, before anything is sent. <code>--watch</code> lists what was blocked since the change and exits 7. A real move writes a change record that <code>--rollback</code> restores, workload by workload, skipping anything changed since.</dd>
+      <dt>PCE cost</dt><dd>All apps over 7 days: one Explorer query with the draft evaluation, 25 requests, 43 s. One app: 14 requests, 9 s. <code>--watch</code>: one query, 8 requests. Nothing polls.</dd>
+    </dl>
+    <figure class="shot">
+      <img src="assets/wf-cli-readiness.png" alt="readiness --app infra-mgmt/Production: 2 workloads in selective, 28 flows, 1504405 connections in, 32 out, 139602 would block, coverage 90.7%, 2 pending, verdict needs rules; gaps: in pos/Staging 7680/tcp 3 flows, out ipl:rfc1918 8080/tcp 1 flow; pending: two rulesets; then enforce --to full --dry-run refused with exit code 6, write_refused, listing the would-block tuples and pending changes, nothing sent" width="2432" height="1064" loading="lazy">
+      <figcaption>The gate: readiness names the gaps; <code>enforce</code> refuses with exit 6 until they are closed (or <code>--force</code>).</figcaption>
+    </figure>
+    <figure class="shot">
+      <img src="assets/wf-cli-watch.png" alt="enforce infra-mgmt/Production --watch since a time 24 hours ago: 9 flows, 12092 connections blocked, 7680/tcp from pos/Staging and 123/udp from seven apps; exit code 7. Then workloads enforce full for app=infra-mgmt env=Production as a dry run: 2 selective to full, one bulk_update PUT and its body" width="2216" height="1172" loading="lazy">
+      <figcaption><code>--watch</code> exits 7 when something is blocked, for cron or CI; the move itself is a bulk plan you see before <code>--yes</code>.</figcaption>
+    </figure>
+<pre><code><span class="p">$ </span>illumio-tui readiness --json | jq -r '.data.apps | sort_by(-.coverage.ratio) | .[:5][]
+    | "\(.app)\t\(.verdict)\t\(.coverage.ratio*1000|floor/10)%\t\(.gap_count) gaps"' | column -t -s $'\t'
+infra-mgmt/Production  needs_rules  90.3%  1 gaps
+soc/Production         needs_rules  89.5%  6 gaps
+monitoring/Production  needs_rules  86%    3 gaps
+pos/Staging            needs_rules  82.8%  34 gaps
+ad/Production          needs_rules  72.2%  37 gaps
+<span class="p">$ </span>illumio-tui enforce infra-mgmt/Production --to full --yes --confirm-count 2   <span class="c"># once ready; writes a change record</span>
+<span class="p">$ </span>illumio-tui enforce infra-mgmt/Production --rollback --dry-run                <span class="c"># the record's before modes, exactly</span></code></pre>
+    <p class="caption">The 7-day run counts one gap for infra-mgmt; the <code>--app</code> run a minute later, two: the window moved.</p>
+  </article>
+
+  <article class="wf" id="wf-small" aria-labelledby="wf-small-h">
+    <h3 id="wf-small-h"><span class="num">7</span>Small things</h3>
+    <ul>
+      <li><kbd>Ctrl-U</kbd> empties the line in every text input, as in a shell: the filter editor, the mark and rule forms, the <code>:</code> prompt. <kbd>Ctrl-N</kbd> / <kbd>Ctrl-P</kbd> complete labels, IP lists, services and values without a request.</li>
+      <li>Shell completions for bash, zsh and fish ship with the Homebrew formula and the <code>.deb</code>/<code>.rpm</code>; otherwise <code>illumio-tui completions zsh &gt; ~/.zfunc/_illumio-tui</code>. Every subcommand, flag and enum value completes, and <code>--profile</code> completes your profile names. Completion never contacts the PCE.</li>
+      <li><code>:export &lt;path&gt;</code> writes the table on screen as CSV, the same format as the CLI&rsquo;s <code>--csv</code>.</li>
+    </ul>
+  </article>
+
+  <article class="wf" id="wf-story" aria-labelledby="wf-story-h">
+    <h3 id="wf-story-h">One app, start to finish</h3>
+    <ol class="steps">
+      <li><code>illumio-tui readiness</code> ranks every app; infra-mgmt/Production is closest, 90% covered.</li>
+      <li><code>readiness --app infra-mgmt/Production</code>: the gaps are 7680/tcp from pos/Staging and 8080/tcp out; two rulesets wait for provisioning.</li>
+      <li>In the TUI, <kbd>r</kbd> once for 24 hours, <kbd>m</kbd> squelches the Nagios noise, <kbd>D</kbd> overlays the draft.</li>
+      <li><kbd>E</kbd> on the 7680/tcp flow: <em>no rule allows this flow</em>. <kbd>E</kbd> on a DNS flow: the activedirectory rule, <kbd>Enter</kbd> to see it.</li>
+      <li><kbd>A</kbd>, <kbd>G</kbd>: NTP from 7 peers folds into one Any rule with <kbd>c</kbd>, <kbd>Space</kbd> adds pos/Staging, <kbd>p</kbd> says 27 of 27 flows covered, <kbd>Enter</kbd> and <kbd>y</kbd> write the ruleset and 3 rules; <kbd>P</kbd> in Policy&rsquo;s pending overlay provisions them.</li>
+      <li><code>readiness --app</code> again until <code>ready</code>; <code>enforce infra-mgmt/Production --to full --dry-run</code>, then <code>--yes --confirm-count 2</code>.</li>
+      <li><code>enforce --watch</code> from cron the next morning: exit 0, or exit 7 and the tuples; <code>--rollback</code> if it has to go back.</li>
+    </ol>
+    <p class="caption">On the demo PCE the recordings stop at step 5&rsquo;s confirm with <kbd>n</kbd> and step 6&rsquo;s dry run: it is shared.</p>
+  </article>
+</section>
+
+<section class="panel" id="start" aria-labelledby="start-h">
+  <h2 id="start-h"><span class="key">4</span>CLI: getting started</h2>
+  <p class="lede">From install to a useful answer, in eight short steps.</p>
+
+  <div class="stack">
+    <div>
+      <h3>1. Connect</h3>
+      <p><a href="#install">Install</a> the binary, then give it a PCE: a dotenv file with the <a href="https://github.com/alexgoller/illumio-mcp-server">illumio-mcp-server</a> names, or a profile in <code>~/.config/illumio-tui/config.toml</code> (see <a href="#configure">Configure</a>).</p>
+<pre><code><span class="p">$ </span>cat pce.env
+PCE_HOST=pce.example
+PCE_ORG_ID=1
+API_KEY=api_xxxxxxxxxxxx
+API_SECRET=xxxxxxxxxxxxxxxx
+<span class="p">$ </span>illumio-tui --env-file pce.env health
+field   value
+ok      true
+host    demo100.illum.io
+org_id  5636114
+status  [{"generated_at":"2026-10-19T21:21:07+00:00","listen_only_m…
+writes  false
+default · 1 api call · 0.1 KB · cache none · 2102 ms</code></pre>
+      <p>The last line goes to stderr on every command: what it cost.</p>
+
+      <h3>2. Look around</h3>
+<pre><code><span class="p">$ </span>illumio-tui labels --key app
+key  value           deleted  href
+app  kubernetes               /orgs/5636114/labels/24206847997120485
+app  guestbook                /orgs/5636114/labels/24206847997120486
+app  monitoring               /orgs/5636114/labels/24206847997120532
+...
+<span class="p">$ </span>illumio-tui workloads --label app=infra-mgmt,monitoring
+hostname          ip          labels                          enforcement  online  health
+inf-time02-prd    10.0.1.137  app=infra-mgmt env=Production…  selective    true    healthy
+inf-time01-prd    10.0.1.5    app=infra-mgmt env=Production…  selective    true    healthy
+inf-nagios02-prd  10.0.1.132  app=monitoring env=Production…  selective    true    healthy
+inf-nagios01-prd  10.0.1.34   app=monitoring env=Production…  selective    true    healthy</code></pre>
+      <p class="caption">Columns trimmed for the page; the table also has name, agent, sync, heartbeat and href.</p>
+
+      <h3>3. Ask Explorer</h3>
+<pre><code><span class="p">$ </span>illumio-tui traffic query --window 24h --group app,env
+src                   dst                    flows  conns    allowed  pot.blocked  blocked
+pos/Staging           pos/Staging            164    2055417  98       0            66
+pos/PCI               pos/PCI                157    1952621  94       0            63
+ordering/Production   ordering/Production    108    1356513  64       0            44
+laptop/Users          jump-infra/Production  106    1004396  72       0            34
+...
+default · 8 api calls · 10783.1 KB · cache miss · 4914 ms · covers 1d
+<span class="p">$ </span>illumio-tui traffic groups --window 1h --by in --app infra-mgmt/Production
+<span class="p">$ </span>illumio-tui app infra-mgmt/Production --window 24h --table</code></pre>
+
+      <h3>4. Get answers</h3>
+<pre><code><span class="p">$ </span>illumio-tui traffic explain --src app=payment,env=Production \
+    --dst app=ad,env=Production --port 53 --proto udp
+<span class="p">$ </span>illumio-tui gen infra-mgmt/Production --table        <span class="c"># proposes rules, writes nothing</span>
+<span class="p">$ </span>illumio-tui readiness --app infra-mgmt/Production</code></pre>
+      <p>Their output is in <a href="#wf-explain">Workflows</a> 3, 4 and 6.</p>
+    </div>
+    <div>
+      <h3>5. Pick an output</h3>
+      <p>A table at a terminal, JSON when piped. <code>--table</code>, <code>--json</code> and <code>--csv</code> force one. JSON is always <code>{"data": ..., "meta": ...}</code>, so <code>jq</code> takes it apart:</p>
+<pre><code><span class="p">$ </span>illumio-tui gen infra-mgmt/Production --json | jq -r '.data.rules[]
+    | "\(.action)\t\(.consumers|join(","))\t→ \(.providers|join(","))\t\(.services|join(","))"' | column -t -s $'\t'
+create  app=cart,env=Production,app=catalog,app=ecomm,app=ordering,app=payment,app=swift  → all workloads  123/udp
+<span class="p">$ </span>illumio-tui traffic groups --window 24h --services --show blocked --csv &gt; still-blocked.csv
+<span class="p">$ </span>head -3 still-blocked.csv
+src,dst,service,flows,conns,bytes,allowed,pot.blocked,blocked,allowed_conns,pot_blocked_conns,blocked_conns,unknown_conns
+pos/Staging,pos/Staging,8080/tcp,8,75533,0,0,0,8,0,0,75533,0
+payment/Production,payment/Production,8080/tcp,7,70438,0,0,0,7,0,0,70438,0</code></pre>
+
+      <h3>6. Read the exit code</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th scope="col">Code</th><th scope="col">Meaning</th><th scope="col">Typical cause</th></tr></thead>
+          <tbody>
+            <tr><td>0</td><td>success</td><td></td></tr>
+            <tr><td>1</td><td>generic failure</td><td>I/O, a record that could not be rewritten</td></tr>
+            <tr><td>2</td><td>arguments or configuration</td><td>an unknown label, a 30-day window without <code>--yes</code>, a missing <code>--confirm-count</code></td></tr>
+            <tr><td>3</td><td>authentication</td><td>a wrong key or secret</td></tr>
+            <tr><td>4</td><td>PCE error</td><td>a failed request, an incomplete write</td></tr>
+            <tr><td>5</td><td>rate limited</td><td>429 / 503 after backoff</td></tr>
+            <tr><td>6</td><td>write refused</td><td>writes not enabled; <code>enforce</code> on an app that is not ready</td></tr>
+            <tr><td>7</td><td>blocked since enforcement</td><td><code>enforce --watch</code> found blocked flows</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Errors are JSON on stderr: <code>{"error":{"exit_code":6,"kind":"write_refused","message":"..."}}</code>.</p>
+
+      <h3>7. Write, on purpose</h3>
+      <ul>
+        <li><strong>Arm it:</strong> <code>writes = true</code> in the profile or <code>ILLUMIO_WRITES=1</code>. Without it every write exits 6, even a dry run.</li>
+        <li><strong>Look first:</strong> <code>--dry-run</code> prints the method, path and body of every request and sends nothing.</li>
+        <li><strong>Then send:</strong> <code>--yes</code>, plus <code>--confirm-count N</code> for full or selective on several workloads or any change to more than 25.</li>
+        <li><strong>Audited:</strong> every sent write goes to <code>~/.local/state/illumio-tui/writes.jsonl</code> with the body and the status.</li>
+      </ul>
+<pre><code><span class="p">$ </span>ILLUMIO_WRITES=1 illumio-tui policy provision --all --dry-run
+method   POST
+path     /orgs/5636114/sec_policy
+summary  provision 9 rule_sets, 2 services
+counts   rule_sets=9, services=2</code></pre>
+
+      <h3>8. Complete it</h3>
+<pre><code><span class="p">$ </span>illumio-tui completions zsh &gt; ~/.zfunc/_illumio-tui   <span class="c"># bash and fish too</span>
+<span class="p">$ </span>head -1 ~/.zfunc/_illumio-tui
+#compdef illumio-tui</code></pre>
+      <p class="caption">Packaged installs (Homebrew, <code>.deb</code>, <code>.rpm</code>) ship the scripts already.</p>
+    </div>
+  </div>
+</section>
+
 <section class="panel" id="cli" aria-labelledby="cli-h">
-  <h2 id="cli-h"><span class="key">3</span>The CLI</h2>
+  <h2 id="cli-h"><span class="key">5</span>The CLI</h2>
   <p class="lede">The same library, scriptable: JSON for agents, tables for humans.</p>
   <p>Output is a table at a terminal and JSON when stdout is piped; force either with <code>--table</code> or <code>--json</code>. <code>--csv</code> prints the full table as CSV for spreadsheets, and <code>:export &lt;path&gt;</code> does the same from the TUI.</p>
 
@@ -273,14 +578,141 @@ illumio-tui 0.3.5</code></pre>
         <dt>3</dt><dd>authentication</dd>
         <dt>4</dt><dd>PCE error</dd>
         <dt>5</dt><dd>rate limited</dd>
-        <dt>6</dt><dd>write refused by the guard</dd>
+        <dt>6</dt><dd>write refused by the guard, or <code>enforce</code> on an app that is not ready</dd>
+        <dt>7</dt><dd>flows blocked since an enforcement (<code>enforce --watch</code>)</dd>
       </dl>
     </div>
   </div>
 </section>
 
+<section class="panel" id="recipes" aria-labelledby="recipes-h">
+  <h2 id="recipes-h"><span class="key">6</span>Cool things you can do with the CLI</h2>
+  <p class="lede">Recipes for cron, CI and spreadsheets, each with its real output from the demo PCE.</p>
+  <p>Writes below are dry runs. The connection flags are left out; each command ran with <code>--env-file</code>.</p>
+
+  <div class="recipes">
+    <article class="recipe" aria-labelledby="r-gate-h">
+      <h3 id="r-gate-h">Gate a pipeline on readiness</h3>
+      <p>One Explorer query judges every app against the draft; <code>jq -e</code> turns the verdicts into an exit code your CI understands.</p>
+<pre><code><span class="p">$ </span>illumio-tui readiness --json &gt; readiness.json      <span class="c"># 7d, 25 requests, 43 s</span>
+<span class="p">$ </span>jq -e '.data.apps | all(.verdict == "ready" or .verdict == "enforced")' readiness.json
+false
+<span class="p">$ </span>echo $?
+1
+<span class="p">$ </span>jq '[.data.apps[] | select(.verdict == "ready")] | length' readiness.json
+0</code></pre>
+    </article>
+
+    <article class="recipe" aria-labelledby="r-watch-h">
+      <h3 id="r-watch-h">Alert on what enforcement broke</h3>
+      <p><code>enforce --watch</code> exits 7 when anything was blocked since the change; cron mails you only then.</p>
+<pre><code><span class="p">$ </span>illumio-tui enforce infra-mgmt/Production --watch --table || mail -s "blocked since enforcement" sec@example
+blocked since 2026-10-18T21:23:11Z · infra-mgmt/Production · 9 flows · 12092 connections
+direction  peer                 service   flows  conns
+in         pos/Staging          7680/tcp  1      11724
+in         cart/Production      123/udp   2      93
+in         catalog/Production   123/udp   1      59
+...</code></pre>
+    </article>
+
+    <article class="recipe" aria-labelledby="r-why-h">
+      <h3 id="r-why-h">Answer &ldquo;why&rdquo; in one line</h3>
+      <p>The ticket says &ldquo;7680 to the time servers is blocked&rdquo;; one command says why, flow by flow, against the draft.</p>
+<pre><code><span class="p">$ </span>illumio-tui traffic explain --src app=pos,env=Staging --dst app=infra-mgmt,env=Production --port 7680 --proto tcp
+src             dst             service   decision  draft                verdict
+pos-proc02-stg  inf-time02-prd  7680/tcp  allowed   potentially_blocked  no rule allows this flow in the draft (allowed now)
+pos-proc02-stg  inf-time02-prd  7680/tcp  blocked   potentially_blocked  no rule allows this flow</code></pre>
+    </article>
+
+    <article class="recipe" aria-labelledby="r-gen-h">
+      <h3 id="r-gen-h">Review generated policy before it exists</h3>
+      <p><code>gen</code> writes nothing: keep its proposal as JSON, diff it against last week&rsquo;s, review it in a pull request, then write it from the TUI.</p>
+<pre><code><span class="p">$ </span>illumio-tui gen infra-mgmt/Production --json | jq '.data.rules' &gt; proposal.json
+<span class="p">$ </span>git diff --no-index last-week.json proposal.json
+<span class="p">$ </span>jq -r '.[] | "\(.ruleset): \(.services|join(",")) → \(.providers|join(","))"' proposal.json
+RF-infra-mgmt-Production: 123/udp → all workloads</code></pre>
+    </article>
+
+    <article class="recipe" aria-labelledby="r-csv-h">
+      <h3 id="r-csv-h">Everything still blocked, as a spreadsheet</h3>
+      <p>One row per group pair and port, full columns, RFC 4180: the list an app owner can sign off.</p>
+<pre><code><span class="p">$ </span>illumio-tui traffic groups --window 24h --services --show blocked --csv &gt; still-blocked.csv
+default · 8 api calls · 10783.1 KB · cache miss · 5040 ms · covers 1d
+<span class="p">$ </span>wc -l &lt; still-blocked.csv
+504
+<span class="p">$ </span>sed -n 6p still-blocked.csv
+pos/PCI,soc/Production,514/udp,9,50786,0,0,0,9,0,0,50786,0</code></pre>
+    </article>
+
+    <article class="recipe" aria-labelledby="r-hyg-h">
+      <h3 id="r-hyg-h">A label and VEN hygiene report</h3>
+      <p>Grouped workloads give one summary line per app and env with VEN health and enforcement: unmanaged devices stand out.</p>
+<pre><code><span class="p">$ </span>illumio-tui workloads --group app,env --table | grep ' workloads · '
+ordering | Production · 23 workloads · healthy 23 · selective 23
+pos | Staging · 21 workloads · healthy 21 · selective 21
+imaging | medical · 17 workloads · unmanaged 17
+packaging | Production · 13 workloads · healthy 8, unmanaged 5 · selective 8
+exchange | Production · 6 workloads · healthy 4, unmanaged 2 · selective 4
+...
+<span class="p">$ </span>illumio-tui workloads --unlabeled --group app,env      <span class="c"># no app, env or role label</span>
+(no rows)</code></pre>
+    </article>
+
+    <article class="recipe" aria-labelledby="r-bulk-h">
+      <h3 id="r-bulk-h">Bulk changes: dry run, then the count</h3>
+      <p>A filter selects, <code>--dry-run</code> shows every workload&rsquo;s change and request; <code>--yes --confirm-count N</code> sends only when N matches.</p>
+<pre><code><span class="p">$ </span>illumio-tui workloads enforce full --label app=infra-mgmt --label env=Production --dry-run
+2 workloads: 2 selective → full · no re-read (the selection read ran 555 ms before, in this run) + 1 write: 1 bulk_update
+workload        change            href
+inf-time01-prd  selective → full  /orgs/5636114/workloads/621e8a92-0827-4190-a5b6-83fd8cd04e98
+inf-time02-prd  selective → full  /orgs/5636114/workloads/bd1b6de4-81a2-47b0-8d0b-4f7a8002c527
+<span class="p">$ </span>illumio-tui workloads enforce full --label app=infra-mgmt --label env=Production --yes --confirm-count 2</code></pre>
+    </article>
+
+    <article class="recipe" aria-labelledby="r-marks-h">
+      <h3 id="r-marks-h">Share noise filters with the team</h3>
+      <p>Marks are a TOML file: export yours, commit it, and everyone&rsquo;s views and CLI reports drop the same known noise.</p>
+<pre><code><span class="p">$ </span>illumio-tui marks export --format toml &gt; team-marks.toml
+<span class="p">$ </span>cat team-marks.toml
+# illumio-tui marks. The tool rewrites this file: comments are not kept, put text in `comment`.
+
+[[mark]]
+id = "m-5awn1n"
+action = "squelch"
+src = { labels = { app = "monitoring" } }
+dst = "any"
+service = "5666/tcp"
+expires = "2027-01-17T21:24:40.736238Z"
+comment = "Nagios NRPE checks, known and wanted"
+created = "2026-10-19T21:24:40.736238Z"
+created_on = "demo100.illum.io"
+<span class="p">$ </span>illumio-tui marks import team-marks.toml               <span class="c"># on a colleague's machine</span></code></pre>
+    </article>
+
+    <article class="recipe" aria-labelledby="r-prov-h">
+      <h3 id="r-prov-h">Pending changes and provisioning in a pipeline</h3>
+      <p>See what waits in draft, diff it, and print the exact provision request before anyone sends it.</p>
+<pre><code><span class="p">$ </span>illumio-tui policy pending
+object_type  change_type  name                                   href
+rule_sets    create       16. payment | prod - vdi browser only  /orgs/5636114/sec_policy/draft/rule_sets/24206847997117727
+rule_sets    create       syslog                                 /orgs/5636114/sec_policy/draft/rule_sets/24206847997119395
+...
+<span class="p">$ </span>illumio-tui policy pending --diff --table
+<span class="p">$ </span>ILLUMIO_WRITES=1 illumio-tui policy provision --all --dry-run
+summary  provision 9 rule_sets, 2 services</code></pre>
+    </article>
+
+    <article class="recipe" aria-labelledby="r-comp-h">
+      <h3 id="r-comp-h">Tab through it all</h3>
+      <p>Subcommands, flags, enum values, files and your profile names complete in bash, zsh and fish, without a request.</p>
+<pre><code><span class="p">$ </span>illumio-tui completions zsh &gt; ~/.zfunc/_illumio-tui
+<span class="p">$ </span>illumio-tui completions fish &gt; ~/.config/fish/completions/illumio-tui.fish</code></pre>
+    </article>
+  </div>
+</section>
+
 <section class="panel" id="writes" aria-labelledby="writes-h">
-  <h2 id="writes-h"><span class="key">4</span>Writes, on purpose</h2>
+  <h2 id="writes-h"><span class="key">7</span>Writes, on purpose</h2>
   <p class="lede">Off unless the profile says yes. Planned, shown, confirmed, audited.</p>
   <p>illumio-tui writes labels, IP lists, services, unmanaged workloads, and policy: rulesets, allow and deny rules, provisioning, and the labels of VEN-managed workloads. None of it happens by accident:</p>
   <ul>
@@ -321,7 +753,7 @@ illumio-tui 0.3.5</code></pre>
 </section>
 
 <section class="panel" id="configure" aria-labelledby="configure-h">
-  <h2 id="configure-h"><span class="key">5</span>Configure</h2>
+  <h2 id="configure-h"><span class="key">8</span>Configure</h2>
   <p class="lede">Environment variables or a profile file; flags override both for one run.</p>
 
   <div class="cols">
@@ -389,7 +821,7 @@ consolidate_min_peers = 5        <span class="c"># the default; at least 2</span
 </section>
 
 <section class="panel" id="protection" aria-labelledby="protection-h">
-  <h2 id="protection-h"><span class="key">6</span>Gentle on the PCE, by construction</h2>
+  <h2 id="protection-h"><span class="key">9</span>Gentle on the PCE, by construction</h2>
   <p class="lede">Your PCE is shared, expensive and important. This tool treats it that way.</p>
   <p>Most tools that hammer a management plane do it by accident: a refresh loop nobody asked for, a retry storm, an Explorer query over ninety days that someone fired off to see what happens. illumio-tui is built so that none of that can happen quietly. Every request is caused by you, throttled, cached where it can be, counted, and shown back to you.</p>
 
@@ -407,11 +839,11 @@ consolidate_min_peers = 5        <span class="c"># the default; at least 2</span
 </section>
 
 <section class="panel" id="roadmap" aria-labelledby="roadmap-h">
-  <h2 id="roadmap-h"><span class="key">7</span>Roadmap</h2>
+  <h2 id="roadmap-h"><span class="key">10</span>Roadmap</h2>
   <p>Ideas for what comes next are collected in the <a href="https://github.com/alexgoller/illumio-tui/issues/5">idea backlog, issue #5</a>. Among them:</p>
   <ul>
-    <li>Explain a flow: which rule allowed or blocked it, in the TUI and as <code>traffic explain</code>.</li>
-    <li>Enable or disable rules and rulesets; change a workload's enforcement mode.</li>
+    <li>Readiness and enforcement in the TUI, as an overlay (<a href="https://github.com/alexgoller/illumio-tui/issues/55">#55</a>).</li>
+    <li>Enable or disable rules and rulesets.</li>
     <li>Drill from a rule's impact into the workloads it covers; an app-to-app matrix with CSV export.</li>
     <li>Search across policy.</li>
     <li>Saved filters per profile; event filters and VEN health; a <code>schema</code> command for agents.</li>
