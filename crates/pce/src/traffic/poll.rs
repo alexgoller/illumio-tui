@@ -352,6 +352,14 @@ async fn draft_stage(
         Some(b) => b,
         None => status(client, query_href, cancel).await?,
     };
+    // Nothing to evaluate: the PCE answers `update_rules` on an empty
+    // result with 405 (demo100), so an empty result skips it and stays
+    // empty, which is also its draft answer.
+    if before.flows_count == Some(0)
+        && let Some(res) = &before.result
+    {
+        return Ok((res.href().to_string(), before.clone()));
+    }
     let was_evaluated = before.rules_state() == Some("completed");
     report(
         progress,

@@ -751,3 +751,43 @@ async fn both_polling_stages_give_up_after_max_wait() {
         "{e}"
     );
 }
+
+#[tokio::test]
+async fn an_empty_result_skips_the_draft_evaluation() {
+    // demo100 answers update_rules on an empty result with 405.
+    use pce::traffic::run_traffic_query_draft;
+    let server = MockServer::start().await;
+    mount_submit(&server).await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}")))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(completed(json!({"flows_count": 0}))),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path(RULES))
+        .respond_with(ResponseTemplate::new(405))
+        .expect(0)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}/download")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let c = client_for(&server);
+    let r = run_traffic_query_draft(&c, &query(2500), &fast(), &CancellationToken::new(), None)
+        .await
+        .unwrap();
+    assert!(r.flows.is_empty());
+    assert_eq!(
+        sequence(&server).await,
+        vec![
+            "POST /orgs/5/traffic_flows/async_queries".to_string(),
+            format!("GET {QHREF}"),
+            format!("GET {QHREF}/download"),
+        ]
+    );
+}
