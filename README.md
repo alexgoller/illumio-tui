@@ -502,6 +502,8 @@ the API call and byte counters at all times.
     illumio-tui app shop/prod --direction in --csv --section inbound > inbound.csv
     illumio-tui gen shop/prod --window 24h --json
     illumio-tui gen shop/prod --granularity role-ports --outbound --table
+    illumio-tui readiness --table
+    illumio-tui readiness --app shop/prod --app crm/prod --json
     illumio-tui traffic mesh --window 1h --no-user --json
     illumio-tui traffic query --window 30d --dry-run
     illumio-tui traffic query --window 24h --backfill --json
@@ -725,6 +727,35 @@ index) and `truncated`. `policy rules impact <rule-href>` prints one rule the sa
 through the cache; `meta.truncated` includes it. `iplists` gives every list a `size`: `v4` and
 `v6` address counts as strings, `unbounded` (the included `0.0.0.0/0` or `::/0`, else `null`),
 `ranges` and `fqdns`.
+
+### Readiness
+
+`illumio-tui readiness [--window 7d] [--app shop/prod]... [--max-results N] [--yes] [--no-marks]`
+judges, per app (a group of the profile's scope keys), whether its workloads could move to
+enforcement under the draft policy. It runs one Explorer query over the window (default 7d;
+unicast only) re-evaluated against the draft policy (the `--draft` path: one PUT
+`update_rules`, more status polls, one download, no policy change), then reads the workloads,
+the pending changes and the draft rulesets (one GET each, cached) and applies `marks.toml`.
+With `--app` (repeatable) the query is narrowed to those apps, which takes two queries (the
+apps as destination, then as source); without it every labelled app in the result is judged.
+The cost rules of `traffic query` apply (a window over 7d or a cap over 10000 needs `--yes`,
+refused before any request), and `meta` counts the requests (`api_calls`, `queries`).
+
+Each app reports `workloads` (total, managed, unmanaged, the enforcement mix, offline VENs,
+managed workloads without the tier label), `evidence` (window, flows, connections, `little`
+under 7 days or 20 flows), `coverage` (connections in, out and total: allowed by the draft,
+`would_block`, and `accepted`, would-block flows a `squelch` or `accept-blocked` mark covers;
+`ratio` is allowed plus accepted over all), `pending` (changes in rulesets whose scope covers
+the app, or applies to every workload, and the objects those rulesets use), `verdict` and
+`warnings`. A flow inside the app counts once, as inbound. The verdict is the first that
+applies: `not_evaluated`, `needs_rules` (would-block flows), `needs_provision` (pending
+changes: enforcement uses the active policy), `ready`; `enforced` when every managed workload
+is in full enforcement already. Warnings (little evidence, a truncated result, missing tier
+labels, offline VENs, unmanaged workloads, no managed workloads) never change the verdict.
+With `--app` the output adds each app's `gaps`, the would-block flows as policy tuples (peer
+group and service, largest first), and its pending changes. `--table` prints the apps table
+(and with `--app` the gaps and pending tables); `--csv` prints the apps table with full
+columns.
 
 ### Flow marks
 

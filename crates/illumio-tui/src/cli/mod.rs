@@ -13,6 +13,7 @@ pub mod objects;
 pub mod output;
 pub mod policy;
 pub mod profile;
+pub mod readiness;
 pub mod traffic;
 pub mod workloads;
 pub mod write;
@@ -106,6 +107,16 @@ pub enum Command {
     /// The TUI generator's rules for the app (G there), printed and never written: rows per
     /// peer, the rules at one granularity, and what is already in the draft.
     Gen(generate::GenArgs),
+    /// Per-app enforcement readiness: draft coverage, gaps, pending changes, verdict (read-only)
+    ///
+    /// Requests: one Explorer query over the window (two with --app: the apps as destination,
+    /// then as source), each re-evaluated against the draft policy (one PUT update_rules, more
+    /// status polls, one download; changes no policy); the workloads, pending changes and draft
+    /// rulesets (one GET each, cached); the object lists for names (cached). Unicast flows
+    /// only. Verdict: not_evaluated, needs_rules (flows the draft would block, not accepted by a
+    /// squelch or accept-blocked mark), needs_provision (pending changes in rulesets covering
+    /// the app), ready; enforced when every managed workload is in full enforcement.
+    Readiness(readiness::ReadinessArgs),
     /// Rulesets, rules, deny rules, pending changes, provisioning
     #[command(subcommand)]
     Policy(policy::PolicyCmd),
@@ -179,6 +190,7 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
         Command::Workloads(a) => workloads::workloads_cmd(&ctx, &a).await,
         Command::App(a) => app::run(&ctx, &a).await,
         Command::Gen(a) => generate::run(&ctx, &a).await,
+        Command::Readiness(a) => readiness::run(&ctx, &a).await,
         Command::Policy(p) => policy::run(&ctx, &p).await,
         Command::Traffic(t) => traffic::run(&ctx, &t).await,
         Command::Profile(_) | Command::Marks(_) => unreachable!("handled above"),
