@@ -155,6 +155,21 @@ impl TrafficFilter {
         (!parts.is_empty()).then(|| parts.join(", "))
     }
 
+    /// [`Self::narrowing`] as readiness sees it: readiness counts unicast
+    /// flows only, so a transmission filter that keeps unicast (`:unicast`)
+    /// narrows nothing it reads.
+    pub fn readiness_narrowing(&self) -> Option<String> {
+        if self.transmission.contains(&Transmission::Unicast) {
+            TrafficFilter {
+                transmission: Vec::new(),
+                ..self.clone()
+            }
+            .narrowing()
+        } else {
+            self.narrowing()
+        }
+    }
+
     /// The decisions as shown in the summary, the filter bar and the editor.
     pub fn decisions_text(&self) -> String {
         decisions_text(&self.decisions)

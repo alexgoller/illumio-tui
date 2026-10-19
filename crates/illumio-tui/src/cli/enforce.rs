@@ -290,17 +290,39 @@ async fn enforce(ctx: &Context, a: &EnforceArgs) -> Result<(), CliError> {
         .apps
         .first()
         .ok_or_else(|| CliError::Other(format!("readiness returned nothing for {}", a.app)))?;
-    let allowed = r.verdict.allows_enforcement();
+    // A truncated or incomplete result may miss the flows that block:
+    // its verdict is not trusted (as a result that is not ready).
+    let partial = match (r.evidence.truncated, r.evidence.incomplete) {
+        (true, _) => Some("truncated"),
+        (false, true) => Some("incomplete"),
+        _ => None,
+    };
+    let allowed = r.verdict.allows_enforcement() && partial.is_none();
     if !allowed && !a.force {
+        if r.verdict.allows_enforcement()
+            && let Some(how) = partial
+        {
+            return Err(CliError::Refused(format!(
+                "{} is {}, but the readiness result is {how}: flows are missing; narrow --window/--max-results or pass --force; nothing sent",
+                r.app,
+                r.verdict.text()
+            )));
+        }
         return Err(CliError::Refused(blockers(r)));
     }
     let mut warnings = ev.meta.warnings.clone().unwrap_or_default();
     if !allowed {
-        warnings.push(format!(
-            "--force: moving {} though readiness says {}",
-            r.app,
-            r.verdict.text()
-        ));
+        warnings.push(match partial {
+            Some(how) if r.verdict.allows_enforcement() => format!(
+                "--force: moving {} though the readiness result is {how}",
+                r.app
+            ),
+            _ => format!(
+                "--force: moving {} though readiness says {}",
+                r.app,
+                r.verdict.text()
+            ),
+        });
     }
     refuse_truncated(ev.workloads.truncated, a.write.yes, &mut warnings)?;
     // The app's workloads, as readiness read and counted them: the

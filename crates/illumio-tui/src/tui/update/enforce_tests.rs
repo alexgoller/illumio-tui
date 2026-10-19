@@ -839,3 +839,48 @@ fn opening_either_overlay_with_the_data_loaded_sends_nothing() {
     assert_eq!(ev(&m).app_text(), "crm/prod");
     assert_eq!(ev(&m).requests, 0);
 }
+
+/// Readiness counts unicast flows only: `:unicast` narrows nothing.
+#[test]
+fn a_unicast_result_is_not_partial() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut base = all_allowed();
+    base.traffic.data.as_mut().unwrap().filter.transmission =
+        vec![pce::models::Transmission::Unicast];
+    let mut m = on_shop(base, dir.path());
+    assert!(ev(&m).partial.is_empty(), "{:?}", ev(&m).partial);
+    quiet(&mut m, key('4'));
+    quiet(&mut m, kc(KeyCode::Enter));
+    assert!(ev(&m).typing.is_none(), "no word asked");
+    assert!(matches!(m.overlay, Overlay::ConfirmBulk(_)));
+    assert!(!m.enforce_send.as_ref().unwrap().readiness.forced);
+}
+
+/// `y` checks readiness again: what landed since the review may require
+/// the typed word; a typed (forced) move goes on.
+#[test]
+fn y_refuses_a_move_that_needs_the_word_since_the_review() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = on_shop(all_allowed(), dir.path());
+    quiet(&mut m, key('4'));
+    quiet(&mut m, kc(KeyCode::Enter));
+    assert!(matches!(m.overlay, Overlay::ConfirmBulk(_)));
+    m.traffic.data.as_mut().unwrap().truncated = true;
+    quiet(&mut m, key('y'));
+    assert_eq!(m.overlay, Overlay::Enforce);
+    assert!(m.enforce_send.is_none() && !m.writes.in_flight);
+    assert!(
+        m.status.text.contains("partial result since the review"),
+        "{}",
+        m.status.text
+    );
+    // Typed through: sent.
+    quiet(&mut m, kc(KeyCode::Enter));
+    typed(&mut m, ENFORCE_WORD);
+    quiet(&mut m, kc(KeyCode::Enter));
+    let cmds = update(&mut m, key('y'));
+    assert!(
+        matches!(cmds.as_slice(), [Cmd::EnforceApp { .. }]),
+        "{cmds:?}"
+    );
+}

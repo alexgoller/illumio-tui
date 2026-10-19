@@ -154,7 +154,7 @@ pub fn partial_reasons(model: &Model, app: &GroupKey, r: Option<&AppReadiness>) 
         return vec!["no traffic loaded".into()];
     };
     let mut out = Vec::new();
-    if let Some(what) = d.filter.narrowing() {
+    if let Some(what) = d.filter.readiness_narrowing() {
         out.push(format!("the traffic filter narrows the flows ({what})"));
     }
     if d.truncated {

@@ -1249,8 +1249,10 @@ enforced, watches what is blocked afterwards, and rolls back exactly. The flow:
 first (one Explorer query narrowed to the app, re-evaluated against the draft, and the cached
 workloads, pending changes and draft rulesets: as `readiness --app`). A verdict other than
 `ready` or `enforced` is refused with exit 6 (`write_refused`) before any write, dry run or
-not; the message lists the blockers (the would-block tuples, the pending changes). `--force`
-moves it anyway and says so in `meta.warnings` and the record. The move is the bulk
+not; the message lists the blockers (the would-block tuples, the pending changes). A `ready`
+verdict on a truncated or incomplete readiness result is refused the same way (flows are
+missing: narrow `--window`/`--max-results`). `--force` moves it anyway and says so in
+`meta.warnings` and the record (`forced`). The move is the bulk
 enforcement of the app's managed workloads with every guard of `workloads enforce` (armed
 writes, `--dry-run` or `--yes`, `--confirm-count`, the audit log, one `bulk_update` per 100,
 a re-read when the workloads came from the cache). `data` holds `readiness` (the app's

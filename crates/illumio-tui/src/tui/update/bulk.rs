@@ -242,6 +242,17 @@ pub(super) fn confirm_key(model: &mut Model, mut c: Box<BulkConfirm>, k: KeyEven
                 model.overlay = Overlay::ConfirmBulk(c);
                 return Vec::new();
             }
+            // A move the enforcement overlay planned: readiness again, as
+            // it is now (data may have landed since the review).
+            if let Some(why) = super::enforce::recheck_send(model) {
+                if let DraftCheck::Running { cancel, .. } = &c.check {
+                    cancel.cancel();
+                }
+                model.enforce_send = None;
+                model.overlay = Overlay::None;
+                model.status = StatusLine::warn(why);
+                return Vec::new();
+            }
             if let DraftCheck::Running { cancel, .. } = &c.check {
                 cancel.cancel();
             }

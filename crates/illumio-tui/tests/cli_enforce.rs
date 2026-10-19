@@ -1260,3 +1260,66 @@ async fn watch_with_nothing_found_in_a_truncated_result_exits_4() {
     assert!(stderr(&a).contains("truncated"), "{}", stderr(&a));
     assert_eq!(json_out(&a)["meta"]["truncated"], true);
 }
+
+/// A ready verdict on a truncated readiness result is refused like one
+/// that is not ready (exit 6, before any write); `--force` moves it,
+/// recorded as forced.
+#[tokio::test(flavor = "multi_thread")]
+async fn enforce_refuses_a_ready_verdict_on_a_truncated_result_unless_forced() {
+    let env = Env::new(ACCEPT_GAPS);
+    let server = MockServer::start().await;
+    mount_readiness(&server, shop_workloads(), "[]").await;
+    mount_bulk(&server, &[]).await;
+    let a = env
+        .cmd(&server)
+        .args([
+            "enforce",
+            "shop/prod",
+            "--to",
+            "full",
+            "--max-results",
+            "4",
+            "--dry-run",
+        ])
+        .assert()
+        .code(6);
+    let err = stderr(&a);
+    assert!(err.contains("write_refused"), "{err}");
+    assert!(
+        err.contains("is ready, but the readiness result is truncated: flows are missing"),
+        "{err}"
+    );
+    assert!(err.contains("--force"), "{err}");
+    assert!(bulk_bodies(&server).await.is_empty());
+    let server = MockServer::start().await;
+    mount_readiness(&server, shop_workloads(), "[]").await;
+    mount_bulk(&server, &[]).await;
+    let a = env
+        .cmd(&server)
+        .args([
+            "enforce",
+            "shop/prod",
+            "--to",
+            "full",
+            "--max-results",
+            "4",
+            "--force",
+            "--yes",
+            "--confirm-count",
+            "2",
+        ])
+        .assert()
+        .success();
+    let out = json_out(&a);
+    assert_eq!(out["data"]["forced"], true);
+    assert!(
+        out["meta"]["warnings"].as_array().unwrap().iter().any(|w| w
+            .as_str()
+            .unwrap()
+            .contains("the readiness result is truncated")),
+        "{out}"
+    );
+    let recs = env.records();
+    assert_eq!(recs.len(), 1);
+    assert_eq!(recs[0].1["readiness"]["forced"], true);
+}

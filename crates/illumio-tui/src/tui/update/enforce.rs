@@ -660,6 +660,41 @@ fn review_key(model: &mut Model) -> Vec<Cmd> {
     Vec::new()
 }
 
+/// `y` on the bulk confirm of a move the overlay planned without the
+/// typed word: readiness computed again from what is loaded now; `Some`
+/// (why, nothing sent) when the move would now need the word (not ready,
+/// a partial result, or something no longer loaded).
+pub(super) fn recheck_send(model: &mut Model) -> Option<String> {
+    let send = model.enforce_send.as_ref()?;
+    if send.readiness.forced {
+        return None;
+    }
+    let app = model.enforce_view.as_ref()?.app.clone();
+    let missing = Missing::of(model);
+    if missing.any() {
+        return Some(format!(
+            "readiness is not complete since the review (loading {}): nothing sent",
+            missing.text()
+        ));
+    }
+    let r = compute(model, std::slice::from_ref(&app), false).pop();
+    let partial = crate::tui::enforce::partial_reasons(model, &app, r.as_ref());
+    match r {
+        Some(r) if !r.verdict.allows_enforcement() => Some(format!(
+            "{} is no longer ready ({}): nothing sent; Enter on step 4 again",
+            r.app,
+            r.verdict.text()
+        )),
+        Some(r) if !partial.is_empty() => Some(format!(
+            "{} rests on a partial result since the review ({}): nothing sent; Enter on step 4 again",
+            r.app,
+            partial.join("; ")
+        )),
+        Some(_) => None,
+        None => Some("no readiness for the app: nothing sent".into()),
+    }
+}
+
 /// The typed `enforce` prompt: letters type, `Enter` reviews only when it
 /// reads `enforce`, `Esc` cancels.
 fn typing_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {

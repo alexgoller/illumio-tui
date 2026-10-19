@@ -60,7 +60,7 @@ fn notes(model: &Model) -> Vec<(String, Style)> {
         ));
     }
     if let Some(d) = model.traffic.data.as_ref() {
-        if let Some(what) = d.filter.narrowing() {
+        if let Some(what) = d.filter.readiness_narrowing() {
             out.push((
                 format!("filtered ({what}): the verdicts rest on part of the flows"),
                 Style::new().fg(t.warn),
