@@ -23,6 +23,7 @@ pub mod label_filter;
 pub mod limiter;
 pub mod marks;
 pub mod models;
+pub mod readiness;
 pub mod resolve;
 pub mod traffic;
 pub mod write;
