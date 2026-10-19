@@ -2,6 +2,7 @@
 //! and gets a `Context`.
 pub mod app;
 pub mod bulk;
+pub mod completions;
 pub mod context;
 pub mod error;
 pub mod events;
@@ -18,7 +19,7 @@ pub mod traffic;
 pub mod workloads;
 pub mod write;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueHint};
 use std::path::PathBuf;
 
 pub use context::Context;
@@ -43,13 +44,13 @@ pub struct GlobalArgs {
     #[arg(long, global = true, env = "ILLUMIO_PROFILE")]
     pub profile: Option<String>,
     /// Config file (default: ~/.config/illumio-tui/config.toml)
-    #[arg(long, global = true)]
+    #[arg(long, global = true, value_hint = ValueHint::FilePath)]
     pub config: Option<PathBuf>,
     /// dotenv file with PCE_HOST, PCE_ORG_ID, API_KEY, API_SECRET, ...
-    #[arg(long, global = true)]
+    #[arg(long, global = true, value_hint = ValueHint::FilePath)]
     pub env_file: Option<PathBuf>,
     /// PCE hostname (env: PCE_HOST)
-    #[arg(long, global = true)]
+    #[arg(long, global = true, value_hint = ValueHint::Hostname)]
     pub host: Option<String>,
     /// PCE port override (named --pce-port: `traffic query` has its own --port)
     #[arg(long = "pce-port", global = true)]
@@ -132,6 +133,11 @@ pub enum Command {
     /// flows are left out, the others carry their mark. --no-marks ignores the file.
     #[command(subcommand)]
     Marks(marks::MarksCmd),
+    /// Print the shell completion script: bash, zsh or fish (local, no request)
+    ///
+    /// e.g. `illumio-tui completions zsh > ~/.zfunc/_illumio-tui`. Profile names complete
+    /// from the config file; nothing a completion does contacts the PCE.
+    Completions(completions::CompletionsArgs),
 }
 
 /// The command's name for `--csv`'s refusal when it prints no table (a
@@ -179,6 +185,9 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
     if let Command::Marks(m) = &command {
         return marks::run(&global, m);
     }
+    if let Command::Completions(c) = &command {
+        return completions::run(c);
+    }
     let ctx = Context::new(&global)?;
     match command {
         Command::Health => health::run(&ctx).await,
@@ -193,6 +202,8 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
         Command::Readiness(a) => readiness::run(&ctx, &a).await,
         Command::Policy(p) => policy::run(&ctx, &p).await,
         Command::Traffic(t) => traffic::run(&ctx, &t).await,
-        Command::Profile(_) | Command::Marks(_) => unreachable!("handled above"),
+        Command::Profile(_) | Command::Marks(_) | Command::Completions(_) => {
+            unreachable!("handled above")
+        }
     }
 }

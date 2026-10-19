@@ -15,7 +15,10 @@ pub enum ProfileCmd {
     /// List profiles in the config file
     List,
     /// Set the default profile
-    Use { name: String },
+    Use {
+        /// Profile name from the config file
+        name: String,
+    },
 }
 
 #[derive(Debug, Serialize)]

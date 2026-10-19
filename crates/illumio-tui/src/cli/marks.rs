@@ -114,6 +114,7 @@ pub struct ExportArgs {
 #[derive(Args, Debug, Clone, Default)]
 pub struct ImportArgs {
     /// A .json file ({"marks": [...]}, as export writes it) or a .toml file
+    #[arg(value_hint = clap::ValueHint::FilePath)]
     pub file: PathBuf,
     /// Replace marks whose id exists instead of skipping them
     #[arg(long)]
