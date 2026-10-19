@@ -147,7 +147,9 @@ or a profile in `~/.config/illumio-tui/config.toml`:
 `[profiles.<name>.labels]` and `[profiles.<name>.generator]` are under Label model below.
 Environment variables outrank the profile. `PCE_TLS_VERIFY=false` skips certificate checks
 like `--insecure`, `PCE_SCHEME` overrides the scheme; `ILLUMIO_PROFILE` picks
-the profile and `ILLUMIO_TUI_THEME` the TUI theme; `ILLUMIO_WRITES` and
+the profile and `ILLUMIO_TUI_THEME` the TUI theme; `ILLUMIO_TUI_COLORS=256` maps the theme's
+24-bit colours to the xterm 256 (the default in Apple Terminal, which garbles 24-bit colour
+before macOS 26; `truecolor` forces 24-bit); `ILLUMIO_WRITES` and
 `ILLUMIO_AUTO_BACKFILL` (`1`/`0`, `true`/`false`) outrank the profile's `writes` and
 `traffic_auto_backfill`. `--env-file .env` loads a dotenv file for one run. Connection settings can
 also be overridden per run with global flags: `--host`, `--pce-port`,

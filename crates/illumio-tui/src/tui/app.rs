@@ -1268,8 +1268,14 @@ pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
     install_panic_hook(); // after ratatui's, so mouse reporting is switched off first
     let _ = crossterm::execute!(std::io::stdout(), EnableMouseCapture, EnableFocusChange);
     let result = {
+        let depth = crate::tui::ui::colors::Depth::detect();
         let mut draw = |m: &Model| {
-            let _ = terminal.draw(|f| view(m, f));
+            let _ = terminal.draw(|f| {
+                view(m, f);
+                if depth == crate::tui::ui::colors::Depth::Ansi256 {
+                    crate::tui::ui::colors::downgrade(f.buffer_mut());
+                }
+            });
         };
         // A terminal read error ends the stream (and the loop) through the normal
         // restore path below instead of being skipped forever.

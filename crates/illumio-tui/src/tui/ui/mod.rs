@@ -1,5 +1,6 @@
 //! `view(&Model, &mut Frame)`: pure rendering. Screens are added in later
 //! tasks; this file owns the chrome (header, tabs, status, too-small notice).
+pub mod colors;
 pub mod layout;
 pub mod screens;
 pub mod theme;
