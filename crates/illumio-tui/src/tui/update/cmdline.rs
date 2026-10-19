@@ -1,0 +1,135 @@
+//! The `:` command line's commands.
+use super::*;
+
+pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
+    match cmd {
+        Command::Screen(s) => switch(model, s),
+        Command::IpLists => {
+            model.objects.kind = ObjectKind::IpLists;
+            model.objects.show_detail = false;
+            model.objects.ip_lists.show_detail = false;
+            switch(model, Screen::Objects)
+        }
+        Command::Quit => quit(model),
+        Command::Batch => {
+            if model.batch_report.is_some() {
+                model.overlay = Overlay::BatchReport { scroll: 0 };
+            } else {
+                model.status = StatusLine::info("no batch sent in this session");
+            }
+            Vec::new()
+        }
+        Command::Help => {
+            open_help(model);
+            Vec::new()
+        }
+        Command::Marks(action) => marks::open_marks(model, action.as_deref()),
+        // On Workloads `:filter` sets the label filter (local, no request).
+        Command::Filter(expr) if model.screen == Screen::Workloads => {
+            if let Err(e) = apply_workload_labels(model, &expr) {
+                model.status = StatusLine::error(format!("label filter: {e}"));
+            }
+            Vec::new()
+        }
+        Command::Filter(expr) => {
+            let mut f = model.traffic.filter.clone();
+            f.src = expr;
+            match f.validate() {
+                Ok(()) => request_query(model, f),
+                Err(e) => {
+                    model.status = StatusLine::error(e);
+                    Vec::new()
+                }
+            }
+        }
+        Command::Unicast => {
+            // Through the cost guard like any filter change: one query.
+            let mut f = model.traffic.filter.clone();
+            f.toggle_unicast();
+            request_query(model, f)
+        }
+        Command::Window(w) => {
+            let mut f = model.traffic.filter.clone();
+            f.window = w;
+            match f.validate() {
+                Ok(()) => request_query(model, f),
+                Err(e) => {
+                    model.status = StatusLine::error(e);
+                    Vec::new()
+                }
+            }
+        }
+        Command::Focus(Some(name)) => {
+            focus_by_name(model, &name);
+            Vec::new()
+        }
+        Command::Focus(None) => {
+            if model.traffic.data.is_none() {
+                model.status = StatusLine::info("no result to focus yet: r runs the query");
+            } else {
+                model.screen = Screen::Traffic;
+                open_app_picker(model, AppPickerPurpose::Focus, "");
+            }
+            Vec::new()
+        }
+        Command::App(Some(name)) => open_app_by_name(model, &name),
+        Command::App(None) => {
+            open_app_picker(model, AppPickerPurpose::Overlay, "");
+            Vec::new()
+        }
+        Command::Gen(Some(name)) => gen_by_name(model, &name),
+        Command::Gen(None) => {
+            open_app_picker(model, AppPickerPurpose::Generator, "");
+            Vec::new()
+        }
+        Command::Profile(name) => {
+            if model.batch_sending {
+                model.status = StatusLine::warn("batch sending: wait for it to finish");
+                return Vec::new();
+            }
+            if model.writes.in_flight {
+                model.status = StatusLine::warn("finish or cancel the write first");
+                return Vec::new();
+            }
+            if model.switching {
+                model.status = StatusLine::info("profile switch in progress");
+                return Vec::new();
+            }
+            model.switching = true;
+            vec![Cmd::SwitchProfile(name)]
+        }
+        Command::Writes(None) => {
+            model.status = StatusLine::info(writes_status(&model.writes));
+            Vec::new()
+        }
+        Command::Writes(Some(on)) => {
+            if model.batch_sending {
+                model.status = StatusLine::warn("batch sending: wait for it to finish");
+                return Vec::new();
+            }
+            if model.writes.in_flight {
+                model.status = StatusLine::warn("finish or cancel the write first");
+                return Vec::new();
+            }
+            if model.switching {
+                model.status = StatusLine::info("profile switch in progress");
+                return Vec::new();
+            }
+            vec![Cmd::SetWrites(on)]
+        }
+        Command::Export { path, force } => match crate::tui::export::current_table(model) {
+            Ok((headers, rows)) => vec![Cmd::Export {
+                path,
+                force,
+                headers,
+                rows,
+            }],
+            Err(e) => {
+                model.status = StatusLine::error(e);
+                Vec::new()
+            }
+        },
+        Command::Draft => show_policy(model, PolicyScope::Draft),
+        Command::Active => show_policy(model, PolicyScope::Active),
+    }
+}
