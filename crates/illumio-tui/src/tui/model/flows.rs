@@ -266,7 +266,8 @@ pub fn draft_flow_column() -> Column<FlowRow> {
 pub fn draft_flow_column_of<T: FlowCells>() -> Column<T> {
     Column {
         title: DRAFT_COLUMN,
-        width: 24,
+        // `pot.blocked → allowed/bnd`, the longest known text.
+        width: 26,
         cell: |r| on_flow(r, |f| f.flow.draft_text()),
         key: |r| {
             flow_key(r, |f| {

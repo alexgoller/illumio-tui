@@ -104,6 +104,19 @@ pub struct ResolvedFlow {
     pub bytes_out: Option<u64>,
 }
 
+/// A decision word as the Flows table shows it: `potentially_blocked` is
+/// `pot.blocked`, a boundary suffix (`_across_boundary`, `_by_boundary`)
+/// is `/bnd` (`allowed/bnd`); any other PCE value stays verbatim.
+pub fn short_decision(d: &str) -> String {
+    let d = d.replacen("potentially_blocked", "pot.blocked", 1);
+    for suffix in ["_across_boundary", "_by_boundary"] {
+        if let Some(base) = d.strip_suffix(suffix) {
+            return format!("{base}/bnd");
+        }
+    }
+    d
+}
+
 impl ResolvedFlow {
     /// `bytes_in + bytes_out`, 0 when the PCE reported neither.
     pub fn bytes(&self) -> u64 {
@@ -143,13 +156,13 @@ impl ResolvedFlow {
     /// allowed` (`pot.blocked → allowed`) where the draft changes the
     /// verdict, else the draft decision; empty without one.
     pub fn draft_text(&self) -> String {
-        let short = |d: &str| match d {
-            "potentially_blocked" => "pot.blocked".to_string(),
-            other => other.to_string(),
-        };
         match (&self.draft_policy_decision, self.draft_change()) {
-            (_, Some(d)) => format!("{} → {}", short(self.policy_decision.as_str()), d.as_str()),
-            (Some(d), None) => d.as_str().to_string(),
+            (_, Some(d)) => format!(
+                "{} → {}",
+                short_decision(self.policy_decision.as_str()),
+                short_decision(d.as_str())
+            ),
+            (Some(d), None) => short_decision(d.as_str()),
             (None, None) => String::new(),
         }
     }
@@ -339,8 +352,17 @@ pub(crate) mod tests {
         assert!(f[a].blocked_by_draft() && !f[a].fixed_by_draft());
         assert_eq!(f[b].draft_change(), Some(&D::Allowed));
         assert_eq!(f[b].draft_text(), "blocked → allowed");
-        assert_eq!(f[p].draft_text(), "pot.blocked → allowed_across_boundary");
+        assert_eq!(f[p].draft_text(), "pot.blocked → allowed/bnd");
         assert_eq!(rich_flows()[0].draft_text(), "", "no draft, no text");
+        assert_eq!(short_decision("potentially_blocked"), "pot.blocked");
+        assert_eq!(short_decision("allowed_across_boundary"), "allowed/bnd");
+        assert_eq!(short_decision("blocked_by_boundary"), "blocked/bnd");
+        assert_eq!(
+            short_decision("potentially_blocked_by_boundary"),
+            "pot.blocked/bnd"
+        );
+        assert_eq!(short_decision("allowed"), "allowed");
+        assert_eq!(short_decision("something_new"), "something_new");
         f[b].draft_policy_decision = Some(D::Blocked);
         assert_eq!(f[b].draft_change(), None, "the same decision is no change");
         f[b].draft_policy_decision = Some(D::Other("blocked_by_override_deny".into()));
