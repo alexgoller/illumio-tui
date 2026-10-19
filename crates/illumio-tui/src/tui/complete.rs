@@ -79,6 +79,7 @@ pub fn complete(
         FieldKind::WorkloadLabels => {
             negatable(token, |t| workload_label_term(t, &used_keys(earlier), idx))
         }
+        FieldKind::RuleFilter => rule_filter_term(token, idx, workloads),
     };
     let mut seen = std::collections::HashSet::new();
     out.retain(|c| seen.insert(c.clone()));
@@ -415,6 +416,52 @@ fn mark_side(token: &str, used: &[String], idx: &NameIndex, workloads: &[Workloa
         .into_iter()
         .map(|c| quote_label(&c))
         .collect()
+}
+
+/// The words the rule search takes besides `key=value`.
+const RULE_WORDS: [&str; 6] = ["ipl:", "svc:", "wl:", "href:", "disabled", "deny"];
+
+/// A rule search term: `ipl:` IP list, `svc:` service and `wl:` loaded
+/// workload names (quoted when they hold a space), `key=` its values (a
+/// comma lists more, as on Workloads; never `-`), a bare token the words,
+/// keys and values. `href:` and ports are left as typed. Never a request.
+fn rule_filter_term(token: &str, idx: &NameIndex, workloads: &[Workload]) -> Vec<String> {
+    let services = idx.services().iter().map(|s| s.name.clone()).collect();
+    let sources = [
+        ("ipl:", idx.ip_list_names()),
+        ("svc:", services),
+        ("wl:", workload_names(workloads)),
+    ];
+    // `ipl:"Any` matches names as typed.
+    let unquoted = token.replacen(":\"", ":", 1);
+    if let Some(names) = prefixed(&unquoted, &sources) {
+        return names
+            .into_iter()
+            .map(|c| match c.split_once(':') {
+                Some((p, n)) if n.contains(char::is_whitespace) || n.contains(['"', '\\']) => {
+                    format!("{p}:\"{}\"", n.replace('\\', "\\\\").replace('"', "\\\""))
+                }
+                _ => c,
+            })
+            .collect();
+    }
+    let no_dash = |c: &String| !(c.ends_with("=-") || c.ends_with(",-"));
+    if token.contains('=') {
+        return workload_label_term(token, &[], idx)
+            .into_iter()
+            .filter(no_dash)
+            .collect();
+    }
+    let mut out = ranked(
+        token,
+        RULE_WORDS.iter().map(|w| (w.to_string(), w.to_string())),
+    );
+    out.extend(
+        workload_label_term(token, &[], idx)
+            .into_iter()
+            .filter(no_dash),
+    );
+    out
 }
 
 /// `key=value` with the value quoted when it holds a side separator.

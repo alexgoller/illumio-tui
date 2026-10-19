@@ -51,6 +51,7 @@ pub fn view(model: &Model, f: &mut Frame) {
         }
         Overlay::FilterEditor(e) => widgets::overlay::render_filter_editor(model, e, f, area),
         Overlay::LabelFilter(e) => widgets::overlay::render_label_filter(model, e, f, area),
+        Overlay::RuleFilter(e) => screens::policy::render_rule_filter(model, e, f, area),
         Overlay::Confirm { reason, action } => {
             // Deleting a mark: the `:marks` list stays behind the question.
             if matches!(action, crate::tui::model::PendingAction::DeleteMark(_)) {

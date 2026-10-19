@@ -227,6 +227,7 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             }
             Vec::new()
         }
+        Overlay::RuleFilter(e) => rule_filter_key(model, e, k),
         Overlay::Confirm { action, .. } => match k.code {
             KeyCode::Char('y') | KeyCode::Char('Y') => {
                 model.overlay = Overlay::None;
@@ -887,6 +888,10 @@ pub(super) fn scroll_focused(model: &mut Model, down: bool) {
                 // The wheel moves table rows; the treemap has none.
                 TrafficView::Treemap => {}
             }
+        }
+        Screen::Policy if model.policy.search.is_some() => {
+            let page = policy_page(model);
+            step(&mut model.policy.found, down, page);
         }
         Screen::Policy => {
             let page = policy_page(model);

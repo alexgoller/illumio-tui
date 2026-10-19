@@ -34,12 +34,49 @@ pub enum PolicyCmd {
     /// Add, update or delete a deny rule
     #[command(subcommand)]
     DenyRules(DenyRulesAction),
+    /// Find rules across all rulesets by label, IP list, service, workload, href, state or kind
+    Search(SearchArgs),
     /// List changes waiting to be provisioned
     Pending(PendingArgs),
     /// Provision pending changes (needs writes = true in the profile)
     Provision(ProvisionArgs),
     /// Revert pending changes to their active version; draft-only objects are deleted (needs writes = true in the profile)
     Revert(RevertArgs),
+}
+
+/// `policy search`: the TUI's rule search (`f` on Policy) over one ruleset
+/// list read (cached).
+#[derive(Args, Debug)]
+pub struct SearchArgs {
+    /// Search terms as in the TUI: app=shop,crm ipl:NAME svc:NAME svc:443/tcp wl:NAME href:TEXT disabled deny
+    pub terms: Vec<String>,
+    /// A label in a scope, consumer or provider (directly or in a label group): key=value, a comma lists values any of which matches (repeatable; all must hold)
+    #[arg(long = "label")]
+    pub labels: Vec<String>,
+    /// An IP list consumer or provider, by name (repeatable)
+    #[arg(long = "ip-list")]
+    pub ip_lists: Vec<String>,
+    /// A service object by name, or a port that a rule's service holds: PORT/PROTO or PORT (tcp or udp) (repeatable)
+    #[arg(long = "service")]
+    pub services: Vec<String>,
+    /// A workload consumer or provider, by hostname or name (one workloads read, cached) or href id (repeatable)
+    #[arg(long = "workload")]
+    pub workloads: Vec<String>,
+    /// The rule's href contains this text
+    #[arg(long)]
+    pub href: Option<String>,
+    /// Only disabled rules (or rules of disabled rulesets)
+    #[arg(long)]
+    pub disabled: bool,
+    /// Only deny and override deny rules
+    #[arg(long)]
+    pub deny: bool,
+    /// Search active policy instead of draft
+    #[arg(long, conflicts_with = "draft")]
+    pub active: bool,
+    /// Search draft policy (the default; explicit for scripts)
+    #[arg(long)]
+    pub draft: bool,
 }
 
 #[derive(Args, Debug)]
@@ -601,6 +638,7 @@ pub async fn run(ctx: &Context, cmd: &PolicyCmd) -> Result<(), CliError> {
             DenyRulesAction::Update(a) => deny_rule_update(ctx, a).await,
             DenyRulesAction::Delete(a) => deny_rule_delete(ctx, a).await,
         },
+        PolicyCmd::Search(a) => search(ctx, a).await,
         PolicyCmd::Pending(a) => pending(ctx, a).await,
         PolicyCmd::Provision(a) => provision(ctx, a).await,
         PolicyCmd::Revert(a) => revert(ctx, a).await,
@@ -690,6 +728,159 @@ async fn rules(ctx: &Context, args: &RulesArgs) -> Result<(), CliError> {
         with_impact: args.impact,
     };
     ctx.emit(&out, cache_label(c.hit, ctx.cache_mode), truncated, None)
+}
+
+/// One rule `policy search` found, with its ruleset.
+#[derive(Debug, Serialize)]
+pub struct SearchRow {
+    pub ruleset: String,
+    pub ruleset_href: String,
+    pub ruleset_enabled: bool,
+    /// The ruleset's scopes, one string each (`app=shop & env=prod`, `All`).
+    pub scopes: Vec<String>,
+    #[serde(flatten)]
+    pub rule: RuleView,
+}
+
+impl TableRows for Vec<SearchRow> {
+    fn headers(&self) -> Vec<&'static str> {
+        vec![
+            "ruleset",
+            "kind",
+            "enabled",
+            "scope",
+            "consumers",
+            "providers",
+            "services",
+        ]
+    }
+    fn rows(&self) -> Vec<Vec<String>> {
+        self.iter()
+            .map(|o| {
+                let r = &o.rule;
+                vec![
+                    o.ruleset.clone(),
+                    kind_text(r.kind),
+                    (r.enabled && o.ruleset_enabled).to_string(),
+                    o.scopes.join(" | "),
+                    names(r.consumers.iter().map(|a| a.name.as_str())),
+                    names(r.providers.iter().map(|a| a.name.as_str())),
+                    names(r.services.iter().map(|s| s.name.as_str())),
+                ]
+            })
+            .collect()
+    }
+    /// Plus the rule's href; lists one entry each.
+    fn full_headers(&self) -> Vec<&'static str> {
+        let mut h = self.headers();
+        h.push("href");
+        h
+    }
+    fn full_rows(&self) -> Vec<Vec<String>> {
+        self.iter()
+            .zip(self.rows())
+            .map(|(o, mut row)| {
+                let r = &o.rule;
+                row[3] = join_list(&o.scopes);
+                row[4] = join_list(r.consumers.iter().map(|a| &a.name));
+                row[5] = join_list(r.providers.iter().map(|a| &a.name));
+                row[6] = join_list(r.services.iter().map(|s| &s.name));
+                row.push(r.href.clone());
+                row
+            })
+            .collect()
+    }
+}
+
+/// The search the flags and terms make; exit 2 for a malformed one or none.
+fn search_filter(a: &SearchArgs) -> Result<pce::RuleFilter, CliError> {
+    use pce::RuleTerm;
+    use pce::rule_filter::PortTerm;
+    let mut terms = Vec::new();
+    for t in &a.terms {
+        terms.extend(pce::RuleFilter::parse(t).map_err(CliError::Args)?.terms);
+    }
+    for l in &a.labels {
+        match RuleTerm::parse(l).map_err(CliError::Args)? {
+            t @ RuleTerm::Label(_) => terms.push(t),
+            _ => return Err(CliError::Args(format!("--label {l:?}: expected key=value"))),
+        }
+    }
+    terms.extend(a.ip_lists.iter().map(|n| RuleTerm::IpList(n.clone())));
+    terms.extend(a.services.iter().map(|n| match PortTerm::parse(n) {
+        Some(p) => RuleTerm::Port(p),
+        None => RuleTerm::Service(n.clone()),
+    }));
+    terms.extend(a.workloads.iter().map(|n| RuleTerm::Workload(n.clone())));
+    terms.extend(a.href.iter().map(|h| RuleTerm::Href(h.clone())));
+    if a.disabled {
+        terms.push(RuleTerm::Disabled);
+    }
+    if a.deny {
+        terms.push(RuleTerm::Deny);
+    }
+    if terms.is_empty() {
+        return Err(CliError::Args(
+            "policy search needs a term: --label, --ip-list, --service, --workload, --href, --disabled, --deny, or a TUI search term".into(),
+        ));
+    }
+    Ok(pce::RuleFilter { terms })
+}
+
+/// `policy search`: the rules of every ruleset (one list read, cached;
+/// deny rules as the list carries them) that hold every term. Names the
+/// index does not know are exit 2. A `--workload` name costs one cached
+/// workloads read.
+async fn search(ctx: &Context, a: &SearchArgs) -> Result<(), CliError> {
+    let filter = search_filter(a)?;
+    let idx = ctx.pce.name_index(ctx.cache_mode).await?;
+    let unknown = filter.unknown(&idx);
+    if !unknown.is_empty() {
+        return Err(CliError::Args(unknown.join("; ")));
+    }
+    let c = ctx.pce.rule_sets(scope(a.active), ctx.cache_mode).await?;
+    let named = filter
+        .terms
+        .iter()
+        .any(|t| matches!(t, pce::RuleTerm::Workload(_)));
+    let (workloads, mut truncated) = if named {
+        let w = impact_workloads(ctx).await?;
+        (w.value, w.truncated)
+    } else {
+        (Vec::new(), false)
+    };
+    truncated |= c.truncated;
+    let mut rows = Vec::new();
+    for rs in &c.value {
+        let view = RuleSetView::from_rule_set(rs, &idx);
+        let hit = |r: pce::RuleRef| filter.matches(&r, &idx, &workloads);
+        let mut mine: Vec<RuleView> = rs
+            .rules
+            .iter()
+            .filter(|r| hit(pce::RuleRef::of_rule(r, rs)))
+            .map(|r| RuleView::from_rule(r, &idx))
+            .chain(
+                rs.deny_rules
+                    .iter()
+                    .filter(|d| hit(pce::RuleRef::of_deny(d, rs)))
+                    .map(|d| RuleView::from_deny(d, &idx)),
+            )
+            .collect();
+        // Evaluation order: override deny, allow, deny.
+        mine.sort_by_key(|r| match r.kind {
+            RuleKind::OverrideDeny => 0,
+            RuleKind::Allow => 1,
+            RuleKind::Deny => 2,
+        });
+        rows.extend(mine.into_iter().map(|rule| SearchRow {
+            ruleset: rs.name.clone(),
+            ruleset_href: rs.href.clone(),
+            ruleset_enabled: rs.enabled,
+            scopes: view.scopes.clone(),
+            rule,
+        }));
+    }
+    ctx.emit(&rows, cache_label(c.hit, ctx.cache_mode), truncated, None)
 }
 
 /// A ruleset's deny rules: inline, or from the per-ruleset endpoint when the

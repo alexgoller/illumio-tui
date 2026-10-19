@@ -24,8 +24,15 @@ pub(super) fn deny_fallback(model: &mut Model, mode: CacheMode) -> Vec<Cmd> {
 
 pub(super) fn policy_page(model: &Model) -> usize {
     let area = ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1);
+    let search = model.policy.search.is_some();
     crate::tui::ui::layout::chrome(area)
-        .map(|c| crate::tui::ui::screens::policy::table_rows(c.body, model.policy.pane))
+        .map(|c| {
+            if search {
+                crate::tui::ui::screens::policy::found_rows(c.body)
+            } else {
+                crate::tui::ui::screens::policy::table_rows(c.body, model.policy.pane)
+            }
+        })
         .unwrap_or(10)
         .max(1)
 }
@@ -43,6 +50,11 @@ pub(super) fn set_policy_scope(model: &mut Model, scope: PolicyScope) -> Vec<Cmd
 }
 
 pub(super) fn policy_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
+    if model.policy.search.is_some()
+        && let Some(cmds) = found_key(model, k)
+    {
+        return cmds;
+    }
     let page = policy_page(model);
     if !model.policy.is_searching() {
         // Explain's pending `Enter` (`E`) is dropped by `Esc` and `d`.
@@ -50,6 +62,10 @@ pub(super) fn policy_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             model.policy.jump = None;
         }
         match k.code {
+            KeyCode::Char('f') => {
+                open_rule_filter(model);
+                return Vec::new();
+            }
             KeyCode::Char('d') => {
                 if model.policy.loading {
                     model.status = StatusLine::info("already loading");
@@ -470,4 +486,196 @@ pub(super) fn show_policy(model: &mut Model, scope: PolicyScope) -> Vec<Cmd> {
         model.policy.clear();
     }
     switch(model, Screen::Policy)
+}
+
+/// `f` on Policy: the rule search editor, on the search in force (or the
+/// last one applied).
+pub(super) fn open_rule_filter(model: &mut Model) {
+    let p = &model.policy;
+    let text = p
+        .search
+        .as_ref()
+        .map_or_else(|| p.last_search.clone(), ToString::to_string);
+    let mut e = crate::tui::rule_search::RuleFilterEditor::new(&text);
+    rule_filter_unknown(model, &mut e);
+    model.overlay = Overlay::RuleFilter(e);
+}
+
+/// The editor's unknown names for its current text (none while it does
+/// not parse): once per edit, never per frame.
+fn rule_filter_unknown(model: &Model, e: &mut crate::tui::rule_search::RuleFilterEditor) {
+    e.unknown = match (e.parse(), model.index()) {
+        (Ok(f), Some(idx)) => f.unknown(idx),
+        _ => Vec::new(),
+    };
+}
+
+/// Keys of the rule search editor: typing, `Ctrl-N`/`Ctrl-P` completion,
+/// `Ctrl-U` clears, `Esc` closes (first puts a completed token back),
+/// `Enter` applies (an empty line clears the search). Never a request.
+pub(super) fn rule_filter_key(
+    model: &mut Model,
+    mut e: crate::tui::rule_search::RuleFilterEditor,
+    k: KeyEvent,
+) -> Vec<Cmd> {
+    let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+    if ctrl && matches!(k.code, KeyCode::Char('n' | 'p')) {
+        complete_field(model, &mut e, k.code == KeyCode::Char('n'));
+        rule_filter_unknown(model, &mut e);
+        model.overlay = Overlay::RuleFilter(e);
+        return Vec::new();
+    }
+    let esc = k.code == KeyCode::Esc;
+    if e.end_completion(esc) && esc {
+        model.overlay = Overlay::RuleFilter(e);
+        return Vec::new();
+    }
+    match k.code {
+        KeyCode::Esc => {
+            model.overlay = Overlay::None;
+            return Vec::new();
+        }
+        KeyCode::Backspace => e.pop(),
+        KeyCode::Char('u') if ctrl => e.clear(),
+        KeyCode::Char(c) => e.push(c),
+        KeyCode::Enter => match e.parse() {
+            Ok(f) => {
+                model.overlay = Overlay::None;
+                apply_rule_search(model, f);
+                return Vec::new();
+            }
+            Err(err) => e.error = Some(err),
+        },
+        _ => {}
+    }
+    rule_filter_unknown(model, &mut e);
+    model.overlay = Overlay::RuleFilter(e);
+    Vec::new()
+}
+
+/// A search from the editor: the flat list of matching rules from the
+/// loaded rulesets (an empty search clears it). Local, never a request.
+pub(super) fn apply_rule_search(model: &mut Model, f: pce::RuleFilter) {
+    if f.is_empty() {
+        clear_rule_search(model);
+        return;
+    }
+    let unknown = model.index().map(|i| f.unknown(i)).unwrap_or_default();
+    model.policy.last_search = f.to_string();
+    model.policy.search = Some(f);
+    model.policy.found.search_clear();
+    model.rebuild_rules();
+    model.policy.found.home();
+    let p = &model.policy;
+    let mut text = format!(
+        "{} {} · {}",
+        p.found.len(),
+        if p.found.len() == 1 { "rule" } else { "rules" },
+        p.last_search
+    );
+    if p.found_deny_unloaded > 0 {
+        text.push_str(&format!(
+            " · deny rules of {} not loaded",
+            counted_rulesets(p.found_deny_unloaded)
+        ));
+    }
+    model.status = if unknown.is_empty() {
+        StatusLine::info(text)
+    } else {
+        StatusLine::warn(format!("{text} · no match: {}", unknown.join(", ")))
+    };
+}
+
+/// `c` on the search list: back to rulesets | rules; `f` offers the
+/// search again.
+pub(super) fn clear_rule_search(model: &mut Model) {
+    let p = &mut model.policy;
+    p.search = None;
+    p.found.search_clear();
+    p.found.set_rows(Vec::new());
+    p.found_deny_unloaded = 0;
+    model.status = StatusLine::info("rule search cleared");
+}
+
+/// Keys while the search list shows: `None` for those the Policy screen
+/// handles as always (`d` `r` `p` `a` `i`). `Enter` opens the rule in its
+/// ruleset, `c` clears, `f` edits the search, `t` toggles the rule; the
+/// pane and edit keys say how to get to the panes.
+fn found_key(model: &mut Model, k: KeyEvent) -> Option<Vec<Cmd>> {
+    let page = policy_page(model);
+    if model.policy.found.is_searching() {
+        drive_table(&mut model.policy.found, k, page);
+        return Some(Vec::new());
+    }
+    match k.code {
+        KeyCode::Char('d' | 'r' | 'p' | 'a' | 'i') => return None,
+        KeyCode::Char('f') => open_rule_filter(model),
+        KeyCode::Char('c') => clear_rule_search(model),
+        KeyCode::Enter => return Some(open_found(model)),
+        KeyCode::Char('t') => {
+            if writes_refused(model) {
+                return Some(Vec::new());
+            }
+            if model.policy.scope == PolicyScope::Active {
+                model.status = StatusLine::warn("switch to draft to edit policy");
+                return Some(Vec::new());
+            }
+            let Some(r) = model.policy.found.selected_item() else {
+                model.status = StatusLine::warn("no row selected");
+                return Some(Vec::new());
+            };
+            let intent = rule_toggle(&r.href, r.kind, r.enabled);
+            return Some(begin_start(model, Start::Plan(intent)));
+        }
+        KeyCode::Tab | KeyCode::BackTab | KeyCode::Char('n' | 'N' | 'e' | 'x') => {
+            model.status =
+                StatusLine::info("Enter opens the rule in its ruleset · c clears the search");
+        }
+        _ => drive_table(&mut model.policy.found, k, page),
+    }
+    Some(Vec::new())
+}
+
+/// `Enter` on the search list: the rule's ruleset selected, its rules
+/// shown with the rule selected and focused; the search is put aside (`f`
+/// offers it again). Asks for the ruleset's deny rules when not loaded,
+/// as selecting it does.
+fn open_found(model: &mut Model) -> Vec<Cmd> {
+    let Some(row) = model.policy.found.selected_item().cloned() else {
+        return Vec::new();
+    };
+    let p = &mut model.policy;
+    p.search = None;
+    p.found.search_clear();
+    p.found.set_rows(Vec::new());
+    p.rulesets.select_where(|r| r.href == row.ruleset_href);
+    if p.selected_href().as_deref() != Some(row.ruleset_href.as_str()) {
+        // A table search hid it.
+        p.rulesets.search_clear();
+        p.rulesets.select_where(|r| r.href == row.ruleset_href);
+    }
+    model.rebuild_rules();
+    let p = &mut model.policy;
+    p.rules.search_clear();
+    p.rules.select_where(|r| r.href == row.href);
+    p.pane = PolicyPane::RuleSets;
+    let page = policy_page(model);
+    model.policy.rulesets.ensure_visible(page);
+    model.policy.pane = PolicyPane::Rules;
+    let page = policy_page(model);
+    model.policy.rules.ensure_visible(page);
+    model.status = StatusLine::info(format!(
+        "{} · f then Enter: back to the search",
+        row.ruleset
+    ));
+    deny_fallback(model, CacheMode::Use)
+}
+
+/// `1 ruleset`, `2 rulesets`.
+pub fn counted_rulesets(n: usize) -> String {
+    if n == 1 {
+        "1 ruleset".into()
+    } else {
+        format!("{n} rulesets")
+    }
 }

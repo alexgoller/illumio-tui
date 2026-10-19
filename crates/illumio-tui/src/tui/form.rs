@@ -70,6 +70,9 @@ pub enum FieldKind {
     /// The Workloads label filter: terms apart by spaces, each
     /// `[!]key=v1,v2` (`-`: no label); a term completes whole.
     WorkloadLabels,
+    /// The Policy rule search: terms apart by spaces, `key=v1,v2`, `ipl:`,
+    /// `svc:`, `wl:` names, `href:`, `disabled`, `deny`.
+    RuleFilter,
 }
 
 impl FieldKind {
@@ -81,7 +84,7 @@ impl FieldKind {
             }
             Self::Scope | Self::TrafficActors => &[',', '|'],
             Self::MarkSide => &[' ', ','],
-            Self::WorkloadLabels => &[' '],
+            Self::WorkloadLabels | Self::RuleFilter => &[' '],
             Self::Text
             | Self::LabelKey
             | Self::LabelValue
@@ -116,7 +119,9 @@ impl FieldKind {
             | Self::MarkAction
             | Self::MarkExpiry
             | Self::MarkScope => Vec::new(),
-            Self::WorkloadLabels => head.split_whitespace().map(String::from).collect(),
+            Self::WorkloadLabels | Self::RuleFilter => {
+                head.split_whitespace().map(String::from).collect()
+            }
             Self::MarkSide => head
                 .split([' ', ','])
                 .map(str::trim)
@@ -142,6 +147,7 @@ impl FieldKind {
                 | Self::TrafficActors
                 | Self::MarkSide
                 | Self::WorkloadLabels
+                | Self::RuleFilter
         )
     }
 
@@ -289,7 +295,7 @@ pub trait Completing {
 fn dives_into(candidate: &str) -> bool {
     let c = candidate.trim_start_matches('!');
     (c.ends_with('=') && c.find('=') == Some(c.len() - 1))
-        || matches!(c, "group:" | "iplist:" | "ipl:" | "wl:")
+        || matches!(c, "group:" | "iplist:" | "ipl:" | "wl:" | "svc:")
 }
 
 /// `head` with `token` after it; a space after a separator for readability.

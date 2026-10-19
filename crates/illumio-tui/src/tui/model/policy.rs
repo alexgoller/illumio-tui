@@ -243,6 +243,86 @@ pub fn rule_columns() -> Vec<Column<RuleRow>> {
     ]
 }
 
+/// A rule the Policy search (`f`) found, with its ruleset.
+#[derive(Debug, Clone)]
+pub struct FoundRow {
+    pub ruleset: String,
+    pub ruleset_href: String,
+    pub ruleset_enabled: bool,
+    /// The ruleset's scopes as its form shows them; `All` without any.
+    pub scopes: String,
+    pub view: RuleView,
+}
+
+impl std::ops::Deref for FoundRow {
+    type Target = RuleView;
+
+    fn deref(&self) -> &RuleView {
+        &self.view
+    }
+}
+
+fn found_col(title: &'static str, width: u16, cell: fn(&FoundRow) -> String) -> Column<FoundRow> {
+    Column {
+        title,
+        width,
+        cell,
+        key: |_| SortKey::Text(String::new()),
+        right: false,
+        hide_below: 0,
+        narrow: None,
+        narrow_width: 0,
+        full_title: None,
+        full: None,
+    }
+}
+
+/// The search's flat rule list: ruleset, on, kind, scope, consumers,
+/// providers, services.
+pub fn found_columns() -> Vec<Column<FoundRow>> {
+    vec![
+        Column {
+            key: |r| SortKey::Text(r.ruleset.clone()),
+            ..found_col("ruleset", 18, |r| r.ruleset.clone())
+        },
+        Column {
+            key: |r| SortKey::Num(u64::from(r.enabled)),
+            full: Some(|r| r.enabled.to_string()),
+            ..found_col("on", 3, |r| on_off(r.enabled))
+        },
+        Column {
+            key: |r| SortKey::Text(rule_kind_name(r.kind).to_string()),
+            hide_below: 100,
+            ..found_col("kind", 13, |r| rule_kind_name(r.kind).to_string())
+        },
+        Column {
+            key: |r| SortKey::Text(r.scopes.clone()),
+            ..found_col("scope", 0, |r| r.scopes.clone())
+        },
+        Column {
+            key: |r| SortKey::Text(actor_names(&r.consumers)),
+            full: Some(|r| join_list(r.consumers.iter().map(|a| &a.name))),
+            ..found_col("consumers", 0, |r| actor_names(&r.consumers))
+        },
+        Column {
+            key: |r| SortKey::Text(actor_names(&r.providers)),
+            full: Some(|r| join_list(r.providers.iter().map(|a| &a.name))),
+            ..found_col("providers", 0, |r| actor_names(&r.providers))
+        },
+        Column {
+            key: |r| SortKey::Text(service_names(&r.services)),
+            full: Some(|r| join_list(r.services.iter().map(|s| &s.name))),
+            ..found_col("services", 0, |r| service_names(&r.services))
+        },
+        Column {
+            key: |r| SortKey::Text(r.href.clone()),
+            // `:export` only: the terminal has no room for it.
+            hide_below: u16::MAX,
+            ..found_col("href", 0, |r| r.href.clone())
+        },
+    ]
+}
+
 #[derive(Debug)]
 pub struct PolicyState {
     pub scope: PolicyScope,
@@ -307,6 +387,17 @@ pub struct PolicyState {
     pub jump: Option<(String, String)>,
 
     pub auto: AutoRefresh,
+
+    /// `f`: the rule search in force. While set the screen shows `found`,
+    /// one flat list of the matching rules of every loaded ruleset.
+    pub search: Option<pce::RuleFilter>,
+    /// The search's text as last applied: `f` opens on it again after
+    /// `Enter` (opened a rule) or `c` (cleared).
+    pub last_search: String,
+    pub found: TableView<FoundRow>,
+    /// Rulesets whose deny rules are not loaded (no inline list, the
+    /// endpoint not fetched): the search could not look at them.
+    pub found_deny_unloaded: usize,
 }
 
 /// One loaded rule that names an IP list, for the IP lists tab.
@@ -316,4 +407,64 @@ pub struct IpListUse {
     pub kind: RuleKind,
     pub providers: Vec<Actor>,
     pub consumers: Vec<Actor>,
+}
+
+impl PolicyState {
+    /// The search's rows from the loaded rulesets (`found`), each
+    /// ruleset's rules in evaluation order; the selection stays on its
+    /// rule. Nothing without a search. `workloads` (those cached) name the
+    /// workload actors for `wl:`. No request.
+    pub fn rebuild_found(&mut self, idx: &NameIndex, workloads: &[Workload]) {
+        let Some(filter) = &self.search else {
+            self.found.set_rows(Vec::new());
+            self.found_deny_unloaded = 0;
+            return;
+        };
+        let keep = self.found.selected_item().map(|r| r.href.clone());
+        let mut rows = Vec::new();
+        let mut unloaded = 0;
+        for rs in &self.raw {
+            let deny: &[DenyRule] = if rs.deny_rules.is_empty() {
+                match self.fallback_deny.get(&rs.href) {
+                    Some(d) => d,
+                    None => {
+                        unloaded += 1;
+                        &[]
+                    }
+                }
+            } else {
+                &rs.deny_rules
+            };
+            let scopes = crate::tui::edit::scopes_text(&rs.scopes, idx);
+            let row = |view: RuleView| FoundRow {
+                ruleset: rs.name.clone(),
+                ruleset_href: rs.href.clone(),
+                ruleset_enabled: rs.enabled,
+                scopes: if scopes.is_empty() {
+                    "All".to_string()
+                } else {
+                    scopes.clone()
+                },
+                view,
+            };
+            let mut mine: Vec<FoundRow> = rs
+                .rules
+                .iter()
+                .filter(|r| filter.matches(&pce::RuleRef::of_rule(r, rs), idx, workloads))
+                .map(|r| row(RuleView::from_rule(r, idx)))
+                .chain(
+                    deny.iter()
+                        .filter(|d| filter.matches(&pce::RuleRef::of_deny(d, rs), idx, workloads))
+                        .map(|d| row(RuleView::from_deny(d, idx))),
+                )
+                .collect();
+            mine.sort_by_key(|r| rule_rank(r.kind));
+            rows.extend(mine);
+        }
+        self.found.set_rows(rows);
+        self.found_deny_unloaded = unloaded;
+        if let Some(href) = keep {
+            self.found.select_where(|r| r.href == href);
+        }
+    }
 }

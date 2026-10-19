@@ -312,6 +312,16 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
             ),
             key("N", "new deny rule in the selected ruleset (rules pane)"),
             key("t", "enable ↔ disable the rule or ruleset (draft, writes)"),
+            key("f / c", "rule search across rulesets (local) · clear it"),
+            more(
+                "",
+                "app=shop,crm ipl:NAME svc:NAME|443/tcp wl:NAME href:TEXT",
+            ),
+            more("", "disabled deny · space: all of · Ctrl-N completes"),
+            more(
+                "Enter",
+                "search list: open the rule in its ruleset (f: back)",
+            ),
             key("i", "rule impact: load the workloads once (1 request)"),
         ],
     },

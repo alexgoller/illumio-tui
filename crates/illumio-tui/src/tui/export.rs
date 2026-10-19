@@ -36,6 +36,7 @@ pub fn current_table(model: &Model) -> Result<Csv, String> {
                 (_, None) => pairs(&t.groups),
             }
         }
+        Screen::Policy if model.policy.search.is_some() => model.policy.found.export(),
         Screen::Policy => match model.policy.pane {
             PolicyPane::RuleSets => model.policy.rulesets.export(),
             PolicyPane::Rules => model.policy.rules.export(),

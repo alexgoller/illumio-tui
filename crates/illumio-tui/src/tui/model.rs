@@ -206,6 +206,8 @@ pub enum Overlay {
     FilterEditor(FilterEditor),
     /// `f` on Workloads: the label filter, one line.
     LabelFilter(LabelFilterEditor),
+    /// `f` on Policy: the rule search, one line.
+    RuleFilter(crate::tui::rule_search::RuleFilterEditor),
     Confirm {
         reason: String,
         action: PendingAction,
@@ -302,6 +304,7 @@ impl PartialEq for Overlay {
             | (Overlay::LabelKeys(a), Overlay::LabelKeys(b)) => a == b,
             (Overlay::FilterEditor(a), Overlay::FilterEditor(b)) => a == b,
             (Overlay::LabelFilter(a), Overlay::LabelFilter(b)) => a == b,
+            (Overlay::RuleFilter(a), Overlay::RuleFilter(b)) => a == b,
             (Overlay::AppPicker(a), Overlay::AppPicker(b)) => a == b,
             (Overlay::Form(a), Overlay::Form(b)) => a == b,
             (Overlay::MarkForm(a), Overlay::MarkForm(b)) => a == b,
@@ -447,11 +450,18 @@ impl PolicyState {
             form_drafts_stale: false,
             jump: None,
             auto: AutoRefresh::new(min_refresh),
+            search: None,
+            last_search: String::new(),
+            found: TableView::new(found_columns()),
+            found_deny_unloaded: 0,
         }
     }
 
     /// Whether the focused pane's table is capturing keys for a search.
     pub fn is_searching(&self) -> bool {
+        if self.search.is_some() {
+            return self.found.is_searching();
+        }
         match self.pane {
             PolicyPane::RuleSets => self.rulesets.is_searching(),
             PolicyPane::Rules => self.rules.is_searching(),
@@ -477,6 +487,7 @@ impl PolicyState {
     pub fn clear(&mut self) {
         self.rulesets.set_rows(Vec::new());
         self.rules.set_rows(Vec::new());
+        self.found.set_rows(Vec::new());
         self.raw.clear();
         self.fallback_deny.clear();
         self.deny_requested.clear();
@@ -491,6 +502,7 @@ impl PolicyState {
     /// order within each group is the PCE's. `workloads` (the cache, when
     /// loaded) fills the `P/C` column.
     pub fn rebuild_rules(&mut self, idx: &NameIndex, workloads: Option<(&[Workload], bool)>) {
+        self.rebuild_found(idx, workloads.map_or(&[], |(w, _)| w));
         let Some(href) = self.selected_href() else {
             self.rules.set_rows(Vec::new());
             return;

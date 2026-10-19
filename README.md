@@ -529,6 +529,16 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   counted (virtual services, a side resolved as `virtual_services`), and a rule's confirm
   overlay shows the same for the rule about to be written. Impact uses the ruleset's scopes, unscoped consumers, label groups (with
   their sub-groups), exclusions, `all` and workload actors; IP lists are sized, never expanded.
+  `f` searches rules across every loaded ruleset (draft or active, no request): `app=shop,crm`
+  (a label in a scope, consumer or provider, directly or through a label group; a comma is any
+  of), `ipl:Corp`, `svc:PostgreSQL` or `svc:443/tcp` (inline ports and service objects that
+  hold it), `wl:web01` (a workload actor, named from the cached workloads), `href:sec_rules/9`,
+  `disabled`, `deny`; terms apart by spaces all hold, `Ctrl-N` completes, `Ctrl-U` clears. The
+  screen then shows one flat list (`Search · app=shop` in its title: ruleset, on, kind, scope,
+  consumers, providers, services; `:export` adds the href); `Enter` opens the rule in its
+  ruleset (`f` then `Enter` comes back), `t` toggles it, `c` clears the search. Deny rules
+  count where loaded (inline, or fetched for a selected ruleset); the meta says how many
+  rulesets' were not.
 - **Objects**: four tabs, labels, label groups, services and IP lists; `Tab` / `Shift-Tab`
   next / previous tab, `Enter` detail. The IP lists tab shows name, size (addresses after
   exclusions: `65.5K`, `16.8M` for a /8; `any` only for an included `0.0.0.0/0` or `::/0`;
@@ -631,6 +641,8 @@ the API call and byte counters at all times.
     illumio-tui policy rules "Web-DB"
     illumio-tui policy rules "Web-DB" --impact --json
     illumio-tui policy rules impact /orgs/1/sec_policy/draft/rule_sets/7/sec_rules/3
+    illumio-tui policy search --label app=shop,crm --service 443/tcp --table
+    illumio-tui policy search ipl:Corp deny --csv > corp-deny.csv
     illumio-tui iplists --table
     illumio-tui policy pending
     illumio-tui policy pending --diff --table
@@ -707,7 +719,7 @@ a `diff` column, one diff line per line of the cell). `traffic groups --by ...` 
 counts and their names. The meta line always goes to
 stderr, so a redirect holds only CSV. `--csv` sends the same requests as the table;
 `workloads`, `labels`, `label-groups`, `services`, `iplists`, `events`, `policy rulesets`,
-`policy rules`, `policy pending`, `traffic query`/`groups`/`mesh`, `app` (with `--section`),
+`policy rules`, `policy search`, `policy pending`, `traffic query`/`groups`/`mesh`, `app` (with `--section`),
 `gen` and `profile list` take it.
 
 `workloads` shows the effective enforcement: `unmanaged` for a workload without a VEN, which
@@ -893,6 +905,19 @@ index) and `truncated`. `policy rules impact <rule-href>` prints one rule the sa
 through the cache; `meta.truncated` includes it. `iplists` gives every list a `size`: `v4` and
 `v6` address counts as strings, `unbounded` (the included `0.0.0.0/0` or `::/0`, else `null`),
 `ranges` and `fqdns`.
+
+`policy search` finds rules across every ruleset (draft, or `--active`) by what they
+reference, from one rulesets read and the name index (cached): `--label key=value[,value]`
+(any of the values, in a scope, a consumer or a provider, directly or through a label group
+and its sub-groups), `--ip-list NAME`, `--service NAME` or `--service 443/tcp` (`443` alone:
+tcp or udp; an inline port or range that holds it, or a service object with such an entry,
+`All Services` included), `--workload NAME` (hostname or name, one cached workloads read; or
+the href's id), `--href TEXT`, `--disabled` (the rule or its ruleset is off) and `--deny`;
+every flag repeats where it makes sense and all must hold. The TUI's search terms work as
+arguments too (`policy search app=shop ipl:Corp deny`). Rows carry the ruleset, kind,
+`enabled`, the ruleset's scopes, consumers, providers and services (CSV adds the rule's
+`href`), each ruleset's rules in evaluation order. Deny rules are searched as the ruleset list
+carries them (no per-ruleset reads). A name the index does not know is exit 2.
 
 ### Readiness
 

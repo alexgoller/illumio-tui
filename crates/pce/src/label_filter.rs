@@ -344,7 +344,7 @@ fn unquote_whole(s: &str) -> &str {
 }
 
 /// `"x"` → `x` with `\"` and `\\` unescaped; a stray quote is an error.
-fn strip_quotes(s: &str) -> Result<String, String> {
+pub(crate) fn strip_quotes(s: &str) -> Result<String, String> {
     let Some(body) = s.strip_prefix('"') else {
         return if s.contains('"') {
             Err(format!("unbalanced quote in {s:?}"))
@@ -370,7 +370,10 @@ fn strip_quotes(s: &str) -> Result<String, String> {
 
 /// `s` split where `sep` matches outside double quotes; an unclosed quote
 /// is an error.
-fn split_outside_quotes(s: &str, sep: impl Fn(char) -> bool) -> Result<Vec<&str>, String> {
+pub(crate) fn split_outside_quotes(
+    s: &str,
+    sep: impl Fn(char) -> bool,
+) -> Result<Vec<&str>, String> {
     let mut out = Vec::new();
     let mut start = 0;
     let mut quoted = false;

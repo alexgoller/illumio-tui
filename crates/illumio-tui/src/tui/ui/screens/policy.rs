@@ -38,6 +38,11 @@ pub fn table_rows(body: Rect, pane: PolicyPane) -> usize {
     area.height.saturating_sub(3) as usize
 }
 
+/// Rows of data visible in the search list (minus border and header).
+pub fn found_rows(body: Rect) -> usize {
+    body.height.saturating_sub(3) as usize
+}
+
 pub fn render_screen(model: &Model, f: &mut Frame, body: Rect) {
     let t = &model.theme;
     let p = &model.policy;
@@ -51,6 +56,10 @@ pub fn render_screen(model: &Model, f: &mut Frame, body: Rect) {
     };
     let mut meta = format!("{} · {freshness}", p.scope.segment());
     meta.push_str(&p.auto.meta(Instant::now()));
+    if let Some(search) = &p.search {
+        render_found(model, search, &meta, f, body);
+        return;
+    }
     let sort_meta = header_meta(&p.rulesets);
     if !sort_meta.is_empty() {
         meta = format!("{sort_meta} · {meta}");
@@ -104,6 +113,119 @@ pub fn render_screen(model: &Model, f: &mut Frame, body: Rect) {
             RuleKind::OverrideDeny => Style::new().fg(theme.bad),
         },
     );
+}
+
+/// The search's flat rule list over the whole body: `Search · <terms>`,
+/// the count and what was not searched in the meta. A disabled rule, or a
+/// rule of a disabled ruleset, is dimmed; deny rules keep their colours.
+fn render_found(model: &Model, search: &pce::RuleFilter, meta: &str, f: &mut Frame, body: Rect) {
+    let t = &model.theme;
+    let p = &model.policy;
+    let n = p.found.len();
+    let mut meta = format!("{n} {} · {meta}", if n == 1 { "rule" } else { "rules" });
+    // Narrower, the title (the search) keeps the room; the status said it.
+    if p.found_deny_unloaded > 0 && body.width >= STACK_BELOW {
+        meta = format!(
+            "deny rules of {} not loaded · {meta}",
+            crate::tui::update::counted_rulesets(p.found_deny_unloaded)
+        );
+    }
+    let sort_meta = header_meta(&p.found);
+    if !sort_meta.is_empty() {
+        meta = format!("{sort_meta} · {meta}");
+    }
+    let room = (body.width as usize).saturating_sub(7 + meta.chars().count());
+    let title = cut(&format!("Search · {search}"), room);
+    let theme = t.clone();
+    render(
+        f,
+        body,
+        &p.found,
+        t,
+        panel(&title, &meta, t, true),
+        &move |r| match r.kind {
+            _ if !r.enabled || !r.ruleset_enabled => theme.dim_style(),
+            RuleKind::Allow => Style::default(),
+            RuleKind::Deny => Style::new().fg(theme.warn),
+            RuleKind::OverrideDeny => Style::new().fg(theme.bad),
+        },
+    );
+}
+
+/// `text` cut with `…` to `width` characters (at least the first one).
+fn cut(text: &str, width: usize) -> String {
+    if text.chars().count() <= width {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(width.saturating_sub(1).max(1)).collect();
+    out.push('…');
+    out
+}
+
+/// `f` on Policy: the rule search on one line, the completion strip under
+/// it while completing, then the parse error, the unknown names (dim:
+/// they match nothing) or the syntax.
+pub fn render_rule_filter(
+    model: &Model,
+    e: &crate::tui::rule_search::RuleFilterEditor,
+    f: &mut Frame,
+    area: Rect,
+) {
+    use crate::tui::ui::layout::centered;
+    use crate::tui::ui::screens::workloads::plain;
+    use crate::tui::ui::widgets::overlay::completion_line;
+    use ratatui::text::{Line, Span};
+    use ratatui::widgets::{Clear, Paragraph};
+    let t = &model.theme;
+    let strip = e.completion_strip();
+    let r = centered(area, 76, 7 + u16::from(strip.is_some()));
+    f.render_widget(Clear, r);
+    let block = panel(
+        "Rule search",
+        "Ctrl-N complete · Enter apply · Esc cancel",
+        t,
+        true,
+    );
+    let inner = (r.width as usize).saturating_sub(2);
+    let label = "rules ";
+    let room = inner.saturating_sub(2 + label.len() + 1);
+    let shown: String = {
+        let chars: Vec<char> = e.value.chars().collect();
+        let skip = chars.len().saturating_sub(room);
+        chars[skip..].iter().collect()
+    };
+    let mut lines = vec![Line::from(vec![
+        Span::styled("▸ ", Style::new().fg(t.accent)),
+        Span::styled(label, t.header_style()),
+        Span::styled(format!("{shown}▏"), Style::new().fg(t.fg).bg(t.selected_bg)),
+    ])];
+    if let Some(strip) = strip.as_ref() {
+        let width = inner.saturating_sub(2 + label.len());
+        lines.push(completion_line(strip, 2 + label.len(), width, t));
+    }
+    lines.push(Line::from(""));
+    let note = match (&e.error, e.parse()) {
+        (Some(err), _) => Line::from(Span::styled(plain(err), Style::new().fg(t.bad))),
+        (None, Err(err)) => Line::from(Span::styled(plain(&err), t.dim_style())),
+        (None, Ok(_)) if !e.unknown.is_empty() => Line::from(Span::styled(
+            format!("no match: {}", e.unknown.join(", ")),
+            t.dim_style(),
+        )),
+        (None, Ok(_)) => Line::from(Span::styled(
+            "app=shop,crm ipl:NAME svc:NAME|443/tcp wl:NAME href:TEXT disabled deny",
+            t.dim_style(),
+        )),
+    };
+    lines.push(note);
+    lines.push(Line::from(Span::styled(
+        "comma: any of · space: all of · labels count in scope and via groups",
+        t.dim_style(),
+    )));
+    lines.push(Line::from(Span::styled(
+        "local: no request · Enter on a rule opens it · c clears",
+        t.dim_style(),
+    )));
+    f.render_widget(Paragraph::new(lines).block(block).style(t.base()), r);
 }
 
 /// `Rules · app=shop, env=prod | app=shop, env=staging`: the selected

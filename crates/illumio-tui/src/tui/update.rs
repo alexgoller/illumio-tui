@@ -52,7 +52,7 @@ mod writes;
 
 pub use cmdline::on_command;
 pub use events::event_detail_lines;
-pub use policy::REVERT_WORD;
+pub use policy::{REVERT_WORD, counted_rulesets};
 pub(crate) use workloads::apply_workload_labels;
 
 use app_overlay::*;
@@ -1150,6 +1150,9 @@ mod focus_tests;
 mod label_filter_tests;
 #[cfg(test)]
 mod rule_form_ruleset_tests;
+/// `f` on Policy: the rule search across rulesets (issue #51).
+#[cfg(test)]
+mod rule_search_tests;
 #[cfg(test)]
 mod section_order_tests;
 #[cfg(test)]

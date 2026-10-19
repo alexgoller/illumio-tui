@@ -27,6 +27,7 @@ pub mod marks;
 pub mod models;
 pub mod readiness;
 pub mod resolve;
+pub mod rule_filter;
 pub mod traffic;
 pub mod write;
 
@@ -44,6 +45,7 @@ pub use resolve::{
     NameIndex, ResolvedActor, ResolvedLabel, ResolvedService, RuleKind, RuleSetView, RuleView,
     describe_actor, describe_ingress_service,
 };
+pub use rule_filter::{RuleFilter, RuleRef, RuleTerm};
 
 pub use auth::Credentials;
 pub use cache::TtlCache;

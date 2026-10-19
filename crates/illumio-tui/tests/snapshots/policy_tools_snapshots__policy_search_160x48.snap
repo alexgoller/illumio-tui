@@ -1,0 +1,52 @@
+---
+source: crates/illumio-tui/tests/policy_tools_snapshots.rs
+expression: "render_to_string(&m, 160, 48)"
+---
+ illumio-tui pce.example · org 5 ●                                                                                                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭ Search · env=prod ──────────────────────────────────────────────────────────────────────────── deny rules of 1 ruleset not loaded · 5 rules · draft · 5s ago ╮
+│  ruleset            on  kind          scope                         consumers                     providers                     services                     │
+│▸ Shop-Prod          ✓   override_deny app=shop, env=prod            All workloads                 role=db                       22/tcp                       │
+│  Shop-Prod          ✓   allow         app=shop, env=prod            role=web                      role=db                       PostgreSQL                   │
+│  Shop-Prod          ✓   allow         app=shop, env=prod            ipl:Corp                      role=web                      443/tcp, 8000-8099/tcp       │
+│  Shop-Prod          ✓   deny          app=shop, env=prod            ipl:Any (0.0.0.0/0 and ::/0)  All workloads                 23/tcp                       │
+│  Global-Infra       ✓   allow         All                           group:All prod envs           All workloads                 All Services                 │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ready                                                                                       d scope  p pending  Enter detail  Tab pane  i impact  : cmd  ? help
