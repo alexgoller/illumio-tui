@@ -457,12 +457,17 @@ pub fn newest_record(
 }
 
 /// The rollback record in `dir` whose `rollback_of` names `record`, if
-/// any (the newest).
+/// any (the newest). Matched by file name: `rollback_of` keeps the path as
+/// it was given (`--record ./x.json`), and record names are unique.
 pub fn rolled_back_by(dir: &Path, record: &Path) -> io::Result<Option<PathBuf>> {
-    let want = record.display().to_string();
+    let want = record.file_name();
     let found = all_records(dir, None)?
         .into_iter()
-        .filter(|(_, _, r)| r.rollback_of.as_deref() == Some(want.as_str()))
+        .filter(|(_, _, r)| {
+            r.rollback_of
+                .as_deref()
+                .is_some_and(|o| want.is_some() && Path::new(o).file_name() == want)
+        })
         .max_by(|a, b| a.0.cmp(&b.0));
     Ok(found.map(|(_, p, _)| p))
 }

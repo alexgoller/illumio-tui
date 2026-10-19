@@ -457,7 +457,13 @@ fn records_by_origin_rollbacks_found_rewrites_and_the_probe() {
     let mut rb = record();
     rb.rollback_of = Some(mine.display().to_string());
     let rbp = write_record(&d, &rb, t("2026-10-21T10:00:00.100Z")).unwrap();
-    assert_eq!(rolled_back_by(&d, &mine).unwrap(), Some(rbp));
+    assert_eq!(rolled_back_by(&d, &mine).unwrap(), Some(rbp.clone()));
+    // `--record ./name.json`: the path as typed still names the record.
+    let mut relative = record();
+    let name = mine.file_name().unwrap().to_string_lossy().to_string();
+    relative.rollback_of = Some(format!("./{name}"));
+    let rel = write_record(&d, &relative, t("2026-10-21T11:00:00.100Z")).unwrap();
+    assert_eq!(rolled_back_by(&d, &mine).unwrap(), Some(rel));
     // The record written before the send, then its results.
     let pending = write_record(&d, &record().pending(), t("2026-10-22T10:00:00.100Z")).unwrap();
     rewrite_record(&pending, &record()).unwrap();
