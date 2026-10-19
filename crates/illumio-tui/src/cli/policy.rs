@@ -667,7 +667,7 @@ async fn rules(ctx: &Context, args: &RulesArgs) -> Result<(), CliError> {
 /// A ruleset's deny rules: inline, or from the per-ruleset endpoint when the
 /// inline list is empty (older PCEs; others have no such endpoint, a 404
 /// there means none).
-async fn deny_rules_of(ctx: &Context, rs: &RuleSet) -> Result<Vec<DenyRule>, CliError> {
+pub(crate) async fn deny_rules_of(ctx: &Context, rs: &RuleSet) -> Result<Vec<DenyRule>, CliError> {
     if !rs.deny_rules.is_empty() {
         return Ok(rs.deny_rules.clone());
     }

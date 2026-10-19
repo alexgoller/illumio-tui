@@ -52,6 +52,12 @@ impl wiremock::Respond for Ticking {
 /// rule. `rules` names `ruleset` for the object lists, the rulesets and
 /// their deny rules.
 async fn mount(server: &MockServer, rules: bool) {
+    mount_with(server, rules, false).await;
+}
+
+/// `mount`, its per-ruleset deny rules endpoint answering 404 when `gone`
+/// (a PCE without it).
+async fn mount_with(server: &MockServer, rules: bool, gone: bool) {
     for (p, body) in [
         (
             "/api/v2/orgs/5/labels",
@@ -86,11 +92,15 @@ async fn mount(server: &MockServer, rules: bool) {
     }
     Mock::given(method("GET"))
         .and(path(format!("/api/v2{RS101}/deny_rules")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
-            "href": format!("{RS101}/deny_rules/9"), "enabled": true, "override": true,
-            "providers": [{"actors": "ams"}], "consumers": [{"actors": "ams"}],
-            "ingress_services": [{"proto": 1}]
-        }])))
+        .respond_with(if gone {
+            ResponseTemplate::new(404)
+        } else {
+            ResponseTemplate::new(200).set_body_json(json!([{
+                "href": format!("{RS101}/deny_rules/9"), "enabled": true, "override": true,
+                "providers": [{"actors": "ams"}], "consumers": [{"actors": "ams"}],
+                "ingress_services": [{"proto": 1}]
+            }]))
+        })
         .mount(server)
         .await;
     Mock::given(method("POST"))
@@ -179,9 +189,7 @@ fn help_states_the_cost() {
 #[test]
 fn a_missing_or_wrong_argument_exits_2_before_any_request() {
     for args in [
-        vec![
-            "traffic", "explain", "--src", "role=web", "--port", "443", "--proto", "tcp",
-        ],
+        vec!["traffic", "explain", "--port", "443", "--proto", "tcp"],
         vec![
             "traffic", "explain", "--src", "role=web", "--dst", "role=db", "--proto", "tcp",
         ],
@@ -281,4 +289,39 @@ async fn no_rule_named_loads_no_rulesets_and_the_table_says_so() {
             .any(|s| s.contains("rule_sets")),
         "no rule to resolve: no ruleset request"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_404_on_the_deny_rules_leaves_that_rule_an_href_and_the_command_succeeds() {
+    let server = MockServer::start().await;
+    mount_with(&server, true, true).await;
+    let home = tempfile::tempdir().unwrap();
+    let out = json_out(cmd(&server, home.path()).args(ARGS).assert().success());
+    let r = &out["data"]["flows"][2]["rules"][0];
+    assert_eq!(r["resolved"], false);
+    assert_eq!(r["kind"], "override_deny", "its side field's kind");
+    assert_eq!(r["href"], format!("{RS101}/deny_rules/9"));
+    assert_eq!(out["data"]["flows"][3]["rules"][0]["resolved"], true);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn one_side_alone_is_enough() {
+    let server = MockServer::start().await;
+    mount(&server, true).await;
+    let home = tempfile::tempdir().unwrap();
+    let out = json_out(
+        cmd(&server, home.path())
+            .args([
+                "traffic", "explain", "--dst", "role=db", "--port", "443", "--proto", "tcp",
+            ])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"]["flows"].as_array().unwrap().len(), 4);
+    let help = Command::cargo_bin("illumio-tui")
+        .unwrap()
+        .args(["traffic", "explain", "--help"])
+        .assert()
+        .success();
+    assert!(String::from_utf8_lossy(&help.get_output().stdout).contains("wider query"));
 }

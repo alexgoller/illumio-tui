@@ -195,24 +195,25 @@ pub struct Flow {
 }
 
 impl Flow {
-    /// The deny rules some PCE versions list beside `rules`
-    /// (`deny_rules`, `override_deny_rules`, `enforcement_boundaries`), as
-    /// hrefs. Read leniently: entries without an href are skipped.
-    pub fn deny_rule_hrefs(&self) -> Vec<String> {
+    /// The deny rules some PCE versions list beside `rules`, as hrefs with
+    /// the kind their field says: `override_deny_rules` override denies,
+    /// `deny_rules` and `enforcement_boundaries` denies. Read leniently:
+    /// entries without an href are skipped.
+    pub fn side_rules(&self) -> Vec<(String, crate::explain::MatchKind)> {
+        use crate::explain::MatchKind;
         let href = |v: &Value| match v {
             Value::String(s) => Some(s.clone()),
             Value::Object(m) => m.get("href").and_then(Value::as_str).map(str::to_string),
             _ => None,
         };
         [
-            "deny_rules",
-            "override_deny_rules",
-            "enforcement_boundaries",
+            ("deny_rules", MatchKind::Deny),
+            ("override_deny_rules", MatchKind::OverrideDeny),
+            ("enforcement_boundaries", MatchKind::Deny),
         ]
         .iter()
-        .filter_map(|k| self.extra.get(*k)?.as_array())
-        .flatten()
-        .filter_map(href)
+        .filter_map(|(k, kind)| Some((self.extra.get(*k)?.as_array()?, *kind)))
+        .flat_map(|(items, kind)| items.iter().filter_map(href).map(move |h| (h, kind)))
         .collect()
     }
 }

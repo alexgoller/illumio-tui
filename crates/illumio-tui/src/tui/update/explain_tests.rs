@@ -1,7 +1,7 @@
 //! `E`: the Explain overlay's keys (issue #50).
 use super::*;
 use crate::tui::app_view::AppPanel;
-use crate::tui::explain::{DstEnforcement, ExplainView};
+use crate::tui::explain::{DstEnforcement, ExplainView, PolicySource};
 use crate::tui::model::{Model, Overlay, PendingAction, PolicyPane, TrafficView, WritesState};
 use crate::tui::test_support::{model_with_flows, with_policy, with_workloads};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -70,7 +70,7 @@ fn e_explains_the_selected_flow_with_no_request() {
     assert_eq!(update(&mut m, key('E')), Vec::<Cmd>::new());
     let v = view(&m);
     assert_eq!(v.flow.dst.display_name(), "fqdn-1.example");
-    assert!(v.policy_loaded);
+    assert_eq!(v.policy, PolicySource::Draft);
     assert_eq!(v.explanation.verdict, "allowed by 1 rule (draft)");
     let r = &v.explanation.rules[0];
     assert_eq!((r.kind, r.resolved), (MatchKind::Allow, true));
@@ -160,7 +160,7 @@ fn enter_jumps_to_the_rule_in_the_loaded_draft_policy() {
 fn enter_before_the_policy_is_loaded_selects_the_rule_when_it_lands() {
     let mut m = evaluated(model_on("fqdn-1.example"));
     update(&mut m, key('E'));
-    assert!(!view(&m).policy_loaded);
+    assert_eq!(view(&m).policy, PolicySource::NotLoaded);
     let cmds = update(&mut m, kc(KeyCode::Enter));
     assert_eq!(
         cmds,
@@ -329,4 +329,150 @@ fn j_and_k_move_between_rules() {
     assert!(m.status.text.contains("essential"));
     update(&mut m, key('k'));
     assert_eq!(view(&m).selected, 0);
+}
+
+#[test]
+fn an_unresolved_override_deny_from_its_side_field_stays_one_and_offers_no_w() {
+    let mut m = evaluated(with_policy(model_on("host-1.example")));
+    let od = "/orgs/5/sec_policy/draft/rule_sets/999/deny_rules/1";
+    let d = m.traffic.data.as_mut().unwrap();
+    for f in &mut d.flows {
+        f.rules = vec![od.into()];
+        f.side_rules = vec![(od.into(), MatchKind::OverrideDeny)];
+    }
+    m.traffic.rebuild_views();
+    select(&mut m, "host-1.example");
+    m.writes = WritesState::on();
+    update(&mut m, key('E'));
+    let r = &view(&m).explanation.rules[0];
+    assert_eq!((r.kind, r.resolved), (MatchKind::OverrideDeny, false));
+    assert!(!view(&m).offers_rule());
+    update(&mut m, key('w'));
+    assert!(matches!(m.overlay, Overlay::Explain(_)), "no form");
+    assert!(m.status.text.contains("override deny"), "{}", m.status.text);
+}
+
+#[test]
+fn d_refuses_a_flow_that_is_not_in_the_result_on_screen() {
+    let mut m = model_on("host-1.example");
+    let mut other = m.traffic.selected_flow().unwrap().flow.as_ref().clone();
+    other.port = Some(9999);
+    let v = explain_view(&m, other, true);
+    assert!(!v.on_screen);
+    m.overlay = Overlay::Explain(Box::new(v));
+    assert_eq!(update(&mut m, key('D')), Vec::<Cmd>::new());
+    assert!(matches!(m.overlay, Overlay::Explain(_)), "{:?}", m.overlay);
+    assert!(m.status.text.contains("not in the result on screen"));
+}
+
+#[test]
+fn n_on_the_draft_confirm_goes_back_to_explain_and_y_back_to_the_app_overlay() {
+    let mut m = with_policy(with_workloads(model_on("host-1.example")));
+    update(&mut m, key('E'));
+    update(&mut m, key('D'));
+    assert!(matches!(m.overlay, Overlay::Confirm { .. }));
+    update(&mut m, kc(KeyCode::Esc));
+    assert!(matches!(m.overlay, Overlay::Explain(_)), "{:?}", m.overlay);
+    // From the app overlay: y runs it and goes back there.
+    update(&mut m, kc(KeyCode::Esc));
+    update(&mut m, key('A'));
+    assert_eq!(m.overlay, Overlay::App);
+    let flow = m.traffic.selected_flow().unwrap().flow.as_ref().clone();
+    m.overlay = Overlay::Explain(Box::new(explain_view(&m, flow, true)));
+    update(&mut m, key('D'));
+    let cmds = update(&mut m, key('y'));
+    assert!(
+        matches!(cmds.as_slice(), [Cmd::RunDraft { .. }]),
+        "{cmds:?}"
+    );
+    assert_eq!(m.overlay, Overlay::App);
+    assert!(m.explain_back.is_none());
+}
+
+#[test]
+fn a_pending_jump_is_dropped_by_d_leaving_policy_and_a_failed_load() {
+    let rs: Vec<pce::models::RuleSet> =
+        serde_json::from_str(include_str!("../../../../../fixtures/rule_sets.json")).unwrap();
+    let landed = |rs: &Vec<pce::models::RuleSet>| Msg::RuleSetsLoaded {
+        scope: PolicyScope::Draft,
+        result: Ok((rs.clone(), 0, false)),
+    };
+    // Leaving the Policy screen.
+    let mut m = evaluated(model_on("fqdn-1.example"));
+    update(&mut m, key('E'));
+    update(&mut m, kc(KeyCode::Enter));
+    assert!(m.policy.jump.is_some());
+    update(&mut m, key('1'));
+    assert_eq!(m.policy.jump, None);
+    update(&mut m, landed(&rs));
+    assert_ne!(
+        m.policy.rules.selected_item().map(|r| r.href.as_str()),
+        Some(ALLOW),
+        "no jump after leaving"
+    );
+    // `d` on Policy (a scope change), even while the load runs.
+    let mut m = evaluated(model_on("fqdn-1.example"));
+    update(&mut m, key('E'));
+    update(&mut m, kc(KeyCode::Enter));
+    update(&mut m, key('d'));
+    assert_eq!(m.policy.jump, None);
+    update(&mut m, landed(&rs));
+    assert_ne!(
+        m.policy.rules.selected_item().map(|r| r.href.as_str()),
+        Some(ALLOW)
+    );
+    // A failed load.
+    let mut m = evaluated(model_on("fqdn-1.example"));
+    update(&mut m, key('E'));
+    update(&mut m, kc(KeyCode::Enter));
+    update(
+        &mut m,
+        Msg::RuleSetsLoaded {
+            scope: PolicyScope::Draft,
+            result: Err("boom".into()),
+        },
+    );
+    assert_eq!(m.policy.jump, None);
+}
+
+#[test]
+fn deny_rules_of_another_ruleset_leave_the_jump_waiting() {
+    let mut m = evaluated(with_policy(model_on("host-1.example")));
+    let deny = "/orgs/5/sec_policy/draft/rule_sets/101/deny_rules/5";
+    m.policy.jump = Some(("/orgs/5/sec_policy/draft/rule_sets/101".into(), deny.into()));
+    m.screen = Screen::Policy;
+    update(
+        &mut m,
+        Msg::DenyRulesLoaded {
+            href: "/orgs/5/sec_policy/draft/rule_sets/555".into(),
+            result: Ok(Vec::new()),
+        },
+    );
+    assert!(m.policy.jump.is_some(), "not its ruleset");
+    update(
+        &mut m,
+        Msg::DenyRulesLoaded {
+            href: "/orgs/5/sec_policy/draft/rule_sets/101".into(),
+            result: Err("boom".into()),
+        },
+    );
+    assert_eq!(m.policy.jump, None, "its ruleset failed");
+}
+
+#[test]
+fn with_only_the_active_policy_loaded_rules_resolve_through_it() {
+    let mut m = evaluated(with_policy(model_on("fqdn-1.example")));
+    m.policy.scope = PolicyScope::Active;
+    update(&mut m, key('E'));
+    let v = view(&m);
+    assert_eq!(v.policy, PolicySource::Active);
+    assert!(v.explanation.rules[0].resolved);
+    assert!(
+        v.rows().iter().any(|r| matches!(
+            r,
+            crate::tui::explain::Row::Rule { detail, .. } if detail.starts_with("ruleset Shop-Prod (active)")
+        )),
+        "{:?}",
+        v.rows()
+    );
 }

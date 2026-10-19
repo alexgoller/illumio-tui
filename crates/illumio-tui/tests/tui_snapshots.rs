@@ -3140,3 +3140,27 @@ fn explain_survives_every_size() {
         }
     }
 }
+
+#[test]
+fn explain_scrolls_to_the_selected_rule_and_keeps_its_keys_in_a_short_terminal() {
+    let mut m = with_policy(model_with_flows());
+    let d = m.traffic.data.as_mut().expect("flows");
+    for f in &mut d.flows {
+        f.draft_policy_decision = Some(pce::models::DraftDecision::Allowed);
+        f.rules = (1..=8)
+            .map(|i| format!("/orgs/5/sec_policy/draft/rule_sets/999/sec_rules/{i}"))
+            .collect();
+    }
+    m.traffic.rebuild_views();
+    bulk_key(&mut m, KeyCodeAlias::Char('E'));
+    for _ in 0..7 {
+        bulk_key(&mut m, KeyCodeAlias::Char('j'));
+    }
+    let out = render_to_string(&m, 80, 18);
+    assert!(out.contains("sec_rules/8"), "the selected rule:\n{out}");
+    assert!(
+        !out.contains("sec_rules/1 "),
+        "scrolled past the first:\n{out}"
+    );
+    assert!(out.contains("w rule · Esc"), "the key line:\n{out}");
+}

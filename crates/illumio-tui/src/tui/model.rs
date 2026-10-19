@@ -707,6 +707,8 @@ pub struct Model {
     /// The open form (or the plan and confirm it led to) was opened from
     /// the app overlay: closing it returns there, not to the screen.
     pub form_from_app: bool,
+    /// Explain's view while its `D` confirm is open: `n`/`Esc` go back to it.
+    pub explain_back: Option<Box<crate::tui::explain::ExplainView>>,
     /// The last app overlay's sequence number: answers of older ones are dropped.
     pub app_seq: u64,
     /// The generator's state while it is open (and after, until the next
@@ -807,6 +809,7 @@ impl Model {
             events,
             app_view: None,
             form_from_app: false,
+            explain_back: None,
             app_seq: 0,
             gen_view: None,
             gen_from_app: false,

@@ -531,7 +531,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         ));
                     }
                     // Explain's `Enter` waiting for them: its rule selected.
-                    apply_policy_jump(model, false);
+                    apply_policy_jump(model, None);
                     // Only the selected ruleset's deny rules are fetched on demand;
                     // an explicit `r` bypasses the cache for them as well.
                     let mode = if std::mem::take(&mut model.policy.bypass_deny) {
@@ -554,6 +554,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 Err(e) => {
                     // The explicit refresh failed: its bypass must not leak into a later reload.
                     model.policy.bypass_deny = false;
+                    model.policy.jump = None;
                     let tripped = model.policy.auto.take_tick_failure();
                     fail(model, "rulesets", &e, tripped);
                     refresh_app_policy(model, scope, Err(&e));
@@ -567,7 +568,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::DenyRulesLoaded { href, result } => {
             match result {
                 Ok(d) => {
-                    model.policy.fallback_deny.insert(href, d);
+                    model.policy.fallback_deny.insert(href.clone(), d);
                     if let Some(idx) = model.index().cloned() {
                         model
                             .policy
@@ -575,13 +576,14 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     }
                     model.objects.ip_lists.recount(&model.policy);
                     model.recount_labels();
-                    apply_policy_jump(model, true);
+                    apply_policy_jump(model, Some(&href));
                 }
                 Err(e) if e.contains("not found") => {
-                    model.policy.fallback_deny.insert(href, Vec::new());
-                    apply_policy_jump(model, true);
+                    model.policy.fallback_deny.insert(href.clone(), Vec::new());
+                    apply_policy_jump(model, Some(&href));
                 }
                 Err(e) => {
+                    drop_policy_jump(model, &href);
                     model.policy.deny_requested.remove(&href); // allow a retry on reselect
                     model.status = StatusLine::warn(format!("deny rules: {e}"));
                 }

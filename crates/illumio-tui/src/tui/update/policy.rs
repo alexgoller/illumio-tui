@@ -30,24 +30,36 @@ pub(super) fn policy_page(model: &Model) -> usize {
         .max(1)
 }
 
+/// Shows the `scope` policy: what was loaded is forgotten, its rulesets
+/// load (through the cache). `d`, and Explain's `Enter` from active.
+pub(super) fn set_policy_scope(model: &mut Model, scope: PolicyScope) -> Vec<Cmd> {
+    model.policy.scope = scope;
+    model.policy.form_drafts_loading = false;
+    model.policy.form_drafts_stale = false;
+    model.policy.jump = None;
+    model.policy.clear();
+    model.objects.ip_lists.recount(&model.policy);
+    load_rule_sets(model, CacheMode::Use)
+}
+
 pub(super) fn policy_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     let page = policy_page(model);
     if !model.policy.is_searching() {
+        // Explain's pending `Enter` (`E`) is dropped by `Esc` and `d`.
+        if matches!(k.code, KeyCode::Esc | KeyCode::Char('d')) {
+            model.policy.jump = None;
+        }
         match k.code {
             KeyCode::Char('d') => {
                 if model.policy.loading {
                     model.status = StatusLine::info("already loading");
                     return Vec::new();
                 }
-                model.policy.scope = match model.policy.scope {
+                let other = match model.policy.scope {
                     PolicyScope::Draft => PolicyScope::Active,
                     PolicyScope::Active => PolicyScope::Draft,
                 };
-                model.policy.form_drafts_loading = false;
-                model.policy.form_drafts_stale = false;
-                model.policy.clear();
-                model.objects.ip_lists.recount(&model.policy);
-                return load_rule_sets(model, CacheMode::Use);
+                return set_policy_scope(model, other);
             }
             KeyCode::Char('r') => {
                 if model.policy.loading {

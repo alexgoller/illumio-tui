@@ -22,6 +22,7 @@ pub fn render(model: &Model, v: &ExplainView, f: &mut Frame, area: Rect) {
     let width = area.width.saturating_sub(4).clamp(20, 96);
     let inner = usize::from(width.saturating_sub(2)).max(1);
     let mut lines: Vec<Line> = Vec::new();
+    let mut selected_line = None;
     for row in v.rows() {
         match row {
             Row::Field(label, text) => {
@@ -48,6 +49,9 @@ pub fn render(model: &Model, v: &ExplainView, f: &mut Frame, area: Rect) {
                     MatchKind::Unknown => t.dim_style(),
                 };
                 let head_style = if selected { t.selected_style() } else { kind };
+                if selected {
+                    selected_line = Some(lines.len());
+                }
                 lines.push(Line::from(vec![
                     Span::styled(
                         format!("{:<LABEL$}", if index == 0 { "rules" } else { "" }),
@@ -67,18 +71,51 @@ pub fn render(model: &Model, v: &ExplainView, f: &mut Frame, area: Rect) {
             ])),
         }
     }
-    lines.push(Line::from(Span::styled(EXPLAIN_KEYS, t.dim_style())));
-    // Rows once wrapped, plus the borders.
-    let rows: usize = lines.iter().map(|l| l.width().div_ceil(inner).max(1)).sum();
-    let height = u16::try_from(rows + 2).unwrap_or(u16::MAX);
+    let keys = Line::from(Span::styled(EXPLAIN_KEYS, t.dim_style()));
+    // Rows once wrapped; the box fits the area, the key line stays at its
+    // foot and the body scrolls to keep the selected rule in view.
+    let heights: Vec<usize> = lines
+        .iter()
+        .map(|l| l.width().div_ceil(inner).max(1))
+        .collect();
+    let key_rows = keys.width().div_ceil(inner).max(1);
+    let total = heights.iter().sum::<usize>() + key_rows + 2;
+    let height = u16::try_from(total).unwrap_or(u16::MAX).min(area.height);
     let r = centered(area, width, height);
     f.render_widget(Clear, r);
+    let block = panel("explain", "no request", t, true);
+    let inside = block.inner(r);
+    f.render_widget(block.style(t.base()), r);
+    let key_h = u16::try_from(key_rows)
+        .unwrap_or(u16::MAX)
+        .min(inside.height);
+    let body = Rect {
+        height: inside.height - key_h,
+        ..inside
+    };
+    let foot = Rect {
+        y: inside.y + body.height,
+        height: key_h,
+        ..inside
+    };
+    let view = usize::from(body.height);
+    let scroll = selected_line.map_or(0, |i| {
+        let top: usize = heights[..i].iter().sum();
+        let bottom = top + heights[i] + heights.get(i + 1).copied().unwrap_or(0);
+        bottom.saturating_sub(view).min(top)
+    });
     f.render_widget(
         Paragraph::new(lines)
-            .block(panel("explain", "no request", t, true))
+            .style(t.base())
+            .wrap(Wrap { trim: false })
+            .scroll((u16::try_from(scroll).unwrap_or(u16::MAX), 0)),
+        body,
+    );
+    f.render_widget(
+        Paragraph::new(keys)
             .style(t.base())
             .wrap(Wrap { trim: false }),
-        r,
+        foot,
     );
 }
 

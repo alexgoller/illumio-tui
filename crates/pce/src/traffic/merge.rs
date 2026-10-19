@@ -102,6 +102,7 @@ mod tests {
             first_detected: Some("2026-10-13T00:00:00Z".into()),
             last_detected: Some("2026-10-13T11:00:00Z".into()),
             rules: vec!["/orgs/1/rule_sets/1/sec_rules/1".into()],
+            side_rules: Vec::new(),
             bytes_in: None,
             bytes_out: Some(100),
         }

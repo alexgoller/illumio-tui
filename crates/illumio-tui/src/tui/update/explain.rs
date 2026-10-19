@@ -4,23 +4,28 @@
 //! asks first (the existing draft evaluation), `Enter` lets the Policy
 //! screen load what it lacks, as switching to it always does.
 use super::*;
-use crate::tui::explain::{DstEnforcement, ExplainView};
+use crate::tui::explain::{DstEnforcement, ExplainView, PolicySource};
 use pce::explain::{MatchKind, canon_href};
 use pce::traffic::ResolvedFlow;
 
 /// The Explain view of `flow` from what is loaded: the draft rulesets (and
-/// the deny rules fetched for them), the name index, the workloads.
+/// the deny rules fetched for them), else the active ones the Policy screen
+/// shows, the name index, the workloads.
 pub(super) fn explain_view(model: &Model, flow: ResolvedFlow, from_app: bool) -> ExplainView {
-    let sets = model.draft_rulesets();
-    let none = std::collections::HashMap::new();
-    let extra = if model.policy.scope == PolicyScope::Draft {
-        &model.policy.fallback_deny
-    } else {
-        &none
+    let p = &model.policy;
+    let (sets, policy) = match model.draft_rulesets() {
+        Some(s) => (s, PolicySource::Draft),
+        None if p.loaded_at.is_some() => (p.raw.as_slice(), PolicySource::Active),
+        None => (&[][..], PolicySource::NotLoaded),
     };
-    let empty = pce::NameIndex::default();
-    let idx = model.index().map_or(&empty, |i| i.as_ref());
-    let explanation = pce::explain::explain(&flow, sets.unwrap_or_default(), extra, idx);
+    // The fetched deny rules are those of the scope the Policy screen shows.
+    let none = std::collections::HashMap::new();
+    let same_scope = match policy {
+        PolicySource::Draft => p.scope == PolicyScope::Draft,
+        PolicySource::Active => true,
+        PolicySource::NotLoaded => false,
+    };
+    let extra = if same_scope { &p.fallback_deny } else { &none };
     let dst = match &flow.dst.workload_href {
         None => DstEnforcement::NotWorkload,
         Some(href) => model
@@ -32,13 +37,24 @@ pub(super) fn explain_view(model: &Model, flow: ResolvedFlow, from_app: bool) ->
                 DstEnforcement::Mode(m.to_string())
             }),
     };
+    let mode = match &dst {
+        DstEnforcement::Mode(m) => Some(m.as_str()),
+        _ => None,
+    };
+    let empty = pce::NameIndex::default();
+    let idx = model.index().map_or(&empty, |i| i.as_ref());
+    let explanation = pce::explain::explain(&flow, sets, extra, idx, mode);
+    // `D` evaluates the result on screen: a flow of another one (the app
+    // overlay's unfocused result) is not in it.
+    let on_screen = model.traffic.loaded_flows().contains(&flow);
     ExplainView {
         flow,
         explanation,
-        policy_loaded: sets.is_some(),
+        policy,
         dst,
         selected: 0,
         from_app,
+        on_screen,
     }
 }
 
@@ -100,8 +116,9 @@ pub(super) fn explain_key(model: &mut Model) -> Vec<Cmd> {
     open(model, flow, false)
 }
 
-/// `E` on an app overlay peer row: the first loaded flow behind it (the
-/// status says how many there are).
+/// `E` on an app overlay peer row: the first loaded flow behind it that no
+/// mark squelches (unless `M` shows them; the status says how many there
+/// are).
 pub(super) fn explain_app_key(model: &mut Model) -> Vec<Cmd> {
     let Some(v) = model.app_view.as_ref() else {
         return Vec::new();
@@ -111,8 +128,15 @@ pub(super) fn explain_app_key(model: &mut Model) -> Vec<Cmd> {
         return Vec::new();
     };
     let focus = &v.focus;
-    let flows: Vec<&ResolvedFlow> = model
-        .traffic
+    let t = &model.traffic;
+    let marks = t.active_marks().filter(|_| !t.show_squelched);
+    let squelched = |f: &ResolvedFlow| {
+        marks
+            .as_ref()
+            .and_then(|a| a.classify(f))
+            .is_some_and(|h| h.action == pce::marks::Action::Squelch)
+    };
+    let flows: Vec<&ResolvedFlow> = t
         .flows_for(focus)
         .iter()
         .filter(|f| {
@@ -126,6 +150,8 @@ pub(super) fn explain_app_key(model: &mut Model) -> Vec<Cmd> {
                 && pce::traffic::group_key(peer_ep, &focus.keys) == p.peer
         })
         .collect();
+    let shown: Vec<&ResolvedFlow> = flows.iter().copied().filter(|f| !squelched(f)).collect();
+    let flows = if shown.is_empty() { flows } else { shown };
     let Some(first) = flows.first().map(|f| (*f).clone()) else {
         model.status = StatusLine::warn("no loaded flow behind this row");
         return Vec::new();
@@ -183,6 +209,12 @@ fn explain_draft(model: &mut Model, v: &ExplainView) -> Vec<Cmd> {
             StatusLine::info("already evaluated against the draft (D on Traffic clears)");
         return Vec::new();
     }
+    if !v.on_screen {
+        model.status = StatusLine::warn(
+            "this flow is not in the result on screen (the app's own query): D there cannot evaluate it",
+        );
+        return Vec::new();
+    }
     if t.is_draft_running() {
         model.status = StatusLine::info("draft re-evaluation running: E again once it is in");
         return Vec::new();
@@ -219,6 +251,7 @@ fn explain_draft(model: &mut Model, v: &ExplainView) -> Vec<Cmd> {
             target.hrefs,
         ),
     };
+    model.explain_back = Some(Box::new(v.clone()));
     model.overlay = Overlay::Confirm {
         reason,
         action: PendingAction::RunDraft {
@@ -280,15 +313,11 @@ fn jump_to_rule(model: &mut Model, v: Box<ExplainView>) -> Vec<Cmd> {
             return Vec::new();
         }
         model.overlay = Overlay::None;
-        // As `d` on the Policy screen: the draft rulesets (cached: none sent).
-        model.policy.scope = PolicyScope::Draft;
-        model.policy.form_drafts_loading = false;
-        model.policy.form_drafts_stale = false;
-        model.policy.clear();
-        model.objects.ip_lists.recount(&model.policy);
-        model.policy.jump = Some((rs, rule));
         model.screen = Screen::Policy;
-        return load_rule_sets(model, CacheMode::Use);
+        // As `d` on the Policy screen: the draft rulesets (cached: none sent).
+        let cmds = set_policy_scope(model, PolicyScope::Draft);
+        model.policy.jump = Some((rs, rule));
+        return cmds;
     }
     model.overlay = Overlay::None;
     if model.policy.loaded_at.is_some() {
@@ -363,16 +392,35 @@ pub(super) fn select_rule(model: &mut Model, rs: &str, rule: &str) -> Jump {
     Jump::NoRule
 }
 
-/// Explain's pending `Enter`, once the draft rulesets (`deny: false`) or
-/// a ruleset's deny rules (`deny: true`) land: selects the rule, once.
-pub(super) fn apply_policy_jump(model: &mut Model, deny: bool) {
+/// Explain's pending `Enter`, once the draft rulesets (`deny: None`) or
+/// the deny rules of ruleset `deny` land: selects the rule, once. Deny
+/// rules of another ruleset leave it waiting.
+pub(super) fn apply_policy_jump(model: &mut Model, deny: Option<&str>) {
     if model.policy.scope != PolicyScope::Draft {
+        model.policy.jump = None;
         return;
     }
     let Some((rs, rule)) = model.policy.jump.take() else {
         return;
     };
-    if select_rule(model, &rs, &rule) == Jump::WaitDeny && !deny {
+    if deny.is_some_and(|h| canon_href(h) != canon_href(&rs)) {
         model.policy.jump = Some((rs, rule));
+        return;
+    }
+    if select_rule(model, &rs, &rule) == Jump::WaitDeny && deny.is_none() {
+        model.policy.jump = Some((rs, rule));
+    }
+}
+
+/// A failed deny-rule load of the ruleset a pending jump waits for: the
+/// jump is dropped.
+pub(super) fn drop_policy_jump(model: &mut Model, ruleset: &str) {
+    if model
+        .policy
+        .jump
+        .as_ref()
+        .is_some_and(|(rs, _)| canon_href(rs) == canon_href(ruleset))
+    {
+        model.policy.jump = None;
     }
 }

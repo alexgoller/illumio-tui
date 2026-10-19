@@ -118,28 +118,35 @@ pub fn ruleset_of(href: &str) -> Option<String> {
 /// Resolves a flow's rule entries through `sets` (the draft rulesets) and
 /// `extra_deny` (deny rules fetched per ruleset, by ruleset href, for
 /// rulesets that carry none inline). An entry the policy does not hold
-/// keeps its href, its kind read from the href.
+/// keeps its href, its kind from `hints` (the field the flow listed it in:
+/// `override_deny_rules` is an override deny), else read from the href;
+/// a resolved rule's own kind wins.
 pub fn resolve_rules(
     rules: &[String],
+    hints: &[(String, MatchKind)],
     sets: &[RuleSet],
     extra_deny: &HashMap<String, Vec<DenyRule>>,
     idx: &NameIndex,
 ) -> Vec<MatchedRule> {
     rules
         .iter()
-        .map(|href| resolve_one(href, sets, extra_deny, idx))
+        .map(|href| {
+            let hint = hints.iter().find(|(h, _)| h == href).map(|(_, k)| *k);
+            resolve_one(href, hint, sets, extra_deny, idx)
+        })
         .collect()
 }
 
 fn resolve_one(
     href: &str,
+    hint: Option<MatchKind>,
     sets: &[RuleSet],
     extra_deny: &HashMap<String, Vec<DenyRule>>,
     idx: &NameIndex,
 ) -> MatchedRule {
     let unresolved = MatchedRule {
         href: href.to_string(),
-        kind: MatchKind::of_href(href),
+        kind: hint.unwrap_or_else(|| MatchKind::of_href(href)),
         resolved: false,
         ruleset: None,
         ruleset_href: ruleset_of(href),
@@ -205,16 +212,33 @@ pub struct Explanation {
     pub verdict: String,
 }
 
-/// Explains `flow` through the loaded draft rulesets. No request.
+/// Explains `flow` through the loaded draft rulesets. `dst_mode` is the
+/// destination workload's effective enforcement when known (`full`,
+/// `selective`, …). No request.
 pub fn explain(
     flow: &ResolvedFlow,
     sets: &[RuleSet],
     extra_deny: &HashMap<String, Vec<DenyRule>>,
     idx: &NameIndex,
+    dst_mode: Option<&str>,
 ) -> Explanation {
     let evaluated = flow.draft_policy_decision.is_some();
-    let rules = resolve_rules(&flow.rules, sets, extra_deny, idx);
-    let verdict = verdict(evaluated, &rules);
+    let rules = resolve_rules(&flow.rules, &flow.side_rules, sets, extra_deny, idx);
+    let dst = Dst {
+        name: flow.dst.display_name(),
+        mode: if flow.dst.is_workload() {
+            dst_mode.map(str::to_string)
+        } else {
+            Some(NOT_WORKLOAD.to_string())
+        },
+    };
+    let verdict = verdict(
+        evaluated,
+        &rules,
+        flow.policy_decision,
+        flow.draft_policy_decision.as_ref(),
+        &dst,
+    );
     Explanation {
         reported: flow.policy_decision,
         draft: flow.draft_policy_decision.clone(),
@@ -232,8 +256,39 @@ fn plural(n: usize, one: &str) -> String {
     }
 }
 
+/// A destination that is no workload (an IP or FQDN): nothing enforces there.
+const NOT_WORKLOAD: &str = "not a workload";
+
+/// The destination as the verdict names it: its name and, when known,
+/// its effective enforcement.
+pub struct Dst {
+    pub name: String,
+    pub mode: Option<String>,
+}
+
+/// Why a flow no rule allows still passes: `fqdn-1.example is not a
+/// workload`, `db01 is in visibility only`; `None` when it is enforced.
+fn passes_because(dst: &Dst) -> Option<String> {
+    let how = match dst.mode.as_deref()? {
+        "full" => return None,
+        "visibility_only" => "in visibility only",
+        "selective" => "in selective enforcement",
+        "idle" => "idle",
+        "unmanaged" => "unmanaged",
+        m => m,
+    };
+    Some(format!("{} is {how}", dst.name))
+}
+
 /// The verdict line: an override deny beats an allow, which beats a deny.
-pub fn verdict(evaluated: bool, rules: &[MatchedRule]) -> String {
+/// With no rule, the decisions say why the flow passes or not.
+pub fn verdict(
+    evaluated: bool,
+    rules: &[MatchedRule],
+    reported: PolicyDecision,
+    draft: Option<&DraftDecision>,
+    dst: &Dst,
+) -> String {
     if !evaluated && rules.is_empty() {
         return "not evaluated against the draft yet: the PCE names the rules only after it"
             .to_string();
@@ -259,7 +314,24 @@ pub fn verdict(evaluated: bool, rules: &[MatchedRule]) -> String {
     } else if essential > 0 {
         "allowed by an essential service rule (built into the PCE)".to_string()
     } else if rules.is_empty() {
-        "no rule allows this flow".to_string()
+        let draft_allows = match draft {
+            Some(d) => d.class() == PolicyDecision::Allowed,
+            None => reported == PolicyDecision::Allowed,
+        };
+        match passes_because(dst) {
+            Some(why) if draft_allows => format!(
+                "no rule allows this flow: it passes only because {why}, not fully enforced"
+            ),
+            None if draft_allows && dst.mode.is_none() && reported == PolicyDecision::Allowed => {
+                "no rule allows this flow: it passes now only because the destination is not fully enforced"
+                    .to_string()
+            }
+            _ if draft_allows => "allowed in the draft; the PCE names no rule".to_string(),
+            _ if reported == PolicyDecision::Allowed => {
+                "no rule allows this flow in the draft (allowed now)".to_string()
+            }
+            _ => "no rule allows this flow".to_string(),
+        }
     } else {
         format!(
             "{} the PCE names, none of a kind this knows",
@@ -322,7 +394,7 @@ mod tests {
 
     #[test]
     fn an_allow_rule_resolves_with_its_ruleset() {
-        let r = resolve_rules(&[ALLOW.into()], &sets(), &HashMap::new(), &index());
+        let r = resolve_rules(&[ALLOW.into()], &[], &sets(), &HashMap::new(), &index());
         let r = &r[0];
         assert!(r.resolved);
         assert_eq!(r.kind, MatchKind::Allow);
@@ -344,6 +416,7 @@ mod tests {
         let active = DENY.replace("/draft/", "/active/");
         let r = resolve_rules(
             &[active.clone(), OVERRIDE.into()],
+            &[],
             &sets(),
             &HashMap::new(),
             &index(),
@@ -358,7 +431,7 @@ mod tests {
     fn deny_rules_fetched_per_ruleset_resolve_too() {
         let mut s = sets();
         let fetched = std::mem::take(&mut s[0].deny_rules);
-        let r = resolve_rules(&[DENY.into()], &s, &HashMap::new(), &index());
+        let r = resolve_rules(&[DENY.into()], &[], &s, &HashMap::new(), &index());
         assert!(!r[0].resolved, "not inline, not fetched");
         assert_eq!(
             r[0].ruleset.as_deref(),
@@ -366,14 +439,14 @@ mod tests {
             "its ruleset is known"
         );
         let extra = HashMap::from([(s[0].href.clone(), fetched)]);
-        let r = resolve_rules(&[DENY.into()], &s, &extra, &index());
+        let r = resolve_rules(&[DENY.into()], &[], &s, &extra, &index());
         assert!(r[0].resolved);
     }
 
     #[test]
     fn unknown_hrefs_stay_hrefs() {
         let gone = "/orgs/5/sec_policy/draft/rule_sets/999/sec_rules/9";
-        let r = resolve_rules(&[gone.into()], &sets(), &HashMap::new(), &index());
+        let r = resolve_rules(&[gone.into()], &[], &sets(), &HashMap::new(), &index());
         assert!(!r[0].resolved);
         assert_eq!(r[0].kind, MatchKind::Allow);
         assert_eq!(r[0].ruleset, None);
@@ -383,6 +456,7 @@ mod tests {
         );
         let e = resolve_rules(
             &["essential:dhcp".into()],
+            &[],
             &sets(),
             &HashMap::new(),
             &index(),
@@ -395,6 +469,7 @@ mod tests {
     fn a_disabled_ruleset_disables_its_rules() {
         let r = resolve_rules(
             &["/orgs/5/sec_policy/draft/rule_sets/101/sec_rules/3".into()],
+            &[],
             &sets(),
             &HashMap::new(),
             &index(),
@@ -404,11 +479,15 @@ mod tests {
 
     #[test]
     fn verdicts() {
-        let e = |rules: &[&str], d| explain(&flow(rules, d), &sets(), &HashMap::new(), &index());
+        let e =
+            |rules: &[&str], d| explain(&flow(rules, d), &sets(), &HashMap::new(), &index(), None);
         assert!(e(&[], None).verdict.starts_with("not evaluated"));
         assert!(!e(&[], None).evaluated);
         let blocked = Some(DraftDecision::Blocked);
-        assert_eq!(e(&[], blocked.clone()).verdict, "no rule allows this flow");
+        assert_eq!(
+            e(&[], blocked.clone()).verdict,
+            "no rule allows this flow in the draft (allowed now)"
+        );
         assert_eq!(
             e(&[ALLOW], Some(DraftDecision::Allowed)).verdict,
             "allowed by 1 rule (draft)"
@@ -430,6 +509,85 @@ mod tests {
             e(&["essential:dhcp"], Some(DraftDecision::Allowed))
                 .verdict
                 .contains("essential")
+        );
+    }
+
+    #[test]
+    fn a_side_field_gives_an_unresolved_href_its_kind_and_a_resolved_rule_wins() {
+        let gone = "/orgs/5/sec_policy/draft/rule_sets/999/deny_rules/1";
+        let hints = [
+            (gone.to_string(), MatchKind::OverrideDeny),
+            (DENY.to_string(), MatchKind::OverrideDeny),
+        ];
+        let r = resolve_rules(
+            &[gone.into(), DENY.into()],
+            &hints,
+            &sets(),
+            &HashMap::new(),
+            &index(),
+        );
+        assert_eq!((r[0].kind, r[0].resolved), (MatchKind::OverrideDeny, false));
+        assert_eq!(
+            (r[1].kind, r[1].resolved),
+            (MatchKind::Deny, true),
+            "the rule's own kind"
+        );
+        assert_eq!(
+            verdict(
+                true,
+                &r[..1],
+                PolicyDecision::Blocked,
+                Some(&DraftDecision::Blocked),
+                &dst(None)
+            ),
+            "blocked by 1 override deny rule (draft)"
+        );
+    }
+
+    fn dst(mode: Option<&str>) -> Dst {
+        Dst {
+            name: "db01".into(),
+            mode: mode.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn with_no_rule_the_decisions_say_why_a_flow_passes() {
+        let allowed = Some(&DraftDecision::Allowed);
+        let v = |reported, draft, d: &Dst| verdict(true, &[], reported, draft, d);
+        assert_eq!(
+            v(PolicyDecision::Allowed, allowed, &dst(Some("selective"))),
+            "no rule allows this flow: it passes only because db01 is in selective enforcement, not fully enforced"
+        );
+        assert_eq!(
+            v(PolicyDecision::Allowed, allowed, &dst(None)),
+            "no rule allows this flow: it passes now only because the destination is not fully enforced"
+        );
+        assert_eq!(
+            v(PolicyDecision::Blocked, allowed, &dst(Some("full"))),
+            "allowed in the draft; the PCE names no rule"
+        );
+        assert_eq!(
+            v(PolicyDecision::Blocked, allowed, &dst(None)),
+            "allowed in the draft; the PCE names no rule"
+        );
+        assert_eq!(
+            v(
+                PolicyDecision::Blocked,
+                Some(&DraftDecision::Blocked),
+                &dst(Some("full"))
+            ),
+            "no rule allows this flow"
+        );
+        // An IP or FQDN destination: `explain` says it is no workload.
+        let mut f = flow(&[], allowed.cloned());
+        f.dst.workload_href = None;
+        f.dst.hostname = Some("fqdn-1.example".into());
+        let e = explain(&f, &sets(), &HashMap::new(), &index(), Some("full"));
+        assert!(
+            e.verdict.contains("fqdn-1.example is not a workload"),
+            "{}",
+            e.verdict
         );
     }
 }

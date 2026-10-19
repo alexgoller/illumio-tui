@@ -94,6 +94,10 @@ pub struct ResolvedFlow {
     /// (or `essential:<name>`) of `rules`, then those of the deny rules
     /// some PCEs list beside it (`override_deny_rules`, …).
     pub rules: Vec<String>,
+    /// The entries of `rules` that came from a deny field beside it, with
+    /// the kind that field gives (an unresolved override deny stays one).
+    #[serde(skip)]
+    pub side_rules: Vec<(String, crate::explain::MatchKind)>,
     /// Bytes the destination received (`dst_bi`), when the PCE reported it.
     pub bytes_in: Option<u64>,
     /// Bytes the destination sent (`dst_bo`), when the PCE reported it.
@@ -229,13 +233,14 @@ pub fn resolve_flows(flows: &[Flow], idx: &NameIndex) -> Vec<ResolvedFlow> {
                 .and_then(|t| t.last_detected.clone()),
             rules: {
                 let mut rules: Vec<String> = f.rules.iter().filter_map(|r| r.text()).collect();
-                for h in f.deny_rule_hrefs() {
+                for (h, _) in f.side_rules() {
                     if !rules.contains(&h) {
                         rules.push(h);
                     }
                 }
                 rules
             },
+            side_rules: f.side_rules(),
             bytes_in: f.dst_bi,
             bytes_out: f.dst_bo,
         })
@@ -453,6 +458,11 @@ pub(crate) mod tests {
                 "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/2".to_string(),
                 deny.to_string()
             ]
+        );
+        assert_eq!(
+            r[3].side_rules,
+            vec![(deny.to_string(), crate::explain::MatchKind::OverrideDeny)],
+            "the field's kind is kept"
         );
         assert!(r[0].rules.is_empty());
     }

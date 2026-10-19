@@ -388,7 +388,9 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   potentially blocked), and `w` drafts the allow rule. Explain sends nothing: before the draft
   evaluation it says so, and `D` there asks first (the same PUT, polls and download as `D`).
   `Enter` opens the selected rule on the Policy screen in the draft, its ruleset and rule
-  selected (a policy or deny rules still to load are selected when they land); `Esc` goes back.
+  selected (a policy or deny rules still to load are selected when they land; `Esc`, `d` or
+  leaving Policy drops that); `Esc` goes back. With only the active policy loaded, rules
+  resolve through it, marked `(active)`.
   `m` **marks** the row under the cursor (Flows, App-to-app pairs and sections, Mesh, Blocked,
   the app overlay's Inbound and Outbound): `squelch` hides known noise, `reviewed` and
   `accept-blocked` dim what you have judged, `critical`, `important` and `revisit` flag what
@@ -559,7 +561,11 @@ one PUT `update_rules`, polls, one download; it changes no policy), then the dra
 them inline (one GET each). JSON: `data.flows[]` with `reported`, `draft`, `verdict` and
 `rules[]` (`kind` allow, deny, override_deny or essential, `ruleset`, `scopes`, `consumers`,
 `providers`, `services`, `enabled`; `resolved: false` keeps an href the policy does not hold);
-`meta.cost` says what it requested.
+`meta.cost` says what it requested. `--src` or `--dst` alone is allowed: a wider query.
+With no rule, the verdict says why a flow still passes (a destination that is not fully
+enforced, or no workload). Since this feature, `traffic query` JSON `rules` and the flow
+detail's rules line also list the deny hrefs some PCEs put beside `rules`
+(`override_deny_rules`, `deny_rules`, `enforcement_boundaries`).
 
 JSON output (default when piped) is `{"data": ..., "meta": {...}}` where
 `meta` reports API calls, bytes (decompressed: downloads are gzip-compressed on the wire, so

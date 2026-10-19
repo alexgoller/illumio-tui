@@ -49,6 +49,7 @@ fn flows(n: usize) -> Vec<ResolvedFlow> {
             first_detected: None,
             last_detected: None,
             rules: Vec::new(),
+            side_rules: Vec::new(),
             bytes_in: None,
             bytes_out: None,
         })

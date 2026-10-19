@@ -17,17 +17,29 @@ pub enum DstEnforcement {
     Mode(String),
 }
 
+/// The policy the rules were resolved through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolicySource {
+    /// The draft rulesets: what the PCE evaluated.
+    Draft,
+    /// Only the active rulesets were loaded: names as provisioned.
+    Active,
+    /// No rulesets loaded: no rule resolves.
+    NotLoaded,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExplainView {
     pub flow: ResolvedFlow,
     pub explanation: Explanation,
-    /// The draft rulesets were loaded when it opened (else no rule resolves).
-    pub policy_loaded: bool,
+    pub policy: PolicySource,
     pub dst: DstEnforcement,
     /// The selected rule (`j`/`k`), an index into `explanation.rules`.
     pub selected: usize,
     /// Opened from the app overlay: `Esc` goes back there.
     pub from_app: bool,
+    /// The flow is in the result on screen, the one `D` evaluates.
+    pub on_screen: bool,
 }
 
 /// One row of the overlay's content.
@@ -113,9 +125,11 @@ impl ExplainView {
             rows.push(Row::Field("dst", self.dst_text()));
         }
         if !e.evaluated {
-            rows.push(Row::Hint(
-                "D: evaluate the result against the draft (asks first)".into(),
-            ));
+            rows.push(Row::Hint(if self.on_screen {
+                "D: evaluate the result against the draft (asks first)".into()
+            } else {
+                "not in the result on screen: D on Traffic evaluates that one".into()
+            }));
         }
         if e.evaluated && !self.allowed_by_rule() && self.offers_rule() {
             rows.push(Row::Hint(
@@ -135,10 +149,12 @@ impl ExplainView {
             };
         }
         if !r.resolved {
-            let why = if !self.policy_loaded {
-                "the draft policy is not loaded: Enter opens Policy (draft)"
-            } else {
-                "not in the loaded draft policy: Enter, then r reloads"
+            let why = match self.policy {
+                PolicySource::NotLoaded => {
+                    "the draft policy is not loaded: Enter opens Policy (draft)"
+                }
+                PolicySource::Active => "not in the loaded active policy: Enter opens the draft",
+                PolicySource::Draft => "not in the loaded draft policy: Enter, then r reloads",
             };
             return Row::Rule {
                 index,
@@ -157,8 +173,13 @@ impl ExplainView {
             index,
             head: format!("{kind} {}", r.summary()),
             detail: format!(
-                "ruleset {} · scope {} · {on}",
+                "ruleset {}{} · scope {} · {on}",
                 r.ruleset.as_deref().unwrap_or("?"),
+                if self.policy == PolicySource::Active {
+                    " (active)"
+                } else {
+                    ""
+                },
                 if r.scopes.is_empty() {
                     "All".to_string()
                 } else {
@@ -200,14 +221,16 @@ mod tests {
         let mut flow = fixture_flows().remove(i);
         flow.rules = rules.iter().map(|s| s.to_string()).collect();
         flow.draft_policy_decision = draft;
-        let explanation = pce::explain::explain(&flow, &sets(), &HashMap::new(), &fixture_index());
+        let explanation =
+            pce::explain::explain(&flow, &sets(), &HashMap::new(), &fixture_index(), None);
         ExplainView {
             flow,
             explanation,
-            policy_loaded: true,
+            policy: PolicySource::Draft,
             dst,
             selected: 0,
             from_app: false,
+            on_screen: true,
         }
     }
 
@@ -298,7 +321,7 @@ mod tests {
         );
         assert!(t[5].contains("enforcement unknown"));
         assert_eq!(t.len(), 6, "no w: an override deny beats an allow rule");
-        v.policy_loaded = false;
+        v.policy = PolicySource::NotLoaded;
         assert!(
             texts(&v)[4].ends_with("the draft policy is not loaded: Enter opens Policy (draft)")
         );

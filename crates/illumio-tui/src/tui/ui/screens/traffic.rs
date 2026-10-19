@@ -1276,6 +1276,7 @@ mod tests {
             first_detected: Some("2026-10-16T08:12:33Z".into()),
             last_detected: Some("2026-10-17T09:40:00Z".into()),
             rules: vec![],
+            side_rules: Vec::new(),
             bytes_in: Some(117_200),
             bytes_out: None,
         }

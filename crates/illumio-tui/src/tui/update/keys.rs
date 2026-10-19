@@ -241,7 +241,16 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                         filter,
                         focus,
                         hrefs,
-                    } => start_draft(model, filter, focus, hrefs),
+                    } => {
+                        let cmds = start_draft(model, filter, focus, hrefs);
+                        // Asked from Explain over the app overlay: back to it.
+                        if model.explain_back.take().is_some_and(|v| v.from_app)
+                            && model.app_view.is_some()
+                        {
+                            model.overlay = Overlay::App;
+                        }
+                        cmds
+                    }
                     PendingAction::ReloadApp => app_reload(model),
                     PendingAction::GenRequery(f, focus) => generator::gen_requery(model, f, focus),
                     PendingAction::DeleteMark(id) => marks::delete_mark(model, &id),
@@ -258,6 +267,12 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 }
                 if matches!(action, PendingAction::DeleteMark(_)) {
                     model.overlay = Overlay::Marks;
+                }
+                // Asked from Explain (`D`): back to it.
+                if matches!(action, PendingAction::RunDraft { .. })
+                    && let Some(v) = model.explain_back.take()
+                {
+                    model.overlay = Overlay::Explain(v);
                 }
                 Vec::new()
             }
@@ -918,6 +933,10 @@ pub(super) fn scroll_focused(model: &mut Model, down: bool) {
 
 pub(super) fn switch(model: &mut Model, s: Screen) -> Vec<Cmd> {
     model.screen = s;
+    // Leaving the Policy screen drops Explain's pending `Enter`.
+    if s != Screen::Policy {
+        model.policy.jump = None;
+    }
     match s {
         // Loaded data is kept: returning to the screen never requests again.
         Screen::Policy

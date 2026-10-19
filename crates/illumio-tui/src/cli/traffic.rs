@@ -53,7 +53,8 @@ pub enum TrafficCmd {
     Mesh(MeshArgs),
     /// Which rule allows or blocks the flows of one source, destination and port
     ///
-    /// Runs one Explorer query narrowed to --src, --dst, --port and --proto, evaluated against
+    /// Runs one Explorer query narrowed to --src and/or --dst (one side alone is a wider
+    /// query), --port and --proto, evaluated against
     /// the draft policy (update_rules; it changes no policy), and resolves each flow's rules
     /// (allow, deny, override deny, essential) through the draft rulesets. Cost: 1 POST,
     /// status polls, 1 PUT, polls and 1 download; the draft rulesets (1 GET) when a flow names

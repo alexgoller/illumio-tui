@@ -21,14 +21,16 @@ pub enum ExplainProto {
     Udp,
 }
 
-/// `traffic explain`: one source, one destination, one port.
+/// `traffic explain`: a source, a destination (at least one), one port.
 #[derive(Args, Debug, Clone)]
+#[command(group(clap::ArgGroup::new("side").args(["src", "dst"]).required(true).multiple(true)))]
 pub struct ExplainArgs {
-    /// Source: key=value, ip:ADDR, ipl:NAME, wl:HOST, fqdn:NAME. Comma = AND, repeat = OR
-    #[arg(long, required = true)]
+    /// Source: key=value, ip:ADDR, ipl:NAME, wl:HOST, fqdn:NAME. Comma = AND, repeat = OR.
+    /// --src or --dst alone is a wider query (every flow to, or from, that side)
+    #[arg(long)]
     pub src: Vec<String>,
     /// Destination, same syntax as --src
-    #[arg(long, required = true)]
+    #[arg(long)]
     pub dst: Vec<String>,
     /// Destination port
     #[arg(long)]
@@ -237,9 +239,12 @@ pub async fn run(ctx: &Context, args: &ExplainArgs) -> Result<(), CliError> {
         Vec::new()
     };
     let mut extra: HashMap<String, Vec<DenyRule>> = HashMap::new();
+    // A PCE without the per-ruleset endpoint answers 404: none, and the
+    // rule stays an href.
     for rs in deny_fallbacks(&f.flows, &sets) {
-        let d = ctx.pce.deny_rules(&rs, ctx.cache_mode).await?.value;
-        extra.insert(rs, d);
+        if let Some(set) = sets.iter().find(|s| s.href == rs) {
+            extra.insert(rs, super::policy::deny_rules_of(ctx, set).await?);
+        }
     }
     let data = Explained {
         flows: f
@@ -251,7 +256,9 @@ pub async fn run(ctx: &Context, args: &ExplainArgs) -> Result<(), CliError> {
                 service: fl.service_text(),
                 process: fl.process_name.clone(),
                 connections: fl.num_connections,
-                explanation: explain(fl, &sets, &extra, &f.index),
+                // No workloads are read: the destination's enforcement is
+                // unknown here, except that an IP or FQDN is no workload.
+                explanation: explain(fl, &sets, &extra, &f.index, None),
             })
             .collect(),
     };
