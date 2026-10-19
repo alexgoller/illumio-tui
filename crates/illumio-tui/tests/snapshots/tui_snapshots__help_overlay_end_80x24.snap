@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ Keys · Flows ────────────────────────────────────────────────── 11-31 of 31 ╮
+╭ Keys · Flows ────────────────────────────────────────────────── 12-32 of 32 ╮
 │f              edit filter: window src dst svc decision transmission         │
 │+ / -          widen (re-runs the window) / narrow (no request)              │╮
 │B              re-run a truncated result at a larger cap                     ││

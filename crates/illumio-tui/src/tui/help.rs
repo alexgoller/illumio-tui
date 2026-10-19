@@ -156,6 +156,11 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
                 "flat · by src app · by dst app · back (focused: X: direction)",
             ),
             key("Enter", "the flow's detail"),
+            key("E", "explain: the rule that allows or blocks the flow"),
+            more(
+                "",
+                "no request; Enter: the rule in Policy (draft); D asks first",
+            ),
         ],
     },
     HelpGroup {
@@ -225,6 +230,7 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
                 "mark · draft allow rule · reload panels (asks) · back",
             ),
             key("G", "policy generator: the rules the app's traffic needs"),
+            key("E", "explain the row's flow: the rule behind its decision"),
         ],
     },
     HelpGroup {

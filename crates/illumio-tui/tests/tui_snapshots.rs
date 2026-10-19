@@ -3084,3 +3084,59 @@ fn bulk_overlays_survive_every_size() {
         }
     }
 }
+
+/// The fixture flows after a draft evaluation (each at its reported
+/// decision; only the fqdn flow names a rule), the policy and workloads
+/// loaded, the cursor on the flow to `dst`, then `E`.
+fn explain_model(dst: &str) -> illumio_tui::tui::model::Model {
+    use pce::models::DraftDecision;
+    let mut m = with_policy(with_workloads(model_with_flows()));
+    let d = m.traffic.data.as_mut().expect("flows");
+    for f in &mut d.flows {
+        f.draft_policy_decision = Some(DraftDecision::parse(f.policy_decision.as_str()));
+        if f.dst.display_name() != "fqdn-1.example" {
+            f.rules.clear();
+        }
+    }
+    d.draft = Some(pce::traffic::DraftSummary::of(&d.flows));
+    m.traffic.rebuild_views();
+    m.traffic
+        .flows
+        .select_where(|r| r.flow.dst.display_name() == dst);
+    bulk_key(&mut m, KeyCodeAlias::Char('E'));
+    m
+}
+
+#[test]
+fn explain_allowed_flow_80x24() {
+    let m = explain_model("fqdn-1.example");
+    let out = render_to_string(&m, 80, 24);
+    for s in ["explain", "allowed by 1 rule (draft)", "Shop-Prod", "Esc"] {
+        assert!(out.contains(s), "missing {s:?}:\n{out}");
+    }
+    insta::assert_snapshot!("explain_allowed_flow_80x24", out);
+}
+
+#[test]
+fn explain_no_rule_100x30() {
+    let m = explain_model("host-1.example");
+    let out = render_to_string(&m, 100, 30);
+    for s in ["no rule allows this flow", "w: write an allow rule"] {
+        assert!(out.contains(s), "missing {s:?}:\n{out}");
+    }
+    insta::assert_snapshot!("explain_no_rule_100x30", out);
+}
+
+#[test]
+fn explain_survives_every_size() {
+    for m in [
+        explain_model("fqdn-1.example"),
+        explain_model("host-1.example"),
+    ] {
+        for w in 20..=130 {
+            for h in [6, 24, 40] {
+                let _ = render_to_string(&m, w, h);
+            }
+        }
+    }
+}

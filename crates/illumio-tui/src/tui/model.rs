@@ -275,6 +275,8 @@ pub enum Overlay {
         diff: ObjectDiff,
         scroll: u16,
     },
+    /// `E`: which rule allows or blocks a flow (no request).
+    Explain(Box<crate::tui::explain::ExplainView>),
 }
 
 impl PartialEq for Overlay {
@@ -366,6 +368,7 @@ impl PartialEq for Overlay {
                     raw: rb,
                 },
             ) => a.href == b.href && sa == sb && ra == rb,
+            (Overlay::Explain(a), Overlay::Explain(b)) => a == b,
             _ => false,
         }
     }
@@ -431,6 +434,7 @@ impl PolicyState {
             form_drafts: None,
             form_drafts_loading: false,
             form_drafts_stale: false,
+            jump: None,
             auto: AutoRefresh::new(min_refresh),
         }
     }

@@ -35,6 +35,9 @@ mod app_overlay;
 mod bulk;
 mod cmdline;
 mod events;
+mod explain;
+#[cfg(test)]
+mod explain_tests;
 mod generator;
 mod keys;
 mod marks;
@@ -53,6 +56,7 @@ pub(crate) use workloads::apply_workload_labels;
 
 use app_overlay::*;
 use events::*;
+use explain::*;
 use keys::*;
 use objects::*;
 use policy::*;
@@ -526,6 +530,8 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                             model.policy.scope.segment()
                         ));
                     }
+                    // Explain's `Enter` waiting for them: its rule selected.
+                    apply_policy_jump(model, false);
                     // Only the selected ruleset's deny rules are fetched on demand;
                     // an explicit `r` bypasses the cache for them as well.
                     let mode = if std::mem::take(&mut model.policy.bypass_deny) {
@@ -569,9 +575,11 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     }
                     model.objects.ip_lists.recount(&model.policy);
                     model.recount_labels();
+                    apply_policy_jump(model, true);
                 }
                 Err(e) if e.contains("not found") => {
                     model.policy.fallback_deny.insert(href, Vec::new());
+                    apply_policy_jump(model, true);
                 }
                 Err(e) => {
                     model.policy.deny_requested.remove(&href); // allow a retry on reselect

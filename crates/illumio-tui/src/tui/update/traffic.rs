@@ -178,10 +178,10 @@ pub(super) fn draft_key(model: &mut Model) -> Vec<Cmd> {
 /// What `D` evaluates: the result on screen, its focus, the hrefs of its
 /// async queries and how many queries it took.
 pub(super) struct DraftTarget {
-    filter: TrafficFilter,
-    focus: Option<Focus>,
-    hrefs: Vec<String>,
-    queries: u32,
+    pub(super) filter: TrafficFilter,
+    pub(super) focus: Option<Focus>,
+    pub(super) hrefs: Vec<String>,
+    pub(super) queries: u32,
 }
 
 /// `D`'s target, `None` without a result on screen.
@@ -471,6 +471,8 @@ pub(super) fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             model.status = model.traffic.auto.toggle();
         }
         KeyCode::Char('w') => return flow_rule_key(model),
+        // Which rule allows or blocks the flow: no request.
+        KeyCode::Char('E') => return explain_key(model),
         // Squelched flows shown or left out: a rebuild, no request.
         KeyCode::Char('M') => model.status = model.traffic.toggle_squelched(),
         // The mark form for the row: marks.toml only, no request.

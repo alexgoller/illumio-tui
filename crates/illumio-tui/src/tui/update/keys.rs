@@ -670,6 +670,7 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             }
         },
         Overlay::App => app_overlay_key(model, k),
+        Overlay::Explain(v) => explain_overlay_key(model, v, k),
         Overlay::Generator => generator::gen_key(model, k),
         Overlay::None => on_screen_key(model, k),
     }

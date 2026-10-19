@@ -302,6 +302,9 @@ pub struct PolicyState {
     /// A policy write forgot the drafts while that load was on its way:
     /// its answer, read before the write, is dropped.
     pub form_drafts_stale: bool,
+    /// Explain's `Enter` (`E`): the ruleset and rule (hrefs) to select once
+    /// the draft rulesets on their way land.
+    pub jump: Option<(String, String)>,
 
     pub auto: AutoRefresh,
 }

@@ -97,6 +97,13 @@ pub fn view(model: &Model, f: &mut Frame) {
         Overlay::Diff { diff, scroll } => {
             widgets::overlay::render_diff(model, diff, *scroll, f, area)
         }
+        Overlay::Explain(v) => {
+            // Opened from the app overlay: it stays behind.
+            if v.from_app && model.app_view.is_some() {
+                widgets::app_overlay::render_app(model, f, area);
+            }
+            widgets::explain::render(model, v, f, area)
+        }
     }
 }
 

@@ -4,11 +4,11 @@ expression: "render_to_string(&m, 100, 40)"
 ---
  illumio-tui pce.example · org 5 ●                                            api 5 calls · 20.8 KB
   1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
-╭ Filters ────────────────────────────────────────────────────── window 24h · cap 1000 · unbounded ╮
-│window 24╭ Keys · Flows ───────────────────────────────────────────────────────────────╮          │
-╰─────────│FLOWS                                                                        │──────────╯
-╭ Result ─│x / X          flat · by src app · by dst app · back (focused: X: direction) │ · 3s ago ╮
-│4 flows a│Enter          the flow's detail                                             │██████████│
+╭ Filters ╭ Keys · Flows ───────────────────────────────────────────────────────────────╮unbounded ╮
+│window 24│FLOWS                                                                        │          │
+╰─────────│x / X          flat · by src app · by dst app · back (focused: X: direction) │──────────╯
+╭ Result ─│Enter          the flow's detail                                             │ · 3s ago ╮
+│4 flows a│E              explain: the rule that allows or blocks the flow              │██████████│
 ╰─────────│                                                                             │──────────╯
 ╭ Flows · │SECTIONS                                                                     │──────────╮
 │  src    │Space / z      fold a section · fold or unfold all (also Blocked, Flows)     │          │

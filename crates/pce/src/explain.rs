@@ -272,7 +272,7 @@ pub fn verdict(evaluated: bool, rules: &[MatchedRule]) -> String {
 /// `full` blocks it; the others only report it (potentially blocked).
 pub fn enforcement_note(mode: &str) -> &'static str {
     match mode {
-        "full" => "enforced: no allow rule, so the flow is blocked",
+        "full" => "enforced: without an allow rule the flow is blocked",
         "selective" => "selective: blocked only where a deny rule applies",
         "visibility_only" | "idle" => "not enforced: reported as potentially blocked, still passes",
         "unmanaged" => "unmanaged: no VEN enforces anything there",
