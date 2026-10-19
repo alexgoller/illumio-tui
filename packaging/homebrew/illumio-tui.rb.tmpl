@@ -31,9 +31,12 @@ class IllumioTui < Formula
 
   def install
     bin.install "illumio-tui"
+    # `illumio-tui completions bash|zsh|fish` prints each script.
+    generate_completions_from_executable(bin/"illumio-tui", "completions")
   end
 
   test do
     assert_match version.to_s, shell_output("#{bin}/illumio-tui --version")
+    assert_match "__complete profiles", shell_output("#{bin}/illumio-tui completions zsh")
   end
 end

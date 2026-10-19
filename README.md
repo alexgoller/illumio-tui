@@ -74,6 +74,33 @@ the hash with `Get-FileHash illumio-tui-<version>-x86_64-pc-windows-msvc.zip`
 (compare with the line in `SHA256SUMS`), extract the zip, and move
 `illumio-tui.exe` into a folder listed in your `PATH`.
 
+### Shell completions
+
+bash, zsh and fish completions come with the Homebrew formula and the
+`.deb`/`.rpm` packages (`/usr/share/bash-completion/completions/illumio-tui`,
+`/usr/share/zsh/site-functions/_illumio-tui`,
+`/usr/share/fish/vendor_completions.d/illumio-tui.fish`); nothing to do. For
+`cargo install` or a release archive, write the script yourself:
+
+    # zsh: a directory on $fpath, before compinit runs in ~/.zshrc
+    mkdir -p ~/.zfunc && illumio-tui completions zsh > ~/.zfunc/_illumio-tui
+    #   in ~/.zshrc: fpath=(~/.zfunc $fpath); autoload -Uz compinit && compinit
+    # bash (needs the bash-completion package)
+    mkdir -p ~/.local/share/bash-completion/completions
+    illumio-tui completions bash > ~/.local/share/bash-completion/completions/illumio-tui
+    # fish
+    illumio-tui completions fish > ~/.config/fish/completions/illumio-tui.fish
+
+Every subcommand and flag completes (with descriptions in zsh and fish), and
+so do enum values (`--direction`, `--format`, `--theme`, `events --severity`
+...), files (`--config`, `--env-file`, `marks import`) and hosts (`--host`).
+`--profile` and `profile use` complete the profile names of the config file
+(or of `--config` given earlier on the line). Completion never contacts the
+PCE: the hidden `illumio-tui __complete profiles` helper only reads the config
+file. Labels, apps, rulesets, IP lists and services are not completed, because
+illumio-tui keeps no cache on disk (the response cache lives in memory, per
+run). Regenerate the script after an upgrade if you wrote it yourself.
+
 ### Cutting a release (maintainers)
 
 1. Bump `version` in `[workspace.package]` of the root `Cargo.toml` and run
@@ -511,6 +538,7 @@ the API call and byte counters at all times.
     illumio-tui traffic groups --window 24h --by in --csv > peers.csv
     illumio-tui profile list
     illumio-tui profile use prod
+    illumio-tui completions zsh > ~/.zfunc/_illumio-tui
 
 JSON output (default when piped) is `{"data": ..., "meta": {...}}` where
 `meta` reports API calls, bytes (decompressed: downloads are gzip-compressed on the wire, so

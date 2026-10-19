@@ -150,7 +150,15 @@ jobs:
           musl=$(ls dist/"$BIN"-*-x86_64-unknown-linux-musl.tar.gz)
           version=${musl#"dist/$BIN-"}
           version=${version%-x86_64-unknown-linux-musl.tar.gz}
-          mkdir -p pkg unpack
+          mkdir -p pkg unpack completions
+          # Completion scripts from the x86_64 musl binary, which runs on this
+          # runner; they are target-independent, so both arches ship them.
+          tar -xzf "$musl" -C unpack
+          host_bin="unpack/$BIN-$version-x86_64-unknown-linux-musl/$BIN"
+          "$host_bin" completions bash > completions/illumio-tui.bash
+          "$host_bin" completions zsh > completions/_illumio-tui
+          "$host_bin" completions fish > completions/illumio-tui.fish
+          bash -n completions/illumio-tui.bash
           for pair in amd64:x86_64-unknown-linux-musl arm64:aarch64-unknown-linux-gnu; do
             arch=${pair%%:*}
             target=${pair#*:}
@@ -158,7 +166,7 @@ jobs:
             binary="unpack/$BIN-$version-$target/$BIN"
             file "$binary"
             for packager in deb rpm; do
-              VERSION="$version" ARCH="$arch" BINARY="$binary" \
+              VERSION="$version" ARCH="$arch" BINARY="$binary" COMPLETIONS=completions \
                 "$RUNNER_TEMP/nfpm" package -f packaging/nfpm.yaml -p "$packager" -t pkg/
             done
           done
@@ -219,6 +227,10 @@ jobs:
             $BIN --help
             test -f /usr/share/doc/$BIN/LICENSE
             test -f /usr/share/doc/$BIN/README.md
+            test -s /usr/share/bash-completion/completions/$BIN
+            test -s /usr/share/zsh/site-functions/_$BIN
+            test -s /usr/share/fish/vendor_completions.d/$BIN.fish
+            bash -n /usr/share/bash-completion/completions/$BIN
             $remove
             test ! -e /usr/bin/$BIN
           "

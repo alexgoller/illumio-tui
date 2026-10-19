@@ -1,6 +1,9 @@
 # nfpm config for the .deb and .rpm packages (built by .github/workflows/release.yml).
-#   VERSION=0.2.0 ARCH=amd64 BINARY=path/to/illumio-tui \
+#   VERSION=0.2.0 ARCH=amd64 BINARY=path/to/illumio-tui COMPLETIONS=path/to/dir \
 #     nfpm package -f packaging/nfpm.yaml -p deb -t dist/
+# COMPLETIONS holds illumio-tui.bash, _illumio-tui and illumio-tui.fish, as
+# `illumio-tui completions <shell>` prints them (the scripts are the same for
+# every architecture).
 # ARCH is the Go-style name (amd64, arm64); nfpm maps it to amd64/arm64 for
 # deb and x86_64/aarch64 for rpm. Paths are relative to the repository root.
 name: illumio-tui
@@ -31,5 +34,20 @@ contents:
       mode: 0644
   - src: LICENSE
     dst: /usr/share/doc/illumio-tui/LICENSE
+    file_info:
+      mode: 0644
+  - src: ${COMPLETIONS}/illumio-tui.bash
+    dst: /usr/share/bash-completion/completions/illumio-tui
+    expand: true
+    file_info:
+      mode: 0644
+  - src: ${COMPLETIONS}/_illumio-tui
+    dst: /usr/share/zsh/site-functions/_illumio-tui
+    expand: true
+    file_info:
+      mode: 0644
+  - src: ${COMPLETIONS}/illumio-tui.fish
+    dst: /usr/share/fish/vendor_completions.d/illumio-tui.fish
+    expand: true
     file_info:
       mode: 0644
