@@ -97,6 +97,7 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
             key("", ":focus <app>  (alone: a picker of the loaded apps)"),
             key("", ":app <app>  the app overlay (alone: the picker)"),
             key("", ":gen <app>  the policy generator (alone: the picker)"),
+            key("", ":readiness  :enforce <app>  (alone: the picker)"),
             key("", ":writes [on|off]  :export[!] <path>  :batch"),
             key("", "(the table on screen as CSV; ! overwrites)"),
         ],
@@ -231,6 +232,42 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
             ),
             key("G", "policy generator: the rules the app's traffic needs"),
             key("E", "explain the row's flow: the rule behind its decision"),
+            key("e", "enforce the app: readiness, rules, provision, move"),
+        ],
+    },
+    HelpGroup {
+        title: "Enforce",
+        lines: &[
+            key(
+                ":readiness",
+                "every app of the result: verdict, coverage, gaps",
+            ),
+            key(
+                "Enter s / D",
+                "the app's steps · sort · search · draft decision",
+            ),
+            key(
+                "Tab 1-5 j/k",
+                "steps: Readiness Rules Provision Enforce Watch",
+            ),
+            key(
+                "G w m",
+                "Rules: generator · rule for the gap · accept-blocked",
+            ),
+            key(
+                "P",
+                "Provision: the app's pending changes (preview; writes)",
+            ),
+            key(
+                "j/k v Enter",
+                "Enforce: full/selective · visibility · confirm",
+            ),
+            more("", "not ready: type enforce first; a change record is kept"),
+            key("r R", "Watch: blocked since the move (1 query) · rollback"),
+            more(
+                "",
+                "rollback: re-read, preview, y; changed ones are skipped",
+            ),
         ],
     },
     HelpGroup {
@@ -404,6 +441,7 @@ pub enum HelpTopic {
     Marks,
     AppOverlay,
     Generator,
+    Enforce,
     Forms,
     Policy,
     Pending,
@@ -415,7 +453,7 @@ pub enum HelpTopic {
 
 impl HelpTopic {
     /// The order `Tab` walks (and the footer names).
-    pub const ALL: [HelpTopic; 20] = [
+    pub const ALL: [HelpTopic; 21] = [
         HelpTopic::Everywhere,
         HelpTopic::Commands,
         HelpTopic::Traffic,
@@ -428,6 +466,7 @@ impl HelpTopic {
         HelpTopic::Marks,
         HelpTopic::AppOverlay,
         HelpTopic::Generator,
+        HelpTopic::Enforce,
         HelpTopic::Forms,
         HelpTopic::Policy,
         HelpTopic::Pending,
@@ -453,6 +492,7 @@ impl HelpTopic {
             HelpTopic::Marks => "Marks",
             HelpTopic::AppOverlay => "App overlay",
             HelpTopic::Generator => "Generator",
+            HelpTopic::Enforce => "Enforce",
             HelpTopic::Forms => "Forms",
             HelpTopic::Policy => "Policy",
             HelpTopic::Pending => "Pending",
@@ -505,6 +545,8 @@ pub enum HelpContext {
     Generator,
     Pending,
     Marks,
+    /// `:readiness` and the enforcement overlay.
+    Enforce,
 }
 
 impl HelpContext {
@@ -525,6 +567,7 @@ impl HelpContext {
             HelpContext::Generator => "Generator",
             HelpContext::Pending => "Pending",
             HelpContext::Marks => "Marks",
+            HelpContext::Enforce => "Enforce",
         }
     }
 
@@ -547,6 +590,7 @@ impl HelpContext {
             HelpContext::Generator => &[T::Generator, T::Overlay],
             HelpContext::Pending => &[T::Pending, T::Overlay],
             HelpContext::Marks => &[T::Marks, T::Overlay],
+            HelpContext::Enforce => &[T::Enforce, T::Overlay],
         }
     }
 
@@ -564,6 +608,7 @@ impl HelpContext {
             Overlay::EventDetail { .. } => return HelpContext::EventDetail,
             Overlay::Pending => return HelpContext::Pending,
             Overlay::Marks => return HelpContext::Marks,
+            Overlay::Readiness | Overlay::Enforce => return HelpContext::Enforce,
             _ => {}
         }
         match model.screen {
@@ -890,7 +935,7 @@ mod tests {
         }
     }
 
-    const CONTEXTS: [(HelpContext, &str); 14] = [
+    const CONTEXTS: [(HelpContext, &str); 15] = [
         (HelpContext::Flows, "Flows"),
         (HelpContext::AppToApp, "App-to-app"),
         (HelpContext::Mesh, "Mesh"),
@@ -905,6 +950,7 @@ mod tests {
         (HelpContext::Generator, "Generator"),
         (HelpContext::Pending, "Pending"),
         (HelpContext::Marks, "Marks"),
+        (HelpContext::Enforce, "Enforce"),
     ];
 
     #[test]
@@ -919,7 +965,7 @@ mod tests {
             });
             let overlay = matches!(
                 ctx,
-                C::EventDetail | C::AppOverlay | C::Generator | C::Pending | C::Marks
+                C::EventDetail | C::AppOverlay | C::Generator | C::Pending | C::Marks | C::Enforce
             );
             let shared = if overlay { "Overlay" } else { "Everywhere" };
             assert_eq!(last_heading, Some(shared), "{ctx:?}");

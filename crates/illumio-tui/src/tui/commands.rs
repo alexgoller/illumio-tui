@@ -18,6 +18,10 @@ pub enum Command {
     App(Option<String>),
     /// `:gen <app>` opens the policy generator; `:gen` alone opens the picker.
     Gen(Option<String>),
+    /// `:readiness`: every app of the result on screen, judged for enforcement.
+    Readiness,
+    /// `:enforce <app>` opens the enforcement overlay; `:enforce` alone the picker.
+    Enforce(Option<String>),
     Profile(String),
     /// `:writes on` / `:writes off`; bare `:writes` shows the state.
     Writes(Option<bool>),
@@ -74,6 +78,8 @@ pub fn parse(input: &str) -> Result<Command, String> {
         "focus" => Ok(Command::Focus((!arg.is_empty()).then(|| arg.to_string()))),
         "app" => Ok(Command::App((!arg.is_empty()).then(|| arg.to_string()))),
         "gen" => Ok(Command::Gen((!arg.is_empty()).then(|| arg.to_string()))),
+        "readiness" => no_arg(Command::Readiness),
+        "enforce" => Ok(Command::Enforce((!arg.is_empty()).then(|| arg.to_string()))),
         "window" => with_arg(Command::Window, "window <duration>  (e.g. 1h, 24h, 7d)"),
         "profile" => with_arg(Command::Profile, "profile <name>"),
         "writes" => match arg {

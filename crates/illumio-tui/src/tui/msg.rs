@@ -195,6 +195,23 @@ pub enum Msg {
     /// The runtime wrote (or could not write) `:export`'s file: the status
     /// line text.
     Exported(Result<String, String>),
+    /// A move from the enforcement overlay (`Cmd::EnforceApp`): the bulk
+    /// report and its change record. Always arrives.
+    EnforceDone(Box<crate::tui::enforce::EnforceOutcome>),
+    /// A rollback (`Cmd::ExecuteRollback`): each group's report and the
+    /// rollback record. Always arrives.
+    RollbackDone(Box<crate::tui::enforce::RollbackOutcome>),
+    /// The re-read before a rollback (`Cmd::RollbackRead`) for overlay `seq`:
+    /// the app's workloads now, and whether the read was cut.
+    RollbackRead {
+        seq: u64,
+        result: Result<(Vec<Workload>, bool), String>,
+    },
+    /// Step 5's query (`Cmd::WatchBlocked`) for watch `seq`.
+    WatchDone {
+        seq: u64,
+        result: Result<crate::tui::enforce::WatchOutcome, String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -305,6 +322,36 @@ pub enum Cmd {
         window: Duration,
         /// The window as typed (`24h`), for the result's text.
         window_text: String,
+        max_results: u32,
+        cancel: CancellationToken,
+    },
+    /// `y` on a bulk confirm the enforcement overlay planned: the records'
+    /// directory probed, the record written with every workload pending,
+    /// then the bulk send (as `ExecuteBulk`), then the record with the
+    /// results; answered with `Msg::EnforceDone`.
+    EnforceApp {
+        plan: Box<pce::write::BulkPlan>,
+        send: Box<crate::tui::enforce::EnforceSend>,
+    },
+    /// `R` on step 5: the app's workloads now (one list read past the
+    /// cache); answered with `Msg::RollbackRead`.
+    RollbackRead {
+        seq: u64,
+        filter: WorkloadFilter,
+    },
+    /// `y` on the rollback preview: the records' directory probed, the
+    /// rollback record written, each group's bulk send in order (stopping
+    /// at the first that fails), the record with the results; answered
+    /// with `Msg::RollbackDone`.
+    ExecuteRollback(Box<crate::tui::enforce::RollbackSend>),
+    /// `r` on step 5: one Explorer query from the change time to now, the
+    /// app on either side, blocked flows only; answered with
+    /// `Msg::WatchDone`.
+    WatchBlocked {
+        seq: u64,
+        app: pce::traffic::GroupKey,
+        keys: Vec<String>,
+        since: jiff::Timestamp,
         max_results: u32,
         cancel: CancellationToken,
     },
@@ -436,6 +483,40 @@ impl PartialEq for Cmd {
             ) => pa.request() == pb.request() && ka == kb,
             (Cmd::PlanBatch { input: a, .. }, Cmd::PlanBatch { input: b, .. }) => a == b,
             (Cmd::ExecuteBatch(a), Cmd::ExecuteBatch(b)) => a.lines() == b.lines(),
+            (Cmd::EnforceApp { plan: a, send: sa }, Cmd::EnforceApp { plan: b, send: sb }) => {
+                a.hrefs() == b.hrefs()
+                    && a.change == b.change
+                    && a.confirmed == b.confirmed
+                    && sa == sb
+            }
+            (
+                Cmd::RollbackRead { seq: a, filter: fa },
+                Cmd::RollbackRead { seq: b, filter: fb },
+            ) => a == b && fa == fb,
+            (Cmd::ExecuteRollback(a), Cmd::ExecuteRollback(b)) => {
+                a.record_path == b.record_path
+                    && a.plans.len() == b.plans.len()
+                    && a.plans
+                        .iter()
+                        .zip(&b.plans)
+                        .all(|((ta, pa), (tb, pb))| ta == tb && pa.hrefs() == pb.hrefs())
+            }
+            (
+                Cmd::WatchBlocked {
+                    seq: a,
+                    app: aa,
+                    since: sa,
+                    max_results: ma,
+                    ..
+                },
+                Cmd::WatchBlocked {
+                    seq: b,
+                    app: ab,
+                    since: sb,
+                    max_results: mb,
+                    ..
+                },
+            ) => a == b && aa == ab && sa == sb && ma == mb,
             (Cmd::ExecuteBulk(a), Cmd::ExecuteBulk(b)) => {
                 a.hrefs() == b.hrefs() && a.change == b.change && a.confirmed == b.confirmed
             }

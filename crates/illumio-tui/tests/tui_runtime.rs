@@ -2994,3 +2994,157 @@ async fn bulk_without_the_runtime_writer_sends_nothing() {
     );
     assert_eq!(model.busy, 0);
 }
+
+/// A move of shop/prod's `aaaa-2` to full from the enforcement overlay,
+/// with its change record (`Cmd::EnforceApp`).
+fn enforce_cmd(dir: &std::path::Path) -> Cmd {
+    use illumio_tui::tui::enforce::EnforceSend;
+    use pce::enforcement::{ModeState, RecordOrigin, RecordReadiness};
+    let ws: Vec<pce::models::Workload> =
+        serde_json::from_str(include_str!("../../../fixtures/workloads.json")).unwrap();
+    let idx = pce::NameIndex::default();
+    let targets: Vec<pce::write::BulkTarget> = ws
+        .iter()
+        .filter(|w| w.href == "/orgs/5/workloads/aaaa-2")
+        .map(|w| pce::write::BulkTarget::of(w, &idx))
+        .collect();
+    let plan = pce::write::plan_bulk(
+        &targets,
+        &pce::write::BulkChange::enforce(pce::write::EnforcementMode::Full, None),
+        pce::models::WorkloadFilter::default(),
+        Some(pce::write::BatchOrigin {
+            profile: "t".into(),
+            host: "h".into(),
+            org_id: 5,
+        }),
+    )
+    .unwrap();
+    Cmd::EnforceApp {
+        plan: Box::new(plan),
+        send: Box::new(EnforceSend {
+            app: "shop/prod".into(),
+            target: ModeState::target(pce::write::EnforcementMode::Full, None),
+            readiness: RecordReadiness {
+                verdict: "ready".into(),
+                coverage: Some(1.0),
+                window: "7d".into(),
+                flows: 40,
+                forced: false,
+            },
+            dir: dir.to_path_buf(),
+            origin: RecordOrigin {
+                profile: "t".into(),
+                pce: "h".into(),
+                org_id: 5,
+            },
+        }),
+    }
+}
+
+/// The record is written before the send (every workload pending) and
+/// rewritten with the results after it; the re-read, one `bulk_update`,
+/// one reload.
+#[tokio::test]
+async fn enforce_app_writes_the_record_around_the_bulk_send() {
+    let server = MockServer::start().await;
+    let fixture: Vec<serde_json::Value> =
+        serde_json::from_str(include_str!("../../../fixtures/workloads.json")).unwrap();
+    let w2 = fixture
+        .iter()
+        .find(|w| w["href"] == "/orgs/5/workloads/aaaa-2")
+        .unwrap()
+        .clone();
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads/aaaa-2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(w2))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v2/orgs/5/workloads/bulk_update"))
+        .and(body_json(json!([
+            {"href": "/orgs/5/workloads/aaaa-2", "enforcement_mode": "full"},
+        ])))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {"href": "/orgs/5/workloads/aaaa-2", "status": "updated"},
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/workloads.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let audit = MemoryAudit::new();
+    let mut m = writes_model();
+    m.records_dir = Some(dir.path().to_path_buf());
+    let (mut rt, _tx) = Runtime::with_writer(pce_for(&server), m, tui_guard(audit.clone()));
+    rt.execute(enforce_cmd(dir.path()));
+    let model = run_loop(&mut rt, Box::pin(wait(600)), &mut |_| {}).await;
+    assert!(
+        model.status.text.starts_with("updated 1 of 1")
+            && model.status.text.contains("record shop_prod-"),
+        "{}",
+        model.status.text
+    );
+    let files: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    assert_eq!(
+        files.len(),
+        1,
+        "one record, no temp or probe file left: {files:?}"
+    );
+    let rec = pce::enforcement::read_record(&files[0]).unwrap();
+    assert_eq!(rec.app, "shop/prod");
+    assert_eq!(rec.workloads[0].result, "updated");
+    assert_eq!(
+        rec.workloads[0].before.mode.as_deref(),
+        Some("visibility_only")
+    );
+    assert_eq!(rec.readiness.as_ref().unwrap().verdict, "ready");
+    assert_eq!(audit.entries().len(), 1);
+    assert!(!model.writes.in_flight && !model.batch_sending);
+    assert_eq!(model.busy, 0);
+    server.verify().await;
+}
+
+/// A records directory that cannot be written: refused before any
+/// request, nothing sent, no record.
+#[tokio::test]
+async fn enforce_app_without_a_writable_record_place_sends_nothing() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("not-a-dir");
+    std::fs::write(&file, "x").unwrap();
+    let audit = MemoryAudit::new();
+    let (mut rt, _tx) =
+        Runtime::with_writer(pce_for(&server), writes_model(), tui_guard(audit.clone()));
+    rt.execute(enforce_cmd(&file));
+    let model = run_loop(&mut rt, Box::pin(wait(300)), &mut |_| {}).await;
+    assert!(
+        model
+            .status
+            .text
+            .starts_with("nothing sent: change records cannot be written"),
+        "{}",
+        model.status.text
+    );
+    assert!(
+        server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .is_empty()
+    );
+    assert!(audit.entries().is_empty());
+    assert_eq!(model.busy, 0);
+}

@@ -254,6 +254,7 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     PendingAction::ReloadApp => app_reload(model),
                     PendingAction::GenRequery(f, focus) => generator::gen_requery(model, f, focus),
                     PendingAction::DeleteMark(id) => marks::delete_mark(model, &id),
+                    PendingAction::EnforceWatch => enforce::start_watch(model),
                 }
             }
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
@@ -681,12 +682,15 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     }
                     AppPickerPurpose::Overlay => open_app_by_name(model, &app),
                     AppPickerPurpose::Generator => gen_by_name(model, &app),
+                    AppPickerPurpose::Enforce => enforce::enforce_by_name(model, &app),
                 }
             }
         },
         Overlay::App => app_overlay_key(model, k),
         Overlay::Explain(v) => explain_overlay_key(model, v, k),
         Overlay::Generator => generator::gen_key(model, k),
+        Overlay::Readiness => enforce::readiness_key(model, k),
+        Overlay::Enforce => enforce::enforce_key(model, k),
         Overlay::None => on_screen_key(model, k),
     }
 }
@@ -793,7 +797,9 @@ pub(super) fn open_help(model: &mut Model) {
         | Overlay::Generator
         | Overlay::EventDetail { .. }
         | Overlay::Pending
-        | Overlay::Marks) => o.clone(),
+        | Overlay::Marks
+        | Overlay::Readiness
+        | Overlay::Enforce) => o.clone(),
         _ => Overlay::None,
     };
     model.overlay = Overlay::Help;

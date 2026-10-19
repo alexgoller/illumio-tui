@@ -221,6 +221,7 @@ pub(super) fn app_overlay_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         KeyCode::Char('m') => return marks::mark_app_key(model),
         KeyCode::Char('w') => return app_rule_key(model),
         KeyCode::Char('E') => return explain_app_key(model),
+        KeyCode::Char('e') => return enforce::app_enforce_key(model),
         KeyCode::Char('r') => app_reload_key(model),
         KeyCode::Char('G') => {
             let app = v.focus.app.clone();

@@ -34,6 +34,7 @@ use std::time::Instant;
 mod app_overlay;
 mod bulk;
 mod cmdline;
+mod enforce;
 mod events;
 mod explain;
 #[cfg(test)]
@@ -73,7 +74,9 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         msg,
         Msg::QueryDone { .. } | Msg::FocusedDone { .. } | Msg::DraftDone { .. }
     );
-    let cmds = on_msg(model, msg);
+    let ours_before = enforce::is_ours(&model.overlay);
+    let data = enforce::is_data(&msg);
+    let mut cmds = on_msg(model, msg);
     // A traffic answer that lands under the open app overlay (or one of its
     // prompts): its peers follow (no request).
     let app_open = matches!(
@@ -99,6 +102,9 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
     if traffic_answer && gen_open {
         generator::rebuild_gen(model);
     }
+    // `:readiness` and the enforcement overlay: back after a step's form or
+    // confirm, and re-evaluated when data lands.
+    cmds.extend(enforce::after_msg(model, ours_before, data));
     // The marks file changed into (or out of) an invalid state, or marks
     // expire soon: shown once, beside an info status; a warning or an
     // error on the line keeps it waiting.
@@ -1006,6 +1012,16 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             results,
         } => batch_done(model, &kinds, &summaries, &target, &results),
         Msg::BulkDone(report) => bulk::bulk_done(model, &report),
+        Msg::EnforceDone(o) => enforce::enforce_done(model, *o),
+        Msg::RollbackDone(o) => enforce::rollback_done(model, *o),
+        Msg::RollbackRead { seq, result } => {
+            enforce::rollback_read_done(model, seq, result);
+            Vec::new()
+        }
+        Msg::WatchDone { seq, result } => {
+            enforce::watch_done(model, seq, result);
+            Vec::new()
+        }
         Msg::BulkCheckDone { seq, result } => {
             bulk::check_done(model, seq, result);
             Vec::new()

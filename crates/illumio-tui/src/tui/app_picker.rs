@@ -11,6 +11,8 @@ pub enum AppPickerPurpose {
     Overlay,
     /// `:gen`: open the policy generator for it.
     Generator,
+    /// `:enforce`: open the enforcement overlay for it.
+    Enforce,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

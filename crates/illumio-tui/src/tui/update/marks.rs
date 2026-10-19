@@ -429,7 +429,7 @@ fn refresh(t: &TrafficState, mf: &mut MarkForm) {
     mf.preview = preview(t, mf, now);
 }
 
-fn open_form(model: &mut Model, mut mf: MarkForm) {
+pub(super) fn open_form(model: &mut Model, mut mf: MarkForm) {
     refresh(&model.traffic, &mut mf);
     model.overlay = Overlay::MarkForm(Box::new(mf));
 }

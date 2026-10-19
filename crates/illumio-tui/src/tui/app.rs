@@ -152,6 +152,158 @@ impl BulkFallback {
     }
 }
 
+/// A move from the enforcement overlay, in the CLI's order: the guard,
+/// the records' directory probed, the record with every workload pending,
+/// the bulk send (on its own task: a panic still ends in an answer), the
+/// record with the results. Refused before the record: nothing sent.
+async fn enforce_task(
+    pce: Arc<Pce>,
+    guard: Option<Arc<WriteGuard>>,
+    plan: pce::write::BulkPlan,
+    send: crate::tui::enforce::EnforceSend,
+    fallback: BulkFallback,
+    tx: TaskTx,
+) -> crate::tui::enforce::EnforceOutcome {
+    use crate::tui::enforce::{self as e, EnforceOutcome};
+    let refused = |fallback: BulkFallback, why: &str| EnforceOutcome {
+        report: fallback.report(why, false),
+        record: None,
+        record_error: None,
+    };
+    let Some(guard) = guard else {
+        return refused(fallback, WRITES_OFF);
+    };
+    if let Err(why) = e::probe(&send.dir) {
+        return refused(fallback, &why);
+    }
+    let afters = e::afters(&[(send.target.clone(), &plan)]);
+    let mut rec = pce::enforcement::ChangeRecord::of_move(
+        &send.app,
+        &send.origin,
+        jiff::Timestamp::now(),
+        Some(send.target.clone()),
+        &afters,
+        &[],
+    );
+    rec.readiness = Some(send.readiness.clone());
+    let path = match e::record_before(&send.dir, &rec) {
+        Ok(p) => p,
+        Err(why) => return refused(fallback, &why),
+    };
+    let worker = {
+        let pce = pce.clone();
+        tokio::spawn(async move {
+            let mut each = move |done: usize, of: usize| {
+                let _ = tx.send(Msg::BatchProgress { done, of });
+            };
+            pce.writer(&guard).execute_bulk(plan, &mut each).await
+        })
+    };
+    let report = match worker.await {
+        Ok(r) => r,
+        Err(err) => fallback.report(
+            &format!(
+                "the sending task failed ({err}); what it sent is unknown: check the audit log, the PCE and {}",
+                path.display()
+            ),
+            true,
+        ),
+    };
+    let record_error = e::record_after(&path, &rec, &afters, &report.items);
+    EnforceOutcome {
+        report,
+        record: Some(path),
+        record_error,
+    }
+}
+
+/// A rollback: the guard, the probe, its own record (`rollback_of` the
+/// original) with every workload pending, each group's bulk send in
+/// order (the rest not sent after one that fails), the record with the
+/// results.
+async fn rollback_task(
+    pce: Arc<Pce>,
+    guard: Option<Arc<WriteGuard>>,
+    send: crate::tui::enforce::RollbackSend,
+    fallbacks: Vec<BulkFallback>,
+) -> crate::tui::enforce::RollbackOutcome {
+    use crate::tui::enforce::{self as e, RollbackOutcome};
+    let refused = |fallbacks: Vec<BulkFallback>, why: &str| RollbackOutcome {
+        reports: fallbacks
+            .into_iter()
+            .map(|f| f.report(why, false))
+            .collect(),
+        record: None,
+        record_error: None,
+    };
+    let Some(guard) = guard else {
+        return refused(fallbacks, WRITES_OFF);
+    };
+    if let Err(why) = e::probe(&send.dir) {
+        return refused(fallbacks, &why);
+    }
+    let plans: Vec<(pce::enforcement::ModeState, &pce::write::BulkPlan)> =
+        send.plans.iter().map(|(t, p)| (t.clone(), p)).collect();
+    let afters = e::afters(&plans);
+    let mut rb = pce::enforcement::ChangeRecord::of_move(
+        &send.app,
+        &send.origin,
+        jiff::Timestamp::now(),
+        None,
+        &afters,
+        &[],
+    );
+    rb.rollback_of = Some(send.record_path.display().to_string());
+    let path = match e::record_before(&send.dir, &rb) {
+        Ok(p) => p,
+        Err(why) => return refused(fallbacks, &why),
+    };
+    let plans: Vec<pce::write::BulkPlan> = send.plans.into_iter().map(|(_, p)| p).collect();
+    let worker = {
+        let pce = pce.clone();
+        tokio::spawn(async move {
+            let mut out = Vec::new();
+            let mut failed = false;
+            for plan in plans {
+                if failed {
+                    out.push(None);
+                    continue;
+                }
+                let r = pce.writer(&guard).execute_bulk(plan, &mut |_, _| {}).await;
+                failed = e::group_failed(&r);
+                out.push(Some(r));
+            }
+            out
+        })
+    };
+    let reports: Vec<pce::write::BulkReport> = match worker.await {
+        Ok(out) => out
+            .into_iter()
+            .zip(fallbacks)
+            .map(|(r, f)| r.unwrap_or_else(|| f.report("an earlier group failed", false)))
+            .collect(),
+        Err(err) => fallbacks
+            .into_iter()
+            .map(|f| {
+                f.report(
+                    &format!(
+                        "the sending task failed ({err}); what it sent is unknown: check the audit log, the PCE and {}",
+                        path.display()
+                    ),
+                    true,
+                )
+            })
+            .collect(),
+    };
+    let results: Vec<_> = reports.iter().flat_map(|r| r.items.clone()).collect();
+    let record_error = e::record_after(&path, &rb, &afters, &results);
+    RollbackOutcome {
+        reports,
+        record: Some(path),
+        record_error,
+    }
+}
+
 /// What a `:profile` switch built off the event loop: the new client, what
 /// the model needs to know about it and what its write guard is built from,
 /// or the error to show.
@@ -634,6 +786,93 @@ impl Runtime {
                     let _ = tx.send(Msg::Stats(pce.stats()));
                 });
             }
+            Cmd::EnforceApp { plan, send } => {
+                self.model.busy += 1;
+                let (pce, tx) = self.task_ctx();
+                let guard = self.writer.clone();
+                let fallback = BulkFallback::of(&plan, &self.model.profile);
+                tokio::spawn(async move {
+                    let o =
+                        enforce_task(pce.clone(), guard, *plan, *send, fallback, tx.clone()).await;
+                    let _ = tx.send(Msg::EnforceDone(Box::new(o)));
+                    let _ = tx.send(Msg::Stats(pce.stats()));
+                });
+            }
+            Cmd::ExecuteRollback(send) => {
+                self.model.busy += 1;
+                let (pce, tx) = self.task_ctx();
+                let guard = self.writer.clone();
+                let fallbacks = send
+                    .plans
+                    .iter()
+                    .map(|(_, p)| BulkFallback::of(p, &self.model.profile))
+                    .collect();
+                tokio::spawn(async move {
+                    let o = rollback_task(pce.clone(), guard, *send, fallbacks).await;
+                    let _ = tx.send(Msg::RollbackDone(Box::new(o)));
+                    let _ = tx.send(Msg::Stats(pce.stats()));
+                });
+            }
+            Cmd::RollbackRead { seq, filter } => {
+                self.model.busy += 1;
+                let (pce, tx) = self.task_ctx();
+                tokio::spawn(async move {
+                    // Past the cache: what the workloads are now.
+                    let result = pce
+                        .workloads(&filter, CacheMode::Bypass)
+                        .await
+                        .map(|c| (c.value, c.truncated))
+                        .map_err(|e| e.to_string());
+                    let _ = tx.send(Msg::RollbackRead { seq, result });
+                    let _ = tx.send(Msg::Stats(pce.stats()));
+                });
+            }
+            Cmd::WatchBlocked {
+                seq,
+                app,
+                keys,
+                since,
+                max_results,
+                cancel,
+            } => {
+                self.model.busy += 1;
+                let (pce, tx) = self.task_ctx();
+                let index = self.model.index().cloned();
+                tokio::spawn(async move {
+                    let result = async {
+                        use pce::models::{PolicyDecision, Transmission};
+                        let idx =
+                            index.ok_or_else(|| "the name index is not loaded".to_string())?;
+                        let m = pce::traffic::app_labels(&app, &keys, &idx)?;
+                        let mut q = pce::traffic::TrafficQueryBuilder::between(
+                            since,
+                            jiff::Timestamp::now(),
+                        )
+                        .transmission(&[Transmission::Unicast])
+                        .decisions(vec![PolicyDecision::Blocked])
+                        .max_results(max_results)
+                        .source(m.clone())
+                        .destination(m)
+                        .build()
+                        .map_err(|e| e.to_string())?;
+                        q.sources_destinations_query_op = "or".into();
+                        // Its own slot: the result on Traffic stays.
+                        let r = pce
+                            .traffic_slot("watch", &q, CacheMode::Bypass, &cancel, None)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        Ok(crate::tui::enforce::WatchOutcome {
+                            flows: pce::traffic::resolve_flows(&r.value.flows, &idx),
+                            truncated: r.truncated,
+                            incomplete: r.value.incomplete,
+                            since,
+                        })
+                    }
+                    .await;
+                    let _ = tx.send(Msg::WatchDone { seq, result });
+                    let _ = tx.send(Msg::Stats(pce.stats()));
+                });
+            }
             Cmd::BulkDraftCheck {
                 seq,
                 hrefs,
@@ -974,6 +1213,10 @@ impl Runtime {
                 | Msg::BatchDone { .. }
                 | Msg::BulkDone(_)
                 | Msg::BulkCheckDone { .. }
+                | Msg::EnforceDone(_)
+                | Msg::RollbackDone(_)
+                | Msg::RollbackRead { .. }
+                | Msg::WatchDone { .. }
         );
         let cmds = update(&mut self.model, msg);
         if task_result {
@@ -1250,6 +1493,8 @@ pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
         cfg.traffic_default_window.clone(),
         writes,
     );
+    // Change records beside the audit log (`illumio-tui enforce` writes them too).
+    model.records_dir = pce::enforcement::default_records_dir();
     // marks.toml next to the config file: read at every rebuild (a stat).
     model.traffic.marks =
         crate::marks::MarksStore::new(crate::marks::marks_path(global.config.as_deref()));

@@ -277,6 +277,12 @@ pub enum Overlay {
     },
     /// `E`: which rule allows or blocks a flow (no request).
     Explain(Box<crate::tui::explain::ExplainView>),
+    /// `:readiness`: every app of the result on screen, judged; its state
+    /// is `Model::readiness_view`.
+    Readiness,
+    /// `:enforce` / `e` in the app overlay: one app's five steps to
+    /// enforcement; its state is `Model::enforce_view`.
+    Enforce,
 }
 
 impl PartialEq for Overlay {
@@ -287,7 +293,9 @@ impl PartialEq for Overlay {
             | (Overlay::Pending, Overlay::Pending)
             | (Overlay::App, Overlay::App)
             | (Overlay::Generator, Overlay::Generator)
-            | (Overlay::Marks, Overlay::Marks) => true,
+            | (Overlay::Marks, Overlay::Marks)
+            | (Overlay::Readiness, Overlay::Readiness)
+            | (Overlay::Enforce, Overlay::Enforce) => true,
             (Overlay::Prompt { input: a }, Overlay::Prompt { input: b })
             | (Overlay::Error(a), Overlay::Error(b)) => a == b,
             (Overlay::GroupKeys(a), Overlay::GroupKeys(b))
@@ -403,6 +411,9 @@ pub enum PendingAction {
     /// `x` on `:marks`: this mark leaves `marks.toml`; `y` and `n` go back
     /// to the overlay. A local file only.
     DeleteMark(String),
+    /// `r` on the enforcement overlay's Watch step past a cost threshold:
+    /// the blocked-since query; `y` and `n` go back to the overlay.
+    EnforceWatch,
 }
 
 impl PolicyState {
@@ -752,6 +763,26 @@ pub struct Model {
     /// The last bulk confirm's draft check (`d`); a late answer for an
     /// older one is dropped.
     pub bulk_check_seq: u64,
+    /// `:readiness`'s state while it is open (and after, until reopened).
+    pub readiness_view: Option<crate::tui::enforce::ReadinessView>,
+    /// The enforcement overlay's state (kept for the same app).
+    pub enforce_view: Option<crate::tui::enforce::EnforceView>,
+    /// The last enforcement overlay's (and watch query's) sequence number.
+    pub enforce_seq: u64,
+    /// Where change records are kept (`…/illumio-tui/enforcements`); `None`
+    /// without `$XDG_STATE_HOME` and `$HOME` (a move is refused). Set by the
+    /// runtime; tests point it at a temp dir.
+    pub records_dir: Option<std::path::PathBuf>,
+    /// A key on `:readiness` or the enforcement overlay opened something
+    /// else (the generator, a form, a confirm): once nothing is open and no
+    /// write is on its way, that overlay comes back.
+    pub enforce_back: Option<Overlay>,
+    /// Where `Esc` on the enforcement overlay returns: `:readiness`, the
+    /// app overlay, or the screen (`Overlay::None`).
+    pub enforce_return: Overlay,
+    /// The open bulk confirm was planned by the enforcement overlay: `y`
+    /// sends it with a change record.
+    pub enforce_send: Option<Box<crate::tui::enforce::EnforceSend>>,
     pub quit: bool,
     pub started: Instant,
 }
@@ -830,6 +861,13 @@ impl Model {
             batch_report: None,
             batch_from_gen: false,
             bulk_check_seq: 0,
+            readiness_view: None,
+            enforce_view: None,
+            enforce_seq: 0,
+            records_dir: None,
+            enforce_back: None,
+            enforce_return: Overlay::None,
+            enforce_send: None,
             quit: false,
             started: Instant::now(),
         }
@@ -1013,6 +1051,11 @@ impl Model {
         self.form_from_app = false;
         self.gen_view = None;
         self.gen_from_app = false;
+        self.readiness_view = None;
+        self.enforce_view = None;
+        self.enforce_back = None;
+        self.enforce_return = Overlay::None;
+        self.enforce_send = None;
         self.stats = StatsSnapshot { calls: 0, bytes: 0 };
         self.busy = 0;
         self.overlay = Overlay::None;

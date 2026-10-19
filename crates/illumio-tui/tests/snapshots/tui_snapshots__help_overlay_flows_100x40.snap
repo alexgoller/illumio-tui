@@ -37,7 +37,7 @@ expression: "render_to_string(&m, 100, 40)"
 │select a │y / n          send / cancel a shown request                                 │          │
 │         │Esc            close overlay / cancel                                        │          │
 │         │q / Ctrl-C     quit                                                          │          │
-│         │more: Commands · App-to-app · Blocked · Mesh · Treemap · Marks +10           │          │
+│         │more: Commands · App-to-app · Blocked · Mesh · Treemap · Marks +11           │          │
 │         ╰─────────────────────────── Tab next · S-Tab prev · a all · j/k scroll · Esc ╯          │
 │                                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

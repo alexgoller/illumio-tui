@@ -98,6 +98,8 @@ pub fn view(model: &Model, f: &mut Frame) {
         Overlay::Diff { diff, scroll } => {
             widgets::overlay::render_diff(model, diff, *scroll, f, area)
         }
+        Overlay::Readiness => widgets::enforce::render_readiness(model, f, area),
+        Overlay::Enforce => widgets::enforce::render_enforce(model, f, area),
         Overlay::Explain(v) => {
             // Opened from the app overlay: it stays behind.
             if v.from_app && model.app_view.is_some() {

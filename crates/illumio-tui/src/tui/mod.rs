@@ -9,6 +9,7 @@ pub mod commands;
 pub mod complete;
 pub mod diff;
 pub mod edit;
+pub mod enforce;
 pub mod event_diff;
 pub mod explain;
 pub mod export;

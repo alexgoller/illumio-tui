@@ -1,0 +1,44 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: wide
+---
+ illumio-tui pce.example · org 5 ●                                                                api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭ Readiness · last 24h · draft ───────────────────────────────────────────────────────────────────────────────── 0 req ╮
+│8 apps · 8 needs rules  · sort verdict                                                                                │
+│app          wl flows   block    cov pend  verdict       enforcement               warnings                           │
+│shop/prod     2    10     708  59.0%    1  needs rules   enforced 1 · visibility 1 little evidence (1d, 10 flows) · 1…│
+│crm/prod      0     9     654  60.2%    0  needs rules   none                      little evidence (1d, 9 flows) · no…│
+│erp/prod      0     9     115  84.2%    0  needs rules   none                      little evidence (1d, 9 flows) · no…│
+│hr/prod       0     5     100  43.1%    0  needs rules   none                      little evidence (1d, 5 flows) · no…│
+│erp/dev       0     2      44  15.3%    0  needs rules   none                      little evidence (1d, 2 flows) · no…│
+│hr/dev        0     2      25   0.0%    0  needs rules   none                      little evidence (1d, 2 flows) · no…│
+│crm/dev       0     2      18  40.0%    0  needs rules   none                      little evidence (1d, 2 flows) · no…│
+│shop/dev      0     3       6  93.9%    0  needs rules   none                      little evidence (1d, 3 flows) · no…│
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│Enter enforce · j/k · s sort · / search · D draft · ? help · Esc back                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+readiness · 8 apps · 8 needs rules · 0 req            f filter  r run  a auto  v view  g group  / search  : cmd  ? help

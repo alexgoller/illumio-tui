@@ -1,0 +1,44 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                                                                api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭ Enforce · shop/prod · last 24h ───────────────────────────────────────────────────────────────── needs rules · 0 req ╮
+│╭ Steps ──────────────────╮╭ 5 Watch ────────────────────────────────────────────────────────────────────────────────╮│
+││ 1 Readiness needs rules ││Record      shop_prod-20261019T100000.000Z.json                                          ││
+││ 2 Rules     3 gaps      ││Moved       2026-10-19T10:00:00Z · to full                                               ││
+││ 3 Provision 1 pending   ││Workloads   host-2.example · visibility_only · flow_summary → full · updated             ││
+││ 4 Enforce   blocked     ││                                                                                         ││
+││▸5 Watch     moved       ││Watch       r: the blocked flows since the change (nothing refreshes by itself)          ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││r blocked since the change (1 query) · R rollback (preview)                              ││
+│╰─────────────────────────╯╰─────────────────────────────────────────────────────────────────────────────────────────╯│
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+shop/prod · needs rules · 0 req                       f filter  r run  a auto  v view  g group  / search  : cmd  ? help

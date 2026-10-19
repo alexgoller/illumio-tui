@@ -82,6 +82,12 @@ pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
             open_app_picker(model, AppPickerPurpose::Generator, "");
             Vec::new()
         }
+        Command::Readiness => enforce::open_readiness(model),
+        Command::Enforce(Some(name)) => enforce::enforce_by_name(model, &name),
+        Command::Enforce(None) => {
+            enforce::enforce_picker(model);
+            Vec::new()
+        }
         Command::Profile(name) => {
             if model.batch_sending {
                 model.status = StatusLine::warn("batch sending: wait for it to finish");

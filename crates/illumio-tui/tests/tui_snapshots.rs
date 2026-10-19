@@ -3164,3 +3164,128 @@ fn explain_scrolls_to_the_selected_rule_and_keeps_its_keys_in_a_short_terminal()
     );
     assert!(out.contains("w rule · Esc"), "the key line:\n{out}");
 }
+
+/// The rich flows with their draft decisions, the workloads, the rulesets
+/// and the pending list loaded; records in a fixed place (never written
+/// here): readiness and the enforcement overlay cost nothing.
+fn enforce_model() -> illumio_tui::tui::model::Model {
+    let mut m = illumio_tui::tui::test_support::with_draft_loaded(with_policy(with_workloads(
+        model_with_window("24h"),
+    )));
+    m.policy.pending = Some(pce::models::parse_pending(
+        serde_json::from_str(include_str!("../../../fixtures/pending_list.json")).unwrap(),
+    ));
+    m.records_dir = Some("/state/illumio-tui/enforcements".into());
+    m
+}
+
+fn command(m: &mut illumio_tui::tui::model::Model, c: illumio_tui::tui::commands::Command) {
+    let cmds = illumio_tui::tui::update(m, illumio_tui::tui::msg::Msg::Command(c));
+    assert!(cmds.is_empty(), "no request: {cmds:?}");
+}
+
+#[test]
+fn readiness_overlay_120x40_and_80x24() {
+    use illumio_tui::tui::commands::Command;
+    let mut m = enforce_model();
+    command(&mut m, Command::Readiness);
+    let wide = render_to_string(&m, 120, 40);
+    for s in [
+        "Readiness · last 24h · draft",
+        "8 apps · 8 needs rules",
+        "shop/prod",
+        "needs rules",
+        "enforcement",
+        "Enter enforce",
+    ] {
+        assert!(wide.contains(s), "missing {s:?}:\n{wide}");
+    }
+    insta::assert_snapshot!("readiness_overlay_120x40", wide);
+    let narrow = render_to_string(&m, 80, 24);
+    assert!(narrow.contains("shop/prod"), "{narrow}");
+    insta::assert_snapshot!("readiness_overlay_80x24", narrow);
+    // Not evaluated: said, and `D` offered.
+    let mut plain = with_policy(with_workloads(model_with_window("24h")));
+    plain.policy.pending = Some(Vec::new());
+    command(&mut plain, Command::Readiness);
+    let out = render_to_string(&plain, 80, 24);
+    assert!(out.contains("not evaluated"), "{out}");
+    assert!(out.contains("D evaluates"), "{out}");
+}
+
+#[test]
+fn enforce_overlay_120x40_and_80x24() {
+    use illumio_tui::tui::commands::Command;
+    let mut m = enforce_model();
+    command(&mut m, Command::Enforce(Some("shop/prod".into())));
+    let wide = render_to_string(&m, 120, 40);
+    for s in [
+        "Enforce · shop/prod · last 24h",
+        "1 Readiness",
+        "5 Watch",
+        "3 gaps",
+        "Coverage",
+        "Warnings",
+    ] {
+        assert!(wide.contains(s), "missing {s:?}:\n{wide}");
+    }
+    insta::assert_snapshot!("enforce_overlay_120x40", wide);
+    insta::assert_snapshot!("enforce_overlay_80x24", render_to_string(&m, 80, 24));
+    // Step 2's gaps and step 4's gate at 80x24.
+    gen_key(&mut m, '2');
+    let rules = render_to_string(&m, 80, 24);
+    assert!(rules.contains("ipl:Corp/-"), "{rules}");
+    assert!(rules.contains("G generator"), "{rules}");
+    insta::assert_snapshot!("enforce_overlay_rules_80x24", rules);
+    gen_key(&mut m, '4');
+    let gate = render_to_string(&m, 80, 24);
+    assert!(gate.contains("type enforce"), "{gate}");
+    insta::assert_snapshot!("enforce_overlay_enforce_80x24", gate);
+}
+
+#[test]
+fn enforce_overlay_watch_with_a_record_120x40() {
+    use illumio_tui::tui::commands::Command;
+    use pce::enforcement::{ChangeRecord, ModeState, RecordWorkload, write_record};
+    let dir = tempfile::tempdir().unwrap();
+    let rec = ChangeRecord {
+        app: "shop/prod".into(),
+        profile: "demo".into(),
+        pce: "pce.example".into(),
+        org_id: 5,
+        at: "2026-10-19T10:00:00Z".into(),
+        to: Some(ModeState {
+            mode: Some("full".into()),
+            visibility: None,
+        }),
+        rollback_of: None,
+        readiness: None,
+        workloads: vec![RecordWorkload {
+            href: "/orgs/5/workloads/aaaa-2".into(),
+            hostname: "host-2.example".into(),
+            before: ModeState {
+                mode: Some("visibility_only".into()),
+                visibility: Some("flow_summary".into()),
+            },
+            after: ModeState {
+                mode: Some("full".into()),
+                visibility: None,
+            },
+            result: "updated".into(),
+        }],
+    };
+    write_record(dir.path(), &rec, "2026-10-19T10:00:00Z".parse().unwrap()).unwrap();
+    let mut m = enforce_model();
+    m.records_dir = Some(dir.path().into());
+    command(&mut m, Command::Enforce(Some("shop/prod".into())));
+    gen_key(&mut m, '5');
+    let out = render_to_string(&m, 120, 40);
+    for s in [
+        "shop_prod-20261019T100000.000Z.json",
+        "host-2.example · visibility_only · flow_summary → full · updated",
+        "r blocked since the change",
+    ] {
+        assert!(out.contains(s), "missing {s:?}:\n{out}");
+    }
+    insta::assert_snapshot!("enforce_overlay_watch_120x40", out);
+}

@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: gate
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭ Enforce · shop/prod · last 24h ───────────────────────── needs rules · 0 req ╮
+│╭ Steps ──────────────────╮╭ 4 Enforce ──────────────────────────────────────╮│
+││ 1 Readiness needs rules ││Target      (●) full   ( ) selective             ││
+││ 2 Rules     3 gaps      ││Visibility  keep each workload's level           ││
+││ 3 Provision 1 pending   ││Plan        2 workloads: 1 visibility_only → full││
+││▸4 Enforce   blocked     ││· 1 already full (skipped)                       ││
+││ 5 Watch     no record   ││Readiness   needs rules: Enter, then type enforce││
+││                         ││                                                 ││
+││                         ││Record      /state/illumio-tui/enforcements      ││
+││                         ││Writes      off: :writes on arms them            ││
+││                         ││                                                 ││
+││                         ││                                                 ││
+││                         ││                                                 ││
+││                         ││                                                 ││
+││                         ││                                                 ││
+││                         ││                                                 ││
+││                         ││                                                 ││
+││                         ││                                                 ││
+││                         ││j/k full/selective · v visibility · Enter review…││
+│╰─────────────────────────╯╰─────────────────────────────────────────────────╯│
+╰──────────────────────────────────────────────────────────────────────────────╯
+shop/prod · n f filter  r run  a auto  v view  g group  / search  : cmd  ? help

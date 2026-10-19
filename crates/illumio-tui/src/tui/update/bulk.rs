@@ -258,6 +258,13 @@ pub(super) fn confirm_key(model: &mut Model, mut c: Box<BulkConfirm>, k: KeyEven
                 "sending: 1 re-read, then {writes} request{} …",
                 if writes == 1 { "" } else { "s" }
             ));
+            // Planned by the enforcement overlay: sent with its change record.
+            if let Some(send) = model.enforce_send.take() {
+                return vec![Cmd::EnforceApp {
+                    plan: Box::new(plan),
+                    send,
+                }];
+            }
             vec![Cmd::ExecuteBulk(Box::new(plan))]
         }
         KeyCode::Esc => {

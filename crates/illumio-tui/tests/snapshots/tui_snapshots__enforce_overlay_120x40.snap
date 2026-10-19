@@ -1,0 +1,44 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: wide
+---
+ illumio-tui pce.example · org 5 ●                                                                api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭ Enforce · shop/prod · last 24h ───────────────────────────────────────────────────────────────── needs rules · 0 req ╮
+│╭ Steps ──────────────────╮╭ 1 Readiness ────────────────────────────────────────────────────────────────────────────╮│
+││▸1 Readiness needs rules ││Verdict     needs rules                                                                  ││
+││ 2 Rules     3 gaps      ││Workloads   2 · 2 managed · 0 unmanaged                                                  ││
+││ 3 Provision 1 pending   ││VENs        1 offline · 0 without role                                                   ││
+││ 4 Enforce   blocked     ││Enforcement enforced 1 · visibility 1                                                    ││
+││ 5 Watch     no record   ││Evidence    1d · 10 flows · 1.7K conns                                                   ││
+││                         ││Coverage    59.0% of the connections                                                     ││
+││                         ││            in  1.5K: 837 allowed · 708 block                                            ││
+││                         ││            out 183: 183 allowed · 0 block                                               ││
+││                         ││Gaps        3 tuples would block                                                         ││
+││                         ││Pending     1 to provision first                                                         ││
+││                         ││Warnings    little evidence (1d, 10 flows)                                               ││
+││                         ││            1 VEN offline                                                                ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││                                                                                         ││
+││                         ││Tab/1-5 steps · D draft · ? help · Esc back                                              ││
+│╰─────────────────────────╯╰─────────────────────────────────────────────────────────────────────────────────────────╯│
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+shop/prod · needs rules · 0 req                       f filter  r run  a auto  v view  g group  / search  : cmd  ? help
