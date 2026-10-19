@@ -16,6 +16,7 @@ pub mod policy;
 pub mod profile;
 pub mod readiness;
 pub mod traffic;
+pub mod traffic_explain;
 pub mod workloads;
 pub mod write;
 
@@ -163,7 +164,7 @@ fn csv_refusal(command: &Command) -> Option<&'static str> {
         Command::Policy(P::DenyRules(_)) => Some("policy deny-rules"),
         Command::Policy(P::Provision(_)) => Some("policy provision"),
         Command::Policy(P::Revert(_)) => Some("policy revert"),
-        Command::Traffic(t) if t.filter().dry_run => Some("traffic --dry-run"),
+        Command::Traffic(t) if t.filter().is_some_and(|f| f.dry_run) => Some("traffic --dry-run"),
         Command::Profile(profile::ProfileCmd::Use { .. }) => Some("profile use"),
         Command::Marks(marks::MarksCmd::Export(_)) => Some("marks export"),
         _ => None,

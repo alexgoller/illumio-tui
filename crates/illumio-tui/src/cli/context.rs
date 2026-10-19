@@ -92,6 +92,7 @@ impl Context {
             warnings: None,
             marks: None,
             squelched: None,
+            cost: None,
         }
     }
 

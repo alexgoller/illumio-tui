@@ -51,15 +51,26 @@ pub enum TrafficCmd {
     /// Units: flows counts flow records; conns and bytes are the lifetime counts of those
     /// records, as in the PCE UI.
     Mesh(MeshArgs),
+    /// Which rule allows or blocks the flows of one source, destination and port
+    ///
+    /// Runs one Explorer query narrowed to --src, --dst, --port and --proto, evaluated against
+    /// the draft policy (update_rules; it changes no policy), and resolves each flow's rules
+    /// (allow, deny, override deny, essential) through the draft rulesets. Cost: 1 POST,
+    /// status polls, 1 PUT, polls and 1 download; the draft rulesets (1 GET) when a flow names
+    /// a rule; 1 GET per ruleset whose deny rules are not inline; the object lists (cached).
+    /// JSON: data.flows[].rules[] (kind, ruleset, scopes, consumers, providers, services,
+    /// enabled); meta.cost
+    Explain(super::traffic_explain::ExplainArgs),
 }
 
 impl TrafficCmd {
-    /// The Explorer filter the subcommand runs.
-    pub fn filter(&self) -> &FilterArgs {
+    /// The Explorer filter the subcommand runs (`explain` builds its own).
+    pub fn filter(&self) -> Option<&FilterArgs> {
         match self {
-            TrafficCmd::Query(a) => &a.filter,
-            TrafficCmd::Groups(a) => &a.filter,
-            TrafficCmd::Mesh(a) => &a.filter,
+            TrafficCmd::Query(a) => Some(&a.filter),
+            TrafficCmd::Groups(a) => Some(&a.filter),
+            TrafficCmd::Mesh(a) => Some(&a.filter),
+            TrafficCmd::Explain(_) => None,
         }
     }
 }
@@ -1165,6 +1176,7 @@ pub async fn run(ctx: &Context, cmd: &TrafficCmd) -> Result<(), CliError> {
         TrafficCmd::Query(a) => query(ctx, a).await,
         TrafficCmd::Groups(a) => groups(ctx, a).await,
         TrafficCmd::Mesh(a) => mesh_cmd(ctx, a).await,
+        TrafficCmd::Explain(a) => super::traffic_explain::run(ctx, a).await,
     }
 }
 

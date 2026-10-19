@@ -106,6 +106,9 @@ pub struct Meta {
     /// flows only (its rules include them).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub squelched: Option<SquelchedMeta>,
+    /// `traffic explain`: the requests it makes, in words.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost: Option<&'static str>,
 }
 
 /// `meta.squelched`.
@@ -474,6 +477,7 @@ mod tests {
             warnings: None,
             marks: None,
             squelched: None,
+            cost: None,
         };
         assert!(meta_line(&meta).contains("POST /orgs/5/labels → 201"));
         let sq = |rows| Meta {
