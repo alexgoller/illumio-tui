@@ -8,6 +8,9 @@ Documentation: https://alexgoller.github.io/illumio-tui/
 
 Screenshots and a short recording: https://alexgoller.github.io/illumio-tui/#screens
 
+Workflows (marks, draft, explain, generator, bulk, readiness and enforce) with screenshots:
+https://alexgoller.github.io/illumio-tui/#workflows
+
 ## Install
 
 ### Homebrew (macOS, Linux)
@@ -156,6 +159,109 @@ also be overridden per run with global flags: `--host`, `--pce-port`,
 `--org-id`, `--profile`, `--config`, `--insecure`, `--no-cache` (the
 connection-port flag is `--pce-port`, not `--port`, because `traffic query`
 has its own `--port` service-port filter).
+
+## Getting started with the CLI
+
+Connect with a dotenv file or a profile (above), then check it:
+
+    $ illumio-tui --env-file pce.env health
+    field   value
+    ok      true
+    host    demo100.illum.io
+    org_id  5636114
+    status  [{"generated_at":"2026-10-19T21:21:07+00:00","listen_only_m…
+    writes  false
+    default · 1 api call · 0.1 KB · cache none · 2102 ms
+
+The last line (stderr) is what the command cost. First useful commands:
+
+    illumio-tui labels --key app
+    illumio-tui workloads --label app=infra-mgmt,monitoring        # comma: any of
+    illumio-tui traffic query --window 24h --group app,env           # one Explorer query
+    illumio-tui traffic groups --window 24h --services --csv > tuples.csv
+    illumio-tui app infra-mgmt/Production --table                    # one app: peers, policy, workloads
+    illumio-tui gen infra-mgmt/Production --table                    # the allow rules it needs (writes nothing)
+    illumio-tui readiness --app infra-mgmt/Production                # verdict, gaps, pending changes
+    illumio-tui traffic explain --src app=payment --dst app=ad --port 53 --proto udp
+
+Output is a table at a terminal and JSON (`{"data": ..., "meta": ...}`) when piped;
+`--table`, `--json` and `--csv` force one. JSON is made for `jq`:
+
+    $ illumio-tui readiness --json | jq -r '.data.apps | sort_by(-.coverage.ratio) | .[:3][]
+        | "\(.app)\t\(.verdict)\t\(.coverage.ratio*1000|floor/10)%"' | column -t -s $'\t'
+    infra-mgmt/Production  needs_rules  90.3%
+    soc/Production         needs_rules  89.5%
+    monitoring/Production  needs_rules  86%
+
+| Exit | Meaning |
+|---|---|
+| 0 | success |
+| 1 | generic failure |
+| 2 | arguments or configuration (an unknown label, an expensive query without `--yes`, a missing `--confirm-count`) |
+| 3 | authentication |
+| 4 | PCE error (a failed request, an incomplete write) |
+| 5 | rate limited |
+| 6 | write refused (writes not enabled; `enforce` on an app that is not ready) |
+| 7 | flows blocked since an enforcement (`enforce --watch`) |
+
+Writes: enable them (`writes = true` or `ILLUMIO_WRITES=1`, else exit 6 even for a dry run),
+look with `--dry-run` (method, path and body; nothing sent), send with `--yes` (plus
+`--confirm-count N` for bulk enforcement), and find each sent request in
+`~/.local/state/illumio-tui/writes.jsonl`. Shell completions: see
+[Shell completions](#shell-completions). More recipes with real output:
+https://alexgoller.github.io/illumio-tui/#recipes
+
+## Workflows
+
+Seven everyday jobs as keys and commands. Screenshots and recordings of each, taken on a demo
+PCE: https://alexgoller.github.io/illumio-tui/#workflows
+
+1. **Find and silence noise (marks).** `m` on a row of any traffic view opens a mark form
+   prefilled from the row: `squelch` hides known noise, `critical` / `important` / `revisit`
+   flag, `reviewed` / `accept-blocked` dim; it previews its matches and asks why. `M` shows
+   the squelched rows, `:marks` lists and edits. No request; `marks.toml` is shared by the
+   TUI and the CLI (`marks add|list|export|import`).
+
+       illumio-tui marks add --action squelch --src app=monitoring --dst any --service 5666/tcp --comment "Nagios NRPE"
+
+2. **What would my draft do? (`D`).** On any traffic view: a `draft` column (`blocked →
+   allowed`, `66 would allow`, `+40 allow -24 block`), `draft ✓ 409 fixed` in the Result
+   header, `draft allows N` in Blocked. One PUT on the query you already ran, polls and a
+   download; no policy change, no armed writes. CLI: `--draft`.
+3. **Why is this flow allowed or blocked? (`E`).** The rules the PCE names for the flow,
+   resolved through the draft policy (`allowed by 1 rule (draft)`: kind, ruleset, scope,
+   consumers → providers, services), or `no rule allows this flow` and `w` to draft one.
+   `Enter` opens the rule on Policy. No request. CLI:
+
+       illumio-tui traffic explain --src app=pos,env=Staging --dst app=infra-mgmt,env=Production --port 7680 --proto tcp
+
+4. **Policy from traffic (the generator).** `A` on a row (or `:app X`), then `G` (or `:gen X`):
+   one row per peer, the slider (`h`/`l`) from `app·all` to `role·all`, `c` on a fan-in line
+   (`123/udp from 7 peers (NTP?)`) folds it into one rule from Any or All Workloads with the
+   catch spelled out, `Space` checks a peer, `p` previews every rule and the coverage
+   (`27 of 27 flows`), `Enter` plans every write into one confirm (`4 requests: 1 rule_set, 3
+   rules`), `y` sends, `n` cancels. CLI: `illumio-tui gen X` (read-only).
+5. **Bulk labels and enforcement (Workloads).** `x` groups by app and env, `f` filters by label
+   (`app=infra-mgmt,monitoring,soc env=Production`), `V` marks a group or everything shown,
+   `Space` one workload, `M` sets the enforcement mode and `L` the labels of the marked
+   workloads (writes armed). One confirm lists every change and request, wants the count
+   typed for full or selective on several workloads, and counts the loaded traffic they would
+   block; `d` runs a draft check on demand. CLI: `workloads enforce` / `workloads relabel` with
+   `--dry-run`, then `--yes --confirm-count N`.
+6. **From visibility to enforcement.** `readiness` ranks every app (one 7-day query with the
+   draft), `readiness --app X` names its gaps and pending changes, `enforce X --to full
+   --dry-run` refuses with exit 6 until it is ready, `--yes --confirm-count N` moves it and
+   writes a change record, `enforce X --watch` exits 7 when something is blocked since,
+   `enforce X --rollback` restores the record's modes exactly. The TUI overlay follows in #55.
+7. **Small things.** `Ctrl-U` clears the line in every text input; `Ctrl-N` / `Ctrl-P`
+   complete without a request; `:export <path>` writes the table on screen as CSV; shell
+   completions for bash, zsh and fish.
+
+**One app, start to finish:** `readiness` (infra-mgmt/Production is closest, 90% covered) →
+`readiness --app` (two gaps, two pending rulesets) → TUI: `r`, `m` the noise, `D` → `E` on the
+gap flow → `A`, `G`, `c`, `Space`, `p`, `Enter`, `y` → provision with `P` → `readiness --app`
+until `ready` → `enforce --to full --dry-run`, then `--yes --confirm-count 2` → `enforce
+--watch` from cron → `--rollback` if needed.
 
 ## TUI
 
