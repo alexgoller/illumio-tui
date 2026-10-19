@@ -18,7 +18,7 @@ use crate::marks::ActiveMarks;
 use crate::models::{PolicyDecision, Workload};
 use crate::readiness::{AppReadiness, Gap, accepted, is_unicast, tuples};
 use crate::traffic::{Direction, GroupKey, ResolvedFlow, group_key, keys_or_default};
-use crate::write::bulk::{BulkItem, BulkReport, EnforcementMode, ItemStatus, VisibilityLevel};
+use crate::write::bulk::{BulkItem, EnforcementMode, ItemResult, ItemStatus, VisibilityLevel};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::io;
@@ -165,20 +165,19 @@ impl ChangeRecord {
     /// The record of a sent bulk move: each planned workload (`items`,
     /// the plan's; workloads the plan skipped were not touched) with its
     /// state before, `after` (each item's own target), and its result in
-    /// `report`. `at` is when the move was sent.
+    /// `results` (the bulk reports' items; none: `not_sent`). `at` is when the move was sent.
     pub fn of_move(
         app: &str,
         origin: &RecordOrigin,
         at: Timestamp,
         to: Option<ModeState>,
         afters: &[(BulkItem, ModeState)],
-        report: &BulkReport,
+        results: &[ItemResult],
     ) -> Self {
         let workloads = afters
             .iter()
             .map(|(i, after)| {
-                let result = report
-                    .items
+                let result = results
                     .iter()
                     .find(|r| r.href == i.href)
                     .map_or("not_sent", |r| result_word(r.status));

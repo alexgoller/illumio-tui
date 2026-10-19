@@ -1,8 +1,7 @@
 use super::*;
 use crate::models::Label;
-use crate::resolve::{NameIndex, ResolvedLabel};
-use crate::traffic::ResolvedEndpoint;
-use crate::write::bulk::{BulkTarget, ItemResult};
+use crate::resolve::NameIndex;
+use crate::write::bulk::{BulkReport, BulkTarget};
 use serde_json::{Value, json};
 
 fn origin() -> RecordOrigin {
@@ -80,7 +79,8 @@ fn record() -> ChangeRecord {
             (1, ItemStatus::Updated),
             (2, ItemStatus::Updated),
             (3, ItemStatus::Failed),
-        ]),
+        ])
+        .items,
     );
     r.readiness = Some(RecordReadiness {
         verdict: "ready".into(),
@@ -274,52 +274,42 @@ fn a_target_with_a_level_holds_only_with_that_level() {
     assert!(!ModeState::default().holds_in(&ModeState::default()));
 }
 
-fn ep(app: &str, host: &str) -> ResolvedEndpoint {
+fn index() -> NameIndex {
     let labels: Vec<Label> = serde_json::from_value(json!([
-        {"href": "/orgs/5/labels/3", "key": "app", "value": app},
-        {"href": "/orgs/5/labels/4", "key": "env", "value": "prod"}
+        {"href": "/orgs/5/labels/3", "key": "app", "value": "shop"},
+        {"href": "/orgs/5/labels/4", "key": "env", "value": "prod"},
+        {"href": "/orgs/5/labels/50", "key": "app", "value": "crm"},
+        {"href": "/orgs/5/labels/51", "key": "app", "value": "hr"}
     ]))
     .unwrap();
-    ResolvedEndpoint {
-        ip: Some("10.0.0.1".into()),
-        hostname: Some(host.into()),
-        workload_href: Some(format!("/orgs/5/workloads/{host}")),
-        labels: labels
-            .into_iter()
-            .map(|l| ResolvedLabel {
-                href: l.href,
-                key: l.key,
-                value: l.value,
-            })
-            .collect(),
-        ..ResolvedEndpoint::default()
-    }
+    NameIndex::new(&labels, &[], &[], &[])
 }
 
-fn flow(
-    src: ResolvedEndpoint,
-    dst: ResolvedEndpoint,
-    port: u16,
-    conns: u64,
-    d: PolicyDecision,
-) -> ResolvedFlow {
-    ResolvedFlow {
-        src,
-        dst,
-        port: Some(port),
-        proto: "tcp".into(),
-        process_name: None,
-        user_name: None,
-        num_connections: conns,
-        policy_decision: d,
-        draft_policy_decision: None,
-        flow_direction: None,
-        first_detected: None,
-        last_detected: None,
-        rules: Vec::new(),
-        bytes_in: None,
-        bytes_out: None,
-    }
+/// A workload endpoint of `app` (shop, crm or hr) in prod, as Explorer
+/// sends it.
+fn ep(app: &str, host: &str) -> Value {
+    let app_href = match app {
+        "shop" => "/orgs/5/labels/3",
+        "crm" => "/orgs/5/labels/50",
+        _ => "/orgs/5/labels/51",
+    };
+    json!({"ip": "10.0.0.1", "workload": {
+        "href": format!("/orgs/5/workloads/{host}"), "hostname": host,
+        "labels": [{"href": app_href}, {"href": "/orgs/5/labels/4"}]
+    }})
+}
+
+/// A flow as Explorer sends it, resolved (built from JSON: the resolved
+/// type has no default).
+fn flow(src: Value, dst: Value, port: u16, conns: u64, d: PolicyDecision) -> ResolvedFlow {
+    let raw: crate::models::Flow = serde_json::from_value(json!({
+        "src": src, "dst": dst,
+        "service": {"port": port, "proto": 6},
+        "policy_decision": d.as_str(),
+        "num_connections": conns,
+    }))
+    .unwrap();
+    crate::traffic::resolve_flows(&[raw], &index()).remove(0)
 }
 
 #[test]
