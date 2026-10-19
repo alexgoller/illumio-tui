@@ -1544,6 +1544,11 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 model.overlay = Overlay::Prompt { input };
                 Vec::new()
             }
+            KeyCode::Char('u') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                input.clear();
+                model.overlay = Overlay::Prompt { input };
+                Vec::new()
+            }
             KeyCode::Char(c) => {
                 input.push(c);
                 model.overlay = Overlay::Prompt { input };
@@ -1603,6 +1608,10 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     e.pop();
                     model.overlay = Overlay::FilterEditor(e);
                 }
+                KeyCode::Char('u') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                    e.clear();
+                    model.overlay = Overlay::FilterEditor(e);
+                }
                 KeyCode::Char(c) => {
                     e.push(c);
                     model.overlay = Overlay::FilterEditor(e);
@@ -1641,6 +1650,11 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 KeyCode::Esc => model.overlay = Overlay::None,
                 KeyCode::Backspace => {
                     e.pop();
+                    label_editor_unknown(model, &mut e);
+                    model.overlay = Overlay::LabelFilter(e);
+                }
+                KeyCode::Char('u') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                    e.clear();
                     label_editor_unknown(model, &mut e);
                     model.overlay = Overlay::LabelFilter(e);
                 }
@@ -1720,6 +1734,10 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 }
                 KeyCode::Backspace => {
                     values[active].pop();
+                    model.overlay = editor(values, active, None);
+                }
+                KeyCode::Char('u') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                    values[active].clear();
                     model.overlay = editor(values, active, None);
                 }
                 KeyCode::Char(c) => {
@@ -1904,7 +1922,7 @@ fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             plan,
             kind: pce::write::ObjectKind::Revert,
             scroll,
-        } => revert_confirm_key(model, plan, scroll, k.code),
+        } => revert_confirm_key(model, plan, scroll, k),
         Overlay::ConfirmWrite { plan, kind, scroll } => {
             let area = ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1);
             let extra = crate::tui::impact::confirm_rows(&plan);
@@ -2184,6 +2202,9 @@ fn search_key<T>(table: &mut crate::tui::table::TableView<T>, k: KeyEvent) {
         KeyCode::Esc => table.search_clear(),
         KeyCode::Enter => table.search_commit(),
         KeyCode::Backspace => table.search_pop(),
+        KeyCode::Char('u') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+            table.search_clear_draft()
+        }
         KeyCode::Char(c) => table.search_push(c),
         _ => {}
     }
@@ -4433,13 +4454,13 @@ pub const REVERT_WORD: &str = "revert";
 
 /// Keys of the revert confirm: letters type the word, `Enter` sends only
 /// when it reads `revert`, `Esc` cancels, arrows scroll. `y` is a letter.
-fn revert_confirm_key(model: &mut Model, plan: Plan, scroll: u16, code: KeyCode) -> Vec<Cmd> {
+fn revert_confirm_key(model: &mut Model, plan: Plan, scroll: u16, k: KeyEvent) -> Vec<Cmd> {
     let kind = pce::write::ObjectKind::Revert;
     let area = ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1);
     let last = confirm_write_last_scroll(&plan, kind, area);
     let last = u16::try_from(last).unwrap_or(u16::MAX);
     let typed = &mut model.policy.revert_typed;
-    match code {
+    match k.code {
         KeyCode::Enter if typed == REVERT_WORD => {
             typed.clear();
             model.policy.provision_counts =
@@ -4460,6 +4481,7 @@ fn revert_confirm_key(model: &mut Model, plan: Plan, scroll: u16, code: KeyCode)
         KeyCode::Backspace => {
             typed.pop();
         }
+        KeyCode::Char('u') if k.modifiers.contains(KeyModifiers::CONTROL) => typed.clear(),
         KeyCode::Char(c) if typed.chars().count() < REVERT_WORD.chars().count() + 8 => {
             typed.push(c)
         }
@@ -19057,5 +19079,92 @@ mod workload_group_tests {
         let mut m = on_workloads();
         m.writes = crate::tui::model::WritesState::on();
         m
+    }
+}
+
+#[cfg(test)]
+mod ctrl_u_tests {
+    use super::*;
+    use crate::tui::filter::FilterEditor;
+    use crate::tui::label_editor::LabelFilterEditor;
+    use crate::tui::model::{Model, Overlay, Screen};
+    use crate::tui::msg::Msg;
+    use crate::tui::test_support::{model_fixture, with_workloads};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn send(m: &mut Model, code: KeyCode, mods: KeyModifiers) {
+        update(m, Msg::Key(KeyEvent::new(code, mods)));
+    }
+
+    fn type_text(m: &mut Model, text: &str) {
+        for c in text.chars() {
+            send(m, KeyCode::Char(c), KeyModifiers::NONE);
+        }
+    }
+
+    fn ctrl_u(m: &mut Model) {
+        send(m, KeyCode::Char('u'), KeyModifiers::CONTROL);
+    }
+
+    #[test]
+    fn ctrl_u_empties_the_command_line() {
+        let mut m = model_fixture();
+        m.overlay = Overlay::Prompt {
+            input: "writes on".into(),
+        };
+        ctrl_u(&mut m);
+        type_text(&mut m, "q");
+        assert!(matches!(&m.overlay, Overlay::Prompt { input } if input == "q"));
+    }
+
+    #[test]
+    fn ctrl_u_empties_the_search_and_keeps_it_open() {
+        let mut m = with_workloads(model_fixture());
+        m.screen = Screen::Workloads;
+        type_text(&mut m, "/web");
+        ctrl_u(&mut m);
+        assert!(m.workloads.table.is_searching());
+        assert_eq!(m.workloads.table.search_text(), "");
+        type_text(&mut m, "db");
+        assert_eq!(m.workloads.table.search_text(), "db", "no stray u");
+    }
+
+    #[test]
+    fn ctrl_u_empties_the_active_field_of_the_traffic_filter() {
+        let mut m = model_fixture();
+        let mut e = FilterEditor::from_filter(&m.traffic.filter);
+        e.active = 1;
+        e.values[0] = "keep".into();
+        e.values[1] = "app=shop".into();
+        m.overlay = Overlay::FilterEditor(e);
+        ctrl_u(&mut m);
+        let Overlay::FilterEditor(e) = &m.overlay else {
+            panic!("{:?}", m.overlay)
+        };
+        assert_eq!((e.values[0].as_str(), e.values[1].as_str()), ("keep", ""));
+    }
+
+    #[test]
+    fn ctrl_u_empties_the_workloads_label_filter() {
+        let mut m = with_workloads(model_fixture());
+        m.screen = Screen::Workloads;
+        m.overlay = Overlay::LabelFilter(LabelFilterEditor::new("app=shop env=prod"));
+        ctrl_u(&mut m);
+        assert!(matches!(&m.overlay, Overlay::LabelFilter(e) if e.value.is_empty()));
+    }
+
+    #[test]
+    fn ctrl_u_empties_the_active_events_field() {
+        let mut m = model_fixture();
+        m.overlay = Overlay::EventsEditor {
+            values: ["err".into(), "user.login".into(), "24h".into()],
+            active: 1,
+            error: None,
+        };
+        ctrl_u(&mut m);
+        assert!(matches!(
+            &m.overlay,
+            Overlay::EventsEditor { values, .. } if values[0] == "err" && values[1].is_empty() && values[2] == "24h"
+        ));
     }
 }

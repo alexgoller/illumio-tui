@@ -237,6 +237,12 @@ impl<T> TableView<T> {
         self.apply();
     }
 
+    /// Ctrl-U: empties the search being typed; the search stays open.
+    pub fn search_clear_draft(&mut self) {
+        self.search_draft.clear();
+        self.apply();
+    }
+
     pub fn search_commit(&mut self) {
         self.search = std::mem::take(&mut self.search_draft);
         self.searching = false;

@@ -68,6 +68,10 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
             brief("s / r a", "sort · search · refresh · auto-refresh"),
             more("s", "cycle sort column and direction"),
             more("/", "search in the current table (Enter keep, Esc clear)"),
+            more(
+                "Ctrl-U",
+                "empty the line being typed (prompt, search, forms)",
+            ),
             more("r", "refresh the current screen (bypasses the cache)"),
             more("a", "toggle auto-refresh for the current screen"),
             key("y / n", "send / cancel a shown request"),

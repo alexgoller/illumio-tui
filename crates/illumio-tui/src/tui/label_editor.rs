@@ -37,6 +37,12 @@ impl LabelFilterEditor {
         self.error = None;
     }
 
+    /// Ctrl-U: empties the line.
+    pub fn clear(&mut self) {
+        self.value.clear();
+        self.error = None;
+    }
+
     /// The text as a filter, or why it is not one.
     pub fn parse(&self) -> Result<LabelFilter, String> {
         LabelFilter::parse(&self.value)

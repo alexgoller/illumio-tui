@@ -391,6 +391,11 @@ impl FilterEditor {
         self.values[self.active].pop();
         self.error = None;
     }
+    /// Ctrl-U: empties the active field.
+    pub fn clear(&mut self) {
+        self.values[self.active].clear();
+        self.error = None;
+    }
 
     /// Up to five candidates around the shown one, then `+N more`.
     pub fn completion_strip(&self) -> Option<Vec<(String, bool)>> {

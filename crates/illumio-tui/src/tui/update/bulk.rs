@@ -297,6 +297,11 @@ pub(super) fn confirm_key(model: &mut Model, mut c: Box<BulkConfirm>, k: KeyEven
             model.overlay = Overlay::ConfirmBulk(c);
             Vec::new()
         }
+        KeyCode::Char('u') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+            c.typed.clear();
+            model.overlay = Overlay::ConfirmBulk(c);
+            Vec::new()
+        }
         KeyCode::Down | KeyCode::Char('j') => {
             c.scroll = (c.scroll + 1).min(last);
             model.overlay = Overlay::ConfirmBulk(c);

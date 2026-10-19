@@ -906,7 +906,9 @@ loaded index, never with a request; a label created in the TUI joins the
 index when the labels reload after the write, and `r` on Labels refreshes it
 from the PCE). `Tab`/`Shift-Tab` move between
 fields, `Ctrl-U` clears one, `Enter` checks the form, `Esc` leaves without a
-request.
+request. `Ctrl-U` empties the line in every text input, as in a shell: the
+`:` prompt, `/` search, the filter editors, the pickers and the typed
+confirmations.
 `Ctrl-N` completes the token being typed (after the last comma) from what is
 already loaded: label keys and values (`app=p` offers `app`'s values with a
 `p`; a bare `pay` also offers `app=payment`; once a key completes to

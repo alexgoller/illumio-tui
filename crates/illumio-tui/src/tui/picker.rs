@@ -1,6 +1,6 @@
 //! The `g` overlay: which label keys every traffic view groups by. Pure
 //! state; `update` applies the outcome and `ui` draws it.
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 /// One key the picker offers.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -128,6 +128,10 @@ impl KeyPicker {
                 self.cursor = self.text_row();
                 self.all = false;
                 self.text.pop();
+            }
+            KeyCode::Char('u') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.cursor = self.text_row();
+                self.text.clear();
             }
             KeyCode::Char(c) => {
                 self.cursor = self.text_row();
@@ -305,5 +309,23 @@ mod tests {
         );
         assert_eq!(picker().key(kc(KeyCode::Esc)), PickerOutcome::Close);
         assert_eq!(parse_keys(" app, ,env ,"), keys(&["app", "env"]));
+    }
+}
+
+#[cfg(test)]
+mod ctrl_u_tests {
+    use super::*;
+
+    #[test]
+    fn ctrl_u_empties_the_typed_keys() {
+        let p = KeyPicker::new(&[], "role", &[("app".into(), 3)], &[], false);
+        let p = match p.key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)) {
+            PickerOutcome::Open(p) => p,
+            other => panic!("{other:?}"),
+        };
+        match p.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)) {
+            PickerOutcome::Open(p) => assert_eq!(p.text, ""),
+            other => panic!("{other:?}"),
+        }
     }
 }

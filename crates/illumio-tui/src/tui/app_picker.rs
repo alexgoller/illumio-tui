@@ -1,6 +1,6 @@
 //! The app picker: `F` on a row without an app, or `:focus` alone. Pure:
 //! a text line narrows the apps of the loaded result; `Enter` picks.
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 /// What the picked app is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,6 +103,11 @@ impl AppPicker {
                 self.selected = 0;
                 AppPickerOutcome::Open(self)
             }
+            KeyCode::Char('u') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.input.clear();
+                self.selected = 0;
+                AppPickerOutcome::Open(self)
+            }
             KeyCode::Char(c) => {
                 self.input.push(c);
                 self.selected = 0;
@@ -177,5 +182,23 @@ mod tests {
             p.key(k(KeyCode::Enter)),
             AppPickerOutcome::Open(_)
         ));
+    }
+}
+
+#[cfg(test)]
+mod ctrl_u_tests {
+    use super::*;
+
+    #[test]
+    fn ctrl_u_empties_the_typed_app() {
+        let p = AppPicker::new(vec!["crm/dev".into()], AppPickerPurpose::Focus);
+        let p = match p.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE)) {
+            AppPickerOutcome::Open(p) => p,
+            other => panic!("{other:?}"),
+        };
+        match p.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)) {
+            AppPickerOutcome::Open(p) => assert_eq!(p.input, ""),
+            other => panic!("{other:?}"),
+        }
     }
 }
