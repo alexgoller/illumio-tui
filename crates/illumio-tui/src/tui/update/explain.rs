@@ -351,6 +351,8 @@ pub(super) enum Jump {
 pub(super) fn select_rule(model: &mut Model, rs: &str, rule: &str) -> Jump {
     let (rs, rule) = (canon_href(rs), canon_href(rule));
     let p = &mut model.policy;
+    // The panes, not a rule search's list, show the rule.
+    p.put_search_aside();
     p.pane = PolicyPane::RuleSets;
     p.rulesets.select_where(|r| canon_href(&r.href) == rs);
     let Some(name) = p

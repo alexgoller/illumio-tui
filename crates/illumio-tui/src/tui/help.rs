@@ -315,12 +315,18 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
             key("f / c", "rule search across rulesets (local) · clear it"),
             more(
                 "",
-                "app=shop,crm ipl:NAME svc:NAME|443/tcp wl:NAME href:TEXT",
+                "app=shop,crm ipl:NAME svc:NAME|443/tcp|tcp wl:NAME href:TEXT",
             ),
             more("", "disabled deny · space: all of · Ctrl-N completes"),
+            more("", "names: exact or a unique prefix · wl: needs i first"),
+            more("", "labels: scope/actors/groups, not exclusions or All"),
             more(
                 "Enter",
                 "search list: open the rule in its ruleset (f: back)",
+            ),
+            more(
+                "",
+                "enabled: the rule's flag, (ruleset off) if its ruleset is",
             ),
             key("i", "rule impact: load the workloads once (1 request)"),
             key("I", "rule impact: the matched workloads, per side (Tab)"),

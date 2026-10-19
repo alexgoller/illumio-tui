@@ -529,20 +529,30 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   counted (virtual services, a side resolved as `virtual_services`), and a rule's confirm
   overlay shows the same for the rule about to be written. Impact uses the ruleset's scopes, unscoped consumers, label groups (with
   their sub-groups), exclusions, `all` and workload actors; IP lists are sized, never expanded.
-  `I` (rules pane or rule detail, once the workloads are cached) lists the workloads behind the
-  counts, providers first and `Tab` the consumers: hostname, labels, enforcement, online; `/`
-  searches it, `:export <path>` writes it as CSV, `Enter` shows the workload on Workloads. A
-  side of IP lists says so (addresses, not workloads: nothing to list). No request.
+  `I` (rules pane, rule detail or a search row, once the workloads are cached) lists the
+  workloads behind the counts, providers first and `Tab` the consumers: hostname, labels,
+  enforcement, online; `/` searches it, `:export <path>` writes it as CSV, `Enter` shows the
+  workload on Workloads, `Esc` goes back (to the rule detail when opened from it), `?` the help.
+  A side of IP lists says so (addresses, not workloads: nothing to list). No request.
   `f` searches rules across every loaded ruleset (draft or active, no request): `app=shop,crm`
   (a label in a scope, consumer or provider, directly or through a label group; a comma is any
-  of), `ipl:Corp`, `svc:PostgreSQL` or `svc:443/tcp` (inline ports and service objects that
-  hold it), `wl:web01` (a workload actor, named from the cached workloads), `href:sec_rules/9`,
-  `disabled`, `deny`; terms apart by spaces all hold, `Ctrl-N` completes, `Ctrl-U` clears. The
-  screen then shows one flat list (`Search · app=shop` in its title: ruleset, on, kind, scope,
-  consumers, providers, services; `:export` adds the href); `Enter` opens the rule in its
-  ruleset (`f` then `Enter` comes back), `t` toggles it, `c` clears the search. Deny rules
-  count where loaded (inline, or fetched for a selected ruleset); the meta says how many
-  rulesets' were not.
+  of; an exclusion such as a scope `All except app=shop` or a consumer `!role=web` does not
+  count, nor does `All workloads`), `ipl:Corp`, `svc:PostgreSQL` or `svc:443/tcp` (inline ports
+  and service objects that hold it, protocol-only entries such as all TCP ports included),
+  `svc:tcp` / `svc:udp` / `svc:icmp` / `svc:icmpv6` (any entry of that protocol), `wl:web01` (a
+  workload actor, named from the cached workloads: press `i` first), `href:sec_rules/9`,
+  `disabled`, `deny`; terms apart by spaces all hold, `Ctrl-N` completes, `Ctrl-U` clears, `?`
+  the help. An IP list or service name is exact, else the one name it starts (any case:
+  `ipl:Any` is `Any (0.0.0.0/0 and ::/0)`); naming several or none is said, with the closest
+  names. Service objects' process and Windows service entries are not modelled: only their port
+  entries count. The screen then shows one flat list (`Search · app=shop` in its title:
+  ruleset, enabled, kind, scope, consumers, providers, services; `:export` adds the href);
+  `enabled` is the rule's own flag, `(ruleset off)` added when its ruleset is disabled (`(rs
+  off)` below 120 columns). `Enter` opens the rule in its ruleset (`f` then `Enter` comes back),
+  `t` toggles it, `I` lists its workloads, `c` clears the search. Deny rules count where loaded
+  (inline, or fetched for a selected ruleset); on a PCE that lists none inline (older ones keep
+  them at a per-ruleset endpoint) the meta says how many rulesets may hold deny rules not
+  loaded.
 - **Objects**: four tabs, labels, label groups, services and IP lists; `Tab` / `Shift-Tab`
   next / previous tab, `Enter` detail. The IP lists tab shows name, size (addresses after
   exclusions: `65.5K`, `16.8M` for a /8; `any` only for an included `0.0.0.0/0` or `::/0`;
@@ -917,15 +927,25 @@ lists lists nothing and `note` (stderr with `--table`/`--csv`) says why. `iplist
 `policy search` finds rules across every ruleset (draft, or `--active`) by what they
 reference, from one rulesets read and the name index (cached): `--label key=value[,value]`
 (any of the values, in a scope, a consumer or a provider, directly or through a label group
-and its sub-groups), `--ip-list NAME`, `--service NAME` or `--service 443/tcp` (`443` alone:
-tcp or udp; an inline port or range that holds it, or a service object with such an entry,
-`All Services` included), `--workload NAME` (hostname or name, one cached workloads read; or
-the href's id), `--href TEXT`, `--disabled` (the rule or its ruleset is off) and `--deny`;
-every flag repeats where it makes sense and all must hold. The TUI's search terms work as
-arguments too (`policy search app=shop ipl:Corp deny`). Rows carry the ruleset, kind,
-`enabled`, the ruleset's scopes, consumers, providers and services (CSV adds the rule's
-`href`), each ruleset's rules in evaluation order. Deny rules are searched as the ruleset list
-carries them (no per-ruleset reads). A name the index does not know is exit 2.
+and its sub-groups; exclusion actors, such as a scope `All except app=shop` or a consumer
+`!role=web`, and `All workloads` (`ams`) do not count), `--ip-list NAME`, `--service NAME` or
+`--service 443/tcp` (`443` alone: tcp or udp; an inline port or range that holds it, or a
+service object with such an entry, `All Services` and protocol-only entries included),
+`--service tcp|udp|icmp|icmpv6` (any entry of that protocol), `--workload NAME` (hostname or
+name, one cached workloads read; or the href's id), `--href TEXT`, `--disabled` (the rule or
+its ruleset is off) and `--deny`; every flag repeats where it makes sense and all must hold.
+The TUI's search terms work as arguments too (`policy search app=shop ipl:Corp deny`). An IP
+list or service name is matched exactly, else as the start of exactly one name, any case
+(`--ip-list Any` finds `Any (0.0.0.0/0 and ::/0)`); a name that starts several is exit 2
+listing them, one that names nothing is exit 2 with the closest names. Service objects'
+`windows_services` (process and Windows service names) are not modelled: only their port
+entries count. Rows carry the ruleset, kind, `enabled`, the ruleset's scopes, consumers,
+providers and services (CSV adds the rule's `href`), each ruleset's rules in evaluation order.
+`enabled` in the table and CSV is the rule's own flag (`on`, `off`), with `(ruleset off)` when
+its ruleset is disabled; JSON has `enabled` and `ruleset_enabled`. Deny rules are searched as
+the ruleset list carries them (no per-ruleset reads); when no ruleset carries any inline (older
+PCEs keep them at a per-ruleset endpoint) `meta.warnings` (stderr with `--table`/`--csv`) says
+the rulesets may hold deny rules not loaded.
 
 ### Readiness
 

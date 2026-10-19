@@ -8,15 +8,22 @@
 //!
 //! Terms apart by spaces must all hold (AND). `key=v1,v2`: a label any of
 //! whose values is in the rule's scope, consumers or providers, directly
-//! or through a label group (sub-groups included). `ipl:NAME`, `svc:NAME`:
-//! an IP list or service object by name (any case). `svc:443/tcp` (or
+//! or through a label group (sub-groups included); an exclusion actor
+//! (`All except app=shop` in a scope, `!role=web` as a consumer) does not
+//! count, and `ams` (All Workloads) names no label. `ipl:NAME`,
+//! `svc:NAME`: an IP list or service object by name (any case; a unique
+//! prefix will do, see [`RuleFilter::resolve`]). `svc:443/tcp` (or
 //! `svc:443`, tcp or udp): an inline port or range that holds it, or a
-//! service object with such an entry (`All Services` too). `wl:NAME`: a
-//! workload actor by hostname or name (of the workloads the caller holds)
-//! or by its href's id. `href:TEXT`: the rule's href contains it.
-//! `disabled`: the rule or its ruleset is off. `deny`: a deny or override
-//! deny rule. A name with spaces is quoted (`ipl:"Any (0.0.0.0/0 and ::/0)"`).
-//! Pure: the caller brings the loaded rulesets and the name index.
+//! service object with such an entry (`All Services` and protocol-only
+//! entries too). `svc:tcp`, `svc:udp`, `svc:icmp`, `svc:icmpv6`: any entry
+//! of that protocol. Service objects' `windows_services` (process and
+//! Windows service names) are not modelled: only their port entries count.
+//! `wl:NAME`: a workload actor by hostname or name (of the workloads the
+//! caller holds) or by its href's id. `href:TEXT`: the rule's href
+//! contains it. `disabled`: the rule or its ruleset is off. `deny`: a deny
+//! or override deny rule. A name with spaces is quoted
+//! (`ipl:"Any (0.0.0.0/0 and ::/0)"`). Pure: the caller brings the loaded
+//! rulesets and the name index.
 use crate::impact::group_members;
 use crate::label_filter::{LabelTerm, split_outside_quotes, strip_quotes};
 use crate::models::{Actor, DenyRule, IngressService, Rule, RuleSet, Workload, proto_number};
@@ -43,7 +50,8 @@ impl PortTerm {
     }
 
     /// Whether an entry `port[-to_port]/proto` holds this port. Protocol
-    /// `-1` (every service) holds every port.
+    /// `-1` (every service) holds every port; an entry without a port (all
+    /// ports of its protocol) holds it when the protocol matches.
     fn held_by(&self, port: Option<u16>, to_port: Option<u16>, proto: i64) -> bool {
         if proto == -1 {
             return true;
@@ -53,7 +61,7 @@ impl PortTerm {
             None => proto == 6 || proto == 17,
         };
         let Some(from) = port else {
-            return false;
+            return proto_ok;
         };
         let to = to_port.unwrap_or(from).max(from);
         proto_ok && (from..=to).contains(&self.port)
@@ -82,6 +90,8 @@ pub enum RuleTerm {
     IpList(String),
     Service(String),
     Port(PortTerm),
+    /// `svc:tcp`, `svc:udp`, `svc:icmp`, `svc:icmpv6`: any port of it.
+    Proto(u8),
     Workload(String),
     Href(String),
     Disabled,
@@ -89,9 +99,26 @@ pub enum RuleTerm {
 }
 
 /// Why a term is not one: what the grammar takes.
-const GRAMMAR: &str = "use key=value[,value], ipl:NAME, svc:NAME or svc:PORT/PROTO, wl:NAME, href:TEXT, disabled or deny";
+const GRAMMAR: &str = "use key=value[,value], ipl:NAME, svc:NAME, svc:PORT/PROTO or svc:tcp|udp|icmp, wl:NAME, href:TEXT, disabled or deny";
+
+/// The protocols `svc:` takes by name.
+const PROTOS: [&str; 4] = ["tcp", "udp", "icmp", "icmpv6"];
 
 impl RuleTerm {
+    /// A `svc:` value (or the CLI's `--service`): a port (`443/tcp`,
+    /// `443`), a protocol (`tcp`, `udp`, `icmp`, `icmpv6`), else a service
+    /// object's name.
+    pub fn service(text: &str) -> Self {
+        if let Some(p) = PortTerm::parse(text) {
+            return Self::Port(p);
+        }
+        let lower = text.trim().to_ascii_lowercase();
+        match crate::models::proto_number(&lower) {
+            Some(p) if PROTOS.contains(&lower.as_str()) => Self::Proto(p),
+            _ => Self::Service(text.to_string()),
+        }
+    }
+
     /// One term (a token of an expression, or a CLI flag's value made one).
     pub fn parse(text: &str) -> Result<Self, String> {
         let t = text.trim();
@@ -119,10 +146,8 @@ impl RuleTerm {
             if name.trim().is_empty() {
                 return Err(format!("{t:?}: {prefix} needs a name"));
             }
-            if prefix == "svc:"
-                && let Some(p) = PortTerm::parse(&name)
-            {
-                return Ok(Self::Port(p));
+            if prefix == "svc:" {
+                return Ok(Self::service(&name));
             }
             return Ok(make(name));
         }
@@ -159,6 +184,7 @@ impl fmt::Display for RuleTerm {
             Self::IpList(n) => f.write_str(&prefixed("ipl:", n)),
             Self::Service(n) => f.write_str(&prefixed("svc:", n)),
             Self::Port(p) => write!(f, "svc:{p}"),
+            Self::Proto(p) => write!(f, "svc:{}", crate::models::proto_name(i64::from(*p))),
             Self::Workload(n) => f.write_str(&prefixed("wl:", n)),
             Self::Href(h) => f.write_str(&prefixed("href:", h)),
             Self::Disabled => f.write_str("disabled"),
@@ -267,38 +293,42 @@ impl RuleFilter {
     }
 
     /// The terms that name nothing the index knows, as warnings (`unknown
-    /// key os`, `unknown value app=shpo`, `unknown IP list Crop`, `unknown
-    /// service Wbe`): such a term matches no rule. `wl:` and ports are
-    /// not checked.
+    /// key os`, `unknown value app=shpo`, `unknown IP list Crop (closest:
+    /// Corp)`, `IP list A matches several: …`): such a term matches no
+    /// rule. `wl:`, ports and protocols are not checked.
     pub fn unknown(&self, idx: &NameIndex) -> Vec<String> {
+        self.resolve(idx).1
+    }
+
+    /// The search with each `ipl:` and `svc:` name made the object's own
+    /// name ([`resolve_name`]: exact, else the one name it is a prefix of,
+    /// any case), and the terms that name nothing or several things, as
+    /// warnings (those terms are kept as typed: they match no rule).
+    pub fn resolve(&self, idx: &NameIndex) -> (Self, Vec<String>) {
         let mut out = Vec::new();
+        let mut terms = Vec::with_capacity(self.terms.len());
+        let ip_lists = idx.ip_list_names();
+        let services: Vec<String> = idx.services().iter().map(|s| s.name.clone()).collect();
         for t in &self.terms {
-            match t {
+            let mut t = t.clone();
+            match &mut t {
                 RuleTerm::Label(l) => {
                     if !idx.label_keys().contains(&l.key) {
                         out.push(format!("unknown key {}", l.key));
-                        continue;
+                    } else {
+                        let known = idx.values_for_key(&l.key);
+                        out.extend(l.values.iter().filter(|v| !known.contains(v)).map(|v| {
+                            format!("unknown value {}={}", l.key, crate::label_filter::quote(v))
+                        }));
                     }
-                    let known = idx.values_for_key(&l.key);
-                    out.extend(l.values.iter().filter(|v| !known.contains(v)).map(|v| {
-                        format!("unknown value {}={}", l.key, crate::label_filter::quote(v))
-                    }));
                 }
-                RuleTerm::IpList(n) if idx.ip_list_href(n).is_none() => {
-                    out.push(format!("unknown IP list {n}"));
-                }
-                RuleTerm::Service(n)
-                    if !idx
-                        .services()
-                        .iter()
-                        .any(|s| s.name.eq_ignore_ascii_case(n)) =>
-                {
-                    out.push(format!("unknown service {n}"));
-                }
+                RuleTerm::IpList(n) => resolve_into(n, &ip_lists, "IP list", &mut out),
+                RuleTerm::Service(n) => resolve_into(n, &services, "service", &mut out),
                 _ => {}
             }
+            terms.push(t);
         }
-        out
+        (Self { terms }, out)
     }
 
     /// Whether `r` holds every term. `workloads` (those the caller holds,
@@ -333,6 +363,15 @@ fn term_matches(t: &RuleTerm, r: &RuleRef, idx: &NameIndex, workloads: &[Workloa
                 .is_some_and(|n| n.eq_ignore_ascii_case(name)),
             IngressService::Port { .. } => false,
         }),
+        RuleTerm::Proto(p) => {
+            let is = |pr: i64| pr == -1 || pr == i64::from(*p);
+            r.services.iter().any(|s| match s {
+                IngressService::Port { proto, .. } => is(*proto),
+                IngressService::Ref(s) => idx
+                    .service(&s.href)
+                    .is_some_and(|svc| svc.service_ports.iter().any(|e| e.proto.is_some_and(is))),
+            })
+        }
         RuleTerm::Port(p) => r.services.iter().any(|s| match s {
             IngressService::Port {
                 port,
@@ -349,8 +388,13 @@ fn term_matches(t: &RuleTerm, r: &RuleRef, idx: &NameIndex, workloads: &[Workloa
 }
 
 /// A label actor with the term's key and one of its values, or a label
-/// group with such a label among its members (sub-groups included).
+/// group with such a label among its members (sub-groups included). An
+/// exclusion actor (`All except app=shop`, `!role=web`) names what the
+/// rule leaves out: never a hit.
 fn label_hit(a: &Actor, term: &LabelTerm, idx: &NameIndex) -> bool {
+    if a.exclusion == Some(true) {
+        return false;
+    }
     let is = |href: &str| {
         idx.label(href)
             .is_some_and(|l| l.key == term.key && term.values.contains(&l.value))
@@ -362,6 +406,95 @@ fn label_hit(a: &Actor, term: &LabelTerm, idx: &NameIndex) -> bool {
         return group_members(&g.href, idx).iter().any(|h| is(h));
     }
     false
+}
+
+/// How a typed name finds one of `names`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NameMatch {
+    /// The name itself (exact, else any case), or the only one the typed
+    /// text is a prefix of (any case).
+    One(String),
+    /// Several names start with the typed text.
+    Many(Vec<String>),
+    /// None does; up to three names closest to it.
+    None(Vec<String>),
+}
+
+/// `typed` among `names`: an exact match, else one in any case, else the
+/// unique name it is a prefix of (any case); else the names it is a
+/// prefix of, or the closest ones (those containing it, then by edit
+/// distance).
+pub fn resolve_name(typed: &str, names: &[String]) -> NameMatch {
+    if let Some(n) = names.iter().find(|n| *n == typed) {
+        return NameMatch::One(n.clone());
+    }
+    if let Some(n) = names.iter().find(|n| n.eq_ignore_ascii_case(typed)) {
+        return NameMatch::One(n.clone());
+    }
+    let lower = typed.to_lowercase();
+    let starts: Vec<String> = names
+        .iter()
+        .filter(|n| n.to_lowercase().starts_with(&lower))
+        .cloned()
+        .collect();
+    match starts.len() {
+        1 => return NameMatch::One(starts[0].clone()),
+        n if n > 1 => return NameMatch::Many(starts),
+        _ => {}
+    }
+    let mut near: Vec<(usize, &String)> = names
+        .iter()
+        .map(|n| {
+            let l = n.to_lowercase();
+            let d = if l.contains(&lower) {
+                0
+            } else {
+                1 + edit_distance(&l, &lower)
+            };
+            (d, n)
+        })
+        .collect();
+    near.sort_by_key(|&(d, n)| (d, n.to_lowercase()));
+    let limit = lower.chars().count().max(3);
+    NameMatch::None(
+        near.into_iter()
+            .filter(|&(d, _)| d <= limit)
+            .take(3)
+            .map(|(_, n)| n.clone())
+            .collect(),
+    )
+}
+
+/// Levenshtein distance by chars.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut cur = vec![i + 1; b.len() + 1];
+        for (j, cb) in b.iter().enumerate() {
+            let sub = prev[j] + usize::from(ca != *cb);
+            cur[j + 1] = sub.min(prev[j + 1] + 1).min(cur[j] + 1);
+        }
+        prev = cur;
+    }
+    prev[b.len()]
+}
+
+/// `name` made the object's own name when it finds one; else a warning
+/// (`unknown IP list Crop (closest: Corp)`, `IP list A matches several:
+/// Any, Apps`) and `name` kept as typed.
+fn resolve_into(name: &mut String, names: &[String], what: &str, out: &mut Vec<String>) {
+    match resolve_name(name, names) {
+        NameMatch::One(n) => *name = n,
+        NameMatch::Many(ns) => {
+            out.push(format!("{what} {name} matches several: {}", ns.join(", ")))
+        }
+        NameMatch::None(near) if near.is_empty() => out.push(format!("unknown {what} {name}")),
+        NameMatch::None(near) => out.push(format!(
+            "unknown {what} {name} (closest: {})",
+            near.join(", ")
+        )),
+    }
 }
 
 /// The workload `href` is called `name`: its id, or the hostname or name
@@ -512,10 +645,148 @@ mod tests {
             [
                 "unknown key os",
                 "unknown value app=shpo",
-                "unknown IP list Crop",
-                "unknown service Wbe"
+                "unknown IP list Crop (closest: Corp)",
+                "unknown service Wbe (closest: Web)"
             ]
         );
+    }
+
+    #[test]
+    fn names_resolve_exact_then_by_a_unique_prefix() {
+        let names: Vec<String> = ["Any (0.0.0.0/0 and ::/0)", "Apps", "Corp", "corp-eu"]
+            .map(String::from)
+            .to_vec();
+        let one = |n: &str| NameMatch::One(n.to_string());
+        assert_eq!(resolve_name("Corp", &names), one("Corp"));
+        // Exact (any case) wins over being a prefix of `corp-eu`.
+        assert_eq!(resolve_name("CORP", &names), one("Corp"));
+        assert_eq!(resolve_name("any", &names), one("Any (0.0.0.0/0 and ::/0)"));
+        assert_eq!(
+            resolve_name("a", &names),
+            NameMatch::Many(vec!["Any (0.0.0.0/0 and ::/0)".into(), "Apps".into()])
+        );
+        assert_eq!(
+            resolve_name("crop", &names),
+            NameMatch::None(vec!["Corp".into()])
+        );
+        assert_eq!(
+            resolve_name("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", &names),
+            NameMatch::None(vec![])
+        );
+
+        // The filter takes the object's own name: `ipl:Any` finds rule 7.
+        let (f, warn) = RuleFilter::parse("ipl:Any svc:post")
+            .unwrap()
+            .resolve(&index());
+        assert!(warn.is_empty(), "{warn:?}");
+        assert_eq!(
+            f.to_string(),
+            "ipl:\"Any (0.0.0.0/0 and ::/0)\" svc:PostgreSQL"
+        );
+        let (_, warn) = RuleFilter::parse("svc:p svc:zz9")
+            .unwrap()
+            .resolve(&index());
+        assert_eq!(warn, ["unknown service zz9"]);
+    }
+
+    /// A rule set (no scope, or the given one) with one rule of these
+    /// actors and services.
+    fn one_rule(scope: serde_json::Value, rule: serde_json::Value) -> RuleSet {
+        let mut rule = rule;
+        rule["href"] = json!("/orgs/5/sec_policy/draft/rule_sets/200/sec_rules/9");
+        rule["enabled"] = json!(true);
+        serde_json::from_value(json!({
+            "href": "/orgs/5/sec_policy/draft/rule_sets/200", "name": "X", "enabled": true,
+            "scopes": [scope], "rules": [rule]
+        }))
+        .unwrap()
+    }
+
+    fn hits(expr: &str, rs: &RuleSet, idx: &NameIndex) -> bool {
+        let f = RuleFilter::parse(expr).unwrap();
+        rules_of(rs, &[]).iter().any(|r| f.matches(r, idx, &[]))
+    }
+
+    #[test]
+    fn exclusion_actors_are_not_label_hits() {
+        let idx = index();
+        // Scope `All except app=shop`, consumers `!role=web`, providers role=db.
+        let rs = one_rule(
+            json!([{"label": {"href": "/orgs/5/labels/3"}, "exclusion": true}]),
+            json!({
+                "providers": [{"label": {"href": "/orgs/5/labels/2"}}],
+                "consumers": [{"label": {"href": "/orgs/5/labels/1"}, "exclusion": true},
+                              {"label_group": {"href": "/orgs/5/sec_policy/draft/label_groups/13"}, "exclusion": true}],
+                "ingress_services": [{"port": 22, "proto": 6}]
+            }),
+        );
+        assert!(!hits("app=shop", &rs, &idx));
+        assert!(!hits("role=web", &rs, &idx));
+        // role=db: the provider counts, the excluded group does not stop it.
+        assert!(hits("role=db", &rs, &idx));
+        let rs = one_rule(
+            json!([]),
+            json!({
+                "providers": [{"actors": "ams"}],
+                "consumers": [{"label_group": {"href": "/orgs/5/sec_policy/draft/label_groups/13"}, "exclusion": true}],
+                "ingress_services": []
+            }),
+        );
+        assert!(!hits("role=db", &rs, &idx));
+    }
+
+    #[test]
+    fn protocol_only_entries_hold_their_ports_and_proto_terms() {
+        let labels: Vec<Label> =
+            serde_json::from_str(include_str!("../../../fixtures/labels.json")).unwrap();
+        let mut services: Vec<Service> =
+            serde_json::from_str(include_str!("../../../fixtures/services.json")).unwrap();
+        services.push(
+            serde_json::from_value(json!({
+                "href": "/orgs/5/sec_policy/draft/services/40", "name": "All TCP",
+                "service_ports": [{"proto": 6}]
+            }))
+            .unwrap(),
+        );
+        services.push(
+            serde_json::from_value(json!({
+                "href": "/orgs/5/sec_policy/draft/services/41", "name": "Ping",
+                "service_ports": [{"proto": 1}]
+            }))
+            .unwrap(),
+        );
+        let idx = NameIndex::new(&labels, &[], &[], &services);
+        let actors = json!({"providers": [{"actors": "ams"}], "consumers": [{"actors": "ams"}]});
+        let with = |svc: serde_json::Value| {
+            let mut r = actors.clone();
+            r["ingress_services"] = svc;
+            one_rule(json!([]), r)
+        };
+        let inline_tcp = with(json!([{"proto": 6}]));
+        let object_tcp = with(json!([{"href": "/orgs/5/sec_policy/draft/services/40"}]));
+        let ping = with(json!([{"href": "/orgs/5/sec_policy/draft/services/41"}]));
+        let udp53 = with(json!([{"port": 53, "proto": 17}]));
+        for rs in [&inline_tcp, &object_tcp] {
+            assert!(hits("svc:443", rs, &idx));
+            assert!(hits("svc:443/tcp", rs, &idx));
+            assert!(!hits("svc:443/udp", rs, &idx));
+            assert!(hits("svc:tcp", rs, &idx));
+            assert!(!hits("svc:icmp", rs, &idx));
+        }
+        assert!(hits("svc:icmp", &ping, &idx));
+        assert!(!hits("svc:443", &ping, &idx));
+        assert!(hits("svc:UDP", &udp53, &idx));
+        assert!(!hits("svc:tcp", &udp53, &idx));
+        assert_eq!(RuleTerm::service("ICMP"), RuleTerm::Proto(1));
+        assert_eq!(
+            RuleTerm::service("17"),
+            RuleTerm::Port(PortTerm {
+                port: 17,
+                proto: None
+            })
+        );
+        assert_eq!(RuleTerm::service("Web"), RuleTerm::Service("Web".into()));
+        assert_eq!(RuleFilter::parse("svc:Tcp").unwrap().to_string(), "svc:tcp");
     }
 
     #[test]

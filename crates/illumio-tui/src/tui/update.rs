@@ -52,7 +52,7 @@ mod writes;
 
 pub use cmdline::on_command;
 pub use events::event_detail_lines;
-pub use policy::{REVERT_WORD, counted_rulesets};
+pub use policy::{REVERT_WORD, deny_unloaded_text};
 pub(crate) use workloads::apply_workload_labels;
 
 use app_overlay::*;
@@ -587,6 +587,9 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 }
                 Err(e) if e.contains("not found") => {
                     model.policy.fallback_deny.insert(href.clone(), Vec::new());
+                    model.policy.deny_endpoint_missing = true;
+                    // The search's "may hold deny rules" count drops.
+                    model.rebuild_rules();
                     apply_policy_jump(model, Some(&href));
                 }
                 Err(e) => {

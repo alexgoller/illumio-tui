@@ -48,15 +48,15 @@ pub enum PolicyCmd {
 /// list read (cached).
 #[derive(Args, Debug)]
 pub struct SearchArgs {
-    /// Search terms as in the TUI: app=shop,crm ipl:NAME svc:NAME svc:443/tcp wl:NAME href:TEXT disabled deny
+    /// Search terms as in the TUI: app=shop,crm ipl:NAME svc:NAME svc:443/tcp svc:tcp wl:NAME href:TEXT disabled deny
     pub terms: Vec<String>,
-    /// A label in a scope, consumer or provider (directly or in a label group): key=value, a comma lists values any of which matches (repeatable; all must hold)
+    /// A label in a scope, consumer or provider (directly or in a label group; exclusions and All workloads do not count): key=value, a comma lists values any of which matches (repeatable; all must hold)
     #[arg(long = "label")]
     pub labels: Vec<String>,
-    /// An IP list consumer or provider, by name (repeatable)
+    /// An IP list consumer or provider, by name: exact, else the start of exactly one name, any case (repeatable)
     #[arg(long = "ip-list")]
     pub ip_lists: Vec<String>,
-    /// A service object by name, or a port that a rule's service holds: PORT/PROTO or PORT (tcp or udp) (repeatable)
+    /// A service object by name (exact, else a unique prefix), a port that a rule's service holds: PORT/PROTO or PORT (tcp or udp), or a protocol: tcp, udp, icmp, icmpv6 (repeatable)
     #[arg(long = "service")]
     pub services: Vec<String>,
     /// A workload consumer or provider, by hostname or name (one workloads read, cached) or href id (repeatable)
@@ -839,7 +839,7 @@ impl TableRows for Vec<SearchRow> {
                 vec![
                     o.ruleset.clone(),
                     kind_text(r.kind),
-                    (r.enabled && o.ruleset_enabled).to_string(),
+                    crate::tui::model::enabled_text(r.enabled, o.ruleset_enabled, false),
                     o.scopes.join(" | "),
                     names(r.consumers.iter().map(|a| a.name.as_str())),
                     names(r.providers.iter().map(|a| a.name.as_str())),
@@ -873,7 +873,6 @@ impl TableRows for Vec<SearchRow> {
 /// The search the flags and terms make; exit 2 for a malformed one or none.
 fn search_filter(a: &SearchArgs) -> Result<pce::RuleFilter, CliError> {
     use pce::RuleTerm;
-    use pce::rule_filter::PortTerm;
     let mut terms = Vec::new();
     for t in &a.terms {
         terms.extend(pce::RuleFilter::parse(t).map_err(CliError::Args)?.terms);
@@ -885,10 +884,7 @@ fn search_filter(a: &SearchArgs) -> Result<pce::RuleFilter, CliError> {
         }
     }
     terms.extend(a.ip_lists.iter().map(|n| RuleTerm::IpList(n.clone())));
-    terms.extend(a.services.iter().map(|n| match PortTerm::parse(n) {
-        Some(p) => RuleTerm::Port(p),
-        None => RuleTerm::Service(n.clone()),
-    }));
+    terms.extend(a.services.iter().map(|n| RuleTerm::service(n)));
     terms.extend(a.workloads.iter().map(|n| RuleTerm::Workload(n.clone())));
     terms.extend(a.href.iter().map(|h| RuleTerm::Href(h.clone())));
     if a.disabled {
@@ -912,7 +908,9 @@ fn search_filter(a: &SearchArgs) -> Result<pce::RuleFilter, CliError> {
 async fn search(ctx: &Context, a: &SearchArgs) -> Result<(), CliError> {
     let filter = search_filter(a)?;
     let idx = ctx.pce.name_index(ctx.cache_mode).await?;
-    let unknown = filter.unknown(&idx);
+    // Names made the objects' own: exact, else a unique prefix (`--ip-list
+    // Any`); none or several is exit 2, with the closest or the matches.
+    let (filter, unknown) = filter.resolve(&idx);
     if !unknown.is_empty() {
         return Err(CliError::Args(unknown.join("; ")));
     }
@@ -958,7 +956,31 @@ async fn search(ctx: &Context, a: &SearchArgs) -> Result<(), CliError> {
             rule,
         }));
     }
-    ctx.emit(&rows, cache_label(c.hit, ctx.cache_mode), truncated, None)
+    let mut meta = ctx.meta(cache_label(c.hit, ctx.cache_mode), truncated, None);
+    let unlisted = deny_maybe_apart(&c.value);
+    if unlisted > 0 {
+        let w = format!(
+            "{unlisted} ruleset{} may hold deny rules not loaded: this PCE lists none inline (policy rules <ruleset> reads them)",
+            if unlisted == 1 { "" } else { "s" }
+        );
+        if ctx.format != super::output::OutputFormat::Json {
+            eprintln!("warning: {w}");
+        }
+        meta.warnings = Some(vec![w]);
+    }
+    ctx.emit_meta(&rows, &meta)
+}
+
+/// The rulesets whose deny rules a search over the list cannot see: on a
+/// PCE that lists none inline (older ones keep them at a per-ruleset
+/// endpoint), every ruleset; where one ruleset carries them inline, an
+/// empty list means none, so 0.
+fn deny_maybe_apart(sets: &[RuleSet]) -> usize {
+    if sets.iter().any(|rs| !rs.deny_rules.is_empty()) {
+        0
+    } else {
+        sets.len()
+    }
 }
 
 /// A ruleset's deny rules: inline, or from the per-ruleset endpoint when the

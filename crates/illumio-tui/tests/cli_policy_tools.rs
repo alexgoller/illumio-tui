@@ -58,6 +58,16 @@ async fn mount(server: &MockServer, p: &str, body: &str) {
 
 /// The four lists behind the name index and both rulesets lists.
 async fn mount_policy(server: &MockServer) {
+    mount_policy_with(
+        server,
+        include_str!("../../../fixtures/ip_lists.json"),
+        include_str!("../../../fixtures/rule_sets.json"),
+    )
+    .await;
+}
+
+/// `mount_policy` with these IP lists and draft rulesets.
+async fn mount_policy_with(server: &MockServer, ip_lists: &str, rule_sets: &str) {
     for (p, body) in [
         (
             "/api/v2/orgs/5/labels",
@@ -67,18 +77,12 @@ async fn mount_policy(server: &MockServer) {
             "/api/v2/orgs/5/sec_policy/draft/label_groups",
             include_str!("../../../fixtures/label_groups.json"),
         ),
-        (
-            "/api/v2/orgs/5/sec_policy/draft/ip_lists",
-            include_str!("../../../fixtures/ip_lists.json"),
-        ),
+        ("/api/v2/orgs/5/sec_policy/draft/ip_lists", ip_lists),
         (
             "/api/v2/orgs/5/sec_policy/draft/services",
             include_str!("../../../fixtures/services.json"),
         ),
-        (
-            "/api/v2/orgs/5/sec_policy/draft/rule_sets",
-            include_str!("../../../fixtures/rule_sets.json"),
-        ),
+        ("/api/v2/orgs/5/sec_policy/draft/rule_sets", rule_sets),
         ("/api/v2/orgs/5/sec_policy/active/rule_sets", "[]"),
     ] {
         mount(server, p, body).await;
@@ -266,7 +270,7 @@ async fn policy_search_prints_table_and_csv() {
     );
     assert_eq!(
         lines.next().unwrap(),
-        "Shop-Prod,allow,true,app=shop & env=prod,ipl:Corp,role=web,443/tcp; 8000-8099/tcp,/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/2"
+        "Shop-Prod,allow,on,app=shop & env=prod,ipl:Corp,role=web,443/tcp; 8000-8099/tcp,/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/2"
     );
 }
 
@@ -297,8 +301,111 @@ async fn policy_search_refuses_no_term_bad_terms_and_unknown_names() {
         .code(2);
     let e = stderr(&a);
     assert!(
-        e.contains("unknown value app=shpo") && e.contains("unknown IP list Crop"),
+        e.contains("unknown value app=shpo") && e.contains("unknown IP list Crop (closest: Corp)"),
         "{e}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn policy_search_names_take_a_unique_prefix_and_refuse_several() {
+    let server = MockServer::start().await;
+    mount_policy(&server).await;
+    // `Any` is the `Any (0.0.0.0/0 and ::/0)` list; `post` PostgreSQL.
+    let out = stdout_json(
+        cmd(&server)
+            .args(["--json", "policy", "search", "--ip-list", "Any"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(hrefs(&out), ["7"]);
+    let out = stdout_json(
+        cmd(&server)
+            .args(["--json", "policy", "search", "--service", "post"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(hrefs(&out), ["1"]);
+    // A protocol: every tcp entry (and All Services).
+    let out = stdout_json(
+        cmd(&server)
+            .args(["--json", "policy", "search", "--service", "tcp"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(hrefs(&out), ["8", "1", "2", "7", "3"]);
+
+    let server = MockServer::start().await;
+    let lists = r#"[
+      {"href":"/orgs/5/sec_policy/draft/ip_lists/20","name":"Any (0.0.0.0/0 and ::/0)","ip_ranges":[]},
+      {"href":"/orgs/5/sec_policy/draft/ip_lists/22","name":"Any IPv4","ip_ranges":[]}
+    ]"#;
+    mount_policy_with(
+        &server,
+        lists,
+        include_str!("../../../fixtures/rule_sets.json"),
+    )
+    .await;
+    let a = cmd(&server)
+        .args(["policy", "search", "--ip-list", "any"])
+        .assert()
+        .code(2);
+    assert!(
+        stderr(&a).contains("IP list any matches several: Any (0.0.0.0/0 and ::/0), Any IPv4"),
+        "{}",
+        stderr(&a)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn policy_search_enabled_and_the_deny_warning() {
+    let server = MockServer::start().await;
+    mount_policy(&server).await;
+    let a = cmd(&server)
+        .args(["--csv", "policy", "search", "--href", "sec_rules/3"])
+        .assert()
+        .success();
+    let text = stdout(&a);
+    // Rule 3 is on; its ruleset Global-Infra is not.
+    assert!(
+        text.lines()
+            .nth(1)
+            .unwrap()
+            .starts_with("Global-Infra,allow,on (ruleset off),"),
+        "{text}"
+    );
+    // Ruleset 100 lists deny rules inline: no warning.
+    let out = stdout_json(
+        cmd(&server)
+            .args(["--json", "policy", "search", "--deny"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["meta"]["warnings"], Value::Null);
+
+    // No ruleset lists them inline: they may be kept apart.
+    let server = MockServer::start().await;
+    let mut sets: Value =
+        serde_json::from_str(include_str!("../../../fixtures/rule_sets.json")).unwrap();
+    for rs in sets.as_array_mut().unwrap() {
+        rs["deny_rules"] = json!([]);
+    }
+    mount_policy_with(
+        &server,
+        include_str!("../../../fixtures/ip_lists.json"),
+        &sets.to_string(),
+    )
+    .await;
+    let out = stdout_json(
+        cmd(&server)
+            .args(["--json", "policy", "search", "--deny"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"], json!([]));
+    let w = out["meta"]["warnings"][0].as_str().unwrap();
+    assert!(
+        w.starts_with("2 rulesets may hold deny rules not loaded"),
+        "{w}"
     );
 }
 

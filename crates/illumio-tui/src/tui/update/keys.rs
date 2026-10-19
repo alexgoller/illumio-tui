@@ -808,7 +808,9 @@ pub(super) fn open_help(model: &mut Model) {
         | Overlay::Pending
         | Overlay::Marks
         | Overlay::Readiness
-        | Overlay::Enforce) => o.clone(),
+        | Overlay::Enforce
+        | Overlay::Matched
+        | Overlay::RuleFilter(_)) => o.clone(),
         _ => Overlay::None,
     };
     model.overlay = Overlay::Help;

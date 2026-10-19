@@ -378,6 +378,13 @@ pub(super) fn policy_edit_key(model: &mut Model, c: char) -> Vec<Cmd> {
 /// once (one `PUT` of `enabled` only); the confirm shows it, `y` sends it,
 /// and it shows in Pending until provisioned. Draft only.
 pub(super) fn toggle_key(model: &mut Model) -> Vec<Cmd> {
+    plan_toggle(model, toggle_intent)
+}
+
+/// `t` (the panes or the search list): refused with writes off or on
+/// active policy, said on the status; else the write `intent` makes of
+/// the selected row planned (`no row selected` without one).
+fn plan_toggle(model: &mut Model, intent: fn(&PolicyState) -> Option<WriteIntent>) -> Vec<Cmd> {
     if writes_refused(model) {
         return Vec::new();
     }
@@ -385,7 +392,7 @@ pub(super) fn toggle_key(model: &mut Model) -> Vec<Cmd> {
         model.status = StatusLine::warn("switch to draft to edit policy");
         return Vec::new();
     }
-    let Some(intent) = toggle_intent(&model.policy) else {
+    let Some(intent) = intent(&model.policy) else {
         model.status = StatusLine::warn("no row selected");
         return Vec::new();
     };
@@ -544,6 +551,13 @@ pub(super) fn rule_filter_key(
             model.overlay = Overlay::None;
             return Vec::new();
         }
+        // The help, unless inside a quoted name (where `?` is text);
+        // closing it comes back to the editor as it was.
+        KeyCode::Char('?') if e.value.matches('"').count().is_multiple_of(2) => {
+            model.overlay = Overlay::RuleFilter(e);
+            open_help(model);
+            return Vec::new();
+        }
         KeyCode::Backspace => e.pop(),
         KeyCode::Char('u') if ctrl => e.clear(),
         KeyCode::Char(c) => e.push(c),
@@ -569,7 +583,19 @@ pub(super) fn apply_rule_search(model: &mut Model, f: pce::RuleFilter) {
         clear_rule_search(model);
         return;
     }
-    let unknown = model.index().map(|i| f.unknown(i)).unwrap_or_default();
+    // Names made the objects' own (`ipl:Any` → the `Any (0.0.0.0/0 and
+    // ::/0)` list); those naming nothing or several are kept and said.
+    let (f, mut unknown) = match model.index() {
+        Some(i) => f.resolve(i),
+        None => (f, Vec::new()),
+    };
+    let names_workloads = f
+        .terms
+        .iter()
+        .any(|t| matches!(t, pce::RuleTerm::Workload(_)));
+    if names_workloads && model.workloads.impact_source().is_none() {
+        unknown.push("wl: names need the workloads (i loads them)".into());
+    }
     model.policy.last_search = f.to_string();
     model.policy.search = Some(f);
     model.policy.found.search_clear();
@@ -583,26 +609,19 @@ pub(super) fn apply_rule_search(model: &mut Model, f: pce::RuleFilter) {
         p.last_search
     );
     if p.found_deny_unloaded > 0 {
-        text.push_str(&format!(
-            " · deny rules of {} not loaded",
-            counted_rulesets(p.found_deny_unloaded)
-        ));
+        text.push_str(&format!(" · {}", deny_unloaded_text(p.found_deny_unloaded)));
     }
     model.status = if unknown.is_empty() {
         StatusLine::info(text)
     } else {
-        StatusLine::warn(format!("{text} · no match: {}", unknown.join(", ")))
+        StatusLine::warn(format!("{text} · {}", unknown.join(", ")))
     };
 }
 
 /// `c` on the search list: back to rulesets | rules; `f` offers the
 /// search again.
 pub(super) fn clear_rule_search(model: &mut Model) {
-    let p = &mut model.policy;
-    p.search = None;
-    p.found.search_clear();
-    p.found.set_rows(Vec::new());
-    p.found_deny_unloaded = 0;
+    model.policy.put_search_aside();
     model.status = StatusLine::info("rule search cleared");
 }
 
@@ -622,19 +641,19 @@ fn found_key(model: &mut Model, k: KeyEvent) -> Option<Vec<Cmd>> {
         KeyCode::Char('c') => clear_rule_search(model),
         KeyCode::Enter => return Some(open_found(model)),
         KeyCode::Char('t') => {
-            if writes_refused(model) {
-                return Some(Vec::new());
-            }
-            if model.policy.scope == PolicyScope::Active {
-                model.status = StatusLine::warn("switch to draft to edit policy");
-                return Some(Vec::new());
-            }
-            let Some(r) = model.policy.found.selected_item() else {
-                model.status = StatusLine::warn("no row selected");
-                return Some(Vec::new());
-            };
-            let intent = rule_toggle(&r.href, r.kind, r.enabled);
-            return Some(begin_start(model, Start::Plan(intent)));
+            return Some(plan_toggle(model, |p| {
+                let r = p.found.selected_item()?;
+                Some(rule_toggle(&r.href, r.kind, r.enabled))
+            }));
+        }
+        KeyCode::Char('I') => {
+            let href = model
+                .policy
+                .found
+                .selected_item()
+                .map(|r| r.href.clone())
+                .unwrap_or_default();
+            return Some(open_matched(model, &href));
         }
         KeyCode::Tab | KeyCode::BackTab | KeyCode::Char('n' | 'N' | 'e' | 'x') => {
             model.status =
@@ -654,9 +673,7 @@ fn open_found(model: &mut Model) -> Vec<Cmd> {
         return Vec::new();
     };
     let p = &mut model.policy;
-    p.search = None;
-    p.found.search_clear();
-    p.found.set_rows(Vec::new());
+    p.put_search_aside();
     p.rulesets.select_where(|r| r.href == row.ruleset_href);
     if p.selected_href().as_deref() != Some(row.ruleset_href.as_str()) {
         // A table search hid it.
@@ -680,8 +697,14 @@ fn open_found(model: &mut Model) -> Vec<Cmd> {
     deny_fallback(model, CacheMode::Use)
 }
 
+/// `2 rulesets may hold deny rules not loaded`: the search's caveat on a
+/// PCE that may keep deny rules apart (`PolicyState::deny_maybe_apart`).
+pub fn deny_unloaded_text(n: usize) -> String {
+    format!("{} may hold deny rules not loaded", counted_rulesets(n))
+}
+
 /// `1 ruleset`, `2 rulesets`.
-pub fn counted_rulesets(n: usize) -> String {
+fn counted_rulesets(n: usize) -> String {
     if n == 1 {
         "1 ruleset".into()
     } else {
@@ -699,7 +722,11 @@ pub(super) fn open_matched(model: &mut Model, href: &str) -> Vec<Cmd> {
         return Vec::new();
     }
     match crate::tui::impact_list::build(model, href, Side::Provider) {
-        Ok(v) => {
+        Ok(mut v) => {
+            // Opened from a rule's detail: `Esc` goes back to it.
+            if let Overlay::RuleDetail(r) = &model.overlay {
+                v.back = Some(r.clone());
+            }
             model.policy.matched = Some(v);
             model.overlay = Overlay::Matched;
         }
@@ -768,9 +795,10 @@ pub(super) fn matched_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     }
     match k.code {
         KeyCode::Esc | KeyCode::Char('q') => {
-            model.policy.matched = None;
-            model.overlay = Overlay::None;
+            let back = model.policy.matched.take().and_then(|v| v.back);
+            model.overlay = back.map_or(Overlay::None, Overlay::RuleDetail);
         }
+        KeyCode::Char('?') => open_help(model),
         KeyCode::Tab | KeyCode::BackTab => {
             let side = other(v.side);
             v.show(side);

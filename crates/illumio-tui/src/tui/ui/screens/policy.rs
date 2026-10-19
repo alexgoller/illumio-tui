@@ -126,8 +126,8 @@ fn render_found(model: &Model, search: &pce::RuleFilter, meta: &str, f: &mut Fra
     // Narrower, the title (the search) keeps the room; the status said it.
     if p.found_deny_unloaded > 0 && body.width >= STACK_BELOW {
         meta = format!(
-            "deny rules of {} not loaded · {meta}",
-            crate::tui::update::counted_rulesets(p.found_deny_unloaded)
+            "{} · {meta}",
+            crate::tui::update::deny_unloaded_text(p.found_deny_unloaded)
         );
     }
     let sort_meta = header_meta(&p.found);
@@ -212,13 +212,13 @@ pub fn render_rule_filter(
             t.dim_style(),
         )),
         (None, Ok(_)) => Line::from(Span::styled(
-            "app=shop,crm ipl:NAME svc:NAME|443/tcp wl:NAME href:TEXT disabled deny",
+            "app=shop,crm ipl:NAME svc:NAME|443/tcp|tcp wl:NAME href:TEXT disabled deny",
             t.dim_style(),
         )),
     };
     lines.push(note);
     lines.push(Line::from(Span::styled(
-        "comma: any of · space: all of · labels count in scope and via groups",
+        "comma: any of · space: all of · labels: scope, via groups, not exclusions",
         t.dim_style(),
     )));
     lines.push(Line::from(Span::styled(

@@ -109,6 +109,8 @@ pub struct MatchedView {
     pub table: TableView<MatchedRow>,
     /// `:` typed in the list: the command being typed (`export <path>`).
     pub prompt: Option<String>,
+    /// The rule detail it was opened from: `Esc` goes back to it.
+    pub back: Option<pce::RuleView>,
 }
 
 impl MatchedView {
@@ -211,13 +213,15 @@ pub fn build(model: &Model, href: &str, side: Side) -> Result<MatchedView, Strin
             .map(|&i| MatchedRow::new(&workloads[i], &order))
             .collect()
     };
-    let rule = model
-        .policy
+    let p = &model.policy;
+    let rule = p
         .rules
         .rows()
         .iter()
-        .find(|r| r.view.href == href)
-        .map_or_else(|| href.to_string(), |r| rule_line(&r.view));
+        .map(|r| &r.view)
+        .chain(p.found.rows().iter().map(|r| &r.view))
+        .find(|v| v.href == href)
+        .map_or_else(|| href.to_string(), rule_line);
     let mut v = MatchedView {
         rule_href: href.to_string(),
         rule,
@@ -239,6 +243,7 @@ pub fn build(model: &Model, href: &str, side: Side) -> Result<MatchedView, Strin
         truncated,
         table: TableView::new(matched_columns()),
         prompt: None,
+        back: None,
     };
     v.show(side);
     Ok(v)

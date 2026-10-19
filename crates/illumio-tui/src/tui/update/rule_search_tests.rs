@@ -66,10 +66,8 @@ fn f_applies_a_search_locally_and_lists_rules_across_rulesets() {
         Some("role=web")
     );
     assert_eq!(found_hrefs(&m), ["1<sec_rules", "2<sec_rules"]);
-    assert_eq!(
-        m.status.text,
-        "2 rules · role=web · deny rules of 1 ruleset not loaded"
-    );
+    // Ruleset 100 lists deny rules inline: 101's empty list means none.
+    assert_eq!(m.status.text, "2 rules · role=web");
     // env=prod: ruleset 100 by scope, rule 3 through its label group.
     search(&mut m, "env=prod");
     assert_eq!(
@@ -109,7 +107,9 @@ fn a_malformed_search_stays_in_the_editor_and_unknown_names_warn() {
     assert!(m.policy.found.is_empty());
     assert_eq!(m.status.kind, StatusKind::Warn);
     assert!(
-        m.status.text.ends_with("no match: unknown IP list Crop"),
+        m.status
+            .text
+            .ends_with("· unknown IP list Crop (closest: Corp)"),
         "{}",
         m.status.text
     );
@@ -242,7 +242,7 @@ fn export_writes_the_search_list() {
         headers,
         [
             "ruleset",
-            "on",
+            "enabled",
             "kind",
             "scope",
             "consumers",
@@ -257,4 +257,103 @@ fn export_writes_the_search_list() {
         rows[0][7],
         "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1"
     );
+}
+
+#[test]
+fn names_resolve_by_a_unique_prefix() {
+    let mut m = on_policy();
+    search(&mut m, "ipl:any");
+    assert_eq!(found_hrefs(&m), ["7<deny_rules"]);
+    assert_eq!(m.policy.last_search, "ipl:\"Any (0.0.0.0/0 and ::/0)\"");
+    assert_eq!(m.status.kind, StatusKind::Info);
+}
+
+#[test]
+fn wl_names_without_cached_workloads_warn() {
+    let mut m = on_policy();
+    search(&mut m, "wl:host-1.example");
+    assert!(m.policy.found.is_empty());
+    assert_eq!(m.status.kind, StatusKind::Warn);
+    assert!(
+        m.status
+            .text
+            .ends_with("wl: names need the workloads (i loads them)"),
+        "{}",
+        m.status.text
+    );
+    // With them, no warning.
+    let mut m = with_workloads(on_policy());
+    search(&mut m, "wl:host-1.example");
+    assert_eq!(m.status.kind, StatusKind::Info);
+}
+
+#[test]
+fn deny_rules_may_be_unloaded_only_where_the_pce_keeps_them_apart() {
+    let mut m = on_policy();
+    // No ruleset lists deny rules inline: an older PCE may keep them apart.
+    for rs in &mut m.policy.raw {
+        rs.deny_rules.clear();
+    }
+    search(&mut m, "role=web");
+    assert_eq!(
+        m.status.text,
+        "2 rules · role=web · 2 rulesets may hold deny rules not loaded"
+    );
+    // The endpoint answers 404: there is none, an empty list means none.
+    update(
+        &mut m,
+        Msg::DenyRulesLoaded {
+            href: "/orgs/5/sec_policy/draft/rule_sets/100".into(),
+            result: Err("not found".into()),
+        },
+    );
+    assert!(m.policy.deny_endpoint_missing);
+    assert_eq!(m.policy.found_deny_unloaded, 0);
+}
+
+#[test]
+fn the_enabled_column_is_the_rules_flag_and_its_rulesets() {
+    let mut m = on_policy();
+    search(&mut m, "svc:443/tcp");
+    let cells: Vec<String> = m
+        .policy
+        .found
+        .rows()
+        .iter()
+        .map(|r| crate::tui::model::enabled_text(r.enabled, r.ruleset_enabled, false))
+        .collect();
+    // Rule 2 of Shop-Prod; rule 3, on, of the disabled Global-Infra.
+    assert_eq!(cells, ["on", "on (ruleset off)"]);
+    let (_, rows) = crate::tui::export::current_table(&m).unwrap();
+    assert_eq!(rows[1][1], "on (ruleset off)");
+}
+
+#[test]
+fn question_mark_in_the_editor_shows_the_help_and_comes_back() {
+    let mut m = on_policy();
+    press(&mut m, key('f'));
+    type_text(&mut m, "role=web");
+    press(&mut m, key('?'));
+    assert_eq!(m.overlay, Overlay::Help);
+    press(&mut m, kc(KeyCode::Esc));
+    assert!(matches!(&m.overlay, Overlay::RuleFilter(e) if e.value == "role=web"));
+    // Inside a quoted name `?` is text.
+    type_text(&mut m, " ipl:\"a?");
+    assert!(matches!(&m.overlay, Overlay::RuleFilter(e) if e.value == "role=web ipl:\"a?"));
+}
+
+#[test]
+fn explains_jump_puts_the_search_aside_to_show_the_rule() {
+    let mut m = on_policy();
+    search(&mut m, "deny");
+    assert!(m.policy.search.is_some());
+    let jump = explain::select_rule(
+        &mut m,
+        "/orgs/5/sec_policy/draft/rule_sets/100",
+        "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/2",
+    );
+    assert_eq!(jump, explain::Jump::Done);
+    assert!(m.policy.search.is_none() && m.policy.found.is_empty());
+    assert_eq!(m.policy.pane, PolicyPane::Rules);
+    assert_eq!(m.policy.last_search, "deny", "f offers it again");
 }

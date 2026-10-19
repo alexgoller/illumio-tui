@@ -169,4 +169,46 @@ fn capital_i_in_the_rule_detail_opens_the_list() {
     press(&mut m, key('I'));
     assert_eq!(m.overlay, Overlay::Matched);
     assert_eq!(hosts(&m), ["host-2.example"]);
+    // `?` shows the help over the list; closing it comes back to the list.
+    press(&mut m, key('?'));
+    assert_eq!(m.overlay, Overlay::Help);
+    press(&mut m, kc(KeyCode::Esc));
+    assert_eq!(m.overlay, Overlay::Matched);
+    assert!(m.policy.matched.is_some());
+    // `Esc` goes back to the detail it was opened from.
+    press(&mut m, kc(KeyCode::Esc));
+    assert!(
+        matches!(&m.overlay, Overlay::RuleDetail(r) if r.href.ends_with("/deny_rules/8")),
+        "{:?}",
+        m.overlay
+    );
+    assert!(m.policy.matched.is_none());
+    press(&mut m, kc(KeyCode::Esc));
+    assert_eq!(m.overlay, Overlay::None);
+}
+
+#[test]
+fn capital_i_on_a_search_row_lists_that_rule() {
+    let mut m = with_workloads(model_with_policy());
+    m.screen = Screen::Policy;
+    press(&mut m, key('f'));
+    for c in "role=web".chars() {
+        press(&mut m, key(c));
+    }
+    press(&mut m, kc(KeyCode::Enter));
+    // Row 1: rule 2 (Corp → role=web).
+    press(&mut m, key('j'));
+    press(&mut m, key('I'));
+    assert_eq!(m.overlay, Overlay::Matched);
+    let v = m.policy.matched.as_ref().unwrap();
+    assert!(v.rule_href.ends_with("/sec_rules/2"), "{}", v.rule_href);
+    assert!(
+        v.rule.contains("Corp"),
+        "named from the search row: {}",
+        v.rule
+    );
+    assert_eq!(hosts(&m), ["host-1.example"]);
+    press(&mut m, kc(KeyCode::Esc));
+    assert_eq!(m.overlay, Overlay::None);
+    assert!(m.policy.search.is_some(), "the search list is still there");
 }

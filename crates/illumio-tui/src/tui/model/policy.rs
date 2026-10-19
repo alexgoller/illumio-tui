@@ -243,6 +243,19 @@ pub fn rule_columns() -> Vec<Column<RuleRow>> {
     ]
 }
 
+/// A found rule's `enabled` as the search shows it, TUI and CLI alike:
+/// the rule's own flag (`on`, `off`), and `(ruleset off)` (`short`: `(rs
+/// off)`) when its ruleset is disabled, which turns it off whatever its
+/// own flag says.
+pub fn enabled_text(rule: bool, ruleset: bool, short: bool) -> String {
+    let own = if rule { "on" } else { "off" };
+    match (ruleset, short) {
+        (true, _) => own.to_string(),
+        (false, false) => format!("{own} (ruleset off)"),
+        (false, true) => format!("{own} (rs off)"),
+    }
+}
+
 /// A rule the Policy search (`f`) found, with its ruleset.
 #[derive(Debug, Clone)]
 pub struct FoundRow {
@@ -286,9 +299,12 @@ pub fn found_columns() -> Vec<Column<FoundRow>> {
             ..found_col("ruleset", 18, |r| r.ruleset.clone())
         },
         Column {
-            key: |r| SortKey::Num(u64::from(r.enabled)),
-            full: Some(|r| r.enabled.to_string()),
-            ..found_col("on", 3, |r| on_off(r.enabled))
+            key: |r| SortKey::Num(u64::from(r.enabled) * 2 + u64::from(r.ruleset_enabled)),
+            narrow: Some(|r| enabled_text(r.enabled, r.ruleset_enabled, true)),
+            narrow_width: 12,
+            ..found_col("enabled", 17, |r| {
+                enabled_text(r.enabled, r.ruleset_enabled, false)
+            })
         },
         Column {
             key: |r| SortKey::Text(rule_kind_name(r.kind).to_string()),
@@ -395,9 +411,13 @@ pub struct PolicyState {
     /// `Enter` (opened a rule) or `c` (cleared).
     pub last_search: String,
     pub found: TableView<FoundRow>,
-    /// Rulesets whose deny rules are not loaded (no inline list, the
-    /// endpoint not fetched): the search could not look at them.
+    /// Rulesets that may hold deny rules the search could not look at:
+    /// no inline list, the endpoint not fetched, on a PCE that may keep
+    /// them apart (`deny_maybe_apart`).
     pub found_deny_unloaded: usize,
+    /// A deny-rule endpoint read answered 404: this PCE has no such
+    /// endpoint, an empty inline list means none.
+    pub deny_endpoint_missing: bool,
     /// `I`: the open list of a rule's matched workloads (`Overlay::Matched`).
     pub matched: Option<crate::tui::impact_list::MatchedView>,
 }
@@ -412,6 +432,23 @@ pub struct IpListUse {
 }
 
 impl PolicyState {
+    /// Whether this PCE may keep deny rules apart from the ruleset list
+    /// (older PCEs: the per-ruleset endpoint has them): not when a loaded
+    /// ruleset carries deny rules inline (an empty list then means none)
+    /// or the endpoint answered 404 (there is none).
+    pub fn deny_maybe_apart(&self) -> bool {
+        !self.deny_endpoint_missing && self.raw.iter().all(|rs| rs.deny_rules.is_empty())
+    }
+
+    /// The search put aside (the rulesets | rules panes show again; `f`
+    /// offers it again from `last_search`).
+    pub fn put_search_aside(&mut self) {
+        self.search = None;
+        self.found.search_clear();
+        self.found.set_rows(Vec::new());
+        self.found_deny_unloaded = 0;
+    }
+
     /// The search's rows from the loaded rulesets (`found`), each
     /// ruleset's rules in evaluation order; the selection stays on its
     /// rule. Nothing without a search. `workloads` (those cached) name the
@@ -425,12 +462,13 @@ impl PolicyState {
         let keep = self.found.selected_item().map(|r| r.href.clone());
         let mut rows = Vec::new();
         let mut unloaded = 0;
+        let apart = self.deny_maybe_apart();
         for rs in &self.raw {
             let deny: &[DenyRule] = if rs.deny_rules.is_empty() {
                 match self.fallback_deny.get(&rs.href) {
                     Some(d) => d,
                     None => {
-                        unloaded += 1;
+                        unloaded += usize::from(apart);
                         &[]
                     }
                 }
