@@ -1148,27 +1148,36 @@ writes, `--dry-run` or `--yes`, `--confirm-count`, the audit log, one `bulk_upda
 a re-read when the workloads came from the cache). `data` holds `readiness` (the app's
 report), `plan` (dry run) or `bulk` (the report), and `record`.
 
-Each move that changed something (also a partial one) writes a **change record**,
+Each move writes a **change record**,
 `$XDG_STATE_HOME/illumio-tui/enforcements/<app>-<UTC time>.json` (else
-`~/.local/state/illumio-tui/enforcements/`), atomically: `app`, `profile`, `pce`, `org_id`, `at`
-(when it was sent), `to`, `readiness` (`verdict`, `coverage`, `window`, `flows`, `forced`) and
-each planned workload's `href`, `hostname`, `before` and `after` (`mode`, `visibility`) and
+`~/.local/state/illumio-tui/enforcements/`): `app`, `profile`, `pce`, `org_id`, `at` (when it
+was sent), `to`, `readiness` (`verdict`, `coverage`, `window`, `flows`, `forced`) and each
+planned workload's `href`, `hostname`, `before` and `after` (`mode`, `visibility`) and
 `result` (`updated`, `failed`, `unanswered`, `not_sent`, `changed`, `missing`). No credentials.
+The directory is checked writable before any request (else exit 6, nothing sent); the record
+is written before the send with every result `pending` and rewritten with the results after
+it, so a run killed mid-send still leaves one. Should the rewrite fail, the record goes to
+stderr whole and the command exits 1.
 
 `--watch [--since <record path|RFC 3339 time>]` runs one Explorer query, blocked flows only,
 the app on either side, from the change time (the app's newest record by default) to now, and
 lists them as tuples (direction, peer, service, flows, connections). Flows a `squelch` or
 `accept-blocked` mark accepts are counted (`accepted`) but do not alert (`--no-marks`: they
 do). Exit 0 when there are none, 7 (`blocked_since_enforcement`) when there are, after the
-report. A window over 7d needs `--yes`. It runs only when asked; nothing polls.
+report; none found in a truncated or incomplete result is exit 4. A record named with
+`--since` must be of this app, PCE and org. A window over 7d needs `--yes`. It runs only when asked; nothing polls.
 
-`--rollback [--record <path>]` takes the app's newest move record (never a rollback record)
-unless one is named, refuses a record of another PCE or org (exit 6), reads the app's
-workloads once past the cache, and restores each workload still as the move set it to its
-`before`, one `bulk_update` per `(mode, visibility)` (per 100), with the same guards (the
-typed count covers the whole rollback). A workload changed by someone else since, gone, or
-not moved by that change is skipped and listed in `skipped`, never overwritten. The rollback
-writes its own record with `rollback_of`; no record is ever deleted.
+`--rollback [--record <path>]` takes the app's newest move record made on this PCE and org
+(never a rollback record) unless one is named; it refuses (exit 6) a record already rolled
+back (name it with `--record` to do it again), a record of another PCE or org, and a rollback
+record unless `--force` (that re-applies a move without readiness). It reads the app's
+workloads once past the cache and restores each workload still as the move set it to its
+`before` mode, and its `before` level only when the move set a level, one `bulk_update` per
+`(mode, visibility)` (per 100), with the same guards (the typed count covers the whole
+rollback). A workload changed by someone else since, gone, not moved by that change, or whose
+`unanswered`/`pending` move did not apply (`not applied`) is skipped and listed in `skipped`,
+never overwritten. The rollback writes its own record with `rollback_of`; no record is ever
+deleted.
 
 ### Policy editing in the TUI
 

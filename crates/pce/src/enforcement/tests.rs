@@ -151,7 +151,10 @@ fn file_names_are_safe_and_sort_by_time() {
 fn records_are_written_atomically_never_over_another_and_the_newest_is_found() {
     let dir = tempfile::tempdir().unwrap();
     let d = dir.path().join("enforcements");
-    assert!(newest_record(&d, "shop/prod").unwrap().is_none(), "no dir");
+    assert!(
+        newest_record(&d, "shop/prod", None).unwrap().is_none(),
+        "no dir"
+    );
     let t = |s: &str| -> Timestamp { s.parse().unwrap() };
     let mut old = record();
     old.at = "2026-10-18T10:00:00Z".into();
@@ -177,7 +180,9 @@ fn records_are_written_atomically_never_over_another_and_the_newest_is_found() {
         .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
         .collect();
     assert!(names.iter().all(|n| !n.contains(".tmp")), "{names:?}");
-    let (p, r) = newest_record(&d, "shop/prod").unwrap().unwrap();
+    let (p, r) = newest_record(&d, "shop/prod", Some(&origin()))
+        .unwrap()
+        .unwrap();
     assert_eq!(r, new);
     assert!(p == p_new || p == p_same);
     assert_eq!(read_record(&p_old).unwrap(), old);
@@ -231,12 +236,12 @@ fn rollback_restores_moved_workloads_grouped_and_skips_changed_ones() {
         vec![
             (
                 EnforcementMode::VisibilityOnly,
-                Some(VisibilityLevel::FlowSummary),
+                None,
                 vec!["/orgs/5/workloads/w1".into(), "/orgs/5/workloads/w7".into()]
             ),
             (
                 EnforcementMode::Selective,
-                Some(VisibilityLevel::FlowDrops),
+                None,
                 vec!["/orgs/5/workloads/w4".into()]
             ),
         ]
@@ -359,4 +364,107 @@ fn watch_groups_blocked_flows_involving_the_app() {
         ]
     );
     assert!(blocked_since(&[], &shop, &keys, None).tuples.is_empty());
+}
+
+#[test]
+fn rollback_restores_the_level_only_when_the_move_set_one() {
+    // A move without --visibility: someone changed w1's level since; the
+    // rollback restores the mode and leaves the level alone.
+    let mut r = record();
+    r.workloads.truncate(1);
+    let plan = plan_rollback(&r, &[workload(1, "full", "flow_drops")]);
+    assert_eq!(plan.groups.len(), 1);
+    assert_eq!(plan.groups[0].mode, EnforcementMode::VisibilityOnly);
+    assert_eq!(plan.groups[0].visibility, None);
+    // A move that set flow_drops: the level goes back too.
+    let drops = ModeState::target(EnforcementMode::Full, Some(VisibilityLevel::FlowDrops));
+    r.workloads[0].after = drops;
+    let plan = plan_rollback(&r, &[workload(1, "full", "flow_drops")]);
+    assert_eq!(
+        plan.groups[0].visibility,
+        Some(VisibilityLevel::FlowSummary)
+    );
+    // ...and with the level changed since, it is left as it is.
+    let plan = plan_rollback(&r, &[workload(1, "full", "flow_off")]);
+    assert!(plan.groups.is_empty());
+    assert!(plan.skipped[0].reason.starts_with("changed since"));
+}
+
+#[test]
+fn pending_and_unanswered_items_restore_where_applied_and_report_the_rest() {
+    let r = record().pending();
+    assert!(r.workloads.iter().all(|w| w.result == PENDING));
+    assert!(r.any_moved());
+    let current = [
+        workload(1, "full", "flow_summary"),
+        workload(2, "idle", "flow_off"),
+        workload(3, "selective", "flow_summary"),
+    ];
+    let plan = plan_rollback(&r, &current);
+    assert_eq!(plan.count(), 1, "w1 applied: restored");
+    let reasons: Vec<&str> = plan.skipped.iter().map(|s| s.reason.as_str()).collect();
+    assert_eq!(
+        reasons,
+        [
+            "not applied (the send did not finish: still idle · flow_off)",
+            "changed since (selective · flow_summary now, full set): left as it is",
+        ]
+    );
+    let mut u = record();
+    u.workloads[1].result = "unanswered".into();
+    let plan = plan_rollback(&u, &current);
+    assert!(
+        plan.skipped
+            .iter()
+            .any(|s| s.reason == "not applied (not answered: still idle · flow_off)")
+    );
+}
+
+#[test]
+fn long_app_names_are_cut_with_a_hash() {
+    let long = "a".repeat(150) + "/prod";
+    let stem = record_stem(&long);
+    assert_eq!(stem.len(), STEM_MAX + 9);
+    assert!(stem.starts_with(&"a".repeat(100)));
+    assert_ne!(stem, record_stem(&("a".repeat(150) + "/dev")));
+    assert_eq!(record_stem("shop/prod"), "shop_prod");
+}
+
+#[test]
+fn records_by_origin_rollbacks_found_rewrites_and_the_probe() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path().join("enforcements");
+    probe_dir(&d).unwrap();
+    assert_eq!(std::fs::read_dir(&d).unwrap().count(), 0, "probe removed");
+    let t = |s: &str| -> Timestamp { s.parse().unwrap() };
+    let mine = write_record(&d, &record(), t("2026-10-19T10:00:00.100Z")).unwrap();
+    let mut other = record();
+    other.pce = "other.example".into();
+    other.at = "2026-10-20T10:00:00Z".into();
+    let theirs = write_record(&d, &other, t("2026-10-20T10:00:00.100Z")).unwrap();
+    assert_eq!(
+        newest_record(&d, "shop/prod", None).unwrap().unwrap().0,
+        theirs
+    );
+    assert_eq!(
+        newest_record(&d, "shop/prod", Some(&origin()))
+            .unwrap()
+            .unwrap()
+            .0,
+        mine
+    );
+    assert!(rolled_back_by(&d, &mine).unwrap().is_none());
+    let mut rb = record();
+    rb.rollback_of = Some(mine.display().to_string());
+    let rbp = write_record(&d, &rb, t("2026-10-21T10:00:00.100Z")).unwrap();
+    assert_eq!(rolled_back_by(&d, &mine).unwrap(), Some(rbp));
+    // The record written before the send, then its results.
+    let pending = write_record(&d, &record().pending(), t("2026-10-22T10:00:00.100Z")).unwrap();
+    rewrite_record(&pending, &record()).unwrap();
+    assert_eq!(read_record(&pending).unwrap(), record());
+    // A file where the directory should be: the probe fails.
+    let blocked = dir.path().join("file");
+    std::fs::write(&blocked, "x").unwrap();
+    assert!(probe_dir(&blocked).is_err());
+    assert!(probe_dir(&blocked.join("enforcements")).is_err());
 }

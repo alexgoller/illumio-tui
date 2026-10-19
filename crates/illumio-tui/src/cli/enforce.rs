@@ -26,7 +26,8 @@ use clap::{ArgGroup, Args};
 use jiff::Timestamp;
 use pce::enforcement::{
     BlockedSince, ChangeRecord, ModeState, RecordOrigin, RecordReadiness, RollbackSkip,
-    default_records_dir, newest_record, plan_rollback, read_record, write_record,
+    default_records_dir, newest_record, plan_rollback, probe_dir, read_record, rewrite_record,
+    rolled_back_by, write_record,
 };
 use pce::models::{PolicyDecision, Transmission, WorkloadFilter};
 use pce::readiness::{AppReadiness, workload_group};
@@ -54,8 +55,9 @@ pub struct EnforceArgs {
     /// The readiness window (default 7d; over 7d needs --yes)
     #[arg(long, requires = "to")]
     pub window: Option<String>,
-    /// Move though readiness does not allow it (not ready, not evaluated)
-    #[arg(long, requires = "to")]
+    /// --to: move though readiness does not allow it (not ready, not evaluated);
+    /// --rollback: roll back a rollback record (re-applies its move without readiness)
+    #[arg(long, conflicts_with = "watch")]
     pub force: bool,
     /// The number of workloads that change (the dry run shows it); with --yes, needed for full
     /// or selective on more than one workload, or more than 25
@@ -109,10 +111,54 @@ fn origin(ctx: &Context) -> RecordOrigin {
     }
 }
 
-/// The app's newest move record, or the error that names where none was
-/// found.
-fn newest(dir: &Path, app: &str) -> Result<(PathBuf, ChangeRecord), CliError> {
-    newest_record(dir, app)?.ok_or_else(|| {
+/// [`records_dir`], created and probed with a file written and removed:
+/// before any request of a move or rollback, so a record that cannot be
+/// written stops it with nothing sent.
+fn writable_records_dir() -> Result<PathBuf, CliError> {
+    let dir = records_dir()?;
+    probe_dir(&dir).map_err(|e| {
+        CliError::Refused(format!(
+            "change records cannot be written in {}: {e}; nothing sent",
+            dir.display()
+        ))
+    })?;
+    Ok(dir)
+}
+
+/// Before the send: the record with every workload `pending`, so a send
+/// that never finishes (a crash, a kill) still leaves one a rollback can
+/// use. Refused (nothing sent) when it cannot be written.
+fn record_before(dir: &Path, rec: &ChangeRecord) -> Result<PathBuf, CliError> {
+    write_record(dir, &rec.clone().pending(), Timestamp::now()).map_err(|e| {
+        CliError::Refused(format!(
+            "the change record could not be written in {}: {e}; nothing sent",
+            dir.display()
+        ))
+    })
+}
+
+/// After the send: the record rewritten with the results. When that
+/// fails, the whole record goes to stderr (keep it: a rollback needs it)
+/// and the error is returned for after the report.
+fn record_after(path: &Path, rec: &ChangeRecord, warnings: &mut Vec<String>) -> Option<CliError> {
+    let e = rewrite_record(path, rec).err()?;
+    let msg = format!(
+        "CHANGE RECORD NOT UPDATED: {} still lists every workload as pending ({e}); the record with the results is on stderr: save it, a rollback needs it",
+        path.display()
+    );
+    eprintln!("{msg}");
+    eprintln!(
+        "{}",
+        serde_json::to_string_pretty(rec).unwrap_or_else(|e| format!("(unprintable: {e})"))
+    );
+    warnings.push(msg.clone());
+    Some(CliError::Other(msg))
+}
+
+/// The app's newest move record made on this PCE and org, or the error
+/// that names where none was found.
+fn newest(ctx: &Context, dir: &Path, app: &str) -> Result<(PathBuf, ChangeRecord), CliError> {
+    newest_record(dir, app, Some(&origin(ctx)))?.ok_or_else(|| {
         CliError::Args(format!(
             "no change record for {app} in {}; pass --record (or --since)",
             dir.display()
@@ -229,7 +275,7 @@ async fn enforce(ctx: &Context, a: &EnforceArgs) -> Result<(), CliError> {
     // any request.
     let guard = write::prepare(ctx, &a.write)?;
     let (mode, visibility) = parse_target(a)?;
-    let dir = records_dir()?;
+    let dir = writable_records_dir()?;
     let rargs = ReadinessArgs {
         window: a.window.clone(),
         apps: vec![a.app.clone()],
@@ -336,21 +382,22 @@ async fn enforce(ctx: &Context, a: &EnforceArgs) -> Result<(), CliError> {
         .map(|i| (i.clone(), target.clone()))
         .collect();
     let at = Timestamp::now();
+    let mut rec =
+        ChangeRecord::of_move(&r.app, &origin(ctx), at, Some(target.clone()), &afters, &[]);
+    rec.readiness = Some(RecordReadiness::of(r, !allowed));
+    let path = record_before(&dir, &rec)?;
     let report = ctx
         .pce
         .writer(&guard)
         .execute_bulk(plan, &mut |_, _| {})
         .await;
-    let mut rec = ChangeRecord::of_move(
-        &r.app,
-        &origin(ctx),
-        at,
-        Some(target.clone()),
-        &afters,
-        &report.items,
-    );
-    rec.readiness = Some(RecordReadiness::of(r, !allowed));
-    let (record, record_err) = save(&dir, &rec, &mut warnings);
+    let rec = ChangeRecord {
+        workloads: ChangeRecord::of_move(&r.app, &origin(ctx), at, None, &afters, &report.items)
+            .workloads,
+        ..rec
+    };
+    let record_err = record_after(&path, &rec, &mut warnings);
+    let record = Some(path.display().to_string());
     let data = EnforceOutput {
         app: &r.app,
         to: target,
@@ -390,33 +437,14 @@ async fn enforce(ctx: &Context, a: &EnforceArgs) -> Result<(), CliError> {
         ],
         &meta,
     )?;
+    // A record that could not be updated first: it is the louder fault.
+    if let Some(e) = record_err {
+        return Err(e);
+    }
     if let Some(e) = exit_error(&report, status) {
         return Err(e);
     }
-    record_err.map_or(Ok(()), Err)
-}
-
-/// Writes `rec` when some workload moved: its path, or the error (after
-/// the report, exit 1) with a warning for the report.
-fn save(
-    dir: &Path,
-    rec: &ChangeRecord,
-    warnings: &mut Vec<String>,
-) -> (Option<String>, Option<CliError>) {
-    if !rec.any_moved() {
-        return (None, None);
-    }
-    match write_record(dir, rec, Timestamp::now()) {
-        Ok(p) => (Some(p.display().to_string()), None),
-        Err(e) => {
-            let msg = format!(
-                "the change record could not be written in {}: {e}; a rollback needs it",
-                dir.display()
-            );
-            warnings.push(msg.clone());
-            (None, Some(CliError::Other(msg)))
-        }
-    }
+    Ok(())
 }
 
 /// One `(mode, visibility)` of a rollback: its plan (dry run) or report.
@@ -464,7 +492,7 @@ impl TableRows for SkipRows<'_> {
 /// A record names where it was made: a rollback goes only there.
 fn same_place(ctx: &Context, rec: &ChangeRecord, path: &Path) -> Result<(), CliError> {
     let here = origin(ctx);
-    if rec.pce != here.pce || rec.org_id != here.org_id {
+    if !rec.made_on(&here) {
         return Err(CliError::Refused(format!(
             "{} was made on {} (org {}); this profile writes to {} (org {}); nothing sent",
             path.display(),
@@ -479,24 +507,41 @@ fn same_place(ctx: &Context, rec: &ChangeRecord, path: &Path) -> Result<(), CliE
 
 async fn rollback(ctx: &Context, a: &EnforceArgs) -> Result<(), CliError> {
     let guard = write::prepare(ctx, &a.write)?;
-    let dir = records_dir()?;
+    let app = parse_app(&a.app).join("/");
+    let dir = writable_records_dir()?;
     let (path, rec) = match &a.record {
         Some(p) => (p.clone(), read_record(p)?),
-        None => newest(&dir, &a.app)?,
+        None => {
+            let (p, rec) = newest(ctx, &dir, &app)?;
+            if let Some(by) = rolled_back_by(&dir, &p)? {
+                return Err(CliError::Refused(format!(
+                    "{} was already rolled back by {}; pass --record {} to roll it back again; nothing sent",
+                    p.display(),
+                    by.display(),
+                    p.display()
+                )));
+            }
+            (p, rec)
+        }
     };
-    if rec.app != a.app {
+    if rec.app != app {
         return Err(CliError::Args(format!(
-            "{} is a record of {}, not {}",
+            "{} is a record of {}, not {app}",
             path.display(),
             rec.app,
-            a.app
         )));
     }
     same_place(ctx, &rec, &path)?;
+    if rec.is_rollback() && !a.force {
+        return Err(CliError::Refused(format!(
+            "{} is a rollback record: rolling it back moves the workloads again, without readiness; pass --force to do so; nothing sent",
+            path.display()
+        )));
+    }
     // The app's workloads now: one list read past the cache.
     let keys = keys_or_default(&ctx.config.scope_keys);
     let idx = ctx.pce.name_index(ctx.cache_mode).await?;
-    let labels = app_labels(&parse_app(&a.app), &keys, &idx).map_err(CliError::Args)?;
+    let labels = app_labels(&parse_app(&app), &keys, &idx).map_err(CliError::Args)?;
     let filter = WorkloadFilter {
         labels: vec![pce::app::label_hrefs(&labels)],
         ..WorkloadFilter::default()
@@ -540,7 +585,7 @@ async fn rollback(ctx: &Context, a: &EnforceArgs) -> Result<(), CliError> {
     }
     let org = ctx.config.org_id;
     let mut out = RollbackOutput {
-        app: a.app.clone(),
+        app: app.clone(),
         record: path.display().to_string(),
         dry_run: a.write.dry_run,
         count,
@@ -550,15 +595,25 @@ async fn rollback(ctx: &Context, a: &EnforceArgs) -> Result<(), CliError> {
         rollback_record: None,
     };
     let mut results: Vec<ItemResult> = Vec::new();
-    let mut afters = Vec::new();
+    let afters: Vec<_> = plans
+        .iter()
+        .flat_map(|(to, p)| p.items.iter().map(|i| (i.clone(), to.clone())))
+        .collect();
     let mut failed: Option<CliError> = None;
     let mut written = None;
     let at = Timestamp::now();
+    let mut rb = ChangeRecord::of_move(&rec.app, &origin(ctx), at, None, &afters, &[]);
+    rb.rollback_of = Some(path.display().to_string());
+    // The rollback's record before its first send.
+    let rb_path = if out.dry_run || count == 0 {
+        None
+    } else {
+        Some(record_before(&dir, &rb)?)
+    };
     for (to, mut plan) in plans {
         plan.confirmed = a.confirm_count.map(|_| plan.items.len());
         plan.selection_read(read_at, false);
         let data = dry_run_data(&plan, out.dry_run, org);
-        afters.extend(plan.items.iter().map(|i| (i.clone(), to.clone())));
         let bulk = if out.dry_run || failed.is_some() {
             None
         } else {
@@ -581,12 +636,11 @@ async fn rollback(ctx: &Context, a: &EnforceArgs) -> Result<(), CliError> {
         });
     }
     let mut record_err = None;
-    if !out.dry_run {
-        let mut rb = ChangeRecord::of_move(&rec.app, &origin(ctx), at, None, &afters, &results);
-        rb.rollback_of = Some(path.display().to_string());
-        let (p, e) = save(&dir, &rb, &mut warnings);
-        out.rollback_record = p;
-        record_err = e;
+    if let Some(p) = rb_path {
+        rb.workloads =
+            ChangeRecord::of_move(&rec.app, &origin(ctx), at, None, &afters, &results).workloads;
+        record_err = record_after(&p, &rb, &mut warnings);
+        out.rollback_record = Some(p.display().to_string());
     }
     if !out.skipped.is_empty() {
         warnings.push(format!(
@@ -627,10 +681,10 @@ async fn rollback(ctx: &Context, a: &EnforceArgs) -> Result<(), CliError> {
     );
     tables.insert(0, (skipped_title, &skips));
     ctx.emit_report(&out, &tables, &meta)?;
-    if let Some(e) = failed {
+    if let Some(e) = record_err {
         return Err(e);
     }
-    record_err.map_or(Ok(()), Err)
+    failed.map_or(Ok(()), Err)
 }
 
 /// `enforce --watch`'s data.
@@ -653,11 +707,21 @@ async fn watch(ctx: &Context, a: &EnforceArgs) -> Result<(), CliError> {
             Err(_) => {
                 let p = PathBuf::from(s);
                 let rec = read_record(&p)?;
+                same_place(ctx, &rec, &p)?;
+                if rec.app != parse_app(&a.app).join("/") {
+                    return Err(CliError::Args(format!(
+                        "{} is a record of {}, not {}",
+                        p.display(),
+                        rec.app,
+                        a.app
+                    )));
+                }
                 (record_at(&rec, &p)?, Some(p))
             }
         },
         None => {
-            let (p, rec) = newest(&records_dir()?, &a.app)?;
+            let app = parse_app(&a.app).join("/");
+            let (p, rec) = newest(ctx, &records_dir()?, &app)?;
             (record_at(&rec, &p)?, Some(p))
         }
     };
@@ -711,6 +775,11 @@ async fn watch(ctx: &Context, a: &EnforceArgs) -> Result<(), CliError> {
             .get_or_insert_with(Vec::new)
             .push("the query hit its cap: more blocked flows may exist".into());
     }
+    if r.value.incomplete {
+        meta.warnings
+            .get_or_insert_with(Vec::new)
+            .push("a region did not answer: blocked flows may be missing".into());
+    }
     let out = WatchOutput {
         app: app.join("/"),
         since: since.to_string(),
@@ -737,6 +806,18 @@ async fn watch(ctx: &Context, a: &EnforceArgs) -> Result<(), CliError> {
         )],
         &meta,
     )?;
+    // None found in a partial result is not "none": exit 4.
+    if out.blocked.flows == 0 && (r.truncated || r.value.incomplete) {
+        return Err(CliError::Incomplete(format!(
+            "no blocked flows of {} found, but the result is {}: the answer is not complete",
+            out.app,
+            if r.truncated {
+                "truncated (cap reached)"
+            } else {
+                "incomplete (a region did not answer)"
+            }
+        )));
+    }
     if out.blocked.flows > 0 {
         return Err(CliError::Blocked(format!(
             "{} flows of {} blocked since {} ({} tuples)",

@@ -597,7 +597,7 @@ async fn enforce_force_moves_a_not_ready_app_and_a_partial_result_still_writes_a
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn enforce_with_nothing_moved_writes_no_record() {
+async fn enforce_with_nothing_moved_keeps_the_record_with_the_results() {
     let env = Env::new(ACCEPT_GAPS);
     // Only w2 to move, and the PCE refuses it.
     let mut one = shop_workloads();
@@ -610,9 +610,14 @@ async fn enforce_with_nothing_moved_writes_no_record() {
         .args(["enforce", "shop/prod", "--to", "full", "--yes"])
         .assert()
         .code(4);
-    assert!(json_out(&a)["data"].get("record").is_none());
     assert_eq!(bulk_bodies(&server).await.len(), 1);
-    assert!(env.records().is_empty());
+    let recs = env.records();
+    assert_eq!(recs.len(), 1, "written before the send, kept");
+    assert_eq!(
+        json_out(&a)["data"]["record"],
+        recs[0].0.display().to_string()
+    );
+    assert_eq!(recs[0].1["workloads"][0]["result"], "failed");
 }
 
 fn record_body(at: &str) -> Value {
@@ -836,8 +841,9 @@ async fn rollback_rereads_once_skips_the_changed_and_restores_the_rest_grouped()
     assert_eq!(
         bulk_bodies(&server).await,
         vec![
-            json!([{"href": "/orgs/5/workloads/w1", "enforcement_mode": "visibility_only", "visibility_level": "flow_summary"}]),
-            json!([{"href": "/orgs/5/workloads/w2", "enforcement_mode": "idle", "visibility_level": "flow_off"}]),
+            // The move set no level: the rollback leaves the level alone.
+            json!([{"href": "/orgs/5/workloads/w1", "enforcement_mode": "visibility_only"}]),
+            json!([{"href": "/orgs/5/workloads/w2", "enforcement_mode": "idle"}]),
         ]
     );
     let recs = env.records();
@@ -870,15 +876,70 @@ async fn rollback_rereads_once_skips_the_changed_and_restores_the_rest_grouped()
     );
     server.verify().await;
 
-    // A rollback picks the newest move record, never a rollback record.
+    // A second rollback of the newest record is refused before any
+    // request; naming it with --record goes ahead.
     let server = MockServer::start().await;
-    mount_rollback(&server).await;
     let a = env
         .cmd(&server)
         .args(["enforce", "shop/prod", "--rollback", "--dry-run"])
         .assert()
+        .code(6);
+    assert!(
+        stderr(&a).contains("already rolled back by"),
+        "{}",
+        stderr(&a)
+    );
+    assert!(server.received_requests().await.unwrap().is_empty());
+    let server = MockServer::start().await;
+    mount_rollback(&server).await;
+    let a = env
+        .cmd(&server)
+        .args([
+            "enforce",
+            "shop/prod",
+            "--rollback",
+            "--dry-run",
+            "--record",
+        ])
+        .arg(&rec)
+        .assert()
         .success();
     assert_eq!(json_out(&a)["data"]["record"], rec.display().to_string());
+
+    // Rolling back the rollback re-applies the move: only with --force.
+    let server = MockServer::start().await;
+    let a = env
+        .cmd(&server)
+        .args([
+            "enforce",
+            "shop/prod",
+            "--rollback",
+            "--dry-run",
+            "--record",
+        ])
+        .arg(p)
+        .assert()
+        .code(6);
+    assert!(
+        stderr(&a).contains("is a rollback record"),
+        "{}",
+        stderr(&a)
+    );
+    assert!(server.received_requests().await.unwrap().is_empty());
+    let server = MockServer::start().await;
+    mount_rollback(&server).await;
+    env.cmd(&server)
+        .args([
+            "enforce",
+            "shop/prod",
+            "--rollback",
+            "--dry-run",
+            "--force",
+            "--record",
+        ])
+        .arg(p)
+        .assert()
+        .success();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -959,4 +1020,243 @@ async fn tables_print_and_csv_is_refused_for_a_write() {
         .assert()
         .code(2);
     assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unwritable_records_dir_refuses_before_any_request() {
+    let env = Env::new(ACCEPT_GAPS);
+    std::fs::create_dir_all(env.state.path().join("illumio-tui")).unwrap();
+    std::fs::write(env.records_dir(), "not a directory").unwrap();
+    let server = MockServer::start().await;
+    for args in [
+        vec!["enforce", "shop/prod", "--to", "full", "--yes"],
+        vec!["enforce", "shop/prod", "--rollback", "--yes"],
+    ] {
+        let a = env.cmd(&server).args(&args).assert().code(6);
+        let err = stderr(&a);
+        assert!(err.contains("change records cannot be written"), "{err}");
+        assert!(err.contains("nothing sent"), "{err}");
+    }
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_record_that_cannot_be_updated_after_the_send_goes_to_stderr_loudly() {
+    use std::os::unix::fs::PermissionsExt;
+    let env = Env::new(ACCEPT_GAPS);
+    let server = MockServer::start().await;
+    mount_readiness(&server, shop_workloads(), "[]").await;
+    // The records directory turns read-only while the bulk request is
+    // answered: the record before the send exists, its update fails.
+    let dir = env.records_dir();
+    let lock = dir.clone();
+    let ok = bulk_answer(&[]);
+    Mock::given(method("PUT"))
+        .and(path(BULK))
+        .respond_with(move |req: &Request| {
+            std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(0o555)).unwrap();
+            ok(req)
+        })
+        .mount(&server)
+        .await;
+    let a = env
+        .cmd(&server)
+        .args([
+            "enforce",
+            "shop/prod",
+            "--to",
+            "full",
+            "--yes",
+            "--confirm-count",
+            "2",
+        ])
+        .assert()
+        .code(1);
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let err = stderr(&a);
+    assert!(err.contains("CHANGE RECORD NOT UPDATED"), "{err}");
+    assert!(
+        err.contains("\"result\": \"updated\""),
+        "the record with results: {err}"
+    );
+    let out = json_out(&a);
+    let updated = out["data"]["bulk"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|i| i["status"] == "updated")
+        .count();
+    assert_eq!(updated, 2);
+    // The record before the send is there, every workload pending.
+    let recs = env.records();
+    assert_eq!(recs.len(), 1);
+    assert!(
+        recs[0].1["workloads"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|w| w["result"] == "pending")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unanswered_bulk_is_recorded_and_rolled_back_where_it_applied() {
+    let env = Env::new(ACCEPT_GAPS);
+    let server = MockServer::start().await;
+    mount_readiness(&server, shop_workloads(), "[]").await;
+    Mock::given(method("PUT"))
+        .and(path(BULK))
+        .respond_with(ResponseTemplate::new(502))
+        .mount(&server)
+        .await;
+    env.cmd(&server)
+        .args([
+            "enforce",
+            "shop/prod",
+            "--to",
+            "full",
+            "--yes",
+            "--confirm-count",
+            "2",
+        ])
+        .assert()
+        .code(4);
+    let recs = env.records();
+    assert_eq!(recs.len(), 1, "unanswered: it may have applied");
+    let results: Vec<&str> = recs[0].1["workloads"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w["result"].as_str().unwrap())
+        .collect();
+    assert_eq!(results, ["unanswered", "unanswered"]);
+    // It applied to w2, not to w3.
+    let server = MockServer::start().await;
+    mount_index(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            wl(2, "full", "flow_summary", true),
+            wl(3, "visibility_only", "flow_off", true),
+        ])))
+        .mount(&server)
+        .await;
+    let a = env
+        .cmd(&server)
+        .args(["enforce", "shop/prod", "--rollback", "--dry-run"])
+        .assert()
+        .success();
+    let d = &json_out(&a)["data"];
+    assert_eq!(d["count"], 1);
+    assert_eq!(
+        d["groups"][0]["plan"]["workloads"][0]["href"],
+        "/orgs/5/workloads/w2"
+    );
+    assert_eq!(
+        d["skipped"][0]["reason"],
+        "not applied (not answered: still visibility_only · flow_off)"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pending_items_after_a_crash_are_restored_where_applied() {
+    let env = Env::new("");
+    let mut body = record_body("2026-10-19T10:00:00Z");
+    for w in body["workloads"].as_array_mut().unwrap() {
+        w["result"] = json!("pending");
+    }
+    env.write_record("shop_prod-20261019T100000.000Z.json", &body);
+    let server = MockServer::start().await;
+    mount_index(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            wl(1, "full", "flow_summary", true),
+            wl(2, "idle", "flow_off", true),
+        ])))
+        .mount(&server)
+        .await;
+    let a = env
+        .cmd(&server)
+        .args(["enforce", "shop/prod", "--rollback", "--dry-run"])
+        .assert()
+        .success();
+    let d = &json_out(&a)["data"];
+    assert_eq!(d["count"], 1);
+    let reasons: Vec<&str> = d["skipped"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["reason"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        reasons,
+        [
+            "not applied (the send did not finish: still idle · flow_off)",
+            "not found among the app's workloads",
+            "not found among the app's workloads",
+        ]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rollback_without_writes_or_with_a_wrong_count_sends_nothing() {
+    let env = Env::new("");
+    env.write_record(
+        "shop_prod-20261019T100000.000Z.json",
+        &record_body("2026-10-19T10:00:00Z"),
+    );
+    let server = MockServer::start().await;
+    let a = env
+        .cmd(&server)
+        .env_remove("ILLUMIO_WRITES")
+        .args(["enforce", "shop/prod", "--rollback", "--yes"])
+        .assert()
+        .code(6);
+    assert!(stderr(&a).contains("write_refused"));
+    assert!(server.received_requests().await.unwrap().is_empty());
+    let server = MockServer::start().await;
+    mount_rollback(&server).await;
+    let a = env
+        .cmd(&server)
+        .args([
+            "enforce",
+            "shop/prod",
+            "--rollback",
+            "--yes",
+            "--confirm-count",
+            "5",
+        ])
+        .assert()
+        .code(2);
+    assert!(
+        stderr(&a).contains("2 workloads would be restored"),
+        "{}",
+        stderr(&a)
+    );
+    assert_eq!(sequence(&server).await, ["GET /orgs/5/workloads"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn watch_with_nothing_found_in_a_truncated_result_exits_4() {
+    let server = MockServer::start().await;
+    mount_index(&server).await;
+    mount_query(&server, "[]".into(), 0).await;
+    let env = Env::new("");
+    let a = env
+        .cmd(&server)
+        .args([
+            "enforce",
+            "shop/prod",
+            "--watch",
+            "--since",
+            &recent(600),
+            "--max-results",
+            "3",
+        ])
+        .assert()
+        .code(4);
+    assert!(stderr(&a).contains("truncated"), "{}", stderr(&a));
+    assert_eq!(json_out(&a)["meta"]["truncated"], true);
 }

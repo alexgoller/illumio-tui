@@ -21,7 +21,7 @@ use crate::traffic::{Direction, GroupKey, ResolvedFlow, group_key, keys_or_defau
 use crate::write::bulk::{BulkItem, EnforcementMode, ItemResult, ItemStatus, VisibilityLevel};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 /// An enforcement mode and visibility level, as the PCE names them
@@ -101,14 +101,38 @@ pub struct RecordWorkload {
     /// restored `before`): what a rollback expects to find still.
     pub after: ModeState,
     /// What became of it: `updated`, `failed`, `unanswered`, `not_sent`,
-    /// `changed`, `missing`.
+    /// `changed`, `missing`; `pending` in the record written before the
+    /// send (the send did not finish if it is still there).
     pub result: String,
 }
 
+/// The result of a workload in the record written before the send.
+pub const PENDING: &str = "pending";
+
 impl RecordWorkload {
-    /// The move may have applied to it (`updated`, or `unanswered`).
+    /// The move may have applied to it (`updated`, `unanswered`, or
+    /// `pending`: a send that never reported).
     pub fn moved(&self) -> bool {
-        matches!(self.result.as_str(), "updated" | "unanswered")
+        matches!(self.result.as_str(), "updated" | "unanswered" | PENDING)
+    }
+
+    /// Whether it applied is unknown (`unanswered`, `pending`).
+    pub fn uncertain(&self) -> bool {
+        matches!(self.result.as_str(), "unanswered" | PENDING)
+    }
+
+    /// What a rollback sets: the previous mode, and the previous level
+    /// only when the move set a level (else the level is left as it is:
+    /// someone may have changed it since).
+    pub fn restore(&self) -> ModeState {
+        ModeState {
+            mode: self.before.mode.clone(),
+            visibility: self
+                .after
+                .visibility
+                .as_ref()
+                .and(self.before.visibility.clone()),
+        }
     }
 }
 
@@ -211,6 +235,19 @@ impl ChangeRecord {
         self.workloads.iter().any(RecordWorkload::moved)
     }
 
+    /// The record written before the send: every workload `pending`.
+    pub fn pending(mut self) -> Self {
+        for w in &mut self.workloads {
+            w.result = PENDING.into();
+        }
+        self
+    }
+
+    /// Made on `o`'s PCE and org.
+    pub fn made_on(&self, o: &RecordOrigin) -> bool {
+        self.pce == o.pce && self.org_id == o.org_id
+    }
+
     pub fn at_time(&self) -> Option<Timestamp> {
         self.at.parse().ok()
     }
@@ -225,8 +262,27 @@ impl ChangeRecord {
     pub fn file_name(&self, now: Timestamp) -> String {
         let ts = now.strftime("%Y%m%dT%H%M%S%.3fZ").to_string();
         let kind = if self.is_rollback() { "-rollback" } else { "" };
-        format!("{}-{ts}{kind}.json", file_safe(&self.app))
+        format!("{}-{ts}{kind}.json", record_stem(&self.app))
     }
+}
+
+/// The longest app part of a record's file name.
+pub const STEM_MAX: usize = 100;
+
+/// The app as a record file name's first part: [`file_safe`], cut to
+/// [`STEM_MAX`] characters plus a short hash of the whole app when longer.
+pub fn record_stem(app: &str) -> String {
+    let safe = file_safe(app);
+    if safe.len() <= STEM_MAX {
+        return safe;
+    }
+    // FNV-1a: stable across runs and builds.
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in app.bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{}~{:08x}", &safe[..STEM_MAX], h as u32)
 }
 
 /// The app as a file name part: letters, digits, `-`, `_`, `.` kept, any
@@ -261,32 +317,86 @@ pub fn default_records_dir() -> Option<PathBuf> {
     records_dir_from(var("XDG_STATE_HOME").as_deref(), var("HOME").as_deref())
 }
 
-/// Writes `rec` into `dir` (created if missing) as a new file: a
-/// temporary file renamed into place, never over an existing record.
-/// Returns its path.
+/// Creates `dir` and checks a file can be written there (a probe file,
+/// written, synced and removed): before any request of a move, so a
+/// record that cannot be written stops it with nothing sent.
+pub fn probe_dir(dir: &Path) -> io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let probe = dir.join(format!(".probe-{}", std::process::id()));
+    let r = (|| {
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&probe)?;
+        f.write_all(b"probe")?;
+        f.sync_all()
+    })();
+    let _ = std::fs::remove_file(&probe);
+    r
+}
+
+/// `body` in a synced temporary file in `dir`.
+fn temp_file(dir: &Path, name: &str, body: &[u8]) -> io::Result<PathBuf> {
+    let tmp = dir.join(format!(".{name}.tmp-{}", std::process::id()));
+    let mut f = std::fs::File::create(&tmp)?;
+    let r = f.write_all(body).and_then(|_| f.sync_all());
+    if let Err(e) = r {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    Ok(tmp)
+}
+
+/// Syncs the directory, so a rename or link in it survives a crash.
+fn sync_dir(dir: &Path) {
+    if let Ok(d) = std::fs::File::open(dir) {
+        let _ = d.sync_all();
+    }
+}
+
+/// Writes `rec` into `dir` (created if missing) as a new file: a synced
+/// temporary file hard-linked into place, which fails rather than
+/// replace an existing record (then `-2`, `-3`, ... is tried). Returns
+/// its path.
 pub fn write_record(dir: &Path, rec: &ChangeRecord, now: Timestamp) -> io::Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
     let body = serde_json::to_vec_pretty(rec).map_err(io::Error::other)?;
     let name = rec.file_name(now);
-    let mut path = dir.join(&name);
+    let tmp = temp_file(dir, &name, &body)?;
     let mut n = 1;
-    while path.exists() {
-        n += 1;
-        path = dir.join(name.replacen(".json", &format!("-{n}.json"), 1));
-    }
-    let tmp = dir.join(format!(
-        ".{}.tmp-{}",
-        path.file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("record"),
-        std::process::id()
-    ));
-    std::fs::write(&tmp, &body)?;
-    if let Err(e) = std::fs::rename(&tmp, &path) {
+    let result = loop {
+        let path = if n == 1 {
+            dir.join(&name)
+        } else {
+            dir.join(name.replacen(".json", &format!("-{n}.json"), 1))
+        };
+        match std::fs::hard_link(&tmp, &path) {
+            Ok(()) => break Ok(path),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists && n < 1000 => n += 1,
+            Err(e) => break Err(e),
+        }
+    };
+    let _ = std::fs::remove_file(&tmp);
+    sync_dir(dir);
+    result
+}
+
+/// Replaces the record at `path` with `rec` (the results after the
+/// send): a synced temporary file renamed over it.
+pub fn rewrite_record(path: &Path, rec: &ChangeRecord) -> io::Result<()> {
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let body = serde_json::to_vec_pretty(rec).map_err(io::Error::other)?;
+    let name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("record");
+    let tmp = temp_file(dir, name, &body)?;
+    if let Err(e) = std::fs::rename(&tmp, path) {
         let _ = std::fs::remove_file(&tmp);
         return Err(e);
     }
-    Ok(path)
+    sync_dir(dir);
+    Ok(())
 }
 
 pub fn read_record(path: &Path) -> io::Result<ChangeRecord> {
@@ -299,39 +409,62 @@ pub fn read_record(path: &Path) -> io::Result<ChangeRecord> {
     })
 }
 
-/// The app's newest move record in `dir` (rollbacks left out), by `at`,
-/// then by file name; `None` when there is none (or no directory). A file
-/// that is not a record is passed over.
-pub fn newest_record(dir: &Path, app: &str) -> io::Result<Option<(PathBuf, ChangeRecord)>> {
+/// Every record in `dir` (any app), with its path; files that are not
+/// records are passed over; no directory: none.
+fn all_records(dir: &Path, stem: Option<&str>) -> io::Result<Vec<(String, PathBuf, ChangeRecord)>> {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(e),
     };
-    let prefix = format!("{}-", file_safe(app));
-    let mut found: Vec<(Timestamp, String, PathBuf, ChangeRecord)> = Vec::new();
+    let prefix = stem.map(|s| format!("{s}-"));
+    let mut out = Vec::new();
     for e in entries {
         let e = e?;
         let name = e.file_name().to_string_lossy().to_string();
-        if !name.starts_with(&prefix) || !name.ends_with(".json") {
+        if name.starts_with('.') || !name.ends_with(".json") {
+            continue;
+        }
+        if let Some(p) = &prefix
+            && !name.starts_with(p.as_str())
+        {
             continue;
         }
         let path = e.path();
-        let Ok(rec) = read_record(&path) else {
-            continue;
-        };
-        if rec.app != app || rec.is_rollback() {
-            continue;
+        if let Ok(rec) = read_record(&path) {
+            out.push((name, path, rec));
         }
-        let Some(at) = rec.at_time() else {
-            continue;
-        };
-        found.push((at, name, path, rec));
     }
-    Ok(found
+    Ok(out)
+}
+
+/// The app's newest move record in `dir` (rollbacks left out; with
+/// `origin`, only those made on its PCE and org), by `at`, then by file
+/// name; `None` when there is none (or no directory).
+pub fn newest_record(
+    dir: &Path,
+    app: &str,
+    origin: Option<&RecordOrigin>,
+) -> io::Result<Option<(PathBuf, ChangeRecord)>> {
+    let found = all_records(dir, Some(&record_stem(app)))?
         .into_iter()
+        .filter(|(_, _, r)| r.app == app && !r.is_rollback())
+        .filter(|(_, _, r)| origin.is_none_or(|o| r.made_on(o)))
+        .filter_map(|(n, p, r)| r.at_time().map(|t| (t, n, p, r)));
+    Ok(found
         .max_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)))
         .map(|(_, _, p, r)| (p, r)))
+}
+
+/// The rollback record in `dir` whose `rollback_of` names `record`, if
+/// any (the newest).
+pub fn rolled_back_by(dir: &Path, record: &Path) -> io::Result<Option<PathBuf>> {
+    let want = record.display().to_string();
+    let found = all_records(dir, None)?
+        .into_iter()
+        .filter(|(_, _, r)| r.rollback_of.as_deref() == Some(want.as_str()))
+        .max_by(|a, b| a.0.cmp(&b.0));
+    Ok(found.map(|(_, p, _)| p))
 }
 
 /// A workload a rollback leaves as it is, and why.
@@ -374,9 +507,11 @@ impl RollbackPlan {
 /// What a rollback of `rec` does, from `current` (the workloads re-read
 /// just now): each workload the move changed and that is still as the
 /// move set it goes back to its `before`, grouped by `(mode, visibility)`
-/// in the order first seen. Skipped and reported: a workload the move did
-/// not change (its result), one gone, one changed by someone else since,
-/// one whose previous mode is unknown.
+/// in the order first seen; the level goes back only when the move set
+/// one. Skipped and reported: a workload the move did not change (its
+/// result), one gone, one changed by someone else since, one whose
+/// unanswered or unfinished move did not apply, one whose previous mode
+/// is unknown.
 pub fn plan_rollback(rec: &ChangeRecord, current: &[Workload]) -> RollbackPlan {
     let mut plan = RollbackPlan::default();
     for w in &rec.workloads {
@@ -399,12 +534,26 @@ pub fn plan_rollback(rec: &ChangeRecord, current: &[Workload]) -> RollbackPlan {
             continue;
         };
         let state = ModeState::of(now);
+        let restore = w.restore();
         if !w.after.holds_in(&state) {
-            plan.skipped.push(skip(format!(
-                "changed since ({} now, {} set): left as it is",
-                state.text(),
-                w.after.text()
-            )));
+            let reason = if w.uncertain() && restore.holds_in(&state) {
+                format!(
+                    "not applied ({}: still {})",
+                    if w.result == PENDING {
+                        "the send did not finish"
+                    } else {
+                        "not answered"
+                    },
+                    state.text()
+                )
+            } else {
+                format!(
+                    "changed since ({} now, {} set): left as it is",
+                    state.text(),
+                    w.after.text()
+                )
+            };
+            plan.skipped.push(skip(reason));
             continue;
         }
         let mode = w.before.mode.as_deref().and_then(EnforcementMode::parse);
@@ -415,8 +564,8 @@ pub fn plan_rollback(rec: &ChangeRecord, current: &[Workload]) -> RollbackPlan {
             )));
             continue;
         };
-        let visibility = w
-            .before
+        // The level only when the move set one.
+        let visibility = restore
             .visibility
             .as_deref()
             .and_then(VisibilityLevel::parse);
