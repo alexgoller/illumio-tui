@@ -437,6 +437,8 @@ recording error. `PCE_LIVE=1` enables the single live test.
 `crates/illumio-tui/tests/cli_writes.rs` covers the guard, exit codes 2/4/6, dry
 runs and the audit file. `crates/pce/tests/policy_writes.rs` pins every policy
 body (rulesets, rules, deny rules, provisioning, managed labels) with wiremock.
-`live_writes.rs` is opt-in (`PCE_LIVE_WRITES=1`); it creates and deletes one
-label, and runs a draft ruleset and rule lifecycle that plans but never sends a
-provision.
+`live_writes.rs` is opt-in (`PCE_LIVE_WRITES=1`, run by `scripts/live-smoke.sh`);
+it covers every write path (labels, services, IP lists, unmanaged workloads,
+rulesets and rules, a batch, a draft revert, and bulk on the one workload
+`PCE_LIVE_WORKLOAD` names), restores what it changes even when a check fails,
+and plans but never sends a provision.

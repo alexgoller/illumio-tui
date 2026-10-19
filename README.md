@@ -1184,7 +1184,22 @@ across many PCEs, use workloader. illumio-tui does not plan to cover those.
     cargo test --workspace
     cargo xtask record --env-file ../illumio-mcp-server/.env   # refresh fixtures/recorded
     PCE_LIVE=1 cargo test -p pce --test live                    # needs PCE_* env
-    PCE_LIVE_WRITES=1 cargo test -p pce --test live_writes      # creates and deletes one label; non-production PCE only
+    PCE_LIVE_WRITES=1 cargo test -p pce --test live_writes -- --test-threads=1   # non-production PCE only
+
+`scripts/live-smoke.sh --env-file <path> [--workload <hostname>]` runs both
+live suites against the PCE the env file names (sourced, never printed) and
+prints a pass/fail summary. The write suite exercises every write path the
+`pce` crate has: labels, services, IP lists and unmanaged workloads (create,
+update, delete), a ruleset and rule lifecycle with `enabled` toggles, a batch
+with placeholders, and a draft revert of its own change; a provision is only
+planned, never sent. Everything it makes is named `illumio-tui-smoke-<ts>` and
+removed again, also when a check fails. The label test uses the existing key
+`role`: a PCE refuses labels of keys it has no dimension for. `--workload`
+names one VEN-managed workload (exact hostname) for the bulk test, which
+changes its visibility level, its enforcement to `visibility_only` and one
+label to another existing value, puts each back and checks the original state
+by a fresh read; without it the bulk test is skipped. Use it only on a PCE and
+a workload you designate for testing.
 
 Design: `docs/superpowers/specs/2026-10-10-illumio-tui-design.md`.
 
