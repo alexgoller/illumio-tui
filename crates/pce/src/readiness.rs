@@ -13,8 +13,11 @@
 //!   none at all on an evaluated result).
 //! - **Accepted**: a would-block flow with a live `squelch` or
 //!   `accept-blocked` mark (and no stronger highlight mark): never a gap.
+use crate::app::names_app;
 use crate::app::{EnforcementCounts, PolicyReason, app_policy};
-use crate::impact::rule_set_href_of;
+use crate::impact::{
+    ImpactInputs, RuleActors, is_rule_href, rule_impact_with, rule_set_href_of, workload_labels,
+};
 use crate::marks::{Action, ActiveMarks};
 use crate::models::{
     Actor, IngressService, PendingChange, PolicyDecision, RuleSet, VenHealth, Workload,
@@ -26,7 +29,7 @@ use crate::traffic::{
 };
 use jiff::Timestamp;
 use serde::Serialize;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::net::IpAddr;
 use std::time::Duration;
 
@@ -46,6 +49,11 @@ pub struct ReadinessInput<'a> {
     pub draft: bool,
     /// The traffic result hit its cap: the evidence is partial.
     pub truncated: bool,
+    /// A supercluster region did not answer: flows are missing.
+    pub incomplete: bool,
+    /// List each app's gaps (`AppReadiness::gaps`); `gap_count` is always
+    /// there.
+    pub gaps: bool,
     /// The query window's length.
     pub window: Duration,
     /// The workloads to judge (all of them, or a superset of the apps').
@@ -138,12 +146,15 @@ pub struct Evidence {
     pub little: bool,
     /// The traffic result hit its cap.
     pub truncated: bool,
+    /// A supercluster region did not answer.
+    pub incomplete: bool,
 }
 
 /// One side's app flows: connections allowed by the draft, would-block,
 /// and accepted (would-block, but marked squelch or accept-blocked).
 /// `allowed + would_block + accepted == connections` once evaluated; all
-/// three are 0 when not.
+/// three are 0 when not. `undecided` flows (no draft decision on an
+/// evaluated result) count as would-block too.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct SideCounts {
     pub flows: u64,
@@ -153,6 +164,9 @@ pub struct SideCounts {
     pub accepted: u64,
     /// Flow records that would block (not accepted).
     pub would_block_flows: u64,
+    /// Flow records without a draft decision on an evaluated result
+    /// (counted in `would_block`).
+    pub undecided: u64,
 }
 
 impl SideCounts {
@@ -163,6 +177,7 @@ impl SideCounts {
         self.would_block += other.would_block;
         self.accepted += other.accepted;
         self.would_block_flows += other.would_block_flows;
+        self.undecided += other.undecided;
     }
 }
 
@@ -195,21 +210,15 @@ pub struct Gap {
     /// `in`: the peer is the source; `out`: the destination.
     pub direction: Direction,
     pub peer: GroupKey,
+    /// `web/prod`: `peer` joined.
+    pub peer_text: String,
     /// `443/tcp`, or `icmp`.
     pub service: String,
     pub flows: u64,
     pub connections: u64,
 }
 
-impl Gap {
-    /// `web/prod`.
-    pub fn peer_text(&self) -> String {
-        self.peer.join("/")
-    }
-}
-
-/// The pending changes that hold the app back: in rulesets whose scope
-/// covers it, and the objects those rulesets use.
+/// The pending changes that hold the app back (see `pending_for`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct PendingForApp {
     pub count: usize,
@@ -224,6 +233,11 @@ pub enum Warning {
     LittleEvidence { window: String, flows: u64 },
     /// The traffic result hit its cap: flows may be missing.
     Truncated,
+    /// A supercluster region did not answer: flows are missing.
+    Incomplete,
+    /// App flows without a draft decision on an evaluated result: counted
+    /// as would-block.
+    Undecided { flows: u64 },
     /// Managed workloads without a tier label.
     MissingTier { key: String, workloads: usize },
     /// Managed workloads whose VEN is offline or in error.
@@ -242,6 +256,8 @@ impl Warning {
                 format!("little evidence ({window}, {flows} flows)")
             }
             Warning::Truncated => "traffic truncated".into(),
+            Warning::Incomplete => "traffic incomplete".into(),
+            Warning::Undecided { flows } => format!("{flows} flows without draft decision"),
             Warning::MissingTier { key, workloads } => format!("{workloads} without {key}"),
             Warning::OfflineVens { workloads } => format!("{workloads} VEN offline"),
             Warning::Unmanaged { workloads } => format!("{workloads} unmanaged"),
@@ -262,8 +278,12 @@ pub struct AppReadiness {
     pub workloads: ReadinessWorkloads,
     pub evidence: Evidence,
     pub coverage: Coverage,
-    /// Largest first (connections, then flows).
-    pub gaps: Vec<Gap>,
+    /// The number of gap tuples (0 when not evaluated).
+    pub gap_count: usize,
+    /// The gaps, largest first (connections, then flows): only when asked
+    /// for (`ReadinessInput::gaps`) and evaluated.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gaps: Option<Vec<Gap>>,
     pub pending: PendingForApp,
     pub warnings: Vec<Warning>,
 }
@@ -375,6 +395,7 @@ fn judge(
         connections: total.connections,
         little: input.window < LITTLE_EVIDENCE_WINDOW || total.flows < LITTLE_EVIDENCE_FLOWS,
         truncated: input.truncated,
+        incomplete: input.incomplete,
     };
     let mut gaps = Vec::new();
     if input.draft {
@@ -389,7 +410,7 @@ fn judge(
                 .then_with(|| a.service.cmp(&b.service))
         });
     }
-    let pending = pending_for(input, keys, app);
+    let pending = pending_for(input, keys, app, wls);
     let enforced = workloads.managed > 0 && workloads.enforcement.enforced == workloads.managed;
     let verdict = if enforced {
         Verdict::Enforced
@@ -411,6 +432,14 @@ fn judge(
     }
     if input.truncated {
         warnings.push(Warning::Truncated);
+    }
+    if input.incomplete {
+        warnings.push(Warning::Incomplete);
+    }
+    if total.undecided > 0 {
+        warnings.push(Warning::Undecided {
+            flows: total.undecided,
+        });
     }
     if workloads.managed == 0 {
         warnings.push(Warning::NoManagedWorkloads);
@@ -438,7 +467,8 @@ fn judge(
         workloads,
         evidence,
         coverage,
-        gaps,
+        gap_count: gaps.len(),
+        gaps: (input.draft && input.gaps).then_some(gaps),
         pending,
         warnings,
     }
@@ -464,6 +494,7 @@ fn side<'a>(
         } else {
             c.would_block += f.num_connections;
             c.would_block_flows += 1;
+            c.undecided += u64::from(f.draft_policy_decision.is_none());
             gaps.push(f);
         }
     }
@@ -494,15 +525,19 @@ pub fn accepted(marks: Option<&ActiveMarks>, f: &ResolvedFlow) -> bool {
 fn tuples(flows: &[&ResolvedFlow], keys: &[String], dir: Direction) -> Vec<Gap> {
     group_by_service_refs(flows.iter().copied(), keys)
         .into_iter()
-        .map(|g| Gap {
-            direction: dir,
-            peer: match dir {
+        .map(|g| {
+            let peer = match dir {
                 Direction::In => g.src,
                 Direction::Out => g.dst,
-            },
-            service: g.service.unwrap_or_default(),
-            flows: g.flows,
-            connections: g.connections,
+            };
+            Gap {
+                direction: dir,
+                peer_text: peer.join("/"),
+                peer,
+                service: g.service.unwrap_or_default(),
+                flows: g.flows,
+                connections: g.connections,
+            }
         })
         .collect()
 }
@@ -600,11 +635,98 @@ fn actor_refs(actors: &[Actor], out: &mut HashSet<String>) {
     }
 }
 
-/// Pending changes for the app: a covering ruleset itself (or one of its
-/// rules), or an object (service, IP list, label group) a covering
-/// ruleset's scopes or rules use. A ruleset covers the app when one of its
-/// scopes does or it applies to every workload (`app::app_policy`).
-fn pending_for(input: &ReadinessInput, keys: &[String], app: &[String]) -> PendingForApp {
+/// The objects one rule (allow or deny) uses: its actors' and its
+/// services by reference.
+fn rule_refs(
+    consumers: &[Actor],
+    providers: &[Actor],
+    services: &[IngressService],
+) -> HashSet<String> {
+    let mut out = HashSet::new();
+    actor_refs(consumers, &mut out);
+    actor_refs(providers, &mut out);
+    for s in services {
+        if let IngressService::Ref(x) = s {
+            out.insert(draft_href(&x.href));
+        }
+    }
+    out
+}
+
+/// One rule of a ruleset, allow or deny, as `pending_for` judges it.
+struct PolicyRule {
+    href: String,
+    enabled: bool,
+    actors: RuleActors,
+    refs: HashSet<String>,
+}
+
+fn rules_of(rs: &RuleSet) -> Vec<PolicyRule> {
+    let allow = rs.rules.iter().map(|r| PolicyRule {
+        href: draft_href(&r.href),
+        enabled: r.enabled,
+        actors: RuleActors::of_rule(r),
+        refs: rule_refs(&r.consumers, &r.providers, &r.ingress_services),
+    });
+    let deny = rs.deny_rules.iter().map(|r| PolicyRule {
+        href: draft_href(&r.href),
+        enabled: r.enabled,
+        actors: RuleActors::of_deny(r),
+        refs: rule_refs(&r.consumers, &r.providers, &r.ingress_services),
+    });
+    allow.chain(deny).collect()
+}
+
+/// What `pending_for` evaluates rules against: the app's workloads (with
+/// their label sets), else its labels.
+struct AppPolicy<'a> {
+    workloads: Vec<Workload>,
+    hrefs: Vec<String>,
+    idx: &'a NameIndex,
+}
+
+impl AppPolicy<'_> {
+    /// The rule reaches the app: with workloads, `rule_impact` over them
+    /// (with the ruleset's scopes, `unscoped_consumers` honoured) matches
+    /// a provider or a consumer; without, a non-excluded actor is `ams` or
+    /// names one of the app's labels.
+    fn reaches(&self, scopes: &[Vec<Actor>], r: &RuleActors, labels: &[HashSet<&str>]) -> bool {
+        if self.workloads.is_empty() {
+            return r.providers.iter().chain(&r.consumers).any(|a| {
+                a.exclusion != Some(true)
+                    && (a.actors.as_deref() == Some("ams") || names_app(a, &self.hrefs, self.idx))
+            });
+        }
+        let inputs = ImpactInputs {
+            workloads: &self.workloads,
+            index: self.idx,
+            truncated: false,
+        };
+        let i = rule_impact_with(scopes, r, &inputs, labels);
+        i.providers > 0 || i.consumers > 0
+    }
+}
+
+/// Pending changes for the app, by one rule:
+/// 1. a ruleset with a scope covering the app (`PolicyReason::Scope`):
+///    every change to it, its rules, and the objects its scopes and rules
+///    use (disabled or not: a change may enable it);
+/// 2. any other ruleset (unscoped, or scoped elsewhere): a change to the
+///    ruleset counts when one of its enabled rules reaches the app's
+///    workloads (`AppPolicy::reaches`, e.g. a peer's rule consuming the
+///    app with `unscoped_consumers`), a change to one rule when that rule
+///    does, an object when an enabled rule that reaches the app uses it.
+///    A disabled ruleset or rule is skipped here: it reaches nothing (a
+///    pending change that enables one is missed).
+///
+/// A change whose ruleset or rule is not in the draft (deleted) is not
+/// counted: its effect shows in the draft decisions already.
+fn pending_for(
+    input: &ReadinessInput,
+    keys: &[String],
+    app: &[String],
+    wls: &[&Workload],
+) -> PendingForApp {
     if input.pending.is_empty() {
         return PendingForApp::default();
     }
@@ -614,48 +736,90 @@ fn pending_for(input: &ReadinessInput, keys: &[String], app: &[String]) -> Pendi
         .filter(|(_, v)| v.as_str() != "-")
         .filter_map(|(k, v)| input.idx.label_href(k, v).map(str::to_string))
         .collect();
-    let covering: BTreeMap<String, &RuleSet> = app_policy(input.rule_sets, &hrefs, input.idx)
+    let scoped: HashSet<String> = app_policy(input.rule_sets, &hrefs, input.idx)
         .into_iter()
-        .filter(|r| matches!(r.reason, PolicyReason::Scope | PolicyReason::AllWorkloads))
-        .filter_map(|r| {
-            input
-                .rule_sets
-                .iter()
-                .find(|rs| rs.href == r.href)
-                .map(|rs| (draft_href(&rs.href), rs))
-        })
+        .filter(|r| r.reason == PolicyReason::Scope)
+        .map(|r| draft_href(&r.href))
         .collect();
-    let mut used = HashSet::new();
-    for rs in covering.values() {
-        for s in &rs.scopes {
-            actor_refs(s, &mut used);
-        }
-        for r in &rs.rules {
-            actor_refs(&r.consumers, &mut used);
-            actor_refs(&r.providers, &mut used);
-            for s in &r.ingress_services {
-                if let IngressService::Ref(x) = s {
-                    used.insert(draft_href(&x.href));
+    let ctx = AppPolicy {
+        workloads: wls.iter().map(|w| (*w).clone()).collect(),
+        hrefs,
+        idx: input.idx,
+    };
+    let labels = workload_labels(&ctx.workloads);
+    // Only rules a pending change can concern are evaluated: those of a
+    // ruleset with a pending change, or using a pending object.
+    let mut pending_sets = HashSet::new();
+    let mut pending_objs = HashSet::new();
+    for p in input.pending {
+        let h = draft_href(&p.href);
+        match rule_set_href_of(&h) {
+            Some(set) => pending_sets.insert(set.to_string()),
+            None => pending_objs.insert(h),
+        };
+    }
+    // Per ruleset (draft href): covering by scope, the objects counted,
+    // and the rules that reach the app.
+    struct Judged {
+        scoped: bool,
+        refs: HashSet<String>,
+        reaching: HashSet<String>,
+    }
+    let mut judged: HashMap<String, Judged> = HashMap::new();
+    for rs in input.rule_sets {
+        let h = draft_href(&rs.href);
+        let rules = rules_of(rs);
+        let j = if scoped.contains(&h) {
+            let mut refs = HashSet::new();
+            for s in &rs.scopes {
+                actor_refs(s, &mut refs);
+            }
+            for r in &rules {
+                refs.extend(r.refs.iter().cloned());
+            }
+            Judged {
+                scoped: true,
+                refs,
+                reaching: HashSet::new(),
+            }
+        } else {
+            let mut refs = HashSet::new();
+            let mut reaching = HashSet::new();
+            if rs.enabled {
+                let concerned = |r: &PolicyRule| {
+                    pending_sets.contains(&h) || !r.refs.is_disjoint(&pending_objs)
+                };
+                for r in rules.iter().filter(|r| r.enabled && concerned(r)) {
+                    if ctx.reaches(&rs.scopes, &r.actors, &labels) {
+                        refs.extend(r.refs.iter().cloned());
+                        reaching.insert(r.href.clone());
+                    }
                 }
             }
-        }
-        for r in &rs.deny_rules {
-            actor_refs(&r.consumers, &mut used);
-            actor_refs(&r.providers, &mut used);
-            for s in &r.ingress_services {
-                if let IngressService::Ref(x) = s {
-                    used.insert(draft_href(&x.href));
-                }
+            Judged {
+                scoped: false,
+                refs,
+                reaching,
             }
-        }
+        };
+        judged.insert(h, j);
     }
     let changes: Vec<PendingChange> = input
         .pending
         .iter()
         .filter(|p| {
             let h = draft_href(&p.href);
-            let in_set = rule_set_href_of(&h).unwrap_or(&h);
-            covering.contains_key(in_set) || used.contains(&h)
+            match rule_set_href_of(&h) {
+                Some(set) => judged.get(set).is_some_and(|j| {
+                    j.scoped
+                        || if is_rule_href(&h) {
+                            j.reaching.contains(&h)
+                        } else {
+                            !j.reaching.is_empty()
+                        }
+                }),
+                None => judged.values().any(|j| j.refs.contains(&h)),
+            }
         })
         .cloned()
         .collect();

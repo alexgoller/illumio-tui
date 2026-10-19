@@ -1,22 +1,26 @@
 //! `illumio-tui readiness`: per-app enforcement readiness (#54). One
-//! traffic query (two with `--app`: the apps as destination, then as
-//! source) re-evaluated against the draft policy, the workloads, the
+//! traffic query (with `--app`, narrowed to the apps on either side)
+//! re-evaluated against the draft policy, the workloads, the
 //! pending changes and the draft rulesets (cached reads), and marks.toml;
 //! `pce::readiness` judges each app. Read-only.
 use super::context::{Context, cache_label};
 use super::error::CliError;
 use super::marked::CliMarks;
+use super::output::Window;
 use super::output::{OutputFormat, TableRows, join_list};
 use super::traffic::{Fetched, FilterArgs, TransmissionArg, fetch};
 use clap::Args;
 use jiff::Timestamp;
-use pce::models::{PolicyScope, WorkloadFilter};
+use pce::NameIndex;
+use pce::models::{ActorMatch, PolicyScope, Transmission, WorkloadFilter};
 use pce::readiness::{AppReadiness, Gap, ReadinessInput, readiness};
 use pce::traffic::{
     DraftSummary, GroupKey, TrafficQueryBuilder, app_labels, keys_or_default, parse_app,
-    parse_window, union_flows,
+    parse_window, resolve_flows,
 };
 use serde::Serialize;
+use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 
 /// The window readiness looks at unless told otherwise: under 7 days is
 /// little evidence, over it needs `--yes`.
@@ -27,9 +31,10 @@ pub struct ReadinessArgs {
     /// Relative window ending now (default 7d; under 7d is little evidence, over 7d needs --yes)
     #[arg(long)]
     pub window: Option<String>,
-    /// Only this app, e.g. shop/prod: one value per scope key (repeatable). The query is narrowed
-    /// to the apps (two queries: the apps as destination, then as source) and the gaps and
-    /// pending changes are printed per app
+    /// Only this app, e.g. shop/prod: one value per scope key (repeatable). The one query is
+    /// narrowed to the apps (on either side) and the gaps and pending changes are printed per
+    /// app. An app with a `-` slot (a workload missing a scope label) is listed without --app
+    /// but cannot be named here
     #[arg(long = "app")]
     pub apps: Vec<String>,
     /// Row cap per traffic query, up to 200000 (default from profile; > 10000 needs --yes)
@@ -173,7 +178,7 @@ impl TableRows for Gaps<'_> {
             .map(|g| {
                 vec![
                     g.direction.as_str().to_string(),
-                    g.peer_text(),
+                    g.peer_text.clone(),
                     g.service.clone(),
                     g.flows.to_string(),
                     g.connections.to_string(),
@@ -224,7 +229,7 @@ fn filter(args: &ReadinessArgs) -> FilterArgs {
 /// The cost guard before any request (the window, the cap), as
 /// `traffic query`'s: `--app` validates its labels with the name index,
 /// which must not be loaded for a query that is then refused.
-fn guard(ctx: &Context, args: &ReadinessArgs, queries: u32) -> Result<(), CliError> {
+fn guard(ctx: &Context, args: &ReadinessArgs) -> Result<(), CliError> {
     let w = args
         .window
         .clone()
@@ -235,59 +240,55 @@ fn guard(ctx: &Context, args: &ReadinessArgs, queries: u32) -> Result<(), CliErr
     if !args.yes
         && let Some(reason) = q.needs_confirmation()
     {
-        let runs = if queries > 1 {
-            format!(
-                " (--app runs it as {})",
-                pce::traffic::queries_text(queries)
-            )
-        } else {
-            String::new()
-        };
         return Err(CliError::Args(format!(
-            "expensive query: {reason}{runs}; re-run with --yes to confirm"
+            "expensive query: {reason}; re-run with --yes to confirm"
         )));
     }
     Ok(())
 }
 
-/// `shop/prod` → `app=shop,env=prod`: one AND group of a traffic filter.
-fn filter_group(app: &[String], keys: &[String]) -> String {
-    keys.iter()
-        .zip(app)
-        .map(|(k, v)| format!("{k}={v}"))
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
-/// The apps as destination, then as source: two queries, merged without
-/// duplicates (a flow between two of the apps is in both).
+/// One query for the apps: each app's labels as an include group on both
+/// sides, joined with `or` (`sources_destinations_query_op`, as the bulk
+/// draft check does), so a flow with an app on either side comes back
+/// once; re-evaluated against the draft (one `update_rules`).
 async fn fetch_apps(
     ctx: &Context,
     args: &ReadinessArgs,
-    apps: &[GroupKey],
-    keys: &[String],
+    groups: &[Vec<ActorMatch>],
+    idx: Arc<NameIndex>,
 ) -> Result<Fetched, CliError> {
-    let groups: Vec<String> = apps.iter().map(|a| filter_group(a, keys)).collect();
-    let inbound = FilterArgs {
-        dst: groups.clone(),
-        ..filter(args)
-    };
-    let outbound = FilterArgs {
-        src: groups,
-        ..filter(args)
-    };
-    let some = |f: Option<Fetched>| f.ok_or_else(|| CliError::Other("not a dry run".into()));
-    let a = some(fetch(ctx, &inbound, None).await?)?;
-    let b = some(fetch(ctx, &outbound, None).await?)?;
-    let flows = union_flows(a.flows, b.flows);
+    let w = args
+        .window
+        .clone()
+        .unwrap_or_else(|| DEFAULT_READINESS_WINDOW.into());
+    let mut b = TrafficQueryBuilder::last(parse_window(&w)?)?
+        .transmission(&[Transmission::Unicast])
+        .max_results(args.max_results.unwrap_or(ctx.config.traffic_max_results));
+    for g in groups {
+        b = b.source(g.clone()).destination(g.clone());
+    }
+    let mut q = b.build()?;
+    q.sources_destinations_query_op = "or".into();
+    let r = ctx
+        .pce
+        .traffic_draft(&q, None, ctx.cache_mode, &CancellationToken::new(), None)
+        .await?;
+    let flows = resolve_flows(&r.value.flows, &idx);
     Ok(Fetched {
         draft: Some(DraftSummary::of(&flows)),
-        cache: if a.cache == b.cache { a.cache } else { "miss" },
-        truncated: a.truncated || b.truncated,
-        incomplete: a.incomplete || b.incomplete,
-        queries: Some(2),
+        cache: cache_label(r.hit, ctx.cache_mode),
+        truncated: r.truncated,
+        incomplete: r.value.incomplete,
+        window: Some(Window {
+            start: q.start_date.clone(),
+            end: q.end_date.clone(),
+        }),
+        span: q.window(),
+        cap: q.max_results,
+        cap_steps: None,
+        queries: Some(1),
         flows,
-        ..a
+        index: idx,
     })
 }
 
@@ -301,19 +302,19 @@ pub async fn run(ctx: &Context, args: &ReadinessArgs) -> Result<(), CliError> {
         }
     }
     let narrowed = !apps.is_empty();
-    guard(ctx, args, if narrowed { 2 } else { 1 })?;
+    guard(ctx, args)?;
     // The apps' labels, checked before any traffic request (exit 2 with
     // the closest values), and the workload filter they make.
     let mut label_groups = Vec::new();
-    if narrowed {
+    let fetched = if narrowed {
         let idx = ctx.pce.name_index(ctx.cache_mode).await?;
+        let mut matches = Vec::new();
         for app in &apps {
             let m = app_labels(app, &keys, &idx).map_err(CliError::Args)?;
             label_groups.push(pce::app::label_hrefs(&m));
+            matches.push(m);
         }
-    }
-    let fetched = if narrowed {
-        fetch_apps(ctx, args, &apps, &keys).await?
+        fetch_apps(ctx, args, &matches, idx).await?
     } else {
         fetch(ctx, &filter(args), None)
             .await?
@@ -335,6 +336,8 @@ pub async fn run(ctx: &Context, args: &ReadinessArgs) -> Result<(), CliError> {
         flows: &fetched.flows,
         draft: true,
         truncated: fetched.truncated,
+        incomplete: fetched.incomplete,
+        gaps: narrowed,
         window: fetched.span,
         workloads: &wl.value,
         pending: &pending.value,
@@ -378,7 +381,11 @@ pub async fn run(ctx: &Context, args: &ReadinessArgs) -> Result<(), CliError> {
         ),
         &apps_table,
     )];
-    let gaps: Vec<Gaps> = report.apps.iter().map(|r| Gaps(&r.gaps)).collect();
+    let gaps: Vec<Gaps> = report
+        .apps
+        .iter()
+        .map(|r| Gaps(r.gaps.as_deref().unwrap_or_default()))
+        .collect();
     let pend: Vec<Pending> = report
         .apps
         .iter()
@@ -388,25 +395,11 @@ pub async fn run(ctx: &Context, args: &ReadinessArgs) -> Result<(), CliError> {
     // table only, one table per output).
     if narrowed && ctx.format != OutputFormat::Csv {
         for ((r, g), p) in report.apps.iter().zip(&gaps).zip(&pend) {
-            tables.push((format!("gaps · {} · {}", r.app, r.gaps.len()), g));
+            tables.push((format!("gaps · {} · {}", r.app, r.gap_count), g));
             if r.pending.count > 0 {
                 tables.push((format!("pending · {} · {}", r.app, r.pending.count), p));
             }
         }
     }
-    if narrowed {
-        ctx.emit_report(&report, &tables, &meta)
-    } else {
-        // Without `--app` the gaps stay out of JSON too: every app's
-        // tuples would swamp the envelope.
-        let mut data = serde_json::to_value(&report).map_err(|e| CliError::Other(e.to_string()))?;
-        if let Some(list) = data.get_mut("apps").and_then(|a| a.as_array_mut()) {
-            for a in list {
-                if let Some(o) = a.as_object_mut() {
-                    o.remove("gaps");
-                }
-            }
-        }
-        ctx.emit_report(&data, &tables, &meta)
-    }
+    ctx.emit_report(&report, &tables, &meta)
 }

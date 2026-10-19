@@ -1,5 +1,5 @@
 //! `illumio-tui readiness` (#54) against a mock PCE: the request sequence
-//! and its cost (one draft-evaluated query, two with `--app`, then the
+//! and its cost (one draft-evaluated query, with or without `--app`, then the
 //! workloads, pending changes and draft rulesets), the JSON shape, the
 //! `--app` narrowing, marks counting as accepted, and the cost guard. The
 //! helpers repeat those of cli.rs (test files share no code without a
@@ -249,6 +249,7 @@ async fn readiness_runs_one_draft_query_then_the_cached_reads_and_judges_each_ap
     assert_eq!(shop["app"], "shop/prod");
     assert_eq!(shop["verdict"], "needs_rules");
     assert!(shop.get("gaps").is_none(), "gaps only with --app");
+    assert_eq!(shop["gap_count"], 2, "always counted");
     assert_eq!(shop["evidence"]["flows"], 4);
     assert_eq!(shop["evidence"]["little"], true);
     let c = &shop["coverage"];
@@ -264,8 +265,9 @@ async fn readiness_runs_one_draft_query_then_the_cached_reads_and_judges_each_ap
     assert_eq!(shop["workloads"]["managed"], 2);
     assert_eq!(shop["workloads"]["enforcement"]["enforced"], 1);
     assert_eq!(shop["workloads"]["enforcement"]["visibility"], 1);
-    // Global-Infra (every workload) and Corp (used by Shop-Prod's rule).
-    assert_eq!(shop["pending"]["count"], 2);
+    // Corp (used by Shop-Prod's rule); Global-Infra is disabled, so its
+    // rules reach nothing.
+    assert_eq!(shop["pending"]["count"], 1);
     assert!(
         shop["warnings"]
             .as_array()
@@ -277,11 +279,11 @@ async fn readiness_runs_one_draft_query_then_the_cached_reads_and_judges_each_ap
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn readiness_app_narrows_to_two_queries_and_prints_the_gaps() {
+async fn readiness_app_narrows_one_or_query_to_the_apps_and_prints_the_gaps() {
     let server = MockServer::start().await;
     mount(
         &server,
-        2,
+        1,
         Some(r#"[["/orgs/5/labels/3","/orgs/5/labels/4"]]"#),
     )
     .await;
@@ -301,36 +303,40 @@ async fn readiness_app_narrows_to_two_queries_and_prints_the_gaps() {
     );
     let seq = sequence(&server).await;
     assert_eq!(
-        seq.iter().filter(|s| s.starts_with("PUT")).count(),
-        2,
-        "one update_rules per side: {seq:?}"
-    );
-    assert_eq!(
-        seq[seq.len() - 3..],
+        seq,
         [
-            "GET /orgs/5/workloads",
-            "GET /orgs/5/sec_policy/pending",
-            "GET /orgs/5/sec_policy/draft/rule_sets",
-        ]
+            "POST /orgs/5/traffic_flows/async_queries".to_string(),
+            format!("GET {QHREF}"),
+            format!("PUT {QHREF}/update_rules"),
+            format!("GET {QHREF}"),
+            format!("GET {QHREF}/download"),
+            "GET /orgs/5/workloads".into(),
+            "GET /orgs/5/sec_policy/pending".into(),
+            "GET /orgs/5/sec_policy/draft/rule_sets".into(),
+        ],
+        "one query, one update_rules"
     );
     let reqs = server.received_requests().await.unwrap();
     let bodies = posts(&reqs);
     let shop =
         json!([[{"label": {"href": "/orgs/5/labels/3"}}, {"label": {"href": "/orgs/5/labels/4"}}]]);
+    assert_eq!(bodies.len(), 1);
+    assert_eq!(bodies[0]["sources"]["include"], shop);
+    assert_eq!(bodies[0]["destinations"]["include"], shop);
     assert_eq!(
-        bodies[0]["destinations"]["include"], shop,
-        "the app as destination"
+        bodies[0]["sources_destinations_query_op"], "or",
+        "the app on either side"
     );
-    assert_eq!(bodies[0]["sources"]["include"], json!([[]]));
-    assert_eq!(bodies[1]["sources"]["include"], shop, "then as source");
-    // 4 object lists, 2 × 5 traffic requests, 3 reads.
-    assert_eq!(out["meta"]["api_calls"], 17);
-    assert_eq!(out["meta"]["queries"], 2);
+    assert_eq!(
+        bodies[0]["destinations"]["exclude"],
+        json!([{"transmission": "broadcast"}, {"transmission": "multicast"}])
+    );
+    // 4 object lists, 5 traffic requests, 3 reads.
+    assert_eq!(out["meta"]["api_calls"], 12);
+    assert_eq!(out["meta"]["queries"], 1);
     let app = &out["data"]["apps"][0];
-    assert_eq!(
-        app["evidence"]["flows"], 4,
-        "the sides merged without duplicates"
-    );
+    assert_eq!(app["evidence"]["flows"], 4);
+    assert_eq!(app["gap_count"], 2);
     assert_eq!(app["evidence"]["window"], "1d");
     let gaps: Vec<(String, String, String, u64)> = app["gaps"]
         .as_array()
@@ -339,7 +345,7 @@ async fn readiness_app_narrows_to_two_queries_and_prints_the_gaps() {
         .map(|g| {
             (
                 g["direction"].as_str().unwrap().into(),
-                g["peer"].as_array().unwrap()[0].as_str().unwrap().into(),
+                g["peer_text"].as_str().unwrap().into(),
                 g["service"].as_str().unwrap().into(),
                 g["connections"].as_u64().unwrap(),
             )
@@ -348,8 +354,8 @@ async fn readiness_app_narrows_to_two_queries_and_prints_the_gaps() {
     assert_eq!(
         gaps,
         vec![
-            ("out".into(), "fqdn-1.example".into(), "443/tcp".into(), 5),
-            ("in".into(), "unmanaged-nas".into(), "icmp".into(), 3),
+            ("out".into(), "fqdn-1.example/-".into(), "443/tcp".into(), 5),
+            ("in".into(), "unmanaged-nas/-".into(), "icmp".into(), 3),
         ]
     );
     let pending: Vec<&str> = app["pending"]["changes"]
@@ -360,10 +366,8 @@ async fn readiness_app_narrows_to_two_queries_and_prints_the_gaps() {
         .collect();
     assert_eq!(
         pending,
-        [
-            "/orgs/5/sec_policy/draft/rule_sets/101",
-            "/orgs/5/sec_policy/draft/ip_lists/21"
-        ]
+        ["/orgs/5/sec_policy/draft/ip_lists/21"],
+        "Global-Infra (unscoped) is disabled: it reaches no workload"
     );
     server.verify().await;
 }
@@ -373,7 +377,7 @@ async fn readiness_counts_squelched_and_accept_blocked_flows_as_accepted() {
     let server = MockServer::start().await;
     mount(
         &server,
-        2,
+        1,
         Some(r#"[["/orgs/5/labels/3","/orgs/5/labels/4"]]"#),
     )
     .await;
@@ -416,7 +420,7 @@ comment = "egress is handled elsewhere"
     assert_eq!(app["gaps"], json!([]));
     assert_eq!(
         app["verdict"], "needs_provision",
-        "Global-Infra and Corp are pending"
+        "Corp, used by Shop-Prod, is pending"
     );
     assert_eq!(out["meta"]["marks"]["active"], 2);
 }
@@ -426,7 +430,7 @@ async fn readiness_table_and_csv() {
     let server = MockServer::start().await;
     mount(
         &server,
-        2,
+        1,
         Some(r#"[["/orgs/5/labels/3","/orgs/5/labels/4"]]"#),
     )
     .await;
@@ -442,7 +446,7 @@ async fn readiness_table_and_csv() {
         "97.5%",
         "gaps · shop/prod · 2",
         "unmanaged-nas/-",
-        "pending · shop/prod · 2",
+        "pending · shop/prod · 1",
     ] {
         assert!(text.contains(want), "{want:?} in {text}");
     }
@@ -463,7 +467,7 @@ async fn readiness_table_and_csv() {
     );
     let row = lines.next().unwrap();
     assert!(row.starts_with("shop/prod,2,2,0,1,0,1,0,"), "{row}");
-    assert!(row.contains(",0.9758,2,needs_rules,"), "{row}");
+    assert!(row.contains(",0.9758,1,needs_rules,"), "{row}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -480,14 +484,6 @@ async fn readiness_refuses_an_expensive_query_without_yes_before_any_request() {
         let err = String::from_utf8_lossy(&a.get_output().stderr).to_string();
         assert!(err.contains("--yes"), "{args:?}: {err}");
     }
-    let a = cmd(&server, home.path())
-        .args(["readiness", "--app", "shop/prod", "--window", "30d"])
-        .assert()
-        .code(2);
-    assert!(
-        String::from_utf8_lossy(&a.get_output().stderr).contains("2 queries"),
-        "the guard names the two queries"
-    );
     assert!(server.received_requests().await.unwrap().is_empty());
 }
 

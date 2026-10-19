@@ -109,13 +109,13 @@ pub enum Command {
     Gen(generate::GenArgs),
     /// Per-app enforcement readiness: draft coverage, gaps, pending changes, verdict (read-only)
     ///
-    /// Requests: one Explorer query over the window (two with --app: the apps as destination,
-    /// then as source), each re-evaluated against the draft policy (one PUT update_rules, more
-    /// status polls, one download; changes no policy); the workloads, pending changes and draft
-    /// rulesets (one GET each, cached); the object lists for names (cached). Unicast flows
-    /// only. Verdict: not_evaluated, needs_rules (flows the draft would block, not accepted by a
-    /// squelch or accept-blocked mark), needs_provision (pending changes in rulesets covering
-    /// the app), ready; enforced when every managed workload is in full enforcement.
+    /// Requests: one Explorer query over the window (with --app, narrowed to the apps on either
+    /// side), re-evaluated against the draft policy (one PUT update_rules, more status polls,
+    /// one download; changes no policy); the workloads, pending changes and draft rulesets (one
+    /// GET each, cached); the object lists for names (cached). Unicast flows only. Apps with a
+    /// `-` slot (a workload missing a scope label) are listed but cannot be named with --app. Verdict: not_evaluated, needs_rules (flows the draft would block, not accepted by a
+    /// squelch or accept-blocked mark), needs_provision (pending changes in rulesets whose scope
+    /// covers the app, or whose rules reach its workloads), ready; enforced when every managed workload is in full enforcement.
     Readiness(readiness::ReadinessArgs),
     /// Rulesets, rules, deny rules, pending changes, provisioning
     #[command(subcommand)]

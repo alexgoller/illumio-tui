@@ -736,8 +736,10 @@ enforcement under the draft policy. It runs one Explorer query over the window (
 unicast only) re-evaluated against the draft policy (the `--draft` path: one PUT
 `update_rules`, more status polls, one download, no policy change), then reads the workloads,
 the pending changes and the draft rulesets (one GET each, cached) and applies `marks.toml`.
-With `--app` (repeatable) the query is narrowed to those apps, which takes two queries (the
-apps as destination, then as source); without it every labelled app in the result is judged.
+With `--app` (repeatable) the one query is narrowed to those apps on either side (the apps'
+labels in sources and destinations, joined with `or`); without it every labelled app in the
+result is judged. An app with a `-` slot (a workload missing a scope label) is listed but
+cannot be named with `--app`.
 The cost rules of `traffic query` apply (a window over 7d or a cap over 10000 needs `--yes`,
 refused before any request), and `meta` counts the requests (`api_calls`, `queries`).
 
@@ -745,13 +747,17 @@ Each app reports `workloads` (total, managed, unmanaged, the enforcement mix, of
 managed workloads without the tier label), `evidence` (window, flows, connections, `little`
 under 7 days or 20 flows), `coverage` (connections in, out and total: allowed by the draft,
 `would_block`, and `accepted`, would-block flows a `squelch` or `accept-blocked` mark covers;
-`ratio` is allowed plus accepted over all), `pending` (changes in rulesets whose scope covers
-the app, or applies to every workload, and the objects those rulesets use), `verdict` and
+`ratio` is allowed plus accepted over all; `undecided` flows, without a draft decision, count
+as would-block), `pending` (every change to a ruleset whose scope covers the app, its rules and
+the objects they use; in any other ruleset, unscoped or scoped elsewhere, a change counts when
+an enabled rule of it reaches the app's workloads, e.g. a peer's rule consuming the app with
+unscoped consumers, and an object when such a rule uses it), `gap_count`, `verdict` and
 `warnings`. A flow inside the app counts once, as inbound. The verdict is the first that
 applies: `not_evaluated`, `needs_rules` (would-block flows), `needs_provision` (pending
 changes: enforcement uses the active policy), `ready`; `enforced` when every managed workload
-is in full enforcement already. Warnings (little evidence, a truncated result, missing tier
-labels, offline VENs, unmanaged workloads, no managed workloads) never change the verdict.
+is in full enforcement already. Warnings (little evidence, missing tier
+labels, offline VENs, unmanaged workloads, no managed workloads, a truncated or incomplete
+result, undecided flows) never change the verdict.
 With `--app` the output adds each app's `gaps`, the would-block flows as policy tuples (peer
 group and service, largest first), and its pending changes. `--table` prints the apps table
 (and with `--app` the gaps and pending tables); `--csv` prints the apps table with full

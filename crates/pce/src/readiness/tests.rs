@@ -142,6 +142,10 @@ fn plenty() -> Vec<ResolvedFlow> {
         .collect()
 }
 
+fn gaps(r: &AppReadiness) -> &[Gap] {
+    r.gaps.as_deref().expect("gaps listed")
+}
+
 struct Fixture {
     flows: Vec<ResolvedFlow>,
     draft: bool,
@@ -172,6 +176,8 @@ impl Fixture {
             flows: &self.flows,
             draft: self.draft,
             truncated: false,
+            incomplete: false,
+            gaps: true,
             window: self.window,
             workloads: &self.workloads,
             pending: &self.pending,
@@ -202,7 +208,8 @@ fn without_draft_decisions_the_app_is_not_evaluated_but_counted() {
     assert_eq!(r.coverage.ratio, None);
     assert_eq!(r.coverage.percent_text(), "-");
     assert_eq!(r.coverage.total.would_block, 0);
-    assert!(r.gaps.is_empty());
+    assert!(r.gaps.is_none());
+    assert_eq!(r.gap_count, 0);
 }
 
 #[test]
@@ -236,13 +243,15 @@ fn would_block_flows_need_rules_and_become_gaps_largest_first() {
     ));
     let r = Fixture::new(f).shop();
     assert_eq!(r.verdict, Verdict::NeedsRules);
-    let gaps: Vec<(Direction, String, String, u64, u64)> = r
+    let tuples: Vec<(Direction, String, String, u64, u64)> = r
         .gaps
+        .as_deref()
+        .unwrap()
         .iter()
         .map(|g| {
             (
                 g.direction,
-                g.peer_text(),
+                g.peer_text.clone(),
                 g.service.clone(),
                 g.flows,
                 g.connections,
@@ -250,7 +259,7 @@ fn would_block_flows_need_rules_and_become_gaps_largest_first() {
         })
         .collect();
     assert_eq!(
-        gaps,
+        tuples,
         vec![
             (Direction::In, "10.9.9.9/-".into(), "22/tcp".into(), 1, 9),
             (Direction::In, "crm/prod".into(), "5432/tcp".into(), 2, 7),
@@ -278,7 +287,51 @@ fn a_flow_without_a_draft_decision_on_an_evaluated_result_would_block() {
         1,
         None,
     ));
-    assert_eq!(Fixture::new(f).shop().verdict, Verdict::NeedsRules);
+    let r = Fixture::new(f).shop();
+    assert_eq!(r.verdict, Verdict::NeedsRules);
+    assert_eq!(
+        (r.coverage.total.undecided, r.coverage.total.would_block),
+        (1, 1)
+    );
+    assert!(r.warnings.contains(&Warning::Undecided { flows: 1 }));
+    assert_eq!(
+        Warning::Undecided { flows: 1 }.text(),
+        "1 flows without draft decision"
+    );
+}
+
+#[test]
+fn an_incomplete_result_is_a_warning_and_in_the_evidence() {
+    let fx = Fixture::new(plenty());
+    let mut input = fx.input(None);
+    input.incomplete = true;
+    let r = app_readiness(&input, &shop());
+    assert!(r.evidence.incomplete);
+    assert_eq!(r.warnings, vec![Warning::Incomplete]);
+    assert_eq!(r.warnings_text(), "traffic incomplete");
+}
+
+#[test]
+fn gaps_are_listed_only_when_asked_but_always_counted() {
+    let mut f = plenty();
+    f.push(flow(
+        ip_ep("10.9.9.9"),
+        wl_ep("shop", None, "web-1"),
+        22,
+        1,
+        Some("blocked"),
+    ));
+    let fx = Fixture::new(f);
+    let mut input = fx.input(None);
+    input.gaps = false;
+    let r = app_readiness(&input, &shop());
+    assert_eq!((r.gaps.is_none(), r.gap_count), (true, 1));
+    let v = serde_json::to_value(&r).unwrap();
+    assert!(v.get("gaps").is_none());
+    assert_eq!(v["gap_count"], 1);
+    let v = serde_json::to_value(fx.shop()).unwrap();
+    assert_eq!(v["gaps"][0]["peer_text"], "10.9.9.9/-");
+    assert_eq!(v["gaps"][0]["peer"], json!(["10.9.9.9", "-"]));
 }
 
 fn mark(action: Action, port: u16) -> Mark {
@@ -317,10 +370,10 @@ fn accepted_marks_take_flows_out_of_the_gaps_unless_a_highlight_outranks_them() 
         ],
     };
     // Without marks: three gaps.
-    assert_eq!(fx.shop().gaps.len(), 3);
+    assert_eq!(gaps(&fx.shop()).len(), 3);
     let active = set.active(None, now(), true);
     let r = app_readiness(&fx.input(Some(&active)), &shop());
-    let ports: Vec<&str> = r.gaps.iter().map(|g| g.service.as_str()).collect();
+    let ports: Vec<&str> = gaps(&r).iter().map(|g| g.service.as_str()).collect();
     assert_eq!(
         ports,
         ["24/tcp", "23/tcp"],
@@ -340,7 +393,7 @@ fn accepted_marks_take_flows_out_of_the_gaps_unless_a_highlight_outranks_them() 
     };
     let active = all.active(None, now(), true);
     let r = app_readiness(&fx.input(Some(&active)), &shop());
-    assert!(r.gaps.is_empty());
+    assert!(gaps(&r).is_empty());
     assert_eq!(r.coverage.ratio, Some(1.0));
     assert_eq!(r.coverage.percent_text(), "100%");
     assert_eq!(r.verdict, Verdict::Ready);
@@ -364,9 +417,9 @@ fn a_flow_inside_the_app_counts_once_as_inbound_and_one_between_apps_on_both() {
         (2, 0)
     );
     assert_eq!(s.evidence.connections, 13);
-    let inside = s.gaps.iter().find(|g| g.service == "5432/tcp").unwrap();
+    let inside = gaps(s).iter().find(|g| g.service == "5432/tcp").unwrap();
     assert_eq!(
-        (inside.direction, inside.peer_text()),
+        (inside.direction, inside.peer_text.clone()),
         (Direction::In, "shop/prod".into())
     );
     let c = &all[0];
@@ -374,8 +427,8 @@ fn a_flow_inside_the_app_counts_once_as_inbound_and_one_between_apps_on_both() {
         (c.coverage.inbound.flows, c.coverage.outbound.flows),
         (0, 1)
     );
-    assert_eq!(c.gaps[0].direction, Direction::Out);
-    assert_eq!(c.gaps[0].peer_text(), "shop/prod");
+    assert_eq!(gaps(c)[0].direction, Direction::Out);
+    assert_eq!(gaps(c)[0].peer_text, "shop/prod");
     assert_eq!(c.verdict, Verdict::NeedsRules);
     assert!(
         c.warnings.contains(&Warning::NoManagedWorkloads),
@@ -471,24 +524,165 @@ fn pending_changes_are_matched_to_the_app_by_scope_and_by_the_objects_its_rules_
         pending("/orgs/5/sec_policy/draft/rule_sets/300"),
     ];
     let r = fx.shop();
-    let hrefs: Vec<&str> = r.pending.changes.iter().map(|p| p.href.as_str()).collect();
     assert_eq!(
-        hrefs,
+        pending_hrefs(&r),
         [
             "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/1",
             "/orgs/5/sec_policy/draft/ip_lists/21",
             "/orgs/5/sec_policy/draft/services/31",
-            "/orgs/5/sec_policy/draft/rule_sets/300",
         ],
-        "CRM's ruleset and its IP list are not shop's"
+        "CRM's ruleset and its IP list are not shop's; a global ruleset without rules reaches nothing"
     );
-    assert_eq!(r.pending.count, 4);
+    assert_eq!(r.pending.count, 3);
     assert_eq!(r.verdict, Verdict::NeedsProvision);
     let crm = app_readiness(&fx.input(None), &crm());
     assert_eq!(
-        crm.pending.count, 3,
-        "its ruleset, its IP list, the global one"
+        pending_hrefs(&crm),
+        [
+            "/orgs/5/sec_policy/draft/rule_sets/200",
+            "/orgs/5/sec_policy/draft/ip_lists/22"
+        ],
+        "its ruleset by scope (no crm workloads: the label test), its IP list"
     );
+}
+
+fn pending_hrefs(r: &AppReadiness) -> Vec<&str> {
+    r.pending.changes.iter().map(|p| p.href.as_str()).collect()
+}
+
+/// A ruleset `href` with `scopes` and one rule: `consumers`, `providers`,
+/// service 32, `unscoped_consumers`, `enabled`.
+fn one_rule_set(
+    id: u32,
+    scopes: serde_json::Value,
+    consumers: serde_json::Value,
+    providers: serde_json::Value,
+    unscoped: bool,
+    enabled: bool,
+) -> RuleSet {
+    serde_json::from_value(json!({
+        "href": format!("/orgs/5/sec_policy/draft/rule_sets/{id}"), "name": format!("rs-{id}"),
+        "enabled": true, "scopes": scopes,
+        "rules": [{"href": format!("/orgs/5/sec_policy/draft/rule_sets/{id}/sec_rules/1"),
+                   "enabled": enabled, "consumers": consumers, "providers": providers,
+                   "unscoped_consumers": unscoped,
+                   "ingress_services": [{"href": "/orgs/5/sec_policy/draft/services/32"}]}]
+    }))
+    .unwrap()
+}
+
+/// Shop's pending changes when `rs` is the only ruleset and it, its rule
+/// and service 32 are pending.
+fn shop_pending(rs: RuleSet, with_workloads: bool) -> Vec<String> {
+    let mut fx = Fixture::new(plenty());
+    if !with_workloads {
+        fx.workloads.clear();
+    }
+    fx.pending = vec![
+        pending(&rs.href),
+        pending(&format!("{}/sec_rules/1", rs.href)),
+        pending("/orgs/5/sec_policy/draft/services/32"),
+    ];
+    fx.rule_sets = vec![rs];
+    pending_hrefs(&fx.shop())
+        .into_iter()
+        .map(|h| {
+            h.trim_start_matches("/orgs/5/sec_policy/draft/")
+                .to_string()
+        })
+        .collect()
+}
+
+const ALL3: [&str; 3] = ["rule_sets/300", "rule_sets/300/sec_rules/1", "services/32"];
+
+#[test]
+fn a_global_ruleset_counts_only_through_a_rule_that_reaches_the_app() {
+    let ams = json!([{"actors": "ams"}]);
+    let crm_only = json!([{"label": {"href": "/orgs/5/labels/50"}}]);
+    for wl in [true, false] {
+        assert_eq!(
+            shop_pending(
+                one_rule_set(300, json!([[]]), ams.clone(), ams.clone(), false, true),
+                wl
+            ),
+            ALL3,
+            "an All Workloads rule reaches shop (workloads: {wl})"
+        );
+        assert!(
+            shop_pending(
+                one_rule_set(
+                    300,
+                    json!([[]]),
+                    crm_only.clone(),
+                    crm_only.clone(),
+                    false,
+                    true
+                ),
+                wl
+            )
+            .is_empty(),
+            "a rule for crm only does not (workloads: {wl})"
+        );
+        assert!(
+            shop_pending(
+                one_rule_set(300, json!([[]]), ams.clone(), ams.clone(), false, false),
+                wl
+            )
+            .is_empty(),
+            "a disabled rule reaches nothing (workloads: {wl})"
+        );
+    }
+}
+
+#[test]
+fn a_peer_rule_consuming_the_app_unscoped_counts_for_it() {
+    // What the generator writes for shop's outbound: in crm's ruleset,
+    // consumers app=shop with unscoped_consumers.
+    let crm_scope = json!([[{"label": {"href": "/orgs/5/labels/50"}}]]);
+    let shop_c = json!([{"label": {"href": "/orgs/5/labels/3"}}]);
+    let ams = json!([{"actors": "ams"}]);
+    let want = ["rule_sets/300", "rule_sets/300/sec_rules/1", "services/32"];
+    for wl in [true, false] {
+        assert_eq!(
+            shop_pending(
+                one_rule_set(
+                    300,
+                    crm_scope.clone(),
+                    shop_c.clone(),
+                    ams.clone(),
+                    true,
+                    true
+                ),
+                wl
+            ),
+            want,
+            "workloads: {wl}"
+        );
+    }
+    assert!(
+        shop_pending(one_rule_set(300, crm_scope, shop_c, ams, false, true), true).is_empty(),
+        "scoped consumers stay inside crm's scope"
+    );
+}
+
+#[test]
+fn a_tier_rule_in_an_unscoped_ruleset_reaching_the_apps_workload_counts() {
+    let db = json!([{"label": {"href": "/orgs/5/labels/2"}}]);
+    let ip = json!([{"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/22"}}]);
+    assert_eq!(
+        shop_pending(
+            one_rule_set(300, json!([[]]), ip.clone(), db.clone(), false, true),
+            true
+        ),
+        ALL3,
+        "role=db reaches shop's db-1"
+    );
+    let mut fx = Fixture::new(plenty());
+    fx.workloads
+        .retain(|w| w.hostname.as_deref() == Some("web-1"));
+    fx.rule_sets = vec![one_rule_set(300, json!([[]]), ip, db, false, true)];
+    fx.pending = vec![pending("/orgs/5/sec_policy/draft/rule_sets/300")];
+    assert_eq!(fx.shop().pending.count, 0, "shop without a db workload");
 }
 
 #[test]
@@ -543,7 +737,7 @@ fn an_app_in_full_enforcement_is_enforced_with_its_numbers() {
         Verdict::Enforced,
         "unmanaged ones are never moved"
     );
-    assert_eq!(r.gaps.len(), 1, "the numbers stay as a check");
+    assert_eq!(gaps(&r).len(), 1, "the numbers stay as a check");
     fx.draft = false;
     assert_eq!(fx.shop().verdict, Verdict::Enforced);
     fx.workloads[0] = workload("web-1", &SHOP_WEB, "selective", true, true);

@@ -278,7 +278,7 @@ pub struct AppPolicyRow {
 
 /// The actor is one of the app's labels, or a label group holding one
 /// (its sub-groups included, recursively).
-fn names_app(a: &Actor, hrefs: &[String], idx: &NameIndex) -> bool {
+pub(crate) fn names_app(a: &Actor, hrefs: &[String], idx: &NameIndex) -> bool {
     if let Some(l) = &a.label {
         return hrefs.contains(&l.href);
     }
