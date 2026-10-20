@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Per-user MSI for illumio-tui (WiX v5 source; built by .github/workflows/release.yml).
+
+    wix build packaging/windows/illumio-tui.wxs -arch x64 -d Version=1.2.3 -d BinDir=<dir> -o illumio-tui.msi
+
+  Version: numeric x.y.z (MSI ProductVersion). BinDir: holds illumio-tui.exe,
+  README.md and LICENSE.
+
+  Installs into %LOCALAPPDATA%\Programs\illumio-tui without admin rights and
+  appends that directory to the user PATH; uninstall removes both.
+
+  The UpgradeCode identifies the product across versions: never change it, or
+  a new MSI installs next to the old one instead of replacing it. The
+  ProductCode is new on every build, so MajorUpgrade replaces any installed
+  version (including a rebuild of the same version) in place.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="illumio-tui"
+      Manufacturer="Alex Goller"
+      Version="$(var.Version)"
+      UpgradeCode="44708F5A-DA8B-483B-BD6A-F5E4B1A34D7F"
+      Scope="perUser"
+      Language="1033"
+      Compressed="yes">
+
+    <MajorUpgrade
+        AllowSameVersionUpgrades="yes"
+        DowngradeErrorMessage="A newer version of illumio-tui is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Add/Remove Programs entry -->
+    <Property Id="ARPCOMMENTS" Value="Terminal UI and CLI for the Illumio Core PCE. License: GPL-3.0-only (https://github.com/alexgoller/illumio-tui/blob/main/LICENSE)" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/alexgoller/illumio-tui" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/alexgoller/illumio-tui/blob/main/LICENSE" />
+    <Property Id="ARPURLUPDATEINFO" Value="https://github.com/alexgoller/illumio-tui/releases" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <Property Id="ARPNOREPAIR" Value="1" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="UserProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="illumio-tui" />
+      </Directory>
+    </StandardDirectory>
+
+    <!-- Per-user components need an HKCU key path, not a file. -->
+    <Component Id="Main" Directory="INSTALLFOLDER" Guid="9B229B97-CAC0-4736-A70F-6EF6531F0178">
+      <RegistryValue Root="HKCU" Key="Software\illumio-tui" Name="InstallDir" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+      <File Id="Exe" Source="$(var.BinDir)\illumio-tui.exe" />
+      <File Id="Readme" Source="$(var.BinDir)\README.md" />
+      <File Id="License" Source="$(var.BinDir)\LICENSE" />
+      <Environment Id="UserPath" Name="PATH" Value="[INSTALLFOLDER]" Part="last" Action="set" System="no" Permanent="no" />
+      <RemoveFolder Id="RemoveInstallFolder" Directory="INSTALLFOLDER" On="uninstall" />
+      <RemoveRegistryKey Root="HKCU" Key="Software\illumio-tui" Action="removeOnUninstall" />
+    </Component>
+  </Package>
+</Wix>

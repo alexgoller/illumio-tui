@@ -1,10 +1,13 @@
 name: Release
 
-# Tag push (v*) builds every target, the .deb/.rpm packages, tests the
-# packages in distro containers, publishes a GitHub Release and updates the
-# Homebrew formula (Formula/illumio-tui.rb) on main.
-# workflow_dispatch is a dry run: same builds, archives, packages, container
-# tests and SHA256SUMS, uploaded as workflow artifacts; no release, no formula.
+# Tag push (v*) builds every target, the .deb/.rpm packages and the Windows
+# MSI, tests the packages in distro containers and the MSI on Windows,
+# publishes a GitHub Release and updates the Homebrew formula
+# (Formula/illumio-tui.rb) and the Scoop manifest (bucket/illumio-tui.json)
+# on main.
+# workflow_dispatch is a dry run: same builds, archives, packages, package
+# tests and SHA256SUMS, uploaded as workflow artifacts; no release, no
+# formula or manifest commit.
 on:
   push:
     tags: ["v*"]
@@ -19,6 +22,8 @@ env:
   NFPM_VERSION: 2.47.0
   # sha256 of nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz from the nfpm release's checksums.txt.
   NFPM_SHA256: 0660ca602b2d2d2ae4781a06c692b3eeb9d437ffea05b831d76e41f4a3188783
+  # WiX 5 is MS-RL; WiX 6 and later need the OSMF EULA accepted.
+  WIX_VERSION: 5.0.2
 
 jobs:
   build:
@@ -235,8 +240,89 @@ jobs:
             test ! -e /usr/bin/$BIN
           "
 
+  # Per-user MSI (packaging/windows/illumio-tui.wxs) from the windows zip's
+  # binary. Before upload it is installed, upgraded in place by a second MSI
+  # of the same binary with the patch version + 1 (test only, never
+  # uploaded), and uninstalled (packaging/windows/test-msi.ps1).
+  msi:
+    needs: build
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      # The wix 5 tool targets net6.0; let it run on the runner's newer .NET.
+      DOTNET_ROLL_FORWARD: Major
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: x86_64-pc-windows-msvc
+          path: dist
+
+      - name: Install WiX
+        run: |
+          dotnet tool install --global wix --version "$WIX_VERSION"
+          wix --version
+
+      - name: Build MSIs
+        id: msi
+        run: |
+          set -euo pipefail
+          zip=$(cd dist && ls "$BIN"-*-x86_64-pc-windows-msvc.zip)
+          version=${zip#"$BIN-"}
+          version=${version%-x86_64-pc-windows-msvc.zip}
+          # MSI ProductVersion is numeric: 1.2.3-rc1 -> 1.2.3.
+          msi_version=${version%%-*}
+          if [[ ! "$msi_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::cannot make an MSI version from $version"
+            exit 1
+          fi
+          IFS=. read -r major minor patch <<<"$msi_version"
+          upgrade_version="$major.$minor.$((patch + 1))"
+          7z x "dist/$zip" -ounpack > /dev/null
+          bin_dir="unpack/$BIN-$version-x86_64-pc-windows-msvc"
+          mkdir -p msi msi-test
+          msi="msi/$BIN-$version-x86_64-pc-windows-msvc.msi"
+          wix build packaging/windows/illumio-tui.wxs -arch x64 \
+            -d Version="$msi_version" -d BinDir="$bin_dir" -o "$msi"
+          wix build packaging/windows/illumio-tui.wxs -arch x64 \
+            -d Version="$upgrade_version" -d BinDir="$bin_dir" -o msi-test/upgrade.msi
+          ls -l msi msi-test
+          {
+            echo "msi=$msi"
+            echo "msi_version=$msi_version"
+            echo "upgrade_version=$upgrade_version"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Test install, upgrade, uninstall
+        shell: pwsh
+        env:
+          MSI: ${{ steps.msi.outputs.msi }}
+          MSI_VERSION: ${{ steps.msi.outputs.msi_version }}
+          UPGRADE_VERSION: ${{ steps.msi.outputs.upgrade_version }}
+        run: |
+          ./packaging/windows/test-msi.ps1 -Msi $env:MSI -Version $env:MSI_VERSION `
+            -UpgradeMsi msi-test/upgrade.msi -UpgradeVersion $env:UPGRADE_VERSION
+
+      - name: Upload msiexec logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: msi-logs
+          path: |
+            msi/*.log
+            msi-test/*.log
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: msi
+          path: ${{ steps.msi.outputs.msi }}
+          if-no-files-found: error
+
   checksums:
-    needs: [build, packages]
+    needs: [build, packages, msi]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -246,7 +332,7 @@ jobs:
       - name: Generate SHA256SUMS
         working-directory: dist
         run: |
-          sha256sum -- *.tar.gz *.zip *.deb *.rpm > SHA256SUMS
+          sha256sum -- *.tar.gz *.zip *.msi *.deb *.rpm > SHA256SUMS
           cat SHA256SUMS
           sha256sum --check SHA256SUMS
       - uses: actions/upload-artifact@v4
@@ -273,13 +359,16 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.zip
+            dist/*.msi
             dist/*.deb
             dist/*.rpm
             dist/SHA256SUMS
 
-  # Render Formula/illumio-tui.rb from the template with the release's
-  # sha256s and commit it to main, so `brew tap alexgoller/illumio-tui
-  # https://github.com/alexgoller/illumio-tui` picks up the new version.
+  # Render Formula/illumio-tui.rb and bucket/illumio-tui.json from their
+  # templates with the release's sha256s and commit them to main, so
+  # `brew tap alexgoller/illumio-tui https://github.com/alexgoller/illumio-tui`
+  # and `scoop bucket add illumio-tui https://github.com/alexgoller/illumio-tui`
+  # pick up the new version.
   # Pushes made with GITHUB_TOKEN start no workflows, and releases are
   # tag-driven anyway, so this commit cannot loop. Pre-release tags
   # (v1.2.3-rc1) are skipped.
@@ -302,26 +391,76 @@ jobs:
           name: SHA256SUMS
           path: sums
 
-      - name: Render formula
+      - name: Render formula and Scoop manifest
         run: |
           version="${GITHUB_REF_NAME#v}"
           packaging/homebrew/render.sh "$version" sums/SHA256SUMS > Formula/illumio-tui.rb
+          packaging/scoop/render.sh "$version" sums/SHA256SUMS > bucket/illumio-tui.json
+          jq empty bucket/illumio-tui.json
           git diff --stat
 
       - name: Commit to main
         run: |
           version="${GITHUB_REF_NAME#v}"
-          if git diff --quiet -- Formula/illumio-tui.rb; then
-            echo "Formula already at $version"
+          files=(Formula/illumio-tui.rb bucket/illumio-tui.json)
+          if git diff --quiet -- "${files[@]}"; then
+            echo "Formula and manifest already at $version"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Formula/illumio-tui.rb
-          git commit -m "brew: illumio-tui $version"
+          git add "${files[@]}"
+          git commit -m "brew, scoop: illumio-tui $version"
           for _ in 1 2 3; do
             git push origin HEAD:main && exit 0
             git pull --rebase origin main
           done
-          echo "::error::could not push the formula to main"
+          echo "::error::could not push the formula and manifest to main"
           exit 1
+
+  # Dry runs only: install the committed Scoop manifest (the last release)
+  # with Scoop, run it, and check that its autoupdate block, fed that same
+  # version, finds the same hash in the release's SHA256SUMS. Not a release
+  # gate: it depends on Scoop's installer and the published release.
+  scoop-test:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Scoop
+        shell: pwsh
+        run: |
+          Invoke-Expression "& {$(Invoke-RestMethod https://get.scoop.sh)} -RunAsAdmin"
+          "$env:USERPROFILE\scoop\shims" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Install, run, autoupdate, uninstall
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifest = Get-Content bucket/illumio-tui.json -Raw | ConvertFrom-Json
+          $version = $manifest.version
+          scoop install ./bucket/illumio-tui.json
+          if ($LASTEXITCODE -ne 0) { throw "scoop install exited with $LASTEXITCODE" }
+          $out = illumio-tui --version
+          if ($LASTEXITCODE -ne 0 -or "$out" -notmatch [regex]::Escape($version)) { throw "illumio-tui --version: $out" }
+          Write-Host "illumio-tui --version: $out"
+          # Autoupdate on a copy with the hash blanked must restore it.
+          $dir = Join-Path $env:RUNNER_TEMP 'bucket'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          $copy = Get-Content bucket/illumio-tui.json -Raw | ConvertFrom-Json
+          $copy.architecture.'64bit'.hash = '0' * 64
+          $copy | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $dir 'illumio-tui.json')
+          $checkver = "$env:USERPROFILE\scoop\apps\scoop\current\bin\checkver.ps1"
+          & $checkver -App illumio-tui -Dir $dir -Version $version -ForceUpdate -ThrowError
+          $updated = Get-Content (Join-Path $dir 'illumio-tui.json') -Raw | ConvertFrom-Json
+          $want = $manifest.architecture.'64bit'.hash
+          $got = $updated.architecture.'64bit'.hash
+          if ($got -ne $want) { throw "autoupdate hash $got, committed $want" }
+          Write-Host "autoupdate hash matches: $got"
+          # checkver against GitHub: the latest release, as Scoop sees it.
+          & $checkver -App illumio-tui -Dir bucket -ThrowError
+          scoop uninstall illumio-tui
+          if ($LASTEXITCODE -ne 0) { throw "scoop uninstall exited with $LASTEXITCODE" }
