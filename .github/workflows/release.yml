@@ -2,12 +2,13 @@ name: Release
 
 # Tag push (v*) builds every target, the .deb/.rpm packages and the Windows
 # MSI, tests the packages in distro containers and the MSI on Windows,
-# publishes a GitHub Release and updates the Homebrew formula
+# publishes a GitHub Release, updates the Homebrew formula
 # (Formula/illumio-tui.rb) and the Scoop manifest (bucket/illumio-tui.json)
-# on main.
+# on main, tests the winget manifests against the release MSI and submits
+# them to winget-pkgs (Komac, when WINGET_TOKEN is set).
 # workflow_dispatch is a dry run: same builds, archives, packages, package
-# tests and SHA256SUMS, uploaded as workflow artifacts; no release, no
-# formula or manifest commit.
+# tests, winget manifest test and SHA256SUMS, uploaded as workflow
+# artifacts; no release, no formula or manifest commit, no winget submission.
 on:
   push:
     tags: ["v*"]
@@ -24,6 +25,10 @@ env:
   NFPM_SHA256: 0660ca602b2d2d2ae4781a06c692b3eeb9d437ffea05b831d76e41f4a3188783
   # WiX 5 is MS-RL; WiX 6 and later need the OSMF EULA accepted.
   WIX_VERSION: 5.0.2
+  KOMAC_VERSION: 2.16.0
+  # sha256 of komac-${KOMAC_VERSION}-x86_64-unknown-linux-gnu.tar.gz from the Komac release's SHA256SUMS.
+  KOMAC_SHA256: 7d2707fa6210f2789a3702de49fbd150b736dbf426ee0b9bc8e098736f9fd82d
+  WINGET_ID: AlexGoller.IllumioTUI
 
 jobs:
   build:
@@ -363,6 +368,188 @@ jobs:
             dist/*.deb
             dist/*.rpm
             dist/SHA256SUMS
+
+  # winget manifests (packaging/winget/) for this build's MSI: render,
+  # `winget validate`, then install, upgrade and uninstall from the local
+  # manifests. Tag runs point the manifest at the published release asset
+  # (so this runs after `release`); dry runs serve the dry-run MSI from a
+  # local HTTP server. The upgrade target is the same binary in an MSI one
+  # patch version up, always served locally. Dry runs also render and
+  # validate the manifests for the latest published release, ready for a
+  # manual winget-pkgs submission. The rendered manifests are uploaded.
+  winget:
+    needs: [msi, checksums, release]
+    if: >-
+      !cancelled() && needs.msi.result == 'success' && needs.checksums.result == 'success'
+      && (needs.release.result == 'success'
+          || (github.event_name == 'workflow_dispatch' && needs.release.result == 'skipped'))
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      DOTNET_ROLL_FORWARD: Major
+      LOCAL_URL: http://127.0.0.1:8765
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: msi
+          path: serve
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: SHA256SUMS
+          path: sums
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: x86_64-pc-windows-msvc
+          path: dist
+
+      - name: Install WiX
+        run: |
+          dotnet tool install --global wix --version "$WIX_VERSION"
+          wix --version
+
+      - name: Render manifests
+        id: render
+        run: |
+          set -euo pipefail
+          msi=$(cd serve && ls "$BIN"-*-x86_64-pc-windows-msvc.msi)
+          version=${msi#"$BIN-"}
+          version=${version%-x86_64-pc-windows-msvc.msi}
+          msi_version=${version%%-*}
+          IFS=. read -r major minor patch <<<"$msi_version"
+          upgrade_version="$major.$minor.$((patch + 1))"
+          # The upgrade MSI: this build's binary, one patch version up.
+          7z x "dist/$BIN-$version-x86_64-pc-windows-msvc.zip" -ounpack > /dev/null
+          upgrade_msi="$BIN-$upgrade_version-x86_64-pc-windows-msvc.msi"
+          wix build packaging/windows/illumio-tui.wxs -arch x64 \
+            -d Version="$upgrade_version" -d BinDir="unpack/$BIN-$version-x86_64-pc-windows-msvc" \
+            -o "serve/$upgrade_msi"
+          (cd serve && sha256sum "$upgrade_msi") > upgrade-sums
+          # The MSI the release publishes is this artifact, byte for byte.
+          (cd serve && sha256sum --check --ignore-missing ../sums/SHA256SUMS)
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            base_url=""
+          else
+            base_url="$LOCAL_URL"
+          fi
+          product_code=$(pwsh -NoProfile -File packaging/winget/product-code.ps1 "serve/$msi")
+          upgrade_product_code=$(pwsh -NoProfile -File packaging/winget/product-code.ps1 "serve/$upgrade_msi")
+          echo "ProductCode $msi: $product_code"
+          BASE_URL="$base_url" PRODUCT_CODE="$product_code" \
+            packaging/winget/render.sh "$version" sums/SHA256SUMS "manifests/$version"
+          BASE_URL="$LOCAL_URL" PRODUCT_CODE="$upgrade_product_code" \
+            packaging/winget/render.sh "$upgrade_version" upgrade-sums "manifests-upgrade/$upgrade_version"
+          head -n 100 manifests/"$version"/*.yaml
+          grep -n 'InstallerUrl\|ProductCode' manifests-upgrade/"$upgrade_version"/*.installer.yaml
+          {
+            echo "version=$version"
+            echo "msi_version=$msi_version"
+            echo "upgrade_version=$upgrade_version"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Test validate, install, upgrade, uninstall
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.render.outputs.version }}
+          MSI_VERSION: ${{ steps.render.outputs.msi_version }}
+          UPGRADE_VERSION: ${{ steps.render.outputs.upgrade_version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { throw 'winget is not on this runner' }
+          $server = Start-Process python -ArgumentList @('-m', 'http.server', '8765', '--bind', '127.0.0.1', '--directory', 'serve') -PassThru -NoNewWindow
+          try {
+            foreach ($i in 1..30) {
+              try { Invoke-WebRequest "$env:LOCAL_URL/" -UseBasicParsing | Out-Null; break } catch { Start-Sleep -Seconds 1 }
+            }
+            ./packaging/winget/test-winget.ps1 -Manifest "manifests/$env:VERSION" -Version $env:VERSION `
+              -MsiVersion $env:MSI_VERSION -UpgradeManifest "manifests-upgrade/$env:UPGRADE_VERSION" `
+              -UpgradeVersion $env:UPGRADE_VERSION
+          } finally {
+            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Render manifests for the latest release
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)
+          version=${tag#v}
+          mkdir -p latest
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir latest \
+            --pattern SHA256SUMS --pattern "$BIN-$version-x86_64-pc-windows-msvc.msi"
+          (cd latest && sha256sum --check --ignore-missing SHA256SUMS)
+          product_code=$(pwsh -NoProfile -File packaging/winget/product-code.ps1 "latest/$BIN-$version-x86_64-pc-windows-msvc.msi")
+          echo "ProductCode $tag: $product_code"
+          PRODUCT_CODE="$product_code" packaging/winget/render.sh "$version" latest/SHA256SUMS "manifests-latest/$version"
+          winget validate --manifest "manifests-latest/$version"
+          head -n 100 manifests-latest/"$version"/*.yaml
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: winget-manifests
+          path: |
+            manifests
+            manifests-upgrade
+            manifests-latest
+          if-no-files-found: ignore
+
+  # Submit the release to microsoft/winget-pkgs with Komac: a PR from a fork
+  # in the WINGET_TOKEN owner's account (classic PAT, public_repo scope).
+  # Skipped with a notice when the secret is unset or the package is not in
+  # winget-pkgs yet (the first submission is a manual PR). Pre-release tags
+  # are skipped. Not a release gate. Dry runs only install Komac.
+  winget-submit:
+    needs: [release, winget]
+    if: >-
+      !cancelled() && needs.winget.result == 'success'
+      && ((needs.release.result == 'success' && !contains(github.ref_name, '-'))
+          || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Komac
+        run: |
+          tarball="komac-${KOMAC_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          curl -fsSLo "$RUNNER_TEMP/$tarball" \
+            "https://github.com/russellbanks/Komac/releases/download/v${KOMAC_VERSION}/$tarball"
+          echo "$KOMAC_SHA256  $RUNNER_TEMP/$tarball" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP" komac
+          "$RUNNER_TEMP/komac" --version
+
+      - name: Submit to winget-pkgs
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$WINGET_TOKEN" ]]; then
+            echo "::notice::WINGET_TOKEN is not set; not submitting to winget-pkgs"
+            exit 0
+          fi
+          status=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/microsoft/winget-pkgs/contents/manifests/a/AlexGoller/IllumioTUI")
+          case "$status" in
+            200) ;;
+            404)
+              echo "::notice::$WINGET_ID is not in microsoft/winget-pkgs yet; submit the first version manually"
+              exit 0 ;;
+            *)
+              echo "::error::GitHub API returned $status looking up $WINGET_ID in microsoft/winget-pkgs"
+              exit 1 ;;
+          esac
+          version="${GITHUB_REF_NAME#v}"
+          url="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$BIN-$version-x86_64-pc-windows-msvc.msi"
+          "$RUNNER_TEMP/komac" update "$WINGET_ID" --version "$version" --urls "$url" \
+            --release-notes-url "https://github.com/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME" \
+            --submit --token "$WINGET_TOKEN"
 
   # Render Formula/illumio-tui.rb and bucket/illumio-tui.json from their
   # templates with the release's sha256s and commit them to main, so
