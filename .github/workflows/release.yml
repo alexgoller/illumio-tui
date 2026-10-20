@@ -418,8 +418,8 @@ jobs:
           echo "::error::could not push the formula and manifest to main"
           exit 1
 
-  # Dry runs only: install the committed Scoop manifest (the last release)
-  # with Scoop, run it, and check that its autoupdate block, fed that same
+  # Dry runs only: add this checkout as a Scoop bucket, install the committed
+  # manifest (the last release) from it, run it, and check that its autoupdate block, fed that same
   # version, finds the same hash in the release's SHA256SUMS. Not a release
   # gate: it depends on Scoop's installer and the published release.
   scoop-test:
@@ -442,7 +442,10 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $manifest = Get-Content bucket/illumio-tui.json -Raw | ConvertFrom-Json
           $version = $manifest.version
-          scoop install ./bucket/illumio-tui.json
+          # As a user would, with this checkout standing in for the repository.
+          scoop bucket add illumio-tui $env:GITHUB_WORKSPACE
+          if ($LASTEXITCODE -ne 0) { throw "scoop bucket add exited with $LASTEXITCODE" }
+          scoop install illumio-tui/illumio-tui
           if ($LASTEXITCODE -ne 0) { throw "scoop install exited with $LASTEXITCODE" }
           $out = illumio-tui --version
           if ($LASTEXITCODE -ne 0 -or "$out" -notmatch [regex]::Escape($version)) { throw "illumio-tui --version: $out" }

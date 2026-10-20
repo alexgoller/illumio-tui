@@ -38,7 +38,8 @@ function Get-Related {
     $out
 }
 
-# Entries of the user PATH (registry, not this process) equal to the install dir.
+# Entries of the user PATH (registry, not this process) equal to the install
+# dir. Callers wrap it in @(): PowerShell unrolls a one-element array.
 function Get-PathHits {
     $path = (Get-ItemProperty -Path 'HKCU:\Environment' -Name Path -ErrorAction SilentlyContinue).Path
     @("$path" -split ';' | Where-Object { $_.TrimEnd('\') -ieq $Dir })
@@ -56,7 +57,7 @@ function Assert-Installed([string] $Expected) {
     Write-Host "illumio-tui --version: $out"
     # Both MSIs carry the same binary, which reports the first version.
     if ("$out" -notmatch [regex]::Escape($Version)) { throw "unexpected --version output: $out" }
-    $hits = Get-PathHits
+    $hits = @(Get-PathHits)
     if ($hits.Count -ne 1) { throw "user PATH holds $Dir $($hits.Count) times, expected once" }
     $arp = @(Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' |
         Get-ItemProperty | Where-Object { $_.PSObject.Properties['DisplayName'] -and $_.DisplayName -eq 'illumio-tui' })
@@ -92,5 +93,5 @@ $code = @((Get-Related).Keys)[0]
 Invoke-Msiexec @('/x', $code) (Join-Path $logDir 'uninstall.log')
 if ((Get-Related).Count -ne 0) { throw 'product still installed after uninstall' }
 if (Test-Path $Dir) { throw "$Dir still exists after uninstall" }
-if ((Get-PathHits).Count -ne 0) { throw "user PATH still holds $Dir after uninstall" }
+if (@(Get-PathHits).Count -ne 0) { throw "user PATH still holds $Dir after uninstall" }
 Write-Host 'MSI install, upgrade and uninstall: ok'
