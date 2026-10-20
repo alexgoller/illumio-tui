@@ -49,9 +49,11 @@
       <li><a href="#wf-explain"><kbd>E</kbd><b>Explain</b></a><span>which rule allows or blocks a flow, and a jump to it</span></li>
       <li><a href="#wf-gen"><kbd>G</kbd><b>Generate</b></a><span>the allow rules an app&rsquo;s traffic needs, fan-in ports folded</span></li>
       <li><a href="#wf-draft"><kbd>D</kbd><b>Draft</b></a><span>what your draft policy would decide, per flow, before provisioning</span></li>
-      <li><a href="#wf-enforce"><kbd>$</kbd><b>Readiness &rarr; enforce</b></a><span>a verdict per app, a gate, a watch and an exact rollback</span></li>
+      <li><a href="#wf-enforce"><kbd>:</kbd><b>Readiness &rarr; enforce</b></a><span>a verdict per app, five steps to full, a watch and an exact rollback</span></li>
       <li><a href="#wf-marks"><kbd>m</kbd><b>Marks</b></a><span>squelch known noise, flag what matters, locally</span></li>
       <li><a href="#wf-bulk"><kbd>M</kbd><b>Bulk</b></a><span>labels and enforcement for many workloads, one confirm</span></li>
+      <li><a href="#wf-rules"><kbd>f</kbd><b>Find rules</b></a><span>every rule that names a label, IP list, service or workload</span></li>
+      <li><a href="#wf-rules"><kbd>I</kbd><b>Impact</b></a><span>the workloads behind a rule, per side, with <kbd>t</kbd> to switch it off</span></li>
     </ul>
 
     <div class="decision-bar" role="img" aria-label="Decision colours: allowed, potentially blocked, blocked"><span class="a"></span><span class="p"></span><span class="b"></span></div>
@@ -206,8 +208,8 @@ illumio-tui 0.3.5</code></pre>
 
 <section class="panel" id="workflows" aria-labelledby="workflows-h">
   <h2 id="workflows-h"><span class="key">3</span>Workflows</h2>
-  <p class="lede">Seven jobs you do on a PCE every week, each as keys and commands, shot on a demo PCE.</p>
-  <p>Every screenshot and recording below is real: one TUI session and a handful of CLI runs against a shared demo PCE, read-only. Writes were armed only to reach the confirm screens, and every confirm was answered with <code>n</code>. The whole TUI session, from start to the last screenshot, cost 29 requests: the header counts them.</p>
+  <p class="lede">Eight jobs you do on a PCE every week, each as keys and commands, shot on a demo PCE.</p>
+  <p>Every screenshot and recording below is real: one TUI session and a handful of CLI runs against a shared demo PCE, read-only. Writes were armed only to reach the confirm screens, and every confirm was answered with <code>n</code>. The whole TUI session, from start to the last screenshot, cost 29 requests: the header counts them. The enforcement overlay and policy search shots (v0.4.0) come from a second session with writes not enabled at all: one 24-hour query, <kbd>D</kbd> once, the policy and workload loads, 26 requests in all.</p>
 
   <article class="wf" id="wf-marks" aria-labelledby="wf-marks-h">
     <h3 id="wf-marks-h"><span class="num">1</span>Find and silence noise: flow marks</h3>
@@ -337,16 +339,35 @@ inf-time02-prd  skipped: labels already so  /orgs/5636114/workloads/bd1b6de4-...
   </article>
 
   <article class="wf" id="wf-enforce" aria-labelledby="wf-enforce-h">
-    <h3 id="wf-enforce-h"><span class="num">6</span>From visibility to enforcement: readiness, enforce, watch, rollback</h3>
+    <h3 id="wf-enforce-h"><span class="num">6</span>From visibility to enforcement: <code>:readiness</code>, <code>:enforce</code>, watch, rollback</h3>
     <dl class="story">
-      <dt>problem</dt><dd>Which apps can go to full enforcement today, what stops the others, and how do you undo a move exactly?</dd>
-      <dt>commands</dt><dd><code>readiness</code> for every app, <code>readiness --app X</code> for its gaps and pending changes, <code>enforce X --to full --dry-run</code> then <code>--yes --confirm-count N</code>, <code>enforce X --watch</code>, <code>enforce X --rollback</code>. CLI today; the TUI overlay follows in <a href="https://github.com/alexgoller/illumio-tui/issues/55">#55</a>.</dd>
-      <dt>you see</dt><dd>All 23 labelled apps of the demo PCE are <code>needs_rules</code>; the closest is infra-mgmt/Production at 90.3% of its connections covered by the draft. <code>--app</code> names the two gaps (7680/tcp from pos/Staging, 8080/tcp out to rfc1918) and the two pending rulesets. <code>enforce</code> refuses with exit 6 and the blockers, before anything is sent. <code>--watch</code> lists what was blocked since the change and exits 7. A real move writes a change record that <code>--rollback</code> restores, workload by workload, skipping anything changed since.</dd>
-      <dt>PCE cost</dt><dd>All apps over 7 days: one Explorer query with the draft evaluation, 25 requests, 43 s. One app: 14 requests, 9 s. <code>--watch</code>: one query, 8 requests. Nothing polls.</dd>
+      <dt>problem</dt><dd>Which apps can go to full enforcement today, what stops the others, how do you close the gaps, and how do you undo a move exactly?</dd>
+      <dt>keys</dt><dd><code>:readiness</code> lists every app of the result on screen (<kbd>s</kbd> sorts, <kbd>/</kbd> searches, <kbd>D</kbd> evaluates the draft first); <kbd>Enter</kbd> on an app, <code>:enforce &lt;app&gt;</code> or <kbd>e</kbd> in the app overlay opens the <b>enforcement overlay</b>: five steps, <kbd>Tab</kbd> or <kbd>1</kbd>&ndash;<kbd>5</kbd>. <b>1 Readiness</b> the numbers, verdict and warnings. <b>2 Rules</b> the gaps: <kbd>G</kbd> the generator for the app, <kbd>w</kbd> an allow rule for the gap, <kbd>m</kbd> an <code>accept-blocked</code> mark. <b>3 Provision</b> the app&rsquo;s pending changes, <kbd>P</kbd> provisions them through the usual preview. <b>4 Enforce</b> <kbd>j</kbd>/<kbd>k</kbd> full or selective, <kbd>v</kbd> the visibility level, <kbd>Enter</kbd> the bulk confirm with the typed count (an app that is not ready asks for the word <code>enforce</code> first). <b>5 Watch</b> <kbd>r</kbd> the blocked-since query, <kbd>R</kbd> previews the rollback.</dd>
+      <dt>you see</dt><dd>All 23 labelled apps of the demo PCE are <em>needs rules</em> over the last 24 hours; infra-mgmt/Production is closest at 90.5%. Its overlay: two workloads in selective, one gap (7680/tcp from pos/Staging, 3 flows), two pending changes, and step 4 <em>blocked</em>: the plan <em>2 workloads: 2 selective &rarr; full</em>, the record directory, and writes off.</dd>
+      <dt>PCE cost</dt><dd><code>:readiness</code> reuses the query on screen and its <kbd>D</kbd>; it read the workloads, pending changes and draft rulesets once (3 requests, cached). Opening the overlay: 0. Writes are the bulk move and its change record, exactly as the CLI writes them. <kbd>r</kbd> on Watch is one query, only when pressed; nothing refreshes by itself.</dd>
     </dl>
     <figure class="shot">
+      <img src="assets/wf-tui-readiness.png" alt="The Readiness overlay over the last 24 hours with the draft: 23 apps, all needs rules, sorted by would-block connections; columns app, workloads, flows, would block, coverage, pending, verdict, enforcement and warnings; infra-mgmt/Production selected at the bottom with 27 flows, 21.7K would block, 90.5% coverage and 2 pending; 3 requests" width="2216" height="1352" loading="lazy">
+      <figcaption><code>:readiness</code>: every app of the result on screen, a verdict each; <kbd>Enter</kbd> opens the overlay for one.</figcaption>
+    </figure>
+    <div class="shots">
+      <figure class="shot">
+        <img src="assets/wf-tui-enforce-readiness.png" alt="The enforcement overlay for infra-mgmt/Production, step 1 Readiness: verdict needs rules, 2 managed workloads, no offline VENs, selective 2, evidence 1 day 27 flows 230.3K connections, coverage 90.5% (208.6K allowed, 21.7K would block inbound), 1 gap, 2 pending, warning little evidence; the steps list shows 2 Rules 1 gaps, 3 Provision 2 pending, 4 Enforce blocked, 5 Watch no record; 0 requests" width="2216" height="1352" loading="lazy">
+        <figcaption>Step 1 after <kbd>D</kbd>: the numbers behind the verdict, the five steps on the left.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="assets/wf-tui-enforce-rules.png" alt="Step 2 Rules: one gap, inbound from pos/Staging on 7680/tcp, 3 flows, 21.7K connections; the hint line offers G generator, w rule for the gap, m accept-blocked" width="2216" height="1352" loading="lazy">
+        <figcaption>Step 2: the gap as a policy tuple; <kbd>G</kbd>, <kbd>w</kbd> or <kbd>m</kbd> close it.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="assets/wf-tui-enforce-plan.png" alt="Step 4 Enforce: target full selected, visibility keeps each workload's level, plan 2 workloads 2 selective to full, readiness needs rules so Enter then type enforce, the change record directory, writes off with :writes on arms them; hint j/k full or selective, v visibility, Enter review" width="2216" height="1352" loading="lazy">
+        <figcaption>Step 4, the plan before any confirm. Not ready: <kbd>Enter</kbd> would ask for the word <code>enforce</code>. It was not pressed.</figcaption>
+      </figure>
+    </div>
+    <p>The same job on the CLI, for scripts and cron: <code>readiness</code> for every app, <code>readiness --app X</code> for its gaps and pending changes, <code>enforce X --to full --dry-run</code> (exit 6 until ready) then <code>--yes --confirm-count N</code>, <code>enforce X --watch</code> (exit 7 when something is blocked since), <code>enforce X --rollback</code>. Over 7 days, all apps: one Explorer query with the draft evaluation, 25 requests, 43 s; one app: 14 requests, 9 s; <code>--watch</code>: one query, 8 requests.</p>
+    <figure class="shot">
       <img src="assets/wf-cli-readiness.png" alt="readiness --app infra-mgmt/Production: 2 workloads in selective, 28 flows, 1504405 connections in, 32 out, 139602 would block, coverage 90.7%, 2 pending, verdict needs rules; gaps: in pos/Staging 7680/tcp 3 flows, out ipl:rfc1918 8080/tcp 1 flow; pending: two rulesets; then enforce --to full --dry-run refused with exit code 6, write_refused, listing the would-block tuples and pending changes, nothing sent" width="2432" height="1064" loading="lazy">
-      <figcaption>The gate: readiness names the gaps; <code>enforce</code> refuses with exit 6 until they are closed (or <code>--force</code>).</figcaption>
+      <figcaption>The gate on the CLI: readiness names the gaps; <code>enforce</code> refuses with exit 6 until they are closed (or <code>--force</code>).</figcaption>
     </figure>
     <figure class="shot">
       <img src="assets/wf-cli-watch.png" alt="enforce infra-mgmt/Production --watch since a time 24 hours ago: 9 flows, 12092 connections blocked, 7680/tcp from pos/Staging and 123/udp from seven apps; exit code 7. Then workloads enforce full for app=infra-mgmt env=Production as a dry run: 2 selective to full, one bulk_update PUT and its body" width="2216" height="1172" loading="lazy">
@@ -361,15 +382,40 @@ pos/Staging            needs_rules  82.8%  34 gaps
 ad/Production          needs_rules  72.2%  37 gaps
 <span class="p">$ </span>illumio-tui enforce infra-mgmt/Production --to full --yes --confirm-count 2   <span class="c"># once ready; writes a change record</span>
 <span class="p">$ </span>illumio-tui enforce infra-mgmt/Production --rollback --dry-run                <span class="c"># the record's before modes, exactly</span></code></pre>
-    <p class="caption">The 7-day run counts one gap for infra-mgmt; the <code>--app</code> run a minute later, two: the window moved.</p>
+    <p class="caption">The TUI shots use the last 24 hours, the CLI runs 7 days: the coverage and gap counts differ with the window.</p>
+  </article>
+
+  <article class="wf" id="wf-rules" aria-labelledby="wf-rules-h">
+    <h3 id="wf-rules-h"><span class="num">7</span>Find rules fast: <kbd>f</kbd>, <kbd>t</kbd>, <kbd>I</kbd></h3>
+    <dl class="story">
+      <dt>problem</dt><dd>Which rules, in any ruleset, touch pos or ordering? Which workloads does one of them really cover, and can you switch it off for a test?</dd>
+      <dt>keys</dt><dd>On Policy, <kbd>f</kbd> searches every loaded ruleset: <code>app=ordering,pos</code> (a label in a scope, consumer or provider, directly or through a label group; comma is any of), <code>ipl:Corp</code>, <code>svc:443/tcp</code> or <code>svc:PostgreSQL</code>, <code>wl:web01</code>, <code>href:</code>, <code>disabled</code>, <code>deny</code>; terms apart by spaces all hold. <kbd>Enter</kbd> opens the rule in its ruleset, <kbd>c</kbd> clears. <kbd>I</kbd> lists the workloads a rule matches, providers first, <kbd>Tab</kbd> the consumers, <kbd>Enter</kbd> jumps to one on Workloads. <kbd>t</kbd> enables or disables a rule or ruleset (a draft change, writes armed). CLI: <code>policy search</code>, <code>policy rules impact &lt;href&gt; --list providers|consumers</code>, <code>policy rules enable|disable</code>, <code>policy rulesets enable|disable</code>.</dd>
+      <dt>you see</dt><dd><em>Search &middot; app=ordering,pos</em>: 26 rules across 7 rulesets, in evaluation order, with scope, consumers, providers, services and the rule&rsquo;s own <code>enabled</code> (<code>(ruleset off)</code> when its ruleset is disabled). <kbd>I</kbd> on <em>role=processing &rarr; role=db, postgresql</em> in <em>14. pos | pci</em>: 4 providers (pos-db01..04-pci) and 6 consumers, with labels, enforcement and online.</dd>
+      <dt>PCE cost</dt><dd>None: search and <kbd>I</kbd> use the loaded policy and the cached workload list (<kbd>i</kbd> reads it once if no screen has). The CLI search is one rulesets read and the name index, cached. <kbd>t</kbd> is one <code>PUT</code> through the usual confirm.</dd>
+    </dl>
+    <div class="shots">
+      <figure class="shot">
+        <img src="assets/wf-policy-search.png" alt="Policy screen in search mode: Search app=ordering,pos, 26 rules, draft; a flat list with ruleset, enabled, kind, scope, consumers, providers and services, from 8. Adaptive User Segmentation, 14. pos | pci, 7. Cloud Workload Migration, syslog, 13. ordering | prod, illumio-tui-test and RF-pos-Staging, the last one a deny rule from ipl:Any" width="2216" height="1352" loading="lazy">
+        <figcaption><kbd>f</kbd> <code>app=ordering,pos</code>: every rule that names either app, across rulesets, no request.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="assets/wf-policy-impact.png" alt="Providers of allow role=db from role=processing postgresql: 4 workloads, providers 4 and consumers 6 with Tab to switch; pos-db01-pci to pos-db04-pci with their labels app=pos env=PCI role=db bu=banking compliance=PCI-DSS, selective enforcement, online yes" width="2216" height="1352" loading="lazy">
+        <figcaption><kbd>I</kbd> on a search row: the four database workloads behind the rule; <kbd>Tab</kbd> shows the six consumers.</figcaption>
+      </figure>
+    </div>
+<pre><code><span class="p">$ </span>illumio-tui policy search --label app=shop,crm --service 443/tcp --table
+<span class="p">$ </span>illumio-tui policy search ipl:Corp deny --csv &gt; corp-deny.csv
+<span class="p">$ </span>illumio-tui policy rules impact /orgs/1/sec_policy/draft/rule_sets/7/sec_rules/3 --list consumers --csv
+<span class="p">$ </span>illumio-tui policy rules disable /orgs/1/sec_policy/draft/rule_sets/7/sec_rules/9 --dry-run</code></pre>
   </article>
 
   <article class="wf" id="wf-small" aria-labelledby="wf-small-h">
-    <h3 id="wf-small-h"><span class="num">7</span>Small things</h3>
+    <h3 id="wf-small-h"><span class="num">8</span>Small things</h3>
     <ul>
       <li><kbd>Ctrl-U</kbd> empties the line in every text input, as in a shell: the filter editor, the mark and rule forms, the <code>:</code> prompt. <kbd>Ctrl-N</kbd> / <kbd>Ctrl-P</kbd> complete labels, IP lists, services and values without a request.</li>
       <li>Shell completions for bash, zsh and fish ship with the Homebrew formula and the <code>.deb</code>/<code>.rpm</code>; otherwise <code>illumio-tui completions zsh &gt; ~/.zfunc/_illumio-tui</code>. Every subcommand, flag and enum value completes, and <code>--profile</code> completes your profile names. Completion never contacts the PCE.</li>
       <li><code>:export &lt;path&gt;</code> writes the table on screen as CSV, the same format as the CLI&rsquo;s <code>--csv</code>.</li>
+      <li>Apple Terminal garbles 24-bit colour before macOS 26, so there the theme is mapped to the xterm 256 colours by itself; <code>ILLUMIO_TUI_COLORS=256</code> or <code>truecolor</code> overrides it anywhere.</li>
     </ul>
   </article>
 
@@ -381,10 +427,10 @@ ad/Production          needs_rules  72.2%  37 gaps
       <li>In the TUI, <kbd>r</kbd> once for 24 hours, <kbd>m</kbd> squelches the Nagios noise, <kbd>D</kbd> overlays the draft.</li>
       <li><kbd>E</kbd> on the 7680/tcp flow: <em>no rule allows this flow</em>. <kbd>E</kbd> on a DNS flow: the activedirectory rule, <kbd>Enter</kbd> to see it.</li>
       <li><kbd>A</kbd>, <kbd>G</kbd>: NTP from 7 peers folds into one Any rule with <kbd>c</kbd>, <kbd>Space</kbd> adds pos/Staging, <kbd>p</kbd> says 27 of 27 flows covered, <kbd>Enter</kbd> and <kbd>y</kbd> write the ruleset and 3 rules; <kbd>P</kbd> in Policy&rsquo;s pending overlay provisions them.</li>
-      <li><code>readiness --app</code> again until <code>ready</code>; <code>enforce infra-mgmt/Production --to full --dry-run</code>, then <code>--yes --confirm-count 2</code>.</li>
-      <li><code>enforce --watch</code> from cron the next morning: exit 0, or exit 7 and the tuples; <code>--rollback</code> if it has to go back.</li>
+      <li><code>:readiness</code> (or <code>readiness --app</code>) again until <code>ready</code>; <code>:enforce infra-mgmt/Production</code>, step 4, <kbd>Enter</kbd> and the typed count (CLI: <code>enforce --to full --dry-run</code>, then <code>--yes --confirm-count 2</code>).</li>
+      <li><code>enforce --watch</code> from cron the next morning (or <kbd>r</kbd> on step 5): exit 0, or exit 7 and the tuples; <kbd>R</kbd> or <code>--rollback</code> if it has to go back.</li>
     </ol>
-    <p class="caption">On the demo PCE the recordings stop at step 5&rsquo;s confirm with <kbd>n</kbd> and step 6&rsquo;s dry run: it is shared.</p>
+    <p class="caption">On the demo PCE the recordings stop at step 5&rsquo;s confirm with <kbd>n</kbd>, and at step 6&rsquo;s plan and dry run: it is shared.</p>
   </article>
 </section>
 
@@ -778,6 +824,7 @@ API_SECRET=xxxxxxxxxxxxxxxx</code></pre>
             <tr><td><code>ILLUMIO_TIER_KEY</code></td><td>the label key a rule selects a tier by</td></tr>
             <tr><td><code>ILLUMIO_IGNORE_KEYS</code></td><td>label keys hidden from label columns</td></tr>
             <tr><td><code>ILLUMIO_TUI_THEME</code></td><td><code>dark</code> (default) or <code>light</code></td></tr>
+            <tr><td><code>ILLUMIO_TUI_COLORS</code></td><td><code>256</code> maps the theme to the xterm 256 colours (the default in Apple Terminal, which garbles 24-bit colour before macOS 26); <code>truecolor</code> forces 24-bit</td></tr>
           </tbody>
         </table>
       </div>
@@ -840,13 +887,12 @@ consolidate_min_peers = 5        <span class="c"># the default; at least 2</span
 
 <section class="panel" id="roadmap" aria-labelledby="roadmap-h">
   <h2 id="roadmap-h"><span class="key">10</span>Roadmap</h2>
-  <p>Ideas for what comes next are collected in the <a href="https://github.com/alexgoller/illumio-tui/issues/5">idea backlog, issue #5</a>. Among them:</p>
+  <p>New in v0.4.0: the readiness and enforcement overlay (<a href="https://github.com/alexgoller/illumio-tui/issues/55">#55</a>), policy search (<a href="https://github.com/alexgoller/illumio-tui/issues/51">#51</a>), enabling and disabling rules and rulesets (<a href="https://github.com/alexgoller/illumio-tui/issues/52">#52</a>) and the drill from a rule&rsquo;s impact to its workloads (<a href="https://github.com/alexgoller/illumio-tui/issues/53">#53</a>). Ideas for what comes next are collected in the <a href="https://github.com/alexgoller/illumio-tui/issues/5">idea backlog, issue #5</a>. Among them:</p>
   <ul>
-    <li>Readiness and enforcement in the TUI, as an overlay (<a href="https://github.com/alexgoller/illumio-tui/issues/55">#55</a>).</li>
-    <li>Enable or disable rules and rulesets.</li>
-    <li>Drill from a rule's impact into the workloads it covers; an app-to-app matrix with CSV export.</li>
-    <li>Search across policy.</li>
-    <li>Saved filters per profile; event filters and VEN health; a <code>schema</code> command for agents.</li>
+    <li>Saved filters and bookmarks per profile.</li>
+    <li>A <code>schema</code> command and <code>--fields</code> for agents: the output shapes, machine-readable, and only the fields asked for.</li>
+    <li>An on-disk name cache, so shell completions can offer labels, IP lists and services without contacting the PCE.</li>
+    <li>An MCP mode: the same read and write layer, with its throttle and guards, as tools for an agent.</li>
   </ul>
   <p>What it leaves to others: <a href="https://github.com/brian1917/workloader">workloader</a> is the established batch tool for the PCE, and the two work side by side. illumio-tui is for interactive analysis, rule drafting and agents; for bulk import and export, automated labelling, VEN lifecycle, rule and port usage reports and running across many PCEs, use workloader.</p>
   <p>Suggestions and bug reports are welcome in the <a href="https://github.com/alexgoller/illumio-tui/issues">issue tracker</a>.</p>

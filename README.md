@@ -8,7 +8,7 @@ Documentation: https://alexgoller.github.io/illumio-tui/
 
 Screenshots and a short recording: https://alexgoller.github.io/illumio-tui/#screens
 
-Workflows (marks, draft, explain, generator, bulk, readiness and enforce) with screenshots:
+Workflows (marks, draft, explain, generator, bulk, readiness and enforce, policy search) with screenshots:
 https://alexgoller.github.io/illumio-tui/#workflows
 
 ## Install
@@ -213,7 +213,7 @@ https://alexgoller.github.io/illumio-tui/#recipes
 
 ## Workflows
 
-Seven everyday jobs as keys and commands. Screenshots and recordings of each, taken on a demo
+Eight everyday jobs as keys and commands. Screenshots and recordings of each, taken on a demo
 PCE: https://alexgoller.github.io/illumio-tui/#workflows
 
 1. **Find and silence noise (marks).** `m` on a row of any traffic view opens a mark form
@@ -248,20 +248,37 @@ PCE: https://alexgoller.github.io/illumio-tui/#workflows
    typed for full or selective on several workloads, and counts the loaded traffic they would
    block; `d` runs a draft check on demand. CLI: `workloads enforce` / `workloads relabel` with
    `--dry-run`, then `--yes --confirm-count N`.
-6. **From visibility to enforcement.** `readiness` ranks every app (one 7-day query with the
-   draft), `readiness --app X` names its gaps and pending changes, `enforce X --to full
+6. **From visibility to enforcement (`:readiness`, `:enforce`).** `:readiness` lists every app
+   of the result on screen with its verdict, coverage, pending changes and warnings (`D` first
+   for the draft). `Enter` on an app, `:enforce <app>` or `e` in the app overlay opens five
+   steps: 1 Readiness, 2 Rules (`G` generator, `w` rule for the gap, `m` accept-blocked), 3
+   Provision (`P`), 4 Enforce (`j`/`k` full or selective, `v` visibility, `Enter` the typed-count
+   confirm), 5 Watch (`r` blocked since, `R` rollback preview). Opening it costs nothing once the
+   workloads, pending changes and draft rulesets are loaded. CLI: `readiness` ranks every app
+   (one 7-day query with the draft), `readiness --app X` names its gaps, `enforce X --to full
    --dry-run` refuses with exit 6 until it is ready, `--yes --confirm-count N` moves it and
    writes a change record, `enforce X --watch` exits 7 when something is blocked since,
-   `enforce X --rollback` restores the record's modes exactly. The TUI overlay follows in #55.
-7. **Small things.** `Ctrl-U` clears the line in every text input; `Ctrl-N` / `Ctrl-P`
+   `enforce X --rollback` restores the record's modes exactly.
+7. **Find rules fast (`f`, `t`, `I`).** On Policy, `f` searches every loaded ruleset
+   (`app=ordering,pos`, `ipl:Corp`, `svc:443/tcp`, `wl:web01`, `disabled`, `deny`; no request) and
+   shows one flat list; `Enter` opens the rule, `I` lists the workloads it matches per side
+   (`Tab` switches), `t` enables or disables a rule or ruleset (draft, writes armed). CLI:
+
+       illumio-tui policy search --label app=shop,crm --service 443/tcp --table
+       illumio-tui policy rules impact <rule-href> --list providers --csv
+       illumio-tui policy rules disable <rule-href> --dry-run
+
+8. **Small things.** `Ctrl-U` clears the line in every text input; `Ctrl-N` / `Ctrl-P`
    complete without a request; `:export <path>` writes the table on screen as CSV; shell
-   completions for bash, zsh and fish.
+   completions for bash, zsh and fish; Apple Terminal gets the theme in 256 colours by itself
+   (`ILLUMIO_TUI_COLORS=256|truecolor` overrides).
 
 **One app, start to finish:** `readiness` (infra-mgmt/Production is closest, 90% covered) →
 `readiness --app` (two gaps, two pending rulesets) → TUI: `r`, `m` the noise, `D` → `E` on the
-gap flow → `A`, `G`, `c`, `Space`, `p`, `Enter`, `y` → provision with `P` → `readiness --app`
-until `ready` → `enforce --to full --dry-run`, then `--yes --confirm-count 2` → `enforce
---watch` from cron → `--rollback` if needed.
+gap flow → `A`, `G`, `c`, `Space`, `p`, `Enter`, `y` → provision with `P` → `:readiness` (or
+`readiness --app`) until `ready` → `:enforce infra-mgmt/Production`, step 4, `Enter` and the
+typed count (CLI: `enforce --to full --dry-run`, then `--yes --confirm-count 2`) → `enforce
+--watch` from cron → `R` or `--rollback` if needed.
 
 ## TUI
 
