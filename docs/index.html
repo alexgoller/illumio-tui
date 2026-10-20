@@ -59,7 +59,7 @@
     <div class="decision-bar" role="img" aria-label="Decision colours: allowed, potentially blocked, blocked"><span class="a"></span><span class="p"></span><span class="b"></span></div>
 
     <dl class="statline" aria-label="Release facts">
-      <div><dt>release</dt><dd class="ok">v0.4.0</dd></div>
+      <div><dt>release</dt><dd class="ok">v0.4.1</dd></div>
       <div><dt>platforms</dt><dd>macOS · Linux · Windows</dd></div>
       <div><dt>screens</dt><dd>5</dd></div>
       <div><dt>writes</dt><dd>opt-in</dd></div>
@@ -87,15 +87,15 @@
 
   <h3>Debian, Ubuntu</h3>
   <p>Download the <code>.deb</code> (<code>amd64</code> or <code>arm64</code>) from the <a href="https://github.com/alexgoller/illumio-tui/releases">release page</a>:</p>
-<pre><code><span class="p">$ </span>sudo apt install ./illumio-tui_0.4.0-1_amd64.deb</code></pre>
+<pre><code><span class="p">$ </span>sudo apt install ./illumio-tui_0.4.1-1_amd64.deb</code></pre>
 
   <h3>RHEL, Rocky, Alma, Fedora</h3>
   <p>Download the <code>.rpm</code> (<code>x86_64</code> or <code>aarch64</code>) from the release page:</p>
-<pre><code><span class="p">$ </span>sudo dnf install ./illumio-tui-0.4.0-1.x86_64.rpm</code></pre>
+<pre><code><span class="p">$ </span>sudo dnf install ./illumio-tui-0.4.1-1.x86_64.rpm</code></pre>
   <p>Both packages put <code>illumio-tui</code> in <code>/usr/bin</code> with no dependencies, and are install-tested on Debian 12, Ubuntu 22.04, Rocky Linux 9 and AlmaLinux 8 before each release.</p>
 
   <h3>Windows</h3>
-  <p><strong>MSI</strong> (releases after v0.4.0): download <code>illumio-tui-&lt;version&gt;-x86_64-pc-windows-msvc.msi</code> from the <a href="https://github.com/alexgoller/illumio-tui/releases">release page</a> and double-click it, or install it silently:</p>
+  <p><strong>MSI</strong> (v0.4.1 and later): download <code>illumio-tui-&lt;version&gt;-x86_64-pc-windows-msvc.msi</code> from the <a href="https://github.com/alexgoller/illumio-tui/releases">release page</a> and double-click it, or install it silently:</p>
 <pre><code><span class="p">&gt; </span>msiexec /i illumio-tui-&lt;version&gt;-x86_64-pc-windows-msvc.msi /qn</code></pre>
   <p>It installs for the current user, without admin rights, into <code>%LOCALAPPDATA%\Programs\illumio-tui</code> and adds that folder to your user <code>PATH</code> (open a new terminal). A newer MSI upgrades the installed version in place; uninstalling (Settings &gt; Apps) also removes the <code>PATH</code> entry. The MSI is not code-signed, so SmartScreen may warn when you open it: <em>More info</em>, then <em>Run anyway</em>. Each release installs, upgrades and uninstalls it on a Windows runner before publishing.</p>
   <p><strong>Scoop</strong>: the repository is its own bucket.</p>
@@ -104,30 +104,30 @@
 <span class="p">&gt; </span>scoop update illumio-tui     <span class="c"># later, for a new release</span></code></pre>
 
   <h3>Release archives</h3>
-  <p>Every <a href="https://github.com/alexgoller/illumio-tui/releases">GitHub Release</a> carries one archive per platform, the <code>.deb</code>/<code>.rpm</code> packages, the Windows <code>.msi</code> and a <code>SHA256SUMS</code> file covering all of them. The current release is <a href="https://github.com/alexgoller/illumio-tui/releases/tag/v0.4.0">v0.4.0</a>.</p>
+  <p>Every <a href="https://github.com/alexgoller/illumio-tui/releases">GitHub Release</a> carries one archive per platform, the <code>.deb</code>/<code>.rpm</code> packages, the Windows <code>.msi</code> and a <code>SHA256SUMS</code> file covering all of them. The current release is <a href="https://github.com/alexgoller/illumio-tui/releases/tag/v0.4.1">v0.4.1</a>.</p>
 
   <div class="table-scroll">
     <table>
       <thead><tr><th scope="col">Platform</th><th scope="col">Archive</th></tr></thead>
       <tbody>
-        <tr><td>macOS Apple Silicon</td><td><code>illumio-tui-0.4.0-aarch64-apple-darwin.tar.gz</code></td></tr>
-        <tr><td>macOS Intel</td><td><code>illumio-tui-0.4.0-x86_64-apple-darwin.tar.gz</code></td></tr>
-        <tr><td>Linux x86_64 (glibc)</td><td><code>illumio-tui-0.4.0-x86_64-unknown-linux-gnu.tar.gz</code></td></tr>
-        <tr><td>Linux x86_64 (static musl, any distro)</td><td><code>illumio-tui-0.4.0-x86_64-unknown-linux-musl.tar.gz</code></td></tr>
-        <tr><td>Linux arm64</td><td><code>illumio-tui-0.4.0-aarch64-unknown-linux-gnu.tar.gz</code></td></tr>
-        <tr><td>Windows x86_64</td><td><code>illumio-tui-0.4.0-x86_64-pc-windows-msvc.zip</code></td></tr>
+        <tr><td>macOS Apple Silicon</td><td><code>illumio-tui-0.4.1-aarch64-apple-darwin.tar.gz</code></td></tr>
+        <tr><td>macOS Intel</td><td><code>illumio-tui-0.4.1-x86_64-apple-darwin.tar.gz</code></td></tr>
+        <tr><td>Linux x86_64 (glibc)</td><td><code>illumio-tui-0.4.1-x86_64-unknown-linux-gnu.tar.gz</code></td></tr>
+        <tr><td>Linux x86_64 (static musl, any distro)</td><td><code>illumio-tui-0.4.1-x86_64-unknown-linux-musl.tar.gz</code></td></tr>
+        <tr><td>Linux arm64</td><td><code>illumio-tui-0.4.1-aarch64-unknown-linux-gnu.tar.gz</code></td></tr>
+        <tr><td>Windows x86_64</td><td><code>illumio-tui-0.4.1-x86_64-pc-windows-msvc.zip</code></td></tr>
       </tbody>
     </table>
   </div>
 
   <p>Example for macOS on Apple Silicon; swap the target for yours:</p>
-<pre><code><span class="p">$ </span>curl -LO https://github.com/alexgoller/illumio-tui/releases/download/v0.4.0/illumio-tui-0.4.0-aarch64-apple-darwin.tar.gz
-<span class="p">$ </span>curl -LO https://github.com/alexgoller/illumio-tui/releases/download/v0.4.0/SHA256SUMS
+<pre><code><span class="p">$ </span>curl -LO https://github.com/alexgoller/illumio-tui/releases/download/v0.4.1/illumio-tui-0.4.1-aarch64-apple-darwin.tar.gz
+<span class="p">$ </span>curl -LO https://github.com/alexgoller/illumio-tui/releases/download/v0.4.1/SHA256SUMS
 <span class="p">$ </span>shasum -a 256 -c --ignore-missing SHA256SUMS     <span class="c"># Linux: sha256sum --check --ignore-missing SHA256SUMS</span>
-<span class="p">$ </span>tar -xzf illumio-tui-0.4.0-aarch64-apple-darwin.tar.gz
-<span class="p">$ </span>install -m 755 illumio-tui-0.4.0-aarch64-apple-darwin/illumio-tui ~/.local/bin/
+<span class="p">$ </span>tar -xzf illumio-tui-0.4.1-aarch64-apple-darwin.tar.gz
+<span class="p">$ </span>install -m 755 illumio-tui-0.4.1-aarch64-apple-darwin/illumio-tui ~/.local/bin/
 <span class="p">$ </span>illumio-tui --version
-illumio-tui 0.4.0</code></pre>
+illumio-tui 0.4.1</code></pre>
   <p>macOS may quarantine a binary downloaded with a browser; clear it with <code>xattr -d com.apple.quarantine ~/.local/bin/illumio-tui</code>. On Windows, compare <code>Get-FileHash</code> of the zip with its line in <code>SHA256SUMS</code>, extract it, and move <code>illumio-tui.exe</code> into a folder on your <code>PATH</code>.</p>
 
   <h3>From source</h3>
