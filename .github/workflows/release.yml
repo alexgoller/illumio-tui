@@ -374,7 +374,9 @@ jobs:
   # manifests. Tag runs point the manifest at the published release asset
   # (so this runs after `release`); dry runs serve the dry-run MSI from a
   # local HTTP server. The upgrade target is the same binary in an MSI one
-  # patch version up, always served locally. Dry runs also render and
+  # patch version up, always served locally; its manifest carries the
+  # installed MSI's ProductCode so winget matches it to the installed
+  # package, as the winget-pkgs source would. Dry runs also render and
   # validate the manifests for the latest published release, ready for a
   # manual winget-pkgs submission. The rendered manifests are uploaded.
   winget:
@@ -442,7 +444,11 @@ jobs:
           echo "ProductCode $msi: $product_code"
           BASE_URL="$base_url" PRODUCT_CODE="$product_code" \
             packaging/winget/render.sh "$version" sums/SHA256SUMS "manifests/$version"
-          BASE_URL="$LOCAL_URL" PRODUCT_CODE="$upgrade_product_code" \
+          # The upgrade manifest names the installed MSI's ProductCode, the way
+          # the winget-pkgs source maps an installed version to the package
+          # (see packaging/winget/test-winget.ps1).
+          echo "ProductCode $upgrade_msi: $upgrade_product_code"
+          BASE_URL="$LOCAL_URL" PRODUCT_CODE="$product_code" \
             packaging/winget/render.sh "$upgrade_version" upgrade-sums "manifests-upgrade/$upgrade_version"
           head -n 100 manifests/"$version"/*.yaml
           grep -n 'InstallerUrl\|ProductCode' manifests-upgrade/"$upgrade_version"/*.installer.yaml

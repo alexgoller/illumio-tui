@@ -11,6 +11,10 @@
 #                 to the installer entry. It is new on every MSI build, so it
 #                 must come from the MSI that BASE_URL serves.
 # The UpgradeCode in installer.yaml.tmpl must match packaging/windows/illumio-tui.wxs.
+# No Scope: the MSI is per-user, but Windows Installer registers its
+# Add/Remove Programs entry under HKLM, so winget lists it as a machine
+# install and finds no applicable installer for `winget upgrade` when the
+# manifest says `Scope: user` (seen on the CI runner with winget 1.11).
 # Fails if the MSI is missing from SHA256SUMS.
 set -euo pipefail
 version="$1"

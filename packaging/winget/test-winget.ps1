@@ -5,8 +5,12 @@
 #     -UpgradeManifest dir2 -UpgradeVersion 1.2.4
 # -Version is the package version (what --version prints), -MsiVersion the
 # MSI ProductVersion it maps to (1.2.3-rc1 -> 1.2.3). The upgrade package is
-# the same binary in an MSI with a higher version. Fails on the first broken
-# expectation.
+# the same binary in an MSI with a higher version.
+# With a local manifest, winget matches the installed package only by that
+# manifest's installer ProductCode; the winget-pkgs source also knows the
+# ProductCodes of earlier versions. The upgrade manifest must therefore carry
+# the ProductCode of the MSI behind -Manifest (as the source would map it),
+# not its own. Fails on the first broken expectation.
 param(
     [Parameter(Mandatory)] [string] $Manifest,
     [Parameter(Mandatory)] [string] $Version,
@@ -75,7 +79,8 @@ Invoke-Winget (@('upgrade', '--manifest', $UpgradeManifest, '--silent') + $Commo
 Assert-Installed $UpgradeVersion
 
 Write-Host '== winget uninstall'
-Invoke-Winget @('uninstall', '--manifest', $UpgradeManifest, '--silent', '--accept-source-agreements', '--disable-interactivity')
+$code = @((Get-Related).Keys)[0]
+Invoke-Winget @('uninstall', '--product-code', $code, '--silent', '--accept-source-agreements', '--disable-interactivity')
 if ((Get-Related).Count -ne 0) { throw 'product still installed after uninstall' }
 if (Test-Path $Dir) { throw "$Dir still exists after uninstall" }
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
