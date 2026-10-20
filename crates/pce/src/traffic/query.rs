@@ -334,6 +334,7 @@ mod tests {
                 })
                 .service(ServiceMatch {
                     port: Some(443),
+                    to_port: None,
                     proto: Some(6),
                     process_name: None,
                 })
@@ -369,6 +370,7 @@ mod tests {
             })
             .exclude_service(ServiceMatch {
                 port: Some(22),
+                to_port: None,
                 proto: Some(6),
                 process_name: None,
             })
@@ -390,12 +392,49 @@ mod tests {
         let included = b
             .service(ServiceMatch {
                 port: None,
+                to_port: None,
                 proto: Some(17),
                 process_name: None,
             })
             .build()
             .unwrap();
         assert!(!included.cost().unbounded, "an include narrows");
+    }
+
+    #[test]
+    fn a_range_serialises_to_port_in_both_lists_and_a_single_port_does_not() {
+        let range = ServiceMatch {
+            port: Some(8000),
+            to_port: Some(8100),
+            proto: Some(6),
+            process_name: None,
+        };
+        let q =
+            TrafficQueryBuilder::between(ts("2026-10-01T00:00:00Z"), ts("2026-10-02T00:00:00Z"))
+                .service(range.clone())
+                .service(ServiceMatch {
+                    port: Some(443),
+                    to_port: None,
+                    proto: Some(6),
+                    process_name: None,
+                })
+                .exclude_service(ServiceMatch {
+                    proto: Some(17),
+                    ..range
+                })
+                .build()
+                .unwrap();
+        let body = serde_json::to_string(&q).unwrap();
+        assert!(
+            body.contains(
+                r#""include":[{"port":8000,"to_port":8100,"proto":6},{"port":443,"proto":6}]"#
+            ),
+            "{body}"
+        );
+        assert!(
+            body.contains(r#""exclude":[{"port":8000,"to_port":8100,"proto":17}]"#),
+            "{body}"
+        );
     }
 
     #[test]

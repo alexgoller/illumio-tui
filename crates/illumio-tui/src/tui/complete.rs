@@ -510,10 +510,11 @@ fn workload_names(workloads: &[Workload]) -> Vec<String> {
 }
 
 /// A traffic filter service: the protocols and `svc:`, then each index
-/// service whose name matches as its single-port `port/proto` entries
-/// (ranges and other protocols do not fit the field). `svc:` completes the
-/// names the filter can expand (`resolve_service`: no range, not every
-/// protocol, no `,` or `|` in the name). A port (`/`, digits) is left as typed.
+/// service whose name matches as its TCP and UDP `port/proto` and
+/// `from-to/proto` entries (other protocols have no port to write). `svc:`
+/// completes the names the filter can expand (`resolve_service`: not every
+/// protocol, no `,` or `|` in the name). A port (`/`, digits, a `-` range)
+/// is left as typed.
 fn traffic_service(token: &str, idx: &NameIndex) -> Vec<String> {
     let all = idx.services();
     let expandable = all
@@ -528,8 +529,8 @@ fn traffic_service(token: &str, idx: &NameIndex) -> Vec<String> {
     if let Some(names) = prefixed(token, &[("svc:", expandable)]) {
         return names;
     }
-    let is_port =
-        token.contains('/') || (!token.is_empty() && token.bytes().all(|b| b.is_ascii_digit()));
+    let is_port = token.contains('/')
+        || (!token.is_empty() && token.bytes().all(|b| b.is_ascii_digit() || b == b'-'));
     if is_port {
         return Vec::new();
     }
@@ -544,10 +545,12 @@ fn traffic_service(token: &str, idx: &NameIndex) -> Vec<String> {
                 17 => "udp",
                 _ => return None,
             };
-            let single = p.to_port.is_none_or(|to| Some(to) == p.port);
-            p.port
-                .filter(|_| single)
-                .map(|port| (s.name.clone(), format!("{port}/{proto}")))
+            let port = p.port?;
+            let text = match p.to_port.filter(|to| *to > port) {
+                Some(to) => format!("{port}-{to}/{proto}"),
+                None => format!("{port}/{proto}"),
+            };
+            Some((s.name.clone(), text))
         })
     });
     out.extend(ranked(token, ports));
@@ -1071,13 +1074,21 @@ mod tests {
     }
 
     #[test]
-    fn filter_services_offer_protocols_and_single_ports() {
+    fn filter_services_offer_protocols_ports_and_ranges() {
         assert_eq!(
             ff(FieldKind::TrafficService, "", &[], false),
             s(&[
-                "tcp", "udp", "icmp", "icmpv6", "svc:", "5432/tcp", "80/tcp", "443/tcp"
+                "tcp",
+                "udp",
+                "icmp",
+                "icmpv6",
+                "svc:",
+                "5432/tcp",
+                "80/tcp",
+                "443/tcp",
+                "8000-8099/tcp"
             ]),
-            "no range (8000-8099) and no `All Services`"
+            "a range as from-to/proto, no `All Services`"
         );
         assert_eq!(
             ff(FieldKind::TrafficService, "post", &[], false),
@@ -1086,11 +1097,12 @@ mod tests {
         );
         assert_eq!(
             ff(FieldKind::TrafficService, "WEB", &[], false),
-            s(&["80/tcp", "443/tcp"])
+            s(&["80/tcp", "443/tcp", "8000-8099/tcp"])
         );
         assert_eq!(ff(FieldKind::TrafficService, "u", &[], false), s(&["udp"]));
         assert!(ff(FieldKind::TrafficService, "443", &[], false).is_empty());
         assert!(ff(FieldKind::TrafficService, "443/t", &[], false).is_empty());
+        assert!(ff(FieldKind::TrafficService, "8000-", &[], false).is_empty());
         assert_eq!(
             ff(FieldKind::TrafficService, "!post", &[], false),
             s(&["!5432/tcp"]),
@@ -1103,8 +1115,8 @@ mod tests {
         assert!(ff(FieldKind::TrafficService, "!22", &[], false).is_empty());
         assert_eq!(
             ff(FieldKind::TrafficService, "svc:", &[], false),
-            s(&["svc:PostgreSQL"]),
-            "only names the filter can expand: no range (Web), not every protocol"
+            s(&["svc:PostgreSQL", "svc:Web"]),
+            "only names the filter can expand: not every protocol"
         );
         assert_eq!(
             ff(FieldKind::TrafficService, "!SVC:post", &[], false),

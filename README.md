@@ -368,16 +368,18 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   service `,` is AND, `|` is OR and a `!` term excludes (`env=prod, !app=monitoring`,
   `tcp, !22/tcp`, `443/tcp | 80/tcp`, `!svc:SSH`): it goes into Explorer's own exclude list,
   so the PCE leaves it out at no extra cost. A `!` starts its term (`env=prod !app=x` asks for
-  the missing `,`). `svc:NAME` stands for the service's ports, each one more alternative (or
-  one more exclusion), from the cached service list; a service with a port range or of every
-  protocol cannot be written as the single ports the filter takes and is a form error. That list is flat, so a `!` leaves its match out of the whole
+  the missing `,`). A port range is `FROM-TO/PROTO` with tcp or udp, both ends included
+  (`8000-8100/tcp`, `!8000-8100/udp`; `1 <= FROM < TO <= 65535`), sent as Explorer's
+  `port`/`to_port`. `svc:NAME` stands for the service's ports and port ranges, each one more
+  alternative (or one more exclusion), from the cached service list; a service of every
+  protocol is a form error. That list is flat, so a `!` leaves its match out of the whole
   field, whichever `|` group it is written in, and a field of `!` terms only keeps every flow
   but those; the editor says so under the fields. Explorer takes labels, IP lists, workloads,
   IPs and ports/protocols there; `fqdn:` only on the destination side (a source `fqdn:`, to
   include or exclude, is a form error, and src completion does not offer it). In the filter
   editor `Ctrl-N` / `Ctrl-P` complete like a form (after a `!` too): labels, `ipl:` IP lists and the grammar's
   `ip:` `ipl:` `wl:` `fqdn:` in src and dst (`wl:` hostnames only once the Workloads screen
-  has loaded them), protocols and services as `port/proto`, the decision and transmission
+  has loaded them), protocols and services as `port/proto` or `from-to/proto`, the decision and transmission
   words and the window steps, never with a request. The editor's `transmission` field
   (`unicast`, `broadcast`, `multicast`, comma list; `all` by default) and `:unicast` (unicast
   only; again: every kind, one query through the same cost guard) narrow the query by how
@@ -856,8 +858,9 @@ Commands that print no table (writes, `health`, `policy rules impact`, `profile 
 traffic `--dry-run`) refuse it with exit 2 before any request.
 
 `--exclude-src`, `--exclude-dst` (same syntax as `--src` / `--dst`) and `--exclude-service`
-(`22/tcp`, `22`, `udp` or `svc:NAME`, the service's ports, read from the cached service list;
-no port ranges), each repeatable, fill Explorer's exclude lists: `--dst env=prod
+(`22/tcp`, `22`, `udp`, a range `8000-8100/tcp` or `svc:NAME`, the service's ports and
+ranges, read from the cached service list), each repeatable, fill Explorer's exclude lists
+(`--port 8000-8100 --proto tcp` includes a range the same way): `--dst env=prod
 --exclude-src app=monitoring --exclude-service 22/tcp` is every flow into prod except from
 monitoring and except SSH. With no `--src`, `--exclude-src` alone means every source but
 those, and the query stays unbounded (only an include narrows it). `fqdn:` is a destination

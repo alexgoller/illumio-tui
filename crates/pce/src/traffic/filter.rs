@@ -98,9 +98,9 @@ impl ServiceExpr {
 }
 
 /// The port/protos `expr` stands for: itself, or one per port entry of the
-/// named service (live services only, the name any case). A port range, a
-/// service of every protocol or one without ports cannot be written as the
-/// single ports the filter takes, and fails naming why.
+/// named service (live services only, the name any case), a port range
+/// kept as one. A service of every protocol or one without ports cannot be
+/// written as a service filter, and fails naming why.
 pub fn resolve_service(
     expr: &ServiceExpr,
     services: &[&Service],
@@ -134,24 +134,16 @@ pub fn resolve_service(
     svc.service_ports
         .iter()
         .map(|p| {
-            let proto = p
-                .proto
-                .and_then(|n| u8::try_from(n).ok())
-                .ok_or_else(|| {
-                    format!(
-                        "svc:{} matches every protocol: leave the service field empty",
-                        svc.name
-                    )
-                })?;
-            if p.to_port.is_some_and(|to| Some(to) != p.port) {
-                return Err(format!(
-                    "svc:{} has the port range {}; the traffic filter takes single ports, write them instead",
-                    svc.name,
-                    p.display()
-                ));
-            }
+            let proto = p.proto.and_then(|n| u8::try_from(n).ok()).ok_or_else(|| {
+                format!(
+                    "svc:{} matches every protocol: leave the service field empty",
+                    svc.name
+                )
+            })?;
             Ok(ServiceMatch {
                 port: p.port,
+                // A to_port equal to (or below) the port is the single port.
+                to_port: p.to_port.filter(|to| p.port.is_some_and(|from| *to > from)),
                 proto: Some(proto),
                 process_name: None,
             })
@@ -159,8 +151,10 @@ pub fn resolve_service(
         .collect()
 }
 
-/// `443/tcp`, `443` or `tcp`: one service of the traffic filter, to include
-/// or to exclude (Explorer takes the same port/proto in both lists).
+/// `443/tcp`, `443`, `tcp` or `8000-8100/tcp`: one service of the traffic
+/// filter, to include or to exclude (Explorer takes the same
+/// port/to_port/proto in both lists). A range runs upwards from port 1,
+/// both ends included, and needs tcp or udp.
 pub fn parse_service(s: &str) -> std::result::Result<ServiceMatch, String> {
     let s = s.trim();
     let (port_s, proto_s) = match s.split_once('/') {
@@ -168,7 +162,36 @@ pub fn parse_service(s: &str) -> std::result::Result<ServiceMatch, String> {
         None => (s, None),
     };
     let mut m = ServiceMatch::default();
-    if let Some(pr) = proto_s {
+    if let Some((from_s, to_s)) = port_s.split_once('-') {
+        let port = |p: &str| {
+            p.trim()
+                .parse::<u16>()
+                .map_err(|_| format!("bad port {:?} in the range {port_s:?}", p.trim()))
+        };
+        let (from, to) = (port(from_s)?, port(to_s)?);
+        if from == 0 {
+            return Err(format!(
+                "port range {port_s:?} starts at 0: start at port 1"
+            ));
+        }
+        if from >= to {
+            return Err(format!(
+                "port range {port_s:?} must run from a lower to a higher port"
+            ));
+        }
+        let proto =
+            proto_s.map(|pr| proto_number(pr).ok_or_else(|| format!("unknown protocol {pr:?}")));
+        match proto.transpose()? {
+            Some(n @ (6 | 17)) => m.proto = Some(n),
+            _ => {
+                return Err(format!(
+                    "port range {port_s:?} needs tcp or udp: {from}-{to}/tcp"
+                ));
+            }
+        }
+        m.port = Some(from);
+        m.to_port = Some(to);
+    } else if let Some(pr) = proto_s {
         m.proto = Some(proto_number(pr).ok_or_else(|| format!("unknown protocol {pr:?}"))?);
         m.port = Some(
             port_s
@@ -180,7 +203,9 @@ pub fn parse_service(s: &str) -> std::result::Result<ServiceMatch, String> {
     } else if let Some(n) = proto_number(port_s) {
         m.proto = Some(n);
     } else {
-        return Err(format!("use PORT, PROTO or PORT/PROTO, got {s:?}"));
+        return Err(format!(
+            "use PORT, PROTO, PORT/PROTO or FROM-TO/PROTO, got {s:?}"
+        ));
     }
     Ok(m)
 }
@@ -323,11 +348,12 @@ mod tests {
     }
 
     #[test]
-    fn named_services_expand_to_their_single_ports() {
+    fn named_services_expand_to_their_ports_and_ranges() {
         let idx = index();
         let all = idx.services();
         let m = |port, proto| ServiceMatch {
             port,
+            to_port: None,
             proto: Some(proto),
             process_name: None,
         };
@@ -352,8 +378,33 @@ mod tests {
             "any case"
         );
         assert_eq!(r("443/tcp").unwrap(), vec![m(Some(443), 6)]);
-        let err = r("svc:Web").unwrap_err();
-        assert!(err.contains("port range 8000-8099/tcp"), "{err}");
+        assert_eq!(
+            r("svc:Web").unwrap(),
+            vec![
+                m(Some(80), 6),
+                m(Some(443), 6),
+                ServiceMatch {
+                    to_port: Some(8099),
+                    ..m(Some(8000), 6)
+                }
+            ],
+            "the range kept as one entry"
+        );
+        let single = Service {
+            service_ports: vec![crate::models::ServicePort {
+                port: Some(53),
+                to_port: Some(53),
+                proto: Some(17),
+                icmp_type: None,
+                icmp_code: None,
+            }],
+            ..(*all.iter().find(|s| s.name == "PostgreSQL").unwrap()).clone()
+        };
+        assert_eq!(
+            resolve_service(&ServiceExpr::parse("svc:PostgreSQL").unwrap(), &[&single]).unwrap(),
+            vec![m(Some(53), 17)],
+            "a to_port equal to the port is the single port"
+        );
         let err = r("svc:All Services").unwrap_err();
         assert!(err.contains("every protocol"), "{err}");
         let err = r("svc:nope").unwrap_err();
@@ -383,6 +434,7 @@ mod tests {
     fn service_forms() {
         let m = |port, proto| ServiceMatch {
             port,
+            to_port: None,
             proto,
             process_name: None,
         };
@@ -397,6 +449,36 @@ mod tests {
         );
         assert!(parse_service("99999").unwrap_err().contains("PORT/PROTO"));
         assert!(parse_service("").is_err());
+        let range = |from, to, proto| ServiceMatch {
+            port: Some(from),
+            to_port: Some(to),
+            proto: Some(proto),
+            process_name: None,
+        };
+        assert_eq!(
+            parse_service("8000-8100/tcp").unwrap(),
+            range(8000, 8100, 6)
+        );
+        assert_eq!(
+            parse_service(" 1 - 65535 / UDP ").unwrap(),
+            range(1, 65535, 17),
+            "the widest range"
+        );
+        assert_eq!(parse_service("1-2/6").unwrap(), range(1, 2, 6));
+        for (bad, why) in [
+            ("8000-8100", "needs tcp or udp"),
+            ("8000-8100/icmp", "needs tcp or udp"),
+            ("8000-8100/xyz", "unknown protocol"),
+            ("0-100/tcp", "starts at 0"),
+            ("8100-8000/tcp", "lower to a higher"),
+            ("8000-8000/tcp", "lower to a higher"),
+            ("8000-65536/tcp", "bad port \"65536\""),
+            ("-80/tcp", "bad port \"\""),
+            ("80-/tcp", "bad port \"\""),
+        ] {
+            let err = parse_service(bad).unwrap_err();
+            assert!(err.contains(why), "{bad}: {err}");
+        }
     }
 
     #[test]

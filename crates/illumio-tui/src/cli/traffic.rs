@@ -18,7 +18,7 @@ use pce::traffic::{
     FlowGroup, Focus, FocusDirection, MAX_TRAFFIC_MAX_RESULTS, MeshColumns, MeshRow, ResolvedFlow,
     ServiceExpr, TrafficQueryBuilder, app_header, app_sections, app_sections_both, backfill_cap,
     compact_duration, group_by_labels, group_by_service, in_app, keys_or_default, mesh, parse_app,
-    parse_window, resolve_actor, resolve_flows, resolve_service,
+    parse_service, parse_window, resolve_actor, resolve_flows, resolve_service,
 };
 use pce::{KeyOrder, NameIndex};
 use serde::Serialize;
@@ -268,13 +268,13 @@ pub struct FilterArgs {
     /// Exclude destinations matching this filter (same syntax as --dst; repeatable)
     #[arg(long = "exclude-dst")]
     pub exclude_dst: Vec<String>,
-    /// Exclude a service: PORT, PROTO, PORT/PROTO (22/tcp) or svc:NAME, a service object's
-    /// ports (no port ranges); repeatable
+    /// Exclude a service: PORT, PROTO, PORT/PROTO (22/tcp), FROM-TO/PROTO (8000-8100/tcp) or
+    /// svc:NAME, a service object's ports and port ranges; repeatable
     #[arg(long = "exclude-service")]
     pub exclude_service: Vec<String>,
-    /// Destination port
+    /// Destination port, or a range FROM-TO with --proto tcp or udp (8000-8100)
     #[arg(long)]
-    pub port: Option<u16>,
+    pub port: Option<String>,
     /// tcp, udp, icmp or a protocol number
     #[arg(long)]
     pub proto: Option<String>,
@@ -399,16 +399,29 @@ async fn build_query(
         }
     };
     if args.port.is_some() || args.proto.is_some() || args.process.is_some() {
-        let proto = match &args.proto {
-            Some(p) => Some(
-                proto_number(p).ok_or_else(|| CliError::Args(format!("unknown protocol {p:?}")))?,
-            ),
-            None => None,
+        // --port (a range too) and --proto read as one PORT/PROTO term.
+        let bad = |e: String| CliError::Args(format!("--port/--proto: {e}"));
+        let m = match (&args.port, &args.proto) {
+            (Some(port), proto) => {
+                let term = match proto {
+                    Some(proto) => format!("{port}/{proto}"),
+                    None => port.clone(),
+                };
+                let m = parse_service(&term).map_err(bad)?;
+                if m.port.is_none() {
+                    return Err(bad(format!("--port takes a port or a range, got {port:?}")));
+                }
+                m
+            }
+            (None, Some(p)) => ServiceMatch {
+                proto: Some(proto_number(p).ok_or_else(|| bad(format!("unknown protocol {p:?}")))?),
+                ..ServiceMatch::default()
+            },
+            (None, None) => ServiceMatch::default(),
         };
         b = b.service(ServiceMatch {
-            port: args.port,
-            proto,
             process_name: args.process.clone(),
+            ..m
         });
     }
     let ex_svc: Vec<ServiceExpr> = args

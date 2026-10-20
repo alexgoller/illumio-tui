@@ -255,13 +255,28 @@ async fn named_services_expand_in_both_lists() {
         v["services"]["exclude"],
         json!([{"port": 5432, "proto": 6}])
     );
-    f.service = "!svc:Web".into();
+    f.service = "8000-8100/tcp, !svc:Web".into();
+    let v = serde_json::to_value(f.to_query(&pce, pce::CacheMode::Use).await.unwrap()).unwrap();
+    assert_eq!(
+        v["services"]["include"],
+        json!([{"port": 8000, "to_port": 8100, "proto": 6}])
+    );
+    assert_eq!(
+        v["services"]["exclude"],
+        json!([
+            {"port": 80, "proto": 6},
+            {"port": 443, "proto": 6},
+            {"port": 8000, "to_port": 8099, "proto": 6}
+        ]),
+        "a range of the service stays one range"
+    );
+    f.service = "!svc:All Services".into();
     let err = f
         .to_query(&pce, pce::CacheMode::Use)
         .await
         .unwrap_err()
         .to_string();
-    assert!(err.contains("service: svc:Web has the port range"), "{err}");
+    assert!(err.contains("every protocol"), "{err}");
 }
 
 /// A filter without `!` builds exactly the body it built before #62.

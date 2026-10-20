@@ -75,8 +75,13 @@ pub struct ActorFilter {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ServiceMatch {
+    /// The port, or the first port of a range.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
+    /// The last port of a range, inclusive; absent for a single port, so
+    /// a single-port body is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to_port: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proto: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

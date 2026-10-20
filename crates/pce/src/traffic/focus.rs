@@ -459,6 +459,7 @@ mod tests {
         })
         .exclude_service(crate::models::ServiceMatch {
             port: Some(22),
+            to_port: None,
             proto: Some(6),
             process_name: None,
         })

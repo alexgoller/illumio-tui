@@ -108,10 +108,7 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
             key("v", "cycle Flows · App-to-app · Mesh · Blocked · Treemap"),
             key("f", "edit filter: window src dst svc decision transmission"),
             more("", "in f: , and · | or · ! excludes from the whole field"),
-            more(
-                "",
-                "svc svc:NAME: its ports (no port ranges) · src: no fqdn:",
-            ),
+            more("", "svc 8000-8100/tcp · svc:NAME its ports · src: no fqdn:"),
             more(
                 "Ctrl-N Ctrl-P",
                 "in f: complete the filter fields · cycle back",

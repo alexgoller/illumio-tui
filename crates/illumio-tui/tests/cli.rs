@@ -1929,22 +1929,74 @@ async fn exclude_service_by_name_reads_only_the_cached_service_list() {
         out["meta"]["api_calls"], 4,
         "the index the actors load anyway"
     );
-    let assert = cmd(&server)
-        .args([
-            "traffic",
-            "query",
-            "--exclude-service",
-            "svc:Web",
-            "--dry-run",
-        ])
-        .assert()
-        .code(2);
-    let err: Value = serde_json::from_slice(&assert.get_output().stderr).unwrap();
-    let msg = err["error"]["message"].as_str().unwrap();
-    assert!(
-        msg.contains("--exclude-service") && msg.contains("port range 8000-8099/tcp"),
-        "{msg}"
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "traffic",
+                "query",
+                "--exclude-service",
+                "svc:Web",
+                "--exclude-service",
+                "9000-9100/udp",
+                "--dry-run",
+            ])
+            .assert()
+            .success(),
     );
+    assert_eq!(
+        out["data"]["services"]["exclude"],
+        json!([
+            {"port": 80, "proto": 6},
+            {"port": 443, "proto": 6},
+            {"port": 8000, "to_port": 8099, "proto": 6},
+            {"port": 9000, "to_port": 9100, "proto": 17}
+        ]),
+        "a service's range stays one range"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn port_takes_a_range_with_tcp_or_udp() {
+    let server = MockServer::start().await;
+    mount_traffic(&server, 0).await;
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "traffic",
+                "query",
+                "--port",
+                "8000-8100",
+                "--proto",
+                "tcp",
+                "--dry-run",
+            ])
+            .assert()
+            .success(),
+    );
+    assert_eq!(
+        out["data"]["services"]["include"],
+        json!([{"port": 8000, "to_port": 8100, "proto": 6}])
+    );
+    for (args, why) in [
+        (&["--port", "8000-8100"][..], "needs tcp or udp"),
+        (
+            &["--port", "8000-8100", "--proto", "icmp"],
+            "needs tcp or udp",
+        ),
+        (&["--port", "100-10", "--proto", "udp"], "lower to a higher"),
+        (&["--port", "tcp"], "--port takes a port or a range"),
+        (&["--port", "99999"], "PORT/PROTO"),
+        (&["--exclude-service", "0-10/tcp"], "starts at 0"),
+    ] {
+        let assert = cmd(&server)
+            .args(["traffic", "query", "--dry-run"])
+            .args(args)
+            .assert()
+            .code(2);
+        let err: Value = serde_json::from_slice(&assert.get_output().stderr).unwrap();
+        let msg = err["error"]["message"].as_str().unwrap();
+        assert!(msg.contains(why), "{args:?}: {msg}");
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

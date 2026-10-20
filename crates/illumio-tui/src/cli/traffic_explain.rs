@@ -56,7 +56,7 @@ impl ExplainArgs {
             window: self.window.clone(),
             src: self.src.clone(),
             dst: self.dst.clone(),
-            port: Some(self.port),
+            port: Some(self.port.to_string()),
             proto: Some(
                 match self.proto {
                     ExplainProto::Tcp => "tcp",

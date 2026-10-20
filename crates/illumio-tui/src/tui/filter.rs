@@ -733,6 +733,7 @@ mod tests {
         let m = |port, proto| {
             ServiceExpr::Port(ServiceMatch {
                 port,
+                to_port: None,
                 proto,
                 process_name: None,
             })
@@ -762,6 +763,20 @@ mod tests {
                 .unwrap_err()
                 .contains("a flow has one service")
         );
+        f.service = "8000-8100/tcp | !8443-8444/udp".into();
+        let t = f.service_terms().unwrap();
+        let range = |from, to, proto| {
+            ServiceExpr::Port(ServiceMatch {
+                port: Some(from),
+                to_port: Some(to),
+                proto: Some(proto),
+                process_name: None,
+            })
+        };
+        assert_eq!(t.include, vec![vec![range(8000, 8100, 6)]]);
+        assert_eq!(t.exclude, vec![range(8443, 8444, 17)]);
+        f.service = "8000-8100".into();
+        assert!(f.service_terms().unwrap_err().contains("needs tcp or udp"));
         f.service = "udp/53".into();
         assert!(f.service_terms().unwrap_err().starts_with("service: "));
         f.service = "99999".into();
@@ -789,6 +804,7 @@ mod tests {
             svc.exclude,
             vec![ServiceExpr::Port(ServiceMatch {
                 port: Some(22),
+                to_port: None,
                 proto: Some(6),
                 process_name: None
             })]
@@ -897,7 +913,11 @@ mod tests {
             ("dst", "!justaword", "cannot parse"),
             ("src", "!fqdn:x.example", "destination filter only"),
             ("svc", "!", "service: ! needs a term after it"),
-            ("svc", "!ssh", "service: use PORT, PROTO or PORT/PROTO"),
+            (
+                "svc",
+                "!ssh",
+                "service: use PORT, PROTO, PORT/PROTO or FROM-TO/PROTO",
+            ),
             ("svc", "!22/xyz", "unknown protocol"),
         ] {
             let mut g = f.clone();
