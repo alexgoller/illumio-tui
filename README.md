@@ -364,8 +364,15 @@ scrolls the current table and a click on a tab switches screen; on a terminal na
 the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
 
 - **Traffic**: `f` edit the filter, `r` run (bypasses the cache), `a` auto-refresh, `s` sort,
-  `/` search; a filter that would be expensive asks for confirmation first. In the filter
-  editor `Ctrl-N` / `Ctrl-P` complete like a form: labels, `ipl:` IP lists and the grammar's
+  `/` search; a filter that would be expensive asks for confirmation first. In src, dst and
+  service `,` is AND, `|` is OR and a `!` term excludes (`env=prod, !app=monitoring`,
+  `tcp, !22/tcp`, `443/tcp | 80/tcp`): it goes into Explorer's own exclude list, so the PCE
+  leaves it out at no extra cost. That list is flat, so a `!` leaves its match out of the whole
+  field, whichever `|` group it is written in, and a field of `!` terms only keeps every flow
+  but those; the editor says so under the fields. Explorer takes labels, IP lists, workloads,
+  IPs and ports/protocols there; `fqdn:` only on the destination side (a source `fqdn:` is a
+  form error). In the filter
+  editor `Ctrl-N` / `Ctrl-P` complete like a form (after a `!` too): labels, `ipl:` IP lists and the grammar's
   `ip:` `ipl:` `wl:` `fqdn:` in src and dst (`wl:` hostnames only once the Workloads screen
   has loaded them), protocols and services as `port/proto`, the decision and transmission
   words and the window steps, never with a request. The editor's `transmission` field
@@ -740,6 +747,7 @@ the API call and byte counters at all times.
     illumio-tui traffic query --window 24h --src app=web --dst app=db --json
     illumio-tui traffic query --window 1h --group app,env
     illumio-tui traffic query --window 1h --blocked
+    illumio-tui traffic query --dst env=prod --exclude-src app=monitoring --exclude-service 22/tcp
     illumio-tui traffic groups --window 1h --keys app,env,role
     illumio-tui traffic groups --window 1h --services --csv > tuples.csv
     illumio-tui traffic groups --window 1h --services --show blocked --csv > still-blocked.csv
@@ -843,6 +851,13 @@ record per workload with a leading `group` column in the filter grammar (`app=sh
 largest group first. Grouping is local: no extra request.
 Commands that print no table (writes, `health`, `policy rules impact`, `profile use`, a
 traffic `--dry-run`) refuse it with exit 2 before any request.
+
+`--exclude-src`, `--exclude-dst` (same syntax as `--src` / `--dst`) and `--exclude-service`
+(`22/tcp`, `22` or `udp`), each repeatable, fill Explorer's exclude lists: `--dst env=prod
+--exclude-src app=monitoring --exclude-service 22/tcp` is every flow into prod except from
+monitoring and except SSH. With no `--src`, `--exclude-src` alone means every source but
+those. `fqdn:` is a destination filter only (exit 2 on `--src` or `--exclude-src`). `--dry-run`
+prints the body with the `exclude` lists.
 
 `traffic groups` and `traffic mesh` take the `traffic query` filter flags (and its dry run,
 cost guard and cache) and print the same envelope. `groups` gives one row per source and

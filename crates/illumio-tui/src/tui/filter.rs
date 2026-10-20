@@ -2,10 +2,10 @@
 //! cost hints (no network), and its conversion to a `TrafficQuery` (needs
 //! the name index, so it is async and runs in the runtime, not in `update`).
 use crate::tui::form::{Completing, Completion, FieldKind};
-use pce::models::{PolicyDecision, ServiceMatch, TrafficQuery, Transmission, proto_number};
+use pce::models::{PolicyDecision, ServiceMatch, TrafficQuery, Transmission};
 use pce::traffic::{
     CONFIRM_MAX_RESULTS, CONFIRM_WINDOW, FilterExpr, MAX_TRAFFIC_MAX_RESULTS, TrafficQueryBuilder,
-    parse_window,
+    parse_service, parse_window,
 };
 use pce::{CacheMode, Pce};
 use std::time::Duration;
@@ -22,22 +22,59 @@ pub struct TrafficFilter {
     pub max_results: u32,
 }
 
-/// `a,b | c` is (a AND b) OR c. Empty expressions and groups that end up empty
-/// (`,` or ` | `) are dropped, so blank-ish text parses to no groups at all.
-fn parse_groups(text: &str) -> Result<Vec<Vec<FilterExpr>>, String> {
-    let mut groups = Vec::new();
+/// A field's terms: `include` its `|` groups of `,` terms (OR of ANDs),
+/// `exclude` every `!` term, whichever group it is written in: Explorer's
+/// exclude list is flat, so a `!` leaves its match out of the whole field.
+/// No include group (only `!` terms) means every flow except those.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Terms<T> {
+    pub include: Vec<Vec<T>>,
+    pub exclude: Vec<T>,
+}
+
+impl<T> Terms<T> {
+    pub fn is_empty(&self) -> bool {
+        self.include.is_empty() && self.exclude.is_empty()
+    }
+
+    /// (include groups, exclusions).
+    fn counts(&self) -> (usize, usize) {
+        (self.include.len(), self.exclude.len())
+    }
+}
+
+/// `a,b | c, !d` is ((a AND b) OR c) AND NOT d. Empty terms and groups that
+/// end up empty (`,` or ` | `) are dropped, so blank-ish text parses to no
+/// terms at all. A `!` needs one term after it.
+fn parse_terms<T>(
+    text: &str,
+    parse: impl Fn(&str) -> Result<T, String>,
+) -> Result<Terms<T>, String> {
+    let mut terms = Terms {
+        include: Vec::new(),
+        exclude: Vec::new(),
+    };
     for g in text.split('|') {
-        let group = g
-            .split(',')
-            .map(str::trim)
-            .filter(|e| !e.is_empty())
-            .map(|e| FilterExpr::parse(e).map_err(|err| err.to_string()))
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut group = Vec::new();
+        for e in g.split(',').map(str::trim).filter(|e| !e.is_empty()) {
+            match e.strip_prefix('!').map(str::trim_start) {
+                Some("") => return Err("! needs a term after it, e.g. !app=web".into()),
+                Some(rest) if rest.starts_with('!') => {
+                    return Err(format!("{e:?}: one ! per term (no double negation)"));
+                }
+                Some(rest) => terms.exclude.push(parse(rest)?),
+                None => group.push(parse(e)?),
+            }
+        }
         if !group.is_empty() {
-            groups.push(group);
+            terms.include.push(group);
         }
     }
-    Ok(groups)
+    Ok(terms)
+}
+
+fn parse_actor(e: &str) -> Result<FilterExpr, String> {
+    FilterExpr::parse(e).map_err(|err| err.to_string())
 }
 
 /// `all` when every decision is selected (or none, which the PCE treats the same),
@@ -71,48 +108,40 @@ impl TrafficFilter {
         parse_window(&self.window).map_err(|e| format!("window: {e}"))
     }
 
-    pub fn src_groups(&self) -> Result<Vec<Vec<FilterExpr>>, String> {
-        parse_groups(&self.src).map_err(|e| format!("source: {e}"))
-    }
-
-    pub fn dst_groups(&self) -> Result<Vec<Vec<FilterExpr>>, String> {
-        parse_groups(&self.dst).map_err(|e| format!("destination: {e}"))
-    }
-
-    /// `443/tcp`, `443`, `tcp`; empty means no service filter.
-    pub fn service_match(&self) -> Result<Option<ServiceMatch>, String> {
-        let s = self.service.trim();
-        if s.is_empty() {
-            return Ok(None);
-        }
-        let (port_s, proto_s) = match s.split_once('/') {
-            Some((p, pr)) => (p.trim(), Some(pr.trim())),
-            None => (s, None),
+    /// The source terms. Explorer takes no FQDN on the source side, to
+    /// include or to exclude.
+    pub fn src_terms(&self) -> Result<Terms<FilterExpr>, String> {
+        let src = |e: &str| {
+            let x = parse_actor(e)?;
+            x.check_source().map_err(|err| err.to_string())?;
+            Ok(x)
         };
-        let mut m = ServiceMatch::default();
-        if let Some(pr) = proto_s {
-            m.proto =
-                Some(proto_number(pr).ok_or_else(|| format!("service: unknown protocol {pr:?}"))?);
-            m.port = Some(
-                port_s
-                    .parse::<u16>()
-                    .map_err(|_| format!("service: bad port {port_s:?}"))?,
+        parse_terms(&self.src, src).map_err(|e| format!("source: {e}"))
+    }
+
+    pub fn dst_terms(&self) -> Result<Terms<FilterExpr>, String> {
+        parse_terms(&self.dst, parse_actor).map_err(|e| format!("destination: {e}"))
+    }
+
+    /// `443/tcp`, `443`, `tcp`, any of them `|` another, each with `!` to
+    /// leave it out instead; empty means no service filter. A flow has one
+    /// service, so a `,` group holds one service to include at most.
+    pub fn service_terms(&self) -> Result<Terms<ServiceMatch>, String> {
+        let terms =
+            parse_terms(&self.service, parse_service).map_err(|e| format!("service: {e}"))?;
+        if terms.include.iter().any(|g| g.len() > 1) {
+            return Err(
+                "service: a flow has one service; use | between services (443/tcp | 80/tcp)".into(),
             );
-        } else if let Ok(p) = port_s.parse::<u16>() {
-            m.port = Some(p);
-        } else if let Some(n) = proto_number(port_s) {
-            m.proto = Some(n);
-        } else {
-            return Err(format!("service: use PORT, PROTO or PORT/PROTO, got {s:?}"));
         }
-        Ok(Some(m))
+        Ok(terms)
     }
 
     pub fn validate(&self) -> Result<(), String> {
         self.window_duration()?;
-        self.src_groups()?;
-        self.dst_groups()?;
-        self.service_match()?;
+        self.src_terms()?;
+        self.dst_terms()?;
+        self.service_terms()?;
         if self.max_results == 0 {
             return Err("max results must be at least 1".into());
         }
@@ -125,12 +154,44 @@ impl TrafficFilter {
         Ok(())
     }
 
-    /// No source, destination or service restriction, judged from the parsed groups
-    /// so `,` or ` | ` counts as empty. Unparseable text is not unbounded (it fails
-    /// validation instead).
+    /// No source, destination or service restriction (to include or to
+    /// exclude), judged from the parsed terms so `,` or ` | ` counts as empty.
+    /// Unparseable text is not unbounded (it fails validation instead).
     pub fn is_unbounded(&self) -> bool {
-        let empty = |g: Result<Vec<Vec<FilterExpr>>, String>| g.is_ok_and(|g| g.is_empty());
-        empty(self.src_groups()) && empty(self.dst_groups()) && self.service.trim().is_empty()
+        self.src_terms().is_ok_and(|t| t.is_empty())
+            && self.dst_terms().is_ok_and(|t| t.is_empty())
+            && self.service_terms().is_ok_and(|t| t.is_empty())
+    }
+
+    /// The editor's note on `!` terms, `None` without any: Explorer's
+    /// exclude list is flat, so a `!` in one `|` group leaves its match out
+    /// of the whole field, and a field of `!` terms only keeps every flow
+    /// but those.
+    pub fn exclude_note(&self) -> Option<&'static str> {
+        // (text, include groups, exclusions) per field that parses.
+        let fields = [
+            self.src_terms().ok().map(|t| (&self.src, t.counts())),
+            self.dst_terms().ok().map(|t| (&self.dst, t.counts())),
+            self.service_terms()
+                .ok()
+                .map(|t| (&self.service, t.counts())),
+        ];
+        // (written with `|`, include groups) per field with a `!` term.
+        let excluding: Vec<(bool, usize)> = fields
+            .into_iter()
+            .flatten()
+            .filter(|(_, (_, ex))| *ex > 0)
+            .map(|(text, (inc, _))| (text.contains('|'), inc))
+            .collect();
+        if excluding.iter().any(|(or, _)| *or) {
+            Some("a ! term leaves its match out of the whole field, not one | group")
+        } else if excluding.iter().any(|(_, inc)| *inc == 0) {
+            Some("a field of ! terms only: every flow except those")
+        } else if !excluding.is_empty() {
+            Some("! leaves its match out of the whole field")
+        } else {
+            None
+        }
     }
 
     /// What narrows the flows besides the window and the cap (`svc 443,
@@ -279,16 +340,36 @@ impl TrafficFilter {
         pce: &Pce,
         mode: CacheMode,
     ) -> pce::Result<TrafficQuery> {
-        let src = self.src_groups().map_err(pce::PceError::Invalid)?;
-        let dst = self.dst_groups().map_err(pce::PceError::Invalid)?;
-        for g in pce.resolve_filter_groups(&src, mode).await? {
+        let src = self.src_terms().map_err(pce::PceError::Invalid)?;
+        let dst = self.dst_terms().map_err(pce::PceError::Invalid)?;
+        let svc = self.service_terms().map_err(pce::PceError::Invalid)?;
+        // One resolution for every group: the include groups of both sides,
+        // then each side's excludes as one more group.
+        let groups: Vec<Vec<FilterExpr>> = src
+            .include
+            .iter()
+            .chain(&dst.include)
+            .cloned()
+            .chain([src.exclude, dst.exclude])
+            .collect();
+        let mut resolved = pce.resolve_filter_groups(&groups, mode).await?.into_iter();
+        for g in resolved.by_ref().take(src.include.len()) {
             b = b.source(g);
         }
-        for g in pce.resolve_filter_groups(&dst, mode).await? {
+        for g in resolved.by_ref().take(dst.include.len()) {
             b = b.destination(g);
         }
-        if let Some(m) = self.service_match().map_err(pce::PceError::Invalid)? {
+        for m in resolved.next().unwrap_or_default() {
+            b = b.exclude_source(m);
+        }
+        for m in resolved.next().unwrap_or_default() {
+            b = b.exclude_destination(m);
+        }
+        for m in svc.include.into_iter().flatten() {
             b = b.service(m);
+        }
+        for m in svc.exclude {
+            b = b.exclude_service(m);
         }
         b.decisions(self.decisions.clone())
             .transmission(&self.transmission)
@@ -505,7 +586,7 @@ mod tests {
     fn groups_parse_or_and() {
         let mut f = TrafficFilter::defaults("1h", 50);
         f.src = "app=web,env=prod | ipl:Corp".into();
-        let g = f.src_groups().unwrap();
+        let g = f.src_terms().unwrap().include;
         assert_eq!(
             g,
             vec![
@@ -524,12 +605,12 @@ mod tests {
         );
         f.dst = "10.0.0.5".into();
         assert_eq!(
-            f.dst_groups().unwrap(),
+            f.dst_terms().unwrap().include,
             vec![vec![FilterExpr::Ip("10.0.0.5".into())]]
         );
         assert!(!f.is_unbounded());
         f.src = "justaword".into();
-        assert!(f.src_groups().unwrap_err().contains("cannot parse"));
+        assert!(f.src_terms().unwrap_err().contains("cannot parse"));
     }
 
     #[test]
@@ -538,13 +619,13 @@ mod tests {
         for text in [",", " | ", ", | ,", "|"] {
             f.src = text.into();
             f.dst = text.into();
-            assert_eq!(f.src_groups().unwrap(), Vec::<Vec<FilterExpr>>::new());
+            assert!(f.src_terms().unwrap().is_empty());
             assert!(f.is_unbounded(), "{text:?}");
             assert!(f.cost_hint().ends_with("unbounded"), "{text:?}");
         }
         f.src = "app=web | ,".into();
         assert_eq!(
-            f.src_groups().unwrap().len(),
+            f.src_terms().unwrap().include.len(),
             1,
             "the empty group is dropped"
         );
@@ -614,39 +695,159 @@ mod tests {
 
     #[test]
     fn service_forms() {
+        let m = |port, proto| ServiceMatch {
+            port,
+            proto,
+            process_name: None,
+        };
         let mut f = TrafficFilter::defaults("1h", 50);
-        assert_eq!(f.service_match().unwrap(), None);
+        assert!(f.service_terms().unwrap().is_empty());
         f.service = "443/tcp".into();
         assert_eq!(
-            f.service_match().unwrap(),
-            Some(ServiceMatch {
-                port: Some(443),
-                proto: Some(6),
-                process_name: None
-            })
+            f.service_terms().unwrap().include,
+            vec![vec![m(Some(443), Some(6))]]
         );
         f.service = "53".into();
         assert_eq!(
-            f.service_match().unwrap(),
-            Some(ServiceMatch {
-                port: Some(53),
-                proto: None,
-                process_name: None
-            })
+            f.service_terms().unwrap().include,
+            vec![vec![m(Some(53), None)]]
         );
         f.service = "udp".into();
         assert_eq!(
-            f.service_match().unwrap(),
-            Some(ServiceMatch {
-                port: None,
-                proto: Some(17),
-                process_name: None
-            })
+            f.service_terms().unwrap().include,
+            vec![vec![m(None, Some(17))]]
+        );
+        f.service = "443/tcp | 80/tcp".into();
+        assert_eq!(f.service_terms().unwrap().include.len(), 2, "| is any of");
+        f.service = "443/tcp, 80/tcp".into();
+        assert!(
+            f.service_terms()
+                .unwrap_err()
+                .contains("a flow has one service")
         );
         f.service = "udp/53".into();
-        assert!(f.service_match().is_err());
+        assert!(f.service_terms().unwrap_err().starts_with("service: "));
         f.service = "99999".into();
-        assert!(f.service_match().is_err());
+        assert!(f.service_terms().is_err());
+    }
+
+    #[test]
+    fn bang_terms_exclude_in_each_field() {
+        let label = |k: &str, v: &str| FilterExpr::Label {
+            key: k.into(),
+            value: v.into(),
+        };
+        let mut f = TrafficFilter::defaults("1h", 50);
+        f.src = "env=prod, !app=monitoring".into();
+        f.dst = "! ipl:Corp, 10.0.0.0/8".into();
+        f.service = "tcp, !22/tcp".into();
+        let src = f.src_terms().unwrap();
+        assert_eq!(src.include, vec![vec![label("env", "prod")]]);
+        assert_eq!(src.exclude, vec![label("app", "monitoring")]);
+        let dst = f.dst_terms().unwrap();
+        assert_eq!(dst.include, vec![vec![FilterExpr::Ip("10.0.0.0/8".into())]]);
+        assert_eq!(dst.exclude, vec![FilterExpr::IpList("Corp".into())]);
+        let svc = f.service_terms().unwrap();
+        assert_eq!(
+            svc.exclude,
+            vec![ServiceMatch {
+                port: Some(22),
+                proto: Some(6),
+                process_name: None
+            }]
+        );
+        assert_eq!(svc.include.len(), 1, "one service plus an exclusion");
+        assert!(f.validate().is_ok());
+        assert!(f.summary().contains("src env=prod, !app=monitoring"));
+        assert!(f.narrowing().unwrap().contains("svc tcp, !22/tcp"));
+        assert_eq!(
+            f.exclude_note(),
+            Some("! leaves its match out of the whole field")
+        );
+    }
+
+    #[test]
+    fn a_field_of_bang_terms_only_means_everything_except() {
+        let mut f = TrafficFilter::defaults("1h", 50);
+        f.dst = "!app=monitoring, !wl:host-1.example".into();
+        let dst = f.dst_terms().unwrap();
+        assert!(dst.include.is_empty(), "no include group: every flow");
+        assert_eq!(dst.exclude.len(), 2);
+        assert!(!f.is_unbounded(), "an exclusion narrows");
+        assert!(!f.cost_hint().contains("unbounded"));
+        assert_eq!(
+            f.exclude_note(),
+            Some("a field of ! terms only: every flow except those")
+        );
+        f.dst.clear();
+        f.service = "!udp".into();
+        assert!(!f.is_unbounded());
+        assert!(f.service_terms().unwrap().include.is_empty());
+    }
+
+    #[test]
+    fn a_bang_in_an_or_group_excludes_from_the_whole_field() {
+        let mut f = TrafficFilter::defaults("1h", 50);
+        f.src = "app=web | app=db, !env=dev".into();
+        let src = f.src_terms().unwrap();
+        assert_eq!(src.include.len(), 2);
+        assert_eq!(
+            src.exclude,
+            vec![FilterExpr::Label {
+                key: "env".into(),
+                value: "dev".into()
+            }],
+            "flat: not part of the app=db group"
+        );
+        assert_eq!(
+            f.exclude_note(),
+            Some("a ! term leaves its match out of the whole field, not one | group")
+        );
+        f.src = "app=web | !env=dev".into();
+        assert_eq!(f.src_terms().unwrap().include.len(), 1);
+        assert!(f.exclude_note().unwrap().contains("not one | group"));
+        f.src = "app=web".into();
+        assert_eq!(f.exclude_note(), None);
+    }
+
+    #[test]
+    fn bad_bang_terms_fail_validation() {
+        let mut f = TrafficFilter::defaults("1h", 50);
+        for (field, text, want) in [
+            ("src", "!", "source: ! needs a term after it"),
+            ("src", "app=web, ! ", "source: ! needs a term after it"),
+            ("dst", "!!app=web", "one ! per term"),
+            ("dst", "!justaword", "cannot parse"),
+            ("src", "!fqdn:x.example", "destination filter only"),
+            ("svc", "!", "service: ! needs a term after it"),
+            ("svc", "!ssh", "service: use PORT, PROTO or PORT/PROTO"),
+            ("svc", "!22/xyz", "unknown protocol"),
+        ] {
+            let mut g = f.clone();
+            match field {
+                "src" => g.src = text.into(),
+                "dst" => g.dst = text.into(),
+                _ => g.service = text.into(),
+            }
+            let err = g.validate().unwrap_err();
+            assert!(err.contains(want), "{field} {text:?}: {err}");
+            let mut e = FilterEditor::from_filter(&f);
+            e.values[match field {
+                "src" => 1,
+                "dst" => 2,
+                _ => 3,
+            }] = text.into();
+            assert_eq!(e.to_filter().unwrap_err(), err, "the form says the same");
+        }
+        f.dst = "!fqdn:x.example".into();
+        assert!(f.validate().is_ok(), "an FQDN is a destination exclude");
+        f.src = "fqdn:x.example".into();
+        assert!(
+            f.validate()
+                .unwrap_err()
+                .contains("destination filter only"),
+            "nor a source include"
+        );
     }
 
     #[test]

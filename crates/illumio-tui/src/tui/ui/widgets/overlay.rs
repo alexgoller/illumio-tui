@@ -333,8 +333,13 @@ pub fn render_filter_editor(model: &Model, e: &FilterEditor, f: &mut Frame, area
             Style::new().fg(t.bad),
         ))),
         None => {
-            let preview = e.to_filter().map(|f| f.cost_hint()).unwrap_or_default();
+            let parsed = e.to_filter().ok();
+            let preview = parsed.as_ref().map(|f| f.cost_hint()).unwrap_or_default();
             lines.push(Line::from(Span::styled(preview, t.dim_style())));
+            // The editor's last row: how a `!` term applies.
+            if let Some(note) = parsed.as_ref().and_then(|f| f.exclude_note()) {
+                lines.push(Line::from(Span::styled(note, t.dim_style())));
+            }
         }
     }
     f.render_widget(Paragraph::new(lines).block(block).style(t.base()), r);

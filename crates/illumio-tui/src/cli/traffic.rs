@@ -18,7 +18,7 @@ use pce::traffic::{
     FlowGroup, Focus, FocusDirection, MAX_TRAFFIC_MAX_RESULTS, MeshColumns, MeshRow, ResolvedFlow,
     TrafficQueryBuilder, app_header, app_sections, app_sections_both, backfill_cap,
     compact_duration, group_by_labels, group_by_service, in_app, keys_or_default, mesh, parse_app,
-    parse_window, resolve_actor, resolve_flows,
+    parse_service, parse_window, resolve_actor, resolve_flows,
 };
 use pce::{KeyOrder, NameIndex};
 use serde::Serialize;
@@ -255,18 +255,22 @@ pub struct FilterArgs {
     /// End, RFC 3339 or YYYY-MM-DD (end of that day, UTC)
     #[arg(long, requires = "from")]
     pub to: Option<String>,
-    /// Source filter: key=value, ip:ADDR, ipl:NAME, wl:HOST, fqdn:NAME. Comma = AND, repeat = OR
+    /// Source filter: key=value, ip:ADDR, ipl:NAME, wl:HOST (fqdn:NAME is destination only).
+    /// Comma = AND, repeat = OR
     #[arg(long = "src")]
     pub src: Vec<String>,
-    /// Destination filter, same syntax as --src
+    /// Destination filter, same syntax as --src, plus fqdn:NAME
     #[arg(long = "dst")]
     pub dst: Vec<String>,
     /// Exclude sources matching this filter (same syntax as --src; repeatable)
     #[arg(long = "exclude-src")]
     pub exclude_src: Vec<String>,
-    /// Exclude destinations matching this filter (same syntax as --src; repeatable)
+    /// Exclude destinations matching this filter (same syntax as --dst; repeatable)
     #[arg(long = "exclude-dst")]
     pub exclude_dst: Vec<String>,
+    /// Exclude a service: PORT, PROTO or PORT/PROTO, e.g. 22/tcp (repeatable)
+    #[arg(long = "exclude-service")]
+    pub exclude_service: Vec<String>,
     /// Destination port
     #[arg(long)]
     pub port: Option<u16>,
@@ -406,6 +410,11 @@ async fn build_query(
             process_name: args.process.clone(),
         });
     }
+    for s in &args.exclude_service {
+        b = b.exclude_service(
+            parse_service(s).map_err(|e| CliError::Args(format!("--exclude-service: {e}")))?,
+        );
+    }
     let decisions: Vec<PolicyDecision> = args
         .decision
         .iter()
@@ -452,6 +461,10 @@ async fn build_query(
     let dst = parse_groups(&args.dst)?;
     let ex_src = parse_groups(&args.exclude_src)?;
     let ex_dst = parse_groups(&args.exclude_dst)?;
+    // Explorer takes no FQDN on the source side, to include or to exclude.
+    for e in src.iter().chain(&ex_src).flatten() {
+        e.check_source()?;
+    }
     let all = || {
         [&src, &dst, &ex_src, &ex_dst]
             .into_iter()

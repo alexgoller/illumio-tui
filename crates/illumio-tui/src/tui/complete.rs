@@ -63,8 +63,17 @@ pub fn complete(
                 .map(|r| (r.name.clone(), r.name.clone()));
             ranked(token, names)
         }
-        FieldKind::TrafficActors => filter_actors(token, &used_keys(earlier), idx, workloads),
-        FieldKind::TrafficService => traffic_service(token, idx),
+        // A `!` term excludes from the whole field, not the AND group: its
+        // keys are not narrowed by the group's.
+        FieldKind::TrafficActors => negatable(token, |t| {
+            let used = if token.starts_with('!') {
+                Vec::new()
+            } else {
+                used_keys(earlier)
+            };
+            filter_actors(t, &used, idx, workloads)
+        }),
+        FieldKind::TrafficService => negatable(token, |t| traffic_service(t, idx)),
         FieldKind::Decisions => word_list(token, earlier, &DECISIONS),
         FieldKind::Transmission => word_list(
             token,
@@ -296,20 +305,18 @@ const FILTER_WORDS: [&str; 4] = ["ip:", "ipl:", "wl:", "fqdn:"];
 /// `ipl:` completes IP list names, `wl:` the loaded workloads' hostnames
 /// and names, `key=` its values; a bare token offers keys (not those in
 /// `used`, the current AND group's), the prefixes, then label values, IP
-/// lists and workloads. `ip:`, `fqdn:` and a `!` (the filter has no
-/// negation) are left as typed.
+/// lists and workloads. `ip:` and `fqdn:` are left as typed.
 fn filter_actors(
     token: &str,
     used: &[String],
     idx: &NameIndex,
     workloads: &[Workload],
 ) -> Vec<String> {
-    let literal = token.starts_with('!')
-        || ["ip:", "fqdn:"].iter().any(|p| {
-            token
-                .get(..p.len())
-                .is_some_and(|h| h.eq_ignore_ascii_case(p))
-        });
+    let literal = ["ip:", "fqdn:"].iter().any(|p| {
+        token
+            .get(..p.len())
+            .is_some_and(|h| h.eq_ignore_ascii_case(p))
+    });
     if literal {
         return Vec::new();
     }
@@ -938,9 +945,24 @@ mod tests {
             s(&["env=prod"]),
             "and values across keys"
         );
+        assert_eq!(
+            ff(FieldKind::TrafficActors, "!ro", &[], false),
+            s(&["!role=", "!env=prod"]),
+            "after a ! the same candidates, the ! kept"
+        );
+        assert_eq!(
+            ff(FieldKind::TrafficActors, "!ipl:co", &[], false),
+            s(&["!ipl:Corp"])
+        );
+        assert_eq!(
+            ff(FieldKind::TrafficActors, "! wl:web", &[], true),
+            s(&["!wl:web01"])
+        );
+        assert!(ff(FieldKind::TrafficActors, "!ip:10.", &[], false).is_empty());
         assert!(
-            ff(FieldKind::TrafficActors, "!ro", &[], false).is_empty(),
-            "the filter has no negation: a ! is left as typed"
+            ff(FieldKind::TrafficActors, "!app=", &["app=shop"], false)
+                .contains(&"!app=shop".into()),
+            "an exclusion is field-wide: the group's keys stay offered"
         );
         assert!(ff(FieldKind::TrafficActors, "ip:10.", &[], true).is_empty());
         assert!(ff(FieldKind::TrafficActors, "fqdn:x", &[], true).is_empty());
@@ -1018,6 +1040,16 @@ mod tests {
         assert_eq!(ff(FieldKind::TrafficService, "u", &[], false), s(&["udp"]));
         assert!(ff(FieldKind::TrafficService, "443", &[], false).is_empty());
         assert!(ff(FieldKind::TrafficService, "443/t", &[], false).is_empty());
+        assert_eq!(
+            ff(FieldKind::TrafficService, "!post", &[], false),
+            s(&["!5432/tcp"]),
+            "after a ! the same candidates, the ! kept"
+        );
+        assert_eq!(
+            ff(FieldKind::TrafficService, "!u", &[], false),
+            s(&["!udp"])
+        );
+        assert!(ff(FieldKind::TrafficService, "!22", &[], false).is_empty());
     }
 
     #[test]

@@ -1821,6 +1821,92 @@ async fn traffic_dry_run_prints_body_without_submitting() {
     assert_eq!(out["meta"]["cache"], "none");
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn traffic_dry_run_shows_every_exclude_list() {
+    let server = MockServer::start().await;
+    mount_traffic(&server, 0).await;
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "traffic",
+                "query",
+                "--window",
+                "1h",
+                "--dst",
+                "env=prod",
+                "--exclude-src",
+                "app=shop",
+                "--exclude-dst",
+                "fqdn:x.example",
+                "--exclude-service",
+                "22/tcp",
+                "--exclude-service",
+                "udp",
+                "--dry-run",
+            ])
+            .assert()
+            .success(),
+    );
+    assert_eq!(
+        out["data"]["sources"]["exclude"],
+        json!([{"label": {"href": "/orgs/5/labels/3"}}])
+    );
+    assert_eq!(out["data"]["sources"]["include"], json!([[]]));
+    assert_eq!(
+        out["data"]["destinations"]["exclude"],
+        json!([{"fqdn": "x.example"}])
+    );
+    assert_eq!(
+        out["data"]["services"]["exclude"],
+        json!([{"port": 22, "proto": 6}, {"proto": 17}])
+    );
+    assert_eq!(out["data"]["services"]["include"], json!([]));
+    // Only a service exclude: no object list is needed.
+    let quiet = MockServer::start().await;
+    mount_traffic_quiet(&quiet).await;
+    let out = stdout_json(
+        cmd(&quiet)
+            .args([
+                "traffic",
+                "groups",
+                "--exclude-service",
+                "443/tcp",
+                "--dry-run",
+            ])
+            .assert()
+            .success(),
+    );
+    assert_eq!(
+        out["data"]["services"]["exclude"],
+        json!([{"port": 443, "proto": 6}])
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn traffic_rejects_what_explorer_cannot_exclude_before_any_request() {
+    let quiet = MockServer::start().await;
+    mount_traffic_quiet(&quiet).await;
+    let assert = cmd(&quiet)
+        .args(["traffic", "query", "--exclude-service", "ssh", "--dry-run"])
+        .assert()
+        .code(2);
+    let err: Value = serde_json::from_slice(&assert.get_output().stderr).unwrap();
+    let msg = err["error"]["message"].as_str().unwrap();
+    assert!(
+        msg.contains("--exclude-service") && msg.contains("PORT/PROTO"),
+        "{msg}"
+    );
+    for flag in ["--exclude-src", "--src"] {
+        let assert = cmd(&quiet)
+            .args(["traffic", "query", flag, "fqdn:x.example", "--dry-run"])
+            .assert()
+            .failure();
+        let err: Value = serde_json::from_slice(&assert.get_output().stderr).unwrap();
+        let msg = err["error"]["message"].as_str().unwrap();
+        assert!(msg.contains("destination filter only"), "{flag}: {msg}");
+    }
+}
+
 /// Every mock answers but none may be called: the guards run offline.
 async fn mount_traffic_quiet(server: &MockServer) {
     mount_objects_expecting(server, Some(0)).await;

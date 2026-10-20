@@ -198,6 +198,46 @@ async fn run_query_command_executes_against_the_pce_and_reports_flows() {
 }
 
 #[tokio::test]
+async fn bang_terms_go_into_explorers_exclude_lists() {
+    use illumio_tui::tui::filter::TrafficFilter;
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    let pce = pce_for(&server);
+    let mut f = TrafficFilter::defaults("1h", 50);
+    f.src = "app=shop | 10.0.0.1, !env=prod".into();
+    f.dst = "!ipl:corp, !fqdn:x.example".into();
+    f.service = "tcp, !22/tcp | !udp".into();
+    let q = f.to_query(&pce, pce::CacheMode::Use).await.unwrap();
+    let v = serde_json::to_value(&q).unwrap();
+    assert_eq!(
+        v["sources"]["include"],
+        json!([[{"label": {"href": "/orgs/5/labels/3"}}], [{"ip_address": "10.0.0.1"}]])
+    );
+    assert_eq!(
+        v["sources"]["exclude"],
+        json!([{"label": {"href": "/orgs/5/labels/4"}}]),
+        "flat, whichever | group the ! was in"
+    );
+    assert_eq!(
+        v["destinations"]["include"],
+        json!([[]]),
+        "only exclusions: every destination but those"
+    );
+    assert_eq!(
+        v["destinations"]["exclude"],
+        json!([
+            {"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/21"}},
+            {"fqdn": "x.example"}
+        ])
+    );
+    assert_eq!(v["services"]["include"], json!([{"proto": 6}]));
+    assert_eq!(
+        v["services"]["exclude"],
+        json!([{"port": 22, "proto": 6}, {"proto": 17}])
+    );
+}
+
+#[tokio::test]
 async fn refresh_only_reruns_the_traffic_query() {
     use illumio_tui::tui::filter::TrafficFilter;
     use illumio_tui::tui::msg::Msg;

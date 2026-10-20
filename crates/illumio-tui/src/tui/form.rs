@@ -47,10 +47,10 @@ pub enum FieldKind {
     Ruleset,
     /// A traffic filter's source or destination, in `FilterExpr`'s grammar:
     /// labels, `ipl:`, `wl:` (the loaded workloads), `ip:`, `fqdn:`; `,`
-    /// within a group and `|` between groups.
+    /// within a group and `|` between groups; `!` excludes.
     TrafficActors,
-    /// A traffic filter's service (the whole field): protocols, and the
-    /// index's services as the `port/proto` the filter takes.
+    /// A traffic filter's service: protocols, and the index's services as
+    /// the `port/proto` the filter takes; `,` and `|` apart, `!` excludes.
     TrafficService,
     /// A traffic filter's decisions, comma list.
     Decisions,
@@ -82,14 +82,13 @@ impl FieldKind {
             Self::Labels | Self::Actors | Self::Services | Self::Decisions | Self::Transmission => {
                 &[',']
             }
-            Self::Scope | Self::TrafficActors => &[',', '|'],
+            Self::Scope | Self::TrafficActors | Self::TrafficService => &[',', '|'],
             Self::MarkSide => &[' ', ','],
             Self::WorkloadLabels | Self::RuleFilter => &[' '],
             Self::Text
             | Self::LabelKey
             | Self::LabelValue
             | Self::Ruleset
-            | Self::TrafficService
             | Self::Window
             | Self::MarkAction
             | Self::MarkExpiry

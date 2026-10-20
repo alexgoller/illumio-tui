@@ -2,7 +2,7 @@
 //! `fqdn:x`) resolved to PCE actor matches. Unknown names fail here with the
 //! known values listed, before anything is sent to the PCE.
 use crate::error::{PceError, Result};
-use crate::models::{ActorMatch, Ref, Workload};
+use crate::models::{ActorMatch, Ref, ServiceMatch, Workload, proto_number};
 use crate::resolve::NameIndex;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +54,44 @@ impl FilterExpr {
     pub fn needs_workloads(&self) -> bool {
         matches!(self, FilterExpr::Workload(_))
     }
+
+    /// Whether Explorer takes this on the source side. An FQDN is a
+    /// destination filter only, to include or to exclude; everything else
+    /// goes on either side, in either list.
+    pub fn check_source(&self) -> Result<()> {
+        match self {
+            FilterExpr::Fqdn(f) => Err(PceError::Invalid(format!(
+                "fqdn:{f} is a destination filter only: Explorer matches an FQDN on the destination side"
+            ))),
+            _ => Ok(()),
+        }
+    }
+}
+
+/// `443/tcp`, `443` or `tcp`: one service of the traffic filter, to include
+/// or to exclude (Explorer takes the same port/proto in both lists).
+pub fn parse_service(s: &str) -> std::result::Result<ServiceMatch, String> {
+    let s = s.trim();
+    let (port_s, proto_s) = match s.split_once('/') {
+        Some((p, pr)) => (p.trim(), Some(pr.trim())),
+        None => (s, None),
+    };
+    let mut m = ServiceMatch::default();
+    if let Some(pr) = proto_s {
+        m.proto = Some(proto_number(pr).ok_or_else(|| format!("unknown protocol {pr:?}"))?);
+        m.port = Some(
+            port_s
+                .parse::<u16>()
+                .map_err(|_| format!("bad port {port_s:?}"))?,
+        );
+    } else if let Ok(p) = port_s.parse::<u16>() {
+        m.port = Some(p);
+    } else if let Some(n) = proto_number(port_s) {
+        m.proto = Some(n);
+    } else {
+        return Err(format!("use PORT, PROTO or PORT/PROTO, got {s:?}"));
+    }
+    Ok(m)
 }
 
 /// Joins up to 20 names with `", "`, appending `", …"` when more exist.
@@ -191,6 +229,42 @@ mod tests {
         assert!(FilterExpr::parse("justaword").is_err());
         assert!(FilterExpr::Workload("x".into()).needs_workloads());
         assert!(!FilterExpr::Ip("x".into()).needs_workloads());
+    }
+
+    #[test]
+    fn only_an_fqdn_is_kept_off_the_source_side() {
+        for ok in ["app=shop", "10.0.0.1", "ipl:Corp", "wl:host-1.example"] {
+            assert!(
+                FilterExpr::parse(ok).unwrap().check_source().is_ok(),
+                "{ok}"
+            );
+        }
+        let err = FilterExpr::parse("fqdn:x.example")
+            .unwrap()
+            .check_source()
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("destination filter only"), "{err}");
+    }
+
+    #[test]
+    fn service_forms() {
+        let m = |port, proto| ServiceMatch {
+            port,
+            proto,
+            process_name: None,
+        };
+        assert_eq!(parse_service("443/tcp").unwrap(), m(Some(443), Some(6)));
+        assert_eq!(parse_service(" 53 ").unwrap(), m(Some(53), None));
+        assert_eq!(parse_service("udp").unwrap(), m(None, Some(17)));
+        assert!(parse_service("udp/53").unwrap_err().contains("bad port"));
+        assert!(
+            parse_service("22/xyz")
+                .unwrap_err()
+                .contains("unknown protocol")
+        );
+        assert!(parse_service("99999").unwrap_err().contains("PORT/PROTO"));
+        assert!(parse_service("").is_err());
     }
 
     #[test]

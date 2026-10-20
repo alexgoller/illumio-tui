@@ -107,6 +107,7 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
         lines: &[
             key("v", "cycle Flows · App-to-app · Mesh · Blocked · Treemap"),
             key("f", "edit filter: window src dst svc decision transmission"),
+            more("", "in f: , and · | or · ! excludes from the whole field"),
             more(
                 "Ctrl-N Ctrl-P",
                 "in f: complete the filter fields · cycle back",

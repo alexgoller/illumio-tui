@@ -122,16 +122,17 @@ fn window_service_and_decision_complete_their_words() {
     assert_eq!(value(&m, 0), "2d", "the pre-filled window: where `+` goes");
     ctrl(&mut m, 'n');
     assert_eq!(value(&m, 0), "3d");
-    let mut m = editing(1, "!ro");
-    let before = m.overlay.clone();
+    let mut m = editing(1, "env=prod, !ro");
     ctrl(&mut m, 'n');
-    assert_eq!(
-        m.overlay, before,
-        "no negation in the filter: left as typed"
-    );
+    assert_eq!(value(&m, 1), "env=prod, !role=", "a ! is kept");
+    ctrl(&mut m, 'n');
+    assert_eq!(value(&m, 1), "env=prod, !role=db", "and dives like a key");
     let mut m = editing(3, "post");
     ctrl(&mut m, 'n');
     assert_eq!(value(&m, 3), "5432/tcp");
+    let mut m = editing(3, "tcp, !post");
+    ctrl(&mut m, 'n');
+    assert_eq!(value(&m, 3), "tcp, !5432/tcp", "the service's token only");
     let mut m = editing(3, "443/");
     ctrl(&mut m, 'n');
     assert_eq!(value(&m, 3), "443/", "a port is left as typed");

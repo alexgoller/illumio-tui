@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭ Filters ────────────────────────────────────────────── window 24h · cap 1000 ╮
+│window 24h  src app=shop | env=prod, !app=monitoring  dst *  svc !22/tcp  deci│
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭ Result ────────────────────────────────────────────── no query yet · press r ╮
+│run ╭ Edit filter ──────────────────── Tab next · Enter run · Esc cancel ╮    │
+╰────│▸ window       24h▏                                                 │────╯
+╭ Flo│  source       app=shop | env=prod, !app=monitoring                 │────╮
+│no r│  destination                                                       │    │
+│    │  service      !22/tcp                                              │    │
+│    │  decisions    all                                                  │    │
+│    │  transmission all                                                  │    │
+│    │  max results  1000                                                 │    │
+╰────│                                                                    │────╯
+╭ Det│window 24h · cap 1000                                               │ows ╮
+│sele│a ! term leaves its match out of the whole field, not one | group   │    │
+│    ╰────────────────────────────────────────────────────────────────────╯    │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ready         f filter  r run  a auto  v view  g group  / search  : cmd  ? help

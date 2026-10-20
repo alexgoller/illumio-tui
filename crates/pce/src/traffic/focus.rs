@@ -451,6 +451,17 @@ mod tests {
         .source(vec![ActorMatch::IpAddress {
             ip_address: "10.0.0.1".into(),
         }])
+        .exclude_source(ActorMatch::IpAddress {
+            ip_address: "10.0.0.9".into(),
+        })
+        .exclude_destination(ActorMatch::Label {
+            label: Ref::new("/orgs/5/labels/9"),
+        })
+        .exclude_service(crate::models::ServiceMatch {
+            port: Some(22),
+            proto: Some(6),
+            process_name: None,
+        })
         .max_results(500)
         .build()
         .unwrap();
@@ -484,6 +495,16 @@ mod tests {
             assert_eq!(v["start_date"], "2026-10-09T00:00:00Z");
             assert_eq!(v["end_date"], "2026-10-10T00:00:00Z");
             assert_eq!(v["max_results"], 500);
+            assert_eq!(v["sources"]["exclude"], json!([{"ip_address": "10.0.0.9"}]));
+            assert_eq!(
+                v["destinations"]["exclude"],
+                json!([{"label": {"href": "/orgs/5/labels/9"}}])
+            );
+            assert_eq!(
+                v["services"]["exclude"],
+                json!([{"port": 22, "proto": 6}]),
+                "the excludes stay on both sides"
+            );
             assert_eq!(
                 v["policy_decisions"],
                 json!(["allowed", "potentially_blocked", "blocked"])

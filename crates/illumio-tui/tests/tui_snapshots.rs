@@ -335,6 +335,27 @@ fn traffic_filter_bar_and_editor_80x24() {
 }
 
 #[test]
+fn traffic_filter_editor_with_exclusions_80x24() {
+    use illumio_tui::tui::filter::FilterEditor;
+    use illumio_tui::tui::model::Overlay;
+    let mut m = model_fixture();
+    m.traffic.filter.src = "app=shop | env=prod, !app=monitoring".into();
+    m.traffic.filter.service = "!22/tcp".into();
+    let out = render_to_string(&m, 80, 24);
+    assert!(
+        out.contains("svc !22/tcp"),
+        "the bar shows exclusions: {out}"
+    );
+    m.overlay = Overlay::FilterEditor(FilterEditor::from_filter(&m.traffic.filter));
+    let out = render_to_string(&m, 80, 24);
+    assert!(
+        out.contains("a ! term leaves its match out of the whole field, not one | group"),
+        "{out}"
+    );
+    insta::assert_snapshot!("traffic_filter_editor_with_exclusions_80x24", out);
+}
+
+#[test]
 fn the_filter_bar_shows_a_narrowed_transmission_only() {
     let mut m = model_fixture();
     let out = render_to_string(&m, 80, 24);

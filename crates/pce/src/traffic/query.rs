@@ -55,7 +55,8 @@ impl TrafficQuery {
         };
         let unbounded = !has_actor(&self.sources)
             && !has_actor(&self.destinations)
-            && self.services.include.is_empty();
+            && self.services.include.is_empty()
+            && self.services.exclude.is_empty();
         QueryCost {
             window: self.window(),
             max_results: self.max_results,
@@ -357,6 +358,49 @@ mod tests {
         assert_eq!(v["services"]["include"], json!([{"port": 443, "proto": 6}]));
         assert_eq!(v["policy_decisions"], json!(["blocked"]));
         assert_eq!(v["max_results"], 50);
+    }
+
+    #[test]
+    fn excludes_serialise_flat_and_bound_the_query() {
+        let b =
+            TrafficQueryBuilder::between(ts("2026-10-01T00:00:00Z"), ts("2026-10-02T00:00:00Z"));
+        let q = b
+            .clone()
+            .exclude_source(ActorMatch::Label {
+                label: Ref::new("/orgs/5/labels/3"),
+            })
+            .exclude_destination(ActorMatch::Fqdn {
+                fqdn: "x.example".into(),
+            })
+            .exclude_service(ServiceMatch {
+                port: Some(22),
+                proto: Some(6),
+                process_name: None,
+            })
+            .build()
+            .unwrap();
+        let v = serde_json::to_value(&q).unwrap();
+        assert_eq!(
+            v["sources"]["exclude"],
+            json!([{"label": {"href": "/orgs/5/labels/3"}}])
+        );
+        assert_eq!(v["sources"]["include"], json!([[]]), "everything except");
+        assert_eq!(v["destinations"]["exclude"], json!([{"fqdn": "x.example"}]));
+        assert_eq!(v["services"]["exclude"], json!([{"port": 22, "proto": 6}]));
+        assert_eq!(v["services"]["include"], json!([]));
+        assert!(!q.cost().unbounded);
+        let svc_only = b
+            .exclude_service(ServiceMatch {
+                port: None,
+                proto: Some(17),
+                process_name: None,
+            })
+            .build()
+            .unwrap();
+        assert!(
+            !svc_only.cost().unbounded,
+            "a service exclude narrows like an actor exclude"
+        );
     }
 
     #[test]
