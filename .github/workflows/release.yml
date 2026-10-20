@@ -443,7 +443,7 @@ jobs:
           $manifest = Get-Content bucket/illumio-tui.json -Raw | ConvertFrom-Json
           $version = $manifest.version
           # As a user would, with this checkout standing in for the repository.
-          scoop bucket add illumio-tui $env:GITHUB_WORKSPACE
+          scoop bucket add illumio-tui ('file:///' + ($env:GITHUB_WORKSPACE -replace '\\', '/'))
           if ($LASTEXITCODE -ne 0) { throw "scoop bucket add exited with $LASTEXITCODE" }
           scoop install illumio-tui/illumio-tui
           if ($LASTEXITCODE -ne 0) { throw "scoop install exited with $LASTEXITCODE" }

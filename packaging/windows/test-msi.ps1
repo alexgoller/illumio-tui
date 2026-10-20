@@ -26,15 +26,17 @@ function Invoke-Msiexec([string[]] $Arguments, [string] $Log) {
     }
 }
 
+$Installer = New-Object -ComObject WindowsInstaller.Installer
+
+function Get-ProductInfo([string] $Code, [string] $Name) {
+    $Installer.GetType().InvokeMember('ProductInfo', 'GetProperty', $null, $Installer, @($Code, $Name))
+}
+
 # Installed products with our UpgradeCode, as product code -> version.
 function Get-Related {
-    $installer = New-Object -ComObject WindowsInstaller.Installer
-    $t = $installer.GetType()
-    $codes = @($t.InvokeMember('RelatedProducts', 'GetProperty', $null, $installer, @($UpgradeCode)))
+    $codes = @($Installer.GetType().InvokeMember('RelatedProducts', 'GetProperty', $null, $Installer, @($UpgradeCode)))
     $out = [ordered]@{}
-    foreach ($c in $codes) {
-        $out[$c] = $t.InvokeMember('ProductInfo', 'GetProperty', $null, $installer, @($c, 'VersionString'))
-    }
+    foreach ($c in $codes) { $out[$c] = Get-ProductInfo $c 'VersionString' }
     $out
 }
 
@@ -59,11 +61,16 @@ function Assert-Installed([string] $Expected) {
     if ("$out" -notmatch [regex]::Escape($Version)) { throw "unexpected --version output: $out" }
     $hits = @(Get-PathHits)
     if ($hits.Count -ne 1) { throw "user PATH holds $Dir $($hits.Count) times, expected once" }
-    $arp = @(Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' |
-        Get-ItemProperty | Where-Object { $_.PSObject.Properties['DisplayName'] -and $_.DisplayName -eq 'illumio-tui' })
-    if ($arp.Count -ne 1) { throw "expected 1 Add/Remove Programs entry, found $($arp.Count)" }
-    if ($arp[0].Publisher -ne 'Alex Goller' -or $arp[0].DisplayVersion -ne $Expected) {
-        throw "ARP entry: publisher '$($arp[0].Publisher)', version '$($arp[0].DisplayVersion)'"
+    # Add/Remove Programs reads a per-user MSI's entry from Windows Installer.
+    $code = @($related.Keys)[0]
+    $arp = [ordered]@{
+        InstalledProductName = 'illumio-tui'
+        Publisher            = 'Alex Goller'
+        URLInfoAbout         = 'https://github.com/alexgoller/illumio-tui'
+    }
+    foreach ($name in $arp.Keys) {
+        $got = Get-ProductInfo $code $name
+        if ($got -ne $arp[$name]) { throw "ARP $name '$got', expected '$($arp[$name])'" }
     }
 }
 
