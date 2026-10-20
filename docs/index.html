@@ -78,7 +78,7 @@
 
 <section class="panel" id="install" aria-labelledby="install-h">
   <h2 id="install-h"><span class="key">1</span>Install</h2>
-  <p class="lede">One binary. Install it with Homebrew, apt, dnf, an MSI or Scoop, or download it, check it, put it on your PATH.</p>
+  <p class="lede">One binary. Install it with Homebrew, apt, dnf, an MSI, Scoop or winget, or download it, check it, put it on your PATH.</p>
 
   <h3>Homebrew (macOS, Linux)</h3>
   <p>The repository is its own tap:</p>
@@ -95,6 +95,9 @@
   <p>Both packages put <code>illumio-tui</code> in <code>/usr/bin</code> with no dependencies, and are install-tested on Debian 12, Ubuntu 22.04, Rocky Linux 9 and AlmaLinux 8 before each release.</p>
 
   <h3>Windows</h3>
+  <p><strong>winget</strong>, once the package is merged into <a href="https://github.com/microsoft/winget-pkgs">winget-pkgs</a> (pending). It installs the MSI below, for the current user.</p>
+<pre><code><span class="p">&gt; </span>winget install AlexGoller.IllumioTUI
+<span class="p">&gt; </span>winget upgrade AlexGoller.IllumioTUI     <span class="c"># later, for a new release</span></code></pre>
   <p><strong>MSI</strong> (v0.4.1 and later): download <code>illumio-tui-&lt;version&gt;-x86_64-pc-windows-msvc.msi</code> from the <a href="https://github.com/alexgoller/illumio-tui/releases">release page</a> and double-click it, or install it silently:</p>
 <pre><code><span class="p">&gt; </span>msiexec /i illumio-tui-&lt;version&gt;-x86_64-pc-windows-msvc.msi /qn</code></pre>
   <p>It installs for the current user, without admin rights, into <code>%LOCALAPPDATA%\Programs\illumio-tui</code> and adds that folder to your user <code>PATH</code> (open a new terminal). A newer MSI upgrades the installed version in place; uninstalling (Settings &gt; Apps) also removes the <code>PATH</code> entry. The MSI is not code-signed, so SmartScreen may warn when you open it: <em>More info</em>, then <em>Run anyway</em>. Each release installs, upgrades and uninstalls it on a Windows runner before publishing.</p>

@@ -43,6 +43,14 @@ Their sha256 is in the release's `SHA256SUMS`.
 
 ### Windows
 
+**winget**. Available once the package is merged into
+[winget-pkgs](https://github.com/microsoft/winget-pkgs) (pending):
+
+    winget install AlexGoller.IllumioTUI
+    winget upgrade AlexGoller.IllumioTUI
+
+winget installs the MSI below, for the current user.
+
 **MSI** (v0.4.1 and later). Download
 `illumio-tui-<version>-x86_64-pc-windows-msvc.msi` from the
 [release page](https://github.com/alexgoller/illumio-tui/releases) and
@@ -110,7 +118,7 @@ bash, zsh and fish completions come with the Homebrew formula and the
 `.deb`/`.rpm` packages (`/usr/share/bash-completion/completions/illumio-tui`,
 `/usr/share/zsh/site-functions/_illumio-tui`,
 `/usr/share/fish/vendor_completions.d/illumio-tui.fish`); nothing to do. For
-`cargo install`, a release archive, the MSI or Scoop, write the script
+`cargo install`, a release archive, the MSI (also via winget) or Scoop, write the script
 yourself:
 
     # zsh: a directory on $fpath, before compinit runs in ~/.zshrc
@@ -157,6 +165,19 @@ MSI replace an installed one. Run the workflow manually
 (`workflow_dispatch`) for a dry run that builds and tests everything and only
 uploads artifacts; it also installs the committed Scoop manifest with Scoop
 and checks its `autoupdate` against the release's `SHA256SUMS`.
+
+winget: the workflow renders the winget manifests (`packaging/winget/`, schema
+1.9.0) for the new MSI, validates them and installs, upgrades and uninstalls
+with winget from them on a Windows runner (dry runs serve the MSI locally and
+also render the manifests for the latest published release, as the
+`winget-manifests` artifact). On a release tag (not a pre-release) it then
+submits the update to `microsoft/winget-pkgs` with
+[Komac](https://github.com/russellbanks/Komac), which forks winget-pkgs into
+the token owner's account and opens the PR from there. That needs the
+repository secret `WINGET_TOKEN`: a classic personal access token with the
+`public_repo` scope. Without it, or while `AlexGoller.IllumioTUI` is not yet
+in winget-pkgs (the first version is a manual PR), the step is skipped with a
+notice. It runs after the release is published and never blocks it.
 
 ## Configure
 
