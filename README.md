@@ -41,6 +41,33 @@ binary is static, the arm64 one needs glibc 2.18 or newer) and are tested on
 Debian 12, Ubuntu 22.04, Rocky Linux 9 and AlmaLinux 8 before each release.
 Their sha256 is in the release's `SHA256SUMS`.
 
+### Windows
+
+**MSI** (releases after v0.4.0). Download
+`illumio-tui-<version>-x86_64-pc-windows-msvc.msi` from the
+[release page](https://github.com/alexgoller/illumio-tui/releases) and
+double-click it, or install it silently:
+
+    msiexec /i illumio-tui-<version>-x86_64-pc-windows-msvc.msi /qn
+
+It installs for the current user only (no admin rights) into
+`%LOCALAPPDATA%\Programs\illumio-tui` and adds that folder to your user
+`PATH` (open a new terminal to pick it up). A newer MSI upgrades the installed
+version in place; uninstall from Settings > Apps (or `msiexec /x` with the
+MSI), which also removes the `PATH` entry. The MSI is not code-signed, so
+SmartScreen may warn when you open it: *More info*, then *Run anyway*. Its sha256 is
+in the release's `SHA256SUMS`. Each release installs, upgrades and uninstalls
+it on a Windows runner before publishing.
+
+**Scoop**. This repository is its own bucket:
+
+    scoop bucket add illumio-tui https://github.com/alexgoller/illumio-tui
+    scoop install illumio-tui
+
+`scoop update illumio-tui` picks up new releases (the manifest,
+`bucket/illumio-tui.json`, installs the release zip and is updated on `main`
+with each release).
+
 ### From source
 
 From a clone of this repository (Rust 1.88 or newer):
@@ -83,7 +110,8 @@ bash, zsh and fish completions come with the Homebrew formula and the
 `.deb`/`.rpm` packages (`/usr/share/bash-completion/completions/illumio-tui`,
 `/usr/share/zsh/site-functions/_illumio-tui`,
 `/usr/share/fish/vendor_completions.d/illumio-tui.fish`); nothing to do. For
-`cargo install` or a release archive, write the script yourself:
+`cargo install`, a release archive, the MSI or Scoop, write the script
+yourself:
 
     # zsh: a directory on $fpath, before compinit runs in ~/.zshrc
     mkdir -p ~/.zfunc && illumio-tui completions zsh > ~/.zfunc/_illumio-tui
@@ -93,6 +121,8 @@ bash, zsh and fish completions come with the Homebrew formula and the
     illumio-tui completions bash > ~/.local/share/bash-completion/completions/illumio-tui
     # fish
     illumio-tui completions fish > ~/.config/fish/completions/illumio-tui.fish
+    # PowerShell: add to your profile (subcommands and flags; no profile names)
+    illumio-tui completions powershell | Out-String | Invoke-Expression
 
 Every subcommand and flag completes (with descriptions in zsh and fish), and
 so do enum values (`--direction`, `--format`, `--theme`, `events --severity`
@@ -112,15 +142,21 @@ run). Regenerate the script after an upgrade if you wrote it yourself.
 
 The `Release` workflow builds all targets, builds the `.deb`/`.rpm` packages
 (nfpm, `packaging/nfpm.yaml`) and install-tests them in Debian, Ubuntu, Rocky
-and Alma containers, then publishes the release with generated notes; it fails
-if the tag does not match the Cargo version. Afterwards it renders
-`Formula/illumio-tui.rb` from `packaging/homebrew/illumio-tui.rb.tmpl` with
-the new sha256s and commits it to `main` as `brew: illumio-tui <version>`
+and Alma containers, builds the Windows MSI (WiX, `packaging/windows/`) and
+installs, upgrades and uninstalls it on a Windows runner, then publishes the
+release with generated notes; it fails if the tag does not match the Cargo
+version. Afterwards it renders `Formula/illumio-tui.rb` from
+`packaging/homebrew/illumio-tui.rb.tmpl` and `bucket/illumio-tui.json` from
+`packaging/scoop/illumio-tui.json.tmpl` with the new sha256s and commits both
+to `main` as `brew, scoop: illumio-tui <version>`
 (with the workflow's own `GITHUB_TOKEN`; no secret to set up, pre-release
 tags such as `v1.2.3-rc1` are skipped). Pull before your next commit. Edit
-the template, not the formula. Run the workflow manually
+the templates, not the formula or manifest. Never change the MSI's
+`UpgradeCode` in `packaging/windows/illumio-tui.wxs`: it is what lets a new
+MSI replace an installed one. Run the workflow manually
 (`workflow_dispatch`) for a dry run that builds and tests everything and only
-uploads artifacts.
+uploads artifacts; it also installs the committed Scoop manifest with Scoop
+and checks its `autoupdate` against the release's `SHA256SUMS`.
 
 ## Configure
 
