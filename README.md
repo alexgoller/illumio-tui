@@ -28,13 +28,13 @@ prebuilt binaries from the GitHub Release (static musl build on Linux x86_64).
 Download the `.deb` for your architecture (`amd64` or `arm64`) from the
 [release page](https://github.com/alexgoller/illumio-tui/releases), then:
 
-    sudo apt install ./illumio-tui_0.3.5-1_amd64.deb
+    sudo apt install ./illumio-tui_0.4.0-1_amd64.deb
 
 ### RHEL, Rocky, Alma, Fedora
 
 Download the `.rpm` (`x86_64` or `aarch64`) from the release page, then:
 
-    sudo dnf install ./illumio-tui-0.3.5-1.x86_64.rpm
+    sudo dnf install ./illumio-tui-0.4.0-1.x86_64.rpm
 
 Both packages install `/usr/bin/illumio-tui` with no dependencies (the x86_64
 binary is static, the arm64 one needs glibc 2.18 or newer) and are tested on
@@ -64,11 +64,11 @@ covering all of them:
 | Windows x86_64 | `illumio-tui-<version>-x86_64-pc-windows-msvc.zip` |
 
 Download the archive for your platform and `SHA256SUMS`, then verify and
-install (example: macOS Apple Silicon, version 0.3.5):
+install (example: macOS Apple Silicon, version 0.4.0):
 
     sha256sum --check --ignore-missing SHA256SUMS      # macOS: shasum -a 256 -c --ignore-missing SHA256SUMS
-    tar -xzf illumio-tui-0.3.5-aarch64-apple-darwin.tar.gz
-    install -m 755 illumio-tui-0.3.5-aarch64-apple-darwin/illumio-tui ~/.local/bin/   # any directory on PATH
+    tar -xzf illumio-tui-0.4.0-aarch64-apple-darwin.tar.gz
+    install -m 755 illumio-tui-0.4.0-aarch64-apple-darwin/illumio-tui ~/.local/bin/   # any directory on PATH
     illumio-tui --version
 
 macOS may quarantine binaries downloaded with a browser; clear it with
