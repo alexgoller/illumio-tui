@@ -238,6 +238,76 @@ async fn bang_terms_go_into_explorers_exclude_lists() {
 }
 
 #[tokio::test]
+async fn named_services_expand_in_both_lists() {
+    use illumio_tui::tui::filter::TrafficFilter;
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    let pce = pce_for(&server);
+    let mut f = TrafficFilter::defaults("1h", 50);
+    f.service = "svc:postgresql | udp, !svc:PostgreSQL".into();
+    let v = serde_json::to_value(f.to_query(&pce, pce::CacheMode::Use).await.unwrap()).unwrap();
+    assert_eq!(
+        v["services"]["include"],
+        json!([{"port": 5432, "proto": 6}, {"proto": 17}]),
+        "each port of the service is one more alternative"
+    );
+    assert_eq!(
+        v["services"]["exclude"],
+        json!([{"port": 5432, "proto": 6}])
+    );
+    f.service = "!svc:Web".into();
+    let err = f
+        .to_query(&pce, pce::CacheMode::Use)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("service: svc:Web has the port range"), "{err}");
+}
+
+/// A filter without `!` builds exactly the body it built before #62.
+#[tokio::test]
+async fn a_filter_without_bang_builds_the_same_body_as_before() {
+    use illumio_tui::tui::filter::TrafficFilter;
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    let pce = pce_for(&server);
+    let mut f = TrafficFilter::defaults("1h", 50);
+    f.src = "app=shop, env=prod | 10.0.0.1".into();
+    f.dst = "ipl:corp".into();
+    f.service = "443/tcp".into();
+    f.decisions = vec![pce::models::PolicyDecision::Blocked];
+    let mut v = serde_json::to_value(f.to_query(&pce, pce::CacheMode::Use).await.unwrap()).unwrap();
+    for k in ["start_date", "end_date"] {
+        assert!(v[k].as_str().unwrap().ends_with('Z'));
+        v[k] = json!("-");
+    }
+    assert_eq!(
+        v,
+        json!({
+            "start_date": "-",
+            "end_date": "-",
+            "sources": {
+                "include": [
+                    [{"label": {"href": "/orgs/5/labels/3"}}, {"label": {"href": "/orgs/5/labels/4"}}],
+                    [{"ip_address": "10.0.0.1"}]
+                ],
+                "exclude": []
+            },
+            "destinations": {
+                "include": [[{"ip_list": {"href": "/orgs/5/sec_policy/draft/ip_lists/21"}}]],
+                "exclude": []
+            },
+            "services": {"include": [{"port": 443, "proto": 6}], "exclude": []},
+            "policy_decisions": ["blocked"],
+            "exclude_workloads_from_ip_list_query": true,
+            "sources_destinations_query_op": "and",
+            "max_results": 50,
+            "query_name": "illumio-tui"
+        })
+    );
+}
+
+#[tokio::test]
 async fn refresh_only_reruns_the_traffic_query() {
     use illumio_tui::tui::filter::TrafficFilter;
     use illumio_tui::tui::msg::Msg;

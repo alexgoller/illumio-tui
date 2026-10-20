@@ -19,7 +19,7 @@ pub use aggregate::{
     keys_seen,
 };
 pub use duration::compact_duration;
-pub use filter::{FilterExpr, parse_service, resolve_actor};
+pub use filter::{FilterExpr, ServiceExpr, parse_service, resolve_actor, resolve_service};
 pub use focus::{
     Focus, FocusDirection, FocusedTraffic, GroupKey, app_labels, apps_in, closest, focus_flows,
     focus_query, parse_app, queries_text, union_flows,

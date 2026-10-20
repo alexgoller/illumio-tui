@@ -45,12 +45,16 @@ pub enum FieldKind {
     Services,
     /// A ruleset name (the whole field), from the loaded draft rulesets.
     Ruleset,
-    /// A traffic filter's source or destination, in `FilterExpr`'s grammar:
-    /// labels, `ipl:`, `wl:` (the loaded workloads), `ip:`, `fqdn:`; `,`
-    /// within a group and `|` between groups; `!` excludes.
+    /// A traffic filter's destination, in `FilterExpr`'s grammar: labels,
+    /// `ipl:`, `wl:` (the loaded workloads), `ip:`, `fqdn:`; `,` within a
+    /// group and `|` between groups; `!` excludes.
     TrafficActors,
-    /// A traffic filter's service: protocols, and the index's services as
-    /// the `port/proto` the filter takes; `,` and `|` apart, `!` excludes.
+    /// A traffic filter's source: as `TrafficActors`, without `fqdn:`
+    /// (Explorer matches an FQDN on the destination side only).
+    TrafficSource,
+    /// A traffic filter's service: protocols, the index's services as the
+    /// `port/proto` the filter takes, `svc:` names; `,` and `|` apart, `!`
+    /// excludes.
     TrafficService,
     /// A traffic filter's decisions, comma list.
     Decisions,
@@ -82,7 +86,9 @@ impl FieldKind {
             Self::Labels | Self::Actors | Self::Services | Self::Decisions | Self::Transmission => {
                 &[',']
             }
-            Self::Scope | Self::TrafficActors | Self::TrafficService => &[',', '|'],
+            Self::Scope | Self::TrafficActors | Self::TrafficSource | Self::TrafficService => {
+                &[',', '|']
+            }
             Self::MarkSide => &[' ', ','],
             Self::WorkloadLabels | Self::RuleFilter => &[' '],
             Self::Text
@@ -130,7 +136,9 @@ impl FieldKind {
             Self::Labels | Self::Actors | Self::Services | Self::Decisions | Self::Transmission => {
                 tokens(head)
             }
-            Self::Scope | Self::TrafficActors => tokens(head.rsplit('|').next().unwrap_or(head)),
+            Self::Scope | Self::TrafficActors | Self::TrafficSource => {
+                tokens(head.rsplit('|').next().unwrap_or(head))
+            }
         };
         Some((token.to_string(), earlier))
     }
@@ -144,6 +152,7 @@ impl FieldKind {
                 | Self::Scope
                 | Self::Actors
                 | Self::TrafficActors
+                | Self::TrafficSource
                 | Self::MarkSide
                 | Self::WorkloadLabels
                 | Self::RuleFilter

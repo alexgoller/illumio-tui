@@ -109,6 +109,10 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
             key("f", "edit filter: window src dst svc decision transmission"),
             more("", "in f: , and · | or · ! excludes from the whole field"),
             more(
+                "",
+                "svc svc:NAME: its ports (no port ranges) · src: no fqdn:",
+            ),
+            more(
                 "Ctrl-N Ctrl-P",
                 "in f: complete the filter fields · cycle back",
             ),

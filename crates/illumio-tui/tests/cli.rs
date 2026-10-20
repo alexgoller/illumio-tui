@@ -1883,6 +1883,71 @@ async fn traffic_dry_run_shows_every_exclude_list() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn exclude_service_by_name_reads_only_the_cached_service_list() {
+    let server = MockServer::start().await;
+    mount_traffic(&server, 0).await;
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "traffic",
+                "query",
+                "--no-cache",
+                "--exclude-service",
+                "svc:postgresql",
+                "--exclude-service",
+                "udp",
+                "--dry-run",
+            ])
+            .assert()
+            .success(),
+    );
+    assert_eq!(
+        out["data"]["services"]["exclude"],
+        json!([{"port": 5432, "proto": 6}, {"proto": 17}])
+    );
+    assert_eq!(out["meta"]["api_calls"], 1, "the service list only");
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "traffic",
+                "query",
+                "--no-cache",
+                "--dst",
+                "env=prod",
+                "--exclude-service",
+                "svc:PostgreSQL",
+                "--dry-run",
+            ])
+            .assert()
+            .success(),
+    );
+    assert_eq!(
+        out["data"]["services"]["exclude"],
+        json!([{"port": 5432, "proto": 6}])
+    );
+    assert_eq!(
+        out["meta"]["api_calls"], 4,
+        "the index the actors load anyway"
+    );
+    let assert = cmd(&server)
+        .args([
+            "traffic",
+            "query",
+            "--exclude-service",
+            "svc:Web",
+            "--dry-run",
+        ])
+        .assert()
+        .code(2);
+    let err: Value = serde_json::from_slice(&assert.get_output().stderr).unwrap();
+    let msg = err["error"]["message"].as_str().unwrap();
+    assert!(
+        msg.contains("--exclude-service") && msg.contains("port range 8000-8099/tcp"),
+        "{msg}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn traffic_rejects_what_explorer_cannot_exclude_before_any_request() {
     let quiet = MockServer::start().await;
     mount_traffic_quiet(&quiet).await;

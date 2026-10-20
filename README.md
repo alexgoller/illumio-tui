@@ -366,12 +366,15 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
 - **Traffic**: `f` edit the filter, `r` run (bypasses the cache), `a` auto-refresh, `s` sort,
   `/` search; a filter that would be expensive asks for confirmation first. In src, dst and
   service `,` is AND, `|` is OR and a `!` term excludes (`env=prod, !app=monitoring`,
-  `tcp, !22/tcp`, `443/tcp | 80/tcp`): it goes into Explorer's own exclude list, so the PCE
-  leaves it out at no extra cost. That list is flat, so a `!` leaves its match out of the whole
+  `tcp, !22/tcp`, `443/tcp | 80/tcp`, `!svc:SSH`): it goes into Explorer's own exclude list,
+  so the PCE leaves it out at no extra cost. A `!` starts its term (`env=prod !app=x` asks for
+  the missing `,`). `svc:NAME` stands for the service's ports, each one more alternative (or
+  one more exclusion), from the cached service list; a service with a port range or of every
+  protocol cannot be written as the single ports the filter takes and is a form error. That list is flat, so a `!` leaves its match out of the whole
   field, whichever `|` group it is written in, and a field of `!` terms only keeps every flow
   but those; the editor says so under the fields. Explorer takes labels, IP lists, workloads,
-  IPs and ports/protocols there; `fqdn:` only on the destination side (a source `fqdn:` is a
-  form error). In the filter
+  IPs and ports/protocols there; `fqdn:` only on the destination side (a source `fqdn:`, to
+  include or exclude, is a form error, and src completion does not offer it). In the filter
   editor `Ctrl-N` / `Ctrl-P` complete like a form (after a `!` too): labels, `ipl:` IP lists and the grammar's
   `ip:` `ipl:` `wl:` `fqdn:` in src and dst (`wl:` hostnames only once the Workloads screen
   has loaded them), protocols and services as `port/proto`, the decision and transmission
@@ -853,10 +856,12 @@ Commands that print no table (writes, `health`, `policy rules impact`, `profile 
 traffic `--dry-run`) refuse it with exit 2 before any request.
 
 `--exclude-src`, `--exclude-dst` (same syntax as `--src` / `--dst`) and `--exclude-service`
-(`22/tcp`, `22` or `udp`), each repeatable, fill Explorer's exclude lists: `--dst env=prod
+(`22/tcp`, `22`, `udp` or `svc:NAME`, the service's ports, read from the cached service list;
+no port ranges), each repeatable, fill Explorer's exclude lists: `--dst env=prod
 --exclude-src app=monitoring --exclude-service 22/tcp` is every flow into prod except from
 monitoring and except SSH. With no `--src`, `--exclude-src` alone means every source but
-those. `fqdn:` is a destination filter only (exit 2 on `--src` or `--exclude-src`). `--dry-run`
+those, and the query stays unbounded (only an include narrows it). `fqdn:` is a destination
+filter only (exit 2 on `--src` or `--exclude-src`). `--dry-run`
 prints the body with the `exclude` lists.
 
 `traffic groups` and `traffic mesh` take the `traffic query` filter flags (and its dry run,

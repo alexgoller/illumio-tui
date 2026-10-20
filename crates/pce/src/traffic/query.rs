@@ -46,17 +46,12 @@ impl TrafficQuery {
     }
 
     pub fn cost(&self) -> QueryCost {
-        // A transmission exclude narrows by kind, not by actor.
-        let has_actor = |f: &ActorFilter| {
-            f.include.iter().any(|g| !g.is_empty())
-                || f.exclude
-                    .iter()
-                    .any(|m| !matches!(m, ActorMatch::Transmission { .. }))
-        };
+        // Only an include narrows: an exclude (or a transmission, which is
+        // one) still asks for everything but a few.
+        let has_actor = |f: &ActorFilter| f.include.iter().any(|g| !g.is_empty());
         let unbounded = !has_actor(&self.sources)
             && !has_actor(&self.destinations)
-            && self.services.include.is_empty()
-            && self.services.exclude.is_empty();
+            && self.services.include.is_empty();
         QueryCost {
             window: self.window(),
             max_results: self.max_results,
@@ -361,7 +356,7 @@ mod tests {
     }
 
     #[test]
-    fn excludes_serialise_flat_and_bound_the_query() {
+    fn excludes_serialise_flat_and_leave_the_query_unbounded() {
         let b =
             TrafficQueryBuilder::between(ts("2026-10-01T00:00:00Z"), ts("2026-10-02T00:00:00Z"));
         let q = b
@@ -388,19 +383,19 @@ mod tests {
         assert_eq!(v["destinations"]["exclude"], json!([{"fqdn": "x.example"}]));
         assert_eq!(v["services"]["exclude"], json!([{"port": 22, "proto": 6}]));
         assert_eq!(v["services"]["include"], json!([]));
-        assert!(!q.cost().unbounded);
-        let svc_only = b
-            .exclude_service(ServiceMatch {
+        assert!(
+            q.cost().unbounded,
+            "excludes only: every flow but a few, still unbounded"
+        );
+        let included = b
+            .service(ServiceMatch {
                 port: None,
                 proto: Some(17),
                 process_name: None,
             })
             .build()
             .unwrap();
-        assert!(
-            !svc_only.cost().unbounded,
-            "a service exclude narrows like an actor exclude"
-        );
+        assert!(!included.cost().unbounded, "an include narrows");
     }
 
     #[test]

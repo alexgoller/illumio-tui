@@ -2,7 +2,7 @@
 //! `fqdn:x`) resolved to PCE actor matches. Unknown names fail here with the
 //! known values listed, before anything is sent to the PCE.
 use crate::error::{PceError, Result};
-use crate::models::{ActorMatch, Ref, ServiceMatch, Workload, proto_number};
+use crate::models::{ActorMatch, Ref, Service, ServiceMatch, Workload, proto_number};
 use crate::resolve::NameIndex;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,6 +66,97 @@ impl FilterExpr {
             _ => Ok(()),
         }
     }
+}
+
+/// One service term of the traffic filter: a port/proto, or a service
+/// object by name (`svc:NAME`), which needs the service list to resolve.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServiceExpr {
+    Port(ServiceMatch),
+    Named(String),
+}
+
+impl ServiceExpr {
+    /// `svc:NAME`, else [`parse_service`].
+    pub fn parse(s: &str) -> std::result::Result<Self, String> {
+        let s = s.trim();
+        match s.get(..4).filter(|h| h.eq_ignore_ascii_case("svc:")) {
+            Some(_) => {
+                let name = s[4..].trim();
+                if name.is_empty() {
+                    return Err("svc: needs a service name, e.g. svc:SSH".into());
+                }
+                Ok(ServiceExpr::Named(name.to_string()))
+            }
+            None => parse_service(s).map(ServiceExpr::Port),
+        }
+    }
+
+    pub fn is_named(&self) -> bool {
+        matches!(self, ServiceExpr::Named(_))
+    }
+}
+
+/// The port/protos `expr` stands for: itself, or one per port entry of the
+/// named service (live services only, the name any case). A port range, a
+/// service of every protocol or one without ports cannot be written as the
+/// single ports the filter takes, and fails naming why.
+pub fn resolve_service(
+    expr: &ServiceExpr,
+    services: &[&Service],
+) -> std::result::Result<Vec<ServiceMatch>, String> {
+    let name = match expr {
+        ServiceExpr::Port(m) => return Ok(vec![m.clone()]),
+        ServiceExpr::Named(n) => n,
+    };
+    let live = || {
+        services
+            .iter()
+            .filter(|s| s.update_type.as_deref() != Some("delete"))
+    };
+    let hits: Vec<&&Service> = live()
+        .filter(|s| s.name.eq_ignore_ascii_case(name))
+        .collect();
+    let svc = match hits.as_slice() {
+        [one] => *one,
+        [] => {
+            let known: Vec<String> = live().map(|s| s.name.clone()).collect();
+            return Err(format!(
+                "unknown service {name:?}; known: {}",
+                preview(&known)
+            ));
+        }
+        _ => return Err(format!("{} services are named {name:?}", hits.len())),
+    };
+    if svc.service_ports.is_empty() {
+        return Err(format!("svc:{} has no ports to filter on", svc.name));
+    }
+    svc.service_ports
+        .iter()
+        .map(|p| {
+            let proto = p
+                .proto
+                .and_then(|n| u8::try_from(n).ok())
+                .ok_or_else(|| {
+                    format!(
+                        "svc:{} matches every protocol: leave the service field empty",
+                        svc.name
+                    )
+                })?;
+            if p.to_port.is_some_and(|to| Some(to) != p.port) {
+                return Err(format!(
+                    "svc:{} has the port range {}; the traffic filter takes single ports, write them instead",
+                    svc.name,
+                    p.display()
+                ));
+            }
+            Ok(ServiceMatch {
+                port: p.port,
+                proto: Some(proto),
+                process_name: None,
+            })
+        })
+        .collect()
 }
 
 /// `443/tcp`, `443` or `tcp`: one service of the traffic filter, to include
@@ -229,6 +320,47 @@ mod tests {
         assert!(FilterExpr::parse("justaword").is_err());
         assert!(FilterExpr::Workload("x".into()).needs_workloads());
         assert!(!FilterExpr::Ip("x".into()).needs_workloads());
+    }
+
+    #[test]
+    fn named_services_expand_to_their_single_ports() {
+        let idx = index();
+        let all = idx.services();
+        let m = |port, proto| ServiceMatch {
+            port,
+            proto: Some(proto),
+            process_name: None,
+        };
+        assert_eq!(
+            ServiceExpr::parse("svc:postgresql").unwrap(),
+            ServiceExpr::Named("postgresql".into())
+        );
+        assert_eq!(
+            ServiceExpr::parse("22/tcp").unwrap(),
+            ServiceExpr::Port(m(Some(22), 6))
+        );
+        assert!(
+            ServiceExpr::parse("svc: ")
+                .unwrap_err()
+                .contains("needs a service name")
+        );
+        let r = |s: &str| resolve_service(&ServiceExpr::parse(s).unwrap(), &all);
+        assert_eq!(r("svc:PostgreSQL").unwrap(), vec![m(Some(5432), 6)]);
+        assert_eq!(
+            r("SVC:postgresql").unwrap(),
+            vec![m(Some(5432), 6)],
+            "any case"
+        );
+        assert_eq!(r("443/tcp").unwrap(), vec![m(Some(443), 6)]);
+        let err = r("svc:Web").unwrap_err();
+        assert!(err.contains("port range 8000-8099/tcp"), "{err}");
+        let err = r("svc:All Services").unwrap_err();
+        assert!(err.contains("every protocol"), "{err}");
+        let err = r("svc:nope").unwrap_err();
+        assert!(
+            err.contains("unknown service") && err.contains("PostgreSQL"),
+            "{err}"
+        );
     }
 
     #[test]

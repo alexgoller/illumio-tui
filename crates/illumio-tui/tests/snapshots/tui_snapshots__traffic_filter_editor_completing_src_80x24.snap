@@ -10,7 +10,7 @@ expression: out
 ╭ Res╭ Edit filter ──────────────────── Tab next · Enter run · Esc cancel ╮s r ╮
 │run │  window       24h                                                  │    │
 ╰────│▸ source       env=prod, app=▏                                      │────╯
-╭ Flo│               app=  loc=  role=  ip:  ipl:  +8 more                │────╮
+╭ Flo│               app=  loc=  role=  ip:  ipl:  +7 more                │────╮
 │no r│  destination                                                       │    │
 │    │  service                                                           │    │
 │    │  decisions    all                                                  │    │

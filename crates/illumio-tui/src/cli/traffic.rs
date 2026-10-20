@@ -16,9 +16,9 @@ use pce::models::{
 use pce::traffic::{
     AppSection, CONFIRM_MAX_RESULTS, Decisions, Direction, DraftCounts, DraftSummary, FilterExpr,
     FlowGroup, Focus, FocusDirection, MAX_TRAFFIC_MAX_RESULTS, MeshColumns, MeshRow, ResolvedFlow,
-    TrafficQueryBuilder, app_header, app_sections, app_sections_both, backfill_cap,
+    ServiceExpr, TrafficQueryBuilder, app_header, app_sections, app_sections_both, backfill_cap,
     compact_duration, group_by_labels, group_by_service, in_app, keys_or_default, mesh, parse_app,
-    parse_service, parse_window, resolve_actor, resolve_flows,
+    parse_window, resolve_actor, resolve_flows, resolve_service,
 };
 use pce::{KeyOrder, NameIndex};
 use serde::Serialize;
@@ -268,7 +268,8 @@ pub struct FilterArgs {
     /// Exclude destinations matching this filter (same syntax as --dst; repeatable)
     #[arg(long = "exclude-dst")]
     pub exclude_dst: Vec<String>,
-    /// Exclude a service: PORT, PROTO or PORT/PROTO, e.g. 22/tcp (repeatable)
+    /// Exclude a service: PORT, PROTO, PORT/PROTO (22/tcp) or svc:NAME, a service object's
+    /// ports (no port ranges); repeatable
     #[arg(long = "exclude-service")]
     pub exclude_service: Vec<String>,
     /// Destination port
@@ -410,11 +411,13 @@ async fn build_query(
             process_name: args.process.clone(),
         });
     }
-    for s in &args.exclude_service {
-        b = b.exclude_service(
-            parse_service(s).map_err(|e| CliError::Args(format!("--exclude-service: {e}")))?,
-        );
-    }
+    let ex_svc: Vec<ServiceExpr> = args
+        .exclude_service
+        .iter()
+        .map(|s| {
+            ServiceExpr::parse(s).map_err(|e| CliError::Args(format!("--exclude-service: {e}")))
+        })
+        .collect::<Result<_, _>>()?;
     let decisions: Vec<PolicyDecision> = args
         .decision
         .iter()
@@ -471,9 +474,30 @@ async fn build_query(
             .flatten()
             .flatten()
     };
+    // `svc:NAME` expands to the service's ports from the cached service
+    // list: the index's when the actors load it, else that one list.
+    let named = ex_svc.iter().any(ServiceExpr::is_named);
+    let exclude_services = |mut b: TrafficQueryBuilder,
+                            services: &[&pce::models::Service]|
+     -> Result<TrafficQueryBuilder, CliError> {
+        for e in &ex_svc {
+            for m in resolve_service(e, services)
+                .map_err(|err| CliError::Args(format!("--exclude-service: {err}")))?
+            {
+                b = b.exclude_service(m);
+            }
+        }
+        Ok(b)
+    };
     if all().next().is_none() {
+        let b = if named {
+            let services = ctx.pce.services(ctx.cache_mode).await?.value;
+            exclude_services(b, &services.iter().collect::<Vec<_>>())?
+        } else {
+            exclude_services(b, &[])?
+        };
         return Ok(BuiltQuery {
-            query: bounds,
+            query: b.build()?,
             index: None,
         });
     }
@@ -508,6 +532,7 @@ async fn build_query(
     for m in resolve(&ex_dst)?.into_iter().flatten() {
         b = b.exclude_destination(m);
     }
+    let b = exclude_services(b, &idx.services())?;
     Ok(BuiltQuery {
         query: b.build()?,
         index: Some(idx),

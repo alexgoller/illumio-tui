@@ -63,16 +63,22 @@ pub fn complete(
                 .map(|r| (r.name.clone(), r.name.clone()));
             ranked(token, names)
         }
-        // A `!` term excludes from the whole field, not the AND group: its
-        // keys are not narrowed by the group's.
-        FieldKind::TrafficActors => negatable(token, |t| {
+        FieldKind::TrafficActors | FieldKind::TrafficSource => {
+            let source = kind == FieldKind::TrafficSource;
+            // A `!` term excludes from the whole field, not the AND group:
+            // it neither hides the group's keys nor is hidden by them.
             let used = if token.starts_with('!') {
                 Vec::new()
             } else {
-                used_keys(earlier)
+                let included: Vec<String> = earlier
+                    .iter()
+                    .filter(|t| !t.trim_start().starts_with('!'))
+                    .cloned()
+                    .collect();
+                used_keys(&included)
             };
-            filter_actors(t, &used, idx, workloads)
-        }),
+            negatable(token, |t| filter_actors(t, &used, idx, workloads, source))
+        }
         FieldKind::TrafficService => negatable(token, |t| traffic_service(t, idx)),
         FieldKind::Decisions => word_list(token, earlier, &DECISIONS),
         FieldKind::Transmission => word_list(
@@ -298,19 +304,22 @@ fn window_steps(token: &str) -> Vec<String> {
 /// The words the filter's decision field takes.
 const DECISIONS: [&str; 4] = ["all", "allowed", "potentially_blocked", "blocked"];
 
-/// The prefixes `FilterExpr` takes besides `key=value`.
+/// The prefixes `FilterExpr` takes besides `key=value`; a source takes
+/// all but the last (`fqdn:`).
 const FILTER_WORDS: [&str; 4] = ["ip:", "ipl:", "wl:", "fqdn:"];
 
 /// A traffic filter source or destination, in `FilterExpr`'s grammar:
 /// `ipl:` completes IP list names, `wl:` the loaded workloads' hostnames
 /// and names, `key=` its values; a bare token offers keys (not those in
 /// `used`, the current AND group's), the prefixes, then label values, IP
-/// lists and workloads. `ip:` and `fqdn:` are left as typed.
+/// lists and workloads. `ip:` and `fqdn:` are left as typed; a `source`
+/// is not offered `fqdn:`.
 fn filter_actors(
     token: &str,
     used: &[String],
     idx: &NameIndex,
     workloads: &[Workload],
+    source: bool,
 ) -> Vec<String> {
     let literal = ["ip:", "fqdn:"].iter().any(|p| {
         token
@@ -327,7 +336,12 @@ fn filter_actors(
     if let Some(names) = prefixed(token, &sources) {
         return names;
     }
-    labels(token, used, idx, &FILTER_WORDS, &named_all(&sources))
+    let words = if source {
+        &FILTER_WORDS[..3]
+    } else {
+        &FILTER_WORDS[..]
+    };
+    labels(token, used, idx, words, &named_all(&sources))
 }
 
 /// A Workloads label filter term: a bare token offers keys (`app=`) and
@@ -495,16 +509,31 @@ fn workload_names(workloads: &[Workload]) -> Vec<String> {
     names
 }
 
-/// A traffic filter service: the protocols, then each index service whose
-/// name matches as its single-port `port/proto` entries (ranges and other
-/// protocols do not fit the field). A port (`/`, digits) is left as typed.
+/// A traffic filter service: the protocols and `svc:`, then each index
+/// service whose name matches as its single-port `port/proto` entries
+/// (ranges and other protocols do not fit the field). `svc:` completes the
+/// names the filter can expand (`resolve_service`: no range, not every
+/// protocol, no `,` or `|` in the name). A port (`/`, digits) is left as typed.
 fn traffic_service(token: &str, idx: &NameIndex) -> Vec<String> {
+    let all = idx.services();
+    let expandable = all
+        .iter()
+        .filter(|s| !s.name.contains([',', '|']))
+        .filter(|s| {
+            let named = pce::traffic::ServiceExpr::Named(s.name.clone());
+            pce::traffic::resolve_service(&named, &all).is_ok()
+        })
+        .map(|s| s.name.clone())
+        .collect();
+    if let Some(names) = prefixed(token, &[("svc:", expandable)]) {
+        return names;
+    }
     let is_port =
         token.contains('/') || (!token.is_empty() && token.bytes().all(|b| b.is_ascii_digit()));
     if is_port {
         return Vec::new();
     }
-    let protos = ["tcp", "udp", "icmp", "icmpv6"]
+    let protos = ["tcp", "udp", "icmp", "icmpv6", "svc:"]
         .into_iter()
         .map(|p| (p.to_string(), p.to_string()));
     let mut out = ranked(token, protos);
@@ -977,6 +1006,28 @@ mod tests {
     }
 
     #[test]
+    fn the_source_side_offers_no_fqdn_and_bang_terms_hide_no_keys() {
+        let src = ff(FieldKind::TrafficSource, "", &[], false);
+        assert_eq!(
+            &src[..7],
+            &s(&["app=", "env=", "loc=", "role=", "ip:", "ipl:", "wl:"])
+        );
+        assert!(!src.contains(&"fqdn:".to_string()), "{src:?}");
+        assert!(ff(FieldKind::TrafficSource, "fq", &[], false).is_empty());
+        assert_eq!(
+            ff(FieldKind::TrafficActors, "fq", &[], false),
+            s(&["fqdn:"])
+        );
+        let got = ff(FieldKind::TrafficSource, "", &["!app=shop"], false);
+        assert!(
+            got.contains(&"app=".to_string()),
+            "an excluded key is still offered to include: {got:?}"
+        );
+        let got = ff(FieldKind::TrafficSource, "", &["app=shop"], false);
+        assert!(!got.contains(&"app=".to_string()), "{got:?}");
+    }
+
+    #[test]
     fn filter_actors_keep_key_order_and_ignored_keys() {
         let got = complete(FieldKind::TrafficActors, "pay", &[], &rich(), &[], &[]);
         assert_eq!(
@@ -1024,7 +1075,7 @@ mod tests {
         assert_eq!(
             ff(FieldKind::TrafficService, "", &[], false),
             s(&[
-                "tcp", "udp", "icmp", "icmpv6", "5432/tcp", "80/tcp", "443/tcp"
+                "tcp", "udp", "icmp", "icmpv6", "svc:", "5432/tcp", "80/tcp", "443/tcp"
             ]),
             "no range (8000-8099) and no `All Services`"
         );
@@ -1050,6 +1101,15 @@ mod tests {
             s(&["!udp"])
         );
         assert!(ff(FieldKind::TrafficService, "!22", &[], false).is_empty());
+        assert_eq!(
+            ff(FieldKind::TrafficService, "svc:", &[], false),
+            s(&["svc:PostgreSQL"]),
+            "only names the filter can expand: no range (Web), not every protocol"
+        );
+        assert_eq!(
+            ff(FieldKind::TrafficService, "!SVC:post", &[], false),
+            s(&["!svc:PostgreSQL"])
+        );
     }
 
     #[test]
