@@ -74,8 +74,16 @@ fn completions_prints_a_script_per_shell() {
         }
         assert!(s.contains("illumio-tui __complete profiles"), "{shell}");
     }
+    let s = stdout(bin(dir.path()).args(["completions", "powershell"]));
+    assert!(s.contains("Register-ArgumentCompleter -Native -CommandName 'illumio-tui'"));
+    for name in top
+        .iter()
+        .chain(&["rulesets", "deny-rules", "provision", "import"])
+    {
+        assert!(s.contains(name), "powershell script misses {name}");
+    }
     bin(dir.path())
-        .args(["completions", "powershell"])
+        .args(["completions", "elvish"])
         .assert()
         .failure();
 }

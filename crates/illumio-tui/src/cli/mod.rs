@@ -155,7 +155,7 @@ pub enum Command {
     /// flows are left out, the others carry their mark. --no-marks ignores the file.
     #[command(subcommand)]
     Marks(marks::MarksCmd),
-    /// Print the shell completion script: bash, zsh or fish (local, no request)
+    /// Print the shell completion script: bash, zsh, fish or powershell (local, no request)
     ///
     /// e.g. `illumio-tui completions zsh > ~/.zfunc/_illumio-tui`. Profile names complete
     /// from the config file; nothing a completion does contacts the PCE.
