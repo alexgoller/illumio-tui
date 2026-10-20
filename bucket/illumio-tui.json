@@ -1,13 +1,13 @@
 {
-    "version": "0.4.0",
+    "version": "0.4.1",
     "description": "Terminal UI and CLI for the Illumio Core PCE",
     "homepage": "https://github.com/alexgoller/illumio-tui",
     "license": "GPL-3.0-only",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/alexgoller/illumio-tui/releases/download/v0.4.0/illumio-tui-0.4.0-x86_64-pc-windows-msvc.zip",
-            "hash": "de370c46ff6ac84fb5537666ebf8e7b621380232510fc4bfeaab5712e0e91eb8",
-            "extract_dir": "illumio-tui-0.4.0-x86_64-pc-windows-msvc"
+            "url": "https://github.com/alexgoller/illumio-tui/releases/download/v0.4.1/illumio-tui-0.4.1-x86_64-pc-windows-msvc.zip",
+            "hash": "86ad2f0675254c409e480acb31ae0682cfee9863dbcf9ab9874f9b3beeaa6aae",
+            "extract_dir": "illumio-tui-0.4.1-x86_64-pc-windows-msvc"
         }
     },
     "bin": "illumio-tui.exe",

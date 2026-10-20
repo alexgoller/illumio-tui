@@ -3,29 +3,29 @@
 class IllumioTui < Formula
   desc "Terminal UI and CLI for the Illumio Core PCE"
   homepage "https://github.com/alexgoller/illumio-tui"
-  version "0.4.0"
+  version "0.4.1"
   license "GPL-3.0-only"
 
   on_macos do
     on_arm do
-      url "https://github.com/alexgoller/illumio-tui/releases/download/v0.4.0/illumio-tui-0.4.0-aarch64-apple-darwin.tar.gz"
-      sha256 "b71337920794d830d1ebae0493c15c65c45e94483eab9a67eae6f5e7a110f8a9"
+      url "https://github.com/alexgoller/illumio-tui/releases/download/v0.4.1/illumio-tui-0.4.1-aarch64-apple-darwin.tar.gz"
+      sha256 "c53d85f67ac48d8425af3fc9b1c1cf542cad93a067a1d8cf8b992c699fc283b9"
     end
     on_intel do
-      url "https://github.com/alexgoller/illumio-tui/releases/download/v0.4.0/illumio-tui-0.4.0-x86_64-apple-darwin.tar.gz"
-      sha256 "da2e8b20357875eed1f97d0b0073b61fcafa26011754bfb84ef6bf95d642d6c5"
+      url "https://github.com/alexgoller/illumio-tui/releases/download/v0.4.1/illumio-tui-0.4.1-x86_64-apple-darwin.tar.gz"
+      sha256 "5fe10137607a34f1841f5623287e9bc2714842b9d8f8d7255285dae7faffa2a8"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/alexgoller/illumio-tui/releases/download/v0.4.0/illumio-tui-0.4.0-aarch64-unknown-linux-gnu.tar.gz"
-      sha256 "d4fa2d1a9e0672d654e523ad8daddb934c3c1529ddd4af002aae7e7cdffe8179"
+      url "https://github.com/alexgoller/illumio-tui/releases/download/v0.4.1/illumio-tui-0.4.1-aarch64-unknown-linux-gnu.tar.gz"
+      sha256 "968b32b4a77315783ad20719428335a0eefc4dbb77034c16e4d51a750905ba4f"
     end
     on_intel do
       # The static musl build: no glibc floor, runs on any x86_64 Linux.
-      url "https://github.com/alexgoller/illumio-tui/releases/download/v0.4.0/illumio-tui-0.4.0-x86_64-unknown-linux-musl.tar.gz"
-      sha256 "4fd9deb2a2aabb7159f46a7b1e1a42c053cf3ca9adc7d57261c09c507909b5b1"
+      url "https://github.com/alexgoller/illumio-tui/releases/download/v0.4.1/illumio-tui-0.4.1-x86_64-unknown-linux-musl.tar.gz"
+      sha256 "da7f0b72e2692c38679ad78436ba64395ecfd4e0e2db32e63a509bae16fd7861"
     end
   end
 
