@@ -3,37 +3,40 @@
 class IllumioTui < Formula
   desc "Terminal UI and CLI for the Illumio Core PCE"
   homepage "https://github.com/alexgoller/illumio-tui"
-  version "0.3.5"
+  version "0.4.0"
   license "GPL-3.0-only"
 
   on_macos do
     on_arm do
-      url "https://github.com/alexgoller/illumio-tui/releases/download/v0.3.5/illumio-tui-0.3.5-aarch64-apple-darwin.tar.gz"
-      sha256 "89e8438873dde5002329e31d48b1945c2b6471f5d7b8655c6b852a82411b209c"
+      url "https://github.com/alexgoller/illumio-tui/releases/download/v0.4.0/illumio-tui-0.4.0-aarch64-apple-darwin.tar.gz"
+      sha256 "b71337920794d830d1ebae0493c15c65c45e94483eab9a67eae6f5e7a110f8a9"
     end
     on_intel do
-      url "https://github.com/alexgoller/illumio-tui/releases/download/v0.3.5/illumio-tui-0.3.5-x86_64-apple-darwin.tar.gz"
-      sha256 "0baa08241052c6759225c53d483b6a654713bdeac48a471fbefb7da77d1e5a08"
+      url "https://github.com/alexgoller/illumio-tui/releases/download/v0.4.0/illumio-tui-0.4.0-x86_64-apple-darwin.tar.gz"
+      sha256 "da2e8b20357875eed1f97d0b0073b61fcafa26011754bfb84ef6bf95d642d6c5"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/alexgoller/illumio-tui/releases/download/v0.3.5/illumio-tui-0.3.5-aarch64-unknown-linux-gnu.tar.gz"
-      sha256 "70088c419612ee0dba39e75c315cc2ada2920d2f2e698a849bf27e6b25fd176d"
+      url "https://github.com/alexgoller/illumio-tui/releases/download/v0.4.0/illumio-tui-0.4.0-aarch64-unknown-linux-gnu.tar.gz"
+      sha256 "d4fa2d1a9e0672d654e523ad8daddb934c3c1529ddd4af002aae7e7cdffe8179"
     end
     on_intel do
       # The static musl build: no glibc floor, runs on any x86_64 Linux.
-      url "https://github.com/alexgoller/illumio-tui/releases/download/v0.3.5/illumio-tui-0.3.5-x86_64-unknown-linux-musl.tar.gz"
-      sha256 "538cfb0d9ba8313f868fc9e611847d8ea6b7dc6f34967c94c91f08bfcdc092ac"
+      url "https://github.com/alexgoller/illumio-tui/releases/download/v0.4.0/illumio-tui-0.4.0-x86_64-unknown-linux-musl.tar.gz"
+      sha256 "4fd9deb2a2aabb7159f46a7b1e1a42c053cf3ca9adc7d57261c09c507909b5b1"
     end
   end
 
   def install
     bin.install "illumio-tui"
+    # `illumio-tui completions bash|zsh|fish` prints each script.
+    generate_completions_from_executable(bin/"illumio-tui", "completions")
   end
 
   test do
     assert_match version.to_s, shell_output("#{bin}/illumio-tui --version")
+    assert_match "__complete profiles", shell_output("#{bin}/illumio-tui completions zsh")
   end
 end
