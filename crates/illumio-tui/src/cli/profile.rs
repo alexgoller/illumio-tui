@@ -7,7 +7,7 @@ use super::output::{
     Meta, OutputFormat, TableRows, choose_format, meta_line, write_json, write_table,
     write_table_csv,
 };
-use crate::config::{self, ConfigFile, Profile};
+use crate::config::{self, ConfigFile};
 use clap::{Args, Subcommand, ValueHint};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -30,7 +30,11 @@ pub enum ProfileCmd {
     /// override imported values. Host and org id from --host and --org-id. The secret comes
     /// from the env file, --api-secret-stdin, --api-secret or --api-secret-cmd; a plaintext
     /// secret is stored as api_secret in the config file, which is written mode 0600. The first
-    /// profile in a file becomes the default.
+    /// profile in a file becomes the default. --force replaces an existing profile's connection
+    /// settings given here and keeps the rest (limits, labels, generator, other keys).
+    ///
+    /// The real environment (PCE_HOST, API_SECRET, ILLUMIO_PROFILE, ...) is ignored: only flags
+    /// and --from-env-file count. dotenvy expands $VAR in values that are not single-quoted.
     Add(AddArgs),
 }
 
@@ -49,7 +53,7 @@ pub struct AddArgs {
     pub api_key: Option<String>,
     /// API secret, stored as plaintext api_secret. A flag value can land in shell history:
     /// prefer --api-secret-stdin or --from-env-file
-    #[arg(long, conflicts_with_all = ["api_secret_stdin", "api_secret_cmd"])]
+    #[arg(long, allow_hyphen_values = true, conflicts_with_all = ["api_secret_stdin", "api_secret_cmd"])]
     pub api_secret: Option<String>,
     /// Read the API secret from stdin (one line), stored as plaintext api_secret
     #[arg(long, conflicts_with = "api_secret_cmd")]
@@ -58,7 +62,8 @@ pub struct AddArgs {
     /// secret is written, even when the env file has API_SECRET
     #[arg(long)]
     pub api_secret_cmd: Option<String>,
-    /// dotenv file to import (- reads it from stdin, for pasting; end with Ctrl-D)
+    /// dotenv file to import (- reads it from stdin, for pasting; end with Ctrl-D). $VAR in a
+    /// value is expanded unless the value is single-quoted
     #[arg(long, value_name = "PATH", value_hint = ValueHint::FilePath)]
     pub from_env_file: Option<PathBuf>,
     /// Allow write commands against this PCE (writes = true)
@@ -67,7 +72,7 @@ pub struct AddArgs {
     /// Make it the default profile
     #[arg(long)]
     pub default: bool,
-    /// Replace a profile of the same name
+    /// Replace a profile of the same name (keeps its limits, labels, generator, other keys)
     #[arg(long)]
     pub force: bool,
 }
@@ -319,18 +324,19 @@ fn add(
         )));
     }
 
-    let env: HashMap<String, String> = match &a.from_env_file {
-        None => HashMap::new(),
+    let (env_text, env_name) = match &a.from_env_file {
+        None => (String::new(), String::new()),
         Some(_) if stdin_env => {
             if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
                 eprintln!("paste the env file, then Ctrl-D");
             }
             let mut text = String::new();
             std::io::stdin().read_to_string(&mut text)?;
-            config::parse_env_text(&text, "stdin")?
+            (text, "stdin".to_string())
         }
-        Some(p) => config::load_env_file(p)?,
+        Some(p) => (config::read_env_file(p)?, p.display().to_string()),
     };
+    let env: HashMap<String, String> = config::parse_env_text(&env_text, &env_name)?;
     // Values from the env file are never quoted in an error: it holds a secret.
     let imported = |k: &str| {
         env.get(k)
@@ -346,7 +352,7 @@ fn add(
             ));
         }
     };
-    if host.contains("://") || host.contains('/') || host.contains(char::is_whitespace) {
+    if host.contains([':', '/']) || host.contains(char::is_whitespace) {
         return Err(CliError::Args(
             "the host is a hostname only, without scheme, port or path (use --scheme, --port)"
                 .into(),
@@ -414,6 +420,9 @@ fn add(
         }
         (None, Some(cmd.clone()))
     } else if a.api_secret_stdin {
+        if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+            eprintln!("type or paste the API secret, then Enter (input is not hidden)");
+        }
         let mut line = String::new();
         std::io::stdin().read_line(&mut line)?;
         let secret = line.trim().to_string();
@@ -432,27 +441,60 @@ fn add(
         (imported("API_SECRET"), None)
     };
 
-    let secret_state = if api_secret_cmd.is_some() {
-        "cmd"
-    } else if api_secret.is_some() {
+    // dotenvy expands `$VAR` in a value that is not single-quoted.
+    for key in ["API_KEY", "API_SECRET"] {
+        let from_file = match key {
+            "API_KEY" => a.api_key.is_none(),
+            _ => a.api_secret_cmd.is_none() && !a.api_secret_stdin && a.api_secret.is_none(),
+        };
+        if from_file && config::env_value_expands(&env_text, key) {
+            eprintln!(
+                "warning: {key} in {env_name} has a $, which is expanded as a variable; \
+                 single-quote the value to keep it literal"
+            );
+        }
+    }
+
+    // A replaced profile keeps everything but the connection settings given
+    // here (limits, labels, generator, unknown keys, and what is not given).
+    let is_default = a.default || file.profiles.is_empty();
+    let replaced = file.profiles.contains_key(name);
+    let profile = file.profiles.entry(name.to_string()).or_default();
+    profile.host = Some(host.clone());
+    profile.org_id = Some(org_id);
+    if port.is_some() {
+        profile.port = port;
+    }
+    if scheme.is_some() {
+        profile.scheme = scheme;
+    }
+    if tls_verify.is_some() {
+        profile.tls_verify = tls_verify;
+    }
+    if api_key.is_some() {
+        profile.api_key = api_key;
+    }
+    // One secret source given clears the other.
+    if api_secret.is_some() || api_secret_cmd.is_some() {
+        profile.api_secret = api_secret;
+        profile.api_secret_cmd = api_secret_cmd;
+    }
+    if a.writes {
+        profile.writes = Some(true);
+    }
+    let port = profile.port;
+    let api_key = if profile.api_key.is_some() {
         "set"
     } else {
         "none"
     };
-    let profile = Profile {
-        host: Some(host.clone()),
-        port,
-        org_id: Some(org_id),
-        scheme,
-        tls_verify,
-        api_key: api_key.clone(),
-        api_secret,
-        api_secret_cmd,
-        writes: a.writes.then_some(true),
-        ..Profile::default()
+    let secret_state = if profile.api_secret_cmd.is_some() {
+        "cmd"
+    } else if profile.api_secret.is_some() {
+        "set"
+    } else {
+        "none"
     };
-    let is_default = a.default || file.profiles.is_empty();
-    let replaced = file.profiles.insert(name.to_string(), profile).is_some();
     if is_default {
         file.default_profile = Some(name.to_string());
     }
@@ -464,7 +506,7 @@ fn add(
             host,
             port,
             org_id,
-            api_key: if api_key.is_some() { "set" } else { "none" },
+            api_key,
             api_secret: secret_state,
             is_default: file.default_profile.as_deref() == Some(name),
             replaced,

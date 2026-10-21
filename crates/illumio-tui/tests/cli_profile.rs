@@ -461,3 +461,271 @@ fn add_args_debug_redacts_the_secret() {
     assert!(debug.contains("<redacted>"), "{debug}");
     assert!(!debug.contains(SECRET), "{debug}");
 }
+
+fn output(a: &assert_cmd::assert::Assert) -> String {
+    String::from_utf8_lossy(&a.get_output().stdout).to_string()
+        + &String::from_utf8_lossy(&a.get_output().stderr)
+}
+
+const RICH: &str = r#"default_profile = "prod"
+
+[profiles.prod]
+host = "old.example"
+port = 8443
+org_id = 2
+scheme = "https"
+api_key = "old_key"
+api_secret_cmd = "op read op://old"
+writes = true
+completion_cache = false
+mystery = "kept"
+
+[profiles.prod.limits]
+traffic_max_results = 5000
+requests_per_second = 1.5
+future_limit = 7
+
+[profiles.prod.labels]
+scope_keys = ["app", "env", "loc"]
+tier_key = "role"
+label_future = "x"
+
+[profiles.prod.generator]
+ruleset_name = "RS-{app}"
+gen_future = true
+
+[profiles.prod.custom_sub]
+anything = 1
+"#;
+
+#[test]
+fn force_keeps_what_it_is_not_given() {
+    let h = Home::new();
+    std::fs::create_dir_all(h.cfg().parent().unwrap()).unwrap();
+    std::fs::write(h.cfg(), RICH).unwrap();
+    let a = h
+        .add(&[
+            "prod",
+            "--host",
+            "new.example",
+            "--org-id",
+            "3",
+            "--api-secret-stdin",
+            "--force",
+        ])
+        .write_stdin(format!("{SECRET}\n"))
+        .assert()
+        .success();
+    assert_no_secret(&a);
+    let d = &json(&a)["data"];
+    assert_eq!(d["replaced"], true);
+    assert_eq!(d["port"], 8443, "the old port is kept");
+    assert_eq!(d["api_key"], "set");
+    assert_eq!(d["api_secret"], "set");
+    assert_eq!(d["is_default"], true);
+    let text = h.text();
+    let v: toml::Table = toml::from_str(&text).unwrap();
+    let p = &v["profiles"]["prod"];
+    assert_eq!(p["host"].as_str(), Some("new.example"));
+    assert_eq!(p["org_id"].as_integer(), Some(3));
+    assert_eq!(p["port"].as_integer(), Some(8443));
+    assert_eq!(p["api_key"].as_str(), Some("old_key"));
+    assert_eq!(p["api_secret"].as_str(), Some(SECRET));
+    assert!(
+        p.get("api_secret_cmd").is_none(),
+        "a new plaintext secret clears the cmd: {text}"
+    );
+    assert_eq!(p["writes"].as_bool(), Some(true));
+    assert_eq!(p["completion_cache"].as_bool(), Some(false));
+    assert_eq!(p["mystery"].as_str(), Some("kept"));
+    assert_eq!(p["limits"]["traffic_max_results"].as_integer(), Some(5000));
+    assert_eq!(p["limits"]["requests_per_second"].as_float(), Some(1.5));
+    assert_eq!(p["limits"]["future_limit"].as_integer(), Some(7));
+    assert_eq!(p["labels"]["scope_keys"].as_array().unwrap().len(), 3);
+    assert_eq!(p["labels"]["label_future"].as_str(), Some("x"));
+    assert_eq!(p["generator"]["ruleset_name"].as_str(), Some("RS-{app}"));
+    assert_eq!(p["generator"]["gen_future"].as_bool(), Some(true));
+    assert_eq!(p["custom_sub"]["anything"].as_integer(), Some(1));
+
+    // And back to a cmd: the plaintext secret goes.
+    h.add(&[
+        "prod",
+        "--host",
+        "new.example",
+        "--org-id",
+        "3",
+        "--api-secret-cmd",
+        "op read op://new",
+        "--force",
+    ])
+    .assert()
+    .success();
+    let text = h.text();
+    assert!(!text.contains(SECRET), "{text}");
+    assert!(
+        text.contains("api_secret_cmd = \"op read op://new\""),
+        "{text}"
+    );
+}
+
+#[test]
+fn unknown_keys_in_subtables_survive_profile_use() {
+    let h = Home::new();
+    std::fs::create_dir_all(h.cfg().parent().unwrap()).unwrap();
+    std::fs::write(
+        h.cfg(),
+        format!("{RICH}\n[profiles.other]\nhost = \"o.example\"\norg_id = 1\n"),
+    )
+    .unwrap();
+    Command::cargo_bin("illumio-tui")
+        .unwrap()
+        .env_clear()
+        .args(["--config", arg(&h.cfg()), "profile", "use", "other"])
+        .assert()
+        .success();
+    let text = h.text();
+    for kept in [
+        "future_limit = 7",
+        "label_future = \"x\"",
+        "gen_future = true",
+        "anything = 1",
+        "mystery = \"kept\"",
+        "default_profile = \"other\"",
+    ] {
+        assert!(text.contains(kept), "{kept}: {text}");
+    }
+}
+
+#[test]
+fn bom_and_line_numbers() {
+    let h = Home::new();
+    let body = format!("\u{feff}{}", full_env());
+    let env = h.env_file(&body);
+    h.add(&["file", "--from-env-file", arg(&env)])
+        .assert()
+        .success();
+    h.add(&["paste", "--from-env-file", "-"])
+        .write_stdin(body)
+        .assert()
+        .success();
+    let text = h.text();
+    assert!(text.contains("[profiles.file]") && text.contains("[profiles.paste]"));
+    assert_eq!(text.matches("host = \"pce.example\"").count(), 2, "{text}");
+
+    let env = h.env_file(&format!(
+        "\u{feff}# comment\nPCE_HOST=h\n\nAPI_SECRET=\"{SECRET} unterminated\nmore\n"
+    ));
+    let a = h
+        .add(&["bad", "--from-env-file", arg(&env)])
+        .assert()
+        .code(2);
+    assert_no_secret(&a);
+    let err = output(&a);
+    assert!(err.contains("bad line 4 in"), "{err}");
+    assert!(
+        !err.contains("unterminated") && !err.contains("more"),
+        "{err}"
+    );
+}
+
+#[test]
+fn dollar_in_an_imported_secret_warns_without_the_value() {
+    let h = Home::new();
+    let env = h.env_file("PCE_HOST=h\nPCE_ORG_ID=1\nAPI_KEY=k\nAPI_SECRET=ab$cd-s3cr3t\n");
+    let a = h
+        .add(&["d", "--from-env-file", arg(&env)])
+        .assert()
+        .success();
+    let err = String::from_utf8_lossy(&a.get_output().stderr).to_string();
+    assert!(
+        err.contains("API_SECRET") && err.contains("single-quote"),
+        "{err}"
+    );
+    assert!(!err.contains("s3cr3t") && !err.contains("API_KEY"), "{err}");
+
+    // Single-quoted: literal, no warning.
+    let env = h.env_file("PCE_HOST=h\nPCE_ORG_ID=1\nAPI_SECRET='ab$cd'\n");
+    let a = h
+        .add(&["e", "--from-env-file", arg(&env)])
+        .assert()
+        .success();
+    assert!(!output(&a).contains("warning"), "{}", output(&a));
+    assert!(h.text().contains("api_secret = \"ab$cd\""), "{}", h.text());
+    // A flag secret over the file: no warning about the file's value.
+    let env = h.env_file("PCE_HOST=h\nPCE_ORG_ID=1\nAPI_SECRET=x$y\n");
+    let a = h
+        .add(&[
+            "f",
+            "--from-env-file",
+            arg(&env),
+            "--api-secret-cmd",
+            "true",
+        ])
+        .assert()
+        .success();
+    assert!(!output(&a).contains("warning"), "{}", output(&a));
+}
+
+#[test]
+fn host_with_a_port_is_refused() {
+    let h = Home::new();
+    let a = h
+        .add(&["d", "--host", "pce.example:8443", "--org-id", "1"])
+        .assert()
+        .code(2);
+    assert!(output(&a).contains("--port"), "{}", output(&a));
+    let env = h.env_file("PCE_HOST=pce.example:8443\nPCE_ORG_ID=1\n");
+    h.add(&["d", "--from-env-file", arg(&env)]).assert().code(2);
+    assert!(!h.cfg().exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_write_failure_says_write() {
+    use std::os::unix::fs::PermissionsExt;
+    let h = Home::new();
+    let dir = h.cfg().parent().unwrap().to_path_buf();
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let a = h
+        .add(&["d", "--host", "h", "--org-id", "1"])
+        .assert()
+        .failure();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let err = output(&a);
+    assert!(err.contains("cannot write"), "{err}");
+    assert!(!err.contains("cannot read"), "{err}");
+    assert!(!h.cfg().exists());
+}
+
+#[test]
+fn a_secret_may_start_with_a_hyphen() {
+    let h = Home::new();
+    let a = h
+        .add(&[
+            "d",
+            "--host",
+            "h",
+            "--org-id",
+            "1",
+            "--api-secret",
+            "-starts-with-hyphen",
+        ])
+        .assert()
+        .success();
+    assert_eq!(json(&a)["data"]["api_secret"], "set");
+    assert!(h.text().contains("api_secret = \"-starts-with-hyphen\""));
+}
+
+#[test]
+fn help_says_the_environment_is_ignored() {
+    let a = Command::cargo_bin("illumio-tui")
+        .unwrap()
+        .env_clear()
+        .args(["profile", "add", "--help"])
+        .assert()
+        .success();
+    let text = output(&a);
+    assert!(text.contains("real environment"), "{text}");
+    assert!(text.contains("shell history"), "{text}");
+}

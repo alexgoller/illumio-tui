@@ -248,9 +248,13 @@ Flags override imported values (`--host`, `--port`, `--org-id`, `--scheme`, `--a
 `--api-secret` (lands in shell history; prefer the other two) or `--api-secret-cmd`, which wins
 over an imported `API_SECRET` and keeps plaintext out of the file; a plaintext secret is stored
 as `api_secret`. The file is written atomically, mode 0600 (directory 0700), keeping the other
-profiles and unknown keys (not comments). An existing profile is replaced only with `--force`;
-the first profile in a file, or `--default`, becomes `default_profile`. The output says whether
-a key and secret are `set` (or `cmd`, `none`), never the secret.
+profiles and unknown keys (not comments). An existing profile is changed only with `--force`,
+which sets the connection settings given and keeps the rest (limits, labels, generator, other
+keys; a new secret source replaces the old one). The first profile in a file, or `--default`,
+becomes `default_profile`. Only flags and the env file count, not the real environment; dotenvy
+expands `$VAR` in values that are not single-quoted (a warning says so for `API_KEY` and
+`API_SECRET`). The output says whether a key and secret are `set` (or `cmd`, `none`), never the
+secret.
 
 `[profiles.<name>.labels]` and `[profiles.<name>.generator]` are under Label model below.
 Environment variables outrank the profile. `PCE_TLS_VERIFY=false` skips certificate checks

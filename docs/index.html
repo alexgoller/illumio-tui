@@ -850,7 +850,7 @@ API_SECRET=xxxxxxxxxxxxxxxx</code></pre>
 <pre><code><span class="p">$ </span>illumio-tui profile add demo --from-env-file path/.env
 <span class="p">$ </span>illumio-tui profile add prod --host pce.example --org-id 1 --api-key api_... \
     --api-secret-cmd "op read op://vault/pce/secret" --default</code></pre>
-      <p>Flags override imported values. The secret comes from the env file, <code>--api-secret-stdin</code>, <code>--api-secret</code> (lands in shell history) or <code>--api-secret-cmd</code> (wins, no plaintext stored); a plaintext secret is stored as <code>api_secret</code> in a file of mode 0600. <code>--force</code> replaces an existing profile; the first profile becomes the default. The secret is never printed.</p>
+      <p>Flags override imported values. The secret comes from the env file, <code>--api-secret-stdin</code>, <code>--api-secret</code> (lands in shell history) or <code>--api-secret-cmd</code> (wins, no plaintext stored); a plaintext secret is stored as <code>api_secret</code> in a file of mode 0600. <code>--force</code> updates an existing profile's connection settings and keeps the rest (limits, labels, generator); the first profile becomes the default. Single-quote a value with a <code>$</code>: dotenv expands <code>$VAR</code>. The secret is never printed.</p>
       <p>In <code>~/.config/illumio-tui/config.toml</code>:</p>
 <pre><code>default_profile = "prod"
 

@@ -97,6 +97,9 @@ pub struct Limits {
     /// Re-run a truncated traffic query below 10000 at 10000 without `B`
     /// (the user saying yes in advance, in writing).
     pub traffic_auto_backfill: Option<bool>,
+    /// Unknown keys, round-tripped verbatim.
+    #[serde(default, flatten)]
+    pub extra: toml::Table,
 }
 
 impl Limits {
@@ -106,6 +109,7 @@ impl Limits {
             && self.traffic_max_results.is_none()
             && self.traffic_default_window.is_none()
             && self.traffic_auto_backfill.is_none()
+            && self.extra.is_empty()
     }
 }
 
@@ -118,6 +122,9 @@ pub struct LabelsConfig {
     pub scope_keys: Option<Vec<String>>,
     pub tier_key: Option<String>,
     pub ignore_keys: Option<Vec<String>>,
+    /// Unknown keys, round-tripped verbatim.
+    #[serde(default, flatten)]
+    pub extra: toml::Table,
 }
 
 /// The policy generator: `ruleset_name` names a ruleset it creates, a
@@ -128,6 +135,9 @@ pub struct LabelsConfig {
 pub struct GeneratorConfig {
     pub ruleset_name: Option<String>,
     pub consolidate_min_peers: Option<usize>,
+    /// Unknown keys, round-tripped verbatim.
+    #[serde(default, flatten)]
+    pub extra: toml::Table,
 }
 
 pub const DEFAULT_SCOPE_KEYS: [&str; 2] = ["app", "env"];
@@ -210,6 +220,11 @@ pub enum ConfigError {
         path: PathBuf,
         source: std::io::Error,
     },
+    #[error("cannot write {path}: {source}")]
+    Write {
+        path: PathBuf,
+        source: std::io::Error,
+    },
     /// Reports the parser's message and byte offset only: the `Display` of
     /// `toml::de::Error` quotes the offending line, which may hold a secret.
     #[error("cannot parse {}: {}", path.display(), parse_summary(source))]
@@ -254,28 +269,35 @@ pub fn load_config_file(path: &Path) -> Result<ConfigFile, ConfigError> {
 
 /// Reads a dotenv file into a map without touching the process environment.
 pub fn load_env_file(path: &Path) -> Result<HashMap<String, String>, ConfigError> {
-    let iter = dotenvy::from_path_iter(path).map_err(|e| {
-        ConfigError::Message(format!("cannot read env file {}: {e}", path.display()))
-    })?;
-    env_map(iter, &path.display().to_string())
+    let text = read_env_file(path)?;
+    parse_env_text(&text, &path.display().to_string())
 }
 
-/// Reads dotenv text (`profile add --from-env-file -`: stdin) into a map
-/// without touching the process environment; `what` names it in errors.
+/// The text of a dotenv file; the error names the file, never its content.
+pub fn read_env_file(path: &Path) -> Result<String, ConfigError> {
+    std::fs::read_to_string(path)
+        .map_err(|e| ConfigError::Message(format!("cannot read env file {}: {e}", path.display())))
+}
+
+/// Reads dotenv text into a map without touching the process environment;
+/// `what` names it in errors (a path, or `stdin`). A leading byte-order
+/// mark is dropped. A bad line is reported by its number, never its text.
 pub fn parse_env_text(text: &str, what: &str) -> Result<HashMap<String, String>, ConfigError> {
-    env_map(dotenvy::from_read_iter(text.as_bytes()), what)
-}
-
-fn env_map<R: std::io::Read>(
-    iter: dotenvy::Iter<R>,
-    what: &str,
-) -> Result<HashMap<String, String>, ConfigError> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let mut map = HashMap::new();
-    for item in iter {
+    for item in dotenvy::from_read_iter(text.as_bytes()) {
         let (k, v) = item.map_err(|e| {
             // `LineParse` displays the raw line, which may be a secret.
             let why = match e {
-                dotenvy::Error::LineParse(_, idx) => format!("parse error at index {idx}"),
+                dotenvy::Error::LineParse(line, idx) => {
+                    let at = text
+                        .find(line.as_str())
+                        .map(|pos| format!(" {}", text[..pos].matches('\n').count() + 1))
+                        .unwrap_or_default();
+                    return ConfigError::Message(format!(
+                        "bad line{at} in {what} (parse error at index {idx})"
+                    ));
+                }
                 other => other.to_string(),
             };
             ConfigError::Message(format!("bad line in {what} ({why})"))
@@ -285,13 +307,33 @@ fn env_map<R: std::io::Read>(
     Ok(map)
 }
 
-/// Writes the config file atomically (a temporary file beside it, then a
-/// rename), mode 0600 on Unix, creating its directory mode 0700. A
+/// Whether `key`'s raw value in dotenv `text` has a `$` outside single
+/// quotes, which dotenvy expands as a variable (`$VAR`, `${VAR}`).
+pub fn env_value_expands(text: &str, key: &str) -> bool {
+    text.lines().any(|line| {
+        let line = line.trim_start();
+        let line = line.strip_prefix("export ").unwrap_or(line).trim_start();
+        match line
+            .strip_prefix(key)
+            .and_then(|rest| rest.trim_start().strip_prefix('='))
+        {
+            Some(value) => {
+                let value = value.trim_start();
+                !value.starts_with('\'') && value.contains('$')
+            }
+            None => false,
+        }
+    })
+}
+
+/// Writes the config file atomically (a new temporary file beside it, then
+/// a rename), mode 0600 on Unix, creating its directory mode 0700. A
 /// symlinked config file is written through to its target.
 pub fn write_config_file(path: &Path, file: &ConfigFile) -> Result<(), ConfigError> {
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let io = |path: &Path| {
         let path = path.to_path_buf();
-        move |source| ConfigError::Io { path, source }
+        move |source| ConfigError::Write { path, source }
     };
     let text = toml::to_string_pretty(file)
         .map_err(|e| ConfigError::Message(format!("cannot serialise config: {e}")))?;
@@ -314,17 +356,28 @@ pub fn write_config_file(path: &Path, file: &ConfigFile) -> Result<(), ConfigErr
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "config.toml".into());
-    let tmp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or_default();
+    let tmp = dir.join(format!(
+        ".{name}.{}.{}.{nanos}.tmp",
+        std::process::id(),
+        N.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    ));
+    // A stale temp of the same name (a symlink planted there included) goes
+    // first; `create_new` then refuses anything that appears in between.
+    let _ = std::fs::remove_file(&tmp);
     let written = (|| {
         use std::io::Write;
         let mut o = std::fs::OpenOptions::new();
-        o.write(true).create(true).truncate(true);
+        o.write(true).create_new(true);
         #[cfg(unix)]
         std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
         let mut f = o.open(&tmp)?;
         #[cfg(unix)]
         {
-            // `mode` applies to a new file only; a stale temp keeps its own.
+            // The umask can only narrow `mode`; set it exactly before writing.
             use std::os::unix::fs::PermissionsExt;
             f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
         }
@@ -1082,6 +1135,7 @@ ignore_keys = [" DFIRBubble ", "", "os", "DFIRBubble", "app", "role", "bu"]
             scope_keys: Some(vec![" ".into()]),
             tier_key: None,
             ignore_keys: None,
+            ..LabelsConfig::default()
         });
         let err = resolve(&f, &Overrides::default(), &env(&[])).unwrap_err();
         assert_eq!(
