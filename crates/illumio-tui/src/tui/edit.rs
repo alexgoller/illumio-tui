@@ -1088,8 +1088,9 @@ pub fn scope_inputs(
 }
 
 /// Before a key reaches an allow rule form: its Scope switch's ruleset
-/// scopes and group keys, fresh from what is loaded. Other forms are left
-/// alone. Never a request.
+/// scopes and group keys, fresh from what is loaded; other scopes than
+/// before forget the last switch. Other forms are left alone. Never a
+/// request.
 pub fn refresh_rule_scope(
     form: &mut Form,
     loaded: &[RuleSet],
@@ -1101,6 +1102,11 @@ pub fn refresh_rule_scope(
     }
     let (scopes, groups) = scope_inputs(form, loaded, drafts, idx);
     if let Some(ctx) = form.rule_scope.as_deref_mut() {
+        // What the last switch did was judged against the old scopes:
+        // undone against others (another ruleset typed) it could widen.
+        if ctx.scopes != scopes {
+            ctx.last = None;
+        }
         ctx.scopes = scopes;
         ctx.groups = groups;
     }
@@ -3782,5 +3788,54 @@ mod tests {
             ruleset_href: sets[0].href.clone(),
         });
         assert_eq!(notes(&d, &sets, None), None);
+    }
+
+    #[test]
+    fn a_ruleset_change_forgets_the_last_switch() {
+        let mut sets = rule_sets();
+        let mut prod = sets[0].clone();
+        prod.href = "/orgs/5/sec_policy/draft/rule_sets/102".into();
+        prod.name = "Prod".into();
+        prod.scopes =
+            serde_json::from_value(json!([[{"label": {"href": "/orgs/5/labels/4"}}]])).unwrap();
+        sets.push(prod);
+        let flows = crate::tui::test_support::fixture_flows();
+        let extra_in_shop = || {
+            let mut f = flow_form(&flows[0]);
+            set(&mut f, "Ruleset", "Shop-Prod");
+            let mut f = on_scope(f, &sets);
+            space(&mut f);
+            assert_eq!(
+                scope_and_consumers(&f),
+                ("extra", "app=shop, env=prod, role=web")
+            );
+            f
+        };
+        let retarget = |f: &mut Form, name: &str| {
+            set(f, "Ruleset", name);
+            refresh_rule_scope(f, &sets, Some(&sets), &fixture_index());
+        };
+        // To a global ruleset: back to intra must not open role=web anywhere.
+        let mut f = extra_in_shop();
+        retarget(&mut f, "Global-Infra");
+        space(&mut f);
+        assert_eq!(
+            scope_and_consumers(&f),
+            ("intra", "app=shop, env=prod, role=web")
+        );
+        // To a ruleset scoped env=prod, consumers edited: only env=prod,
+        // redundant there, goes; app=shop stays.
+        let mut f = extra_in_shop();
+        set(
+            &mut f,
+            "Consumers",
+            "app=shop, env=prod, role=web, iplist:Corp",
+        );
+        retarget(&mut f, "Prod");
+        space(&mut f);
+        assert_eq!(
+            scope_and_consumers(&f),
+            ("intra", "app=shop, role=web, iplist:Corp")
+        );
     }
 }

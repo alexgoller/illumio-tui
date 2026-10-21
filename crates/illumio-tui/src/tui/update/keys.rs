@@ -30,10 +30,6 @@ pub(super) fn field_candidates(model: &Model, editor: &impl Completing) -> Vec<S
     candidates
 }
 
-/// `Tab` in a Ruleset field completes instead of moving on: the field holds
-/// text that is no draft ruleset's exact name (any case) and some name
-/// matches it. Empty or exact text, or an open completion (`Tab` then keeps
-/// the shown name and moves on), leaves `Tab` to the form.
 /// A key to a form, its Scope switch brought up to date first (the
 /// ruleset's scopes as loaded). No request.
 fn form_key(model: &Model, form: &mut Form, k: KeyEvent) -> FormEvent {
@@ -41,6 +37,10 @@ fn form_key(model: &Model, form: &mut Form, k: KeyEvent) -> FormEvent {
     form.on_key(k)
 }
 
+/// `Tab` in a Ruleset field completes instead of moving on: the field holds
+/// text that is no draft ruleset's exact name (any case) and some name
+/// matches it. Empty or exact text, or an open completion (`Tab` then keeps
+/// the shown name and moves on), leaves `Tab` to the form.
 pub(super) fn tab_completes(model: &Model, form: &Form) -> bool {
     let Some(field) = form.fields.get(form.active) else {
         return false;
