@@ -735,7 +735,7 @@ fn two_profile_config(dir: &std::path::Path, b: &MockServer) -> std::path::PathB
     std::fs::write(
         &cfg,
         format!(
-            "[profiles.a]\nhost = \"a.invalid\"\norg_id = 1\napi_key = \"k\"\napi_secret = \"s\"\n\n[profiles.b]\nscheme = \"http\"\nhost = \"{}\"\nport = {}\norg_id = 5\napi_key = \"k\"\napi_secret = \"s\"\n[profiles.b.limits]\ntraffic_max_results = 500\ntraffic_default_window = \"1h\"\n",
+            "completion_cache = false\n[profiles.a]\nhost = \"a.invalid\"\norg_id = 1\napi_key = \"k\"\napi_secret = \"s\"\n\n[profiles.b]\nscheme = \"http\"\nhost = \"{}\"\nport = {}\norg_id = 5\napi_key = \"k\"\napi_secret = \"s\"\n[profiles.b.limits]\ntraffic_max_results = 500\ntraffic_default_window = \"1h\"\n",
             ub.host_str().unwrap(),
             ub.port().unwrap()
         ),
@@ -998,7 +998,7 @@ async fn a_slow_profile_switch_does_not_block_the_event_loop() {
     std::fs::write(
         &cfg,
         format!(
-            "[profiles.a]\nhost = \"a.invalid\"\norg_id = 1\napi_key = \"k\"\napi_secret = \"s\"\n\n[profiles.slow]\nscheme = \"http\"\nhost = \"{}\"\nport = {}\norg_id = 5\napi_key = \"k\"\napi_secret_cmd = \"sleep 1; echo s\"\n",
+            "completion_cache = false\n[profiles.a]\nhost = \"a.invalid\"\norg_id = 1\napi_key = \"k\"\napi_secret = \"s\"\n\n[profiles.slow]\nscheme = \"http\"\nhost = \"{}\"\nport = {}\norg_id = 5\napi_key = \"k\"\napi_secret_cmd = \"sleep 1; echo s\"\n",
             ub.host_str().unwrap(),
             ub.port().unwrap()
         ),
