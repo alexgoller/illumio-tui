@@ -440,6 +440,7 @@ fn run_zsh(driver: &str, dir: &Path) -> std::process::Output {
 /// The zsh script, loaded by compinit in an interactive zsh on a pty
 /// (zsh/zpty), completes PCE names through `_arguments`, as a user's Tab
 /// does: each line is typed with a Tab, then a widget records the buffer.
+/// Profile names too, from the config `--config` names anywhere on the line.
 #[test]
 fn zsh_script_completes_cached_names_through_arguments() {
     if !Path::new("/bin/zsh").exists() {
@@ -453,6 +454,9 @@ fn zsh_script_completes_cached_names_through_arguments() {
         "prod-eu",
         r#"{"version": 1, "host": "127.0.0.1", "org_id": 1, "labels": ["app=eu"]}"#,
     );
+    // Profile names of a config given with --config (before or after the
+    // subcommand), not of the default one.
+    std::fs::write(dir.path().join("other.toml"), "[profiles.zeta]\n").unwrap();
     let fpath = dir.path().join("fn");
     std::fs::create_dir_all(&fpath).unwrap();
     std::fs::write(
@@ -471,7 +475,11 @@ for line in \
     "illumio-tui workloads --label=app=c" \
     "illumio-tui traffic query --src wl:w" \
     "illumio-tui enforce s" \
-    "illumio-tui workloads --profile prod-eu --label app=e"; do
+    "illumio-tui workloads --profile prod-eu --label app=e" \
+    "illumio-tui workloads --config $1/other.toml --profile z" \
+    "illumio-tui --config=$1/other.toml workloads --profile z" \
+    "illumio-tui profile use z" \
+    "illumio-tui profile use p"; do
   zpty -r -m z x '*READY> '
   zpty -w -n z "$line"$'\t\x14'
 done
@@ -493,13 +501,20 @@ cat $out
     );
     assert_eq!(
         String::from_utf8(out.stdout).unwrap(),
-        "<illumio-tui workloads --label app=shop >\n\
+        format!(
+            "<illumio-tui workloads --label app=shop >\n\
          <illumio-tui workloads --label loc=new\\ york >\n\
          <illumio-tui workloads --hostname db\\ 1 >\n\
          <illumio-tui workloads --label=app=crm >\n\
          <illumio-tui traffic query --src wl:web1 >\n\
          <illumio-tui enforce shop/prod >\n\
-         <illumio-tui workloads --profile prod-eu --label app=eu >\n"
+         <illumio-tui workloads --profile prod-eu --label app=eu >\n\
+         <illumio-tui workloads --config {d}/other.toml --profile zeta >\n\
+         <illumio-tui --config={d}/other.toml workloads --profile zeta >\n\
+         <illumio-tui profile use z>\n\
+         <illumio-tui profile use prod-eu >\n",
+            d = dir.path().display()
+        )
     );
 }
 

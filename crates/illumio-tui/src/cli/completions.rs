@@ -345,26 +345,37 @@ const PROFILE_USE_ZSH: &str = ":name -- Profile name from the config file:_defau
 /// `_illumio-tui__names KIND`; both defined before the script's entry.
 fn zsh_dynamic(text: &str) -> String {
     const FUNC: &str = r#"(( $+functions[_illumio-tui__profiles] )) ||
+(( $+functions[_illumio-tui__line_args] )) ||
+_illumio-tui__line_args() {
+    # `reply`: the options named in "$@" with their values, from the whole
+    # line (a subcommand's _arguments, and its opt_args, sees its own words
+    # only), as `--opt VALUE` or `--opt=VALUE`.
+    local -a w
+    local i
+    reply=()
+    w=(${(Q)${(z)LBUFFER}})
+    for (( i = 1; i < $#w; i++ )); do
+        if (( $@[(Ie)$w[i]] )); then
+            reply+=($w[i] ${~w[i+1]})
+        elif [[ $w[i] == --*=* ]] && (( $@[(Ie)${w[i]%%=*}] )); then
+            reply+=(${w[i]%%=*} ${~w[i]#*=})
+        fi
+    done
+}
+
+(( $+functions[_illumio-tui__profiles] )) ||
 _illumio-tui__profiles() {
-    local -a profiles cfg
-    [[ -n ${opt_args[--config]} ]] && cfg=(--config ${~opt_args[--config]})
-    profiles=(${(f)"$(illumio-tui __complete profiles $cfg 2>/dev/null)"})
+    local -a profiles reply
+    _illumio-tui__line_args --config
+    profiles=(${(f)"$(illumio-tui __complete profiles $reply 2>/dev/null)"})
     _wanted profiles expl 'profile' compadd -a profiles
 }
 
 (( $+functions[_illumio-tui__names] )) ||
 _illumio-tui__names() {
-    local -a values args words_
-    local i
-    # The whole line: a subcommand's _arguments only knows its own words.
-    words_=(${(Q)${(z)LBUFFER}})
-    for (( i = 1; i < $#words_; i++ )); do
-        case $words_[i] in
-            --config|--profile) args+=($words_[i] ${~words_[i+1]}) ;;
-            --config=*|--profile=*) args+=(${words_[i]%%=*} ${~words_[i]#*=}) ;;
-        esac
-    done
-    values=(${(f)"$(illumio-tui __complete $1 $args -- "${(Q)PREFIX}" 2>/dev/null)"})
+    local -a values reply
+    _illumio-tui__line_args --config --profile
+    values=(${(f)"$(illumio-tui __complete $1 $reply -- "${(Q)PREFIX}" 2>/dev/null)"})
     _wanted values expl $1 compadd -a values
 }
 
@@ -889,7 +900,7 @@ mod tests {
         let zsh = script(Shell::Zsh);
         assert_eq!(zsh.matches(": _illumio-tui__names ").count(), HOOKS.len());
         assert!(zsh.contains("_illumio-tui__names() {"));
-        assert!(zsh.contains("illumio-tui __complete $1 $args -- \"${(Q)PREFIX}\""));
+        assert!(zsh.contains("illumio-tui __complete $1 $reply -- \"${(Q)PREFIX}\""));
         // Through `_arguments` as written, not with its options first.
         assert!(!zsh.contains(":_illumio-tui__names "));
         assert!(zsh.contains(
