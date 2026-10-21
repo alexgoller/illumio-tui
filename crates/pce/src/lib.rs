@@ -45,7 +45,7 @@ pub use resolve::{
     NameIndex, ResolvedActor, ResolvedLabel, ResolvedService, RuleKind, RuleSetView, RuleView,
     describe_actor, describe_ingress_service,
 };
-pub use rule_filter::{RuleFilter, RuleRef, RuleTerm};
+pub use rule_filter::{ActorTerm, Position, RuleFilter, RuleRef, RuleTerm};
 
 pub use auth::Credentials;
 pub use cache::TtlCache;
