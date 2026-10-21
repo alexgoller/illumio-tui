@@ -589,11 +589,7 @@ pub(super) fn apply_rule_search(model: &mut Model, f: pce::RuleFilter) {
         Some(i) => f.resolve(i),
         None => (f, Vec::new()),
     };
-    let names_workloads = f
-        .terms
-        .iter()
-        .any(|t| matches!(t, pce::RuleTerm::Workload(_)));
-    if names_workloads && model.workloads.impact_source().is_none() {
+    if f.names_workloads() && model.workloads.impact_source().is_none() {
         unknown.push("wl: names need the workloads (i loads them)".into());
     }
     model.policy.last_search = f.to_string();
@@ -603,9 +599,8 @@ pub(super) fn apply_rule_search(model: &mut Model, f: pce::RuleFilter) {
     model.policy.found.home();
     let p = &model.policy;
     let mut text = format!(
-        "{} {} · {}",
-        p.found.len(),
-        if p.found.len() == 1 { "rule" } else { "rules" },
+        "{} · {}",
+        crate::tui::ui::screens::policy::matched_text(p.found.len(), p.found_loaded),
         p.last_search
     );
     if p.found_deny_unloaded > 0 {

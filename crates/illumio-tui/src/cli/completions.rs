@@ -1047,7 +1047,7 @@ mod tests {
         // main hands `__complete` to the helper before clap and the runtime.
         let main = include_str!("../main.rs");
         let helper = main.find("completions::helper(").unwrap();
-        assert!(helper < main.find("Cli::parse()").unwrap());
+        assert!(helper < main.find("Cli::parse_from(").unwrap());
         assert!(helper < main.find("tokio::runtime").unwrap());
     }
 

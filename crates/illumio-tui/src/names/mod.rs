@@ -278,7 +278,10 @@ pub enum Kind {
     Scope,
     /// A rule side: `[!]key=value`, `group:`, `iplist:`, `workload:`.
     Actors,
-    /// A `policy search` term: `key=value`, `ipl:`, `svc:`, `wl:`.
+    /// A `policy search` term: `key=value`, `ipl:`, `svc:`, `wl:`; after
+    /// `scope:` labels and `global`, after `src:`/`dst:` (`consumer:`,
+    /// `provider:`) labels, `ipl:`, `wl:` and `all`; a leading `-` and a
+    /// `!` before a label kept.
     Search,
 }
 
@@ -390,6 +393,9 @@ pub fn complete(kind: Kind, names: &Names, word: &str) -> Vec<String> {
         Some(rest) => rest.split_once('=').map_or("", |(_, v)| v),
         None => word,
     };
+    if kind == Kind::Search {
+        return search_terms(names, word);
+    }
     let (head, term) = match word.rfind(',') {
         Some(i) if kind.lists() => word.split_at(i + 1),
         _ => ("", word),
@@ -402,6 +408,36 @@ pub fn complete(kind: Kind, names: &Names, word: &str) -> Vec<String> {
         .into_iter()
         .filter(|t| t.starts_with(term))
         .map(|t| format!("{head}{bang}{t}"))
+        .collect()
+}
+
+/// [`Kind::Search`]: `-` (a negated term), then a side prefix, then `!`
+/// (an exclusion: labels only) peeled off the word and put back on each
+/// candidate.
+fn search_terms(n: &Names, word: &str) -> Vec<String> {
+    let prefixed = |p: &str, v: &[String]| v.iter().map(|x| format!("{p}{x}")).collect::<Vec<_>>();
+    let (dash, rest) = word.split_at(usize::from(word.starts_with('-')));
+    let side = ["scope:", "src:", "consumer:", "dst:", "provider:"]
+        .into_iter()
+        .find(|p| rest.starts_with(p));
+    let (side, rest) = rest.split_at(side.map_or(0, str::len));
+    let (bang, term) = rest.split_at(usize::from(rest.starts_with('!')));
+    let terms = match (side, bang) {
+        (_, "!") => n.labels.clone(),
+        ("", _) => Kind::Search.terms(n, ""),
+        ("scope:", _) => [n.labels.clone(), vec!["global".into()]].concat(),
+        _ => [
+            n.labels.clone(),
+            vec!["all".into()],
+            prefixed("ipl:", &n.ip_lists),
+            prefixed("wl:", &n.hostnames),
+        ]
+        .concat(),
+    };
+    terms
+        .into_iter()
+        .filter(|t| t.starts_with(term))
+        .map(|t| format!("{dash}{side}{bang}{t}"))
         .collect()
 }
 

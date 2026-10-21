@@ -451,6 +451,8 @@ pub struct PolicyState {
     /// no inline list, the endpoint not fetched, on a PCE that may keep
     /// them apart (`deny_maybe_apart`).
     pub found_deny_unloaded: usize,
+    /// The rules the search looked at (allow and loaded deny rules).
+    pub found_loaded: usize,
     /// A deny-rule endpoint read answered 404: this PCE has no such
     /// endpoint, an empty inline list means none.
     pub deny_endpoint_missing: bool,
@@ -483,6 +485,7 @@ impl PolicyState {
         self.found.search_clear();
         self.found.set_rows(Vec::new());
         self.found_deny_unloaded = 0;
+        self.found_loaded = 0;
     }
 
     /// The search's rows from the loaded rulesets (`found`), each
@@ -493,11 +496,13 @@ impl PolicyState {
         let Some(filter) = &self.search else {
             self.found.set_rows(Vec::new());
             self.found_deny_unloaded = 0;
+            self.found_loaded = 0;
             return;
         };
         let keep = self.found.selected_item().map(|r| r.href.clone());
         let mut rows = Vec::new();
         let mut unloaded = 0;
+        let mut loaded = 0;
         let apart = self.deny_maybe_apart();
         for rs in &self.raw {
             let deny: &[DenyRule] = if rs.deny_rules.is_empty() {
@@ -511,6 +516,7 @@ impl PolicyState {
             } else {
                 &rs.deny_rules
             };
+            loaded += rs.rules.len() + deny.len();
             let scopes = crate::tui::edit::scopes_text(&rs.scopes, idx);
             let row = |view: RuleView| FoundRow {
                 ruleset: rs.name.clone(),
@@ -539,6 +545,7 @@ impl PolicyState {
         }
         self.found.set_rows(rows);
         self.found_deny_unloaded = unloaded;
+        self.found_loaded = loaded;
         if let Some(href) = keep {
             self.found.select_where(|r| r.href == href);
         }

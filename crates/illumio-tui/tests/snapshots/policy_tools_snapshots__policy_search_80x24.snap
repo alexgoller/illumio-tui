@@ -4,7 +4,7 @@ expression: out
 ---
  illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
   1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
-╭ Search · env=prod ───────────────────────────────── 5 rules · draft · 5s ago ╮
+╭ Search · env=prod ──────────────────────────── 5 of 5 rules · draft · 5s ago ╮
 │  ruleset            enabled      scope      consumers   providers  services  │
 │▸ Shop-Prod          on           app=shop,  All workloa role=db    22/tcp    │
 │  Shop-Prod          on           app=shop,  role=web    role=db    PostgreSQL│

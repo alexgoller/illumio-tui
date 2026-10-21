@@ -281,7 +281,10 @@ async fn policy_search_refuses_no_term_bad_terms_and_unknown_names() {
         vec!["policy", "search"],
         vec!["policy", "search", "shop"],
         vec!["policy", "search", "--label", "shop"],
-        vec!["policy", "search", "!app=shop"],
+        vec!["policy", "search", "--label", "!app=shop"],
+        vec!["policy", "search", "-"],
+        vec!["policy", "search", "app=shop", "--x"],
+        vec!["policy", "search", "scope:all"],
     ] {
         let a = cmd(&server).args(&args).assert().code(2);
         assert!(!stderr(&a).is_empty(), "{args:?}");
@@ -527,4 +530,129 @@ async fn impact_list_explains_an_ip_list_side() {
         .assert()
         .code(2);
     assert_eq!(server.received_requests().await.unwrap().len(), before);
+}
+
+/// The issue's examples' world: a payment ruleset and a global one.
+async fn mount_examples(server: &MockServer) {
+    let label = |id: u32, key: &str, value: &str| json!({"href": format!("/orgs/5/labels/{id}"), "key": key, "value": value});
+    let labels = json!([
+        label(1, "role", "web"),
+        label(2, "role", "db"),
+        label(3, "app", "payment"),
+        label(4, "env", "prod")
+    ]);
+    let l = |id: u32| json!({"label": {"href": format!("/orgs/5/labels/{id}")}});
+    let rule = |id: u32, consumers: Value, providers: Value, port: u16, unscoped: bool| {
+        json!({
+            "href": format!("/orgs/5/sec_policy/draft/rule_sets/300/sec_rules/{id}"),
+            "enabled": true, "consumers": consumers, "providers": providers,
+            "ingress_services": [{"port": port, "proto": 6}], "unscoped_consumers": unscoped
+        })
+    };
+    let ams = json!([{"actors": "ams"}]);
+    let rule_sets = json!([
+        {"href": "/orgs/5/sec_policy/draft/rule_sets/300", "name": "Payment", "enabled": true,
+         "scopes": [[l(3)]],
+         "rules": [
+            rule(11, json!([l(1)]), json!([l(2)]), 5432, true),
+            rule(12, json!([l(1)]), json!([l(2)]), 443, false),
+            rule(13, json!([{"label": {"href": "/orgs/5/labels/4"}, "exclusion": true}]), json!([l(2)]), 22, false)
+         ],
+         "deny_rules": [
+            {"href": "/orgs/5/sec_policy/draft/rule_sets/300/deny_rules/14", "enabled": true,
+             "consumers": ams, "providers": [l(2)], "ingress_services": [{"port": 23, "proto": 6}]}
+         ]},
+        {"href": "/orgs/5/sec_policy/draft/rule_sets/301", "name": "Global", "enabled": true,
+         "scopes": [[]],
+         "rules": [
+            rule(15, ams.clone(), json!([l(1)]), 443, false),
+            rule(16, json!([l(4)]), ams, 443, false)
+         ]}
+    ]);
+    for (p, body) in [
+        ("/api/v2/orgs/5/labels", labels.to_string()),
+        ("/api/v2/orgs/5/sec_policy/draft/label_groups", "[]".into()),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/ip_lists",
+            include_str!("../../../fixtures/ip_lists.json").into(),
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/services",
+            include_str!("../../../fixtures/services.json").into(),
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/rule_sets",
+            rule_sets.to_string(),
+        ),
+    ] {
+        mount(server, p, &body).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn policy_search_runs_the_issue_examples() {
+    let server = MockServer::start().await;
+    mount_examples(&server).await;
+    let search = |terms: &[&str]| {
+        let mut args = vec!["--json", "policy", "search"];
+        args.extend_from_slice(terms);
+        stdout_json(cmd(&server).args(&args).assert().success())
+    };
+    // Extra-scope rules from web to db: 12 is intra.
+    let out = search(&["src:role=web", "dst:role=db", "extra"]);
+    assert_eq!(hrefs(&out), ["11"]);
+    assert_eq!(out["meta"]["matched"], json!({"matched": 1, "loaded": 6}));
+    // Payment rules not covering 443: allow rules, then the deny rule.
+    assert_eq!(
+        hrefs(&search(&["scope:app=payment", "-svc:443/tcp"])),
+        ["11", "13", "14"]
+    );
+    // Consumers that say `All except env=prod`; 16 names env=prod itself.
+    assert_eq!(hrefs(&search(&["src:!env=prod"])), ["13"]);
+    assert_eq!(hrefs(&search(&["src:env=prod"])), ["16"]);
+    // Allow rules open to All Workloads: deny rule 14 is left out.
+    assert_eq!(hrefs(&search(&["src:all", "-deny"])), ["15"]);
+    assert_eq!(hrefs(&search(&["src:all"])), ["14", "15"]);
+    assert_eq!(hrefs(&search(&["scope:global"])), ["15", "16"]);
+    assert_eq!(gets(&server, "/api/v2/orgs/5/workloads").await, 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn policy_search_takes_dash_terms_as_terms_and_flags_as_flags() {
+    let server = MockServer::start().await;
+    mount_examples(&server).await;
+    // A negated term first, then flags; flags before; after `--`.
+    for args in [
+        vec!["policy", "search", "-deny", "--json", "--label", "role=db"],
+        vec!["--json", "policy", "search", "--label", "role=db", "-deny"],
+        vec![
+            "--json",
+            "policy",
+            "search",
+            "--label=role=db",
+            "--",
+            "-deny",
+        ],
+        vec!["--json", "policy", "search", "role=db", "-deny", "-src:all"],
+    ] {
+        let out = stdout_json(cmd(&server).args(&args).assert().success());
+        assert_eq!(hrefs(&out), ["11", "12", "13"], "{args:?}");
+    }
+    let a = cmd(&server)
+        .args(["--table", "policy", "search", "-scope:global", "-deny"])
+        .assert()
+        .success();
+    assert!(
+        stderr(&a).contains(" · 3 of 6 rules matched"),
+        "{}",
+        stderr(&a)
+    );
+    // Two dashes are a flag's: an unknown one is refused.
+    for args in [
+        vec!["policy", "search", "--deny-x"],
+        vec!["policy", "search", "app=payment", "--nope"],
+    ] {
+        let a = cmd(&server).args(&args).assert().code(2);
+        assert!(!stderr(&a).is_empty(), "{args:?}");
+    }
 }

@@ -486,23 +486,83 @@ fn mark_side(token: &str, used: &[String], idx: &NameIndex, workloads: &[Workloa
 }
 
 /// The words the rule search takes besides `key=value`.
-const RULE_WORDS: [&str; 6] = ["ipl:", "svc:", "wl:", "href:", "disabled", "deny"];
+const RULE_WORDS: [&str; 13] = [
+    "ipl:", "svc:", "wl:", "href:", "scope:", "src:", "dst:", "disabled", "enabled", "deny",
+    "allow", "intra", "extra",
+];
+
+/// The prefixes that put an actor term on one side (`consumer:` and
+/// `provider:` are `src:` and `dst:`).
+const RULE_SIDES: [&str; 5] = ["scope:", "src:", "consumer:", "dst:", "provider:"];
 
 /// A rule search term: `ipl:` IP list, `svc:` service and `wl:` loaded
 /// workload names (quoted when they hold a space), `key=` its values (a
 /// comma lists more, as on Workloads; never `-`), a bare token the words,
-/// keys and values. `href:` and ports are left as typed. Never a request.
+/// keys and values. `-term` completes the term, `!key=` an exclusion's
+/// values; after `scope:` labels and `global`, after `src:`/`dst:` labels,
+/// `ipl:`, `wl:` and `all`, the prefix kept. `href:` and ports are left as
+/// typed. Never a request.
 fn rule_filter_term(token: &str, idx: &NameIndex, workloads: &[Workload]) -> Vec<String> {
+    if let Some(rest) = token.strip_prefix('-') {
+        return rule_filter_term(rest, idx, workloads)
+            .into_iter()
+            .map(|c| format!("-{c}"))
+            .collect();
+    }
+    for prefix in RULE_SIDES {
+        let Some(head) = token
+            .get(..prefix.len())
+            .filter(|h| h.eq_ignore_ascii_case(prefix))
+        else {
+            continue;
+        };
+        let rest = &token[prefix.len()..];
+        return rule_side_term(rest, prefix == "scope:", idx, workloads)
+            .into_iter()
+            .map(|c| format!("{head}{c}"))
+            .collect();
+    }
     let services = idx.services().iter().map(|s| s.name.clone()).collect();
     let sources = [
         ("ipl:", idx.ip_list_names()),
         ("svc:", services),
         ("wl:", workload_names(workloads)),
     ];
-    // `ipl:"Any` matches names as typed.
+    if let Some(names) = quoted_names(token, &sources) {
+        return names;
+    }
+    rule_words_and_labels(token, &RULE_WORDS, idx)
+}
+
+/// After `scope:` (`scope`) or `src:`/`dst:`: the side's words and names,
+/// then labels.
+fn rule_side_term(
+    token: &str,
+    scope: bool,
+    idx: &NameIndex,
+    workloads: &[Workload],
+) -> Vec<String> {
+    if scope {
+        return rule_words_and_labels(token, &["global"], idx);
+    }
+    let sources = [
+        ("ipl:", idx.ip_list_names()),
+        ("wl:", workload_names(workloads)),
+    ];
+    if let Some(names) = quoted_names(token, &sources) {
+        return names;
+    }
+    rule_words_and_labels(token, &["all", "ipl:", "wl:"], idx)
+}
+
+/// `prefix` + name of `sources` for a token with one of the prefixes
+/// (`ipl:"Any` matches names as typed), the name quoted when it holds a
+/// space, a quote or a backslash; `None` without such a prefix.
+fn quoted_names(token: &str, sources: &[(&str, Vec<String>)]) -> Option<Vec<String>> {
     let unquoted = token.replacen(":\"", ":", 1);
-    if let Some(names) = prefixed(&unquoted, &sources) {
-        return names
+    let names = prefixed(&unquoted, sources)?;
+    Some(
+        names
             .into_iter()
             .map(|c| match c.split_once(':') {
                 Some((p, n)) if n.contains(char::is_whitespace) || n.contains(['"', '\\']) => {
@@ -510,24 +570,25 @@ fn rule_filter_term(token: &str, idx: &NameIndex, workloads: &[Workload]) -> Vec
                 }
                 _ => c,
             })
-            .collect();
-    }
+            .collect(),
+    )
+}
+
+/// `key=` its values; a bare token `words`, then keys and values; `!` in
+/// front (an exclusion) the label part only. Never `key=-`.
+fn rule_words_and_labels(token: &str, words: &[&str], idx: &NameIndex) -> Vec<String> {
     let no_dash = |c: &String| !(c.ends_with("=-") || c.ends_with(",-"));
-    if token.contains('=') {
-        return workload_label_term(token, &[], idx)
+    let labels = |t: &str| -> Vec<String> {
+        workload_label_term(t, &[], idx)
             .into_iter()
             .filter(no_dash)
-            .collect();
+            .collect()
+    };
+    if token.starts_with('!') || token.contains('=') {
+        return negatable(token, labels);
     }
-    let mut out = ranked(
-        token,
-        RULE_WORDS.iter().map(|w| (w.to_string(), w.to_string())),
-    );
-    out.extend(
-        workload_label_term(token, &[], idx)
-            .into_iter()
-            .filter(no_dash),
-    );
+    let mut out = ranked(token, words.iter().map(|w| (w.to_string(), w.to_string())));
+    out.extend(labels(token));
     out
 }
 

@@ -320,9 +320,14 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
                 "",
                 "app=shop,crm ipl:NAME svc:NAME|443/tcp|tcp wl:NAME href:TEXT",
             ),
-            more("", "disabled deny · space: all of · Ctrl-N completes"),
+            more(
+                "",
+                "disabled enabled deny allow intra extra · space: all of",
+            ),
+            more("", "scope: src: dst: put a label (src:/dst: ipl: wl: all)"),
+            more("", "!app=shop: an exclusion · -term: not it (-deny)"),
             more("", "names: exact or a unique prefix · wl: needs i first"),
-            more("", "labels: scope/actors/groups, not exclusions or All"),
+            more("", "labels: direct or in a group · Ctrl-N completes"),
             more(
                 "Enter",
                 "search list: open the rule in its ruleset (f: back)",

@@ -67,7 +67,7 @@ fn f_applies_a_search_locally_and_lists_rules_across_rulesets() {
     );
     assert_eq!(found_hrefs(&m), ["1<sec_rules", "2<sec_rules"]);
     // Ruleset 100 lists deny rules inline: 101's empty list means none.
-    assert_eq!(m.status.text, "2 rules · role=web");
+    assert_eq!(m.status.text, "2 of 5 rules · role=web");
     // env=prod: ruleset 100 by scope, rule 3 through its label group.
     search(&mut m, "env=prod");
     assert_eq!(
@@ -297,7 +297,7 @@ fn deny_rules_may_be_unloaded_only_where_the_pce_keeps_them_apart() {
     search(&mut m, "role=web");
     assert_eq!(
         m.status.text,
-        "2 rules · role=web · 2 rulesets may hold deny rules not loaded"
+        "2 of 3 rules · role=web · 2 rulesets may hold deny rules not loaded"
     );
     // The endpoint answers 404: there is none, an empty list means none.
     update(
@@ -356,4 +356,64 @@ fn explains_jump_puts_the_search_aside_to_show_the_rule() {
     assert!(m.policy.search.is_none() && m.policy.found.is_empty());
     assert_eq!(m.policy.pane, PolicyPane::Rules);
     assert_eq!(m.policy.last_search, "deny", "f offers it again");
+}
+
+#[test]
+fn sides_exclusions_negation_and_properties_search_locally() {
+    let mut m = on_policy();
+    search(&mut m, "src:role=web");
+    assert_eq!(found_hrefs(&m), ["1<sec_rules"]);
+    search(&mut m, "dst:role=web extra");
+    assert_eq!(found_hrefs(&m), ["2<sec_rules"]);
+    search(&mut m, "scope:app=shop -deny");
+    assert_eq!(found_hrefs(&m), ["1<sec_rules", "2<sec_rules"]);
+    assert_eq!(m.status.text, "2 of 5 rules · scope:app=shop -deny");
+    search(&mut m, "consumer:all");
+    assert_eq!(found_hrefs(&m), ["8<deny_rules"]);
+    assert_eq!(m.policy.last_search, "src:all");
+    search(&mut m, "scope:global enabled");
+    assert!(found_hrefs(&m).is_empty(), "its ruleset is off");
+    search(&mut m, "scope:global intra");
+    assert_eq!(found_hrefs(&m), ["3<sec_rules"]);
+    search(&mut m, "src:!env=prod");
+    assert!(found_hrefs(&m).is_empty());
+    // A malformed negation stays in the editor; the search in force holds.
+    press(&mut m, key('f'));
+    press(&mut m, ctrl('u'));
+    type_text(&mut m, "--deny");
+    press(&mut m, kc(KeyCode::Enter));
+    match &m.overlay {
+        Overlay::RuleFilter(e) => assert!(e.error.as_deref().unwrap().contains("one - negates")),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(m.policy.last_search, "src:!env=prod");
+}
+
+#[test]
+fn ctrl_n_completes_after_a_side_a_bang_and_a_dash() {
+    let mut m = with_workloads(on_policy());
+    for (typed, completed) in [
+        ("src:role=w", "src:role=web"),
+        ("-scope:app=sh", "-scope:app=shop"),
+        ("dst:ipl:C", "dst:ipl:Corp"),
+        ("src:!role=w", "src:!role=web"),
+        ("!env=p", "!env=prod"),
+        ("scope:gl", "scope:global"),
+        ("dst:al", "dst:all"),
+        ("provider:wl:host-1", "provider:wl:host-1.example"),
+        ("-ext", "-extra"),
+        ("intr", "intra"),
+    ] {
+        press(&mut m, key('f'));
+        press(&mut m, ctrl('u'));
+        type_text(&mut m, typed);
+        press(&mut m, ctrl('n'));
+        assert!(
+            matches!(&m.overlay, Overlay::RuleFilter(e) if e.value == completed),
+            "{typed}: {:?}",
+            m.overlay
+        );
+        press(&mut m, kc(KeyCode::Esc));
+        press(&mut m, kc(KeyCode::Esc));
+    }
 }

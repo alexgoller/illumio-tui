@@ -1,5 +1,6 @@
-//! `f` on Policy: the one-line rule search editor
-//! (`app=shop ipl:Corp svc:443/tcp wl:web01 href:… disabled deny`). Pure:
+//! `f` on Policy: the one-line rule search editor (`app=shop ipl:Corp
+//! svc:443/tcp wl:web01 href:… disabled deny`, `src:role=web dst:role=db
+//! extra`, `scope:app=shop -svc:443/tcp`, `src:!env=prod`). Pure:
 //! keys change the text; `update` parses it on `Enter` and completes it
 //! on `Ctrl-N`/`Ctrl-P` from the name index and the loaded workloads
 //! (never a request). The grammar is `pce::RuleFilter`'s.

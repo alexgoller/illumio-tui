@@ -3,7 +3,7 @@
 //! provisioning changes (list, provision, revert).
 use super::context::{Context, cache_label};
 use super::error::CliError;
-use super::output::{TableRows, join_list};
+use super::output::{MatchedMeta, TableRows, join_list};
 use super::write::{
     self, ActorToken, Lists, ServiceToken, WriteFlags, is_href, parse_actors, parse_scopes,
     parse_services, resolve_actors, resolve_scopes, resolve_services, run_plan, run_rule_plan,
@@ -24,6 +24,7 @@ use pce::write::{
 };
 use pce::{CacheMode, Cached, PceError, RuleKind, RuleSetView, RuleView};
 use serde::Serialize;
+use std::ffi::OsString;
 
 #[derive(Subcommand, Debug)]
 pub enum PolicyCmd {
@@ -48,9 +49,9 @@ pub enum PolicyCmd {
 /// list read (cached).
 #[derive(Args, Debug)]
 pub struct SearchArgs {
-    /// Search terms as in the TUI: app=shop,crm ipl:NAME svc:NAME svc:443/tcp svc:tcp wl:NAME href:TEXT disabled deny
+    /// Search terms as in the TUI (all must hold): app=shop,crm !env=prod ipl:NAME svc:NAME svc:443/tcp svc:tcp wl:NAME href:TEXT disabled enabled deny allow intra extra; scope:, src: (consumer:) or dst: (provider:) before a label (src:/dst: also ipl:NAME, wl:NAME, all; scope:global); a leading - negates a term (-deny, -scope:env=dev). Examples: `src:role=web dst:role=db extra`, `scope:app=payment -svc:443/tcp`, `src:!env=prod`, `src:all -deny`. A -term needs no `--`; after `--` every word is a term
     pub terms: Vec<String>,
-    /// A label in a scope, consumer or provider (directly or in a label group; exclusions and All workloads do not count): key=value, a comma lists values any of which matches (repeatable; all must hold)
+    /// A label in a scope, consumer or provider (directly or in a label group; exclusions and All workloads do not count): key=value, a comma lists values any of which matches (repeatable; all must hold). For exclusions use the term !key=value
     #[arg(long = "label")]
     pub labels: Vec<String>,
     /// An IP list consumer or provider, by name: exact, else the start of exactly one name, any case (repeatable)
@@ -874,6 +875,41 @@ impl TableRows for Vec<SearchRow> {
     }
 }
 
+/// `policy search -deny …`: clap reads a word that starts with `-` as a
+/// flag, and a positional that takes such words swallows every flag after
+/// its first one. So the words after `policy search` that start with one
+/// `-` (not `-h`, not `-` alone) move behind a `--` (the one given, else a
+/// new one at the end), where they are terms; terms AND, so their order
+/// does not matter. Every other command line is left as it is.
+pub fn negated_terms_last(mut args: Vec<OsString>) -> Vec<OsString> {
+    let Some(at) = args
+        .windows(2)
+        .position(|w| w[0] == "policy" && w[1] == "search")
+    else {
+        return args;
+    };
+    let mut rest = args.split_off(at + 2);
+    // After `--`, the words are terms already.
+    let tail = match rest.iter().position(|a| a == "--") {
+        Some(i) => rest.split_off(i),
+        None => Vec::new(),
+    };
+    let negated = |a: &OsString| {
+        a.to_str()
+            .is_some_and(|s| s.len() > 1 && s.starts_with('-') && !s.starts_with("--") && s != "-h")
+    };
+    let (terms, kept): (Vec<OsString>, Vec<OsString>) = rest.into_iter().partition(negated);
+    args.extend(kept);
+    if !terms.is_empty() && tail.is_empty() {
+        args.push("--".into());
+    }
+    let mut tail = tail.into_iter();
+    args.extend(tail.next());
+    args.extend(terms);
+    args.extend(tail);
+    args
+}
+
 /// The search the flags and terms make; exit 2 for a malformed one or none.
 fn search_filter(a: &SearchArgs) -> Result<pce::RuleFilter, CliError> {
     use pce::RuleTerm;
@@ -883,6 +919,11 @@ fn search_filter(a: &SearchArgs) -> Result<pce::RuleFilter, CliError> {
     }
     for l in &a.labels {
         match RuleTerm::parse(l).map_err(CliError::Args)? {
+            RuleTerm::Label(t) if t.negate => {
+                return Err(CliError::Args(format!(
+                    "--label {l:?}: expected key=value (the term {l} finds exclusions)"
+                )));
+            }
             t @ RuleTerm::Label(_) => terms.push(t),
             _ => return Err(CliError::Args(format!("--label {l:?}: expected key=value"))),
         }
@@ -919,11 +960,7 @@ async fn search(ctx: &Context, a: &SearchArgs) -> Result<(), CliError> {
         return Err(CliError::Args(unknown.join("; ")));
     }
     let c = ctx.pce.rule_sets(scope(a.active), ctx.cache_mode).await?;
-    let named = filter
-        .terms
-        .iter()
-        .any(|t| matches!(t, pce::RuleTerm::Workload(_)));
-    let (workloads, mut truncated) = if named {
+    let (workloads, mut truncated) = if filter.names_workloads() {
         let w = impact_workloads(ctx).await?;
         (w.value, w.truncated)
     } else {
@@ -931,7 +968,9 @@ async fn search(ctx: &Context, a: &SearchArgs) -> Result<(), CliError> {
     };
     truncated |= c.truncated;
     let mut rows = Vec::new();
+    let mut loaded = 0;
     for rs in &c.value {
+        loaded += rs.rules.len() + rs.deny_rules.len();
         let view = RuleSetView::from_rule_set(rs, &idx);
         let hit = |r: pce::RuleRef| filter.matches(&r, &idx, &workloads);
         let mut mine: Vec<RuleView> = rs
@@ -961,6 +1000,10 @@ async fn search(ctx: &Context, a: &SearchArgs) -> Result<(), CliError> {
         }));
     }
     let mut meta = ctx.meta(cache_label(c.hit, ctx.cache_mode), truncated, None);
+    meta.matched = Some(MatchedMeta {
+        matched: rows.len(),
+        loaded,
+    });
     let unlisted = deny_maybe_apart(&c.value);
     if unlisted > 0 {
         let w = format!(
@@ -1910,4 +1953,81 @@ async fn revert(ctx: &Context, a: &RevertArgs) -> Result<(), CliError> {
         .await
         .map_err(|e| with_typed(e, &typed))?;
     write::run_provision_plan(ctx, &a.write, &guard, plan).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    fn moved(line: &str) -> String {
+        let args = line.split(' ').map(OsString::from).collect();
+        let out: Vec<String> = negated_terms_last(args)
+            .into_iter()
+            .map(|a| a.into_string().unwrap())
+            .collect();
+        out.join(" ")
+    }
+
+    #[test]
+    fn negated_terms_move_behind_the_escape() {
+        assert_eq!(
+            moved("x --json policy search -deny app=shop --active -scope:env=dev"),
+            "x --json policy search app=shop --active -- -deny -scope:env=dev"
+        );
+        // A `--` given: the terms go right behind it.
+        assert_eq!(
+            moved("x policy search -deny --label app=x -- -svc:443 y"),
+            "x policy search --label app=x -- -deny -svc:443 y"
+        );
+        // Nothing to move, `-h`, `-` alone, other commands: as they are.
+        for line in [
+            "x policy search app=shop --json",
+            "x policy search -h",
+            "x policy search -",
+            "x policy search app=x -- y",
+            "x workloads -deny",
+            "x policy rules -x",
+        ] {
+            assert_eq!(moved(line), line);
+        }
+    }
+
+    /// The terms clap hands `policy search` for this command line.
+    fn terms(line: &str) -> Result<(Vec<String>, bool), String> {
+        let args = line.split(' ').map(OsString::from).collect();
+        let cli = super::super::Cli::try_parse_from(negated_terms_last(args))
+            .map_err(|e| e.to_string())?;
+        match cli.command {
+            Some(super::super::Command::Policy(PolicyCmd::Search(a))) => Ok((a.terms, a.active)),
+            other => Err(format!("{other:?}")),
+        }
+    }
+
+    #[test]
+    fn dash_terms_parse_as_terms_and_flags_as_flags() {
+        assert_eq!(
+            terms("x policy search -deny --active app=shop").unwrap(),
+            (vec!["app=shop".into(), "-deny".into()], true)
+        );
+        assert_eq!(
+            terms("x --json policy search --active -- -deny -src:all").unwrap(),
+            (vec!["-deny".into(), "-src:all".into()], true)
+        );
+        assert!(terms("x policy search app=x --nope").is_err());
+        let f = search_filter(&SearchArgs {
+            terms: terms("x policy search -deny scope:global").unwrap().0,
+            labels: Vec::new(),
+            ip_lists: Vec::new(),
+            services: Vec::new(),
+            workloads: Vec::new(),
+            href: None,
+            disabled: false,
+            deny: false,
+            active: false,
+            draft: false,
+        })
+        .unwrap();
+        assert_eq!(f.to_string(), "scope:global -deny");
+    }
 }

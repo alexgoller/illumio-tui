@@ -137,14 +137,21 @@ pub fn scope_counts(rows: &[RuleRow]) -> String {
     }
 }
 
+/// A search's count against what it looked at: `3 of 40 rules`.
+pub fn matched_text(matched: usize, loaded: usize) -> String {
+    format!(
+        "{matched} of {loaded} {}",
+        if loaded == 1 { "rule" } else { "rules" }
+    )
+}
+
 /// The search's flat rule list over the whole body: `Search · <terms>`,
 /// the count and what was not searched in the meta. A disabled rule, or a
 /// rule of a disabled ruleset, is dimmed; deny rules keep their colours.
 fn render_found(model: &Model, search: &pce::RuleFilter, meta: &str, f: &mut Frame, body: Rect) {
     let t = &model.theme;
     let p = &model.policy;
-    let n = p.found.len();
-    let mut meta = format!("{n} {} · {meta}", if n == 1 { "rule" } else { "rules" });
+    let mut meta = format!("{} · {meta}", matched_text(p.found.len(), p.found_loaded));
     // Narrower, the title (the search) keeps the room; the status said it.
     if p.found_deny_unloaded > 0 && body.width >= STACK_BELOW {
         meta = format!(
@@ -234,7 +241,7 @@ pub fn render_rule_filter(
             t.dim_style(),
         )),
         (None, Ok(_)) => Line::from(Span::styled(
-            "app=shop,crm ipl:NAME svc:NAME|443/tcp|tcp wl:NAME href:TEXT disabled deny",
+            "[scope:|src:|dst:][!]app=shop ipl: svc: wl: href: deny intra extra -term",
             t.dim_style(),
         )),
     };

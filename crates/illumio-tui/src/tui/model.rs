@@ -450,6 +450,7 @@ impl PolicyState {
             last_search: String::new(),
             found: TableView::new(found_columns()),
             found_deny_unloaded: 0,
+            found_loaded: 0,
             deny_endpoint_missing: false,
             matched: None,
         }

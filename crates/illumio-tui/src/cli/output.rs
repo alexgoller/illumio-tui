@@ -113,6 +113,16 @@ pub struct Meta {
     /// `traffic explain`: the requests it makes, in words.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost: Option<&'static str>,
+    /// `policy search`: the rules found of the rules loaded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matched: Option<MatchedMeta>,
+}
+
+/// `meta.matched`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct MatchedMeta {
+    pub matched: usize,
+    pub loaded: usize,
 }
 
 /// `meta.squelched`.
@@ -351,6 +361,14 @@ pub fn meta_line(meta: &Meta) -> String {
         Some(u) => s.push_str(&format!(" · usage from {u}")),
         None => {}
     }
+    if let Some(m) = meta.matched {
+        s.push_str(&format!(
+            " · {} of {} rule{} matched",
+            m.matched,
+            m.loaded,
+            if m.loaded == 1 { "" } else { "s" }
+        ));
+    }
     if let Some(f) = &meta.local_filter {
         s.push_str(&format!(" · filtered locally: {}", f.join(", ")));
     }
@@ -486,8 +504,17 @@ mod tests {
             marks: None,
             squelched: None,
             cost: None,
+            matched: None,
         };
         assert!(meta_line(&meta).contains("POST /orgs/5/labels → 201"));
+        let m = Meta {
+            matched: Some(MatchedMeta {
+                matched: 2,
+                loaded: 40,
+            }),
+            ..Meta::default()
+        };
+        assert!(meta_line(&m).ends_with(" · 2 of 40 rules matched"));
         let sq = |rows| Meta {
             squelched: Some(SquelchedMeta { rows, flows: 52 }),
             ..Meta::default()

@@ -77,6 +77,26 @@ fn lists_complete_their_last_term_and_a_flag_prefix_is_dropped() {
 }
 
 #[test]
+fn search_completes_after_a_side_a_bang_and_a_dash() {
+    assert_eq!(c(Kind::Search, "scope:app=s"), ["scope:app=shop"]);
+    assert_eq!(c(Kind::Search, "scope:g"), ["scope:global"]);
+    assert_eq!(c(Kind::Search, "src:!env="), ["src:!env=prod"]);
+    assert_eq!(c(Kind::Search, "dst:ipl:C"), ["dst:ipl:Corp"]);
+    assert_eq!(c(Kind::Search, "consumer:wl:w"), ["consumer:wl:web1"]);
+    assert_eq!(
+        c(Kind::Search, "dst:a"),
+        ["dst:app=crm", "dst:app=shop", "dst:all"]
+    );
+    assert_eq!(c(Kind::Search, "-scope:e"), ["-scope:env=prod"]);
+    assert_eq!(c(Kind::Search, "-svc:S"), ["-svc:SSH"]);
+    assert_eq!(c(Kind::Search, "!app=c"), ["!app=crm"]);
+    // `scope:` takes labels only; `!` labels only.
+    assert_eq!(c(Kind::Search, "scope:ipl:"), Vec::<String>::new());
+    assert_eq!(c(Kind::Search, "src:!ipl:"), Vec::<String>::new());
+    assert_eq!(c(Kind::Search, "src:!a"), ["src:!app=crm", "src:!app=shop"]);
+}
+
+#[test]
 fn kinds_round_trip_by_name() {
     for k in Kind::ALL {
         assert_eq!(Kind::parse(k.name()), Some(k));
