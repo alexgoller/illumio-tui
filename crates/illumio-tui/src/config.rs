@@ -10,6 +10,9 @@
 //! `traffic_auto_backfill` (or `ILLUMIO_AUTO_BACKFILL`) lets the TUI re-run
 //! a truncated traffic result at a cap of 10000 without asking; off unless
 //! written down.
+//! `[profiles.<name>.events] exclude_types` lists the event types the
+//! TUI's Events screen and `events` hide by default (`events --all-types`
+//! shows them); read only, never written by the tool.
 //! `completion_cache = false` (top level, or in a profile, which wins) keeps
 //! PCE names off disk: no names cache is written or read for shell completion.
 //! The tool writes a secret only where `profile add` is given one: the
@@ -56,6 +59,9 @@ pub struct Profile {
     /// The top-level `completion_cache` for this profile.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completion_cache: Option<bool>,
+    /// The audit events' defaults (`[profiles.<name>.events]`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub events: Option<EventsConfig>,
     /// Unknown keys, round-tripped verbatim.
     #[serde(default, flatten)]
     pub extra: toml::Table,
@@ -82,6 +88,7 @@ impl std::fmt::Debug for Profile {
             .field("labels", &self.labels)
             .field("generator", &self.generator)
             .field("completion_cache", &self.completion_cache)
+            .field("events", &self.events)
             // Unknown keys could be anything; print their names only.
             .field("extra", &self.extra.keys().collect::<Vec<_>>())
             .finish()
@@ -140,6 +147,17 @@ pub struct GeneratorConfig {
     pub extra: toml::Table,
 }
 
+/// Audit events: `exclude_types` are hidden by default, each a type, a
+/// substring or a `*` glob (`user.login`, `agent.*`), as `!term` in the
+/// type filter.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct EventsConfig {
+    pub exclude_types: Option<Vec<String>>,
+    /// Unknown keys, round-tripped verbatim.
+    #[serde(default, flatten)]
+    pub extra: toml::Table,
+}
+
 pub const DEFAULT_SCOPE_KEYS: [&str; 2] = ["app", "env"];
 pub const DEFAULT_TIER_KEY: &str = "role";
 
@@ -191,6 +209,9 @@ pub struct ResolvedConfig {
     pub generator_ruleset_name: String,
     /// `generator.consolidate_min_peers`, at least 2; default 5.
     pub generator_consolidate_min_peers: usize,
+    /// `events.exclude_types`: the event types hidden by default, trimmed,
+    /// a leading `!` dropped, blank entries left out.
+    pub event_exclude_types: Vec<String>,
 }
 
 impl ResolvedConfig {
@@ -663,6 +684,8 @@ pub fn resolve(
         None => pce::generate::consolidate::DEFAULT_MIN_PEERS,
     };
 
+    let event_exclude_types = event_excludes(profile.events.as_ref())?;
+
     Ok(ResolvedConfig {
         profile_name,
         scheme,
@@ -700,7 +723,33 @@ pub fn resolve(
         ignore_keys: ignored,
         generator_ruleset_name,
         generator_consolidate_min_peers,
+        event_exclude_types,
     })
+}
+
+/// `events.exclude_types`, checked: each entry one term of the type filter
+/// (no `,`, which separates terms; no other `!` than a leading one).
+fn event_excludes(events: Option<&EventsConfig>) -> Result<Vec<String>, ConfigError> {
+    let list = events
+        .and_then(|e| e.exclude_types.as_deref())
+        .unwrap_or_default();
+    let mut out: Vec<String> = Vec::new();
+    for raw in list {
+        let t = raw.trim();
+        let t = t.strip_prefix('!').unwrap_or(t).trim_start();
+        if t.is_empty() {
+            continue;
+        }
+        if t.contains([',', '!']) {
+            return Err(ConfigError::Message(format!(
+                "events.exclude_types {raw:?}: one type per entry (no , or !)"
+            )));
+        }
+        if !out.iter().any(|o| o.eq_ignore_ascii_case(t)) {
+            out.push(t.to_string());
+        }
+    }
+    Ok(out)
 }
 
 /// `traffic_max_results`: the starting cap, 1 up to the hard maximum.
@@ -1261,6 +1310,47 @@ traffic_auto_backfill = true
             err,
             "generator.consolidate_min_peers 1: at least 2 peers make a fan-in port"
         );
+    }
+
+    #[test]
+    fn event_exclude_types_are_read_checked_and_round_trip() {
+        let r = resolve(&file(), &Overrides::default(), &env(&[])).unwrap();
+        assert!(r.event_exclude_types.is_empty(), "none by default");
+        let with = |tail: &str| -> ConfigFile {
+            toml::from_str(&format!(
+                "[profiles.default]\nhost = \"h\"\norg_id = 1\napi_key = \"k\"\napi_secret = \"s\"\n{tail}"
+            ))
+            .unwrap()
+        };
+        let f = with(
+            "[profiles.default.events]\nexclude_types = [\" user.login \", \"!agent.*\", \"\", \"USER.LOGIN\"]\nfuture = 3\n",
+        );
+        let r = resolve(&f, &Overrides::default(), &env(&[])).unwrap();
+        assert_eq!(r.event_exclude_types, ["user.login", "agent.*"]);
+        let text = toml::to_string_pretty(&f).unwrap();
+        assert!(text.contains("[profiles.default.events]"), "{text}");
+        assert!(text.contains("future = 3"), "unknown keys kept: {text}");
+        let again: ConfigFile = toml::from_str(&text).unwrap();
+        assert_eq!(
+            again.profiles["default"]
+                .events
+                .as_ref()
+                .unwrap()
+                .exclude_types,
+            f.profiles["default"].events.as_ref().unwrap().exclude_types
+        );
+        for bad in ["a, b", "a!b"] {
+            let f = with(&format!(
+                "[profiles.default.events]\nexclude_types = [\"{bad}\"]\n"
+            ));
+            let err = resolve(&f, &Overrides::default(), &env(&[]))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("one type per entry"), "{err}");
+        }
+        // No `[events]` table: none written.
+        let text = toml::to_string_pretty(&file()).unwrap();
+        assert!(!text.contains("events"), "{text}");
     }
 
     #[test]
