@@ -1,6 +1,7 @@
 //! The Events screen's state: its table columns, the filter being edited
 //! and the loaded events.
 use super::*;
+use pce::models::{SeverityFilter, TypeFilter};
 
 /// The severity column, the target of `S`.
 pub(super) const SEVERITY_COL: usize = 1;
@@ -93,8 +94,8 @@ pub fn event_columns() -> Vec<Column<Event>> {
     ]
 }
 
-/// What the events editor holds: the server-side severity and window, and the
-/// local `type` substring.
+/// What the events editor holds: the severity (one is sent to the PCE,
+/// `X+` filters locally), the local event-type terms and the window.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EventsFilterEdit {
     pub severity: String,
@@ -106,7 +107,10 @@ impl EventsFilterEdit {
     /// The request filter. `since` is rounded down to the whole minute and
     /// `until` is left open, so applying the same filter again within the cache
     /// TTL produces the same query (and a cache hit) instead of a new one every second.
+    /// Checks the local parts too, so a bad type term is never applied.
     pub fn to_filter(&self, now: jiff::Timestamp) -> Result<EventFilter, String> {
+        let severity = SeverityFilter::parse(&self.severity)?;
+        TypeFilter::parse(&self.event_type).map_err(|e| format!("type: {e}"))?;
         let w = pce::traffic::parse_window(&self.window).map_err(|e| format!("window: {e}"))?;
         let span = jiff::Span::try_from(w).map_err(|e| format!("window: {e}"))?;
         let minute = jiff::Timestamp::from_second(now.as_second().div_euclid(60) * 60)
@@ -115,7 +119,7 @@ impl EventsFilterEdit {
             .checked_sub(span)
             .map_err(|e| format!("window: {e}"))?;
         Ok(EventFilter {
-            severity: Some(self.severity.trim().to_string()).filter(|s| !s.is_empty()),
+            severity: severity.pce_value(),
             event_type: None,
             status: None,
             since: Some(since),
@@ -123,12 +127,59 @@ impl EventsFilterEdit {
             max_results: None,
         })
     }
+
+    /// What the PCE is asked: the severity it is sent and the window. Two
+    /// filters alike in these need no new request to switch between.
+    pub fn pce_side(&self) -> (Option<String>, String) {
+        let severity = SeverityFilter::parse(&self.severity)
+            .ok()
+            .and_then(|s| s.pce_value());
+        (severity, self.window.trim().to_string())
+    }
+}
+
+/// Type-filter text with `ty` hidden: the terms naming it (`ty`, `!ty`)
+/// dropped and `!ty` added at the end.
+pub fn hide_type(text: &str, ty: &str) -> String {
+    let mut terms = other_terms(text, ty);
+    terms.push(format!("!{ty}"));
+    terms.join(", ")
+}
+
+/// Type-filter text showing only `ty`: the includes replaced by `ty`, and
+/// the excludes that would hide it dropped.
+pub fn only_type(text: &str, ty: &str) -> String {
+    let mut terms: Vec<String> = other_terms(text, ty)
+        .into_iter()
+        .filter(|t| {
+            t.strip_prefix('!').is_some_and(|ex| {
+                TypeFilter::parse(&format!("!{ex}")).is_ok_and(|f| f.keeps_type(ty))
+            })
+        })
+        .collect();
+    terms.insert(0, ty.to_string());
+    terms.join(", ")
+}
+
+/// The terms of `text` (trimmed, empty ones dropped) except those naming
+/// `ty` itself, included or excluded.
+fn other_terms(text: &str, ty: &str) -> Vec<String> {
+    text.split(',')
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .filter(|t| {
+            let bare = t.strip_prefix('!').unwrap_or(t).trim_start();
+            !bare.eq_ignore_ascii_case(ty)
+        })
+        .map(String::from)
+        .collect()
 }
 
 #[derive(Debug)]
 pub struct EventsState {
     pub table: TableView<Event>,
-    /// The events as fetched; `table` is the local `type` projection of these.
+    /// The events as fetched; `table` is the local type and severity
+    /// projection of these.
     pub raw: Vec<Event>,
     pub filter: EventsFilterEdit,
     /// The `since` and `until` of the last answered request (`until` is empty when open).
@@ -136,44 +187,81 @@ pub struct EventsState {
     pub loaded_at: Option<Instant>,
     pub age_secs: u64,
     pub loading: bool,
+    /// The PCE returned a full page: more events may exist than were loaded.
+    pub truncated: bool,
+    /// Distinct event types in `raw` the type filter hides.
+    pub hidden_types: usize,
     pub auto: AutoRefresh,
 }
 
 impl EventsState {
-    pub fn new(min_refresh: u64) -> Self {
+    /// `type_filter` is the Type field's starting text (the profile's
+    /// `events.exclude_types` as `!` terms).
+    pub fn new(min_refresh: u64, type_filter: String) -> Self {
         Self {
             table: TableView::new(event_columns()),
             raw: Vec::new(),
             filter: EventsFilterEdit {
                 severity: String::new(),
-                event_type: String::new(),
+                event_type: type_filter,
                 window: "24h".into(),
             },
             window: None,
             loaded_at: None,
             age_secs: 0,
             loading: false,
+            truncated: false,
+            hidden_types: 0,
             auto: AutoRefresh::new(min_refresh),
         }
     }
 
-    /// Applies the local type substring filter.
+    /// Applies the local filters: the type terms and a `X+` severity
+    /// floor. Text that does not parse (never applied) keeps everything.
     pub fn rebuild(&mut self) {
-        let needle = self.filter.event_type.trim().to_ascii_lowercase();
-        let rows: Vec<Event> = self
-            .raw
-            .iter()
-            .filter(|e| {
-                needle.is_empty()
-                    || e.event_type
-                        .as_deref()
-                        .unwrap_or("")
-                        .to_ascii_lowercase()
-                        .contains(&needle)
-            })
-            .cloned()
-            .collect();
+        let types = TypeFilter::parse(&self.filter.event_type).unwrap_or_default();
+        let severity = SeverityFilter::parse(&self.filter.severity).unwrap_or_default();
+        let mut hidden: Vec<&str> = Vec::new();
+        let mut rows: Vec<Event> = Vec::new();
+        for e in &self.raw {
+            let ty = e.event_type.as_deref().unwrap_or("");
+            if !types.keeps_type(ty) {
+                if !hidden.contains(&ty) {
+                    hidden.push(ty);
+                }
+            } else if severity.keeps(e) {
+                rows.push(e.clone());
+            }
+        }
+        self.hidden_types = hidden.len();
         self.table.set_rows(rows);
+    }
+
+    /// Every event type in the load with its count, most frequent first
+    /// (then by name); events without a type count under `""`.
+    pub fn type_counts(&self) -> Vec<(String, usize)> {
+        let mut counts: Vec<(String, usize)> = Vec::new();
+        for e in &self.raw {
+            let ty = e.event_type.as_deref().unwrap_or("");
+            match counts.iter_mut().find(|(t, _)| t == ty) {
+                Some((_, n)) => *n += 1,
+                None => counts.push((ty.to_string(), 1)),
+            }
+        }
+        counts.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        counts
+    }
+
+    /// `x`: hides the type `ty` (no request).
+    pub fn hide_type(&mut self, ty: &str) {
+        self.filter.event_type = hide_type(&self.filter.event_type, ty);
+        self.rebuild();
+    }
+
+    /// `o`: shows only the type `ty` (no request).
+    pub fn only_type(&mut self, ty: &str) {
+        self.filter.event_type = only_type(&self.filter.event_type, ty);
+        self.rebuild();
     }
 
     /// `S`: worst severity first; pressing it again flips the direction.

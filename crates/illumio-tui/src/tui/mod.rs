@@ -11,6 +11,7 @@ pub mod diff;
 pub mod edit;
 pub mod enforce;
 pub mod event_diff;
+pub mod events_editor;
 pub mod explain;
 pub mod export;
 pub mod filter;

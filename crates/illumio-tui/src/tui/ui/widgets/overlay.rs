@@ -588,55 +588,132 @@ pub(crate) fn completion_line<'a>(
     Line::from(spans)
 }
 
-/// Field names of the events editor, in the order of `Overlay::EventsEditor::values`.
+/// Field names of the events editor, in the order of `EventsEditor::values`.
 const EVENTS_FIELDS: [&str; 3] = ["severity", "type", "window"];
 
+/// The events editor: severity, type, window; the completion strip under
+/// the Type field while completing; then the error or the syntax.
 pub fn render_events_editor(
     model: &Model,
-    values: &[String; 3],
-    active: usize,
-    error: &Option<String>,
+    e: &crate::tui::events_editor::EventsEditor,
     f: &mut Frame,
     area: Rect,
 ) {
     let t = &model.theme;
-    let r = centered(area, 70, 9);
+    let strip = e.completion_strip();
+    let r = centered(area, 76, 9 + u16::from(strip.is_some()));
     f.render_widget(Clear, r);
     let block = panel(
         "Edit events",
-        "Tab next · Enter apply · Esc cancel",
+        "Tab next · Ctrl-N type · Enter apply · Esc cancel",
         t,
         true,
     );
-    let mut lines: Vec<Line> = EVENTS_FIELDS
+    let inner = (r.width as usize).saturating_sub(2);
+    const LABEL: usize = 12;
+    // The end of a long value stays in view, where the cursor is.
+    let room = inner.saturating_sub(2 + LABEL + 1);
+    let mut lines: Vec<Line> = Vec::new();
+    for (i, name) in EVENTS_FIELDS.iter().enumerate() {
+        let on = i == e.active;
+        let cursor = if on { "▏" } else { "" };
+        let chars: Vec<char> = e.values[i].chars().collect();
+        let shown: String = chars[chars.len().saturating_sub(room)..].iter().collect();
+        lines.push(Line::from(vec![
+            Span::styled(if on { "▸ " } else { "  " }, Style::new().fg(t.accent)),
+            Span::styled(format!("{name:<LABEL$}"), t.header_style()),
+            Span::styled(
+                format!("{shown}{cursor}"),
+                if on {
+                    Style::new().fg(t.fg).bg(t.selected_bg)
+                } else {
+                    t.base()
+                },
+            ),
+        ]));
+        if on && let Some(strip) = &strip {
+            lines.push(completion_line(strip, 2 + LABEL, room, t));
+        }
+    }
+    lines.push(Line::from(""));
+    match &e.error {
+        Some(err) => lines.push(Line::from(Span::styled(
+            err.clone(),
+            Style::new().fg(t.bad),
+        ))),
+        None => {
+            for hint in [
+                "severity: err (asks the PCE) · warning+ that and worse (local)",
+                "type: sec_policy, rule_set · !user.login hides · *.delete (local)",
+                "window e.g. 24h · empty severity or type = any",
+            ] {
+                lines.push(Line::from(Span::styled(hint, t.dim_style())));
+            }
+        }
+    }
+    f.render_widget(Paragraph::new(lines).block(block).style(t.base()), r);
+}
+
+/// The key line of the type summary.
+const EVENT_TYPES_KEYS: &str = "Enter only this · x/! hide · Esc close";
+
+/// `t` on Events: every event type of the load with its count, most
+/// frequent first; the types the filter hides are dim and say so.
+pub fn render_event_types(model: &Model, selected: usize, f: &mut Frame, area: Rect) {
+    let t = &model.theme;
+    let e = &model.events;
+    let types = e.type_counts();
+    let filter = pce::models::TypeFilter::parse(&e.filter.event_type).unwrap_or_default();
+    let r = centered(
+        area,
+        64,
+        (types.len() as u16).saturating_add(3).clamp(6, 24),
+    );
+    f.render_widget(Clear, r);
+    // Rows inside the borders, less the key line.
+    let rows = (r.height.saturating_sub(2) as usize).saturating_sub(1);
+    let sel = selected.min(types.len().saturating_sub(1));
+    let first = sel.saturating_sub(rows.saturating_sub(1));
+    let width = (r.width as usize).saturating_sub(2);
+    let count_w = types.first().map_or(1, |(_, n)| n.to_string().len()).max(5);
+    let name_w = width.saturating_sub(2 + count_w + 2 + 6);
+    let mut lines: Vec<Line> = types
         .iter()
         .enumerate()
-        .map(|(i, name)| {
-            let on = i == active;
-            let cursor = if on { "▏" } else { "" };
+        .skip(first)
+        .take(rows)
+        .map(|(i, (ty, n))| {
+            let hidden = !filter.keeps_type(ty);
+            let name = if ty.is_empty() { "(no type)" } else { ty };
+            let style = if hidden { t.dim_style() } else { t.base() };
             Line::from(vec![
-                Span::styled(if on { "▸ " } else { "  " }, Style::new().fg(t.accent)),
-                Span::styled(format!("{name:<12}"), t.header_style()),
                 Span::styled(
-                    format!("{}{cursor}", values[i]),
-                    if on {
-                        Style::new().fg(t.fg).bg(t.selected_bg)
-                    } else {
-                        t.base()
-                    },
+                    if i == sel { "▸ " } else { "  " },
+                    Style::new().fg(t.accent),
+                ),
+                Span::styled(format!("{:<name_w$}", clip(&plain(name), name_w)), style),
+                Span::styled(format!("{n:>count_w$}"), style),
+                Span::styled(
+                    if hidden { "  hidden" } else { "" },
+                    Style::new().fg(t.warn),
                 ),
             ])
         })
         .collect();
-    lines.push(Line::from(""));
-    lines.push(match error {
-        Some(err) => Line::from(Span::styled(err.clone(), Style::new().fg(t.bad))),
-        None => Line::from(Span::styled(
-            "severity empty = any · type matches locally · window e.g. 24h",
-            t.dim_style(),
-        )),
-    });
-    f.render_widget(Paragraph::new(lines).block(block).style(t.base()), r);
+    lines.resize(rows, Line::from(""));
+    lines.push(Line::from(Span::styled(EVENT_TYPES_KEYS, t.dim_style())));
+    let meta = format!(
+        "{} types · {} events{}",
+        types.len(),
+        e.raw.len(),
+        if e.truncated { " · capped" } else { "" }
+    );
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(panel("Event types", &meta, t, true))
+            .style(t.base()),
+        r,
+    );
 }
 
 /// Most lines shown for one event; the rest scrolls. A smaller terminal
@@ -1252,7 +1329,7 @@ pub fn screen_hint(screen: Screen, writes: bool) -> &'static str {
         (Screen::Policy, _) => "d scope  p pending  Enter detail  Tab pane  i impact",
         (Screen::Objects, false) => "Tab type  Enter detail  r refresh  a auto  / search",
         (Screen::Workloads, false) => "t/T traffic  x group  f labels  Enter detail",
-        (Screen::Events, _) => "f filter  r refresh  a auto  S severity  Enter detail",
+        (Screen::Events, _) => "f filter  x/o hide/only type  t types  Enter detail",
     }
 }
 
@@ -1266,6 +1343,7 @@ pub fn screen_hint_more(screen: Screen, view: TrafficView) -> &'static str {
         }
         (Screen::Traffic, _) => "+/- window  ]/[ cap  D draft",
         (Screen::Workloads, _) => "h/H health  E/m/o/u  c clear",
+        (Screen::Events, _) => "S severity  r refresh  a auto",
         _ => "",
     }
 }

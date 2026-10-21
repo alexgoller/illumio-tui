@@ -49,4 +49,4 @@ expression: out
 │                                                                                                                                                              │
 │                                                                                                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-ready                                                                                      f filter  r refresh  a auto  S severity  Enter detail  : cmd  ? help
+ready                                                         f filter  x/o hide/only type  t types  Enter detail  S severity  r refresh  a auto  : cmd  ? help

@@ -63,11 +63,10 @@ pub fn view(model: &Model, f: &mut Frame) {
         Overlay::Matched => screens::policy::render_matched(model, f, area),
         Overlay::Pending => widgets::overlay::render_pending(model, f, area),
         Overlay::Error(text) => widgets::overlay::render_error(model, text, f, area),
-        Overlay::EventsEditor {
-            values,
-            active,
-            error,
-        } => widgets::overlay::render_events_editor(model, values, *active, error, f, area),
+        Overlay::EventsEditor(e) => widgets::overlay::render_events_editor(model, e, f, area),
+        Overlay::EventTypes { selected } => {
+            widgets::overlay::render_event_types(model, *selected, f, area)
+        }
         Overlay::EventDetail { event, scroll, raw } => {
             widgets::overlay::render_event_detail(model, event, *scroll, *raw, f, area)
         }

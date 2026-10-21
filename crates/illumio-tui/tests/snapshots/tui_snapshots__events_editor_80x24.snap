@@ -9,15 +9,15 @@ expression: "render_to_string(&m, 80, 24)"
 │▸ 10-10 07:30:00 info     user.login               user:user-1                │
 │  10-10 07:31:00 info     sec_policy.create        user:user-2                │
 │  10-10 07:32:00 err      agent.tampering          agent:host-1.example       │
-│  10╭ Edit events ────────────────── Tab next · Enter apply · Esc cancel ╮    │
-│    │  severity    err                                                   │    │
-│    │▸ type        agent▏                                                │    │
-│    │  window      24h                                                   │    │
-│    │                                                                    │    │
-│    │severity empty = any · type matches locally · window e.g. 24h       │    │
-│    │                                                                    │    │
-│    │                                                                    │    │
-│    ╰────────────────────────────────────────────────────────────────────╯    │
+│ ╭ Edit events ────────── Tab next · Ctrl-N type · Enter apply · Esc cancel ╮ │
+│ │  severity    err                                                         │ │
+│ │▸ type        agent▏                                                      │ │
+│ │  window      24h                                                         │ │
+│ │                                                                          │ │
+│ │severity: err (asks the PCE) · warning+ that and worse (local)            │ │
+│ │type: sec_policy, rule_set · !user.login hides · *.delete (local)         │ │
+│ │window e.g. 24h · empty severity or type = any                            │ │
+│ ╰──────────────────────────────────────────────────────────────────────────╯ │
 │                                                                              │
 │                                                                              │
 │                                                                              │
@@ -25,4 +25,4 @@ expression: "render_to_string(&m, 80, 24)"
 │                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-ready      f filter  r refresh  a auto  S severity  Enter detail  : cmd  ? help
+ready        f filter  x/o hide/only type  t types  Enter detail  : cmd  ? help

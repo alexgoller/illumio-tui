@@ -77,8 +77,17 @@ pub enum ObjectsPayload {
     Services(Vec<Service>, u64),
 }
 
-/// Events, the cache age in seconds and the `(since, until)` the request used.
-pub type EventsPayload = (Vec<Event>, u64, (String, String));
+/// Events as loaded for the Events screen.
+#[derive(Debug)]
+pub struct EventsPayload {
+    pub events: Vec<Event>,
+    /// The cache age in seconds.
+    pub age_secs: u64,
+    /// A full page: more events may exist than were returned.
+    pub truncated: bool,
+    /// The `(since, until)` the request used.
+    pub window: (String, String),
+}
 
 #[derive(Debug)]
 pub enum Msg {

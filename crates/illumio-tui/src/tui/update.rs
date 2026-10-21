@@ -675,15 +675,16 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::EventsLoaded(result) => {
             model.events.loading = false;
             match result {
-                Ok((rows, age, window)) => {
+                Ok(p) => {
                     let e = &mut model.events;
-                    e.raw = rows;
+                    e.raw = p.events;
                     e.rebuild();
-                    e.window = Some(window);
+                    e.window = Some(p.window);
                     e.loaded_at = Some(Instant::now());
                     e.auto.from_tick = false;
-                    e.age_secs = age;
-                    model.status = StatusLine::info(format!("{} events", model.events.table.len()));
+                    e.age_secs = p.age_secs;
+                    e.truncated = p.truncated;
+                    model.status = StatusLine::info(events_loaded_text(&model.events));
                 }
                 Err(e) => {
                     let tripped = model.events.auto.take_tick_failure();
@@ -1151,6 +1152,8 @@ mod batch_tests;
 mod ctrl_u_tests;
 #[cfg(test)]
 mod draft_tests;
+#[cfg(test)]
+mod event_types_tests;
 #[cfg(test)]
 mod filter_completion_tests;
 #[cfg(test)]

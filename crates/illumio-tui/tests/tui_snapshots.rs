@@ -1069,15 +1069,64 @@ fn events_wide_editor_and_light_styled() {
     let out = render_to_string(&m, 160, 48);
     assert!(out.contains("cached 5s ago · 4 rows · window 24h"), "{out}");
     assert!(out.contains("resource"), "{out}");
-    m.overlay = Overlay::EventsEditor {
-        values: ["err".into(), "agent".into(), "24h".into()],
-        active: 1,
-        error: None,
-    };
+    let mut e = illumio_tui::tui::events_editor::EventsEditor::new([
+        "err".into(),
+        "agent".into(),
+        "24h".into(),
+    ]);
+    e.active = 1;
+    m.overlay = Overlay::EventsEditor(e);
     insta::assert_snapshot!("events_editor_80x24", render_to_string(&m, 80, 24));
     m.overlay = Overlay::None;
     m.set_theme("light");
     insta::assert_snapshot!("light_events_160x48", render_styled(&m, 160, 48));
+}
+
+#[test]
+fn events_hidden_types_capped_summary_and_type_completion() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use illumio_tui::tui::model::{Overlay, Screen};
+    use illumio_tui::tui::test_support::model_with_events;
+    use illumio_tui::tui::{Msg, update};
+    let mut m = model_with_events();
+    m.screen = Screen::Events;
+    m.events.truncated = true;
+    m.events.filter.event_type = "!user.login, !system.*".into();
+    m.events.filter.severity = "warning+".into();
+    m.events.rebuild();
+    let out = render_to_string(&m, 80, 24);
+    assert!(
+        out.contains("hiding 2 types · warning+ · 1 of 4 · capped at 4"),
+        "{out}"
+    );
+    insta::assert_snapshot!("events_hidden_capped_80x24", out);
+    m.overlay = Overlay::EventTypes { selected: 1 };
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("hidden"), "{out}");
+    insta::assert_snapshot!("event_types_80x24", out);
+    // The Type field completes the loaded types after a `!`.
+    m.overlay = Overlay::None;
+    update(
+        &mut m,
+        Msg::Key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE)),
+    );
+    update(
+        &mut m,
+        Msg::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)),
+    );
+    for c in ", !a".chars() {
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)),
+        );
+    }
+    update(
+        &mut m,
+        Msg::Key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL)),
+    );
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("!agent.tampering"), "{out}");
+    insta::assert_snapshot!("events_editor_completing_80x24", out);
 }
 
 #[test]

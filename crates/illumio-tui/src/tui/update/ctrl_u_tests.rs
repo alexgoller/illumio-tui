@@ -70,14 +70,16 @@ fn ctrl_u_empties_the_workloads_label_filter() {
 #[test]
 fn ctrl_u_empties_the_active_events_field() {
     let mut m = model_fixture();
-    m.overlay = Overlay::EventsEditor {
-        values: ["err".into(), "user.login".into(), "24h".into()],
-        active: 1,
-        error: None,
-    };
+    let mut e = crate::tui::events_editor::EventsEditor::new([
+        "err".into(),
+        "user.login".into(),
+        "24h".into(),
+    ]);
+    e.active = 1;
+    m.overlay = Overlay::EventsEditor(e);
     ctrl_u(&mut m);
     assert!(matches!(
         &m.overlay,
-        Overlay::EventsEditor { values, .. } if values[0] == "err" && values[1].is_empty() && values[2] == "24h"
+        Overlay::EventsEditor(e) if e.values[0] == "err" && e.values[1].is_empty() && e.values[2] == "24h"
     ));
 }

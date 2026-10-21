@@ -9,7 +9,8 @@ use crate::tui::filter::TrafficFilter;
 use crate::tui::model::ObjectKind;
 use crate::tui::model::{Limits, Model, ProfileInfo, WRITES_OFF, WritesState};
 use crate::tui::msg::{
-    Cmd, DraftFailure, DraftOutcome, FocusedOutcome, Msg, ObjectsPayload, QueryOutcome,
+    Cmd, DraftFailure, DraftOutcome, EventsPayload, FocusedOutcome, Msg, ObjectsPayload,
+    QueryOutcome,
 };
 use crate::tui::{update, view};
 use crossterm::event::{
@@ -1141,7 +1142,12 @@ impl Runtime {
                     let result = pce
                         .events(&filter, mode)
                         .await
-                        .map(|c| (c.value, c.age.as_secs(), window))
+                        .map(|c| EventsPayload {
+                            age_secs: c.age.as_secs(),
+                            truncated: c.truncated,
+                            events: c.value,
+                            window,
+                        })
                         .map_err(|e| e.to_string());
                     let _ = tx.send(Msg::EventsLoaded(result));
                     let _ = tx.send(Msg::Stats(pce.stats()));
@@ -1502,6 +1508,10 @@ pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
     // marks.toml next to the config file: read at every rebuild (a stat).
     model.traffic.marks =
         crate::marks::MarksStore::new(crate::marks::marks_path(global.config.as_deref()));
+    // Every profile limit, as a `:profile` switch applies them (the
+    // generator's settings and auto-backfill included).
+    model.limits = Limits::from_config(cfg);
+    model.events.filter.event_type = model.limits.event_type_filter();
     model.set_label_model(
         cfg.scope_keys.clone(),
         cfg.tier_key.clone(),
@@ -1687,6 +1697,7 @@ mod tests {
             ignore_keys: Vec::new(),
             ruleset_name: "RF-{app}-{env}".into(),
             consolidate_min_peers: 5,
+            event_exclude_types: Vec::new(),
         }
     }
 

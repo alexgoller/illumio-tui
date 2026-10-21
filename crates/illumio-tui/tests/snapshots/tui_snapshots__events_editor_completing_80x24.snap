@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭cached 5s ago · hiding 2 types · warning+ · 1 of 4 · capped at 4 · window 24h ╮
+│  timestamp      severity type                     actor                      │
+│▸ 10-10 07:32:00 err      agent.tampering          agent:host-1.example       │
+│                                                                              │
+│                                                                              │
+│ ╭ Edit events ────────── Tab next · Ctrl-N type · Enter apply · Esc cancel ╮ │
+│ │  severity    warning+                                                    │ │
+│ │▸ type        !user.login, !system.*, !agent.tampering▏                   │ │
+│ │              !agent.tampering  !sec_policy.create                        │ │
+│ │  window      24h                                                         │ │
+│ │                                                                          │ │
+│ │severity: err (asks the PCE) · warning+ that and worse (local)            │ │
+│ │type: sec_policy, rule_set · !user.login hides · *.delete (local)         │ │
+│ │window e.g. 24h · empty severity or type = any                            │ │
+│ ╰──────────────────────────────────────────────────────────────────────────╯ │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ready        f filter  x/o hide/only type  t types  Enter detail  : cmd  ? help

@@ -78,6 +78,9 @@ pub enum FieldKind {
     /// The Policy rule search: terms apart by spaces, `key=v1,v2`, `ipl:`,
     /// `svc:`, `wl:` names, `href:`, `disabled`, `deny`.
     RuleFilter,
+    /// The Events type filter: event types from the loaded events, comma
+    /// list, `!` excludes.
+    EventTypes,
     /// An allow rule's Scope, `intra` or `extra`: not typed; `Space`
     /// switches it (`i`, `e` pick one) and rewrites the Consumers to match
     /// ([`crate::rule_scope::switch_consumers`]). Nothing to complete.
@@ -88,9 +91,12 @@ impl FieldKind {
     /// The characters that end a token; none: the whole field is one token.
     fn separators(self) -> &'static [char] {
         match self {
-            Self::Labels | Self::Actors | Self::Services | Self::Decisions | Self::Transmission => {
-                &[',']
-            }
+            Self::Labels
+            | Self::Actors
+            | Self::Services
+            | Self::Decisions
+            | Self::Transmission
+            | Self::EventTypes => &[','],
             Self::Scope | Self::TrafficActors | Self::TrafficSource | Self::TrafficService => {
                 &[',', '|']
             }
@@ -139,9 +145,12 @@ impl FieldKind {
                 .filter(|t| !t.is_empty())
                 .map(String::from)
                 .collect(),
-            Self::Labels | Self::Actors | Self::Services | Self::Decisions | Self::Transmission => {
-                tokens(head)
-            }
+            Self::Labels
+            | Self::Actors
+            | Self::Services
+            | Self::Decisions
+            | Self::Transmission
+            | Self::EventTypes => tokens(head),
             Self::Scope | Self::TrafficActors | Self::TrafficSource => {
                 tokens(head.rsplit('|').next().unwrap_or(head))
             }

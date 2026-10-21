@@ -233,10 +233,11 @@ pub enum Overlay {
     /// A failure too long for the status line, or an authentication failure.
     Error(String),
     /// Events filter: severity, type (local), window.
-    EventsEditor {
-        values: [String; 3],
-        active: usize,
-        error: Option<String>,
+    EventsEditor(crate::tui::events_editor::EventsEditor),
+    /// `t` on Events: the loaded events' types with their counts, most
+    /// frequent first; `selected` is the cursor row.
+    EventTypes {
+        selected: usize,
     },
     /// The selected audit event as a change diff, or as pretty JSON when
     /// `raw` (`J` toggles); `scroll` is the first shown line.
@@ -359,18 +360,8 @@ impl PartialEq for Overlay {
             ) => a == b && sa == sb,
             // `RuleView` is not `PartialEq`; a rule is identified by its href.
             (Overlay::RuleDetail(a), Overlay::RuleDetail(b)) => a.href == b.href,
-            (
-                Overlay::EventsEditor {
-                    values: va,
-                    active: aa,
-                    error: ea,
-                },
-                Overlay::EventsEditor {
-                    values: vb,
-                    active: ab,
-                    error: eb,
-                },
-            ) => va == vb && aa == ab && ea == eb,
+            (Overlay::EventsEditor(a), Overlay::EventsEditor(b)) => a == b,
+            (Overlay::EventTypes { selected: a }, Overlay::EventTypes { selected: b }) => a == b,
             (
                 Overlay::EventDetail {
                     event: a,
@@ -697,6 +688,9 @@ pub struct Limits {
     /// `generator.consolidate_min_peers`: inbound peers on one port that
     /// make it a fan-in candidate.
     pub consolidate_min_peers: usize,
+    /// `events.exclude_types`: the event types the Events screen starts
+    /// hiding.
+    pub event_exclude_types: Vec<String>,
 }
 
 impl Limits {
@@ -713,7 +707,13 @@ impl Limits {
             ignore_keys: cfg.ignore_keys.clone(),
             ruleset_name: cfg.generator_ruleset_name.clone(),
             consolidate_min_peers: cfg.generator_consolidate_min_peers,
+            event_exclude_types: cfg.event_exclude_types.clone(),
         }
+    }
+
+    /// The Events type filter's starting text: `!user.login, !agent.*`.
+    pub fn event_type_filter(&self) -> String {
+        pce::models::exclude_text(&self.event_exclude_types)
     }
 
     /// The order label keys are shown in: `scope_keys`, `tier_key`, then
@@ -838,7 +838,7 @@ impl Model {
         let policy = PolicyState::new(auto_refresh_min_seconds);
         let objects = ObjectsState::new(auto_refresh_min_seconds);
         let workloads = WorkloadsState::new(auto_refresh_min_seconds);
-        let events = EventsState::new(auto_refresh_min_seconds);
+        let events = EventsState::new(auto_refresh_min_seconds, String::new());
         Self {
             profile,
             theme_name,
@@ -854,6 +854,7 @@ impl Model {
                 ignore_keys: Vec::new(),
                 ruleset_name: pce::generate::DEFAULT_RULESET_NAME.into(),
                 consolidate_min_peers: pce::generate::consolidate::DEFAULT_MIN_PEERS,
+                event_exclude_types: Vec::new(),
             },
             screen: Screen::Traffic,
             overlay: Overlay::None,
@@ -1098,7 +1099,7 @@ impl Model {
         self.objects = ObjectsState::new(min);
         self.objects.hide_ignored = !self.limits.ignore_keys.is_empty();
         self.workloads = WorkloadsState::new(min);
-        self.events = EventsState::new(min);
+        self.events = EventsState::new(min, self.limits.event_type_filter());
         self.app_view = None;
         self.form_from_app = false;
         self.gen_view = None;

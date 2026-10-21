@@ -1197,6 +1197,7 @@ fn profile_command_resets_state_and_reconnects() {
                 ignore_keys: vec!["os".into()],
                 ruleset_name: "RF-{site}".into(),
                 consolidate_min_peers: 5,
+                event_exclude_types: Vec::new(),
             },
         ))),
     );
@@ -1596,6 +1597,7 @@ fn policy_reloads_after_a_profile_switch_once_the_index_is_back() {
                 ignore_keys: Vec::new(),
                 ruleset_name: "RF-{app}-{env}".into(),
                 consolidate_min_peers: 5,
+                event_exclude_types: Vec::new(),
             },
         ))),
     );
@@ -1789,17 +1791,18 @@ fn opening_events_loads_once_and_editor_reloads() {
         serde_json::from_str(include_str!("../../../../../../fixtures/events.json")).unwrap();
     update(
         &mut m,
-        Msg::EventsLoaded(Ok((
+        Msg::EventsLoaded(Ok(crate::tui::msg::EventsPayload {
             events,
-            0,
-            ("2026-10-09T08:00:00Z".into(), "2026-10-10T08:00:00Z".into()),
-        ))),
+            age_secs: 0,
+            truncated: false,
+            window: ("2026-10-09T08:00:00Z".into(), "2026-10-10T08:00:00Z".into()),
+        })),
     );
     assert_eq!(m.events.table.len(), 4);
     assert!(update(&mut m, key('1')).is_empty());
     assert!(update(&mut m, key('5')).is_empty(), "already loaded");
     update(&mut m, key('f'));
-    assert!(matches!(m.overlay, Overlay::EventsEditor { .. }));
+    assert!(matches!(m.overlay, Overlay::EventsEditor(_)));
     for c in "err".chars() {
         update(&mut m, key(c));
     }
@@ -1828,7 +1831,7 @@ fn opening_events_loads_once_and_editor_reloads() {
     }
     update(&mut m, enter());
     assert!(
-        matches!(&m.overlay, Overlay::EventsEditor { error: Some(e), .. } if e.contains("window"))
+        matches!(&m.overlay, Overlay::EventsEditor(e) if e.error.as_ref().is_some_and(|e| e.contains("window")))
     );
 }
 
@@ -1955,7 +1958,7 @@ fn events_invalid_window_sends_nothing_and_enter_needs_a_selection() {
     assert!(!m.events.loading);
     assert!(matches!(
         &m.overlay,
-        Overlay::EventsEditor { error: Some(_), .. }
+        Overlay::EventsEditor(e) if e.error.is_some()
     ));
     update(
         &mut m,

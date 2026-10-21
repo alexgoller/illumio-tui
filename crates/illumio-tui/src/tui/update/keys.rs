@@ -12,10 +12,14 @@ use super::*;
 /// The candidates for the active field's current token, best first;
 /// none without an index or for a text field. Never a request.
 pub(super) fn field_candidates(model: &Model, editor: &impl Completing) -> Vec<String> {
-    let Some(idx) = model.index() else {
+    let Some((kind, token, earlier)) = editor.completion_request() else {
         return Vec::new();
     };
-    let Some((kind, token, earlier)) = editor.completion_request() else {
+    // Event types come from the loaded events, with or without an index.
+    if kind == FieldKind::EventTypes {
+        return crate::tui::complete::event_types(&token, &earlier, &model.events.raw);
+    }
+    let Some(idx) = model.index() else {
         return Vec::new();
     };
     let rulesets = model.draft_rulesets().unwrap_or_default();
@@ -287,63 +291,8 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             }
             _ => Vec::new(),
         },
-        Overlay::EventsEditor {
-            mut values,
-            mut active,
-            ..
-        } => {
-            let editor =
-                |values: [String; 3], active: usize, error: Option<String>| Overlay::EventsEditor {
-                    values,
-                    active,
-                    error,
-                };
-            match k.code {
-                KeyCode::Esc => model.overlay = Overlay::None,
-                KeyCode::Tab | KeyCode::Down => {
-                    active = (active + 1) % values.len();
-                    model.overlay = editor(values, active, None);
-                }
-                KeyCode::BackTab | KeyCode::Up => {
-                    active = (active + values.len() - 1) % values.len();
-                    model.overlay = editor(values, active, None);
-                }
-                KeyCode::Backspace => {
-                    values[active].pop();
-                    model.overlay = editor(values, active, None);
-                }
-                KeyCode::Char('u') if k.modifiers.contains(KeyModifiers::CONTROL) => {
-                    values[active].clear();
-                    model.overlay = editor(values, active, None);
-                }
-                KeyCode::Char(c) => {
-                    values[active].push(c);
-                    model.overlay = editor(values, active, None);
-                }
-                KeyCode::Enter => {
-                    let edit = EventsFilterEdit {
-                        severity: values[0].trim().to_string(),
-                        event_type: values[1].trim().to_string(),
-                        window: values[2].trim().to_string(),
-                    };
-                    let applied = match edit.to_filter(jiff::Timestamp::now()) {
-                        Ok(_) if model.events.loading => Err("events are still loading".into()),
-                        other => other,
-                    };
-                    match applied {
-                        Ok(filter) => {
-                            model.overlay = Overlay::None;
-                            model.events.filter = edit;
-                            model.events.rebuild();
-                            return request_events(model, filter, CacheMode::Use);
-                        }
-                        Err(err) => model.overlay = editor(values, active, Some(err)),
-                    }
-                }
-                _ => model.overlay = editor(values, active, None),
-            }
-            Vec::new()
-        }
+        Overlay::EventsEditor(e) => events_editor_key(model, e, k),
+        Overlay::EventTypes { selected } => event_types_key(model, selected, k),
         Overlay::EventDetail { event, scroll, raw } => {
             // The renderer clamps to the last page; here only the top is a hard stop.
             let last = event_detail_lines(model, &event, raw).saturating_sub(1);
@@ -816,6 +765,7 @@ pub(super) fn open_help(model: &mut Model) {
         o @ (Overlay::App
         | Overlay::Generator
         | Overlay::EventDetail { .. }
+        | Overlay::EventTypes { .. }
         | Overlay::Pending
         | Overlay::Marks
         | Overlay::Readiness

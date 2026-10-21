@@ -153,6 +153,7 @@ fn all_labels_groups_by_every_seen_key_until_a_profile_switch() {
                     ignore_keys: Vec::new(),
                     ruleset_name: "RF-{site}".into(),
                     consolidate_min_peers: 5,
+                    event_exclude_types: Vec::new(),
                 },
             ))),
         ),

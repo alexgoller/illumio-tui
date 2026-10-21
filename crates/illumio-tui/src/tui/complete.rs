@@ -9,7 +9,7 @@
 use crate::tokens::is_href;
 use crate::tui::form::FieldKind;
 use pce::NameIndex;
-use pce::models::{RuleSet, Workload};
+use pce::models::{Event, RuleSet, Workload};
 use pce::traffic::{WINDOW_STEPS, next_window, parse_window};
 
 /// Most candidates one completion cycles through.
@@ -95,9 +95,42 @@ pub fn complete(
             negatable(token, |t| workload_label_term(t, &used_keys(earlier), idx))
         }
         FieldKind::RuleFilter => rule_filter_term(token, idx, workloads),
+        // From the loaded events, not the index: see `event_types`.
+        FieldKind::EventTypes => Vec::new(),
     };
     let mut seen = std::collections::HashSet::new();
     out.retain(|c| seen.insert(c.clone()));
+    out.truncate(MAX_CANDIDATES);
+    out
+}
+
+/// The Events type filter's candidates: the event types of the loaded
+/// `events`, most frequent first, those named by `earlier` terms (with or
+/// without `!`) left out. After a `!` each candidate keeps it. Pure.
+pub fn event_types(token: &str, earlier: &[String], events: &[Event]) -> Vec<String> {
+    let used: Vec<String> = earlier
+        .iter()
+        .map(|t| t.trim().trim_start_matches('!').trim().to_lowercase())
+        .collect();
+    let mut counts: Vec<(&str, usize)> = Vec::new();
+    for ty in events.iter().filter_map(|e| e.event_type.as_deref()) {
+        if ty.is_empty() || used.contains(&ty.to_lowercase()) {
+            continue;
+        }
+        match counts.iter_mut().find(|(t, _)| *t == ty) {
+            Some((_, n)) => *n += 1,
+            None => counts.push((ty, 1)),
+        }
+    }
+    counts.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+    let mut out = negatable(token, |t| {
+        ranked(
+            t,
+            counts
+                .iter()
+                .map(|(ty, _)| (ty.to_string(), ty.to_string())),
+        )
+    });
     out.truncate(MAX_CANDIDATES);
     out
 }
