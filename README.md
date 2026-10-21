@@ -377,11 +377,14 @@ PCE: https://alexgoller.github.io/illumio-tui/#workflows
    writes a change record, `enforce X --watch` exits 7 when something is blocked since,
    `enforce X --rollback` restores the record's modes exactly.
 7. **Find rules fast (`f`, `t`, `I`).** On Policy, `f` searches every loaded ruleset
-   (`app=ordering,pos`, `ipl:Corp`, `svc:443/tcp`, `wl:web01`, `disabled`, `deny`; no request) and
-   shows one flat list; `Enter` opens the rule, `I` lists the workloads it matches per side
-   (`Tab` switches), `t` enables or disables a rule or ruleset (draft, writes armed). CLI:
+   (`app=ordering,pos`, `ipl:Corp`, `svc:443/tcp`, `wl:web01`, `disabled`, `deny`, where the
+   label sits with `scope:` / `src:` / `dst:`, exclusions with `!`, `-term` to leave out,
+   `intra` / `extra`; no request) and shows one flat list; `Enter` opens the rule, `I` lists the
+   workloads it matches per side (`Tab` switches), `t` enables or disables a rule or ruleset
+   (draft, writes armed). CLI:
 
        illumio-tui policy search --label app=shop,crm --service 443/tcp --table
+       illumio-tui policy search src:role=web dst:role=db extra --table
        illumio-tui policy rules impact <rule-href> --list providers --csv
        illumio-tui policy rules disable <rule-href> --dry-run
 
@@ -684,16 +687,27 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   `f` searches rules across every loaded ruleset (draft or active, no request): `app=shop,crm`
   (a label in a scope, consumer or provider, directly or through a label group; a comma is any
   of; an exclusion such as a scope `All except app=shop` or a consumer `!role=web` does not
-  count, nor does `All workloads`), `ipl:Corp`, `svc:PostgreSQL` or `svc:443/tcp` (inline ports
+  count, nor does `All workloads`), `!env=prod` (an exclusion actor of the label, and only
+  those), `ipl:Corp`, `svc:PostgreSQL` or `svc:443/tcp` (inline ports
   and service objects that hold it, protocol-only entries such as all TCP ports included),
   `svc:tcp` / `svc:udp` / `svc:icmp` / `svc:icmpv6` (any entry of that protocol), `wl:web01` (a
   workload actor, named from the cached workloads: press `i` first), `href:sec_rules/9`,
-  `disabled`, `deny`; terms apart by spaces all hold, `Ctrl-N` completes, `Ctrl-U` clears, `?`
-  the help. An IP list or service name is exact, else the one name it starts (any case:
+  `disabled`, `enabled`, `deny`, `allow`, `intra` / `extra` (an allow rule's consumers inside
+  its ruleset's scope or anywhere; deny rules are neither). A label term without a prefix looks
+  anywhere; `scope:` looks in the ruleset's scopes only (`scope:global`: a scope without
+  labels), `src:` (or `consumer:`) in the consumers, `dst:` (or `provider:`) in the providers,
+  and those two also take `ipl:NAME`, `wl:NAME` and `all` (All Workloads); a deny rule's scope
+  is its ruleset's. A leading `-` keeps the rules a term does not match (`-deny`,
+  `-scope:env=dev`, `-svc:443/tcp`). Terms apart by spaces all hold, `Ctrl-N` completes (after
+  `scope:`, `src:`, `dst:`, `!` and `-` too), `Ctrl-U` clears, `?` the help. For example:
+  `src:role=web dst:role=db extra` (extra-scope rules from web to db), `scope:app=payment
+  -svc:443/tcp` (payment rules not covering 443), `src:!env=prod` (consumers that say *All
+  except prod*), `src:all -deny` (allow rules open to All Workloads). An IP list or service name is exact, else the one name it starts (any case:
   `ipl:Any` is `Any (0.0.0.0/0 and ::/0)`); naming several or none is said, with the closest
   names. Service objects' process and Windows service entries are not modelled: only their port
   entries count. The screen then shows one flat list (`Search · app=shop` in its title:
-  ruleset, enabled, kind, scope, consumers, providers, services; `:export` adds the href);
+  ruleset, enabled, kind, scope, consumers, providers, services; `:export` adds the href; the
+  meta says how many rules matched of those loaded, `3 of 40 rules`);
   `enabled` is the rule's own flag, `(ruleset off)` added when its ruleset is disabled (`(rs
   off)` below 120 columns). `Enter` opens the rule in its ruleset (`f` then `Enter` comes back),
   `t` toggles it, `I` lists its workloads, `c` clears the search. Deny rules count where loaded
@@ -818,6 +832,8 @@ the API call and byte counters at all times.
     illumio-tui policy rules impact /orgs/1/sec_policy/draft/rule_sets/7/sec_rules/3 --list consumers --csv
     illumio-tui policy search --label app=shop,crm --service 443/tcp --table
     illumio-tui policy search ipl:Corp deny --csv > corp-deny.csv
+    illumio-tui policy search scope:app=payment -svc:443/tcp --table
+    illumio-tui policy search src:all -deny --json
     illumio-tui iplists --table
     illumio-tui policy pending
     illumio-tui policy pending --diff --table
@@ -1108,7 +1124,15 @@ service object with such an entry, `All Services` and protocol-only entries incl
 `--service tcp|udp|icmp|icmpv6` (any entry of that protocol), `--workload NAME` (hostname or
 name, one cached workloads read; or the href's id), `--href TEXT`, `--disabled` (the rule or
 its ruleset is off) and `--deny`; every flag repeats where it makes sense and all must hold.
-The TUI's search terms work as arguments too (`policy search app=shop ipl:Corp deny`). An IP
+The TUI's search terms work as arguments too (`policy search app=shop ipl:Corp deny`), with
+the same grammar: `scope:`, `src:` (`consumer:`) and `dst:` (`provider:`) put a label term on
+one side (`src:`/`dst:` also take `ipl:NAME`, `wl:NAME` and `all`; `scope:global`), `!key=value`
+finds exclusion actors, `enabled`, `allow`, `intra` and `extra` test the rule, and a leading `-`
+negates a term: `policy search src:role=web dst:role=db extra`, `policy search
+scope:app=payment -svc:443/tcp`, `policy search src:!env=prod`, `policy search src:all -deny`.
+A `-term` needs no `--` (the CLI takes it as a term, flags keep working); after `--` every word
+is a term. `--label` keeps its meaning (no `!`: use the term). `meta.matched` is `{"matched",
+"loaded"}`: the rules found of the rules searched (stderr: `3 of 40 rules matched`). An IP
 list or service name is matched exactly, else as the start of exactly one name, any case
 (`--ip-list Any` finds `Any (0.0.0.0/0 and ::/0)`); a name that starts several is exit 2
 listing them, one that names nothing is exit 2 with the closest names. Service objects'
