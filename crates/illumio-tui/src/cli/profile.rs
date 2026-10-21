@@ -76,7 +76,10 @@ impl TableRows for UseResult {
     }
 }
 
-fn emit<T: Serialize + TableRows>(global: &GlobalArgs, data: &T) -> Result<(), CliError> {
+pub(super) fn emit<T: Serialize + TableRows>(
+    global: &GlobalArgs,
+    data: &T,
+) -> Result<(), CliError> {
     let meta = Meta {
         profile: String::new(),
         elapsed_ms: 0,

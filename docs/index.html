@@ -425,7 +425,7 @@ ad/Production          needs_rules  72.2%  37 gaps
     <h3 id="wf-small-h"><span class="num">8</span>Small things</h3>
     <ul>
       <li><kbd>Ctrl-U</kbd> empties the line in every text input, as in a shell: the filter editor, the mark and rule forms, the <code>:</code> prompt. <kbd>Ctrl-N</kbd> / <kbd>Ctrl-P</kbd> complete labels, IP lists, services and values without a request.</li>
-      <li>Shell completions for bash, zsh and fish ship with the Homebrew formula and the <code>.deb</code>/<code>.rpm</code>; otherwise <code>illumio-tui completions zsh &gt; ~/.zfunc/_illumio-tui</code> (PowerShell: <code>illumio-tui completions powershell | Out-String | Invoke-Expression</code> in your profile). Every subcommand, flag and enum value completes, and <code>--profile</code> completes your profile names. Completion never contacts the PCE.</li>
+      <li>Shell completions for bash, zsh and fish ship with the Homebrew formula and the <code>.deb</code>/<code>.rpm</code>; otherwise <code>illumio-tui completions zsh &gt; ~/.zfunc/_illumio-tui</code> (PowerShell: <code>illumio-tui completions powershell | Out-String | Invoke-Expression</code> in your profile). Every subcommand, flag and enum value completes, and <code>--profile</code> completes your profile names. Labels, apps, hostnames, services, IP lists and label groups complete from a per-profile names cache that the list commands, the TUI and <code>illumio-tui completions refresh</code> fill (<code>--clear</code> deletes it; <code>completion_cache = false</code> keeps PCE names off disk). Completion never contacts the PCE.</li>
       <li><code>:export &lt;path&gt;</code> writes the table on screen as CSV, the same format as the CLI&rsquo;s <code>--csv</code>.</li>
       <li>Apple Terminal garbles 24-bit colour before macOS 26, so there the theme is mapped to the xterm 256 colours by itself; <code>ILLUMIO_TUI_COLORS=256</code> or <code>truecolor</code> overrides it anywhere.</li>
     </ul>
@@ -762,9 +762,10 @@ summary  provision 9 rule_sets, 2 services</code></pre>
 
     <article class="recipe" aria-labelledby="r-comp-h">
       <h3 id="r-comp-h">Tab through it all</h3>
-      <p>Subcommands, flags, enum values, files and your profile names complete in bash, zsh and fish, without a request.</p>
+      <p>Subcommands, flags, enum values, files and your profile names complete in bash, zsh, fish and PowerShell, without a request. PCE names (<code>app=shop</code>, <code>wl:web01</code>, <code>svc:SSH</code>, <code>shop/prod</code>) complete from a local names cache: one explicit refresh, then the lists you read anyway keep it current. It holds object names in plain text (mode 0600); <code>completion_cache = false</code> turns it off.</p>
 <pre><code><span class="p">$ </span>illumio-tui completions zsh &gt; ~/.zfunc/_illumio-tui
-<span class="p">$ </span>illumio-tui completions fish &gt; ~/.config/fish/completions/illumio-tui.fish</code></pre>
+<span class="p">$ </span>illumio-tui completions fish &gt; ~/.config/fish/completions/illumio-tui.fish
+<span class="p">$ </span>illumio-tui completions refresh          <span class="c"># 5 reads; --clear deletes the cache</span></code></pre>
     </article>
   </div>
 </section>
@@ -903,7 +904,6 @@ consolidate_min_peers = 5        <span class="c"># the default; at least 2</span
   <ul>
     <li>Saved filters and bookmarks per profile.</li>
     <li>A <code>schema</code> command and <code>--fields</code> for agents: the output shapes, machine-readable, and only the fields asked for.</li>
-    <li>An on-disk name cache, so shell completions can offer labels, IP lists and services without contacting the PCE.</li>
     <li>An MCP mode: the same read and write layer, with its throttle and guards, as tools for an agent.</li>
   </ul>
   <p>What it leaves to others: <a href="https://github.com/brian1917/workloader">workloader</a> is the established batch tool for the PCE, and the two work side by side. illumio-tui is for interactive analysis, rule drafting and agents; for bulk import and export, automated labelling, VEN lifecycle, rule and port usage reports and running across many PCEs, use workloader.</p>

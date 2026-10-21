@@ -129,18 +129,38 @@ yourself:
     illumio-tui completions bash > ~/.local/share/bash-completion/completions/illumio-tui
     # fish
     illumio-tui completions fish > ~/.config/fish/completions/illumio-tui.fish
-    # PowerShell: add to your profile (subcommands and flags; no profile names)
+    # PowerShell: add to your profile
     illumio-tui completions powershell | Out-String | Invoke-Expression
 
 Every subcommand and flag completes (with descriptions in zsh and fish), and
 so do enum values (`--direction`, `--format`, `--theme`, `events --severity`
 ...), files (`--config`, `--env-file`, `marks import`) and hosts (`--host`).
 `--profile` and `profile use` complete the profile names of the config file
-(or of `--config` given earlier on the line). Completion never contacts the
-PCE: the hidden `illumio-tui __complete profiles` helper only reads the config
-file. Labels, apps, rulesets, IP lists and services are not completed, because
-illumio-tui keeps no cache on disk (the response cache lives in memory, per
-run). Regenerate the script after an upgrade if you wrote it yourself.
+(or of `--config` given earlier on the line).
+
+PCE names complete too, from a per-profile names cache on disk: labels as
+`key=value` (`workloads --label`, `relabel --set`, `--add-label`,
+`--remove-label`, `workloads add --label`, `policy search --label`), apps
+(`readiness --app`, `enforce`, `app`, `gen`, `traffic --app`), workload
+hostnames (`--hostname`, `workloads update`), traffic terms (`--src`, `--dst`,
+`--exclude-src`, `--exclude-dst`: `key=value`, `wl:HOST`, `ipl:NAME`),
+`svc:NAME` (`--exclude-service`), rule sides and scopes (`group:NAME`,
+`iplist:NAME`, `workload:HOST`), label keys, services and IP lists.
+
+    illumio-tui completions refresh           # fill it: one read each of labels, label groups,
+                                              # IP lists, services and workloads; prints counts and age
+    illumio-tui completions refresh --clear   # delete it; no request
+
+The cache is `$XDG_CACHE_HOME/illumio-tui/<profile>/names.json` (else
+`~/.cache/...`), mode 0600. Besides `completions refresh`, the lists the CLI
+and the TUI read anyway (`labels`, `label-groups`, `iplists`, `services`,
+`workloads`) keep it current; nothing refreshes it on its own. Completion
+itself never contacts the PCE: the hidden `illumio-tui __complete` helper
+reads the config file and that cache file, and offers nothing when there is
+no cache. The cache holds PCE object names in plain text; `completion_cache =
+false` (top level of the config, or in a profile) keeps them off disk: nothing
+is written or read. Regenerate the script after an upgrade if you wrote it
+yourself.
 
 ### Cutting a release (maintainers)
 
@@ -195,6 +215,7 @@ or a profile in `~/.config/illumio-tui/config.toml`:
     api_key = "api_..."
     api_secret_cmd = "op read op://vault/pce/secret"
     writes = true    # optional: allow writes (the CLI still needs --yes, the TUI :writes on)
+    completion_cache = false   # optional: no PCE names on disk for shell completion (also top level)
     # also: port (443), scheme ("https"), tls_verify (true), api_secret (plaintext, instead of _cmd)
 
     [profiles.prod.limits]

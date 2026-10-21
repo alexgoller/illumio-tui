@@ -11,6 +11,7 @@ pub mod generate;
 pub mod health;
 pub mod marked;
 pub mod marks;
+pub mod names_cache;
 pub mod objects;
 pub mod output;
 pub mod policy;
@@ -158,7 +159,9 @@ pub enum Command {
     /// Print the shell completion script: bash, zsh, fish or powershell (local, no request)
     ///
     /// e.g. `illumio-tui completions zsh > ~/.zfunc/_illumio-tui`. Profile names complete
-    /// from the config file; nothing a completion does contacts the PCE.
+    /// from the config file; labels, apps, hostnames, services, IP lists and label groups from
+    /// the profile's names cache, which list commands, the TUI and `completions refresh` fill.
+    /// Nothing a completion does contacts the PCE.
     Completions(completions::CompletionsArgs),
 }
 
@@ -210,7 +213,13 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
         return marks::run(&global, m);
     }
     if let Command::Completions(c) = &command {
-        return completions::run(c);
+        match &c.action {
+            None => return completions::run(c),
+            Some(completions::CompletionsAction::Refresh(r)) if r.clear => {
+                return names_cache::clear(&global);
+            }
+            Some(_) => {}
+        }
     }
     let ctx = Context::new(&global)?;
     match command {
@@ -227,7 +236,8 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
         Command::Enforce(a) => enforce::run(&ctx, &a).await,
         Command::Policy(p) => policy::run(&ctx, &p).await,
         Command::Traffic(t) => traffic::run(&ctx, &t).await,
-        Command::Profile(_) | Command::Marks(_) | Command::Completions(_) => {
+        Command::Completions(_) => names_cache::refresh(&ctx).await,
+        Command::Profile(_) | Command::Marks(_) => {
             unreachable!("handled above")
         }
     }

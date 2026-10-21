@@ -7,6 +7,7 @@ use super::output::{
     write_table_csv,
 };
 use crate::config::{self, Overrides};
+use crate::names::record::Recorder;
 use pce::{CacheMode, Pce, PceClient};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -20,6 +21,10 @@ pub struct Context {
     pub cache_mode: CacheMode,
     /// `marks.toml` next to the config file in use.
     pub marks_path: std::path::PathBuf,
+    /// The profile's names cache (shell completion), filled from the
+    /// lists read; `None` when `completion_cache = false` or no cache
+    /// directory.
+    pub names_path: Option<std::path::PathBuf>,
     started: Instant,
 }
 
@@ -52,8 +57,13 @@ impl Context {
     pub fn new(global: &GlobalArgs) -> Result<Self, CliError> {
         let (file, overrides, env) = config_inputs(global)?;
         let resolved = config::resolve(&file, &overrides, &env)?;
-        let pce = Pce::new(PceClient::new(resolved.client_config())?)
+        let mut pce = Pce::new(PceClient::new(resolved.client_config())?)
             .with_key_order(resolved.key_order());
+        let names_path = crate::names::path_for(&file, &resolved.profile_name);
+        if let Some(path) = &names_path {
+            let recorder = Recorder::new(path.clone(), resolved.scope_keys.clone());
+            pce = pce.with_observer(std::sync::Arc::new(recorder));
+        }
         let format = super::output::choose_format(global.json, global.table, global.csv);
         let cache_mode = if global.no_cache {
             CacheMode::Bypass
@@ -66,6 +76,7 @@ impl Context {
             format,
             cache_mode,
             marks_path: crate::marks::marks_path(global.config.as_deref()),
+            names_path,
             started: Instant::now(),
         })
     }

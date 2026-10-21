@@ -10,6 +10,8 @@
 //! `traffic_auto_backfill` (or `ILLUMIO_AUTO_BACKFILL`) lets the TUI re-run
 //! a truncated traffic result at a cap of 10000 without asking; off unless
 //! written down.
+//! `completion_cache = false` (top level, or in a profile, which wins) keeps
+//! PCE names off disk: no names cache is written or read for shell completion.
 //! The tool never writes secrets anywhere.
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -18,6 +20,9 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ConfigFile {
     pub default_profile: Option<String>,
+    /// Keep the names shell completion offers on disk (default true).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_cache: Option<bool>,
     #[serde(default)]
     pub profiles: BTreeMap<String, Profile>,
     /// Keys this version does not know, kept so `profile use` can rewrite
@@ -47,6 +52,9 @@ pub struct Profile {
     /// The policy generator's settings (`[profiles.<name>.generator]`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generator: Option<GeneratorConfig>,
+    /// The top-level `completion_cache` for this profile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_cache: Option<bool>,
     /// Unknown keys, round-tripped verbatim.
     #[serde(default, flatten)]
     pub extra: toml::Table,
@@ -72,6 +80,7 @@ impl std::fmt::Debug for Profile {
             .field("limits", &self.limits)
             .field("labels", &self.labels)
             .field("generator", &self.generator)
+            .field("completion_cache", &self.completion_cache)
             // Unknown keys could be anything; print their names only.
             .field("extra", &self.extra.keys().collect::<Vec<_>>())
             .finish()
@@ -283,6 +292,26 @@ pub struct Identity {
     pub org_id: u64,
 }
 
+/// The profile a command uses: `named` (`--profile`, else
+/// `ILLUMIO_PROFILE`), else the file's `default_profile`, else `default`;
+/// and whether something named it.
+pub fn profile_name(file: &ConfigFile, named: Option<String>) -> (String, bool) {
+    match named.or_else(|| file.default_profile.clone()) {
+        Some(name) => (name, true),
+        None => ("default".to_string(), false),
+    }
+}
+
+/// Whether the names cache is on for `profile`: its `completion_cache`,
+/// else the top-level one, else on.
+pub fn completion_cache(file: &ConfigFile, profile: &str) -> bool {
+    file.profiles
+        .get(profile)
+        .and_then(|p| p.completion_cache)
+        .or(file.completion_cache)
+        .unwrap_or(true)
+}
+
 pub fn identity(
     file: &ConfigFile,
     overrides: &Overrides,
@@ -299,15 +328,13 @@ pub fn identity(
     // of the three is always an error. Only the implicit fallback name
     // "default" (nothing named a profile at all) may resolve to
     // `Profile::default()` when no such profile is configured.
-    let explicit_profile_name = overrides
-        .profile
-        .clone()
-        .or_else(|| env_str("ILLUMIO_PROFILE"))
-        .or_else(|| file.default_profile.clone());
-    let (profile_name, is_explicit) = match explicit_profile_name {
-        Some(name) => (name, true),
-        None => ("default".to_string(), false),
-    };
+    let (profile_name, is_explicit) = profile_name(
+        file,
+        overrides
+            .profile
+            .clone()
+            .or_else(|| env_str("ILLUMIO_PROFILE")),
+    );
     let profile = match file.profiles.get(&profile_name) {
         Some(p) => p.clone(),
         None if is_explicit => {
@@ -583,6 +610,20 @@ api_secret_cmd = "echo   from-command  "
 "#,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn completion_cache_is_on_unless_written_off_and_a_profile_wins() {
+        let f: ConfigFile = toml::from_str(
+            "completion_cache = false\n[profiles.a]\n[profiles.b]\ncompletion_cache = true\n",
+        )
+        .unwrap();
+        assert!(!completion_cache(&f, "a"));
+        assert!(completion_cache(&f, "b"));
+        assert!(!completion_cache(&f, "unknown"));
+        assert!(completion_cache(&ConfigFile::default(), "a"));
+        let text = toml::to_string(&ConfigFile::default()).unwrap();
+        assert!(!text.contains("completion_cache"), "{text}");
     }
 
     #[test]

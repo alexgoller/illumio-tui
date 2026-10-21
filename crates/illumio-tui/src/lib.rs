@@ -3,5 +3,6 @@
 pub mod cli;
 pub mod config;
 pub mod marks;
+pub mod names;
 pub mod tokens;
 pub mod tui;
