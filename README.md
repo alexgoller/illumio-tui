@@ -237,7 +237,7 @@ or a profile in `~/.config/illumio-tui/config.toml`:
     auto_refresh_min_seconds = 60   # the TUI's auto-refresh interval (default and minimum 60)
 
     [profiles.prod.events]
-    exclude_types = ["user.login", "agent.*"]   # event types hidden by default (see Events)
+    exclude_types = ["=user.login", "agent.*"]   # event types hidden by default (see Events)
 
 `profile add` writes a profile for you (local, no request), from flags or a dotenv file:
 
@@ -261,7 +261,8 @@ secret.
 
 `[profiles.<name>.labels]` and `[profiles.<name>.generator]` are under Label model below.
 `[profiles.<name>.events] exclude_types` lists event types the Events screen and `events` hide
-by default, each a type, a substring or a `*` glob, as a `!term` of the type filter (below);
+by default, each a substring, a `*` glob or an exact type (`=user.login`), as a `!term` of the
+type filter (below; an `=` only at the start);
 `events --all-types` shows them, and in the TUI the Type field starts with them, so `f` can
 drop one for the session. The tool only reads it, never writes it.
 Environment variables outrank the profile. `PCE_TLS_VERIFY=false` skips certificate checks
@@ -760,12 +761,14 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
 - **Events**: severity-coloured audit events, `f` edit severity / type / window, `S` sort by
   severity. The Type field takes comma-separated terms, any of which keeps an event
   (`sec_policy, rule_set`); `!term` hides (`!user.login, !agent.update`), applied after the
-  others; a term with `*` must match the whole type (`sec_policy.*`, `*.delete`), else it is a
-  substring; case-insensitive. `Ctrl-N`/`Ctrl-P` complete the event types of the loaded
-  events, also after `,` or `!`. A severity is sent to the PCE (it takes one); `warning+` is
+  others; a term with `*` must match the whole type (`sec_policy.*`, `*.delete`), as must one
+  starting with `=` (`=user.login` is that type only, `!=user.login` hides only it and keeps
+  `user.login_session_terminated`), else it is a substring; case-insensitive. `Ctrl-N`/`Ctrl-P`
+  complete the event types of the loaded events, also after `,`, `!`, `=` or `!=`. A severity is sent to the PCE (it takes one); `warning+` is
   that and worse (`err+`, `info+` …), filtered here, as is the type. `x` (or `!`) hides the
-  selected row's type, `o` shows only it, `t` lists the loaded types by count (`Enter` only
-  this one, `x` hide it, `Esc` close). None of these sends a request: they filter the loaded
+  selected row's exact type (`!=type`; hiding the type you show only empties the view), `o`
+  shows only it (`=type`), `t` lists the loaded types by count (`Enter` only this one, `x` hide
+  it, `Esc` close; a type whose events the severity floor hides says `(severity)`). None of these sends a request: they filter the loaded
   events, and only a new PCE severity or window in `f` (or `r`) loads again. The header says
   what is hidden (`hiding 3 types · warning+ · 812 of 1,240`) and `capped at 500` when the PCE
   returned a full page, so more events may exist than were filtered. `Enter` the event as a
@@ -820,7 +823,7 @@ the API call and byte counters at all times.
     illumio-tui policy pending --diff --table
     illumio-tui events --since 1h --severity err
     illumio-tui events --type sec_rule --diff
-    illumio-tui events --exclude-type user.login --exclude-type 'agent.*' --severity warning+
+    illumio-tui events --exclude-type =user.login --exclude-type 'agent.*' --severity warning+
     illumio-tui events --type 'sec_policy, rule_set, !*.delete' --all-types --table
     illumio-tui traffic query --window 24h --src app=web --dst app=db --json
     illumio-tui traffic query --window 1h --group app,env
@@ -1391,7 +1394,7 @@ through the fallback endpoint; such a ruleset shows them as "not compared". Labe
 have no description to compare.
 
 `events --type` takes the Events screen's type terms (comma-separated, `!term` hides, `*`
-globs the whole type, else a substring; case-insensitive) and is repeatable; `--exclude-type X`
+globs and a leading `=` match the whole type, else a substring; case-insensitive) and is repeatable; `--exclude-type X`
 is `--type '!X'`. The profile's `events.exclude_types` apply unless `--all-types`. `--severity
 warning+` (that and worse) sends no severity and filters here; a plain severity goes to the
 PCE as before. All of these filter the loaded page: the cap (`--max-results`, default 500)

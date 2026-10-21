@@ -67,7 +67,7 @@ fn meta(model: &Model) -> String {
     if e.truncated {
         parts.push(format!("capped at {}", thousands(e.raw.len())));
     }
-    parts.push(format!("window {}", e.filter.window));
+    parts.push(format!("window {}", e.shown_window()));
     let mut meta = parts.join(" · ");
     meta.push_str(&e.auto.meta(Instant::now()));
     meta

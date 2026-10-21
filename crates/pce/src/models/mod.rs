@@ -10,7 +10,9 @@ pub mod traffic;
 pub mod workloads;
 
 pub use common::{PolicyDecision, Ref, proto_name, proto_number};
-pub use event_select::{SEVERITIES, SeverityFilter, TypeFilter, exclude_text, severity_level};
+pub use event_select::{
+    SEVERITIES, SeverityFilter, TermText, TypeFilter, exclude_text, severity_level,
+};
 pub use events::{Event, EventFilter};
 pub use labels::{Fqdn, IpList, IpRange, Label, LabelGroup, LabelUsageFlags, Service, ServicePort};
 pub use policy::{

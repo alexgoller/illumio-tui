@@ -19,13 +19,13 @@ pub struct EventsArgs {
     #[arg(long)]
     pub severity: Option<String>,
     /// Event types, local and case-insensitive: comma-separated terms,
-    /// any of them (substring, or * glob over the whole type); !term
-    /// excludes. E.g. 'sec_policy, rule_set', '!user.login', '*.delete'.
-    /// Repeatable.
+    /// any of them (substring; * glob or a leading = match the whole
+    /// type); !term excludes. E.g. 'sec_policy, rule_set', '!=user.login',
+    /// '*.delete'. Repeatable.
     #[arg(long = "type", value_name = "TERMS")]
     pub event_type: Vec<String>,
-    /// Hide this event type (substring or * glob; a comma list hides
-    /// each), as --type '!TYPE'. Repeatable.
+    /// Hide this event type (substring, * glob or =exact; a comma list
+    /// hides each), as --type '!TYPE'. Repeatable.
     #[arg(long, value_name = "TYPE")]
     pub exclude_type: Vec<String>,
     /// Ignore the profile's events.exclude_types (show every type)
@@ -305,6 +305,8 @@ mod tests {
         let (t, _, _) = local_filters(&args(&[], &["agent.*,rule_set"], true), &[]).unwrap();
         assert!(!t.keeps_type("agent.update") && !t.keeps_type("rule_set.create"));
         assert!(t.keeps_type("user.login"));
+        let (t, _, _) = local_filters(&args(&[], &["=user.login"], true), &[]).unwrap();
+        assert!(!t.keeps_type("user.login") && t.keeps_type("user.login_session_terminated"));
         let (t, _, words) = local_filters(&args(&[], &[], false), &[]).unwrap();
         assert!(t.is_empty() && words.is_empty());
         let mut a = args(&[], &[], false);

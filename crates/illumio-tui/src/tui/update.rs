@@ -684,6 +684,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     e.auto.from_tick = false;
                     e.age_secs = p.age_secs;
                     e.truncated = p.truncated;
+                    e.answered = e.requested.clone();
                     model.status = StatusLine::info(events_loaded_text(&model.events));
                 }
                 Err(e) => {

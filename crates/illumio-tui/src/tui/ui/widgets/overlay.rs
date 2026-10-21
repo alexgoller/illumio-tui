@@ -644,7 +644,7 @@ pub fn render_events_editor(
         None => {
             for hint in [
                 "severity: err (asks the PCE) · warning+ that and worse (local)",
-                "type: sec_policy, rule_set · !user.login hides · *.delete (local)",
+                "type: sec_policy, rule_set · !user.* hides · =exact · *.delete",
                 "window e.g. 24h · empty severity or type = any",
             ] {
                 lines.push(Line::from(Span::styled(hint, t.dim_style())));
@@ -664,6 +664,7 @@ pub fn render_event_types(model: &Model, selected: usize, f: &mut Frame, area: R
     let e = &model.events;
     let types = e.type_counts();
     let filter = pce::models::TypeFilter::parse(&e.filter.event_type).unwrap_or_default();
+    let by_severity = e.severity_hidden_types();
     let r = centered(
         area,
         64,
@@ -676,7 +677,7 @@ pub fn render_event_types(model: &Model, selected: usize, f: &mut Frame, area: R
     let first = sel.saturating_sub(rows.saturating_sub(1));
     let width = (r.width as usize).saturating_sub(2);
     let count_w = types.first().map_or(1, |(_, n)| n.to_string().len()).max(5);
-    let name_w = width.saturating_sub(2 + count_w + 2 + 6);
+    let name_w = width.saturating_sub(2 + count_w + 2 + 10);
     let mut lines: Vec<Line> = types
         .iter()
         .enumerate()
@@ -684,8 +685,13 @@ pub fn render_event_types(model: &Model, selected: usize, f: &mut Frame, area: R
         .take(rows)
         .map(|(i, (ty, n))| {
             let hidden = !filter.keeps_type(ty);
+            let severity = !hidden && by_severity.contains(ty);
             let name = if ty.is_empty() { "(no type)" } else { ty };
-            let style = if hidden { t.dim_style() } else { t.base() };
+            let style = if hidden || severity {
+                t.dim_style()
+            } else {
+                t.base()
+            };
             Line::from(vec![
                 Span::styled(
                     if i == sel { "▸ " } else { "  " },
@@ -693,10 +699,13 @@ pub fn render_event_types(model: &Model, selected: usize, f: &mut Frame, area: R
                 ),
                 Span::styled(format!("{:<name_w$}", clip(&plain(name), name_w)), style),
                 Span::styled(format!("{n:>count_w$}"), style),
-                Span::styled(
-                    if hidden { "  hidden" } else { "" },
-                    Style::new().fg(t.warn),
-                ),
+                if hidden {
+                    Span::styled("  hidden", Style::new().fg(t.warn))
+                } else if severity {
+                    Span::styled("  (severity)", t.dim_style())
+                } else {
+                    Span::raw("")
+                },
             ])
         })
         .collect();

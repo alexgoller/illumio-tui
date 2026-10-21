@@ -147,9 +147,9 @@ pub struct GeneratorConfig {
     pub extra: toml::Table,
 }
 
-/// Audit events: `exclude_types` are hidden by default, each a type, a
-/// substring or a `*` glob (`user.login`, `agent.*`), as `!term` in the
-/// type filter.
+/// Audit events: `exclude_types` are hidden by default, each a substring,
+/// a `*` glob or an exact type (`user.login`, `agent.*`, `=user.login`),
+/// as `!term` in the type filter.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct EventsConfig {
     pub exclude_types: Option<Vec<String>>,
@@ -728,7 +728,7 @@ pub fn resolve(
 }
 
 /// `events.exclude_types`, checked: each entry one term of the type filter
-/// (no `,`, which separates terms; no other `!` than a leading one).
+/// (no `,`, which separates terms; a `!` or an `=` (exact) only leading).
 fn event_excludes(events: Option<&EventsConfig>) -> Result<Vec<String>, ConfigError> {
     let list = events
         .and_then(|e| e.exclude_types.as_deref())
@@ -740,9 +740,14 @@ fn event_excludes(events: Option<&EventsConfig>) -> Result<Vec<String>, ConfigEr
         if t.is_empty() {
             continue;
         }
-        if t.contains([',', '!']) {
+        let why = if t.contains(',') {
+            Some("no ,".to_string())
+        } else {
+            pce::models::TermText::parse(&format!("!{t}")).err()
+        };
+        if let Some(why) = why {
             return Err(ConfigError::Message(format!(
-                "events.exclude_types {raw:?}: one type per entry (no , or !)"
+                "events.exclude_types {raw:?}: one type per entry ({why})"
             )));
         }
         if !out.iter().any(|o| o.eq_ignore_ascii_case(t)) {
@@ -1323,10 +1328,13 @@ traffic_auto_backfill = true
             .unwrap()
         };
         let f = with(
-            "[profiles.default.events]\nexclude_types = [\" user.login \", \"!agent.*\", \"\", \"USER.LOGIN\"]\nfuture = 3\n",
+            "[profiles.default.events]\nexclude_types = [\" user.login \", \"!agent.*\", \"\", \"USER.LOGIN\", \"=user.logout\"]\nfuture = 3\n",
         );
         let r = resolve(&f, &Overrides::default(), &env(&[])).unwrap();
-        assert_eq!(r.event_exclude_types, ["user.login", "agent.*"]);
+        assert_eq!(
+            r.event_exclude_types,
+            ["user.login", "agent.*", "=user.logout"]
+        );
         let text = toml::to_string_pretty(&f).unwrap();
         assert!(text.contains("[profiles.default.events]"), "{text}");
         assert!(text.contains("future = 3"), "unknown keys kept: {text}");
@@ -1339,7 +1347,7 @@ traffic_auto_backfill = true
                 .exclude_types,
             f.profiles["default"].events.as_ref().unwrap().exclude_types
         );
-        for bad in ["a, b", "a!b"] {
+        for bad in ["a, b", "a!b", "a=b", "=", "==a"] {
             let f = with(&format!(
                 "[profiles.default.events]\nexclude_types = [\"{bad}\"]\n"
             ));

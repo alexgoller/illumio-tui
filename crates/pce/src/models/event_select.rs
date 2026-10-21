@@ -1,12 +1,13 @@
 //! What of the loaded events is shown: the event-type terms
-//! (`sec_policy, !user.login, *.delete`) and a severity floor (`warning+`).
+//! (`sec_policy, !=user.login, *.delete`) and a severity floor (`warning+`).
 //! Both are local, over events already fetched: the PCE events API takes
 //! one `event_type` and one `severity`, so neither a list nor a range can
 //! be sent. Shared by `events` (CLI) and the Events screen (TUI).
 use super::events::Event;
 
-/// One term: a substring, or a glob when it holds a `*` (the whole type
-/// must match it: `sec_policy.*`, `*.delete`, `*`). Lowercase.
+/// One term: a substring, or a glob when it holds a `*` or starts with
+/// `=` (the whole type must match it: `sec_policy.*`, `*.delete`, `*`,
+/// `=user.login`). Lowercase.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Term {
     Substring(String),
@@ -14,9 +15,9 @@ enum Term {
 }
 
 impl Term {
-    fn new(text: &str) -> Self {
+    fn new(text: &str, exact: bool) -> Self {
         let t = text.to_lowercase();
-        if t.contains('*') {
+        if exact || t.contains('*') {
             Term::Glob(t)
         } else {
             Term::Substring(t)
@@ -54,8 +55,57 @@ fn glob(pattern: &str, text: &str) -> bool {
     rest.len() >= last.len() && rest.ends_with(last)
 }
 
+/// One term of the type filter's text, taken apart: `!` (excludes), `=`
+/// (exact: the whole type) and the type, substring or glob.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TermText {
+    pub exclude: bool,
+    pub exact: bool,
+    /// Trimmed, case kept.
+    pub body: String,
+}
+
+impl TermText {
+    /// `t`, a non-empty trimmed term: `[!][=]type`, blanks allowed after
+    /// `!` and `=`. A `!` starts its term and needs a type after it, as in
+    /// the traffic filter (`!`, `!!a`, `a !b`, `!a !b` are errors); so does
+    /// `=` (`=`, `!=`, `==a`, `a=b`).
+    pub fn parse(t: &str) -> Result<Self, String> {
+        let (exclude, rest) = match t.strip_prefix('!') {
+            Some(r) => (true, r.trim_start()),
+            None => (false, t),
+        };
+        if exclude && rest.is_empty() {
+            return Err("! needs a type after it, e.g. !=user.login".into());
+        }
+        if rest.starts_with('!') {
+            return Err(format!("{t:?}: one ! per term (no double negation)"));
+        }
+        let (exact, body) = match rest.strip_prefix('=') {
+            Some(r) => (true, r.trim_start()),
+            None => (false, rest),
+        };
+        if exact && body.is_empty() {
+            return Err("= needs a type after it, e.g. =user.login".into());
+        }
+        if body.contains('!') {
+            return Err(format!("{t:?}: use , before ! (agent, !agent.update)"));
+        }
+        if body.contains('=') {
+            return Err(format!(
+                "{t:?}: = starts its term (=user.login, !=user.login)"
+            ));
+        }
+        Ok(Self {
+            exclude,
+            exact,
+            body: body.to_string(),
+        })
+    }
+}
+
 /// The event-type filter: comma-separated terms, case-insensitive; `!term`
-/// excludes. Includes OR together (none: every type), then the excludes
+/// excludes, `=type` is exact. Includes OR together (none: every type), then the excludes
 /// remove. Empty terms are ignored, so blank text keeps everything.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TypeFilter {
@@ -64,26 +114,19 @@ pub struct TypeFilter {
 }
 
 impl TypeFilter {
-    /// `sec_policy, rule_set` (either), `!user.login` (not), `*.delete`.
-    /// A `!` starts its term and needs one after it, as in the traffic
-    /// filter: `!`, `!!a` and `a !b` are errors.
+    /// `sec_policy, rule_set` (either), `!user.login` (not, substring),
+    /// `!=user.login` (not this exact type), `*.delete`. See
+    /// [`TermText::parse`] for what is refused.
     pub fn parse(text: &str) -> Result<Self, String> {
         let mut f = Self::default();
         for t in text.split(',').map(str::trim).filter(|t| !t.is_empty()) {
-            let (list, term) = match t.strip_prefix('!').map(str::trim_start) {
-                Some("") => {
-                    return Err("! needs a type after it, e.g. !user.login".into());
-                }
-                Some(rest) if rest.starts_with('!') => {
-                    return Err(format!("{t:?}: one ! per term (no double negation)"));
-                }
-                Some(rest) => (&mut f.exclude, rest),
-                None if t.contains('!') => {
-                    return Err(format!("{t:?}: use , before ! (agent, !agent.update)"));
-                }
-                None => (&mut f.include, t),
+            let p = TermText::parse(t)?;
+            let list = if p.exclude {
+                &mut f.exclude
+            } else {
+                &mut f.include
             };
-            let term = Term::new(term);
+            let term = Term::new(&p.body, p.exact);
             if !list.contains(&term) {
                 list.push(term);
             }
@@ -269,7 +312,45 @@ mod tests {
         for bad in ["!", " ! ", "a, !", "!!a", "! !a", "a !b", "a!"] {
             assert!(TypeFilter::parse(bad).is_err(), "{bad:?}");
         }
+        for bad in ["!a !b", "!a!b", "!=a!b"] {
+            let err = TypeFilter::parse(bad).unwrap_err();
+            assert!(err.contains("use , before !"), "{bad:?}: {err}");
+        }
         assert!(TypeFilter::parse("a, !b").is_ok());
+    }
+
+    #[test]
+    fn a_leading_equals_is_exact() {
+        assert!(keeps("=user.login", "user.login"));
+        assert!(!keeps("=user.login", "user.login_session_terminated"));
+        assert!(keeps("user.login", "user.login_session_terminated"));
+        assert!(!keeps("!=user.login", "user.login"));
+        assert!(
+            keeps("!=user.login", "user.login_session_terminated"),
+            "an exact exclude keeps the longer type"
+        );
+        assert!(!keeps("!user.login", "user.login_session_terminated"));
+        assert!(
+            keeps("= User.Login", "user.login"),
+            "blank after =, any case"
+        );
+        assert!(!keeps("! = user.login", "user.login"));
+        assert!(keeps("=sec_policy.*", "sec_policy.create"), "still a glob");
+        assert_eq!(
+            TypeFilter::parse("=a, =A").unwrap(),
+            TypeFilter::parse("=a").unwrap()
+        );
+        for bad in ["=", " = ", "!=", "! =", "==a", "!==a", "a=b", "=a=b"] {
+            assert!(TypeFilter::parse(bad).is_err(), "{bad:?}");
+        }
+        assert_eq!(
+            TermText::parse("! = Ab").unwrap(),
+            TermText {
+                exclude: true,
+                exact: true,
+                body: "Ab".into()
+            }
+        );
     }
 
     #[test]

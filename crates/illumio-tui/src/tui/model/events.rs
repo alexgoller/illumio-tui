@@ -1,7 +1,7 @@
 //! The Events screen's state: its table columns, the filter being edited
 //! and the loaded events.
 use super::*;
-use pce::models::{SeverityFilter, TypeFilter};
+use pce::models::{SeverityFilter, TermText, TypeFilter};
 
 /// The severity column, the target of `S`.
 pub(super) const SEVERITY_COL: usize = 1;
@@ -138,38 +138,39 @@ impl EventsFilterEdit {
     }
 }
 
-/// Type-filter text with `ty` hidden: the terms naming it (`ty`, `!ty`)
-/// dropped and `!ty` added at the end.
+/// Type-filter text with `ty` hidden: the excludes naming it dropped and
+/// `!=ty` (exact) added at the end. The includes stay, so hiding the type
+/// that is the include empties the view instead of widening it.
 pub fn hide_type(text: &str, ty: &str) -> String {
-    let mut terms = other_terms(text, ty);
-    terms.push(format!("!{ty}"));
+    let mut terms = terms_except(text, ty, true);
+    terms.push(format!("!={ty}"));
     terms.join(", ")
 }
 
-/// Type-filter text showing only `ty`: the includes replaced by `ty`, and
-/// the excludes that would hide it dropped.
+/// Type-filter text showing only `ty` (`=ty`, exact): the includes
+/// replaced, and the excludes that would hide it dropped.
 pub fn only_type(text: &str, ty: &str) -> String {
-    let mut terms: Vec<String> = other_terms(text, ty)
+    let mut terms: Vec<String> = terms_except(text, ty, false)
         .into_iter()
         .filter(|t| {
-            t.strip_prefix('!').is_some_and(|ex| {
-                TypeFilter::parse(&format!("!{ex}")).is_ok_and(|f| f.keeps_type(ty))
-            })
+            TermText::parse(t).is_ok_and(|p| p.exclude)
+                && TypeFilter::parse(t).is_ok_and(|f| f.keeps_type(ty))
         })
         .collect();
-    terms.insert(0, ty.to_string());
+    terms.insert(0, format!("={ty}"));
     terms.join(", ")
 }
 
 /// The terms of `text` (trimmed, empty ones dropped) except those naming
-/// `ty` itself, included or excluded.
-fn other_terms(text: &str, ty: &str) -> Vec<String> {
+/// `ty` itself (`ty`, `=ty`, `! = ty`, any case); with `excludes_only`
+/// only the excluding ones are dropped.
+fn terms_except(text: &str, ty: &str, excludes_only: bool) -> Vec<String> {
     text.split(',')
         .map(str::trim)
         .filter(|t| !t.is_empty())
-        .filter(|t| {
-            let bare = t.strip_prefix('!').unwrap_or(t).trim_start();
-            !bare.eq_ignore_ascii_case(ty)
+        .filter(|t| match TermText::parse(t) {
+            Ok(p) => !(p.body.eq_ignore_ascii_case(ty) && (p.exclude || !excludes_only)),
+            Err(_) => true,
         })
         .map(String::from)
         .collect()
@@ -191,6 +192,12 @@ pub struct EventsState {
     pub truncated: bool,
     /// Distinct event types in `raw` the type filter hides.
     pub hidden_types: usize,
+    /// What the PCE was asked (`EventsFilterEdit::pce_side`) by the
+    /// request in flight or last sent, and by the last answered one: a
+    /// filter edit refilters without a request only when the loaded
+    /// events answered the same.
+    pub requested: Option<(Option<String>, String)>,
+    pub answered: Option<(Option<String>, String)>,
     pub auto: AutoRefresh,
 }
 
@@ -212,6 +219,8 @@ impl EventsState {
             loading: false,
             truncated: false,
             hidden_types: 0,
+            requested: None,
+            answered: None,
             auto: AutoRefresh::new(min_refresh),
         }
     }
@@ -250,6 +259,39 @@ impl EventsState {
         }
         counts.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         counts
+    }
+
+    /// The types of `raw` the type filter keeps whose every event the
+    /// severity floor (`X+`) hides.
+    pub fn severity_hidden_types(&self) -> Vec<String> {
+        let types = TypeFilter::parse(&self.filter.event_type).unwrap_or_default();
+        let severity = SeverityFilter::parse(&self.filter.severity).unwrap_or_default();
+        let mut kept: Vec<&str> = Vec::new();
+        let mut seen: Vec<&str> = Vec::new();
+        for e in &self.raw {
+            let ty = e.event_type.as_deref().unwrap_or("");
+            if !types.keeps_type(ty) {
+                continue;
+            }
+            if !seen.contains(&ty) {
+                seen.push(ty);
+            }
+            if severity.keeps(e) && !kept.contains(&ty) {
+                kept.push(ty);
+            }
+        }
+        seen.into_iter()
+            .filter(|t| !kept.contains(t))
+            .map(String::from)
+            .collect()
+    }
+
+    /// The window of the events shown: the last answered request's, else
+    /// the filter's.
+    pub fn shown_window(&self) -> &str {
+        self.answered
+            .as_ref()
+            .map_or(self.filter.window.as_str(), |(_, w)| w.as_str())
     }
 
     /// `x`: hides the type `ty` (no request).

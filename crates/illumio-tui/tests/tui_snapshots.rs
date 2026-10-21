@@ -1103,6 +1103,7 @@ fn events_hidden_types_capped_summary_and_type_completion() {
     m.overlay = Overlay::EventTypes { selected: 1 };
     let out = render_to_string(&m, 80, 24);
     assert!(out.contains("hidden"), "{out}");
+    assert!(out.contains("(severity)"), "{out}");
     insta::assert_snapshot!("event_types_80x24", out);
     // The Type field completes the loaded types after a `!`.
     m.overlay = Overlay::None;

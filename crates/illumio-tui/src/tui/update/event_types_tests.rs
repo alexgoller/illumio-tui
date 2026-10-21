@@ -63,7 +63,7 @@ fn x_hides_the_rows_type_and_o_shows_only_it_without_a_request() {
     let mut m = events();
     select(&mut m, "user.login");
     assert!(press(&mut m, 'x').is_empty());
-    assert_eq!(m.events.filter.event_type, "!user.login");
+    assert_eq!(m.events.filter.event_type, "!=user.login", "exact");
     assert_eq!(m.events.hidden_types, 1);
     assert_eq!(m.events.table.len(), 3);
     assert!(
@@ -76,19 +76,24 @@ fn x_hides_the_rows_type_and_o_shows_only_it_without_a_request() {
         "{:?}",
         m.status
     );
-    // `!` is the same key; hiding twice keeps one term.
+    // Hiding it again, however the term was written, keeps one term.
+    assert_eq!(
+        crate::tui::model::hide_type("! = USER.login", "user.login"),
+        "!=user.login"
+    );
+    // `!` is the same key.
     select(&mut m, "sec_policy.create");
     assert!(press(&mut m, '!').is_empty());
     assert_eq!(
         m.events.filter.event_type,
-        "!user.login, !sec_policy.create"
+        "!=user.login, !=sec_policy.create"
     );
     // `o`: only this type; the other excludes stay, none hides it.
     select(&mut m, "agent.tampering");
     assert!(press(&mut m, 'o').is_empty());
     assert_eq!(
         m.events.filter.event_type,
-        "agent.tampering, !user.login, !sec_policy.create"
+        "=agent.tampering, !=user.login, !=sec_policy.create"
     );
     assert_eq!(shown_types(&m), ["agent.tampering"]);
     assert_eq!(m.events.hidden_types, 3);
@@ -99,15 +104,116 @@ fn x_hides_the_rows_type_and_o_shows_only_it_without_a_request() {
 fn only_drops_an_exclude_that_would_hide_the_type() {
     use crate::tui::model::{hide_type, only_type};
     assert_eq!(
-        only_type("!agent.*, !user.login, x", "agent.tampering"),
-        "agent.tampering, !user.login"
+        only_type(
+            "!agent.*, !user.login, x, ! = Agent.Tampering",
+            "agent.tampering"
+        ),
+        "=agent.tampering, !user.login"
     );
+    assert_eq!(only_type("", "user.login"), "=user.login");
+    assert_eq!(hide_type("", "user.login"), "!=user.login");
+    // The includes stay: hiding the include empties the view, never widens it.
     assert_eq!(
-        hide_type("agent.tampering, !x", "agent.tampering"),
-        "!x, !agent.tampering"
+        hide_type("=agent.tampering, rule_set, !x", "agent.tampering"),
+        "=agent.tampering, rule_set, !x, !=agent.tampering"
     );
-    assert_eq!(hide_type("", "user.login"), "!user.login");
-    assert_eq!(only_type("", "user.login"), "user.login");
+    // `x` twice: one term.
+    assert_eq!(
+        hide_type(&hide_type("!x", "user.login"), "user.login"),
+        "!x, !=user.login"
+    );
+}
+
+#[test]
+fn x_on_the_included_type_empties_the_view() {
+    let mut m = events();
+    select(&mut m, "agent.tampering");
+    assert!(press(&mut m, 'o').is_empty());
+    assert_eq!(shown_types(&m), ["agent.tampering"]);
+    assert!(press(&mut m, 'x').is_empty());
+    assert_eq!(
+        m.events.filter.event_type,
+        "=agent.tampering, !=agent.tampering"
+    );
+    assert!(
+        m.events.table.rows().is_empty(),
+        "not widened to every type"
+    );
+}
+
+#[test]
+fn an_exact_hide_keeps_longer_types_and_the_summary_marks_only_it() {
+    let mut m = events();
+    let mut e = m.events.raw[0].clone();
+    e.href = "/orgs/5/events/e5".into();
+    e.event_type = Some("user.login_session_terminated".into());
+    m.events.raw.push(e);
+    m.events.rebuild();
+    select(&mut m, "user.login");
+    assert!(press(&mut m, 'x').is_empty());
+    assert!(shown_types(&m).contains(&"user.login_session_terminated".to_string()));
+    assert!(!shown_types(&m).contains(&"user.login".to_string()));
+    assert_eq!(m.events.hidden_types, 1);
+    let f = pce::models::TypeFilter::parse(&m.events.filter.event_type).unwrap();
+    let hidden: Vec<String> = m
+        .events
+        .type_counts()
+        .into_iter()
+        .map(|(t, _)| t)
+        .filter(|t| !f.keeps_type(t))
+        .collect();
+    assert_eq!(hidden, ["user.login"]);
+}
+
+#[test]
+fn types_the_severity_floor_empties_are_noted() {
+    let mut m = events();
+    m.events.filter.severity = "warning+".into();
+    m.events.filter.event_type = "!=sec_policy.create".into();
+    m.events.rebuild();
+    let mut by_sev = m.events.severity_hidden_types();
+    by_sev.sort();
+    assert_eq!(
+        by_sev,
+        ["user.login"],
+        "sec_policy.create is hidden by type"
+    );
+}
+
+#[test]
+fn a_failed_request_is_retried_by_a_type_only_edit() {
+    let mut m = events();
+    edit_field(&mut m, 2, "1h");
+    let cmds = send(&mut m, KeyCode::Enter, KeyModifiers::NONE);
+    assert!(matches!(&cmds[..], [Cmd::LoadEvents { .. }]), "{cmds:?}");
+    update(&mut m, Msg::EventsLoaded(Err("boom".into())));
+    assert!(!m.events.loading);
+    // The rows are still the 24h ones: the header says so.
+    assert_eq!(m.events.shown_window(), "24h");
+    edit_field(&mut m, 1, "agent");
+    let cmds = send(&mut m, KeyCode::Enter, KeyModifiers::NONE);
+    assert!(
+        matches!(&cmds[..], [Cmd::LoadEvents { .. }]),
+        "the 1h load never answered: asked again, {cmds:?}"
+    );
+    // While it is in flight, a type-only edit just refilters.
+    edit_field(&mut m, 1, "user");
+    assert!(send(&mut m, KeyCode::Enter, KeyModifiers::NONE).is_empty());
+    let events = model_with_events().events.raw;
+    update(
+        &mut m,
+        Msg::EventsLoaded(Ok(crate::tui::msg::EventsPayload {
+            events,
+            age_secs: 0,
+            truncated: false,
+            window: (String::new(), String::new()),
+        })),
+    );
+    assert_eq!(m.events.shown_window(), "1h");
+    assert_eq!(shown_types(&m), ["user.login"]);
+    // Answered: now a type-only edit sends nothing.
+    edit_field(&mut m, 1, "");
+    assert!(send(&mut m, KeyCode::Enter, KeyModifiers::NONE).is_empty());
 }
 
 #[test]
@@ -129,13 +235,13 @@ fn the_type_summary_counts_hides_and_picks_one() {
     // `x` hides the type under the cursor and the list stays open.
     assert!(press(&mut m, 'j').is_empty());
     assert!(press(&mut m, 'x').is_empty());
-    assert_eq!(m.events.filter.event_type, "!agent.tampering");
+    assert_eq!(m.events.filter.event_type, "!=agent.tampering");
     assert_eq!(m.overlay, Overlay::EventTypes { selected: 1 });
     // Enter: only this type, and the list closes.
     assert!(press(&mut m, 'k').is_empty());
     assert!(send(&mut m, KeyCode::Enter, KeyModifiers::NONE).is_empty());
     assert_eq!(m.overlay, Overlay::None);
-    assert_eq!(m.events.filter.event_type, "user.login, !agent.tampering");
+    assert_eq!(m.events.filter.event_type, "=user.login, !=agent.tampering");
     assert_eq!(m.events.table.len(), 2);
     // `?` and back; Esc closes.
     assert!(press(&mut m, 't').is_empty());
@@ -193,6 +299,11 @@ fn bad_terms_and_severities_are_refused_and_never_sent() {
     for (field, bad, says) in [
         (1, "!", "type: !"),
         (1, "a !b", "use ,"),
+        (1, "!a !b", "use ,"),
+        (1, "!a!b", "use ,"),
+        (1, "=", "= needs"),
+        (1, "!=", "= needs"),
+        (1, "==a", "= starts"),
         (0, "loud+", "X+"),
     ] {
         edit_field(&mut m, field, bad);
@@ -260,6 +371,15 @@ fn event_type_candidates_need_no_index_and_skip_named_types() {
     );
     let c = crate::tui::complete::event_types("!tam", &[], &m.events.raw);
     assert_eq!(c, ["!agent.tampering"]);
+    // `=` and `!=` stay typed; an exact earlier term counts as named.
+    let used = [
+        "=user.login".to_string(),
+        "! = sec_policy.create".to_string(),
+    ];
+    let c = crate::tui::complete::event_types("! = ", &used, &m.events.raw);
+    assert_eq!(c, ["!=agent.tampering", "!=system.license_expiring"]);
+    let c = crate::tui::complete::event_types("=ag", &[], &m.events.raw);
+    assert_eq!(c, ["=agent.tampering"]);
     assert!(crate::tui::complete::event_types("x", &[], &[]).is_empty());
 }
 

@@ -11,10 +11,10 @@ expression: out
 │                                                                              │
 │                                                                              │
 │       ╭ Event types ──────────────────── 4 types · 4 events · capped ╮       │
-│       │  agent.tampering                                    1        │       │
-│       │▸ sec_policy.create                                  1        │       │
-│       │  system.license_expiring                            1  hidden│       │
-│       │  user.login                                         1  hidden│       │
+│       │  agent.tampering                                1            │       │
+│       │▸ sec_policy.create                              1  (severity)│       │
+│       │  system.license_expiring                        1  hidden    │       │
+│       │  user.login                                     1  hidden    │       │
 │       │Enter only this · x/! hide · Esc close                        │       │
 │       ╰──────────────────────────────────────────────────────────────╯       │
 │                                                                              │

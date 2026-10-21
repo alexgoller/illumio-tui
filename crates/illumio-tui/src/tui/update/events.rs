@@ -41,6 +41,7 @@ pub(super) fn load_events(model: &mut Model, mode: CacheMode) -> Vec<Cmd> {
 }
 
 pub(super) fn request_events(model: &mut Model, filter: EventFilter, mode: CacheMode) -> Vec<Cmd> {
+    model.events.requested = Some(model.events.filter.pce_side());
     model.events.loading = true;
     model.events.auto.last_run = Some(Instant::now());
     model.events.auto.from_tick = false;
@@ -215,7 +216,13 @@ fn apply_events_filter(model: &mut Model, mut e: EventsEditor) -> Vec<Cmd> {
         }
     };
     let ev = &model.events;
-    if ev.loaded_at.is_some() && edit.pce_side() == ev.filter.pce_side() {
+    let side = edit.pce_side();
+    // Refilter what is loaded (or about to be): only when it answers (or
+    // will answer) the same question. After a failed request the edit
+    // retries it.
+    let answered = ev.loaded_at.is_some() && ev.answered.as_ref() == Some(&side);
+    let in_flight = ev.loading && ev.requested.as_ref() == Some(&side);
+    if answered || in_flight {
         model.overlay = Overlay::None;
         model.events.filter = edit;
         model.events.rebuild();

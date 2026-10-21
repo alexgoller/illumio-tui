@@ -297,6 +297,7 @@ pub fn model_with_events() -> Model {
         .expect("events fixture");
     m.events.rebuild();
     m.events.loaded_at = Some(Instant::now() - Duration::from_secs(5));
+    m.events.answered = Some(m.events.filter.pce_side());
     m.events.age_secs = 0;
     m.events.window = Some((
         "2026-10-09T08:00:00Z".to_string(),

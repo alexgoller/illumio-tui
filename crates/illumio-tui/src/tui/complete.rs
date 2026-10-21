@@ -106,11 +106,13 @@ pub fn complete(
 
 /// The Events type filter's candidates: the event types of the loaded
 /// `events`, most frequent first, those named by `earlier` terms (with or
-/// without `!`) left out. After a `!` each candidate keeps it. Pure.
+/// without `!` and `=`) left out. A typed `!`, `=` or `!=` prefix stays on
+/// each candidate. Pure.
 pub fn event_types(token: &str, earlier: &[String], events: &[Event]) -> Vec<String> {
     let used: Vec<String> = earlier
         .iter()
-        .map(|t| t.trim().trim_start_matches('!').trim().to_lowercase())
+        .filter_map(|t| pce::models::TermText::parse(t.trim()).ok())
+        .map(|p| p.body.to_lowercase())
         .collect();
     let mut counts: Vec<(&str, usize)> = Vec::new();
     for ty in events.iter().filter_map(|e| e.event_type.as_deref()) {
@@ -123,14 +125,25 @@ pub fn event_types(token: &str, earlier: &[String], events: &[Event]) -> Vec<Str
         }
     }
     counts.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
-    let mut out = negatable(token, |t| {
-        ranked(
-            t,
-            counts
-                .iter()
-                .map(|(ty, _)| (ty.to_string(), ty.to_string())),
-        )
-    });
+    // A typed `!`, `=` or `!=` (blanks after each allowed) stays on
+    // every candidate, written tight.
+    let (neg, rest) = match token.strip_prefix('!') {
+        Some(r) => ("!", r.trim_start()),
+        None => ("", token),
+    };
+    let (exact, rest) = match rest.strip_prefix('=') {
+        Some(r) => ("=", r.trim_start()),
+        None => ("", rest),
+    };
+    let mut out: Vec<String> = ranked(
+        rest,
+        counts
+            .iter()
+            .map(|(ty, _)| (ty.to_string(), ty.to_string())),
+    )
+    .into_iter()
+    .map(|c| format!("{neg}{exact}{c}"))
+    .collect();
     out.truncate(MAX_CANDIDATES);
     out
 }
