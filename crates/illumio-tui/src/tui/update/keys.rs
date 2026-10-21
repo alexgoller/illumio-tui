@@ -466,6 +466,10 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     model.profile.org_id,
                 ) {
                     Ok(Some(intent)) => {
+                        model.policy.scope_warnings = model
+                            .rule_scope_notes(&form)
+                            .map(|(_, w)| w)
+                            .unwrap_or_default();
                         if matches!(form.intent, EditIntent::RuleFromFlow(_)) {
                             model.traffic.rule_form = Some(form);
                         }

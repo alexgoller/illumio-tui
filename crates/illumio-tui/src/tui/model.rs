@@ -443,6 +443,7 @@ impl PolicyState {
             diff_loading: false,
             quiet_reload: false,
             confirm_impact: None,
+            scope_warnings: Vec::new(),
             pending_marked: BTreeSet::new(),
             provision_counts: None,
             provisioned: None,
@@ -555,7 +556,7 @@ impl PolicyState {
                 pc,
             }
         }));
-        rows.sort_by_key(|r| rule_rank(r.kind));
+        rows.sort_by_key(|r| rule_order(r));
         self.rules.set_rows(rows);
     }
 
@@ -981,6 +982,22 @@ impl Model {
             rulesets: self.draft_rulesets(),
             group_keys: None,
         }
+    }
+
+    /// An open allow rule form's Scope notes: what its consumers mean and
+    /// the warnings ([`crate::tui::edit::scope_notes`]) against its
+    /// ruleset's scopes as loaded. No request.
+    pub fn rule_scope_notes(&self, form: &crate::tui::form::Form) -> Option<(String, Vec<String>)> {
+        form.rule_scope.as_ref()?;
+        let empty = pce::NameIndex::default();
+        let idx = self.index().map_or(&empty, |i| i.as_ref());
+        let loaded = self
+            .policy
+            .loaded_at
+            .map_or(&[][..], |_| &self.policy.raw[..]);
+        let scopes =
+            crate::tui::edit::form_ruleset_scopes(form, loaded, self.draft_rulesets(), idx);
+        crate::tui::edit::scope_notes(form, scopes.as_deref())
     }
 
     /// What names hrefs in an event detail: the index and whichever

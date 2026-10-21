@@ -153,6 +153,26 @@ impl std::ops::Deref for RuleRow {
     }
 }
 
+/// An allow rule's scope as the rules pane shows it, `intra` or `extra`;
+/// blank for a deny rule.
+pub fn scope_cell(r: &RuleView) -> &'static str {
+    match r.kind {
+        RuleKind::Allow => {
+            crate::rule_scope::RuleScope::from_unscoped(r.unscoped_consumers).as_str()
+        }
+        RuleKind::Deny | RuleKind::OverrideDeny => "",
+    }
+}
+
+/// The order of the rules pane: by evaluation ([`rule_rank`]), the allow
+/// rules intra-scope first, then extra-scope, as the PCE lists them.
+pub(super) fn rule_order(r: &RuleView) -> (u8, bool) {
+    (
+        rule_rank(r.kind),
+        r.kind == RuleKind::Allow && r.unscoped_consumers,
+    )
+}
+
 pub fn rule_columns() -> Vec<Column<RuleRow>> {
     vec![
         Column {
@@ -178,6 +198,18 @@ pub fn rule_columns() -> Vec<Column<RuleRow>> {
             narrow_width: 0,
             full_title: None,
             full: Some(|r| r.enabled.to_string()),
+        },
+        Column {
+            title: "scope",
+            width: 5,
+            cell: |r| scope_cell(r).to_string(),
+            key: |r| SortKey::Text(scope_cell(r).to_string()),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+            full_title: None,
+            full: None,
         },
         Column {
             title: "consumers",
@@ -368,6 +400,10 @@ pub struct PolicyState {
     /// The open rule confirm's impact line, evaluated when the confirm
     /// opens and when the workloads or rulesets load (never per draw).
     pub confirm_impact: Option<String>,
+    /// The Scope warnings of the allow rule form just submitted, checked
+    /// again at `Enter`: its confirm's status line repeats them. Taken by
+    /// the plan's answer.
+    pub scope_warnings: Vec<String>,
     /// Pending entries marked with `Space` for `P` and `R` (hrefs); cleared
     /// when the list is loaded again.
     pub pending_marked: BTreeSet<String>,

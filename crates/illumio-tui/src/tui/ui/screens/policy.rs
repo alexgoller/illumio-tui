@@ -1,7 +1,7 @@
 //! Policy screen: rulesets on the left, the selected ruleset's rules on the right.
 //! Below 120 columns the panes stack (rulesets above rules) so both stay readable.
 use crate::tui::edit::scopes_text;
-use crate::tui::model::{Model, PolicyPane};
+use crate::tui::model::{Model, PolicyPane, RuleRow};
 use crate::tui::ui::widgets::bars::age_text;
 use crate::tui::ui::widgets::panel::panel;
 use crate::tui::ui::widgets::table::{header_meta, render};
@@ -81,6 +81,16 @@ pub fn render_screen(model: &Model, f: &mut Frame, body: Rect) {
     );
     let theme = t.clone();
     let mut rules_meta = header_meta(&p.rules);
+    // The allow rules come intra-scope first, then extra-scope (`scope`
+    // column); the meta counts both.
+    let scopes = scope_counts(p.rules.rows());
+    if !scopes.is_empty() {
+        rules_meta = if rules_meta.is_empty() {
+            scopes
+        } else {
+            format!("{scopes} · {rules_meta}")
+        };
+    }
     if p.deny_not_loaded() {
         let note = "deny rules not loaded · ↑/↓ loads";
         rules_meta = if rules_meta.is_empty() {
@@ -113,6 +123,18 @@ pub fn render_screen(model: &Model, f: &mut Frame, body: Rect) {
             RuleKind::OverrideDeny => Style::new().fg(theme.bad),
         },
     );
+}
+
+/// The allow rules by scope, `3 intra · 1 extra`; empty without any.
+pub fn scope_counts(rows: &[RuleRow]) -> String {
+    let allow = rows.iter().filter(|r| r.kind == RuleKind::Allow);
+    let extra = allow.clone().filter(|r| r.unscoped_consumers).count();
+    let intra = allow.count() - extra;
+    if intra + extra == 0 {
+        String::new()
+    } else {
+        format!("{intra} intra · {extra} extra")
+    }
 }
 
 /// The search's flat rule list over the whole body: `Search · <terms>`,

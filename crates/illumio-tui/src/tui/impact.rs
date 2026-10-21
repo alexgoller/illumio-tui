@@ -66,7 +66,7 @@ pub fn compute_with(
 }
 
 /// The same ruleset in either scope (an active href folds to draft).
-fn same_policy_href(a: &str, b: &str) -> bool {
+pub(crate) fn same_policy_href(a: &str, b: &str) -> bool {
     let fold = |h: &str| h.replacen("/sec_policy/active/", "/sec_policy/draft/", 1);
     fold(a) == fold(b)
 }
@@ -474,6 +474,7 @@ mod tests {
             vec![
                 "kind",
                 "on",
+                "scope",
                 "consumers",
                 "providers",
                 "services",

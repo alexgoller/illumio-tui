@@ -11,12 +11,12 @@ expression: out
 │                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭ Rules · app=shop, env=prod ──────────────────────────────────────────────────╮
-│  kind          on  consumers       providers      services        P/C        │
-│▸ override_deny ✓   All workloads   role=db        22/tcp                    -│
-│  allow         ✓   role=web        role=db        PostgreSQL                -│
-│  allow         ✓   ipl:Corp        role=web       443/tcp, 8000-8           -│
-│  deny          ✓   ipl:Any (0.0.0. All workloads  23/tcp                    -│
+╭ Rules · app=shop, env=prod ─────────────────────────────── 1 intra · 1 extra ╮
+│  kind          on  scope consumers     providers    services      P/C        │
+│▸ override_deny ✓         All workloads role=db      22/tcp                  -│
+│  allow         ✓   intra role=web      role=db      PostgreSQL              -│
+│  allow         ✓   extra ipl:Corp      role=web     443/tcp, 8000           -│
+│  deny          ✓         ipl:Any (0.0. All workload 23/tcp                  -│
 │                                                                              │
 │                                                                              │
 │                                                                              │

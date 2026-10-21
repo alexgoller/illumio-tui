@@ -301,6 +301,7 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
                 "Ctrl-A Ctrl-R",
                 "w form: all labels · create the typed ruleset",
             ),
+            key("Space", "rule Scope: intra ↔ extra, consumers follow"),
         ],
     },
     HelpGroup {

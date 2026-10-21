@@ -11,7 +11,7 @@ expression: out
 │    ╭ Edit ruleset Shop-Prod ────── Tab next · Enter review · Esc cancel ╮    │
 │    │▸ Name*         Shop-Prod▏                                          │    │
 ╰────│                Shop-Prod                                           │────╯
-╭ Rul│  Description   Ringfence                                           │────╮
+╭ Rul│  Description   Ringfence                                           │tra ╮
 │  ki│                optional                                            │    │
 │▸ ov│  Enabled*      y                                                   │   -│
 │  al│                y or n                                              │   -│

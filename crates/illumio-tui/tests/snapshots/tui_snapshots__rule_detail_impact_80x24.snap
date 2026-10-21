@@ -11,7 +11,7 @@ expression: out
 │ │consumers   ipl:Corp                                                      │ │
 │ │providers   role=web                                                      │ │
 ╰─│services    443/tcp, 8000-8099/tcp                                        │─╯
-╭ │flags       enabled · unscoped consumers                                  │─╮
+╭ │flags       enabled · extra-scope                                         │ ╮
 │ │pending     update                                                        │ │
 │▸│href        /orgs/5/sec_policy/draft/rule_sets/100/sec_rules/2            │2│
 │ │impact      1 provider · 0 consumers                                      │1│

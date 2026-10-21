@@ -11,7 +11,7 @@ expression: out
 │ │▸ host-1.example           app=shop env=prod role=w full            yes   │ │
 │ │  host-2.example           app=shop env=prod role=d visibility_only no    │ │
 ╰─│                                                                          │─╯
-╭ │                                                                          │─╮
+╭ │                                                                          │ ╮
 │ │                                                                          │ │
 │▸│                                                                          │2│
 │ │                                                                          │1│

@@ -11,7 +11,7 @@ expression: out
 │ │  rule_set "Global-Infra" (back to active)                                │ │
 │ │                                                                          │ │
 ╰─│{                                                                         │─╯
-╭ │  "change_subset": {                                                      │─╮
+╭ │  "change_subset": {                                                      │ ╮
 │ │    "ip_lists": [                                                         │ │
 │▸│      {                                                                   │-│
 │ │        "href": "/orgs/5/sec_policy/draft/ip_lists/21"                    │-│

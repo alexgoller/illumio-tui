@@ -12,17 +12,17 @@ expression: out
 ╰────│                app=web, group:Name, iplist:Corp, all, !env=dev     │────╯
 ╭ Flo│  Consumers*    iplist:Corp                                         │────╮
 │  sr│                app=web, group:Name, iplist:Corp, all, !env=dev     │sion│
-│▸ ho│  Services*     8443/tcp                                            │wed │
-│  10│                443/tcp, 8000-8100/udp, icmp, HTTPS                 │blk │
-│  un│  Description   allow 10.1.4.9 to host-1.example on 8443/tcp        │ked │
-│  ho│                optional                                            │wed │
-╰────│  Enabled*      y                                                   │────╯
-╭ Det│                y or n                                              │ows ╮
-│sele│  Unscoped*     y                                                   │    │
-│    │                y: consumers outside the ruleset's scope            │    │
+│▸ ho│                iplist:Corp wherever they are                       │wed │
+│  10│  Services*     8443/tcp                                            │blk │
+│  un│                443/tcp, 8000-8100/udp, icmp, HTTPS                 │ked │
+│  ho│  Description   allow 10.1.4.9 to host-1.example on 8443/tcp        │wed │
+╰────│                optional                                            │────╯
+╭ Det│  Enabled*      y                                                   │ows ╮
+│sele│                y or n                                              │    │
+│    │  Scope*        extra                                               │    │
+│    │                Space: intra (in scope) or extra (anywhere)         │    │
 │    │* required · Ctrl-N names · Ctrl-R new ruleset · Ctrl-A all labels  │    │
 │    ╰────────────────────────────────────────────────────────────────────╯    │
-│                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ready         f filter  r run  a auto  v view  g group  / search  : cmd  ? help

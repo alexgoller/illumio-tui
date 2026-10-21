@@ -2575,3 +2575,50 @@ fn a_w_forms_ruleset_completes_from_the_loaded_draft_rulesets() {
     assert!(update(&mut m, ctrl('n')).is_empty());
     assert_eq!(form_value(&m, "Ruleset"), "");
 }
+
+#[test]
+fn a_rule_forms_scope_warnings_follow_it_to_the_confirm() {
+    use crate::tui::test_support::{model_with_policy, rule_post_plan};
+    let mut m = writes_on(model_with_policy());
+    m.screen = Screen::Policy;
+    let shop = m.policy.raw[0].href.clone();
+    open_form(&mut m, EditIntent::CreateRule { ruleset_href: shop });
+    let Overlay::Form(f) = &mut m.overlay else {
+        panic!("a form");
+    };
+    for (label, value) in [
+        ("Providers", "role=db"),
+        ("Consumers", "role=web"),
+        ("Services", "443/tcp"),
+        ("Scope", "extra"),
+    ] {
+        f.fields
+            .iter_mut()
+            .find(|x| x.label == label)
+            .unwrap()
+            .value = value.into();
+    }
+    let Overlay::Form(f) = &m.overlay else {
+        unreachable!()
+    };
+    assert_eq!(
+        m.rule_scope_notes(f),
+        Some((
+            "role=web in any app, env".to_string(),
+            vec!["matches role=web in every app, env".to_string()]
+        )),
+        "the form shows them while it is open"
+    );
+    assert_eq!(update(&mut m, enter()).len(), 1, "a warning never blocks");
+    update(
+        &mut m,
+        Msg::Planned(Ok((rule_post_plan(), pce::write::ObjectKind::Rule))),
+    );
+    assert!(matches!(m.overlay, Overlay::ConfirmWrite { .. }));
+    assert_eq!(m.status.kind, StatusKind::Warn);
+    assert_eq!(
+        m.status.text,
+        "⚠ matches role=web in every app, env · review the request: y sends it, n cancels"
+    );
+    assert!(m.policy.scope_warnings.is_empty(), "taken by the plan");
+}

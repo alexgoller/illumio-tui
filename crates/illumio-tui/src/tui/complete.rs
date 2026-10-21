@@ -32,7 +32,7 @@ pub fn complete(
     workloads: &[Workload],
 ) -> Vec<String> {
     let mut out = match kind {
-        FieldKind::Text => Vec::new(),
+        FieldKind::Text | FieldKind::RuleScope => Vec::new(),
         FieldKind::LabelKey => ranked(token, keys(idx, &[]).into_iter().map(|k| (k.clone(), k))),
         FieldKind::LabelValue => {
             let key = earlier.first().map_or("", |k| k.trim());

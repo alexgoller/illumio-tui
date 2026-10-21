@@ -435,9 +435,31 @@ pub fn render_form(model: &Model, form: &Form, f: &mut Frame, area: Rect) {
         .error
         .as_deref()
         .map(|e| wrap_rows(&plain(e), width + 1 + 2 + FORM_LABEL_WIDTH, 2));
-    // A value row and its hint rows per field, the error rows and the borders.
-    let rows =
-        hints.iter().map(|h| 1 + h.len()).sum::<usize>() + error.as_ref().map_or(1, Vec::len) + 2;
+    // An allow rule's Scope notes under Consumers, live: what the consumers
+    // mean (`true`: warnings, in the warn colour).
+    let scope_rows: Vec<(String, bool)> = model
+        .rule_scope_notes(form)
+        .map(|(meaning, warnings)| {
+            let mut rows: Vec<(String, bool)> = wrap_rows(&plain(&meaning), width + 1, 2)
+                .into_iter()
+                .map(|r| (r, false))
+                .collect();
+            for w in warnings {
+                rows.extend(
+                    wrap_rows(&plain(&format!("⚠ {w}")), width + 1, 2)
+                        .into_iter()
+                        .map(|r| (r, true)),
+                );
+            }
+            rows
+        })
+        .unwrap_or_default();
+    // A value row and its hint rows per field, the scope notes, the error
+    // rows and the borders.
+    let rows = hints.iter().map(|h| 1 + h.len()).sum::<usize>()
+        + scope_rows.len()
+        + error.as_ref().map_or(1, Vec::len)
+        + 2;
     let r = centered(area, 70, u16::try_from(rows).unwrap_or(u16::MAX));
     f.render_widget(Clear, r);
     // A long title (a rule in a ruleset) would be cut by the full hint.
@@ -490,6 +512,18 @@ pub fn render_form(model: &Model, form: &Form, f: &mut Frame, area: Rect) {
                     format!("{:w$}{hint}", "", w = 2 + FORM_LABEL_WIDTH),
                     t.dim_style(),
                 ))),
+            }
+        }
+        if field.label == "Consumers" {
+            for (row, warn) in &scope_rows {
+                lines.push(Line::from(Span::styled(
+                    format!("{:w$}{row}", "", w = 2 + FORM_LABEL_WIDTH),
+                    if *warn {
+                        Style::new().fg(t.warn)
+                    } else {
+                        Style::new().fg(t.accent)
+                    },
+                )));
             }
         }
     }
@@ -1061,15 +1095,16 @@ pub fn render_rule_detail(model: &Model, rule: &RuleView, f: &mut Frame, area: R
         .map(|s| s.name.clone())
         .collect::<Vec<_>>()
         .join(", ");
-    let flags = format!(
-        "{} · {}",
-        if rule.enabled { "enabled" } else { "disabled" },
-        if rule.unscoped_consumers {
-            "unscoped consumers"
-        } else {
-            "scoped consumers"
-        }
-    );
+    // An allow rule's consumers are intra- or extra-scope; a deny rule as
+    // loaded carries no such flag.
+    let enabled = if rule.enabled { "enabled" } else { "disabled" };
+    let flags = match rule.kind {
+        pce::RuleKind::Allow => format!(
+            "{enabled} · {}",
+            crate::rule_scope::RuleScope::from_unscoped(rule.unscoped_consumers).wording()
+        ),
+        pce::RuleKind::Deny | pce::RuleKind::OverrideDeny => enabled.to_string(),
+    };
     let mut lines = vec![
         labelled(
             model,

@@ -11,7 +11,7 @@ expression: out
 │ │  "consumers": [                                                          │ │
 │ │    {                                                                     │ │
 ╰─│      "ip_list": {                                                        │─╯
-╭ │        "href": "/orgs/5/sec_policy/draft/ip_lists/21"                    │─╮
+╭ │        "href": "/orgs/5/sec_policy/draft/ip_lists/21"                    │ ╮
 │ │      }                                                                   │ │
 │▸│    }                                                                     │2│
 │ │  ],                                                                      │1│

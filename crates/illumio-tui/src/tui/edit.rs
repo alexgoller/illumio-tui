@@ -2,11 +2,12 @@
 //! into a pre-filled [`Form`] (create, update) or straight into a
 //! [`WriteIntent`] (delete); [`build_intent`] turns a submitted form into the
 //! draft or patch the library plans. Pure: nothing here reaches the PCE.
+use crate::rule_scope::RuleScope;
 use crate::tokens::{
     ActorToken, ServiceToken, actor_from_href_token, is_href, parse_scope_tokens,
     service_from_href_token, similar, split_kv, with_exclusion, with_similar,
 };
-use crate::tui::form::{Field, FieldKind, FlowRuleset, Form, RulesetOffer};
+use crate::tui::form::{Field, FieldKind, FlowRuleset, Form, RuleScopeCtx, RulesetOffer};
 
 use pce::models::{
     Actor, DenyRule, Fqdn, IngressService, Interface, IpList, Label, Rule, RuleSet, Service,
@@ -307,11 +308,15 @@ pub fn start(intent: EditIntent, index: Option<&NameIndex>, prefill: FlowPrefill
             name: rs.name,
             href: rs.href,
         }),
-        EditIntent::CreateRule { ruleset_href } => form(
-            format!("New allow rule in ruleset {}", href_id(&ruleset_href)),
-            rule_fields(None, idx),
-            EditIntent::CreateRule { ruleset_href },
-        ),
+        EditIntent::CreateRule { ruleset_href } => Start::Form(rule_form(
+            Form::new(
+                format!("New allow rule in ruleset {}", href_id(&ruleset_href)),
+                rule_fields(None, idx),
+                EditIntent::CreateRule { ruleset_href },
+            ),
+            prefill,
+            Vec::new(),
+        )),
         EditIntent::CreateDenyRule { ruleset_href } => form(
             format!("New deny rule in ruleset {}", href_id(&ruleset_href)),
             deny_rule_fields(None, idx),
@@ -324,7 +329,11 @@ pub fn start(intent: EditIntent, index: Option<&NameIndex>, prefill: FlowPrefill
                 href_id(&rs)
             );
             let fields = rule_fields(Some(&r), idx);
-            form(title, fields, EditIntent::UpdateRule(r, rs))
+            Start::Form(rule_form(
+                Form::new(title, fields, EditIntent::UpdateRule(r, rs)),
+                prefill,
+                Vec::new(),
+            ))
         }
         EditIntent::UpdateDenyRule(d, rs) => {
             let title = format!(
@@ -349,7 +358,12 @@ pub fn start(intent: EditIntent, index: Option<&NameIndex>, prefill: FlowPrefill
         }
         EditIntent::RuleFromFlow(f) => {
             let (fields, alt, covering) = flow_rule_fields(&f, idx, prefill);
-            let mut form = Form::new("Allow rule from flow", fields, EditIntent::RuleFromFlow(f));
+            let source = scope_of(&f.src, prefill.scope_keys)
+                .into_iter()
+                .map(label_token)
+                .collect();
+            let form = Form::new("Allow rule from flow", fields, EditIntent::RuleFromFlow(f));
+            let mut form = rule_form(form, prefill, source);
             form.alt = Some(alt);
             form.flow = Some(Box::new(FlowRuleset {
                 group_keys: prefill.group_keys.map(<[String]>::to_vec),
@@ -358,6 +372,17 @@ pub fn start(intent: EditIntent, index: Option<&NameIndex>, prefill: FlowPrefill
             Start::Form(form)
         }
     }
+}
+
+/// An allow rule form with what its Scope switch reads: the label
+/// model's scope keys and the flow source's scope labels (`source`, a `w`
+/// form's; none for the others).
+fn rule_form(mut form: Form, prefill: FlowPrefill, source: Vec<String>) -> Form {
+    form.rule_scope = Some(Box::new(RuleScopeCtx {
+        scope_keys: prefill.scope_keys.to_vec(),
+        source,
+    }));
+    form
 }
 
 /// The form a create or update intent opens; `None` for a delete.
@@ -550,7 +575,7 @@ fn resolve_scopes(text: &str, idx: &NameIndex, org_id: u64) -> Result<Vec<Vec<Ac
 
 const ACTORS_HINT: &str = "app=web, group:Name, iplist:Corp, all, !env=dev";
 const SERVICES_HINT: &str = "443/tcp, 8000-8100/udp, icmp, HTTPS";
-const UNSCOPED_HINT: &str = "y: consumers outside the ruleset's scope";
+const SCOPE_HINT: &str = "Space: intra (in scope) or extra (anywhere)";
 const OVERRIDE_HINT: &str = "y: evaluated before allow rules";
 const CANNOT_EDIT_RULE: &str = "this rule has entries the form cannot edit; use the CLI";
 
@@ -599,14 +624,24 @@ fn rule_fields(r: Option<&Rule>, idx: &NameIndex) -> Vec<Field> {
             YES_NO_HINT,
             true,
         ),
-        Field::new(
-            "Unscoped",
-            yn(r.is_some_and(|r| r.unscoped_consumers.unwrap_or(false))),
-            UNSCOPED_HINT,
-            true,
-        ),
+        scope_field(RuleScope::from_unscoped(
+            r.is_some_and(|r| r.unscoped_consumers.unwrap_or(false)),
+        )),
     ]);
     fields
+}
+
+/// An allow rule's Scope field: `intra` or `extra`, switched with `Space`.
+fn scope_field(scope: RuleScope) -> Field {
+    Field::new("Scope", scope.as_str(), SCOPE_HINT, true).kind(FieldKind::RuleScope)
+}
+
+/// The Scope field (`intra`/`extra`, or their initials) as the wire's
+/// `unscoped_consumers`.
+fn unscoped_field(form: &Form) -> Result<bool, String> {
+    RuleScope::parse(form.value("Scope"))
+        .map(RuleScope::unscoped)
+        .map_err(|e| format!("Scope: {e}"))
 }
 
 fn deny_rule_fields(d: Option<&DenyRule>, idx: &NameIndex) -> Vec<Field> {
@@ -670,7 +705,7 @@ fn rule_draft(form: &Form, idx: &NameIndex, org_id: u64) -> Result<RuleDraft, St
         providers: actor_field(form, "Providers", idx, org_id)?,
         consumers: actor_field(form, "Consumers", idx, org_id)?,
         services: service_field(form, idx, org_id)?,
-        unscoped_consumers: yes_no(form, "Unscoped")?,
+        unscoped_consumers: unscoped_field(form)?,
         resolve_labels_as: None,
     };
     d.validate().map_err(|e| e.join("; "))?;
@@ -964,6 +999,60 @@ pub fn existing_ruleset_note(
     note
 }
 
+/// The scopes of the ruleset an allow rule form writes to, as actor
+/// tokens per scope (empty: global), from what is loaded: the Policy
+/// screen's rulesets (`loaded`) and the draft rulesets (`drafts`), by the
+/// form's ruleset href, or, in a `w` form, by the Ruleset field (an href or
+/// the name of exactly one draft ruleset). `None` when it is not loaded or
+/// not named yet. Never a request.
+pub fn form_ruleset_scopes(
+    form: &Form,
+    loaded: &[RuleSet],
+    drafts: Option<&[RuleSet]>,
+    idx: &NameIndex,
+) -> Option<Vec<Vec<String>>> {
+    let drafts = drafts.unwrap_or(&[]);
+    let by_href = |href: &str| {
+        loaded
+            .iter()
+            .chain(drafts)
+            .find(|rs| crate::tui::impact::same_policy_href(&rs.href, href))
+    };
+    let rs = match &form.intent {
+        EditIntent::CreateRule { ruleset_href } | EditIntent::UpdateRule(_, ruleset_href) => {
+            by_href(ruleset_href)
+        }
+        EditIntent::RuleFromFlow(_) => {
+            let typed = form.value("Ruleset").trim();
+            if is_href(typed) {
+                by_href(typed)
+            } else {
+                match rulesets_named(drafts, typed).as_slice() {
+                    [one] => Some(*one),
+                    _ => None,
+                }
+            }
+        }
+        _ => None,
+    }?;
+    Some(rs.scopes.iter().map(|s| actor_tokens(s, idx)).collect())
+}
+
+/// What an allow rule form's consumers mean under its Scope (the line
+/// under Consumers) and the warnings about it
+/// ([`crate::rule_scope::meaning`], [`crate::rule_scope::warnings`]);
+/// `None` for a form without a Scope field or with an unreadable one.
+pub fn scope_notes(form: &Form, scopes: Option<&[Vec<String>]>) -> Option<(String, Vec<String>)> {
+    let ctx = form.rule_scope.as_deref()?;
+    let scope = RuleScope::parse(form.value("Scope")).ok()?;
+    let consumers = form.value("Consumers");
+    let keys = &ctx.scope_keys;
+    Some((
+        crate::rule_scope::meaning(consumers, scope, keys, scopes),
+        crate::rule_scope::warnings(consumers, scope, keys, scopes),
+    ))
+}
+
 /// The live draft rulesets named `name` (any case).
 pub fn rulesets_named<'s>(sets: &'s [RuleSet], name: &str) -> Vec<&'s RuleSet> {
     let name = name.trim();
@@ -1120,7 +1209,7 @@ fn flow_rule_fields(
             false,
         ),
         Field::new("Enabled", "y", YES_NO_HINT, true),
-        Field::new("Unscoped", yn(!same_scope), UNSCOPED_HINT, true),
+        scope_field(RuleScope::from_unscoped(!same_scope)),
     ];
     let alt = vec![
         (1, endpoint_tokens(&f.dst).join(", ")),
@@ -1841,7 +1930,7 @@ pub fn build_intent(
             let (add_services, remove_services) =
                 service_changes(&r.ingress_services, &v("Services"), idx, org_id)?;
             let enabled = yes_no(form, "Enabled")?;
-            let unscoped = yes_no(form, "Unscoped")?;
+            let unscoped = unscoped_field(form)?;
             let patch = RulePatch {
                 description: changed(r.description.as_deref().unwrap_or(""), v("Description")),
                 enabled: (enabled != r.enabled).then_some(enabled),
@@ -2598,10 +2687,10 @@ mod tests {
                 "Services",
                 "Description",
                 "Enabled",
-                "Unscoped"
+                "Scope"
             ]
         );
-        assert_eq!((f.value("Enabled"), f.value("Unscoped")), ("y", "n"));
+        assert_eq!((f.value("Enabled"), f.value("Scope")), ("y", "intra"));
         set(&mut f, "Providers", "role=db");
         set(&mut f, "Consumers", "role=web, !env=prod");
         set(&mut f, "Services", "PostgreSQL, 443/tcp");
@@ -2681,7 +2770,7 @@ mod tests {
         assert_eq!(f.value("Consumers"), "iplist:Corp");
         assert_eq!(f.value("Services"), "443/tcp, 8000-8099/tcp");
         assert_eq!(f.value("Description"), "corp to web");
-        assert_eq!(f.value("Unscoped"), "y");
+        assert_eq!(f.value("Scope"), "extra");
         assert_eq!(
             build(&f).unwrap(),
             None,
@@ -2689,7 +2778,7 @@ mod tests {
         );
         set(&mut f, "Consumers", "iplist:Corp, role=db");
         set(&mut f, "Services", "443/tcp");
-        set(&mut f, "Unscoped", "n");
+        set(&mut f, "Scope", "intra");
         assert_eq!(
             build(&f).unwrap(),
             Some(WriteIntent::UpdateRule {
@@ -2857,7 +2946,7 @@ mod tests {
                 "Services",
                 "Description",
                 "Enabled",
-                "Unscoped"
+                "Scope"
             ]
         );
         assert_eq!(f.value("Providers"), "role=web", "the tier only");
@@ -2871,11 +2960,11 @@ mod tests {
             f.value("Description"),
             "allow 10.1.4.9 to host-1.example on 8443/tcp"
         );
-        assert_eq!((f.value("Enabled"), f.value("Unscoped")), ("y", "y"));
+        assert_eq!((f.value("Enabled"), f.value("Scope")), ("y", "extra"));
         let g = flow_form(&flows[2]); // unmanaged-nas -> host-2, icmp
         assert_eq!(g.value("Providers"), "role=db");
         assert_eq!(g.value("Consumers"), "workload:/orgs/5/workloads/aaaa-3");
-        assert_eq!(g.value("Unscoped"), "y", "a source without labels");
+        assert_eq!(g.value("Scope"), "extra", "a source without labels");
         assert_eq!(g.value("Services"), "icmp");
         assert_eq!(
             g.value("Description"),
@@ -2921,7 +3010,7 @@ mod tests {
         let same = flow_form(&flows[0]);
         assert_eq!(same.value("Providers"), "role=db");
         assert_eq!(same.value("Consumers"), "role=web");
-        assert_eq!(same.value("Unscoped"), "n");
+        assert_eq!(same.value("Scope"), "intra");
         // A source in another scope: its scope and tier, unscoped.
         let mut other = flows[0].clone();
         other.src.labels = vec![
@@ -2936,7 +3025,7 @@ mod tests {
             "app=shop, env=dev, role=db",
             "loc is never pre-filled"
         );
-        assert_eq!(o.value("Unscoped"), "y");
+        assert_eq!(o.value("Scope"), "extra");
         // No tier on the destination: the narrowest known instead.
         let mut no_tier = flows[0].clone();
         no_tier.dst.labels.retain(|l| l.key != "role");
@@ -2954,7 +3043,7 @@ mod tests {
         assert_eq!(s.fields[0].hint, NO_SCOPE_HINT);
         assert_eq!(s.value("Providers"), "role=db");
         assert_eq!(s.value("Consumers"), "app=shop, env=prod, role=web");
-        assert_eq!(s.value("Unscoped"), "y");
+        assert_eq!(s.value("Scope"), "extra");
         // Configured keys: scoped by app alone, tiers by env.
         let c = form_with(
             EditIntent::RuleFromFlow(Box::new(flows[0].clone())),
@@ -2964,7 +3053,7 @@ mod tests {
         );
         assert_eq!(c.value("Providers"), "env=prod");
         assert_eq!(c.value("Consumers"), "env=prod");
-        assert_eq!(c.value("Unscoped"), "n");
+        assert_eq!(c.value("Scope"), "intra");
         let c = form_with(
             EditIntent::RuleFromFlow(Box::new(flows[1].clone())),
             &["app"],
@@ -3363,5 +3452,147 @@ mod tests {
         set(&mut f, "Ruleset", "/orgs/9/sec_policy/draft/rule_sets/100");
         let err = build(&f).unwrap_err();
         assert!(err.starts_with("Ruleset: "), "{err}");
+    }
+
+    /// `f` with the focus on its Scope field.
+    fn on_scope(mut f: Form) -> Form {
+        f.active = f.fields.iter().position(|x| x.label == "Scope").unwrap();
+        f
+    }
+
+    fn press(f: &mut Form, code: crossterm::event::KeyCode) {
+        f.on_key(crossterm::event::KeyEvent::new(
+            code,
+            crossterm::event::KeyModifiers::NONE,
+        ));
+    }
+
+    #[test]
+    fn space_switches_the_scope_and_rewrites_the_consumers() {
+        use crossterm::event::KeyCode::{Backspace, Char};
+        let flows = crate::tui::test_support::fixture_flows();
+        // A `w` form: extra adds the source's scope, intra takes it away.
+        let mut f = on_scope(flow_form(&flows[0]));
+        assert_eq!(
+            (f.value("Scope"), f.value("Consumers")),
+            ("intra", "role=web")
+        );
+        press(&mut f, Char(' '));
+        assert_eq!(
+            (f.value("Scope"), f.value("Consumers")),
+            ("extra", "app=shop, env=prod, role=web")
+        );
+        for c in [Char('x'), Char('e'), Backspace] {
+            press(&mut f, c);
+        }
+        assert_eq!(
+            (f.value("Scope"), f.value("Consumers")),
+            ("extra", "app=shop, env=prod, role=web"),
+            "typing, Backspace and the same scope change nothing"
+        );
+        press(&mut f, Char('i'));
+        assert_eq!(
+            (f.value("Scope"), f.value("Consumers")),
+            ("intra", "role=web")
+        );
+        let Ok(Some(WriteIntent::CreateRule { draft, .. })) = build(&f) else {
+            panic!("a create");
+        };
+        assert!(!draft.unscoped_consumers);
+        // A Policy form has no flow source: extra adds nothing; intra
+        // drops the scope labels and keeps the rest.
+        let sets = rule_sets();
+        let mut p = on_scope(form(EditIntent::CreateRule {
+            ruleset_href: sets[0].href.clone(),
+        }));
+        set(&mut p, "Consumers", "app=shop, role=web, iplist:Corp");
+        press(&mut p, Char(' '));
+        assert_eq!(
+            (p.value("Scope"), p.value("Consumers")),
+            ("extra", "app=shop, role=web, iplist:Corp")
+        );
+        press(&mut p, Char(' '));
+        assert_eq!(
+            (p.value("Scope"), p.value("Consumers")),
+            ("intra", "role=web, iplist:Corp")
+        );
+        // Typed initials still build.
+        set(&mut p, "Scope", "E");
+        set(&mut p, "Providers", "role=db");
+        set(&mut p, "Services", "443/tcp");
+        let Ok(Some(WriteIntent::CreateRule { draft, .. })) = build(&p) else {
+            panic!("a create");
+        };
+        assert!(draft.unscoped_consumers);
+        set(&mut p, "Scope", "y");
+        assert_eq!(build(&p).unwrap_err(), "Scope: \"y\" is not intra or extra");
+    }
+
+    #[test]
+    fn the_scope_notes_read_the_rulesets_scopes_as_loaded() {
+        let sets = rule_sets();
+        let idx = fixture_index();
+        let mut p = form(EditIntent::CreateRule {
+            ruleset_href: sets[0].href.clone(),
+        });
+        set(&mut p, "Consumers", "role=web");
+        let scopes = form_ruleset_scopes(&p, &sets, None, &idx);
+        assert_eq!(
+            scopes,
+            Some(vec![vec!["app=shop".to_string(), "env=prod".to_string()]])
+        );
+        let notes = |f: &Form, s: &Option<Vec<Vec<String>>>| scope_notes(f, s.as_deref());
+        assert_eq!(
+            notes(&p, &scopes),
+            Some(("role=web inside app=shop env=prod".to_string(), Vec::new()))
+        );
+        set(&mut p, "Consumers", "app=crm, role=web");
+        assert_eq!(
+            notes(&p, &scopes).unwrap().1,
+            vec!["never matches: app=crm is outside the ruleset scope"]
+        );
+        set(&mut p, "Consumers", "role=web");
+        set(&mut p, "Scope", "extra");
+        assert_eq!(
+            notes(&p, &scopes),
+            Some((
+                "role=web in any app, env".to_string(),
+                vec!["matches role=web in every app, env".to_string()]
+            ))
+        );
+        // The active href of a loaded draft ruleset finds it too.
+        let active = form(EditIntent::CreateRule {
+            ruleset_href: sets[0].href.replace("/draft/", "/active/"),
+        });
+        assert!(form_ruleset_scopes(&active, &sets, None, &idx).is_some());
+        // A global ruleset.
+        let mut g = form(EditIntent::CreateRule {
+            ruleset_href: sets[1].href.clone(),
+        });
+        set(&mut g, "Consumers", "role=web");
+        let global = form_ruleset_scopes(&g, &[], Some(&sets), &idx);
+        assert_eq!(
+            notes(&g, &global),
+            Some((
+                "role=web anywhere: global ruleset".to_string(),
+                vec!["intra-scope in a global ruleset covers every workload".to_string()]
+            ))
+        );
+        // A `w` form by the ruleset it names among the drafts.
+        let flows = crate::tui::test_support::fixture_flows();
+        let mut w = flow_form(&flows[0]);
+        set(&mut w, "Ruleset", " shop-prod ");
+        assert_eq!(form_ruleset_scopes(&w, &[], Some(&sets), &idx), scopes);
+        set(&mut w, "Ruleset", "New-App");
+        assert_eq!(form_ruleset_scopes(&w, &[], Some(&sets), &idx), None);
+        assert_eq!(
+            notes(&w, &None).unwrap().0,
+            "role=web inside the ruleset scope"
+        );
+        // Deny rules have no Scope.
+        let d = form(EditIntent::CreateDenyRule {
+            ruleset_href: sets[0].href.clone(),
+        });
+        assert_eq!(notes(&d, &scopes), None);
     }
 }

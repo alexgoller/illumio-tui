@@ -11,17 +11,17 @@ expression: out
 │    │                app=web, group:Name, iplist:Corp, all, !env=dev     │    │
 │    │  Consumers*    iplist:Corp                                         │    │
 ╰────│                app=web, group:Name, iplist:Corp, all, !env=dev     │────╯
-╭ Rul│  Services*     443/tcp, 8000-8099/tcp                              │────╮
-│  ki│                443/tcp, 8000-8100/udp, icmp, HTTPS                 │    │
-│▸ ov│  Description   corp to web                                         │   -│
+╭ Rul│                iplist:Corp wherever they are                       │tra ╮
+│  ki│  Services*     443/tcp, 8000-8099/tcp                              │    │
+│▸ ov│                443/tcp, 8000-8100/udp, icmp, HTTPS                 │   -│
+│  al│  Description   corp to web                                         │   -│
 │  al│                optional                                            │   -│
-│  al│  Enabled*      y                                                   │   -│
-│  de│                y or n                                              │   -│
-│    │  Unscoped*     y                                                   │    │
-│    │                y: consumers outside the ruleset's scope            │    │
+│  de│  Enabled*      y                                                   │   -│
+│    │                y or n                                              │    │
+│    │  Scope*        extra                                               │    │
+│    │                Space: intra (in scope) or extra (anywhere)         │    │
 │    │* required                                                          │    │
 │    ╰────────────────────────────────────────────────────────────────────╯    │
-│                                                                              │
 │                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯

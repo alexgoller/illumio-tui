@@ -1342,7 +1342,8 @@ fn rule_and_deny_rule_forms_80x24() {
     assert!(out.contains("Edit allow rule 2 in ruleset 100"), "{out}");
     assert!(out.contains("iplist:Corp"), "{out}");
     assert!(out.contains("443/tcp, 8000-8099/tcp"), "{out}");
-    assert!(out.contains("Unscoped*"), "{out}");
+    assert!(out.contains("Scope*"), "{out}");
+    assert!(out.contains("iplist:Corp wherever they are"), "{out}");
     insta::assert_snapshot!("form_rule_80x24", out);
     m.set_theme("light");
     insta::assert_snapshot!("form_rule_light_styled_80x24", render_styled(&m, 80, 24));

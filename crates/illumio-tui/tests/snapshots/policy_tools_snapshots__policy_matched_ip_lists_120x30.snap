@@ -4,7 +4,7 @@ expression: out
 ---
  illumio-tui pce.example · org 5 ●                                                                api 5 calls · 20.8 KB
   1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
-╭ ╭ Consumers of allow role=web ← ipl:Corp 443/tcp, 8000-8099/tcp ────────────────────────────────────── 0 workloads ╮─╮
+╭ ╭ Consumers of allow role=web ← ipl:Corp 443/tcp, 8000-8099/tcp ────────────────────────────────────── 0 workloads ╮ ╮
 │ │▸ consumers 0 · providers 1 (Tab)                                                                                 │ │
 │▸│the consumers are IP lists (Corp): addresses, not workloads; nothing to list                                      │2│
 │ │no rows                                                                                                           │1│

@@ -5,6 +5,7 @@
 //! cannot see the name index, so `update` asks [`Completing::completion_request`],
 //! computes the candidates ([`crate::tui::complete`]) and hands them to
 //! [`Completing::start_completion`].
+use crate::rule_scope::{RuleScope, rewrite_consumers};
 use crate::tui::edit::EditIntent;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::borrow::Cow;
@@ -77,6 +78,10 @@ pub enum FieldKind {
     /// The Policy rule search: terms apart by spaces, `key=v1,v2`, `ipl:`,
     /// `svc:`, `wl:` names, `href:`, `disabled`, `deny`.
     RuleFilter,
+    /// An allow rule's Scope, `intra` or `extra`: not typed; `Space`
+    /// switches it (`i`, `e` pick one) and rewrites the Consumers to match
+    /// ([`crate::rule_scope::rewrite_consumers`]). Nothing to complete.
+    RuleScope,
 }
 
 impl FieldKind {
@@ -92,6 +97,7 @@ impl FieldKind {
             Self::MarkSide => &[' ', ','],
             Self::WorkloadLabels | Self::RuleFilter => &[' '],
             Self::Text
+            | Self::RuleScope
             | Self::LabelKey
             | Self::LabelValue
             | Self::Ruleset
@@ -115,7 +121,7 @@ impl FieldKind {
                 .collect()
         };
         let earlier = match self {
-            Self::Text => return None,
+            Self::Text | Self::RuleScope => return None,
             Self::LabelKey
             | Self::LabelValue
             | Self::Ruleset
@@ -362,6 +368,17 @@ pub struct Form {
     pub completion: Option<Box<Completion>>,
     /// A `w` form's ruleset choice; boxed like `offers_ruleset`.
     pub flow: Option<Box<FlowRuleset>>,
+    /// An allow rule form's label model and flow source, for its Scope
+    /// field; boxed like `offers_ruleset`.
+    pub rule_scope: Option<Box<RuleScopeCtx>>,
+}
+
+/// What an allow rule form's Scope switch reads: the scope keys and, in a
+/// `w` form, the flow source's scope labels as tokens (`app=shop`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RuleScopeCtx {
+    pub scope_keys: Vec<String>,
+    pub source: Vec<String>,
 }
 
 /// What a `w` form keeps to choose its ruleset again when the draft
@@ -406,6 +423,7 @@ impl Form {
             offers_ruleset: None,
             completion: None,
             flow: None,
+            rule_scope: None,
         }
     }
 
@@ -449,12 +467,39 @@ impl Form {
         self.expanded = !self.expanded;
     }
 
+    fn on_rule_scope(&self) -> bool {
+        self.fields
+            .get(self.active)
+            .is_some_and(|f| f.kind == FieldKind::RuleScope)
+    }
+
     /// The value of the field with this label ("" when there is none).
     pub fn value(&self, label: &str) -> &str {
         self.fields
             .iter()
             .find(|f| f.label == label)
             .map_or("", |f| f.value.as_str())
+    }
+
+    /// The Scope field set to `to`; a change rewrites the Consumers to
+    /// keep the rule's meaning (see [`FieldKind::RuleScope`]).
+    fn switch_scope(&mut self, to: Option<RuleScope>) {
+        let Some(f) = self.fields.get_mut(self.active) else {
+            return;
+        };
+        let from = RuleScope::parse(&f.value).ok();
+        let Some(to) = to.or_else(|| from.map(RuleScope::other)) else {
+            f.value = RuleScope::Intra.as_str().into();
+            return;
+        };
+        f.value = to.as_str().into();
+        if from == Some(to) {
+            return;
+        }
+        let ctx = self.rule_scope.as_deref().cloned().unwrap_or_default();
+        if let Some(c) = self.fields.iter_mut().find(|f| f.label == "Consumers") {
+            c.value = rewrite_consumers(&c.value, to, &ctx.scope_keys, &ctx.source);
+        }
     }
 
     pub fn on_key(&mut self, k: KeyEvent) -> FormEvent {
@@ -492,6 +537,15 @@ impl Form {
             }
             KeyCode::Tab | KeyCode::Down => self.active = (self.active + 1) % n,
             KeyCode::BackTab | KeyCode::Up => self.active = (self.active + n - 1) % n,
+            // The Scope field is switched, never typed: `Backspace` and
+            // `Ctrl-U` leave it as it is.
+            KeyCode::Char(c) if !ctrl && self.on_rule_scope() => match c {
+                ' ' => self.switch_scope(None),
+                'i' | 'I' => self.switch_scope(Some(RuleScope::Intra)),
+                'e' | 'E' => self.switch_scope(Some(RuleScope::Extra)),
+                _ => {}
+            },
+            KeyCode::Backspace | KeyCode::Char('u') if self.on_rule_scope() => {}
             KeyCode::Backspace => {
                 if let Some(f) = self.fields.get_mut(self.active) {
                     f.value.pop();

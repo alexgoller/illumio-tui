@@ -1040,6 +1040,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             model.writes.in_flight = false;
             let flow_form = model.traffic.rule_form.take();
             let mut rule_after = model.policy.rule_after_ruleset.take();
+            let scope_warnings = std::mem::take(&mut model.policy.scope_warnings);
             // The ruleset `Ctrl-R` asked for exists after all (the fresh read
             // found it): nothing is created; the form comes back naming it,
             // and Enter adds the rule to it through its own confirm.
@@ -1089,7 +1090,13 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     } else {
                         "review the request: y sends it, n cancels"
                     };
-                    model.status = StatusLine::info(review);
+                    // The rule form's Scope warnings, checked again at its
+                    // `Enter`, stay in sight until `y`.
+                    model.status = if scope_warnings.is_empty() {
+                        StatusLine::info(review)
+                    } else {
+                        StatusLine::warn(format!("⚠ {} · {review}", scope_warnings.join(" · ")))
+                    };
                     model.overlay = Overlay::ConfirmWrite {
                         plan,
                         kind,

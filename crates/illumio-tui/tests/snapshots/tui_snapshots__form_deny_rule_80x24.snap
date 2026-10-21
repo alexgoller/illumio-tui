@@ -11,7 +11,7 @@ expression: out
 │    │                app=web, group:Name, iplist:Corp, all, !env=dev     │    │
 │    │  Consumers*    all                                                 │    │
 ╰────│                app=web, group:Name, iplist:Corp, all, !env=dev     │────╯
-╭ Rul│  Services*     22/tcp                                              │────╮
+╭ Rul│  Services*     22/tcp                                              │tra ╮
 │  ki│                443/tcp, 8000-8100/udp, icmp, HTTPS                 │    │
 │▸ ov│  Description                                                       │   -│
 │  al│                optional                                            │   -│

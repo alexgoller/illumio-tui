@@ -11,7 +11,7 @@ expression: out
 │                                                                              │
 │                                                                              │
 ╰─╭ IP list Corp · updated ────────────────────────────── Esc back · q close ╮─╯
-╭ │  name: Corp                                                              │─╮
+╭ │  name: Corp                                                              │ ╮
 │ │- description: Office ranges                                              │ │
 │▸│+ description: Office and lab                                             │-│
 │ │  range 10.1.0.0-10.1.255.255                                             │-│

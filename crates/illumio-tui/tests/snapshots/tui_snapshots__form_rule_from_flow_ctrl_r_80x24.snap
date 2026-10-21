@@ -4,22 +4,22 @@ expression: out
 ---
  illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
   1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
-╭ Filters ────────────────────────────────── window 24h · cap 1000 · unbounded ╮
-│wind╭ Allow rule from flow ───────────── Ctrl-R new ruleset · Esc cancel ╮    │
-╰────│▸ Ruleset*      New-App▏                                            │────╯
-╭ Res│                Ctrl-R: create it, scoped app=shop, env=prod        │ago ╮
-│4 fl│  Providers*    role=web                                            │████│
-╰────│                app=web, group:Name, iplist:Corp, all, !env=dev     │────╯
-╭ Flo│  Consumers*    iplist:Corp                                         │────╮
-│  sr│                app=web, group:Name, iplist:Corp, all, !env=dev     │sion│
+╭ Fil╭ Allow rule from flow ───────────── Ctrl-R new ruleset · Esc cancel ╮ded ╮
+│wind│▸ Ruleset*      New-App▏                                            │    │
+╰────│                Ctrl-R: create it, scoped app=shop, env=prod        │────╯
+╭ Res│  Providers*    role=web                                            │ago ╮
+│4 fl│                app=web, group:Name, iplist:Corp, all, !env=dev     │████│
+╰────│  Consumers*    iplist:Corp                                         │────╯
+╭ Flo│                app=web, group:Name, iplist:Corp, all, !env=dev     │────╮
+│  sr│                iplist:Corp wherever they are                       │sion│
 │▸ ho│  Services*     8443/tcp                                            │wed │
 │  10│                443/tcp, 8000-8100/udp, icmp, HTTPS                 │blk │
 │  un│  Description   allow 10.1.4.9 to host-1.example on 8443/tcp        │ked │
 │  ho│                optional                                            │wed │
 ╰────│  Enabled*      y                                                   │────╯
 ╭ Det│                y or n                                              │ows ╮
-│sele│  Unscoped*     y                                                   │    │
-│    │                y: consumers outside the ruleset's scope            │    │
+│sele│  Scope*        extra                                               │    │
+│    │                Space: intra (in scope) or extra (anywhere)         │    │
 │    │no ruleset named "New-App": Ctrl-R creates it scoped app=shop,      │    │
 │    │env=prod; similar: Shop-Prod                                        │    │
 │    ╰────────────────────────────────────────────────────────────────────╯    │
