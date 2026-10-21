@@ -6,6 +6,8 @@ fn names() -> Names {
     Names {
         version: VERSION,
         written_at: None,
+        host: None,
+        org_id: None,
         labels: vec![
             "app=crm".into(),
             "app=shop".into(),
@@ -18,6 +20,14 @@ fn names() -> Names {
         services: vec!["HTTPS".into(), "SSH".into()],
         ip_lists: vec!["Any (0.0.0.0/0 and ::/0)".into(), "Corp".into()],
         label_groups: vec!["Prod envs".into()],
+    }
+}
+
+/// The PCE the test files are written for.
+fn lab() -> Origin {
+    Origin {
+        host: "pce.lab".into(),
+        org_id: 1,
     }
 }
 
@@ -81,13 +91,19 @@ fn the_path_is_per_profile_under_the_cache_dir() {
     let p = path_from(None, Some(Path::new("/h")), "a/../b");
     assert_eq!(
         p.unwrap(),
-        Path::new("/h/.cache/illumio-tui/a_.._b/names.json")
+        Path::new("/h/.cache/illumio-tui/a%2F%2E%2E%2Fb/names.json")
     );
     assert_eq!(
         path_from(None, Some(Path::new("/h")), "..").unwrap(),
-        Path::new("/h/.cache/illumio-tui/_/names.json")
+        Path::new("/h/.cache/illumio-tui/%2E%2E/names.json")
     );
     assert_eq!(path_from(None, None, "lab"), None);
+    // Lossless: names that differ get directories that differ.
+    let names = ["prod lab", "prod_lab", "prod%20lab", "", "%", "é"];
+    let dirs: std::collections::BTreeSet<String> = names.iter().map(|n| dir_name(n)).collect();
+    assert_eq!(dirs.len(), names.len(), "{dirs:?}");
+    assert_eq!(dir_name("prod-eu_1"), "prod-eu_1");
+    assert_eq!(dir_name("prod lab"), "prod%20lab");
 }
 
 #[test]
@@ -111,6 +127,7 @@ fn a_whole_list_replaces_its_sets_a_part_adds_and_other_sets_stay() {
     let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
     record(
         &path,
+        &lab(),
         Update::Services(s(&["SSH", "HTTPS", "SSH"])),
         true,
         now,
@@ -118,6 +135,7 @@ fn a_whole_list_replaces_its_sets_a_part_adds_and_other_sets_stay() {
     .unwrap();
     record(
         &path,
+        &lab(),
         Update::Labels {
             labels: s(&["app=shop"]),
             keys: s(&["app"]),
@@ -133,6 +151,7 @@ fn a_whole_list_replaces_its_sets_a_part_adds_and_other_sets_stay() {
     // A filtered read adds; a whole one replaces; services untouched.
     record(
         &path,
+        &lab(),
         Update::Workloads {
             hostnames: s(&["web1"]),
             apps: s(&["shop/prod"]),
@@ -143,6 +162,7 @@ fn a_whole_list_replaces_its_sets_a_part_adds_and_other_sets_stay() {
     .unwrap();
     record(
         &path,
+        &lab(),
         Update::Workloads {
             hostnames: s(&["db1"]),
             apps: vec![],
@@ -157,6 +177,7 @@ fn a_whole_list_replaces_its_sets_a_part_adds_and_other_sets_stay() {
     assert_eq!(n.services, ["HTTPS", "SSH"]);
     record(
         &path,
+        &lab(),
         Update::Workloads {
             hostnames: s(&["app1"]),
             apps: vec![],
@@ -169,9 +190,19 @@ fn a_whole_list_replaces_its_sets_a_part_adds_and_other_sets_stay() {
     assert_eq!(n.hostnames, ["app1"]);
     assert!(n.apps.is_empty());
     assert_eq!(n.labels, ["app=shop"]);
+    // Another PCE's file is started over, not merged into.
+    let other = Origin {
+        host: "pce.other".into(),
+        org_id: 1,
+    };
+    record(&path, &other, Update::IpLists(s(&["Other"])), false, now).unwrap();
+    let n = load(&path).unwrap();
+    assert_eq!(n.ip_lists, ["Other"]);
+    assert!(n.labels.is_empty() && n.hostnames.is_empty(), "{n:?}");
+    assert!(n.is_of(&other) && !n.is_of(&lab()));
     // A corrupt file is started over, not an error.
     std::fs::write(&path, "garbage").unwrap();
-    record(&path, Update::IpLists(s(&["Corp"])), true, now).unwrap();
+    record(&path, &lab(), Update::IpLists(s(&["Corp"])), true, now).unwrap();
     assert_eq!(load(&path).unwrap().ip_lists, ["Corp"]);
     assert!(clear(&path).unwrap());
     assert!(!clear(&path).unwrap());
@@ -189,6 +220,7 @@ fn the_file_is_private() {
         .join("names.json");
     record(
         &path,
+        &lab(),
         Update::Services(vec!["SSH".into()]),
         true,
         Timestamp::now(),
@@ -208,7 +240,7 @@ fn the_file_is_private() {
 fn the_recorder_keeps_live_names_and_apps_of_the_scope_keys() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("names.json");
-    let r = Recorder::new(path.clone(), vec!["app".into(), "env".into()]);
+    let r = Recorder::new(path.clone(), lab(), vec!["app".into(), "env".into()]);
     let labels: Vec<pce::models::Label> = serde_json::from_value(serde_json::json!([
         {"href": "/l/1", "key": "app", "value": "shop"},
         {"href": "/l/2", "key": "env", "value": "prod"},
@@ -232,7 +264,18 @@ fn the_recorder_keeps_live_names_and_apps_of_the_scope_keys() {
     ]))
     .unwrap();
     r.workloads(&wls, true);
+    // A name the helper could not print on one line is left out.
+    let odd: Vec<pce::models::IpList> = serde_json::from_value(serde_json::json!([
+        {"href": "/i/1", "name": "Corp"},
+        {"href": "/i/2", "name": "two\nlines"},
+        {"href": "/i/3", "name": "cr\r"},
+    ]))
+    .unwrap();
+    r.ip_lists(&odd, true);
+    r.flush();
     let n = load(&path).unwrap();
+    assert!(n.is_of(&lab()));
+    assert_eq!(n.ip_lists, ["Corp"]);
     assert_eq!(n.labels, ["app=shop", "env=prod"]);
     assert_eq!(n.label_keys, ["app", "env"]);
     assert_eq!(n.services, ["SSH"]);
@@ -277,4 +320,37 @@ fn this_module_depends_on_no_client_code() {
     ] {
         assert!(!code.contains(banned), "names/mod.rs uses {banned}");
     }
+}
+
+/// Updates are written in the order they came, on the recorder's thread,
+/// and all of them before the recorder is gone.
+#[test]
+fn the_recorder_writes_in_order_and_finishes_when_dropped() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("names.json");
+    let services = |names: &[&str]| -> Vec<pce::models::Service> {
+        names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| {
+                serde_json::from_value(serde_json::json!({"href": format!("/s/{i}"), "name": n}))
+                    .unwrap()
+            })
+            .collect()
+    };
+    let r = Recorder::new(path.clone(), lab(), Vec::new());
+    for i in 0..50 {
+        r.services(&services(&[&format!("S{i:02}")]), i == 0);
+    }
+    drop(r);
+    assert_eq!(load(&path).unwrap().services.len(), 50);
+    let r = Recorder::new(path.clone(), lab(), Vec::new());
+    r.services(&services(&["A"]), false);
+    r.services(&services(&["B"]), true);
+    drop(r);
+    assert_eq!(
+        load(&path).unwrap().services,
+        ["B"],
+        "the whole read came last"
+    );
 }

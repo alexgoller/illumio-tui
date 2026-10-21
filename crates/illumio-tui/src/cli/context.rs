@@ -12,6 +12,7 @@ use pce::{CacheMode, Pce, PceClient};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::io::Write;
+use std::sync::Arc;
 use std::time::Instant;
 
 pub struct Context {
@@ -22,9 +23,9 @@ pub struct Context {
     /// `marks.toml` next to the config file in use.
     pub marks_path: std::path::PathBuf,
     /// The profile's names cache (shell completion), filled from the
-    /// lists read; `None` when `completion_cache = false` or no cache
-    /// directory.
-    pub names_path: Option<std::path::PathBuf>,
+    /// lists read; else why there is none (`completion_cache = false`, no
+    /// cache directory, or host/org not the config file profile's own).
+    pub names: Result<Arc<Recorder>, String>,
     started: Instant,
 }
 
@@ -53,16 +54,35 @@ pub fn config_inputs(
     Ok((file, overrides, env))
 }
 
+/// The recorder of the profile's names cache, when it may have one: a
+/// profile of the config file with its own host and org id
+/// ([`config::names_origin`]), `completion_cache` on, a cache directory.
+fn names_recorder(
+    file: &config::ConfigFile,
+    overrides: &Overrides,
+    env: &HashMap<String, String>,
+    scope_keys: &[String],
+) -> Result<Arc<Recorder>, String> {
+    let (profile, origin) = config::names_origin(file, overrides, env)?;
+    if !config::completion_cache(file, &profile) {
+        return Err(format!(
+            "completion_cache = false for profile {profile:?}: nothing is kept"
+        ));
+    }
+    let path = crate::names::default_path(&profile)
+        .ok_or("no cache directory: set HOME or XDG_CACHE_HOME")?;
+    Ok(Arc::new(Recorder::new(path, origin, scope_keys.to_vec())))
+}
+
 impl Context {
     pub fn new(global: &GlobalArgs) -> Result<Self, CliError> {
         let (file, overrides, env) = config_inputs(global)?;
         let resolved = config::resolve(&file, &overrides, &env)?;
         let mut pce = Pce::new(PceClient::new(resolved.client_config())?)
             .with_key_order(resolved.key_order());
-        let names_path = crate::names::path_for(&file, &resolved.profile_name);
-        if let Some(path) = &names_path {
-            let recorder = Recorder::new(path.clone(), resolved.scope_keys.clone());
-            pce = pce.with_observer(std::sync::Arc::new(recorder));
+        let names = names_recorder(&file, &overrides, &env, &resolved.scope_keys);
+        if let Ok(recorder) = &names {
+            pce = pce.with_observer(recorder.clone());
         }
         let format = super::output::choose_format(global.json, global.table, global.csv);
         let cache_mode = if global.no_cache {
@@ -76,7 +96,7 @@ impl Context {
             format,
             cache_mode,
             marks_path: crate::marks::marks_path(global.config.as_deref()),
-            names_path,
+            names,
             started: Instant::now(),
         })
     }

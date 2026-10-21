@@ -152,9 +152,20 @@ hostnames (`--hostname`, `workloads update`), traffic terms (`--src`, `--dst`,
     illumio-tui completions refresh --clear   # delete it; no request
 
 The cache is `$XDG_CACHE_HOME/illumio-tui/<profile>/names.json` (else
-`~/.cache/...`), mode 0600. Besides `completions refresh`, the lists the CLI
-and the TUI read anyway (`labels`, `label-groups`, `iplists`, `services`,
-`workloads`) keep it current; nothing refreshes it on its own. Completion
+`~/.cache/...`), mode 0600. It needs a profile from the config file whose
+`host` and `org_id` are its own: when `--host`, `--pce-port`, `--org-id`,
+`PCE_HOST`, `PCE_PORT` or `PCE_ORG_ID` (also from `--env-file`) name the PCE,
+nothing is written and `completions refresh` refuses, so one profile's cache
+never holds another PCE's names. The file records the host and org id; after
+a profile's PCE changes, its old names are not offered and the next write
+starts over. Besides `completions refresh`, the lists the CLI and the TUI
+read anyway (`labels`, `label-groups`, `iplists`, `services`, `workloads`)
+keep it current; nothing refreshes it on its own. A filtered or truncated
+workloads list only adds hostnames and apps; they are pruned by a whole
+list, `completions refresh` or `--clear`. The helper and `--clear` find the
+profile from `--profile`, `ILLUMIO_PROFILE` in the shell or the config's
+`default_profile`; an `ILLUMIO_PROFILE` set only in an `--env-file` is not
+seen. Completion
 itself never contacts the PCE: the hidden `illumio-tui __complete` helper
 reads the config file and that cache file, and offers nothing when there is
 no cache. The cache holds PCE object names in plain text; `completion_cache =

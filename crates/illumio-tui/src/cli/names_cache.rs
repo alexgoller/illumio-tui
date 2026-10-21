@@ -110,16 +110,16 @@ fn age(seconds: i64) -> String {
 }
 
 /// `completions refresh`: one read of each list the cache holds, then the
-/// file's counts and age. Refused before any request when
-/// `completion_cache = false` (nothing would be kept).
+/// file's counts and age. Refused before any request when nothing would
+/// be kept: `completion_cache = false`, no cache directory, or host, port
+/// or org id from a flag or the environment rather than a config file
+/// profile.
 pub async fn refresh(ctx: &Context) -> Result<(), CliError> {
-    let path = ctx.names_path.clone().ok_or_else(|| {
-        CliError::Args(
-            "completions refresh: completion_cache = false for this profile (or no cache \
-             directory: set HOME or XDG_CACHE_HOME); nothing is kept, so nothing is read"
-                .into(),
-        )
-    })?;
+    let recorder = ctx
+        .names
+        .clone()
+        .map_err(|why| CliError::Args(format!("completions refresh: {why}; nothing is read")))?;
+    let path = recorder.path().to_path_buf();
     let started = Timestamp::now();
     let mode = ctx.cache_mode;
     let truncated = [
@@ -133,8 +133,12 @@ pub async fn refresh(ctx: &Context) -> Result<(), CliError> {
             .truncated,
     ]
     .contains(&true);
-    // The recorder swallows a failed write (it must never fail a list
-    // command); here the write is the point, so say it did not happen.
+    // The writes happen on the recorder's thread: wait for them. It
+    // swallows a failed write (it must never fail a list command); here
+    // the write is the point, so say it did not happen.
+    tokio::task::spawn_blocking(move || recorder.flush())
+        .await
+        .map_err(|e| CliError::Other(e.to_string()))?;
     let names = names::load(&path)
         .filter(|n| n.written_at.is_some_and(|t| t >= started))
         .ok_or_else(|| {

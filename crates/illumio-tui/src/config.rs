@@ -312,6 +312,57 @@ pub fn completion_cache(file: &ConfigFile, profile: &str) -> bool {
         .unwrap_or(true)
 }
 
+/// The PCE the config file's profile `profile` names on its own: its
+/// host and org id; `None` when the profile is not in the file or lacks
+/// either. Reads the file's values only (no secret command).
+pub fn profile_origin(file: &ConfigFile, profile: &str) -> Option<crate::names::Origin> {
+    let p = file.profiles.get(profile)?;
+    Some(crate::names::Origin {
+        host: p.host.clone()?,
+        org_id: p.org_id?,
+    })
+}
+
+/// The PCE a command's names cache belongs to: the [`profile_origin`] of
+/// the profile it uses, provided no flag (`--host`, `--pce-port`,
+/// `--org-id`) or environment variable (`PCE_HOST`, `PCE_PORT`,
+/// `PCE_ORG_ID`, also from `--env-file`) overrides host, port or org id.
+/// Else why not: the cache is per profile, and names of another PCE must
+/// not land in it.
+pub fn names_origin(
+    file: &ConfigFile,
+    overrides: &Overrides,
+    env: &HashMap<String, String>,
+) -> Result<(String, crate::names::Origin), String> {
+    let set = |k: &str| env.get(k).is_some_and(|v| !v.trim().is_empty());
+    if overrides.host.is_some()
+        || overrides.port.is_some()
+        || overrides.org_id.is_some()
+        || ["PCE_HOST", "PCE_PORT", "PCE_ORG_ID"]
+            .iter()
+            .any(|k| set(k))
+    {
+        return Err(
+            "the completion cache needs a profile from the config file; \
+             host/org came from flags or environment"
+                .into(),
+        );
+    }
+    let named = overrides.profile.clone().or_else(|| {
+        env.get("ILLUMIO_PROFILE")
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    });
+    let (profile, _) = profile_name(file, named);
+    match profile_origin(file, &profile) {
+        Some(origin) => Ok((profile, origin)),
+        None => Err(format!(
+            "the completion cache needs a profile from the config file with host and \
+             org_id; {profile:?} has none"
+        )),
+    }
+}
+
 pub fn identity(
     file: &ConfigFile,
     overrides: &Overrides,
@@ -610,6 +661,57 @@ api_secret_cmd = "echo   from-command  "
 "#,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn the_names_origin_is_a_config_profile_nothing_overrides() {
+        let f: ConfigFile = toml::from_str(
+            "default_profile = \"lab\"\n[profiles.lab]\nhost = \"pce.lab\"\norg_id = 3\n\
+             [profiles.bare]\nhost = \"pce.bare\"\n",
+        )
+        .unwrap();
+        let none = Overrides::default();
+        let (profile, origin) = names_origin(&f, &none, &env(&[])).unwrap();
+        assert_eq!(profile, "lab");
+        assert_eq!(origin.host, "pce.lab");
+        assert_eq!(origin.org_id, 3);
+        for e in [
+            env(&[("PCE_HOST", "elsewhere")]),
+            env(&[("PCE_PORT", "8443")]),
+            env(&[("PCE_ORG_ID", "9")]),
+        ] {
+            let why = names_origin(&f, &none, &e).unwrap_err();
+            assert!(why.contains("flags or environment"), "{why}");
+        }
+        for o in [
+            Overrides {
+                host: Some("x".into()),
+                ..Default::default()
+            },
+            Overrides {
+                port: Some(1),
+                ..Default::default()
+            },
+            Overrides {
+                org_id: Some(1),
+                ..Default::default()
+            },
+        ] {
+            assert!(names_origin(&f, &o, &env(&[])).is_err());
+        }
+        // A named profile is fine; one without org_id, or none, is not.
+        let named = |p: &str| Overrides {
+            profile: Some(p.into()),
+            ..Default::default()
+        };
+        assert!(names_origin(&f, &named("bare"), &env(&[])).is_err());
+        let nothing = ConfigFile::default();
+        assert!(
+            names_origin(&nothing, &none, &env(&[])).is_err(),
+            "the fallback"
+        );
+        let (p, _) = names_origin(&f, &none, &env(&[("ILLUMIO_PROFILE", "lab")])).unwrap();
+        assert_eq!(p, "lab");
     }
 
     #[test]

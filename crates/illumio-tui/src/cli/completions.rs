@@ -60,13 +60,15 @@ pub enum CompletionsAction {
     /// Requests: one paged GET each of labels, label groups, IP lists, services and workloads,
     /// throttled and counted like any command. Prints the counts and the cache's age. The
     /// lists the CLI and the TUI read anyway keep it current too; nothing refreshes it on its
-    /// own. `completion_cache = false` in the config keeps names off disk.
+    /// own. Needs a config file profile with its own host and org_id (none from flags or
+    /// PCE_HOST/PCE_PORT/PCE_ORG_ID); `completion_cache = false` keeps names off disk.
     Refresh(RefreshArgs),
 }
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct RefreshArgs {
-    /// Delete the profile's names cache instead (no request)
+    /// Delete the profile's names cache instead (no request; the profile from --profile,
+    /// ILLUMIO_PROFILE of the shell, not of an --env-file, or default_profile)
     #[arg(long)]
     pub clear: bool,
 }
@@ -352,9 +354,16 @@ _illumio-tui__profiles() {
 
 (( $+functions[_illumio-tui__names] )) ||
 _illumio-tui__names() {
-    local -a values args
-    [[ -n ${opt_args[--config]} ]] && args+=(--config ${~opt_args[--config]})
-    [[ -n ${opt_args[--profile]} ]] && args+=(--profile ${opt_args[--profile]})
+    local -a values args words_
+    local i
+    # The whole line: a subcommand's _arguments only knows its own words.
+    words_=(${(Q)${(z)LBUFFER}})
+    for (( i = 1; i < $#words_; i++ )); do
+        case $words_[i] in
+            --config|--profile) args+=($words_[i] ${~words_[i+1]}) ;;
+            --config=*|--profile=*) args+=(${words_[i]%%=*} ${~words_[i]#*=}) ;;
+        esac
+    done
     values=(${(f)"$(illumio-tui __complete $1 $args -- "${(Q)PREFIX}" 2>/dev/null)"})
     _wanted values expl $1 compadd -a values
 }
@@ -371,7 +380,7 @@ _illumio-tui__names() {
         .map(|line| match take_marker(line) {
             Some((kind, line)) => match line.rfind(":_default'") {
                 Some(at) => format!(
-                    "{}:_illumio-tui__names {}'{}",
+                    "{}: _illumio-tui__names {}'{}",
                     &line[..at],
                     kind.name(),
                     &line[at + ":_default'".len()..]
@@ -491,7 +500,12 @@ _illumio-tui__dynamic() {
         for (( i = 1; i < COMP_CWORD; i++ )); do
             [[ "${COMP_WORDS[i]}" == "--config" ]] && cfg=(--config "${COMP_WORDS[i+1]}")
         done
-        COMPREPLY=( $(compgen -W "$(illumio-tui __complete profiles "${cfg[@]}" 2>/dev/null)" -- "${cur}") )
+        # One name per line, quoted: never word-split or expanded.
+        COMPREPLY=()
+        while IFS= read -r i; do
+            printf -v i '%q' "${i}"
+            COMPREPLY+=("${i}")
+        done < <(illumio-tui __complete profiles "${cfg[@]}" -- "${cur}" 2>/dev/null)
         return 0
     fi
     _illumio__tui "$@"
@@ -603,7 +617,9 @@ fn powershell_command(path: &[&str]) -> String {
 /// (the word after the flag, `--flag=` and the word, or a positional
 /// right after its subcommand), of `--profile` or of `profile use` is
 /// answered from the helper; quoted when it holds a space, a comma or
-/// another character PowerShell would read.
+/// another character PowerShell would read, every single quote doubled:
+/// ASCII `'` and U+2018 to U+201B, which PowerShell also takes for one
+/// (written as `\u` escapes, so the script stays ASCII).
 const POWERSHELL_NAMES: &str = r#"    $namesKinds = @{
 @KINDS@    }
     $namesHead = ''
@@ -632,8 +648,8 @@ const POWERSHELL_NAMES: &str = r#"    $namesKinds = @{
         $namesArgs += @('--', $namesWord)
         & 'illumio-tui' @namesArgs 2>$null | ForEach-Object {
             $text = $namesHead + $_
-            if ($text -match '[\s''"`$@(){};,&|<>#]') {
-                $text = "'" + ($text -replace "'", "''") + "'"
+            if ($text -match '[\s''"`$@(){};,&|<>#\u2018-\u201B]') {
+                $text = "'" + ($text -replace '[''\u2018-\u201B]', '$0$0') + "'"
             }
             [CompletionResult]::new($text, $_, [CompletionResultType]::ParameterValue, $_)
         }
@@ -871,13 +887,15 @@ mod tests {
     #[test]
     fn zsh_and_fish_hook_every_argument() {
         let zsh = script(Shell::Zsh);
-        assert_eq!(zsh.matches(":_illumio-tui__names ").count(), HOOKS.len());
+        assert_eq!(zsh.matches(": _illumio-tui__names ").count(), HOOKS.len());
         assert!(zsh.contains("_illumio-tui__names() {"));
         assert!(zsh.contains("illumio-tui __complete $1 $args -- \"${(Q)PREFIX}\""));
+        // Through `_arguments` as written, not with its options first.
+        assert!(!zsh.contains(":_illumio-tui__names "));
         assert!(zsh.contains(
-            "'*--label=[Label key=value (repeatable)]:LABELS:_illumio-tui__names labels'"
+            "'*--label=[Label key=value (repeatable)]:LABELS: _illumio-tui__names labels'"
         ));
-        assert!(zsh.contains(":_illumio-tui__names apps'"));
+        assert!(zsh.contains(": _illumio-tui__names apps'"));
         let fish = script(Shell::Fish);
         assert_eq!(
             fish.matches("-f -a \"(__fish_illumio_tui_names ").count(),
@@ -945,6 +963,46 @@ mod tests {
         assert!(s.contains("& 'illumio-tui' @namesArgs 2>$null"));
         assert!(s.contains("        'illumio-tui;profile;use' = 'profiles'\n"));
         assert!(s.contains("    if ($namesPrev -eq '--profile') {"));
+    }
+
+    /// A PCE value that holds a typographic single quote (PowerShell reads
+    /// U+2018 to U+201B as `'` too) is quoted with each of them doubled,
+    /// so `x’;calc;’` cannot end the literal. Run in pwsh when installed.
+    #[test]
+    fn powershell_doubles_every_kind_of_single_quote() {
+        let s = script(Shell::PowerShell);
+        let test = s.find("            if ($text -match").expect("the quoting");
+        let end = test + s[test..].find("            }\n").unwrap() + 14;
+        let quoting = &s[test..end];
+        assert!(quoting.contains(r"#\u2018-\u201B]')"), "{quoting}");
+        assert!(
+            quoting.contains(r"-replace '[''\u2018-\u201B]', '$0$0'"),
+            "{quoting}"
+        );
+        assert!(quoting.is_ascii(), "written with escapes");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("q.ps1");
+        std::fs::write(
+            &path,
+            format!(
+                "$text = \"x$([char]0x2019);calc;$([char]0x2018)'y\"\n{quoting}\n\
+                 $text\n$v = Invoke-Expression $text\nif ($v -ne \"x$([char]0x2019);calc;$([char]0x2018)'y\") {{ exit 1 }}\n"
+            ),
+        )
+        .unwrap();
+        match std::process::Command::new("pwsh")
+            .args(["-NoProfile", "-NonInteractive", "-File"])
+            .arg(&path)
+            .output()
+        {
+            Ok(o) => assert!(
+                o.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&o.stdout),
+                String::from_utf8_lossy(&o.stderr)
+            ),
+            Err(_) => eprintln!("pwsh not installed; skipped"),
+        }
     }
 
     /// The helper's side reads files and builds no client: neither this

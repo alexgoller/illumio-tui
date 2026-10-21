@@ -10,11 +10,19 @@
 //! it on its own. Read by `illumio-tui __complete`, which never builds a
 //! client: this module reads and writes the file and nothing else (no
 //! request, no secret command). `completion_cache = false` turns both off.
+//!
+//! The file belongs to one PCE, the [`Origin`] it was written for: only a
+//! profile of the config file whose host and org id nothing overrides
+//! writes it (see [`config::names_origin`]). A write for another origin
+//! starts the file over; a read for another origin (the profile's host or
+//! org id changed since) finds nothing. Names of a filtered or truncated
+//! read are only added: they leave with a whole read or `--clear`.
 use crate::config::{self, ConfigFile};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub mod record;
 
@@ -22,12 +30,24 @@ pub mod record;
 pub const VERSION: u32 = 1;
 pub const FILE_NAME: &str = "names.json";
 
+/// The PCE a file holds the names of: the profile's host and org id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Origin {
+    pub host: String,
+    pub org_id: u64,
+}
+
 /// The file: each set sorted and deduplicated.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Names {
     pub version: u32,
     #[serde(default)]
     pub written_at: Option<Timestamp>,
+    /// The [`Origin`]'s host; a file without one is no one's.
+    #[serde(default)]
+    pub host: Option<String>,
+    #[serde(default)]
+    pub org_id: Option<u64>,
     /// `key=value`, live labels only.
     #[serde(default)]
     pub labels: Vec<String>,
@@ -66,6 +86,11 @@ pub enum Update {
 }
 
 impl Names {
+    /// Whether the file holds `origin`'s names.
+    pub fn is_of(&self, origin: &Origin) -> bool {
+        self.host.as_deref() == Some(origin.host.as_str()) && self.org_id == Some(origin.org_id)
+    }
+
     /// `update`'s sets replaced (`complete`: the read was the whole
     /// collection) or added to (a filtered or truncated read).
     pub fn apply(&mut self, update: Update, complete: bool) {
@@ -142,22 +167,20 @@ pub fn path_for(file: &ConfigFile, profile: &str) -> Option<PathBuf> {
         .flatten()
 }
 
-/// Letters, digits, `-`, `_` and `.` kept, anything else `_`; never `.` or `..`.
+/// The profile name as a directory name, losslessly: ASCII letters,
+/// digits, `-` and `_` kept, every other byte `%XX` (so `.`, `..`, `/`
+/// and a space never reach the path, and `a b` and `a_b` stay apart).
 fn dir_name(profile: &str) -> String {
-    let name: String = profile
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    match name.as_str() {
-        "" | "." | ".." => "_".into(),
-        _ => name,
+    if profile.is_empty() {
+        return "%".into();
     }
+    profile
+        .bytes()
+        .map(|b| match b {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
 }
 
 /// The file at `path`; `None` when it is missing, unreadable, not JSON
@@ -169,11 +192,20 @@ pub fn load(path: &Path) -> Option<Names> {
         .filter(|n| n.version == VERSION)
 }
 
-/// `update` merged into the file at `path` (a missing or unreadable one
-/// starts empty), stamped `now`, written atomically.
-pub fn record(path: &Path, update: Update, complete: bool, now: Timestamp) -> io::Result<()> {
-    let mut names = load(path).unwrap_or_default();
+/// `update` merged into `origin`'s file at `path` (a missing or
+/// unreadable one, or one of another origin, starts empty), stamped
+/// `now`, written atomically.
+pub fn record(
+    path: &Path,
+    origin: &Origin,
+    update: Update,
+    complete: bool,
+    now: Timestamp,
+) -> io::Result<()> {
+    let mut names = load(path).filter(|n| n.is_of(origin)).unwrap_or_default();
     names.version = VERSION;
+    names.host = Some(origin.host.clone());
+    names.org_id = Some(origin.org_id);
     names.apply(update, complete);
     names.written_at = Some(now);
     let body = serde_json::to_vec_pretty(&names).map_err(io::Error::other)?;
@@ -201,7 +233,10 @@ fn write_atomic(path: &Path, body: &[u8]) -> io::Result<()> {
         b.mode(0o700);
     }
     b.create(dir)?;
-    let tmp = dir.join(format!(".{FILE_NAME}.tmp-{}", std::process::id()));
+    // Unique within the process too: two recorders may write at once.
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let tmp = dir.join(format!(".{FILE_NAME}.tmp-{}-{seq}", std::process::id()));
     let mut opts = std::fs::OpenOptions::new();
     opts.write(true).create(true).truncate(true);
     #[cfg(unix)]
@@ -370,9 +405,12 @@ pub fn complete(kind: Kind, names: &Names, word: &str) -> Vec<String> {
         .collect()
 }
 
-/// The names of the profile `named` (else `ILLUMIO_PROFILE`, else the
-/// config's default) from the config file at `config_path`: `None` when
-/// the cache is off for it, or any file is missing or unreadable.
+/// The names of the profile `named` (else `ILLUMIO_PROFILE` of the
+/// process environment, not of an `--env-file`; else the config's
+/// default) from the config file at `config_path`: `None` when the cache
+/// is off for it, the profile is not in the file with a host and an org
+/// id, the file holds another PCE's names, or any file is missing or
+/// unreadable.
 pub fn lookup(config_path: &Path, named: Option<String>) -> Option<Names> {
     let file = config::load_config_file(config_path).ok()?;
     let named = named.or_else(|| {
@@ -382,7 +420,8 @@ pub fn lookup(config_path: &Path, named: Option<String>) -> Option<Names> {
             .filter(|s| !s.is_empty())
     });
     let (profile, _) = config::profile_name(&file, named);
-    load(&path_for(&file, &profile)?)
+    let origin = config::profile_origin(&file, &profile)?;
+    load(&path_for(&file, &profile)?).filter(|n| n.is_of(&origin))
 }
 
 #[cfg(test)]
