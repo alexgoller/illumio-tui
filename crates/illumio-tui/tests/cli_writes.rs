@@ -1924,6 +1924,69 @@ mod policy {
         .stderr(predicate::str::contains("cache none"));
     }
 
+    /// `rules add` warns on stderr of an extra-scope rule open to every
+    /// scope and of intra-scope in a global ruleset, from the rulesets and
+    /// labels it reads anyway; `--extra-scope` is `--unscoped-consumers`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rules_add_warns_of_scope_mistakes_without_another_request() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        mount_lists(&server).await;
+        let add = |ruleset: &str, extra: bool| {
+            let mut args = vec![
+                "policy",
+                "rules",
+                "add",
+                ruleset,
+                "--provider",
+                "role=db",
+                "--consumer",
+                "role=web",
+                "--service",
+                "443/tcp",
+                "--dry-run",
+            ];
+            if extra {
+                args.push("--extra-scope");
+            }
+            writer(&server, state.path()).args(args).assert().success()
+        };
+        let stderr = |a: &assert_cmd::assert::Assert| {
+            String::from_utf8_lossy(&a.get_output().stderr).to_string()
+        };
+        let extra = add("shop-prod", true);
+        assert!(
+            stderr(&extra).contains("warning: matches role=web in every app, env"),
+            "{}",
+            stderr(&extra)
+        );
+        assert_eq!(
+            stdout_json(extra)["data"]["body"]["unscoped_consumers"],
+            true
+        );
+        let intra = add("shop-prod", false);
+        assert!(!stderr(&intra).contains("warning"), "{}", stderr(&intra));
+        let global = add("Global-Infra", false);
+        assert!(
+            stderr(&global)
+                .contains("warning: intra-scope in a global ruleset covers every workload"),
+            "{}",
+            stderr(&global)
+        );
+        // Without a ruleset read (an href) only the extra-scope check runs.
+        let by_href = add(RS_100, true);
+        assert!(stderr(&by_href).contains("warning: matches role=web"));
+        // One labels read per add (its tokens), one rulesets read per name.
+        assert_eq!(gets(&server, "/orgs/5/labels").await, 4);
+        assert_eq!(gets(&server, "/orgs/5/sec_policy/draft/rule_sets").await, 3);
+        assert_eq!(
+            gets(&server, "/orgs/5/labels").await
+                + gets(&server, "/orgs/5/sec_policy/draft/rule_sets").await,
+            server.received_requests().await.unwrap().len(),
+            "nothing else is read"
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn rules_add_resolves_the_mixed_grammar_with_one_get_per_kind() {
         let server = MockServer::start().await;

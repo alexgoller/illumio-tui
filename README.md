@@ -540,7 +540,7 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   says `keeps N managed peer rules (their outbound)`, and that All Workloads covers managed
   sources in one rule). Unchecked workload sources it takes are allowed at the destination
   only, named in the warning (Explorer's flows carry no enforcement mode, so they are named,
-  not sorted by mode). **All Workloads** is one rule with unscoped consumers, which every VEN
+  not sorted by mode). **All Workloads** is one extra-scope rule, which every VEN
   in the org recomputes (warned); IP peers keep their own rows. At an `·ports` app stop the
   rule opens the port on every workload of the app; at a role stop on the destination roles
   its flows reached (the app when one had no role), and the line says which (`→ role=db of
@@ -636,7 +636,8 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   ignore marks; its header counts the squelched flows.
 - **Policy**: `d` toggle draft / active, `p` pending changes (`Enter` on one shows its diff against active), `Tab` switch panes, `Enter` rule
   detail, or on a ruleset load its deny rules. Rules are listed in evaluation order: override
-  deny, allow, deny. With writes on, `n` / `e` / `x` create, edit and delete rulesets and rules
+  deny, allow, deny; the allow rules intra-scope first, then extra-scope (the `scope` column,
+  counted in the pane's title bar, `3 intra · 1 extra`). With writes on, `n` / `e` / `x` create, edit and delete rulesets and rules
   in draft (`N` a deny rule), `t` enables or disables the selected rule (allow or deny) or
   ruleset (a draft change; disabled ones show dimmed with `✗`), and the pending overlay marks
   with `Space`, provisions with `P` and reverts the marked changes with `R`.
@@ -1199,6 +1200,7 @@ its name), and refused when the PCE has none.
     illumio-tui policy rulesets add Web-Tier --scope app=web,env=prod --yes
     illumio-tui policy rulesets update Web-Tier --clear-scopes --dry-run
     illumio-tui policy rules add Web-Tier --provider app=web --consumer iplist:Corp --service 443/tcp --yes --json
+    illumio-tui policy rules add Web-Tier --provider app=web --consumer app=shop --consumer role=web --service 443/tcp --extra-scope --dry-run
     illumio-tui policy rules update /orgs/1/sec_policy/draft/rule_sets/7/sec_rules/9 --add-consumer '!iplist:Guest' --dry-run
     illumio-tui policy deny-rules add Web-Tier --provider all --consumer iplist:Any --service 23/tcp --override --yes
     illumio-tui policy rules disable /orgs/1/sec_policy/draft/rule_sets/7/sec_rules/9 --dry-run
@@ -1207,6 +1209,14 @@ its name), and refused when the PCE has none.
     illumio-tui policy provision Web-Tier --description "web tier v2" --yes
     illumio-tui policy revert Web-Tier /orgs/1/sec_policy/draft/ip_lists/21 --dry-run
     illumio-tui workloads update web-01 --add-label env=prod --managed-labels --yes
+
+A new allow rule is intra-scope (consumers inside the ruleset's scope);
+`--extra-scope` (or `--unscoped-consumers`) lets its consumers come from
+anywhere, and `rules update --extra-scope|--intra-scope` (or
+`--unscoped-consumers|--scoped-consumers`) switches it. `rules add` prints
+the TUI form's scope warnings on stderr (`warning: matches role=web in every
+app, env`), never fatal and from what it reads anyway: with a ruleset href
+(no rulesets read) only the extra-scope check runs.
 
 Providers, consumers and scope members (`--provider`, `--consumer`,
 `--scope`, `--add-*`/`--remove-*`):
@@ -1526,6 +1536,22 @@ what changed; an entry the grammar cannot express (a virtual service, an
 `any` port) shows as its href or `?`, and changing that field is refused
 with `use the CLI`.
 
+An allow rule's **Scope** is `intra` (consumers inside the ruleset's scope)
+or `extra` (consumers anywhere; `unscoped_consumers` on the wire); `Space`
+switches it (`i`, `e` pick one). A line under Consumers says what they
+match as you type: `role=web inside app=shop env=prod`, or extra-scope
+`role=web in any app, env` (the scope keys the consumers do not pin). It
+warns, without blocking, of the classic mistakes: an extra-scope rule whose
+consumers pin no scope key (`matches role=web in every app, env`; IP lists
+and workloads are exempt), an intra-scope consumer label every ruleset scope
+contradicts (`never matches: app=crm is outside the ruleset scope`), and
+intra-scope in a global ruleset; the confirm's status line repeats them.
+Switching rewrites Consumers so the rule keeps its meaning: to extra adds
+the flow source's scope labels (a `w` form; other forms add nothing), to
+intra drops the labels on scope keys; IP lists, workloads, groups,
+exclusions and `all` are never touched. The rule detail says `intra-scope`
+or `extra-scope`.
+
 In the pending overlay (`p`), `Space` marks entries and `P` provisions the
 marked ones, or everything pending when none is marked. The confirm overlay
 shows the exact `POST /orgs/N/sec_policy` body with its `change_subset`;
@@ -1547,7 +1573,7 @@ On Traffic, `w` on a blocked or potentially blocked flow (Flows view or a
 drilled pair; on a section's peer row or a Mesh row, the first such flow behind it) opens an allow-rule form pre-filled from the flow in the label
 model below: the destination's tier (`role=db`) as providers; as consumers
 the source's tier when it is in the destination's scope, else its scope and
-tier (`app=crm, env=prod, role=web`) with Unscoped `y`; an endpoint without
+tier (`app=crm, env=prod, role=web`) with Scope `extra`; an endpoint without
 the label asked for falls back to `workload:<href>`, else its IP lists, else
 `all`. Other dimensions (`loc`, your own keys) are not pre-filled: `Ctrl-A`
 swaps in every attached label and back (what you typed is kept). The

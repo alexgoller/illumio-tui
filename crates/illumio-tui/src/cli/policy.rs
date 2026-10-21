@@ -15,7 +15,7 @@ use pce::impact::{
     rule_matches, rule_set_href_of, workload_labels,
 };
 use pce::models::{
-    DenyRule, PendingChange, PolicyScope, ResolveLabelsAs, RuleSet, Workload, WorkloadFilter,
+    Actor, DenyRule, PendingChange, PolicyScope, ResolveLabelsAs, RuleSet, Workload, WorkloadFilter,
 };
 use pce::write::{
     ActorRef, DenyRuleDraft, DenyRulePatch, IfMissing, ObjectKind, Plan, ProvisionRequest,
@@ -265,8 +265,8 @@ pub struct RuleAddArgs {
     /// Create the rule disabled
     #[arg(long)]
     pub disabled: bool,
-    /// Consumers may come from outside the ruleset's scopes
-    #[arg(long)]
+    /// Extra-scope: consumers may come from outside the ruleset's scopes (default: intra-scope, consumers inside them)
+    #[arg(long, visible_alias = "extra-scope")]
     pub unscoped_consumers: bool,
     /// Resolve provider labels as workloads or virtual_services (repeatable; the other side defaults to workloads)
     #[arg(long = "resolve-providers-as", value_parser = ["workloads", "virtual_services"])]
@@ -296,11 +296,15 @@ pub struct RuleUpdateArgs {
     pub disabled: bool,
     #[command(flatten)]
     pub edits: SideEdits,
-    /// Consumers may come from outside the ruleset's scopes
-    #[arg(long, conflicts_with = "scoped_consumers")]
+    /// Extra-scope: consumers may come from outside the ruleset's scopes
+    #[arg(
+        long,
+        visible_alias = "extra-scope",
+        conflicts_with = "scoped_consumers"
+    )]
     pub unscoped_consumers: bool,
-    /// Consumers must come from inside the ruleset's scopes
-    #[arg(long)]
+    /// Intra-scope: consumers must come from inside the ruleset's scopes
+    #[arg(long, visible_alias = "intra-scope")]
     pub scoped_consumers: bool,
     /// Also report the rule's impact (workloads matched as providers and consumers), computed before anything is sent; one workloads read, cached
     #[arg(long)]
@@ -1629,10 +1633,59 @@ async fn rule_toggle(ctx: &Context, a: &RuleToggleArgs, on: bool) -> Result<(), 
     run_plan(ctx, &a.write, &guard, plan).await
 }
 
+/// A `rules add` ruleset: its href and, when it was found by name in the
+/// draft rulesets read for that, its scopes (an href costs no read, so it
+/// comes without them).
+async fn rule_ruleset(
+    ctx: &Context,
+    needle: &str,
+) -> Result<(String, Option<Vec<Vec<Actor>>>), CliError> {
+    if is_href(needle) {
+        return Ok((needle.trim().to_string(), None));
+    }
+    let sets = ctx
+        .pce
+        .rule_sets(PolicyScope::Draft, ctx.cache_mode)
+        .await?
+        .value;
+    let href = ruleset_named(&sets, needle.trim(), false)?;
+    let scopes = sets
+        .iter()
+        .find(|rs| rs.href == href)
+        .map(|rs| rs.scopes.clone());
+    Ok((href, scopes))
+}
+
+/// The Scope warnings of a new allow rule ([`crate::rule_scope::warnings`])
+/// on stderr; never fatal. The scopes' labels are named from the labels a
+/// token already read (an unnamed one is no label to compare); without the
+/// scopes (a ruleset href) only the extra-scope check runs. No request.
+fn warn_rule_scope(ctx: &Context, a: &RuleAddArgs, scopes: Option<&[Vec<Actor>]>, lists: &Lists) {
+    let labels = lists.loaded_labels().unwrap_or_default();
+    let token = |actor: &Actor| match &actor.label {
+        Some(r) => labels
+            .iter()
+            .find(|l| l.href == r.href)
+            .map_or_else(|| r.href.clone(), |l| l.display()),
+        None => "?".to_string(),
+    };
+    let scopes: Option<Vec<Vec<String>>> =
+        scopes.map(|s| s.iter().map(|s| s.iter().map(token).collect()).collect());
+    let scope = crate::rule_scope::RuleScope::from_unscoped(a.unscoped_consumers);
+    for w in crate::rule_scope::warnings(
+        &a.sides.consumers.join(", "),
+        scope,
+        &ctx.config.scope_keys,
+        scopes.as_deref(),
+    ) {
+        eprintln!("warning: {w}");
+    }
+}
+
 async fn rule_add(ctx: &Context, a: &RuleAddArgs) -> Result<(), CliError> {
     let guard = write::prepare(ctx, &a.write)?;
     let sides = a.sides.parse()?;
-    let ruleset = ruleset_href(ctx, &a.ruleset).await?;
+    let (ruleset, scopes) = rule_ruleset(ctx, &a.ruleset).await?;
     let mut lists = Lists::new(&guard);
     let draft = RuleDraft {
         description: a.description.clone(),
@@ -1644,6 +1697,7 @@ async fn rule_add(ctx: &Context, a: &RuleAddArgs) -> Result<(), CliError> {
         resolve_labels_as: resolve_labels_as(&a.resolve_providers_as, &a.resolve_consumers_as),
     };
     let plan = ctx.pce.writer(&guard).plan_create_rule(&ruleset, &draft)?;
+    warn_rule_scope(ctx, a, scopes.as_deref(), &lists);
     let impact = maybe_impact(ctx, a.impact, &plan).await?;
     run_rule_plan(ctx, &a.write, &guard, plan, impact).await
 }

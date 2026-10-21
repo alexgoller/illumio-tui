@@ -532,6 +532,11 @@ impl<'a> Lists<'a> {
         }
     }
 
+    /// The labels, when a token already read them; never a request.
+    pub fn loaded_labels(&self) -> Option<&[Label]> {
+        self.labels.as_deref()
+    }
+
     async fn labels(&mut self, ctx: &Context) -> Result<&[Label], CliError> {
         if self.labels.is_none() {
             self.labels = Some(ctx.pce.labels(ctx.cache_mode).await?.value);

@@ -63,7 +63,7 @@ pub struct GenArgs {
     #[arg(long)]
     pub yes: bool,
     /// One rule for a fan-in port, e.g. 5666/tcp=any (the built-in Any IP list) or
-    /// 5666/tcp=all (All Workloads, unscoped); repeatable. Only for a port listed in
+    /// 5666/tcp=all (All Workloads, extra-scope); repeatable. Only for a port listed in
     /// `consolidations`
     #[arg(long, value_name = "PORT/PROTO=any|all")]
     pub consolidate: Vec<String>,
