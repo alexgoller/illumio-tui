@@ -120,6 +120,7 @@ impl Context {
             write: None,
             usage: None,
             local_filter: None,
+            hidden: None,
             warnings: None,
             marks: None,
             squelched: None,

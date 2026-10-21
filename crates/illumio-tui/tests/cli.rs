@@ -2324,11 +2324,11 @@ async fn events_diff_reads_the_index_once_and_names_hrefs() {
                 .set_body_string(include_str!("../../../fixtures/events_changes.json"))
                 .insert_header("Content-Type", "application/json"),
         )
-        .expect(3)
+        .expect(4)
         .mount(&server)
         .await;
-    // Only the two `--diff` runs read the four lists.
-    mount_objects_expecting(&server, Some(2)).await;
+    // Only the three `--diff` runs read the four lists.
+    mount_objects_expecting(&server, Some(3)).await;
     let plain = stdout_json(cmd(&server).args(["events"]).assert().success());
     assert_eq!(plain["meta"]["api_calls"], 1, "plain events: no index");
     assert!(plain["data"][0].get("changes").is_none());
@@ -2346,6 +2346,133 @@ async fn events_diff_reads_the_index_once_and_names_hrefs() {
                 "        src_ip       198.51.100.7",
             )),
         );
+    // The type filter works with `--diff`: the hidden rows are not read.
+    let out = stdout_json(
+        cmd(&server)
+            .args(["events", "--diff", "--exclude-type", "sec_rule.*"])
+            .assert()
+            .success(),
+    );
+    let types: Vec<&str> = out["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["event_type"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        types,
+        [
+            "rule_set.create",
+            "workload.update",
+            "request.authorization_failed"
+        ]
+    );
+    assert!(out["data"][0]["changes"].is_array());
+    assert_eq!(out["meta"]["hidden"], 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn events_type_terms_excludes_profile_defaults_and_severity_floor() {
+    use wiremock::matchers::query_param_is_missing;
+    let server = MockServer::start().await;
+    // `warning+` cannot be asked of the PCE: no `severity` is sent.
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/events"))
+        .and(query_param_is_missing("severity"))
+        .and(query_param_is_missing("event_type"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/events.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(6)
+        .mount(&server)
+        .await;
+    let types = |out: &Value| -> Vec<String> {
+        out["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["event_type"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let out = stdout_json(
+        cmd(&server)
+            .args(["events", "--type", "agent, sec_policy.*", "--type", "user"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(
+        types(&out),
+        ["user.login", "sec_policy.create", "agent.tampering"]
+    );
+    assert_eq!(out["meta"]["hidden"], 1);
+    assert_eq!(
+        out["meta"]["local_filter"],
+        json!(["type agent, sec_policy.*, user"])
+    );
+    let out = stdout_json(
+        cmd(&server)
+            .args(["events", "--severity", "warning+"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(types(&out), ["agent.tampering", "system.license_expiring"]);
+    assert_eq!(out["meta"]["hidden"], 2);
+    // The profile's excludes, and --all-types without them.
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = dir.path().join("config.toml");
+    std::fs::write(
+        &cfg,
+        "[profiles.default]\nhost = \"ignored.example\"\norg_id = 5\n\n[profiles.default.events]\nexclude_types = [\"user.login\", \"system.*\"]\n",
+    )
+    .unwrap();
+    let config = cfg.to_str().unwrap();
+    let out = stdout_json(
+        cmd(&server)
+            .args(["--config", config, "events"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(types(&out), ["sec_policy.create", "agent.tampering"]);
+    assert_eq!(out["meta"]["hidden"], 2);
+    let out = stdout_json(
+        cmd(&server)
+            .args(["--config", config, "events", "--all-types"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(types(&out).len(), 4);
+    assert!(out["meta"].get("hidden").is_none(), "no local filter");
+    cmd(&server)
+        .args(["--config", config, "events", "--table"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "filtered locally: type !user.login, !system.* · 2 hidden",
+        ));
+    cmd(&server)
+        .args([
+            "--config",
+            config,
+            "events",
+            "--type",
+            "agent",
+            "--exclude-type",
+            "agent.tampering",
+        ])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("\"data\": []").or(predicate::str::contains("\"data\":[]")),
+        );
+    // Refused before any request.
+    for bad in [["--type", "!"], ["--severity", "loud+"]] {
+        cmd(&server)
+            .args(["events", bad[0], bad[1]])
+            .assert()
+            .code(2);
+    }
 }
 
 /// The fixture workloads behind `--impact`, read `n` times (once per command

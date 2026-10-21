@@ -1,23 +1,36 @@
-//! `events`: PCE audit events with server-side severity/status/window filters
-//! and a local event-type substring filter.
+//! `events`: PCE audit events with server-side severity/status/window
+//! filters, and local ones over the loaded page: event-type terms
+//! (`--type`, `--exclude-type`, the profile's `events.exclude_types`)
+//! and a severity floor (`--severity warning+`).
 use super::context::{Context, cache_label};
 use super::error::CliError;
 use super::output::{TableRows, Window, join_list};
 use crate::tui::diff::Sign;
 use crate::tui::event_diff::{DetailLine, Names, ResourceChange, body_lines, resource_changes};
 use clap::Args;
-use pce::models::{Event, EventFilter};
+use pce::models::{Event, EventFilter, SeverityFilter, TypeFilter, exclude_text};
 use pce::traffic::{format_timestamp, parse_window};
 use serde::Serialize;
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct EventsArgs {
-    /// emerg, alert, crit, err, warning, notice, info, debug (PCE-side filter)
+    /// emerg, alert, crit, err, warning, notice, info, debug (PCE-side
+    /// filter); X+ is X and worse, e.g. warning+ (filtered locally)
     #[arg(long)]
     pub severity: Option<String>,
-    /// Event type substring, case-insensitive, e.g. agent. or sec_policy (local filter)
-    #[arg(long = "type")]
-    pub event_type: Option<String>,
+    /// Event types, local and case-insensitive: comma-separated terms,
+    /// any of them (substring, or * glob over the whole type); !term
+    /// excludes. E.g. 'sec_policy, rule_set', '!user.login', '*.delete'.
+    /// Repeatable.
+    #[arg(long = "type", value_name = "TERMS")]
+    pub event_type: Vec<String>,
+    /// Hide this event type (substring or * glob; a comma list hides
+    /// each), as --type '!TYPE'. Repeatable.
+    #[arg(long, value_name = "TYPE")]
+    pub exclude_type: Vec<String>,
+    /// Ignore the profile's events.exclude_types (show every type)
+    #[arg(long)]
+    pub all_types: bool,
     /// success | failure (PCE-side filter)
     #[arg(long)]
     pub status: Option<String>,
@@ -172,14 +185,54 @@ impl TableRows for EventsOut {
     }
 }
 
+/// The local filters of `args`: the type terms (`--type`, `--exclude-type`
+/// and, without `--all-types`, the profile's excludes) and the severity;
+/// with the words `meta.local_filter` names them by.
+fn local_filters(
+    args: &EventsArgs,
+    profile_excludes: &[String],
+) -> Result<(TypeFilter, SeverityFilter, Vec<String>), CliError> {
+    let severity =
+        SeverityFilter::parse(args.severity.as_deref().unwrap_or("")).map_err(CliError::Args)?;
+    let excludes: Vec<&str> = args
+        .exclude_type
+        .iter()
+        .flat_map(|t| t.split(','))
+        .collect();
+    let mut terms: Vec<String> = args.event_type.clone();
+    terms.push(exclude_text(&excludes));
+    if !args.all_types {
+        terms.push(exclude_text(profile_excludes));
+    }
+    let text = terms
+        .iter()
+        .map(|t| t.trim())
+        .filter(|t| !t.is_empty())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let types = TypeFilter::parse(&text).map_err(|e| CliError::Args(format!("--type: {e}")))?;
+    let mut words = Vec::new();
+    if !types.is_empty() {
+        words.push(format!("type {text}"));
+    }
+    if severity.is_local() {
+        words.push(format!(
+            "severity {}",
+            args.severity.as_deref().unwrap_or("").trim()
+        ));
+    }
+    Ok((types, severity, words))
+}
+
 pub async fn run(ctx: &Context, args: &EventsArgs) -> Result<(), CliError> {
+    let (types, severity, words) = local_filters(args, &ctx.config.event_exclude_types)?;
     let window = parse_window(&args.since).map_err(|e| CliError::Args(e.to_string()))?;
     let until = jiff::Timestamp::now();
     let since = jiff::Span::try_from(window)
         .and_then(|span| until.checked_sub(span))
         .map_err(|e| CliError::Args(format!("bad window {:?}: {e}", args.since)))?;
     let filter = EventFilter {
-        severity: args.severity.clone(),
+        severity: severity.pce_value(),
         event_type: None,
         status: args.status.clone(),
         since: Some(since),
@@ -187,20 +240,13 @@ pub async fn run(ctx: &Context, args: &EventsArgs) -> Result<(), CliError> {
         max_results: args.max_results,
     };
     let c = ctx.pce.events(&filter, ctx.cache_mode).await?;
-    let needle = args.event_type.as_deref().map(str::to_ascii_lowercase);
+    let loaded = c.value.len();
     let data: Vec<Event> = c
         .value
         .into_iter()
-        .filter(|e| {
-            needle.as_deref().is_none_or(|n| {
-                e.event_type
-                    .as_deref()
-                    .unwrap_or("")
-                    .to_ascii_lowercase()
-                    .contains(n)
-            })
-        })
+        .filter(|e| types.keeps(e) && severity.keeps(e))
         .collect();
+    let hidden = loaded - data.len();
     // Names as `policy pending --diff` has them: the index, cached, only with `--diff`.
     let index = match args.diff {
         true => Some(ctx.pce.name_index(ctx.cache_mode).await?),
@@ -214,23 +260,62 @@ pub async fn run(ctx: &Context, args: &EventsArgs) -> Result<(), CliError> {
         .into_iter()
         .map(|event| EventRow::new(event, names.as_ref()))
         .collect();
-    ctx.emit(
-        &EventsOut {
-            rows,
-            diff: args.diff,
-        },
+    let mut meta = ctx.meta(
         cache_label(c.hit, ctx.cache_mode),
         c.truncated,
         Some(Window {
             start: format_timestamp(since),
             end: format_timestamp(until),
         }),
+    );
+    if !words.is_empty() {
+        meta.local_filter = Some(words);
+        meta.hidden = Some(hidden as u64);
+    }
+    ctx.emit_meta(
+        &EventsOut {
+            rows,
+            diff: args.diff,
+        },
+        &meta,
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_filters_join_types_excludes_and_the_profiles() {
+        let args = |types: &[&str], ex: &[&str], all: bool| EventsArgs {
+            event_type: types.iter().map(|s| s.to_string()).collect(),
+            exclude_type: ex.iter().map(|s| s.to_string()).collect(),
+            all_types: all,
+            ..Default::default()
+        };
+        let profile = vec!["user.login".to_string()];
+        let (t, s, words) = local_filters(&args(&["agent", "user"], &[], false), &profile).unwrap();
+        assert!(t.keeps_type("agent.update") && t.keeps_type("user.logout"));
+        assert!(!t.keeps_type("user.login"), "the profile's exclude");
+        assert!(!t.keeps_type("sec_policy.create"));
+        assert_eq!(s, SeverityFilter::Any);
+        assert_eq!(words, ["type agent, user, !user.login"]);
+        let (t, _, _) = local_filters(&args(&[], &[], true), &profile).unwrap();
+        assert!(t.is_empty(), "--all-types drops the profile's excludes");
+        let (t, _, _) = local_filters(&args(&[], &["agent.*,rule_set"], true), &[]).unwrap();
+        assert!(!t.keeps_type("agent.update") && !t.keeps_type("rule_set.create"));
+        assert!(t.keeps_type("user.login"));
+        let (t, _, words) = local_filters(&args(&[], &[], false), &[]).unwrap();
+        assert!(t.is_empty() && words.is_empty());
+        let mut a = args(&[], &[], false);
+        a.severity = Some("warning+".into());
+        let (_, s, words) = local_filters(&a, &[]).unwrap();
+        assert!(s.is_local());
+        assert_eq!(words, ["severity warning+"]);
+        assert!(local_filters(&args(&["a !b"], &[], false), &[]).is_err());
+        a.severity = Some("loud+".into());
+        assert!(local_filters(&a, &[]).is_err());
+    }
 
     #[test]
     fn csv_names_every_resource_change() {

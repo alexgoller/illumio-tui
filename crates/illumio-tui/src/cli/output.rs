@@ -93,6 +93,10 @@ pub struct Meta {
     /// (`offline`, `unlabeled (app, env, role)`, `unhealthy`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_filter: Option<Vec<String>>,
+    /// `events`: the loaded rows the local filters hid (type terms, a
+    /// `X+` severity).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hidden: Option<u64>,
     /// Warnings about the arguments that did not stop the command (also
     /// printed to stderr): `workloads --unlabeled` with an unknown key.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -350,6 +354,9 @@ pub fn meta_line(meta: &Meta) -> String {
     if let Some(f) = &meta.local_filter {
         s.push_str(&format!(" · filtered locally: {}", f.join(", ")));
     }
+    if let Some(n) = meta.hidden {
+        s.push_str(&format!(" · {n} hidden"));
+    }
     match (meta.truncated, meta.cap) {
         (true, Some(cap)) => s.push_str(&format!(
             " · WARNING: result truncated, capped at {cap}; --backfill raises the cap"
@@ -474,6 +481,7 @@ mod tests {
             }),
             usage: None,
             local_filter: None,
+            hidden: None,
             warnings: None,
             marks: None,
             squelched: None,
