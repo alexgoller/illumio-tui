@@ -557,7 +557,12 @@ impl PolicyState {
             }
         }));
         rows.sort_by_key(|r| rule_order(r));
+        // A rule the reload moved (its scope switched) keeps the cursor.
+        let keep = self.rules.selected_item().map(|r| r.href.clone());
         self.rules.set_rows(rows);
+        if let Some(href) = keep {
+            self.rules.select_where(|r| r.href == href);
+        }
     }
 
     pub fn selected_href(&self) -> Option<String> {
@@ -995,9 +1000,21 @@ impl Model {
             .policy
             .loaded_at
             .map_or(&[][..], |_| &self.policy.raw[..]);
-        let scopes =
-            crate::tui::edit::form_ruleset_scopes(form, loaded, self.draft_rulesets(), idx);
-        crate::tui::edit::scope_notes(form, scopes.as_deref())
+        let (scopes, groups) =
+            crate::tui::edit::scope_inputs(form, loaded, self.draft_rulesets(), idx);
+        crate::tui::edit::scope_notes(form, scopes.as_deref(), &groups)
+    }
+
+    /// An allow rule form's Scope switch brought up to date before a key
+    /// reaches it ([`crate::tui::edit::refresh_rule_scope`]). No request.
+    pub fn refresh_rule_scope(&self, form: &mut crate::tui::form::Form) {
+        let empty = pce::NameIndex::default();
+        let idx = self.index().map_or(&empty, |i| i.as_ref());
+        let loaded = self
+            .policy
+            .loaded_at
+            .map_or(&[][..], |_| &self.policy.raw[..]);
+        crate::tui::edit::refresh_rule_scope(form, loaded, self.draft_rulesets(), idx);
     }
 
     /// What names hrefs in an event detail: the index and whichever

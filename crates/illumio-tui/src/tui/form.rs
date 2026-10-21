@@ -5,7 +5,7 @@
 //! cannot see the name index, so `update` asks [`Completing::completion_request`],
 //! computes the candidates ([`crate::tui::complete`]) and hands them to
 //! [`Completing::start_completion`].
-use crate::rule_scope::{RuleScope, rewrite_consumers};
+use crate::rule_scope::{RuleScope, ScopeKeys, Switch, switch_consumers};
 use crate::tui::edit::EditIntent;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::borrow::Cow;
@@ -80,7 +80,7 @@ pub enum FieldKind {
     RuleFilter,
     /// An allow rule's Scope, `intra` or `extra`: not typed; `Space`
     /// switches it (`i`, `e` pick one) and rewrites the Consumers to match
-    /// ([`crate::rule_scope::rewrite_consumers`]). Nothing to complete.
+    /// ([`crate::rule_scope::switch_consumers`]). Nothing to complete.
     RuleScope,
 }
 
@@ -374,11 +374,19 @@ pub struct Form {
 }
 
 /// What an allow rule form's Scope switch reads: the scope keys and, in a
-/// `w` form, the flow source's scope labels as tokens (`app=shop`).
+/// `w` form, the flow source's scope labels as tokens (`app=shop`); the
+/// ruleset's scopes and the keys of the label groups in sight, as loaded
+/// (`update` refreshes them before each key: the form cannot see the
+/// model); and what the last switch did, to undo on the way back.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RuleScopeCtx {
     pub scope_keys: Vec<String>,
     pub source: Vec<String>,
+    /// The ruleset's scopes as actor tokens; `None` while not known.
+    pub scopes: Option<Vec<Vec<String>>>,
+    /// `(name, key)` of the label groups the consumers and scopes name.
+    pub groups: Vec<(String, String)>,
+    pub last: Option<Switch>,
 }
 
 /// What a `w` form keeps to choose its ruleset again when the draft
@@ -496,10 +504,24 @@ impl Form {
         if from == Some(to) {
             return;
         }
-        let ctx = self.rule_scope.as_deref().cloned().unwrap_or_default();
+        let mut ctx = self.rule_scope.take().unwrap_or_default();
         if let Some(c) = self.fields.iter_mut().find(|f| f.label == "Consumers") {
-            c.value = rewrite_consumers(&c.value, to, &ctx.scope_keys, &ctx.source);
+            let m = ScopeKeys {
+                keys: &ctx.scope_keys,
+                groups: &ctx.groups,
+            };
+            let (text, last) = switch_consumers(
+                &c.value,
+                to,
+                m,
+                ctx.scopes.as_deref(),
+                &ctx.source,
+                ctx.last.as_ref(),
+            );
+            c.value = text;
+            ctx.last = last;
         }
+        self.rule_scope = Some(ctx);
     }
 
     pub fn on_key(&mut self, k: KeyEvent) -> FormEvent {

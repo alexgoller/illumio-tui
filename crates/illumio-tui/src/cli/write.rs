@@ -537,6 +537,11 @@ impl<'a> Lists<'a> {
         self.labels.as_deref()
     }
 
+    /// The label groups, when a token already read them; never a request.
+    pub fn loaded_label_groups(&self) -> Option<&[LabelGroup]> {
+        self.label_groups.as_deref()
+    }
+
     async fn labels(&mut self, ctx: &Context) -> Result<&[Label], CliError> {
         if self.labels.is_none() {
             self.labels = Some(ctx.pce.labels(ctx.cache_mode).await?.value);

@@ -756,3 +756,31 @@ fn ip_list_uses_match_the_provider_side_and_fetched_deny_rules() {
         "the second deny rule comes from fallback_deny"
     );
 }
+
+#[test]
+fn the_rules_pane_lists_intra_then_extra_and_keeps_the_cursor_on_a_moved_rule() {
+    use crate::tui::test_support::model_with_policy;
+    let mut m = model_with_policy();
+    let scopes = |m: &Model| -> Vec<String> {
+        m.policy
+            .rules
+            .rows()
+            .iter()
+            .map(|r| crate::tui::model::scope_cell(r).to_string())
+            .collect()
+    };
+    assert_eq!(scopes(&m), ["", "intra", "extra", ""]);
+    let corp = m.policy.raw[0].rules[1].href.clone();
+    m.policy.rules.select_where(|r| r.href == corp);
+    assert_eq!(m.policy.rules.selected_pos(), 2);
+    // Its scope switched (and its neighbour's): it moves, the cursor with it.
+    m.policy.raw[0].rules[1].unscoped_consumers = Some(false);
+    m.policy.raw[0].rules[0].unscoped_consumers = Some(true);
+    m.rebuild_rules();
+    assert_eq!(scopes(&m), ["", "intra", "extra", ""]);
+    assert_eq!(
+        m.policy.rules.selected_item().map(|r| r.href.clone()),
+        Some(corp)
+    );
+    assert_eq!(m.policy.rules.selected_pos(), 1);
+}

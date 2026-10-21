@@ -381,6 +381,7 @@ fn rule_form(mut form: Form, prefill: FlowPrefill, source: Vec<String>) -> Form 
     form.rule_scope = Some(Box::new(RuleScopeCtx {
         scope_keys: prefill.scope_keys.to_vec(),
         source,
+        ..RuleScopeCtx::default()
     }));
     form
 }
@@ -1038,18 +1039,93 @@ pub fn form_ruleset_scopes(
     Some(rs.scopes.iter().map(|s| actor_tokens(s, idx)).collect())
 }
 
+/// `(name, key)` of the label groups `tokens` name (`group:NAME`, `!`
+/// or not) that the index knows with a key.
+fn group_keys<'t>(tokens: impl Iterator<Item = &'t str>, idx: &NameIndex) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for t in tokens {
+        let Some(name) = t
+            .trim()
+            .trim_start_matches('!')
+            .trim()
+            .strip_prefix("group:")
+        else {
+            continue;
+        };
+        let name = name.trim();
+        let key = idx
+            .label_group_href(name)
+            .and_then(|h| idx.label_group(h))
+            .map(|g| g.key.clone())
+            .filter(|k| !k.is_empty());
+        if let Some(key) = key
+            && !out.iter().any(|(n, _)| n == name)
+        {
+            out.push((name.to_string(), key));
+        }
+    }
+    out
+}
+
+/// A ruleset's scopes as actor tokens (`None`: not known) and the
+/// `(name, key)` of the label groups in sight.
+pub type ScopeInputs = (Option<Vec<Vec<String>>>, Vec<(String, String)>);
+
+/// What an allow rule form's Scope reads besides its fields: the ruleset's
+/// scopes ([`form_ruleset_scopes`]) and the keys of the label groups its
+/// consumers and those scopes name. Never a request.
+pub fn scope_inputs(
+    form: &Form,
+    loaded: &[RuleSet],
+    drafts: Option<&[RuleSet]>,
+    idx: &NameIndex,
+) -> ScopeInputs {
+    let scopes = form_ruleset_scopes(form, loaded, drafts, idx);
+    let consumers = form.value("Consumers").split(',');
+    let in_scopes = scopes.iter().flatten().flatten().map(String::as_str);
+    let groups = group_keys(consumers.chain(in_scopes), idx);
+    (scopes, groups)
+}
+
+/// Before a key reaches an allow rule form: its Scope switch's ruleset
+/// scopes and group keys, fresh from what is loaded. Other forms are left
+/// alone. Never a request.
+pub fn refresh_rule_scope(
+    form: &mut Form,
+    loaded: &[RuleSet],
+    drafts: Option<&[RuleSet]>,
+    idx: &NameIndex,
+) {
+    if form.rule_scope.is_none() {
+        return;
+    }
+    let (scopes, groups) = scope_inputs(form, loaded, drafts, idx);
+    if let Some(ctx) = form.rule_scope.as_deref_mut() {
+        ctx.scopes = scopes;
+        ctx.groups = groups;
+    }
+}
+
 /// What an allow rule form's consumers mean under its Scope (the line
 /// under Consumers) and the warnings about it
-/// ([`crate::rule_scope::meaning`], [`crate::rule_scope::warnings`]);
+/// ([`crate::rule_scope::meaning`], [`crate::rule_scope::warnings`]),
+/// against the ruleset's `scopes` with the label groups' keys `groups`;
 /// `None` for a form without a Scope field or with an unreadable one.
-pub fn scope_notes(form: &Form, scopes: Option<&[Vec<String>]>) -> Option<(String, Vec<String>)> {
+pub fn scope_notes(
+    form: &Form,
+    scopes: Option<&[Vec<String>]>,
+    groups: &[(String, String)],
+) -> Option<(String, Vec<String>)> {
     let ctx = form.rule_scope.as_deref()?;
     let scope = RuleScope::parse(form.value("Scope")).ok()?;
     let consumers = form.value("Consumers");
-    let keys = &ctx.scope_keys;
+    let m = crate::rule_scope::ScopeKeys {
+        keys: &ctx.scope_keys,
+        groups,
+    };
     Some((
-        crate::rule_scope::meaning(consumers, scope, keys, scopes),
-        crate::rule_scope::warnings(consumers, scope, keys, scopes),
+        crate::rule_scope::meaning(consumers, scope, m, scopes),
+        crate::rule_scope::warnings(consumers, scope, m, scopes),
     ))
 }
 
@@ -3454,67 +3530,110 @@ mod tests {
         assert!(err.starts_with("Ruleset: "), "{err}");
     }
 
-    /// `f` with the focus on its Scope field.
-    fn on_scope(mut f: Form) -> Form {
+    /// `f` with the focus on its Scope field and its switch reading `sets`
+    /// (as the Policy screen's rulesets and the drafts), as `update` does.
+    fn on_scope(mut f: Form, sets: &[RuleSet]) -> Form {
         f.active = f.fields.iter().position(|x| x.label == "Scope").unwrap();
+        refresh_rule_scope(&mut f, sets, Some(sets), &fixture_index());
         f
     }
 
-    fn press(f: &mut Form, code: crossterm::event::KeyCode) {
+    fn space(f: &mut Form) {
         f.on_key(crossterm::event::KeyEvent::new(
-            code,
+            crossterm::event::KeyCode::Char(' '),
             crossterm::event::KeyModifiers::NONE,
         ));
     }
 
+    fn scope_and_consumers(f: &Form) -> (&str, &str) {
+        (f.value("Scope"), f.value("Consumers"))
+    }
+
     #[test]
-    fn space_switches_the_scope_and_rewrites_the_consumers() {
-        use crossterm::event::KeyCode::{Backspace, Char};
+    fn space_switches_the_scope_of_a_w_form_and_back() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let sets = rule_sets();
         let flows = crate::tui::test_support::fixture_flows();
-        // A `w` form: extra adds the source's scope, intra takes it away.
-        let mut f = on_scope(flow_form(&flows[0]));
+        let w = || {
+            let mut f = flow_form(&flows[0]);
+            set(&mut f, "Ruleset", "Shop-Prod");
+            on_scope(f, &sets)
+        };
+        // Intra to extra adds the source's scope; back takes it away.
+        let mut f = w();
+        assert_eq!(scope_and_consumers(&f), ("intra", "role=web"));
+        space(&mut f);
         assert_eq!(
-            (f.value("Scope"), f.value("Consumers")),
-            ("intra", "role=web")
-        );
-        press(&mut f, Char(' '));
-        assert_eq!(
-            (f.value("Scope"), f.value("Consumers")),
+            scope_and_consumers(&f),
             ("extra", "app=shop, env=prod, role=web")
         );
-        for c in [Char('x'), Char('e'), Backspace] {
-            press(&mut f, c);
+        for c in [KeyCode::Char('x'), KeyCode::Char('e'), KeyCode::Backspace] {
+            f.on_key(KeyEvent::new(c, KeyModifiers::NONE));
         }
         assert_eq!(
-            (f.value("Scope"), f.value("Consumers")),
+            scope_and_consumers(&f),
             ("extra", "app=shop, env=prod, role=web"),
             "typing, Backspace and the same scope change nothing"
         );
-        press(&mut f, Char('i'));
-        assert_eq!(
-            (f.value("Scope"), f.value("Consumers")),
-            ("intra", "role=web")
-        );
+        f.on_key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE));
+        assert_eq!(scope_and_consumers(&f), ("intra", "role=web"));
         let Ok(Some(WriteIntent::CreateRule { draft, .. })) = build(&f) else {
             panic!("a create");
         };
         assert!(!draft.unscoped_consumers);
-        // A Policy form has no flow source: extra adds nothing; intra
-        // drops the scope labels and keeps the rest.
+        // Extra to intra and back returns the consumers as they were.
+        for consumers in ["app=shop, env=prod, role=web", "app=crm, env=dev, role=web"] {
+            let mut f = w();
+            set(&mut f, "Scope", "extra");
+            set(&mut f, "Consumers", consumers);
+            space(&mut f);
+            assert_eq!(f.value("Scope"), "intra");
+            space(&mut f);
+            assert_eq!(scope_and_consumers(&f), ("extra", consumers));
+        }
+        // `all` becomes the source's scope labels, and comes back.
+        let mut f = w();
+        set(&mut f, "Consumers", "all");
+        space(&mut f);
+        assert_eq!(scope_and_consumers(&f), ("extra", "app=shop, env=prod"));
+        space(&mut f);
+        assert_eq!(scope_and_consumers(&f), ("intra", "all"));
+    }
+
+    #[test]
+    fn space_switches_the_scope_of_policy_forms_and_back() {
         let sets = rule_sets();
-        let mut p = on_scope(form(EditIntent::CreateRule {
+        let shop = || EditIntent::CreateRule {
             ruleset_href: sets[0].href.clone(),
-        }));
-        set(&mut p, "Consumers", "app=shop, role=web, iplist:Corp");
-        press(&mut p, Char(' '));
-        assert_eq!(
-            (p.value("Scope"), p.value("Consumers")),
-            ("extra", "app=shop, role=web, iplist:Corp")
+        };
+        // To intra drops only what the scope (app=shop, env=prod) pins
+        // alike; a label it rules out stays, and warns.
+        let mut p = on_scope(form(shop()), &sets);
+        set(&mut p, "Scope", "extra");
+        set(
+            &mut p,
+            "Consumers",
+            "app=shop, env=dev, role=web, iplist:Corp",
         );
-        press(&mut p, Char(' '));
+        space(&mut p);
         assert_eq!(
-            (p.value("Scope"), p.value("Consumers")),
-            ("intra", "role=web, iplist:Corp")
+            scope_and_consumers(&p),
+            ("intra", "env=dev, role=web, iplist:Corp")
+        );
+        // An `n` form has no source: back to extra restores what went.
+        let mut p = on_scope(form(shop()), &sets);
+        set(&mut p, "Scope", "extra");
+        let wide = "app=shop, env=prod, role=web, iplist:Corp";
+        set(&mut p, "Consumers", wide);
+        space(&mut p);
+        assert_eq!(scope_and_consumers(&p), ("intra", "role=web, iplist:Corp"));
+        // Edited meanwhile, the dropped labels still come back.
+        set(&mut p, "Consumers", "role=db, iplist:Corp");
+        refresh_rule_scope(&mut p, &sets, None, &fixture_index());
+        space(&mut p);
+        assert_eq!(
+            scope_and_consumers(&p),
+            ("extra", "app=shop, env=prod, role=db, iplist:Corp")
         );
         // Typed initials still build.
         set(&mut p, "Scope", "E");
@@ -3528,36 +3647,103 @@ mod tests {
         assert_eq!(build(&p).unwrap_err(), "Scope: \"y\" is not intra or extra");
     }
 
+    /// The Shop-Prod rule `corp to web` with these consumers, extra-scope.
+    fn extra_rule(consumers: Value) -> Rule {
+        let mut r = rule_sets()[0].rules[1].clone();
+        r.consumers = serde_json::from_value(consumers).unwrap();
+        r.unscoped_consumers = Some(true);
+        r
+    }
+
+    #[test]
+    fn an_edit_forms_scope_round_trip_patches_nothing() {
+        let sets = rule_sets();
+        let rule = extra_rule(json!([
+            {"label": {"href": "/orgs/5/labels/3"}},
+            {"label": {"href": "/orgs/5/labels/4"}},
+            {"label": {"href": "/orgs/5/labels/1"}}
+        ]));
+        let mut e = on_scope(
+            form(EditIntent::UpdateRule(rule, sets[0].href.clone())),
+            &sets,
+        );
+        assert_eq!(
+            scope_and_consumers(&e),
+            ("extra", "app=shop, env=prod, role=web")
+        );
+        space(&mut e);
+        assert_eq!(scope_and_consumers(&e), ("intra", "role=web"));
+        let Ok(Some(WriteIntent::UpdateRule { patch, .. })) = build(&e) else {
+            panic!("an update");
+        };
+        assert_eq!(
+            (patch.remove_consumers.len(), patch.unscoped_consumers),
+            (2, Some(false)),
+            "intra drops the labels the scope holds"
+        );
+        space(&mut e);
+        assert_eq!(build(&e), Ok(None), "there and back: no consumer patch");
+        // Consumers the form cannot edit: a switch that leaves them as they
+        // are sends the scope alone; there and back sends nothing.
+        let vs = extra_rule(json!([
+            {"virtual_service": {"href": "/orgs/5/sec_policy/draft/virtual_services/v1"}},
+            {"label": {"href": "/orgs/5/labels/1"}}
+        ]));
+        let mut v = on_scope(
+            form(EditIntent::UpdateRule(vs, sets[0].href.clone())),
+            &sets,
+        );
+        space(&mut v);
+        let Ok(Some(WriteIntent::UpdateRule { patch, .. })) = build(&v) else {
+            panic!("an update");
+        };
+        assert!(patch.add_consumers.is_empty() && patch.remove_consumers.is_empty());
+        assert_eq!(patch.unscoped_consumers, Some(false));
+        space(&mut v);
+        assert_eq!(build(&v), Ok(None));
+    }
+
     #[test]
     fn the_scope_notes_read_the_rulesets_scopes_as_loaded() {
         let sets = rule_sets();
         let idx = fixture_index();
+        let notes = |f: &Form, loaded: &[RuleSet], drafts: Option<&[RuleSet]>| {
+            let (scopes, groups) = scope_inputs(f, loaded, drafts, &idx);
+            scope_notes(f, scopes.as_deref(), &groups)
+        };
         let mut p = form(EditIntent::CreateRule {
             ruleset_href: sets[0].href.clone(),
         });
         set(&mut p, "Consumers", "role=web");
-        let scopes = form_ruleset_scopes(&p, &sets, None, &idx);
         assert_eq!(
-            scopes,
+            form_ruleset_scopes(&p, &sets, None, &idx),
             Some(vec![vec!["app=shop".to_string(), "env=prod".to_string()]])
         );
-        let notes = |f: &Form, s: &Option<Vec<Vec<String>>>| scope_notes(f, s.as_deref());
         assert_eq!(
-            notes(&p, &scopes),
+            notes(&p, &sets, None),
             Some(("role=web inside app=shop env=prod".to_string(), Vec::new()))
         );
         set(&mut p, "Consumers", "app=crm, role=web");
         assert_eq!(
-            notes(&p, &scopes).unwrap().1,
+            notes(&p, &sets, None).unwrap().1,
             vec!["never matches: app=crm is outside the ruleset scope"]
         );
         set(&mut p, "Consumers", "role=web");
         set(&mut p, "Scope", "extra");
         assert_eq!(
-            notes(&p, &scopes),
+            notes(&p, &sets, None),
             Some((
                 "role=web in any app, env".to_string(),
                 vec!["matches role=web in every app, env".to_string()]
+            ))
+        );
+        // A label group on a scope key pins it, through the index.
+        set(&mut p, "Consumers", "group:All prod envs, role=web");
+        assert_eq!(
+            notes(&p, &sets, None),
+            Some((
+                "group:All prod envs, role=web in any app".to_string(),
+                Vec::new()
             ))
         );
         // The active href of a loaded draft ruleset finds it too.
@@ -3570,29 +3756,31 @@ mod tests {
             ruleset_href: sets[1].href.clone(),
         });
         set(&mut g, "Consumers", "role=web");
-        let global = form_ruleset_scopes(&g, &[], Some(&sets), &idx);
         assert_eq!(
-            notes(&g, &global),
+            notes(&g, &[], Some(&sets)),
             Some((
                 "role=web anywhere: global ruleset".to_string(),
-                vec!["intra-scope in a global ruleset covers every workload".to_string()]
+                vec![
+                    "global ruleset: intra-scope is the same as extra-scope here (anywhere)"
+                        .to_string()
+                ]
             ))
         );
         // A `w` form by the ruleset it names among the drafts.
         let flows = crate::tui::test_support::fixture_flows();
         let mut w = flow_form(&flows[0]);
         set(&mut w, "Ruleset", " shop-prod ");
-        assert_eq!(form_ruleset_scopes(&w, &[], Some(&sets), &idx), scopes);
+        assert!(form_ruleset_scopes(&w, &[], Some(&sets), &idx).is_some());
         set(&mut w, "Ruleset", "New-App");
         assert_eq!(form_ruleset_scopes(&w, &[], Some(&sets), &idx), None);
         assert_eq!(
-            notes(&w, &None).unwrap().0,
+            notes(&w, &[], Some(&sets)).unwrap().0,
             "role=web inside the ruleset scope"
         );
         // Deny rules have no Scope.
         let d = form(EditIntent::CreateDenyRule {
             ruleset_href: sets[0].href.clone(),
         });
-        assert_eq!(notes(&d, &scopes), None);
+        assert_eq!(notes(&d, &sets, None), None);
     }
 }

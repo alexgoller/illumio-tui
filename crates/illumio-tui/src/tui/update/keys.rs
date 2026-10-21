@@ -34,6 +34,13 @@ pub(super) fn field_candidates(model: &Model, editor: &impl Completing) -> Vec<S
 /// text that is no draft ruleset's exact name (any case) and some name
 /// matches it. Empty or exact text, or an open completion (`Tab` then keeps
 /// the shown name and moves on), leaves `Tab` to the form.
+/// A key to a form, its Scope switch brought up to date first (the
+/// ruleset's scopes as loaded). No request.
+fn form_key(model: &Model, form: &mut Form, k: KeyEvent) -> FormEvent {
+    model.refresh_rule_scope(form);
+    form.on_key(k)
+}
+
 pub(super) fn tab_completes(model: &Model, form: &Form) -> bool {
     let Some(field) = form.fields.get(form.active) else {
         return false;
@@ -422,7 +429,7 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         }
         Overlay::EnforcePicker(p) => bulk::picker_key(model, p, k),
         Overlay::ConfirmBulk(c) => bulk::confirm_key(model, c, k),
-        Overlay::Form(mut form) => match form.on_key(k) {
+        Overlay::Form(mut form) => match form_key(model, &mut form, k) {
             FormEvent::Continue => {
                 model.overlay = Overlay::Form(form);
                 Vec::new()

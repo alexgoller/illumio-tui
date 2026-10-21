@@ -1969,7 +1969,7 @@ mod policy {
         let global = add("Global-Infra", false);
         assert!(
             stderr(&global)
-                .contains("warning: intra-scope in a global ruleset covers every workload"),
+                .contains("warning: global ruleset: intra-scope is the same as extra-scope here"),
             "{}",
             stderr(&global)
         );
@@ -1985,6 +1985,80 @@ mod policy {
             server.received_requests().await.unwrap().len(),
             "nothing else is read"
         );
+    }
+
+    /// The scope lint reads a ruleset's scopes as the TUI does: an excluded
+    /// label is no value of its key, and a label group on a key may hold
+    /// any of its values; only a plain other value rules a label out.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rules_add_reads_scope_exclusions_and_groups_as_such() {
+        let server = MockServer::start().await;
+        let state = tempfile::tempdir().unwrap();
+        let mut labels = fixture_labels();
+        labels
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"href": "/orgs/5/labels/6", "key": "env", "value": "dev"}));
+        mount_get(&server, "/orgs/5/labels", labels).await;
+        mount_get(
+            &server,
+            "/orgs/5/sec_policy/draft/label_groups",
+            fixture_label_groups(),
+        )
+        .await;
+        let ruleset = |id: u32, name: &str, env: Value| {
+            json!({
+                "href": format!("/orgs/5/sec_policy/draft/rule_sets/{id}"),
+                "name": name, "enabled": true, "rules": [],
+                "scopes": [[{"label": {"href": "/orgs/5/labels/3"}}, env]]
+            })
+        };
+        mount_get(
+            &server,
+            "/orgs/5/sec_policy/draft/rule_sets",
+            json!([
+                ruleset(1, "Prod", json!({"label": {"href": "/orgs/5/labels/4"}})),
+                ruleset(
+                    2,
+                    "Not-Prod",
+                    json!({"label": {"href": "/orgs/5/labels/4"}, "exclusion": true})
+                ),
+                ruleset(
+                    3,
+                    "Prod-Group",
+                    json!({"label_group": {"href": "/orgs/5/sec_policy/draft/label_groups/10"}})
+                ),
+            ]),
+        )
+        .await;
+        let stderr = |ruleset: &str| {
+            let a = writer(&server, state.path())
+                .args([
+                    "policy",
+                    "rules",
+                    "add",
+                    ruleset,
+                    "--provider",
+                    "group:All prod envs",
+                    "--consumer",
+                    "env=dev",
+                    "--consumer",
+                    "role=web",
+                    "--service",
+                    "443/tcp",
+                    "--dry-run",
+                ])
+                .assert()
+                .success();
+            String::from_utf8_lossy(&a.get_output().stderr).to_string()
+        };
+        assert!(
+            stderr("Prod").contains("warning: never matches: env=dev is outside the ruleset scope")
+        );
+        for name in ["Not-Prod", "Prod-Group"] {
+            let err = stderr(name);
+            assert!(!err.contains("warning"), "{name}: {err}");
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]

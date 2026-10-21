@@ -1657,27 +1657,32 @@ async fn rule_ruleset(
 }
 
 /// The Scope warnings of a new allow rule ([`crate::rule_scope::warnings`])
-/// on stderr; never fatal. The scopes' labels are named from the labels a
-/// token already read (an unnamed one is no label to compare); without the
-/// scopes (a ruleset href) only the extra-scope check runs. No request.
+/// on stderr; never fatal. The scopes are named as the TUI names them
+/// (`!` before an exclusion, `group:NAME`), from the labels and label
+/// groups a token already read; what they did not read stays an href,
+/// which compares as nothing, and a label group then pins no key (the
+/// conservative reading). Without the scopes (a ruleset href) only the
+/// extra-scope check runs. No request.
 fn warn_rule_scope(ctx: &Context, a: &RuleAddArgs, scopes: Option<&[Vec<Actor>]>, lists: &Lists) {
-    let labels = lists.loaded_labels().unwrap_or_default();
-    let token = |actor: &Actor| match &actor.label {
-        Some(r) => labels
-            .iter()
-            .find(|l| l.href == r.href)
-            .map_or_else(|| r.href.clone(), |l| l.display()),
-        None => "?".to_string(),
+    let groups = lists.loaded_label_groups().unwrap_or_default();
+    let idx = pce::NameIndex::new(lists.loaded_labels().unwrap_or_default(), groups, &[], &[]);
+    let scopes: Option<Vec<Vec<String>>> = scopes.map(|s| {
+        s.iter()
+            .map(|s| crate::tui::edit::actor_tokens(s, &idx))
+            .collect()
+    });
+    let group_keys: Vec<(String, String)> = groups
+        .iter()
+        .filter(|g| !g.key.is_empty())
+        .map(|g| (g.name.clone(), g.key.clone()))
+        .collect();
+    let m = crate::rule_scope::ScopeKeys {
+        keys: &ctx.config.scope_keys,
+        groups: &group_keys,
     };
-    let scopes: Option<Vec<Vec<String>>> =
-        scopes.map(|s| s.iter().map(|s| s.iter().map(token).collect()).collect());
     let scope = crate::rule_scope::RuleScope::from_unscoped(a.unscoped_consumers);
-    for w in crate::rule_scope::warnings(
-        &a.sides.consumers.join(", "),
-        scope,
-        &ctx.config.scope_keys,
-        scopes.as_deref(),
-    ) {
+    for w in crate::rule_scope::warnings(&a.sides.consumers.join(", "), scope, m, scopes.as_deref())
+    {
         eprintln!("warning: {w}");
     }
 }

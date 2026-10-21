@@ -1540,17 +1540,21 @@ An allow rule's **Scope** is `intra` (consumers inside the ruleset's scope)
 or `extra` (consumers anywhere; `unscoped_consumers` on the wire); `Space`
 switches it (`i`, `e` pick one). A line under Consumers says what they
 match as you type: `role=web inside app=shop env=prod`, or extra-scope
-`role=web in any app, env` (the scope keys the consumers do not pin). It
-warns, without blocking, of the classic mistakes: an extra-scope rule whose
-consumers pin no scope key (`matches role=web in every app, env`; IP lists
-and workloads are exempt), an intra-scope consumer label every ruleset scope
-contradicts (`never matches: app=crm is outside the ruleset scope`), and
-intra-scope in a global ruleset; the confirm's status line repeats them.
-Switching rewrites Consumers so the rule keeps its meaning: to extra adds
-the flow source's scope labels (a `w` form; other forms add nothing), to
-intra drops the labels on scope keys; IP lists, workloads, groups,
-exclusions and `all` are never touched. The rule detail says `intra-scope`
-or `extra-scope`.
+`role=web in any app, env` (the scope keys the consumers do not pin; a
+label group pins its key); IP lists and workloads, which no scope narrows,
+read `wherever they are`. It warns, without blocking, of the classic
+mistakes: an extra-scope rule whose consumers pin no scope key (`matches
+role=web in every app, env`), an intra-scope consumer label every ruleset
+scope rules out (`never matches: app=crm is outside the ruleset scope`; an
+excluded scope label or a label group on the key rules out nothing), and
+intra-scope in a global ruleset (`the same as extra-scope here`); the
+confirm's status line repeats them. Switching rewrites Consumers so the
+rule keeps its meaning: to extra adds the flow source's scope labels (a `w`
+form; `all` becomes them), to intra drops only the labels every ruleset
+scope pins to the same value (redundant there; any other label stays).
+Switching back restores what the switch took or added, so there and back
+never changes the rule. IP lists, workloads, groups and exclusions are
+never touched. The rule detail says `intra-scope` or `extra-scope`.
 
 In the pending overlay (`p`), `Space` marks entries and `P` provisions the
 marked ones, or everything pending when none is marked. The confirm overlay
