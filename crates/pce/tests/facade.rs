@@ -1208,3 +1208,79 @@ impl wiremock::Respond for Ticking {
         ResponseTemplate::new(200).set_body_json(body)
     }
 }
+
+/// What an observer was told: (list, rows, complete).
+#[derive(Default)]
+struct Seen(std::sync::Mutex<Vec<(&'static str, usize, bool)>>);
+
+impl pce::ListObserver for Seen {
+    fn labels(&self, v: &[pce::models::Label], complete: bool) {
+        self.0.lock().unwrap().push(("labels", v.len(), complete));
+    }
+    fn services(&self, v: &[pce::models::Service], complete: bool) {
+        self.0.lock().unwrap().push(("services", v.len(), complete));
+    }
+    fn workloads(&self, v: &[pce::models::Workload], complete: bool) {
+        self.0
+            .lock()
+            .unwrap()
+            .push(("workloads", v.len(), complete));
+    }
+}
+
+#[tokio::test]
+async fn the_observer_hears_of_fresh_reads_only_and_whether_they_are_whole() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/labels"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!([{"href": "/orgs/5/labels/1", "key": "app", "value": "web"}])),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/sec_policy/draft/services"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(
+                    json!([{"href": "/orgs/5/sec_policy/draft/services/1", "name": "SSH"}]),
+                )
+                .insert_header("X-Total-Count", "40"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!([{"href": "/orgs/5/workloads/1", "hostname": "web1"}])),
+        )
+        .mount(&server)
+        .await;
+    let seen = std::sync::Arc::new(Seen::default());
+    let p = pce_for(&server).with_observer(seen.clone());
+    p.labels(CacheMode::Use).await.unwrap();
+    p.labels(CacheMode::Use).await.unwrap();
+    p.services(CacheMode::Use).await.unwrap();
+    p.workloads(&Default::default(), CacheMode::Use)
+        .await
+        .unwrap();
+    let filtered = pce::models::WorkloadFilter {
+        hostname: Some("web".into()),
+        ..Default::default()
+    };
+    p.workloads(&filtered, CacheMode::Use).await.unwrap();
+    // A failed read tells nothing.
+    assert!(p.ip_lists(CacheMode::Use).await.is_err());
+    assert_eq!(
+        *seen.0.lock().unwrap(),
+        [
+            ("labels", 1, true),
+            ("services", 1, false),
+            ("workloads", 1, true),
+            ("workloads", 1, false),
+        ],
+        "a cache hit is not told; a truncated or filtered read is a part"
+    );
+}

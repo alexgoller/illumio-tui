@@ -106,6 +106,19 @@ pub const DEFAULT_MAX_RESULTS: u32 = 10_000;
 /// this tool must show soon.
 pub const DRAFT_TTL: Duration = Duration::from_secs(120);
 
+/// Told of each object list read from the PCE (never of a cache hit), so
+/// the caller can keep what it needs of it: illumio-tui keeps the names
+/// shell completion offers. `complete`: the whole collection (unfiltered,
+/// not truncated), else a part of it. Runs on the reading task: keep it
+/// quick, and never fail the read.
+pub trait ListObserver: Send + Sync {
+    fn labels(&self, _labels: &[models::Label], _complete: bool) {}
+    fn label_groups(&self, _groups: &[models::LabelGroup], _complete: bool) {}
+    fn ip_lists(&self, _lists: &[models::IpList], _complete: bool) {}
+    fn services(&self, _services: &[models::Service], _complete: bool) {}
+    fn workloads(&self, _workloads: &[models::Workload], _complete: bool) {}
+}
+
 /// The facade: typed, cached reads on top of one [`PceClient`].
 pub struct Pce {
     client: PceClient,
@@ -113,6 +126,7 @@ pub struct Pce {
     ttls: CacheTtls,
     poll: traffic::PollConfig,
     key_order: KeyOrder,
+    observer: Option<Arc<dyn ListObserver>>,
 }
 
 impl Pce {
@@ -127,6 +141,22 @@ impl Pce {
             ttls,
             poll: traffic::PollConfig::default(),
             key_order: KeyOrder::default(),
+            observer: None,
+        }
+    }
+
+    /// Tells `observer` of every object list read from here on.
+    pub fn with_observer(mut self, observer: Arc<dyn ListObserver>) -> Self {
+        self.observer = Some(observer);
+        self
+    }
+
+    /// Hands a fresh read (not a cache hit) to the observer, if any.
+    fn observe<T>(&self, c: &Cached<Vec<T>>, f: impl FnOnce(&dyn ListObserver, &[T], bool)) {
+        if let Some(o) = &self.observer
+            && !c.hit
+        {
+            f(o.as_ref(), &c.value, !c.truncated);
         }
     }
 
@@ -171,8 +201,11 @@ impl Pce {
 
     pub async fn labels(&self, mode: CacheMode) -> Result<Cached<Vec<models::Label>>> {
         let path = self.client.org_path("labels");
-        self.cached_list("objects:labels", &path, vec![], self.ttls.objects, mode)
-            .await
+        let c = self
+            .cached_list("objects:labels", &path, vec![], self.ttls.objects, mode)
+            .await?;
+        self.observe(&c, |o, v, all| o.labels(v, all));
+        Ok(c)
     }
 
     /// The labels with the PCE's own `usage` flags (`usage=true`): what
@@ -183,38 +216,50 @@ impl Pce {
     /// labels without `usage`.
     pub async fn labels_with_usage(&self, mode: CacheMode) -> Result<Cached<Vec<models::Label>>> {
         let path = self.client.org_path("labels");
-        self.cached_list(
-            "usage:labels",
-            &path,
-            vec![("usage", "true".into())],
-            self.ttls.objects,
-            mode,
-        )
-        .await
+        let c = self
+            .cached_list(
+                "usage:labels",
+                &path,
+                vec![("usage", "true".into())],
+                self.ttls.objects,
+                mode,
+            )
+            .await?;
+        self.observe(&c, |o, v, all| o.labels(v, all));
+        Ok(c)
     }
 
     pub async fn label_groups(&self, mode: CacheMode) -> Result<Cached<Vec<models::LabelGroup>>> {
         let path = self.client.org_path("sec_policy/draft/label_groups");
-        self.cached_list(
-            "objects:label_groups",
-            &path,
-            vec![],
-            self.ttls.objects,
-            mode,
-        )
-        .await
+        let c = self
+            .cached_list(
+                "objects:label_groups",
+                &path,
+                vec![],
+                self.ttls.objects,
+                mode,
+            )
+            .await?;
+        self.observe(&c, |o, v, all| o.label_groups(v, all));
+        Ok(c)
     }
 
     pub async fn ip_lists(&self, mode: CacheMode) -> Result<Cached<Vec<models::IpList>>> {
         let path = self.client.org_path("sec_policy/draft/ip_lists");
-        self.cached_list("objects:ip_lists", &path, vec![], self.ttls.objects, mode)
-            .await
+        let c = self
+            .cached_list("objects:ip_lists", &path, vec![], self.ttls.objects, mode)
+            .await?;
+        self.observe(&c, |o, v, all| o.ip_lists(v, all));
+        Ok(c)
     }
 
     pub async fn services(&self, mode: CacheMode) -> Result<Cached<Vec<models::Service>>> {
         let path = self.client.org_path("sec_policy/draft/services");
-        self.cached_list("objects:services", &path, vec![], self.ttls.objects, mode)
-            .await
+        let c = self
+            .cached_list("objects:services", &path, vec![], self.ttls.objects, mode)
+            .await?;
+        self.observe(&c, |o, v, all| o.services(v, all));
+        Ok(c)
     }
 
     /// Provisioned IP lists, for the TUI's pending diff. Cached under
@@ -287,14 +332,14 @@ impl Pce {
         mode: CacheMode,
     ) -> Result<Cached<Vec<models::Workload>>> {
         let path = self.client.org_path("workloads");
-        self.cached_list(
-            "workloads",
-            &path,
-            filter.to_query(),
-            self.ttls.workloads,
-            mode,
-        )
-        .await
+        let query = filter.to_query();
+        // Only an unfiltered read is the whole collection.
+        let unfiltered = query.iter().all(|(k, _)| *k == "max_results");
+        let c = self
+            .cached_list("workloads", &path, query, self.ttls.workloads, mode)
+            .await?;
+        self.observe(&c, |o, v, all| o.workloads(v, all && unfiltered));
+        Ok(c)
     }
 
     pub const DEFAULT_EVENTS_MAX_RESULTS: u32 = 500;
