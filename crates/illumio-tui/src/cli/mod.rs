@@ -191,6 +191,7 @@ fn csv_refusal(command: &Command) -> Option<&'static str> {
         Command::Policy(P::Revert(_)) => Some("policy revert"),
         Command::Traffic(t) if t.filter().is_some_and(|f| f.dry_run) => Some("traffic --dry-run"),
         Command::Profile(profile::ProfileCmd::Use { .. }) => Some("profile use"),
+        Command::Profile(profile::ProfileCmd::Add(_)) => Some("profile add"),
         Command::Marks(marks::MarksCmd::Export(_)) => Some("marks export"),
         Command::Enforce(a) if !a.watch => Some("enforce --to/--rollback"),
         _ => None,

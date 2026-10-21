@@ -12,7 +12,8 @@
 //! written down.
 //! `completion_cache = false` (top level, or in a profile, which wins) keeps
 //! PCE names off disk: no names cache is written or read for shell completion.
-//! The tool never writes secrets anywhere.
+//! The tool writes a secret only where `profile add` is given one: the
+//! profile's `api_secret`, in a config file of mode 0600.
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -256,19 +257,85 @@ pub fn load_env_file(path: &Path) -> Result<HashMap<String, String>, ConfigError
     let iter = dotenvy::from_path_iter(path).map_err(|e| {
         ConfigError::Message(format!("cannot read env file {}: {e}", path.display()))
     })?;
+    env_map(iter, &path.display().to_string())
+}
+
+/// Reads dotenv text (`profile add --from-env-file -`: stdin) into a map
+/// without touching the process environment; `what` names it in errors.
+pub fn parse_env_text(text: &str, what: &str) -> Result<HashMap<String, String>, ConfigError> {
+    env_map(dotenvy::from_read_iter(text.as_bytes()), what)
+}
+
+fn env_map<R: std::io::Read>(
+    iter: dotenvy::Iter<R>,
+    what: &str,
+) -> Result<HashMap<String, String>, ConfigError> {
     let mut map = HashMap::new();
     for item in iter {
         let (k, v) = item.map_err(|e| {
             // `LineParse` displays the raw line, which may be a secret.
-            let what = match e {
+            let why = match e {
                 dotenvy::Error::LineParse(_, idx) => format!("parse error at index {idx}"),
                 other => other.to_string(),
             };
-            ConfigError::Message(format!("bad line in {} ({what})", path.display()))
+            ConfigError::Message(format!("bad line in {what} ({why})"))
         })?;
         map.insert(k, v);
     }
     Ok(map)
+}
+
+/// Writes the config file atomically (a temporary file beside it, then a
+/// rename), mode 0600 on Unix, creating its directory mode 0700. A
+/// symlinked config file is written through to its target.
+pub fn write_config_file(path: &Path, file: &ConfigFile) -> Result<(), ConfigError> {
+    let io = |path: &Path| {
+        let path = path.to_path_buf();
+        move |source| ConfigError::Io { path, source }
+    };
+    let text = toml::to_string_pretty(file)
+        .map_err(|e| ConfigError::Message(format!("cannot serialise config: {e}")))?;
+    let path = match std::fs::symlink_metadata(path) {
+        Ok(m) if m.file_type().is_symlink() => std::fs::canonicalize(path).map_err(io(path))?,
+        _ => path.to_path_buf(),
+    };
+    let dir = match path.parent() {
+        Some(d) if !d.as_os_str().is_empty() => d.to_path_buf(),
+        _ => PathBuf::from("."),
+    };
+    if !dir.exists() {
+        let mut b = std::fs::DirBuilder::new();
+        b.recursive(true);
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut b, 0o700);
+        b.create(&dir).map_err(io(&dir))?;
+    }
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "config.toml".into());
+    let tmp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
+    let written = (|| {
+        use std::io::Write;
+        let mut o = std::fs::OpenOptions::new();
+        o.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+        let mut f = o.open(&tmp)?;
+        #[cfg(unix)]
+        {
+            // `mode` applies to a new file only; a stale temp keeps its own.
+            use std::os::unix::fs::PermissionsExt;
+            f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        }
+        f.write_all(text.as_bytes())?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, &path)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written.map_err(io(&path))
 }
 
 /// Real environment variables win over the env file.

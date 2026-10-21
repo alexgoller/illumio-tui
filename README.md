@@ -236,6 +236,22 @@ or a profile in `~/.config/illumio-tui/config.toml`:
     requests_per_second = 2         # the request throttle (default 2)
     auto_refresh_min_seconds = 60   # the TUI's auto-refresh interval (default and minimum 60)
 
+`profile add` writes a profile for you (local, no request), from flags or a dotenv file:
+
+    illumio-tui profile add demo --from-env-file path/.env        # PCE_HOST, PCE_PORT, PCE_ORG_ID, API_KEY, API_SECRET
+    illumio-tui profile add demo --from-env-file -                # paste the env text, then Ctrl-D
+    illumio-tui profile add prod --host pce.example --org-id 1 --api-key api_... \
+        --api-secret-cmd "op read op://vault/pce/secret" --writes --default
+
+Flags override imported values (`--host`, `--port`, `--org-id`, `--scheme`, `--api-key`,
+`--insecure`, `--writes`). The secret comes from the env file, `--api-secret-stdin` (one line),
+`--api-secret` (lands in shell history; prefer the other two) or `--api-secret-cmd`, which wins
+over an imported `API_SECRET` and keeps plaintext out of the file; a plaintext secret is stored
+as `api_secret`. The file is written atomically, mode 0600 (directory 0700), keeping the other
+profiles and unknown keys (not comments). An existing profile is replaced only with `--force`;
+the first profile in a file, or `--default`, becomes `default_profile`. The output says whether
+a key and secret are `set` (or `cmd`, `none`), never the secret.
+
 `[profiles.<name>.labels]` and `[profiles.<name>.generator]` are under Label model below.
 Environment variables outrank the profile. `PCE_TLS_VERIFY=false` skips certificate checks
 like `--insecure`, `PCE_SCHEME` overrides the scheme; `ILLUMIO_PROFILE` picks
@@ -806,6 +822,7 @@ the API call and byte counters at all times.
     illumio-tui traffic explain --src app=web --dst app=db --port 5432 --proto tcp --json
     illumio-tui workloads --csv > workloads.csv
     illumio-tui traffic groups --window 24h --by in --csv > peers.csv
+    illumio-tui profile add demo --from-env-file path/.env
     illumio-tui profile list
     illumio-tui profile use prod
     illumio-tui completions zsh > ~/.zfunc/_illumio-tui
@@ -887,7 +904,7 @@ puts `{"group_by": [...], "groups": [{"key": {"app": "shop", "env": null}, "filt
 env=-", "count", "health", "enforcement", "workloads": [...]}]}` in `data`, and CSV keeps one
 record per workload with a leading `group` column in the filter grammar (`app=shop env=-`),
 largest group first. Grouping is local: no extra request.
-Commands that print no table (writes, `health`, `policy rules impact`, `profile use`, a
+Commands that print no table (writes, `health`, `policy rules impact`, `profile use`/`add`, a
 traffic `--dry-run`) refuse it with exit 2 before any request.
 
 `--exclude-src`, `--exclude-dst` (same syntax as `--src` / `--dst`) and `--exclude-service`

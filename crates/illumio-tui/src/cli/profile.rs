@@ -1,14 +1,18 @@
-//! Profile management. Works without credentials: it only reads and
-//! rewrites the config file.
+//! Profile management. Works without credentials and sends no request: it
+//! only reads and rewrites the config file. `profile add` writes a secret
+//! only when given one, and never prints it.
 use super::GlobalArgs;
 use super::error::CliError;
 use super::output::{
     Meta, OutputFormat, TableRows, choose_format, meta_line, write_json, write_table,
     write_table_csv,
 };
-use crate::config::{self, ConfigFile};
-use clap::Subcommand;
+use crate::config::{self, ConfigFile, Profile};
+use clap::{Args, Subcommand, ValueHint};
 use serde::Serialize;
+use std::collections::HashMap;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 
 #[derive(Subcommand, Debug)]
 pub enum ProfileCmd {
@@ -19,6 +23,75 @@ pub enum ProfileCmd {
         /// Profile name from the config file
         name: String,
     },
+    /// Add a profile to the config file (local, no request)
+    ///
+    /// e.g. `illumio-tui profile add demo --from-env-file path/.env` imports PCE_HOST,
+    /// PCE_PORT, PCE_ORG_ID, API_KEY and API_SECRET (also PCE_SCHEME, PCE_TLS_VERIFY); flags
+    /// override imported values. Host and org id from --host and --org-id. The secret comes
+    /// from the env file, --api-secret-stdin, --api-secret or --api-secret-cmd; a plaintext
+    /// secret is stored as api_secret in the config file, which is written mode 0600. The first
+    /// profile in a file becomes the default.
+    Add(AddArgs),
+}
+
+#[derive(Args, Clone)]
+pub struct AddArgs {
+    /// Name of the new profile
+    pub name: String,
+    /// PCE port (default 443; --pce-port works too)
+    #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
+    pub port: Option<u16>,
+    /// http or https (default https)
+    #[arg(long, value_parser = ["http", "https"])]
+    pub scheme: Option<String>,
+    /// API key (the user name of the API key pair)
+    #[arg(long)]
+    pub api_key: Option<String>,
+    /// API secret, stored as plaintext api_secret. A flag value can land in shell history:
+    /// prefer --api-secret-stdin or --from-env-file
+    #[arg(long, conflicts_with_all = ["api_secret_stdin", "api_secret_cmd"])]
+    pub api_secret: Option<String>,
+    /// Read the API secret from stdin (one line), stored as plaintext api_secret
+    #[arg(long, conflicts_with = "api_secret_cmd")]
+    pub api_secret_stdin: bool,
+    /// Shell command whose stdout is the API secret (e.g. `op read ...`); no plaintext
+    /// secret is written, even when the env file has API_SECRET
+    #[arg(long)]
+    pub api_secret_cmd: Option<String>,
+    /// dotenv file to import (- reads it from stdin, for pasting; end with Ctrl-D)
+    #[arg(long, value_name = "PATH", value_hint = ValueHint::FilePath)]
+    pub from_env_file: Option<PathBuf>,
+    /// Allow write commands against this PCE (writes = true)
+    #[arg(long)]
+    pub writes: bool,
+    /// Make it the default profile
+    #[arg(long)]
+    pub default: bool,
+    /// Replace a profile of the same name
+    #[arg(long)]
+    pub force: bool,
+}
+
+/// Manual `Debug` so `--api-secret` never prints.
+impl std::fmt::Debug for AddArgs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AddArgs")
+            .field("name", &self.name)
+            .field("port", &self.port)
+            .field("scheme", &self.scheme)
+            .field("api_key", &self.api_key)
+            .field(
+                "api_secret",
+                &self.api_secret.as_ref().map(|_| "<redacted>"),
+            )
+            .field("api_secret_stdin", &self.api_secret_stdin)
+            .field("api_secret_cmd", &self.api_secret_cmd)
+            .field("from_env_file", &self.from_env_file)
+            .field("writes", &self.writes)
+            .field("default", &self.default)
+            .field("force", &self.force)
+            .finish()
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -73,6 +146,52 @@ impl TableRows for UseResult {
     }
     fn rows(&self) -> Vec<Vec<String>> {
         vec![vec![self.default_profile.clone(), self.config_path.clone()]]
+    }
+}
+
+/// The profile `profile add` wrote, without its secret: `api_key` and
+/// `api_secret` say only whether there is one (`set`, `cmd`, `none`).
+#[derive(Debug, Serialize)]
+pub struct AddResult {
+    pub name: String,
+    pub host: String,
+    pub port: Option<u16>,
+    pub org_id: u64,
+    pub api_key: &'static str,
+    pub api_secret: &'static str,
+    pub is_default: bool,
+    pub replaced: bool,
+    pub config_path: String,
+}
+
+impl TableRows for AddResult {
+    fn headers(&self) -> Vec<&'static str> {
+        vec![
+            "name",
+            "host",
+            "port",
+            "org_id",
+            "api_key",
+            "api_secret",
+            "default",
+            "config_path",
+        ]
+    }
+    fn rows(&self) -> Vec<Vec<String>> {
+        vec![vec![
+            self.name.clone(),
+            self.host.clone(),
+            self.port.map(|p| p.to_string()).unwrap_or_default(),
+            self.org_id.to_string(),
+            self.api_key.into(),
+            self.api_secret.into(),
+            if self.is_default {
+                "*".into()
+            } else {
+                String::new()
+            },
+            self.config_path.clone(),
+        ]]
     }
 }
 
@@ -137,6 +256,7 @@ pub fn run(global: &GlobalArgs, cmd: &ProfileCmd) -> Result<(), CliError> {
                 .collect();
             emit(global, &rows)
         }
+        ProfileCmd::Add(a) => add(global, &path, file, a),
         ProfileCmd::Use { name } => {
             if !file.profiles.contains_key(name) {
                 return Err(CliError::Args(format!(
@@ -146,17 +266,7 @@ pub fn run(global: &GlobalArgs, cmd: &ProfileCmd) -> Result<(), CliError> {
                 )));
             }
             file.default_profile = Some(name.clone());
-            let text = toml::to_string_pretty(&file)
-                .map_err(|e| CliError::Other(format!("cannot serialise config: {e}")))?;
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(&path, text)?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
-            }
+            config::write_config_file(&path, &file)?;
             emit(
                 global,
                 &UseResult {
@@ -166,4 +276,199 @@ pub fn run(global: &GlobalArgs, cmd: &ProfileCmd) -> Result<(), CliError> {
             )
         }
     }
+}
+
+/// Imports PCE_HOST, PCE_PORT, PCE_ORG_ID, PCE_SCHEME, PCE_TLS_VERIFY,
+/// API_KEY and API_SECRET from the env file; other keys are ignored.
+fn add(
+    global: &GlobalArgs,
+    path: &Path,
+    mut file: ConfigFile,
+    a: &AddArgs,
+) -> Result<(), CliError> {
+    if global.env_file.is_some() {
+        return Err(CliError::Args(
+            "profile add imports with --from-env-file, not --env-file".into(),
+        ));
+    }
+    let stdin_env = a.from_env_file.as_deref() == Some(Path::new("-"));
+    if stdin_env && a.api_secret_stdin {
+        return Err(CliError::Args(
+            "--api-secret-stdin and --from-env-file - both read stdin; use one".into(),
+        ));
+    }
+    let port_flag = match (a.port, global.pce_port) {
+        (Some(p), Some(q)) if p != q => {
+            return Err(CliError::Args(
+                "--port and --pce-port disagree; give one".into(),
+            ));
+        }
+        (p, q) => p.or(q),
+    };
+    if global.pce_port == Some(0) {
+        return Err(CliError::Args("--pce-port must be 1-65535".into()));
+    }
+    let name = a.name.trim();
+    if name.is_empty() {
+        return Err(CliError::Args("profile name is empty".into()));
+    }
+    if file.profiles.contains_key(name) && !a.force {
+        return Err(CliError::Args(format!(
+            "profile {name:?} already exists in {}; --force replaces it",
+            path.display()
+        )));
+    }
+
+    let env: HashMap<String, String> = match &a.from_env_file {
+        None => HashMap::new(),
+        Some(_) if stdin_env => {
+            if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+                eprintln!("paste the env file, then Ctrl-D");
+            }
+            let mut text = String::new();
+            std::io::stdin().read_to_string(&mut text)?;
+            config::parse_env_text(&text, "stdin")?
+        }
+        Some(p) => config::load_env_file(p)?,
+    };
+    // Values from the env file are never quoted in an error: it holds a secret.
+    let imported = |k: &str| {
+        env.get(k)
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+    };
+
+    let host = match global.host.clone().or_else(|| imported("PCE_HOST")) {
+        Some(h) if !h.trim().is_empty() => h.trim().to_string(),
+        _ => {
+            return Err(CliError::Args(
+                "no PCE host: pass --host or import PCE_HOST with --from-env-file".into(),
+            ));
+        }
+    };
+    if host.contains("://") || host.contains('/') || host.contains(char::is_whitespace) {
+        return Err(CliError::Args(
+            "the host is a hostname only, without scheme, port or path (use --scheme, --port)"
+                .into(),
+        ));
+    }
+    let org_id = match global.org_id {
+        Some(o) => o,
+        None => match imported("PCE_ORG_ID") {
+            Some(raw) => raw
+                .parse::<u64>()
+                .map_err(|_| CliError::Args("PCE_ORG_ID in the env file is not a number".into()))?,
+            None => {
+                return Err(CliError::Args(
+                    "no org id: pass --org-id or import PCE_ORG_ID with --from-env-file".into(),
+                ));
+            }
+        },
+    };
+    let port = match port_flag {
+        Some(p) => Some(p),
+        None => match imported("PCE_PORT") {
+            Some(raw) => match raw.parse::<u16>() {
+                Ok(p) if p > 0 => Some(p),
+                _ => {
+                    return Err(CliError::Args(
+                        "PCE_PORT in the env file is not a port (1-65535)".into(),
+                    ));
+                }
+            },
+            None => None,
+        },
+    };
+    let scheme = match a.scheme.clone() {
+        Some(s) => Some(s),
+        None => match imported("PCE_SCHEME") {
+            Some(s) if s == "http" || s == "https" => Some(s),
+            Some(_) => {
+                return Err(CliError::Args(
+                    "PCE_SCHEME in the env file is not http or https".into(),
+                ));
+            }
+            None => None,
+        },
+    };
+    let tls_verify = if global.insecure {
+        Some(false)
+    } else {
+        match imported("PCE_TLS_VERIFY") {
+            Some(raw) => Some(config::parse_bool(&raw).ok_or_else(|| {
+                CliError::Args("PCE_TLS_VERIFY in the env file is not a boolean".into())
+            })?),
+            None => None,
+        }
+    };
+    let api_key = a
+        .api_key
+        .clone()
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty())
+        .or_else(|| imported("API_KEY"));
+    // A secret flag beats the env file; `--api-secret-cmd` means no plaintext.
+    let (api_secret, api_secret_cmd) = if let Some(cmd) = &a.api_secret_cmd {
+        if cmd.trim().is_empty() {
+            return Err(CliError::Args("--api-secret-cmd is empty".into()));
+        }
+        (None, Some(cmd.clone()))
+    } else if a.api_secret_stdin {
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line)?;
+        let secret = line.trim().to_string();
+        if secret.is_empty() {
+            return Err(CliError::Args(
+                "--api-secret-stdin: no secret on stdin".into(),
+            ));
+        }
+        (Some(secret), None)
+    } else if let Some(s) = &a.api_secret {
+        if s.trim().is_empty() {
+            return Err(CliError::Args("--api-secret is empty".into()));
+        }
+        (Some(s.trim().to_string()), None)
+    } else {
+        (imported("API_SECRET"), None)
+    };
+
+    let secret_state = if api_secret_cmd.is_some() {
+        "cmd"
+    } else if api_secret.is_some() {
+        "set"
+    } else {
+        "none"
+    };
+    let profile = Profile {
+        host: Some(host.clone()),
+        port,
+        org_id: Some(org_id),
+        scheme,
+        tls_verify,
+        api_key: api_key.clone(),
+        api_secret,
+        api_secret_cmd,
+        writes: a.writes.then_some(true),
+        ..Profile::default()
+    };
+    let is_default = a.default || file.profiles.is_empty();
+    let replaced = file.profiles.insert(name.to_string(), profile).is_some();
+    if is_default {
+        file.default_profile = Some(name.to_string());
+    }
+    config::write_config_file(path, &file)?;
+    emit(
+        global,
+        &AddResult {
+            name: name.to_string(),
+            host,
+            port,
+            org_id,
+            api_key: if api_key.is_some() { "set" } else { "none" },
+            api_secret: secret_state,
+            is_default: file.default_profile.as_deref() == Some(name),
+            replaced,
+            config_path: path.display().to_string(),
+        },
+    )
 }

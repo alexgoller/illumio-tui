@@ -591,6 +591,7 @@ counts   rule_sets=9, services=2</code></pre>
 <span class="p">$ </span>illumio-tui gen shop/prod --consolidate 5666/tcp=any --json
 
 <span class="c"># connection profiles</span>
+<span class="p">$ </span>illumio-tui profile add demo --from-env-file path/.env
 <span class="p">$ </span>illumio-tui profile list
 <span class="p">$ </span>illumio-tui profile use prod</code></pre>
 
@@ -845,6 +846,11 @@ API_SECRET=xxxxxxxxxxxxxxxx</code></pre>
     </div>
     <div>
       <h3>Profiles</h3>
+      <p>Write one from a dotenv file (<code>-</code> reads a paste from stdin) or flags; local, no request:</p>
+<pre><code><span class="p">$ </span>illumio-tui profile add demo --from-env-file path/.env
+<span class="p">$ </span>illumio-tui profile add prod --host pce.example --org-id 1 --api-key api_... \
+    --api-secret-cmd "op read op://vault/pce/secret" --default</code></pre>
+      <p>Flags override imported values. The secret comes from the env file, <code>--api-secret-stdin</code>, <code>--api-secret</code> (lands in shell history) or <code>--api-secret-cmd</code> (wins, no plaintext stored); a plaintext secret is stored as <code>api_secret</code> in a file of mode 0600. <code>--force</code> replaces an existing profile; the first profile becomes the default. The secret is never printed.</p>
       <p>In <code>~/.config/illumio-tui/config.toml</code>:</p>
 <pre><code>default_profile = "prod"
 
