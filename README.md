@@ -236,6 +236,9 @@ or a profile in `~/.config/illumio-tui/config.toml`:
     requests_per_second = 2         # the request throttle (default 2)
     auto_refresh_min_seconds = 60   # the TUI's auto-refresh interval (default and minimum 60)
 
+    [profiles.prod.events]
+    exclude_types = ["user.login", "agent.*"]   # event types hidden by default (see Events)
+
 `profile add` writes a profile for you (local, no request), from flags or a dotenv file:
 
     illumio-tui profile add demo --from-env-file path/.env        # PCE_HOST, PCE_PORT, PCE_ORG_ID, API_KEY, API_SECRET
@@ -257,6 +260,10 @@ expands `$VAR` in values that are not single-quoted (a warning says so for `API_
 secret.
 
 `[profiles.<name>.labels]` and `[profiles.<name>.generator]` are under Label model below.
+`[profiles.<name>.events] exclude_types` lists event types the Events screen and `events` hide
+by default, each a type, a substring or a `*` glob, as a `!term` of the type filter (below);
+`events --all-types` shows them, and in the TUI the Type field starts with them, so `f` can
+drop one for the session. The tool only reads it, never writes it.
 Environment variables outrank the profile. `PCE_TLS_VERIFY=false` skips certificate checks
 like `--insecure`, `PCE_SCHEME` overrides the scheme; `ILLUMIO_PROFILE` picks
 the profile and `ILLUMIO_TUI_THEME` the TUI theme; `ILLUMIO_TUI_COLORS=256` maps the theme's
@@ -751,7 +758,18 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   enforcement of the marked workloads, else of the group under the cursor (on its header),
   else of the row: see [Bulk labels and enforcement](#bulk-labels-and-enforcement).
 - **Events**: severity-coloured audit events, `f` edit severity / type / window, `S` sort by
-  severity, `Enter` the event as a change diff: a header (time,
+  severity. The Type field takes comma-separated terms, any of which keeps an event
+  (`sec_policy, rule_set`); `!term` hides (`!user.login, !agent.update`), applied after the
+  others; a term with `*` must match the whole type (`sec_policy.*`, `*.delete`), else it is a
+  substring; case-insensitive. `Ctrl-N`/`Ctrl-P` complete the event types of the loaded
+  events, also after `,` or `!`. A severity is sent to the PCE (it takes one); `warning+` is
+  that and worse (`err+`, `info+` …), filtered here, as is the type. `x` (or `!`) hides the
+  selected row's type, `o` shows only it, `t` lists the loaded types by count (`Enter` only
+  this one, `x` hide it, `Esc` close). None of these sends a request: they filter the loaded
+  events, and only a new PCE severity or window in `f` (or `r`) loads again. The header says
+  what is hidden (`hiding 3 types · warning+ · 812 of 1,240`) and `capped at 500` when the PCE
+  returned a full page, so more events may exist than were filtered. `Enter` the event as a
+  change diff: a header (time,
   type, severity and status, actor, API request and source), then one block per resource
   change. An update shows only the changed fields, `-` before in red and `+` after in green;
   lists (providers, consumers, services, scopes, IP ranges, labels) are diffed by element, so
@@ -802,6 +820,8 @@ the API call and byte counters at all times.
     illumio-tui policy pending --diff --table
     illumio-tui events --since 1h --severity err
     illumio-tui events --type sec_rule --diff
+    illumio-tui events --exclude-type user.login --exclude-type 'agent.*' --severity warning+
+    illumio-tui events --type 'sec_policy, rule_set, !*.delete' --all-types --table
     illumio-tui traffic query --window 24h --src app=web --dst app=db --json
     illumio-tui traffic query --window 1h --group app,env
     illumio-tui traffic query --window 1h --blocked
@@ -1369,6 +1389,14 @@ gains `diff: [{sign, text}]`, only when `--diff` is given. Each kind's draft and
 list is read once, counted in `meta.api_calls`. The CLI does not fetch deny rules served
 through the fallback endpoint; such a ruleset shows them as "not compared". Label groups
 have no description to compare.
+
+`events --type` takes the Events screen's type terms (comma-separated, `!term` hides, `*`
+globs the whole type, else a substring; case-insensitive) and is repeatable; `--exclude-type X`
+is `--type '!X'`. The profile's `events.exclude_types` apply unless `--all-types`. `--severity
+warning+` (that and worse) sends no severity and filters here; a plain severity goes to the
+PCE as before. All of these filter the loaded page: the cap (`--max-results`, default 500)
+still applies, and `meta.truncated` says when the page was full. `meta.local_filter` names the
+local filters and `meta.hidden` counts the rows they hid. They work with `--diff`.
 
 `events --diff` prints each event's resource changes under its row, as the Events detail
 shows them (a `create` / `update` / `delete` title, then `+` / `-` lines), and a failed
