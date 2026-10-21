@@ -2,6 +2,7 @@
 //! type keeps an `extra` map on purpose (flows do, so the TUI can show
 //! anything the PCE adds later).
 pub mod common;
+pub mod event_select;
 pub mod events;
 pub mod labels;
 pub mod policy;
@@ -9,6 +10,7 @@ pub mod traffic;
 pub mod workloads;
 
 pub use common::{PolicyDecision, Ref, proto_name, proto_number};
+pub use event_select::{SEVERITIES, SeverityFilter, TypeFilter, exclude_text, severity_level};
 pub use events::{Event, EventFilter};
 pub use labels::{Fqdn, IpList, IpRange, Label, LabelGroup, LabelUsageFlags, Service, ServicePort};
 pub use policy::{
