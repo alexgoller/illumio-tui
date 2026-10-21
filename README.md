@@ -1129,9 +1129,10 @@ the same grammar: `scope:`, `src:` (`consumer:`) and `dst:` (`provider:`) put a 
 one side (`src:`/`dst:` also take `ipl:NAME`, `wl:NAME` and `all`; `scope:global`), `!key=value`
 finds exclusion actors, `enabled`, `allow`, `intra` and `extra` test the rule, and a leading `-`
 negates a term: `policy search src:role=web dst:role=db extra`, `policy search
-scope:app=payment -svc:443/tcp`, `policy search src:!env=prod`, `policy search src:all -deny`.
+scope:app=payment -svc:443/tcp`, `policy search 'src:!env=prod'` (quote a `!` for the shell), `policy search src:all -deny`.
 A `-term` needs no `--` (the CLI takes it as a term, flags keep working); after `--` every word
-is a term. `--label` keeps its meaning (no `!`: use the term). `meta.matched` is `{"matched",
+is a term. On Windows PowerShell 5.1, quote a term that starts with `-` and holds a `.`
+(`'-dst:wl:web01.corp'`): it splits such a word otherwise. `--label` keeps its meaning (no `!`: use the term). `meta.matched` is `{"matched",
 "loaded"}`: the rules found of the rules searched (stderr: `3 of 40 rules matched`). An IP
 list or service name is matched exactly, else as the start of exactly one name, any case
 (`--ip-list Any` finds `Any (0.0.0.0/0 and ::/0)`); a name that starts several is exit 2

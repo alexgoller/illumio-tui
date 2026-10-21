@@ -634,6 +634,7 @@ async fn policy_search_takes_dash_terms_as_terms_and_flags_as_flags() {
             "-deny",
         ],
         vec!["--json", "policy", "search", "role=db", "-deny", "-src:all"],
+        vec!["policy", "--json", "search", "role=db", "-deny"],
     ] {
         let out = stdout_json(cmd(&server).args(&args).assert().success());
         assert_eq!(hrefs(&out), ["11", "12", "13"], "{args:?}");
@@ -647,10 +648,13 @@ async fn policy_search_takes_dash_terms_as_terms_and_flags_as_flags() {
         "{}",
         stderr(&a)
     );
-    // Two dashes are a flag's: an unknown one is refused.
+    // Two dashes are a flag's: an unknown one is refused; so is a `-word`
+    // as the value of a flag written without `=`.
     for args in [
         vec!["policy", "search", "--deny-x"],
         vec!["policy", "search", "app=payment", "--nope"],
+        vec!["policy", "search", "--label", "-app=x", "role=db"],
+        vec!["policy", "search", "--href", "-abc", "role=db"],
     ] {
         let a = cmd(&server).args(&args).assert().code(2);
         assert!(!stderr(&a).is_empty(), "{args:?}");

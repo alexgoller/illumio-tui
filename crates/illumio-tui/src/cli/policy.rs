@@ -49,7 +49,7 @@ pub enum PolicyCmd {
 /// list read (cached).
 #[derive(Args, Debug)]
 pub struct SearchArgs {
-    /// Search terms as in the TUI (all must hold): app=shop,crm !env=prod ipl:NAME svc:NAME svc:443/tcp svc:tcp wl:NAME href:TEXT disabled enabled deny allow intra extra; scope:, src: (consumer:) or dst: (provider:) before a label (src:/dst: also ipl:NAME, wl:NAME, all; scope:global); a leading - negates a term (-deny, -scope:env=dev). Examples: `src:role=web dst:role=db extra`, `scope:app=payment -svc:443/tcp`, `src:!env=prod`, `src:all -deny`. A -term needs no `--`; after `--` every word is a term
+    /// Search terms as in the TUI (all must hold): app=shop,crm '!env=prod' ipl:NAME svc:NAME svc:443/tcp svc:tcp wl:NAME href:TEXT disabled enabled deny allow intra extra; scope:, src: (consumer:) or dst: (provider:) before a label (src:/dst: also ipl:NAME, wl:NAME, all; scope:global); a leading - negates a term (-deny, -scope:env=dev). Examples: `src:role=web dst:role=db extra`, `scope:app=payment -svc:443/tcp`, `'src:!env=prod'` (quote a `!` for the shell), `src:all -deny`. A -term needs no `--`; after `--` every word is a term
     pub terms: Vec<String>,
     /// A label in a scope, consumer or provider (directly or in a label group; exclusions and All workloads do not count): key=value, a comma lists values any of which matches (repeatable; all must hold). For exclusions use the term !key=value
     #[arg(long = "label")]
@@ -877,28 +877,49 @@ impl TableRows for Vec<SearchRow> {
 
 /// `policy search -deny …`: clap reads a word that starts with `-` as a
 /// flag, and a positional that takes such words swallows every flag after
-/// its first one. So the words after `policy search` that start with one
-/// `-` (not `-h`, not `-` alone) move behind a `--` (the one given, else a
-/// new one at the end), where they are terms; terms AND, so their order
-/// does not matter. Every other command line is left as it is.
+/// its first one. So the words of `policy search` that start with one `-`
+/// (not `-h`, not `-` alone, not the value of a flag written without `=`)
+/// move behind a `--` (the one given, else a new one at the end), where
+/// they are terms; terms AND, so their order does not matter. The words
+/// are walked as clap would (global flags and their values may sit before
+/// or between `policy` and `search`); every other command line is left as
+/// it is.
 pub fn negated_terms_last(mut args: Vec<OsString>) -> Vec<OsString> {
-    let Some(at) = args
-        .windows(2)
-        .position(|w| w[0] == "policy" && w[1] == "search")
-    else {
+    use clap::CommandFactory;
+    if !args.iter().any(|a| a == "search") {
+        return args;
+    }
+    let mut cmd = super::Cli::command();
+    cmd.build();
+    let Some(start) = search_start(&cmd, &args) else {
         return args;
     };
-    let mut rest = args.split_off(at + 2);
+    let search = cmd
+        .find_subcommand("policy")
+        .and_then(|p| p.find_subcommand("search"))
+        .expect("policy search exists");
+    let mut rest = args.split_off(start);
     // After `--`, the words are terms already.
     let tail = match rest.iter().position(|a| a == "--") {
         Some(i) => rest.split_off(i),
         None => Vec::new(),
     };
-    let negated = |a: &OsString| {
-        a.to_str()
-            .is_some_and(|s| s.len() > 1 && s.starts_with('-') && !s.starts_with("--") && s != "-h")
-    };
-    let (terms, kept): (Vec<OsString>, Vec<OsString>) = rest.into_iter().partition(negated);
+    let (mut terms, mut kept) = (Vec::new(), Vec::new());
+    let mut value_next = false;
+    for a in rest {
+        let text = a.to_str().unwrap_or_default();
+        let negated = !value_next
+            && text.len() > 1
+            && text.starts_with('-')
+            && !text.starts_with("--")
+            && text != "-h";
+        value_next = !value_next && flag_takes_value(search, text);
+        if negated {
+            terms.push(a);
+        } else {
+            kept.push(a);
+        }
+    }
     args.extend(kept);
     if !terms.is_empty() && tail.is_empty() {
         args.push("--".into());
@@ -908,6 +929,47 @@ pub fn negated_terms_last(mut args: Vec<OsString>) -> Vec<OsString> {
     args.extend(terms);
     args.extend(tail);
     args
+}
+
+/// Whether `word` is a long flag of `cmd` (globals included, once built)
+/// written without `=` whose value is the next word.
+fn flag_takes_value(cmd: &clap::Command, word: &str) -> bool {
+    let Some(long) = word
+        .strip_prefix("--")
+        .filter(|l| !l.is_empty() && !l.contains('='))
+    else {
+        return false;
+    };
+    cmd.get_arguments()
+        .find(|a| a.get_long() == Some(long))
+        .is_some_and(|a| a.get_action().takes_values())
+}
+
+/// Where the words of `policy search` start in `args` (after the program
+/// name), walking subcommands as clap does and skipping flags and the
+/// values of those that take one; `None` for any other command line.
+fn search_start(root: &clap::Command, args: &[OsString]) -> Option<usize> {
+    let mut cmd = root;
+    let mut path = Vec::new();
+    let mut words = args.iter().enumerate().skip(1);
+    while let Some((i, a)) = words.next() {
+        let text = a.to_str()?;
+        if text == "--" {
+            return None;
+        }
+        if text.starts_with('-') {
+            if flag_takes_value(cmd, text) {
+                words.next();
+            }
+            continue;
+        }
+        cmd = cmd.find_subcommand(text)?;
+        path.push(text);
+        if path == ["policy", "search"] {
+            return Some(i + 1);
+        }
+    }
+    None
 }
 
 /// The search the flags and terms make; exit 2 for a malformed one or none.
@@ -1980,6 +2042,32 @@ mod tests {
             moved("x policy search -deny --label app=x -- -svc:443 y"),
             "x policy search --label app=x -- -deny -svc:443 y"
         );
+        // Global flags before or between `policy` and `search`.
+        assert_eq!(
+            moved("x policy --json search -deny"),
+            "x policy --json search -- -deny"
+        );
+        assert_eq!(
+            moved("x --profile p policy --profile p search src:all -deny"),
+            "x --profile p policy --profile p search src:all -- -deny"
+        );
+        // A flag's value written apart stays for clap to judge.
+        for line in [
+            "x policy search --profile -x app=y",
+            "x policy search --label -app=x app=y",
+            "x policy search --href -abc app=y",
+        ] {
+            assert_eq!(moved(line), line);
+        }
+        assert_eq!(
+            moved("x policy search --href=-abc -deny"),
+            "x policy search --href=-abc -- -deny"
+        );
+        // A word named `policy` as a flag's value is not the command.
+        assert_eq!(
+            moved("x --profile policy search -deny"),
+            "x --profile policy search -deny"
+        );
         // Nothing to move, `-h`, `-` alone, other commands: as they are.
         for line in [
             "x policy search app=shop --json",
@@ -2015,6 +2103,22 @@ mod tests {
             (vec!["-deny".into(), "-src:all".into()], true)
         );
         assert!(terms("x policy search app=x --nope").is_err());
+        assert_eq!(
+            terms("x policy --json search -deny").unwrap(),
+            (vec!["-deny".into()], false)
+        );
+        assert_eq!(
+            terms("x policy --profile p search src:all -deny").unwrap(),
+            (vec!["src:all".into(), "-deny".into()], false)
+        );
+        // A value-taking flag before a `-word` is refused as before.
+        for line in [
+            "x policy search --profile -x app=y",
+            "x policy search --label -app=x app=y",
+            "x policy search --href -abc app=y",
+        ] {
+            assert!(terms(line).is_err(), "{line}");
+        }
         let f = search_filter(&SearchArgs {
             terms: terms("x policy search -deny scope:global").unwrap().0,
             labels: Vec::new(),

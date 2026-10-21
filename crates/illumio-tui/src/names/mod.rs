@@ -411,6 +411,11 @@ pub fn complete(kind: Kind, names: &Names, word: &str) -> Vec<String> {
         .collect()
 }
 
+/// The words a bare search term may start as, as the TUI offers them.
+const SEARCH_WORDS: [&str; 9] = [
+    "scope:", "src:", "dst:", "disabled", "enabled", "deny", "allow", "intra", "extra",
+];
+
 /// [`Kind::Search`]: `-` (a negated term), then a side prefix, then `!`
 /// (an exclusion: labels only) peeled off the word and put back on each
 /// candidate.
@@ -424,7 +429,11 @@ fn search_terms(n: &Names, word: &str) -> Vec<String> {
     let (bang, term) = rest.split_at(usize::from(rest.starts_with('!')));
     let terms = match (side, bang) {
         (_, "!") => n.labels.clone(),
-        ("", _) => Kind::Search.terms(n, ""),
+        ("", _) => [
+            SEARCH_WORDS.map(String::from).to_vec(),
+            Kind::Search.terms(n, ""),
+        ]
+        .concat(),
         ("scope:", _) => [n.labels.clone(), vec!["global".into()]].concat(),
         _ => [
             n.labels.clone(),

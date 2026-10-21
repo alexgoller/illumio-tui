@@ -90,6 +90,14 @@ fn search_completes_after_a_side_a_bang_and_a_dash() {
     assert_eq!(c(Kind::Search, "-scope:e"), ["-scope:env=prod"]);
     assert_eq!(c(Kind::Search, "-svc:S"), ["-svc:SSH"]);
     assert_eq!(c(Kind::Search, "!app=c"), ["!app=crm"]);
+    // A bare word: the side prefixes and the property words too.
+    assert_eq!(
+        c(Kind::Search, "s"),
+        ["scope:", "src:", "svc:HTTPS", "svc:SSH"]
+    );
+    assert_eq!(c(Kind::Search, "in"), ["intra"]);
+    assert_eq!(c(Kind::Search, "-e"), ["-enabled", "-extra", "-env=prod"]);
+    assert_eq!(c(Kind::Search, "d"), ["dst:", "disabled", "deny"]);
     // `scope:` takes labels only; `!` labels only.
     assert_eq!(c(Kind::Search, "scope:ipl:"), Vec::<String>::new());
     assert_eq!(c(Kind::Search, "src:!ipl:"), Vec::<String>::new());
