@@ -5,7 +5,10 @@
 //! policy filter is one `pce::RuleFilter` query. They are kept raw, so one
 //! that does not parse fails only where it is used, naming the profile,
 //! screen, filter and field. Local files only: nothing here contacts the
-//! PCE. Also the traffic filter text's grammar, which the CLI shares.
+//! PCE. A screen's default (`[profiles.<name>.filter_defaults]`) names one
+//! of them: the TUI applies it at startup and after `:profile`, the CLI
+//! only with `--default-filter`. Also the traffic filter text's grammar,
+//! which the CLI shares.
 use crate::config::{self, ConfigError, ConfigFile};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -175,6 +178,48 @@ impl SavedFilters {
                 })
             }
         }
+    }
+}
+
+/// A profile's default filter per screen (`[profiles.<name>.filter_defaults]`,
+/// `traffic = "prod-blocked"`): a filter name. Kept raw, so a value that is
+/// not a name is said where it is used; unknown keys round-trip verbatim.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct FilterDefaults(pub toml::Table);
+
+impl FilterDefaults {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// The screen's default filter name, or why the value is not one.
+    pub fn get(&self, screen: Screen) -> Result<Option<&str>, String> {
+        match self.0.get(screen.as_str()) {
+            None => Ok(None),
+            Some(toml::Value::String(s)) => Ok(Some(s.as_str())),
+            Some(v) => Err(format!(
+                "filter_defaults.{screen} is a {}, not a filter name",
+                v.type_str()
+            )),
+        }
+    }
+
+    /// The default filter of `screen`, parsed: `None` without one; an error
+    /// (the default is then ignored) when it names no filter or one that
+    /// does not parse.
+    pub fn resolve(
+        &self,
+        filters: &SavedFilters,
+        screen: Screen,
+    ) -> Result<Option<(String, Saved)>, String> {
+        let Some(name) = self.get(screen)? else {
+            return Ok(None);
+        };
+        filters
+            .get(screen, name)
+            .map(|s| Some((name.to_string(), s)))
+            .map_err(|e| format!("default {screen} filter {name:?}: {e}"))
     }
 }
 
@@ -511,9 +556,14 @@ impl Store {
 
     /// The profile's saved filters.
     pub fn load(&self) -> Result<SavedFilters, ConfigError> {
-        let file = config::load_config_file(&self.path)?;
-        match file.profiles.get(&self.profile) {
-            Some(p) => Ok(p.filters.clone()),
+        Ok(self.load_with_defaults()?.0)
+    }
+
+    /// The profile's saved filters and its defaults, from one read.
+    pub fn load_with_defaults(&self) -> Result<(SavedFilters, FilterDefaults), ConfigError> {
+        let mut file = config::load_config_file(&self.path)?;
+        match file.profiles.remove(&self.profile) {
+            Some(p) => Ok((p.filters, p.filter_defaults)),
             None => Err(self.missing()),
         }
     }
@@ -530,7 +580,8 @@ impl Store {
     pub fn save(&self, name: &str, saved: &Saved, force: bool) -> Result<bool, ConfigError> {
         check_name(name).map_err(ConfigError::Message)?;
         let screen = saved.screen();
-        self.change(|f| {
+        self.change(|p| {
+            let f = &mut p.filters;
             if let Some(e) = f.shape_error(screen) {
                 return Err(ConfigError::Message(format!(
                     "profile {}: {e}",
@@ -550,26 +601,64 @@ impl Store {
         })
     }
 
-    /// Deletes the filter `name` of `screen`.
-    pub fn remove(&self, screen: Screen, name: &str) -> Result<(), ConfigError> {
-        self.change(|f| match f.of_mut(screen).remove(name) {
-            Some(_) => Ok(()),
-            None => Err(ConfigError::Message(format!(
-                "no {screen} filter {name:?} in profile {}",
-                self.profile
-            ))),
+    /// Deletes the filter `name` of `screen`, and the screen's default when
+    /// it names that filter. Whether the default went too.
+    pub fn remove(&self, screen: Screen, name: &str) -> Result<bool, ConfigError> {
+        self.change(|p| {
+            if p.filters.of_mut(screen).remove(name).is_none() {
+                return Err(ConfigError::Message(format!(
+                    "no {screen} filter {name:?} in profile {}",
+                    self.profile
+                )));
+            }
+            let was_default = p.filter_defaults.get(screen) == Ok(Some(name));
+            if was_default {
+                p.filter_defaults.0.remove(screen.as_str());
+            }
+            Ok(was_default)
+        })
+    }
+
+    /// Makes the saved filter `name` the default of `screen` (it must exist
+    /// and parse), or clears the default (`None`). The default it replaced.
+    pub fn set_default(
+        &self,
+        screen: Screen,
+        name: Option<&str>,
+    ) -> Result<Option<String>, ConfigError> {
+        self.change(|p| {
+            let previous = p
+                .filter_defaults
+                .get(screen)
+                .ok()
+                .flatten()
+                .map(String::from);
+            match name {
+                Some(name) => {
+                    p.filters.get(screen, name).map_err(|e| {
+                        ConfigError::Message(format!("profile {}: {e}", self.profile))
+                    })?;
+                    p.filter_defaults
+                        .0
+                        .insert(screen.as_str().into(), toml::Value::String(name.into()));
+                }
+                None => {
+                    p.filter_defaults.0.remove(screen.as_str());
+                }
+            }
+            Ok(previous)
         })
     }
 
     fn change<T>(
         &self,
-        edit: impl FnOnce(&mut SavedFilters) -> Result<T, ConfigError>,
+        edit: impl FnOnce(&mut config::Profile) -> Result<T, ConfigError>,
     ) -> Result<T, ConfigError> {
         let mut file = config::load_config_file(&self.path)?;
         let Some(p) = file.profiles.get_mut(&self.profile) else {
             return Err(self.missing());
         };
-        let out = edit(&mut p.filters)?;
+        let out = edit(p)?;
         config::write_config_file(&self.path, &file)?;
         Ok(out)
     }
@@ -877,6 +966,96 @@ org_id = 1
             e.contains("profile demo") && e.contains("filters.events"),
             "{e}"
         );
+    }
+
+    #[test]
+    fn defaults_round_trip_with_unknown_keys_and_go_with_their_filter() {
+        let (_d, path) = home();
+        let text = CONFIG.replace(
+            "[profiles.lab]",
+            "[profiles.demo.filter_defaults]\nevents = \"noise-free\"\nfuture_default = 1\n\n[profiles.lab]",
+        );
+        std::fs::write(&path, text).unwrap();
+        let store = Store::new(path.clone(), "demo");
+        let (f, d) = store.load_with_defaults().unwrap();
+        assert_eq!(d.get(Screen::Events), Ok(Some("noise-free")));
+        assert_eq!(d.get(Screen::Traffic), Ok(None));
+        let (name, saved) = d.resolve(&f, Screen::Events).unwrap().unwrap();
+        assert_eq!(
+            (name.as_str(), saved.screen()),
+            ("noise-free", Screen::Events)
+        );
+        // Set: the filter must exist; the previous default is returned.
+        let e = store
+            .set_default(Screen::Traffic, Some("nope"))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("profile demo") && e.contains("prod-blocked"),
+            "{e}"
+        );
+        assert_eq!(
+            store
+                .set_default(Screen::Traffic, Some("prod-blocked"))
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            store
+                .set_default(Screen::Traffic, Some("prod-blocked"))
+                .unwrap(),
+            Some("prod-blocked".into())
+        );
+        let text = std::fs::read_to_string(&path).unwrap();
+        for kept in [
+            "future_default = 1",
+            "events = \"noise-free\"",
+            "traffic = \"prod-blocked\"",
+            "api_secret = \"s3cr3t-filters-70\"",
+            "future_top = \"kept\"",
+        ] {
+            assert!(text.contains(kept), "{kept} lost:\n{text}");
+        }
+        // Removing a filter that is not the default keeps the default.
+        store
+            .save("other", &Saved::Events(EventsSaved::default()), false)
+            .unwrap();
+        assert!(!store.remove(Screen::Events, "other").unwrap());
+        // Removing the default's filter clears the default, nothing else.
+        assert!(store.remove(Screen::Events, "noise-free").unwrap());
+        let (_, d) = store.load_with_defaults().unwrap();
+        assert_eq!(d.get(Screen::Events), Ok(None));
+        assert_eq!(d.get(Screen::Traffic), Ok(Some("prod-blocked")));
+        assert!(d.0.contains_key("future_default"));
+        // Unset.
+        assert_eq!(
+            store.set_default(Screen::Traffic, None).unwrap(),
+            Some("prod-blocked".into())
+        );
+        assert_eq!(store.set_default(Screen::Traffic, None).unwrap(), None);
+        let (_, d) = store.load_with_defaults().unwrap();
+        assert!(d.get(Screen::Traffic).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_missing_or_broken_default_is_an_error_where_used_never_at_load() {
+        let text = format!(
+            "{CONFIG}\n[profiles.lab.filters.traffic.bad]\nsrc = 3\n\
+             [profiles.lab.filter_defaults]\ntraffic = \"bad\"\npolicy = \"gone\"\nevents = 3\n"
+        );
+        let file: ConfigFile = toml::from_str(&text).expect("startup is not stopped");
+        let p = &file.profiles["lab"];
+        let d = &p.filter_defaults;
+        let e = d.resolve(&p.filters, Screen::Traffic).unwrap_err();
+        assert!(
+            e.contains("default traffic filter \"bad\"") && e.contains("src"),
+            "{e}"
+        );
+        let e = d.resolve(&p.filters, Screen::Policy).unwrap_err();
+        assert!(e.contains("\"gone\"") && e.contains("none saved"), "{e}");
+        let e = d.resolve(&p.filters, Screen::Events).unwrap_err();
+        assert!(e.contains("filter_defaults.events is a integer"), "{e}");
+        assert_eq!(d.resolve(&p.filters, Screen::Workloads), Ok(None));
     }
 
     #[test]

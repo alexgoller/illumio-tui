@@ -16,7 +16,8 @@
 //! `completion_cache = false` (top level, or in a profile, which wins) keeps
 //! PCE names off disk: no names cache is written or read for shell completion.
 //! `[profiles.<name>.filters.<screen>.<filter>]` holds saved filters
-//! (`crate::filters`), written by `:save` and `--save-filter`.
+//! (`crate::filters`), written by `:save` and `--save-filter`;
+//! `[profiles.<name>.filter_defaults]` names a screen's default one.
 //! The tool writes a secret only where `profile add` is given one: the
 //! profile's `api_secret`, in a config file of mode 0600.
 use serde::{Deserialize, Serialize};
@@ -71,6 +72,12 @@ pub struct Profile {
         skip_serializing_if = "crate::filters::SavedFilters::is_empty"
     )]
     pub filters: crate::filters::SavedFilters,
+    /// A default saved filter per screen (`[profiles.<name>.filter_defaults]`).
+    #[serde(
+        default,
+        skip_serializing_if = "crate::filters::FilterDefaults::is_empty"
+    )]
+    pub filter_defaults: crate::filters::FilterDefaults,
     /// Unknown keys, round-tripped verbatim.
     #[serde(default, flatten)]
     pub extra: toml::Table,
@@ -99,6 +106,7 @@ impl std::fmt::Debug for Profile {
             .field("completion_cache", &self.completion_cache)
             .field("events", &self.events)
             .field("filters", &self.filters)
+            .field("filter_defaults", &self.filter_defaults)
             // Unknown keys could be anything; print their names only.
             .field("extra", &self.extra.keys().collect::<Vec<_>>())
             .finish()
