@@ -268,6 +268,26 @@ pub const HOOKS: &[Hook] = &[
         "name",
         Kind::WorkloadsFilters,
     ),
+    (
+        &["filters", "default", "traffic"],
+        "name",
+        Kind::TrafficFilters,
+    ),
+    (
+        &["filters", "default", "policy"],
+        "name",
+        Kind::PolicyFilters,
+    ),
+    (
+        &["filters", "default", "events"],
+        "name",
+        Kind::EventsFilters,
+    ),
+    (
+        &["filters", "default", "workloads"],
+        "name",
+        Kind::WorkloadsFilters,
+    ),
 ];
 
 /// The marker a hooked argument's help carries into the generated text.
@@ -980,6 +1000,21 @@ src = \"x=y\"
             let help = find_arg(&marked, path, arg).unwrap().get_help().unwrap();
             assert!(help.to_string().ends_with(&marker(kind)), "{path:?} {arg}");
         }
+    }
+
+    #[test]
+    fn filters_default_completes_the_screens_saved_names() {
+        let fish = script(Shell::Fish);
+        for screen in ["traffic", "policy", "events", "workloads"] {
+            let line = format!(
+                "__fish_seen_subcommand_from default; and __fish_seen_subcommand_from {screen}\" \
+                 -f -a \"(__fish_illumio_tui_names filters-{screen})\""
+            );
+            assert!(fish.contains(&line), "{screen}");
+        }
+        assert!(script(Shell::Zsh).contains(
+            "'::name -- The saved filter to make the default: _illumio-tui__names filters-policy'"
+        ));
     }
 
     #[test]
