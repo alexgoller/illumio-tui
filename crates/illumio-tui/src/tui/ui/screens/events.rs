@@ -37,6 +37,9 @@ fn thousands(n: usize) -> String {
 fn meta(model: &Model) -> String {
     let e = &model.events;
     let mut parts = Vec::new();
+    if let Some(name) = crate::tui::saved::tag(model, crate::tui::model::Screen::Events) {
+        parts.push(format!("[{name}]"));
+    }
     let sort = header_meta(&e.table);
     if !sort.is_empty() {
         parts.push(sort);

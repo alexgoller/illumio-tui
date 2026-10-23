@@ -289,6 +289,8 @@ pub enum Overlay {
     /// `:enforce` / `e` in the app overlay: one app's five steps to
     /// enforcement; its state is `Model::enforce_view`.
     Enforce,
+    /// `:filters`: the current screen's saved filters.
+    FilterPicker(crate::tui::saved::FilterPicker),
 }
 
 impl PartialEq for Overlay {
@@ -311,6 +313,7 @@ impl PartialEq for Overlay {
             (Overlay::LabelFilter(a), Overlay::LabelFilter(b)) => a == b,
             (Overlay::RuleFilter(a), Overlay::RuleFilter(b)) => a == b,
             (Overlay::AppPicker(a), Overlay::AppPicker(b)) => a == b,
+            (Overlay::FilterPicker(a), Overlay::FilterPicker(b)) => a == b,
             (Overlay::Form(a), Overlay::Form(b)) => a == b,
             (Overlay::MarkForm(a), Overlay::MarkForm(b)) => a == b,
             (
@@ -412,6 +415,12 @@ pub enum PendingAction {
     /// `r` on the enforcement overlay's Watch step past a cost threshold:
     /// the blocked-since query; `y` and `n` go back to the overlay.
     EnforceWatch,
+    /// `:save` over a saved filter of that name: `y` replaces it. A local
+    /// file only.
+    SaveFilter(String, crate::filters::Saved),
+    /// `D` in `:filters`: this filter leaves the config file; `y` and `n`
+    /// go back to the picker. A local file only.
+    DeleteFilter(crate::tui::saved::FilterPicker, String),
 }
 
 impl PolicyState {
@@ -756,6 +765,8 @@ pub struct Model {
     pub gen_seq: u64,
     /// The `:marks` overlay's state while it is open.
     pub marks_view: Option<crate::tui::marks_view::MarksView>,
+    /// Saved filters: the config file they live in and the `[name]` tags.
+    pub saved: crate::tui::saved::SavedState,
     pub connection: Connection,
     pub stats: StatsSnapshot,
     pub size: (u16, u16),
@@ -872,6 +883,7 @@ impl Model {
             gen_from_app: false,
             gen_seq: 0,
             marks_view: None,
+            saved: crate::tui::saved::SavedState::default(),
             connection: Connection::Connecting,
             stats: StatsSnapshot { calls: 0, bytes: 0 },
             size,
@@ -1110,6 +1122,7 @@ impl Model {
         self.enforce_back = None;
         self.enforce_return = Overlay::None;
         self.enforce_send = None;
+        self.saved.applied = crate::tui::saved::Applied::default();
         self.stats = StatsSnapshot { calls: 0, bytes: 0 };
         self.busy = 0;
         self.overlay = Overlay::None;

@@ -221,6 +221,53 @@ pub fn render_app_picker(model: &Model, p: &AppPicker, f: &mut Frame, area: Rect
     f.render_widget(Paragraph::new(lines).block(block).style(t.base()), r);
 }
 
+/// `:filters`: the screen's saved filters, each with its summary.
+pub fn render_filter_picker(
+    model: &Model,
+    p: &crate::tui::saved::FilterPicker,
+    f: &mut Frame,
+    area: Rect,
+) {
+    let t = &model.theme;
+    let matches = p.matches();
+    let shown = matches.len().clamp(1, 10) as u16;
+    let r = centered(area, area.width.saturating_sub(4).min(100), shown + 4);
+    f.render_widget(Clear, r);
+    let title = format!("Saved {} filters", p.screen);
+    let block = panel(&title, "Enter apply · D delete · Esc", t, true);
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("filter: ", t.header_style()),
+            Span::styled(format!("{}▏", p.input), t.base()),
+        ]),
+        Line::from(""),
+    ];
+    if matches.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "no saved filter matches",
+            t.dim_style(),
+        )));
+    }
+    let width = matches
+        .iter()
+        .map(|e| e.name.chars().count())
+        .max()
+        .unwrap_or(0);
+    let first = p.selected.saturating_sub(9);
+    for (i, e) in matches.iter().enumerate().skip(first).take(10) {
+        let style = if i == p.selected {
+            t.base().add_modifier(Modifier::REVERSED)
+        } else {
+            t.base()
+        };
+        lines.push(Line::from(vec![
+            Span::styled(format!("  {:<width$}", e.name), style),
+            Span::styled(format!("  {}", e.summary), t.dim_style()),
+        ]));
+    }
+    f.render_widget(Paragraph::new(lines).block(block).style(t.base()), r);
+}
+
 /// `(title, count prefix, count noun, all row)` name what the picker picks.
 fn draw_key_picker(
     model: &Model,
@@ -1350,9 +1397,10 @@ pub fn screen_hint_more(screen: Screen, view: TrafficView) -> &'static str {
         (Screen::Traffic, TrafficView::Aggregate) => {
             "+/- window  ]/[ cap  x mode  o service  d decision"
         }
-        (Screen::Traffic, _) => "+/- window  ]/[ cap  D draft",
+        (Screen::Traffic, _) => "+/- window  ]/[ cap  D draft  :fl saved",
         (Screen::Workloads, _) => "h/H health  E/m/o/u  c clear",
-        (Screen::Events, _) => "S severity  r refresh  a auto",
+        (Screen::Events, _) => "S severity  r refresh  a auto  :fl saved",
+        (Screen::Policy, _) => ":fl saved",
         _ => "",
     }
 }

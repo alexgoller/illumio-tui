@@ -37,6 +37,12 @@ pub enum Command {
     Batch,
     /// `:marks [action]`: the marks overlay, filtered to one action.
     Marks(Option<String>),
+    /// `:save <name>`: the screen's filter in force, saved under the name.
+    Save(String),
+    /// `:filters` / `:fl`: a picker of the screen's saved filters.
+    Filters,
+    /// `:load <name>`: the screen's saved filter, applied.
+    Load(String),
     Quit,
     Help,
 }
@@ -73,7 +79,7 @@ pub fn parse(input: &str) -> Result<Command, String> {
         "iplists" | "ip" => no_arg(Command::IpLists),
         "filter" | "f" => with_arg(
             Command::Filter,
-            "filter <src expr>  (e.g. app=web,env=prod)",
+            "filter <src expr | saved filter>  (e.g. app=web,env=prod)",
         ),
         "focus" => Ok(Command::Focus((!arg.is_empty()).then(|| arg.to_string()))),
         "app" => Ok(Command::App((!arg.is_empty()).then(|| arg.to_string()))),
@@ -103,6 +109,9 @@ pub fn parse(input: &str) -> Result<Command, String> {
         "active" => no_arg(Command::Active),
         "batch" => no_arg(Command::Batch),
         "marks" => Ok(Command::Marks((!arg.is_empty()).then(|| arg.to_string()))),
+        "save" => with_arg(Command::Save, "save <name>"),
+        "filters" | "fl" => no_arg(Command::Filters),
+        "load" => with_arg(Command::Load, "load <name>"),
         "q" | "quit" => no_arg(Command::Quit),
         "help" | "h" | "?" => no_arg(Command::Help),
         other => Err(format!("unknown command :{other}; try :help")),
@@ -178,6 +187,16 @@ mod tests {
         assert_eq!(parse("active").unwrap(), Command::Active);
         assert_eq!(parse("q").unwrap(), Command::Quit);
         assert_eq!(parse("batch").unwrap(), Command::Batch);
+        assert_eq!(
+            parse("save prod-blocked").unwrap(),
+            Command::Save("prod-blocked".into())
+        );
+        assert_eq!(parse("filters").unwrap(), Command::Filters);
+        assert_eq!(parse("fl").unwrap(), Command::Filters);
+        assert_eq!(parse("load web").unwrap(), Command::Load("web".into()));
+        assert!(parse("save").unwrap_err().contains("usage"));
+        assert!(parse("load").unwrap_err().contains("usage"));
+        assert!(parse("fl x").unwrap_err().contains("takes no argument"));
         assert_eq!(parse("quit").unwrap(), Command::Quit);
         assert_eq!(parse("help").unwrap(), Command::Help);
         assert_eq!(

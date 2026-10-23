@@ -31,4 +31,4 @@ expression: out
 │ │Tab side · / search · Enter workload · :export <path> · Esc close                                                 │ │
 │ ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯ │
 ╰────────────────────────────────────────────────────╯╰────────────────────────────────────────────────────────────────╯
-ready                                               d scope  p pending  Enter detail  Tab pane  i impact  : cmd  ? help
+ready                                    d scope  p pending  Enter detail  Tab pane  i impact  :fl saved  : cmd  ? help

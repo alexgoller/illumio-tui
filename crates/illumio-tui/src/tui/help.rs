@@ -100,6 +100,9 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
             key("", ":readiness  :enforce <app>  (alone: the picker)"),
             key("", ":writes [on|off]  :export[!] <path>  :batch"),
             key("", "(the table on screen as CSV; ! overwrites)"),
+            key("", ":save <name>  the screen's filter, in the profile"),
+            key("", ":filters (:fl)  its saved filters (Enter, D delete)"),
+            key("", ":load <name>  (or :filter <name>; Tab completes)"),
         ],
     },
     HelpGroup {

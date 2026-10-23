@@ -107,6 +107,12 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 model.overlay = Overlay::Prompt { input };
                 Vec::new()
             }
+            // `:load <Tab>`: the screen's saved filter names.
+            KeyCode::Tab => {
+                let input = saved::complete_prompt(model, &input);
+                model.overlay = Overlay::Prompt { input };
+                Vec::new()
+            }
             KeyCode::Char('u') if k.modifiers.contains(KeyModifiers::CONTROL) => {
                 input.clear();
                 model.overlay = Overlay::Prompt { input };
@@ -267,6 +273,14 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     PendingAction::GenRequery(f, focus) => generator::gen_requery(model, f, focus),
                     PendingAction::DeleteMark(id) => marks::delete_mark(model, &id),
                     PendingAction::EnforceWatch => enforce::start_watch(model),
+                    PendingAction::SaveFilter(name, s) => {
+                        saved::write_filter(model, &name, &s);
+                        Vec::new()
+                    }
+                    PendingAction::DeleteFilter(p, name) => {
+                        saved::delete_filter(model, p, &name);
+                        Vec::new()
+                    }
                 }
             }
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
@@ -280,6 +294,9 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 }
                 if matches!(action, PendingAction::DeleteMark(_)) {
                     model.overlay = Overlay::Marks;
+                }
+                if let PendingAction::DeleteFilter(p, _) = &action {
+                    model.overlay = Overlay::FilterPicker(p.clone());
                 }
                 // Asked from Explain (`D`): back to it.
                 if matches!(action, PendingAction::RunDraft { .. })
@@ -633,6 +650,7 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             }
             Vec::new()
         }
+        Overlay::FilterPicker(p) => saved::picker_key(model, p, k),
         Overlay::AppPicker(picker) => match picker.key(k) {
             AppPickerOutcome::Open(p) => {
                 model.overlay = Overlay::AppPicker(p);

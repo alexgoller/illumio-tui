@@ -197,7 +197,7 @@ impl Fields<'_> {
     }
 
     fn wrong(k: &str, want: &str, v: &toml::Value) -> String {
-        format!("field {k}: expected {want}, found a {}", v.type_str())
+        format!("field {k}: expected {want}, found {}", v.type_str())
     }
 
     fn text(&self, k: &str) -> Result<Option<String>, String> {
@@ -287,7 +287,7 @@ impl Saved {
             return match v {
                 toml::Value::String(s) => Ok(Saved::Policy(s.clone())),
                 other => Err(format!(
-                    "a policy filter is a query string, not a {}",
+                    "a policy filter is a query string, not {}",
                     other.type_str()
                 )),
             };

@@ -1508,6 +1508,15 @@ pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
     // marks.toml next to the config file: read at every rebuild (a stat).
     model.traffic.marks =
         crate::marks::MarksStore::new(crate::marks::marks_path(global.config.as_deref()));
+    // Saved filters: the config file's, of the profile in use (read when
+    // used, so a `:profile` switch brings its own).
+    model.saved.path = match &global.env_file {
+        Some(_) => Err("an --env-file connection has no config file profile".into()),
+        None => Ok(global
+            .config
+            .clone()
+            .unwrap_or_else(crate::config::default_config_path)),
+    };
     // Every profile limit, as a `:profile` switch applies them (the
     // generator's settings and auto-backfill included).
     model.limits = Limits::from_config(cfg);

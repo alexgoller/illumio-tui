@@ -207,14 +207,25 @@ fn apply_events_filter(model: &mut Model, mut e: EventsEditor) -> Vec<Cmd> {
         event_type: e.values[1].trim().to_string(),
         window: e.values[2].trim().to_string(),
     };
-    let filter = match edit.to_filter(jiff::Timestamp::now()) {
-        Ok(f) => f,
+    match apply_events_edit(model, edit) {
+        Ok(cmds) => cmds,
         Err(err) => {
             e.error = Some(err);
             model.overlay = Overlay::EventsEditor(e);
-            return Vec::new();
+            Vec::new()
         }
-    };
+    }
+}
+
+/// The editor's `Enter` (and a saved events filter): `edit` checked, then
+/// in force. A change of the type terms alone, or of a `X+` severity,
+/// filters the loaded events again; only a change of what the PCE is asked
+/// (one severity, the window) sends a request. Closes the overlay.
+pub(super) fn apply_events_edit(
+    model: &mut Model,
+    edit: EventsFilterEdit,
+) -> Result<Vec<Cmd>, String> {
+    let filter = edit.to_filter(jiff::Timestamp::now())?;
     let ev = &model.events;
     let side = edit.pce_side();
     // Refilter what is loaded (or about to be): only when it answers (or
@@ -230,17 +241,15 @@ fn apply_events_filter(model: &mut Model, mut e: EventsEditor) -> Vec<Cmd> {
             "{} · filtered locally, no request",
             shown_text(&model.events)
         ));
-        return Vec::new();
+        return Ok(Vec::new());
     }
     if ev.loading {
-        e.error = Some("events are still loading".into());
-        model.overlay = Overlay::EventsEditor(e);
-        return Vec::new();
+        return Err("events are still loading".into());
     }
     model.overlay = Overlay::None;
     model.events.filter = edit;
     model.events.rebuild();
-    request_events(model, filter, CacheMode::Use)
+    Ok(request_events(model, filter, CacheMode::Use))
 }
 
 /// Keys of the type summary: `j`/`k` move, `Enter` shows only the type

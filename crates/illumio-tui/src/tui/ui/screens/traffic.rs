@@ -1039,7 +1039,15 @@ pub fn render_filter_bar(model: &Model, f: &mut Frame, area: Rect) {
         }
     };
     let decision = fl.decisions_text();
-    let line = Line::from(vec![
+    let mut spans = Vec::new();
+    // The saved filter applied, while it is the one in force.
+    if let Some(name) = crate::tui::saved::tag(model, crate::tui::model::Screen::Traffic) {
+        spans.push(Span::styled(
+            format!("[{name}]  "),
+            Style::new().fg(t.accent),
+        ));
+    }
+    spans.extend([
         Span::styled("window ", t.dim_style()),
         Span::styled(fl.window.clone(), Style::new().fg(t.accent)),
         Span::styled("  src ", t.dim_style()),
@@ -1051,7 +1059,12 @@ pub fn render_filter_bar(model: &Model, f: &mut Frame, area: Rect) {
         Span::styled("  decision ", t.dim_style()),
         Span::styled(decision, t.base()),
     ]);
-    f.render_widget(Paragraph::new(line).block(block).style(t.base()), area);
+    f.render_widget(
+        Paragraph::new(Line::from(spans))
+            .block(block)
+            .style(t.base()),
+        area,
+    );
 }
 
 #[cfg(test)]

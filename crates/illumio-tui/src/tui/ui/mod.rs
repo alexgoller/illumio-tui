@@ -44,6 +44,7 @@ pub fn view(model: &Model, f: &mut Frame) {
         Overlay::Prompt { input } => widgets::overlay::render_prompt(model, input, f, area),
         Overlay::GroupKeys(picker) => widgets::overlay::render_key_picker(model, picker, f, area),
         Overlay::AppPicker(p) => widgets::overlay::render_app_picker(model, p, f, area),
+        Overlay::FilterPicker(p) => widgets::overlay::render_filter_picker(model, p, f, area),
         Overlay::App => widgets::app_overlay::render_app(model, f, area),
         Overlay::Generator => widgets::generator::render_generator(model, f, area),
         Overlay::LabelKeys(picker) => {
@@ -56,6 +57,10 @@ pub fn view(model: &Model, f: &mut Frame) {
             // Deleting a mark: the `:marks` list stays behind the question.
             if matches!(action, crate::tui::model::PendingAction::DeleteMark(_)) {
                 widgets::marks::render_marks(model, f, area);
+            }
+            // Deleting a saved filter: the picker stays behind the question.
+            if let crate::tui::model::PendingAction::DeleteFilter(p, _) = action {
+                widgets::overlay::render_filter_picker(model, p, f, area);
             }
             widgets::overlay::render_confirm(model, reason, f, area)
         }

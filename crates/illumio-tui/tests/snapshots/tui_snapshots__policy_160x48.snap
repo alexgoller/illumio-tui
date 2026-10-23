@@ -49,4 +49,4 @@ expression: "render_to_string(&m, 160, 48)"
 │                                                                      ││                                                                                      │
 │                                                                      ││                                                                                      │
 ╰──────────────────────────────────────────────────────────────────────╯╰──────────────────────────────────────────────────────────────────────────────────────╯
-ready                                                                                       d scope  p pending  Enter detail  Tab pane  i impact  : cmd  ? help
+ready                                                                            d scope  p pending  Enter detail  Tab pane  i impact  :fl saved  : cmd  ? help

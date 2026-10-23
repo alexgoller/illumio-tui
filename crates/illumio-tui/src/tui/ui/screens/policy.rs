@@ -164,7 +164,11 @@ fn render_found(model: &Model, search: &pce::RuleFilter, meta: &str, f: &mut Fra
         meta = format!("{sort_meta} · {meta}");
     }
     let room = (body.width as usize).saturating_sub(7 + meta.chars().count());
-    let title = cut(&format!("Search · {search}"), room);
+    let title = match crate::tui::saved::tag(model, crate::tui::model::Screen::Policy) {
+        Some(name) => format!("Search · [{name}] {search}"),
+        None => format!("Search · {search}"),
+    };
+    let title = cut(&title, room);
     let theme = t.clone();
     render(
         f,

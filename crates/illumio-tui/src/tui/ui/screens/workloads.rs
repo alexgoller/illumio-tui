@@ -67,7 +67,14 @@ pub fn render_screen(model: &Model, f: &mut Frame, body: Rect) {
     .areas(area);
     f.render_widget(Paragraph::new(summary_line(model, summary.width)), summary);
     if let Some(text) = filter {
-        let mut spans = vec![Span::styled("filter ", t.header_style()), Span::raw(text)];
+        let mut spans = vec![Span::styled("filter ", t.header_style())];
+        if let Some(name) = crate::tui::saved::tag(model, crate::tui::model::Screen::Workloads) {
+            spans.push(Span::styled(
+                format!("[{name}] "),
+                Style::new().fg(t.accent),
+            ));
+        }
+        spans.push(Span::raw(text));
         // Unknown keys and values match nothing: said, dimmed, not refused.
         if !model.workloads.label_warnings.is_empty() {
             spans.push(Span::styled(

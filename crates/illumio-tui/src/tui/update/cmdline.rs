@@ -27,6 +27,16 @@ pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
             Vec::new()
         }
         Command::Marks(action) => marks::open_marks(model, action.as_deref()),
+        Command::Save(name) => saved::save_filter(model, &name),
+        Command::Filters => {
+            saved::open_filters(model);
+            Vec::new()
+        }
+        Command::Load(name) => saved::load_filter(model, &name),
+        // A saved filter of the screen's by that name wins over the expression.
+        Command::Filter(name) if saved::has_filter(model, &name) => {
+            saved::load_filter(model, &name)
+        }
         // On Workloads `:filter` sets the label filter (local, no request).
         Command::Filter(expr) if model.screen == Screen::Workloads => {
             if let Err(e) = apply_workload_labels(model, &expr) {
