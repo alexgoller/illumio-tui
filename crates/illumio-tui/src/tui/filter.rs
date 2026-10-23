@@ -1,6 +1,8 @@
 //! The traffic filter as the user edits it (strings), its validation and
 //! cost hints (no network), and its conversion to a `TrafficQuery` (needs
 //! the name index, so it is async and runs in the runtime, not in `update`).
+pub use crate::filters::Terms;
+use crate::filters::{or_segments, parse_terms};
 use crate::tui::form::{Completing, Completion, FieldKind};
 use pce::models::{PolicyDecision, TrafficQuery, Transmission};
 use pce::traffic::{
@@ -20,64 +22,6 @@ pub struct TrafficFilter {
     /// The transmission kinds kept; empty: every kind (the default).
     pub transmission: Vec<Transmission>,
     pub max_results: u32,
-}
-
-/// A field's terms: `include` its `|` groups of `,` terms (OR of ANDs),
-/// `exclude` every `!` term, whichever group it is written in: Explorer's
-/// exclude list is flat, so a `!` leaves its match out of the whole field.
-/// No include group (only `!` terms) means every flow except those.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Terms<T> {
-    pub include: Vec<Vec<T>>,
-    pub exclude: Vec<T>,
-}
-
-impl<T> Terms<T> {
-    pub fn is_empty(&self) -> bool {
-        self.include.is_empty() && self.exclude.is_empty()
-    }
-}
-
-/// The `|` segments of `text` that hold a term (`a | ,` has one).
-fn or_segments(text: &str) -> usize {
-    text.split('|')
-        .filter(|g| g.split(',').any(|t| !t.trim().is_empty()))
-        .count()
-}
-
-/// `a,b | c, !d` is ((a AND b) OR c) AND NOT d. Empty terms and groups that
-/// end up empty (`,` or ` | `) are dropped, so blank-ish text parses to no
-/// terms at all. A `!` needs one term after it and starts the term: `a !b`
-/// is a missing `,`.
-fn parse_terms<T>(
-    text: &str,
-    parse: impl Fn(&str) -> Result<T, String>,
-) -> Result<Terms<T>, String> {
-    let mut terms = Terms {
-        include: Vec::new(),
-        exclude: Vec::new(),
-    };
-    for g in text.split('|') {
-        let mut group = Vec::new();
-        for e in g.split(',').map(str::trim).filter(|e| !e.is_empty()) {
-            let negated = e.strip_prefix('!').map(str::trim_start);
-            match negated {
-                Some("") => return Err("! needs a term after it, e.g. !app=web".into()),
-                Some(rest) if rest.starts_with('!') => {
-                    return Err(format!("{e:?}: one ! per term (no double negation)"));
-                }
-                _ if e[1..].contains('!') => {
-                    return Err(format!("{e:?}: use , before ! (env=prod, !app=web)"));
-                }
-                Some(rest) => terms.exclude.push(parse(rest)?),
-                None => group.push(parse(e)?),
-            }
-        }
-        if !group.is_empty() {
-            terms.include.push(group);
-        }
-    }
-    Ok(terms)
 }
 
 fn parse_actor(e: &str) -> Result<FilterExpr, String> {
