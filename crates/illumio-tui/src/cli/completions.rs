@@ -1013,7 +1013,7 @@ src = \"x=y\"
             assert!(fish.contains(&line), "{screen}");
         }
         assert!(script(Shell::Zsh).contains(
-            "'::name -- The saved filter to make the default: _illumio-tui__names filters-policy'"
+            "'::name -- The saved filter to make the default (or --unset): _illumio-tui__names filters-policy'"
         ));
     }
 

@@ -71,8 +71,8 @@ pub enum ScreenDefault {
 
 #[derive(Args, Debug, Clone)]
 pub struct DefaultArg {
-    /// The saved filter to make the default
-    #[arg(required_unless_present = "unset")]
+    /// The saved filter to make the default (or --unset)
+    #[arg(required_unless_present = "unset", value_name = "NAME|--unset")]
     pub name: Option<String>,
     /// Clear the screen's default instead
     #[arg(long, conflicts_with = "name")]
@@ -446,6 +446,19 @@ pub fn run(global: &GlobalArgs, cmd: &FiltersCmd) -> Result<(), CliError> {
                 None => Screen::ALL.to_vec(),
             };
             let mut rows = Vec::new();
+            // A `filters` or `filter_defaults` that is not a table: one row.
+            for (e, default) in [(filters.top_error(), false), (defaults.shape_error(), true)] {
+                if let Some(e) = e {
+                    rows.push(FilterRow {
+                        screen: "-",
+                        name: "-".into(),
+                        default,
+                        summary: String::new(),
+                        error: Some(e),
+                        filter: serde_json::Value::Null,
+                    });
+                }
+            }
             for screen in screens {
                 let problem = |name: &str, default: bool, e: String| FilterRow {
                     screen: screen.as_str(),
@@ -455,11 +468,14 @@ pub fn run(global: &GlobalArgs, cmd: &FiltersCmd) -> Result<(), CliError> {
                     error: Some(e),
                     filter: serde_json::Value::Null,
                 };
-                if let Some(e) = filters.shape_error(screen) {
+                if filters.top_error().is_none()
+                    && let Some(e) = filters.shape_error(screen)
+                {
                     rows.push(problem("-", false, e));
                 }
                 let default = match defaults.get(screen) {
                     Ok(d) => d,
+                    Err(_) if defaults.shape_error().is_some() => None,
                     Err(e) => {
                         rows.push(problem("-", true, e));
                         None

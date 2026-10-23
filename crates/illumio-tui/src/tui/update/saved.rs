@@ -229,7 +229,7 @@ pub(super) fn load_filter(model: &mut Model, name: &str) -> Vec<Cmd> {
         model.profile.name,
         saved.screen()
     );
-    match apply(model, name, saved) {
+    match apply(model, name, saved, true) {
         Ok(cmds) => cmds,
         Err(e) => {
             model.status = StatusLine::error(format!("{what}: {e}"));
@@ -238,24 +238,36 @@ pub(super) fn load_filter(model: &mut Model, name: &str) -> Vec<Cmd> {
     }
 }
 
-fn apply(model: &mut Model, name: &str, saved: Saved) -> Result<Vec<Cmd>, String> {
+/// `saved` in force on its screen as `name`, through the screen's `f`
+/// path. `send` (`:load`, the picker): Traffic runs its query (cost guard
+/// included) and Events asks the PCE when its question changed. Without it
+/// (a default, before anything loads) nothing is sent: the screen's own
+/// first load, or the user's run, uses the filter.
+fn apply(model: &mut Model, name: &str, saved: Saved, send: bool) -> Result<Vec<Cmd>, String> {
+    let mut cmds = Vec::new();
     match saved {
         Saved::Traffic(s) => {
             let f = saved::traffic_filter(&s, &model.traffic.filter)?;
             model.saved.applied.traffic = Some((name.to_string(), f.clone()));
-            Ok(request_query(model, f))
+            if send {
+                return Ok(request_query(model, f));
+            }
+            model.traffic.filter = f;
         }
         Saved::Policy(q) => {
-            let f = pce::RuleFilter::parse(&q)?;
-            apply_rule_search(model, f);
+            apply_rule_search(model, pce::RuleFilter::parse(&q)?);
             saved::mark_applied(model, Screen::Policy, name);
-            Ok(Vec::new())
         }
         Saved::Events(s) => {
             let edit = saved::events_edit(&s, &model.limits.event_type_filter());
-            let cmds = apply_events_edit(model, edit)?;
+            if send {
+                cmds = apply_events_edit(model, edit)?;
+            } else {
+                edit.to_filter(jiff::Timestamp::now())?;
+                model.events.filter = edit;
+                model.events.rebuild();
+            }
             saved::mark_applied(model, Screen::Events, name);
-            Ok(cmds)
         }
         Saved::Workloads(s) => {
             let (filters, labels) = saved::workload_filters(&s);
@@ -270,9 +282,9 @@ fn apply(model: &mut Model, name: &str, saved: Saved) -> Result<Vec<Cmd>, String
                     w.table.len()
                 ));
             }
-            Ok(Vec::new())
         }
     }
+    Ok(cmds)
 }
 
 /// `Tab` in the `:` prompt after `load ` or `filter `: the screen's saved
@@ -318,10 +330,20 @@ pub fn apply_defaults(model: &mut Model) {
     let Ok((filters, defaults)) = load_with_defaults(model) else {
         return;
     };
-    let mut ignored = Vec::new();
-    for screen in FilterScreen::ALL {
+    // A `filter_defaults` or `filters` that is not a table: said once.
+    let mut ignored: Vec<String> = [defaults.shape_error(), filters.top_error()]
+        .into_iter()
+        .flatten()
+        .collect();
+    let screens = if ignored.is_empty() {
+        FilterScreen::ALL.as_slice()
+    } else {
+        &[]
+    };
+    for &screen in screens {
         let applied = defaults.resolve(&filters, screen).and_then(|d| match d {
-            Some((name, saved)) => apply_default(model, &name, saved)
+            Some((name, saved)) => apply(model, &name, saved, false)
+                .map(|_| ())
                 .map_err(|e| format!("default {screen} filter {name:?}: {e}")),
             None => Ok(()),
         });
@@ -341,36 +363,6 @@ pub fn apply_defaults(model: &mut Model) {
     }
 }
 
-/// One default, in force as `:load` would put it, but sending nothing.
-fn apply_default(model: &mut Model, name: &str, saved: Saved) -> Result<(), String> {
-    match saved {
-        Saved::Traffic(s) => {
-            let f = saved::traffic_filter(&s, &model.traffic.filter)?;
-            model.traffic.filter = f.clone();
-            model.saved.applied.traffic = Some((name.to_string(), f));
-        }
-        Saved::Policy(q) => {
-            apply_rule_search(model, pce::RuleFilter::parse(&q)?);
-            saved::mark_applied(model, Screen::Policy, name);
-        }
-        Saved::Events(s) => {
-            let edit = saved::events_edit(&s, &model.limits.event_type_filter());
-            edit.to_filter(jiff::Timestamp::now())?;
-            model.events.filter = edit;
-            model.events.rebuild();
-            saved::mark_applied(model, Screen::Events, name);
-        }
-        Saved::Workloads(s) => {
-            let (filters, labels) = saved::workload_filters(&s);
-            pce::LabelFilter::parse(&labels).map_err(|e| format!("labels: {e}"))?;
-            model.workloads.filters = filters;
-            apply_workload_labels(model, &labels)?;
-            saved::mark_applied(model, Screen::Workloads, name);
-        }
-    }
-    Ok(())
-}
-
 /// Once the names load: a rule search set before them (a default) gets
 /// its names resolved, as `f` resolves them; the names that match none.
 pub(super) fn resolve_search(model: &mut Model) -> Vec<String> {
@@ -388,6 +380,7 @@ pub(super) fn resolve_search(model: &mut Model) -> Vec<String> {
         }
         model.policy.last_search = after;
         model.policy.search = Some(f);
+        model.rebuild_rules();
     }
     unknown
 }

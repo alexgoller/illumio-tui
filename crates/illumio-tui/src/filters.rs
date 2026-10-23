@@ -81,28 +81,62 @@ pub fn check_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// `v`'s TOML type with its article: `a string`, `an integer`.
+pub fn a_type(v: &toml::Value) -> String {
+    let t = v.type_str();
+    let article = if t.starts_with(['a', 'e', 'i', 'o', 'u']) {
+        "an"
+    } else {
+        "a"
+    };
+    format!("{article} {t}")
+}
+
 /// A profile's saved filters as the file holds them, per screen and name;
 /// each parsed only where it is used ([`Saved::parse`]). A screen key that
-/// is not a table (`traffic = "x"`) stays in `extra`, written back as it
-/// was: that screen's filters fail where they are used, nothing else does.
-#[derive(Debug, Default, Clone, PartialEq, Serialize)]
+/// is not a table (`traffic = "x"`) stays in `extra`, and a `filters` that
+/// is not one (`filters = "x"`) in `raw`, each written back as it was:
+/// those filters fail where they are used, nothing else does.
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct SavedFilters {
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub traffic: BTreeMap<String, toml::Value>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub policy: BTreeMap<String, toml::Value>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub events: BTreeMap<String, toml::Value>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub workloads: BTreeMap<String, toml::Value>,
     /// Unknown keys, round-tripped verbatim.
-    #[serde(default, flatten)]
     pub extra: toml::Table,
+    /// The whole value when it is not a table.
+    pub raw: Option<toml::Value>,
+}
+
+impl Serialize for SavedFilters {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        if let Some(v) = &self.raw {
+            return v.serialize(s);
+        }
+        let mut t = self.extra.clone();
+        for screen in Screen::ALL {
+            let m = self.of(screen);
+            if !m.is_empty() {
+                let table = m.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+                t.insert(screen.as_str().into(), toml::Value::Table(table));
+            }
+        }
+        t.serialize(s)
+    }
 }
 
 impl<'de> Deserialize<'de> for SavedFilters {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let mut extra = toml::Table::deserialize(d)?;
+        let mut extra = match toml::Value::deserialize(d)? {
+            toml::Value::Table(t) => t,
+            other => {
+                return Ok(SavedFilters {
+                    raw: Some(other),
+                    ..Default::default()
+                });
+            }
+        };
         let mut f = SavedFilters::default();
         for screen in Screen::ALL {
             match extra.remove(screen.as_str()) {
@@ -119,13 +153,20 @@ impl<'de> Deserialize<'de> for SavedFilters {
 }
 
 impl SavedFilters {
-    /// Why `screen`'s filters cannot be read: its key is not a table.
+    /// Why no filter can be read: `filters` is not a table.
+    pub fn top_error(&self) -> Option<String> {
+        self.raw
+            .as_ref()
+            .map(|v| format!("filters is {}, not a table of screens", a_type(v)))
+    }
+
+    /// Why `screen`'s filters cannot be read: `filters` or its key is not
+    /// a table.
     pub fn shape_error(&self, screen: Screen) -> Option<String> {
-        self.extra.get(screen.as_str()).map(|v| {
-            format!(
-                "filters.{screen} is a {}, not a table of filters",
-                v.type_str()
-            )
+        self.top_error().or_else(|| {
+            self.extra
+                .get(screen.as_str())
+                .map(|v| format!("filters.{screen} is {}, not a table of filters", a_type(v)))
         })
     }
 
@@ -138,7 +179,9 @@ impl SavedFilters {
     }
 
     pub fn is_empty(&self) -> bool {
-        Screen::ALL.iter().all(|s| self.of(*s).is_empty()) && self.extra.is_empty()
+        Screen::ALL.iter().all(|s| self.of(*s).is_empty())
+            && self.extra.is_empty()
+            && self.raw.is_none()
     }
 
     pub fn of(&self, screen: Screen) -> &BTreeMap<String, toml::Value> {
@@ -183,24 +226,62 @@ impl SavedFilters {
 
 /// A profile's default filter per screen (`[profiles.<name>.filter_defaults]`,
 /// `traffic = "prod-blocked"`): a filter name. Kept raw, so a value that is
-/// not a name is said where it is used; unknown keys round-trip verbatim.
-#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct FilterDefaults(pub toml::Table);
+/// not a name, or a `filter_defaults` that is not a table (kept in `raw`),
+/// is said where it is used; both, and unknown keys, round-trip verbatim.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct FilterDefaults {
+    pub names: toml::Table,
+    /// The whole value when it is not a table.
+    pub raw: Option<toml::Value>,
+}
+
+impl Serialize for FilterDefaults {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match &self.raw {
+            Some(v) => v.serialize(s),
+            None => self.names.serialize(s),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for FilterDefaults {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(match toml::Value::deserialize(d)? {
+            toml::Value::Table(names) => FilterDefaults { names, raw: None },
+            other => FilterDefaults {
+                names: toml::Table::new(),
+                raw: Some(other),
+            },
+        })
+    }
+}
 
 impl FilterDefaults {
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.names.is_empty() && self.raw.is_none()
+    }
+
+    /// Why no default can be read: `filter_defaults` is not a table.
+    pub fn shape_error(&self) -> Option<String> {
+        self.raw.as_ref().map(|v| {
+            format!(
+                "filter_defaults is {}, not a table of screen = filter name",
+                a_type(v)
+            )
+        })
     }
 
     /// The screen's default filter name, or why the value is not one.
     pub fn get(&self, screen: Screen) -> Result<Option<&str>, String> {
-        match self.0.get(screen.as_str()) {
+        if let Some(e) = self.shape_error() {
+            return Err(e);
+        }
+        match self.names.get(screen.as_str()) {
             None => Ok(None),
             Some(toml::Value::String(s)) => Ok(Some(s.as_str())),
             Some(v) => Err(format!(
-                "filter_defaults.{screen} is a {}, not a filter name",
-                v.type_str()
+                "filter_defaults.{screen} is {}, not a filter name",
+                a_type(v)
             )),
         }
     }
@@ -286,7 +367,7 @@ impl Fields<'_> {
     }
 
     fn wrong(k: &str, want: &str, v: &toml::Value) -> String {
-        format!("field {k}: expected {want}, found {}", v.type_str())
+        format!("field {k}: expected {want}, found {}", a_type(v))
     }
 
     fn text(&self, k: &str) -> Result<Option<String>, String> {
@@ -376,7 +457,7 @@ impl Saved {
             toml::Value::Table(t) => Ok(Fields(t)),
             other => Err(format!(
                 "expected a table of fields, found {}",
-                other.type_str()
+                a_type(other)
             )),
         };
         Ok(match screen {
@@ -385,7 +466,7 @@ impl Saved {
                 other => {
                     return Err(format!(
                         "a policy filter is a query string, not {}",
-                        other.type_str()
+                        a_type(other)
                     ));
                 }
             },
@@ -613,7 +694,7 @@ impl Store {
             }
             let was_default = p.filter_defaults.get(screen) == Ok(Some(name));
             if was_default {
-                p.filter_defaults.0.remove(screen.as_str());
+                p.filter_defaults.names.remove(screen.as_str());
             }
             Ok(was_default)
         })
@@ -627,6 +708,13 @@ impl Store {
         name: Option<&str>,
     ) -> Result<Option<String>, ConfigError> {
         self.change(|p| {
+            if let Some(e) = p.filter_defaults.shape_error() {
+                return Err(ConfigError::Message(format!(
+                    "profile {}: {e}; fix it in {}",
+                    self.profile,
+                    self.path.display()
+                )));
+            }
             let previous = p
                 .filter_defaults
                 .get(screen)
@@ -639,11 +727,11 @@ impl Store {
                         ConfigError::Message(format!("profile {}: {e}", self.profile))
                     })?;
                     p.filter_defaults
-                        .0
+                        .names
                         .insert(screen.as_str().into(), toml::Value::String(name.into()));
                 }
                 None => {
-                    p.filter_defaults.0.remove(screen.as_str());
+                    p.filter_defaults.names.remove(screen.as_str());
                 }
             }
             Ok(previous)
@@ -1026,7 +1114,7 @@ org_id = 1
         let (_, d) = store.load_with_defaults().unwrap();
         assert_eq!(d.get(Screen::Events), Ok(None));
         assert_eq!(d.get(Screen::Traffic), Ok(Some("prod-blocked")));
-        assert!(d.0.contains_key("future_default"));
+        assert!(d.names.contains_key("future_default"));
         // Unset.
         assert_eq!(
             store.set_default(Screen::Traffic, None).unwrap(),
@@ -1054,8 +1142,55 @@ org_id = 1
         let e = d.resolve(&p.filters, Screen::Policy).unwrap_err();
         assert!(e.contains("\"gone\"") && e.contains("none saved"), "{e}");
         let e = d.resolve(&p.filters, Screen::Events).unwrap_err();
-        assert!(e.contains("filter_defaults.events is a integer"), "{e}");
+        assert!(e.contains("filter_defaults.events is an integer"), "{e}");
         assert_eq!(d.resolve(&p.filters, Screen::Workloads), Ok(None));
+    }
+
+    #[test]
+    fn wrong_shaped_filters_or_defaults_load_and_are_written_back_as_they_were() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let text = CONFIG.replace(
+            "[profiles.lab]\nhost = \"lab.example\"",
+            "[profiles.lab]\nhost = \"lab.example\"\nfilters = \"x\"\nfilter_defaults = [1]",
+        );
+        std::fs::write(&path, &text).unwrap();
+        let file = config::load_config_file(&path).expect("loads");
+        let lab = &file.profiles["lab"];
+        assert_eq!(
+            lab.filters.get(Screen::Traffic, "a").unwrap_err(),
+            "filters is a string, not a table of screens"
+        );
+        assert_eq!(
+            lab.filter_defaults.get(Screen::Events).unwrap_err(),
+            "filter_defaults is an array, not a table of screen = filter name"
+        );
+        let store = Store::new(path.clone(), "lab");
+        let e = store
+            .save("p", &Saved::Policy("deny".into()), false)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("profile lab") && e.contains("filters is a string"),
+            "{e}"
+        );
+        let e = store
+            .set_default(Screen::Traffic, None)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("profile lab") && e.contains("filter_defaults is an array"),
+            "{e}"
+        );
+        // A change to another profile keeps both as they were.
+        Store::new(path.clone(), "demo")
+            .save("new", &Saved::Policy("deny".into()), false)
+            .unwrap();
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            after.contains("filters = \"x\"") && after.contains("filter_defaults = [1]"),
+            "{after}"
+        );
     }
 
     #[test]

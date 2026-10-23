@@ -1230,8 +1230,9 @@ managed = true
 ```
 
 Names are `A-Z a-z 0-9 . _ -`, up to 64, case-sensitive, not starting with `-`. A filter that does not parse stops
-nothing at startup (nor does a screen key that is not a table); using it says which profile,
-screen, filter and field.
+nothing at startup (nor does a screen key, a `filters` or a `filter_defaults` that is not a
+table: the TUI warns, the value is kept as written); using it says which profile, screen,
+filter and field.
 
 In the TUI, `:save <name>` saves the filter in force on the screen (asking before it replaces
 one), `:filters` (`:fl`) lists the screen's saved filters with a summary each (type to narrow,

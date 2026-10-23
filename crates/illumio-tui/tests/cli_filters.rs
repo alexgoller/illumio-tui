@@ -696,7 +696,7 @@ fn a_hand_edited_default_that_does_not_resolve_is_said_where_used() {
         .assert()
         .code(2);
     assert!(
-        stderr(&e).contains("filter_defaults.events is a integer"),
+        stderr(&e).contains("filter_defaults.events is an integer"),
         "{}",
         stderr(&e)
     );
@@ -723,4 +723,86 @@ fn a_hand_edited_default_that_does_not_resolve_is_said_where_used() {
     ])
     .assert()
     .success();
+}
+
+#[test]
+fn wrong_shaped_filters_or_defaults_stop_nothing_else() {
+    let h = Home::new();
+    let text = h.text().replace(
+        "future_key = \"kept too\"",
+        "future_key = \"kept too\"\nfilters = \"x\"\nfilter_defaults = 3",
+    );
+    let text = text.replace(
+        "[profiles.creds.filters.traffic.blocked]\nservice = \"443/tcp\"\ndecisions = [\"blocked\"]\nwindow = \"7d\"\nmax_results = 500\n",
+        "",
+    );
+    assert!(text.contains("filters = \"x\""), "{text}");
+    std::fs::write(h.cfg(), &text).unwrap();
+    h.run(&["--json", "profile", "list"]).assert().success();
+    h.run(&["--json", "filters", "list"]).assert().success();
+    let a = h
+        .run(&["--json", "--profile", "creds", "filters", "list"])
+        .assert()
+        .success();
+    let rows = json(&a)["data"].as_array().unwrap().clone();
+    let errors: Vec<&str> = rows.iter().map(|r| r["error"].as_str().unwrap()).collect();
+    assert_eq!(
+        errors,
+        vec![
+            "filters is a string, not a table of screens",
+            "filter_defaults is an integer, not a table of screen = filter name"
+        ]
+    );
+    let e = h
+        .run(&[
+            "--profile",
+            "creds",
+            "traffic",
+            "query",
+            "--dry-run",
+            "--filter",
+            "x",
+        ])
+        .assert()
+        .code(2);
+    assert!(
+        stderr(&e).contains("profile creds: filters is a string"),
+        "{}",
+        stderr(&e)
+    );
+    let e = h
+        .run(&[
+            "--profile",
+            "creds",
+            "traffic",
+            "query",
+            "--dry-run",
+            "--default-filter",
+        ])
+        .assert()
+        .code(2);
+    assert!(
+        stderr(&e).contains("filter_defaults is an integer"),
+        "{}",
+        stderr(&e)
+    );
+    // Unchanged, and a write elsewhere keeps both values.
+    h.run(&[
+        "traffic",
+        "query",
+        "--filter",
+        "blocked",
+        "--save-filter",
+        "z",
+    ])
+    .assert()
+    .success();
+    let after = h.text();
+    assert!(
+        after.contains("filters = \"x\"") && after.contains("filter_defaults = 3"),
+        "{after}"
+    );
+    h.run(&["--profile", "creds", "traffic", "query", "--dry-run"])
+        .assert()
+        .success();
 }

@@ -345,7 +345,7 @@ fn star_in_the_picker_sets_and_unsets_the_default_in_the_file() {
         Ok(Some("month"))
     );
     assert!(
-        defaults(&path).0.contains_key("future_default"),
+        defaults(&path).names.contains_key("future_default"),
         "unknown keys kept"
     );
     let Overlay::FilterPicker(p) = &m.overlay else {
@@ -426,4 +426,66 @@ fn deleting_the_default_filter_clears_the_default_and_says_so() {
     let (_, d) = Store::new(path, "demo").load_with_defaults().unwrap();
     assert_eq!(d.get(FilterScreen::Workloads), Ok(None));
     assert_eq!(d.get(FilterScreen::Traffic), Ok(Some("web")));
+}
+
+#[test]
+fn a_search_resolved_when_the_names_load_rebuilds_the_found_list() {
+    use crate::tui::test_support::model_with_policy;
+    // The search the `f` path would give, resolved against the index.
+    let mut want = model_with_policy();
+    super::policy::apply_rule_search(&mut want, pce::RuleFilter::parse("ipl:corp").unwrap());
+    assert!(!want.policy.found.is_empty());
+    // The same search put in force unresolved (as before the index), the
+    // rulesets loaded: an index (re)load resolves it and rebuilds the list.
+    let mut m = model_with_policy();
+    m.policy.search = Some(pce::RuleFilter::parse("ipl:corp").unwrap());
+    m.policy.found.set_rows(Vec::new());
+    update(
+        &mut m,
+        Msg::IndexLoaded {
+            index: fixture_index(),
+            age_secs: 0,
+        },
+    );
+    assert_eq!(m.policy.search, want.policy.search);
+    assert_eq!(m.policy.found.len(), want.policy.found.len());
+}
+
+#[test]
+fn wrong_shaped_filters_or_filter_defaults_are_ignored_with_a_warning() {
+    let head = "[profiles.demo]\nhost = \"pce.example\"\norg_id = 5\n";
+    for (text, key) in [
+        (
+            format!(
+                "{head}filter_defaults = \"web\"\n[profiles.demo.filters.traffic.web]\nsrc = \"app=web\"\n"
+            ),
+            "filter_defaults is a string",
+        ),
+        (
+            format!("{head}filters = 3\n[profiles.demo.filter_defaults]\ntraffic = \"web\"\n"),
+            "filters is an integer",
+        ),
+    ] {
+        let (_d, path) = config(|_| text.clone());
+        let mut m = starting(Some(&path));
+        apply_defaults(&mut m);
+        assert_eq!(m.status.kind, StatusKind::Warn, "{key}");
+        assert!(
+            m.status.text.contains("profile demo") && m.status.text.contains(key),
+            "{key}: {}",
+            m.status.text
+        );
+        assert!(m.traffic.filter.src.is_empty(), "nothing applied");
+        // Where used, it says why; the file keeps the value.
+        let mut m = model_fixture();
+        m.saved.path = Ok(path.clone());
+        if key.starts_with("filters") {
+            cmd(&mut m, "fl");
+        } else {
+            cmd(&mut m, "default web");
+        }
+        assert_eq!(m.status.kind, StatusKind::Error);
+        assert!(m.status.text.contains(key), "{}", m.status.text);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+    }
 }
