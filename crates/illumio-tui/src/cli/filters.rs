@@ -1,7 +1,9 @@
 //! Saved filters on the command line: `--filter NAME` (the saved filter
 //! as the base, flags replacing its fields), `--save-filter NAME` (the
-//! effective filter saved, then exit: no request), and `filters
-//! list|show|rm`. The config file only; nothing here contacts the PCE.
+//! effective filter saved, then exit: no request), `--default-filter`
+//! (the screen's default as `--filter`; never applied without it), and
+//! `filters list|show|rm|default`. The config file only; nothing here
+//! contacts the PCE.
 use super::context::config_inputs;
 use super::error::CliError;
 use super::output::{
@@ -22,6 +24,10 @@ pub struct SavedFilterArgs {
     /// that field of it (`policy search`: terms and flags are added to its query)
     #[arg(long, value_name = "NAME")]
     pub filter: Option<String>,
+    /// Start from the profile's default filter for this screen (`filters default`), as --filter
+    /// would; an error when there is none. Without this flag the CLI never applies a default
+    #[arg(long, conflicts_with = "filter")]
+    pub default_filter: bool,
     /// Save the filter these flags (and --filter) make as NAME in the profile, and exit without
     /// contacting the PCE; prints `saved <screen> filter NAME to <config path>` (JSON:
     /// data.screen, data.name, data.config_path, data.replaced, data.filter). Names: letters,
@@ -40,9 +46,49 @@ pub enum FiltersCmd {
     /// Print one saved filter: filters show traffic NAME
     #[command(subcommand)]
     Show(ScreenName),
-    /// Delete one saved filter: filters rm traffic NAME
+    /// Delete one saved filter (and the screen's default, when it is that one): filters rm traffic
+    /// NAME
     #[command(subcommand)]
     Rm(ScreenName),
+    /// Set a screen's default filter (filters default traffic NAME) or clear it (--unset). The TUI
+    /// applies it at startup and after :profile; the CLI only with --default-filter
+    #[command(subcommand)]
+    Default(ScreenDefault),
+}
+
+/// The screen whose default is set, and the filter (or `--unset`).
+#[derive(Subcommand, Debug, Clone)]
+pub enum ScreenDefault {
+    /// The Traffic screen's default (traffic query|groups|mesh --default-filter)
+    Traffic(DefaultArg),
+    /// The Policy screen's default rule search (policy search --default-filter)
+    Policy(DefaultArg),
+    /// The Events screen's default (events --default-filter)
+    Events(DefaultArg),
+    /// The Workloads screen's default (workloads --default-filter)
+    Workloads(DefaultArg),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DefaultArg {
+    /// The saved filter to make the default
+    #[arg(required_unless_present = "unset")]
+    pub name: Option<String>,
+    /// Clear the screen's default instead
+    #[arg(long, conflicts_with = "name")]
+    pub unset: bool,
+}
+
+impl ScreenDefault {
+    fn parts(&self) -> (Screen, Option<&str>) {
+        let (screen, a) = match self {
+            ScreenDefault::Traffic(a) => (Screen::Traffic, a),
+            ScreenDefault::Policy(a) => (Screen::Policy, a),
+            ScreenDefault::Events(a) => (Screen::Events, a),
+            ScreenDefault::Workloads(a) => (Screen::Workloads, a),
+        };
+        (screen, a.name.as_deref().filter(|_| !a.unset))
+    }
 }
 
 #[derive(Args, Debug, Clone, Default)]
@@ -129,13 +175,22 @@ pub fn prepare(global: &GlobalArgs, mut command: Command) -> Result<Option<Comma
     let Some((screen, args)) = saved_args(&command) else {
         return Ok(Some(command));
     };
-    let args = args.clone();
-    if args.filter.is_none() && args.save_filter.is_none() {
+    let mut args = args.clone();
+    if args.filter.is_none() && args.save_filter.is_none() && !args.default_filter {
         return Ok(Some(command));
     }
     let store = store(global)?;
+    if args.default_filter {
+        args.filter = Some(default_name(&store, screen)?);
+    }
     if let Some(name) = &args.filter {
-        let saved = store.get(screen, name)?;
+        let saved = store.get(screen, name).map_err(|e| {
+            if args.default_filter {
+                CliError::Args(format!("--default-filter: {e}"))
+            } else {
+                e.into()
+            }
+        })?;
         merge(&mut command, &saved).map_err(|e| {
             CliError::Args(format!(
                 "profile {}, {screen} filter {name}: {e}",
@@ -172,6 +227,21 @@ pub fn prepare(global: &GlobalArgs, mut command: Command) -> Result<Option<Comma
         }
     }
     Ok(None)
+}
+
+/// `--default-filter`: the name of the profile's default for `screen`.
+fn default_name(store: &Store, screen: Screen) -> Result<String, CliError> {
+    let (_, defaults) = store.load_with_defaults()?;
+    let named = defaults
+        .get(screen)
+        .map_err(|e| CliError::Args(format!("--default-filter: profile {}: {e}", store.profile)))?;
+    named.map(String::from).ok_or_else(|| {
+        CliError::Args(format!(
+            "--default-filter: profile {} has no default {screen} filter; \
+             filters default {screen} NAME sets one",
+            store.profile
+        ))
+    })
 }
 
 /// `saved` (of the command's screen) as the base of `command`.
@@ -234,6 +304,8 @@ struct SaveResult {
 pub struct FilterRow {
     pub screen: &'static str,
     pub name: String,
+    /// The screen's default (`filters default`).
+    pub default: bool,
     pub summary: String,
     /// Why the stored filter does not parse.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -243,7 +315,7 @@ pub struct FilterRow {
 
 impl TableRows for Vec<FilterRow> {
     fn headers(&self) -> Vec<&'static str> {
-        vec!["screen", "name", "summary"]
+        vec!["screen", "name", "default", "summary"]
     }
     fn rows(&self) -> Vec<Vec<String>> {
         self.iter()
@@ -252,7 +324,13 @@ impl TableRows for Vec<FilterRow> {
                     Some(e) => format!("does not parse: {e}"),
                     None => r.summary.clone(),
                 };
-                vec![r.screen.to_string(), r.name.clone(), summary]
+                let default = if r.default { "yes" } else { "" };
+                vec![
+                    r.screen.to_string(),
+                    r.name.clone(),
+                    default.to_string(),
+                    summary,
+                ]
             })
             .collect()
     }
@@ -286,6 +364,8 @@ impl TableRows for ShowResult {
 pub struct RmResult {
     pub screen: &'static str,
     pub name: String,
+    /// It was the screen's default, which is now cleared.
+    pub default_cleared: bool,
     pub config_path: String,
 }
 
@@ -294,8 +374,33 @@ impl TableRows for RmResult {
         vec!["removed", "config_path"]
     }
     fn rows(&self) -> Vec<Vec<String>> {
+        let mut removed = format!("{} filter {}", self.screen, self.name);
+        if self.default_cleared {
+            removed.push_str(&format!(" and the {} default", self.screen));
+        }
+        vec![vec![removed, self.config_path.clone()]]
+    }
+}
+
+/// `filters default`: the screen's default now (`None`: cleared) and before.
+#[derive(Debug, Serialize)]
+pub struct DefaultResult {
+    pub screen: &'static str,
+    pub default: Option<String>,
+    pub previous: Option<String>,
+    pub config_path: String,
+}
+
+impl TableRows for DefaultResult {
+    fn headers(&self) -> Vec<&'static str> {
+        vec!["screen", "default", "previous", "config_path"]
+    }
+    fn rows(&self) -> Vec<Vec<String>> {
+        let name = |n: &Option<String>| n.clone().unwrap_or_else(|| "-".into());
         vec![vec![
-            format!("{} filter {}", self.screen, self.name),
+            self.screen.to_string(),
+            name(&self.default),
+            name(&self.previous),
             self.config_path.clone(),
         ]]
     }
@@ -333,7 +438,7 @@ fn field_text(v: &toml::Value) -> String {
 
 pub fn run(global: &GlobalArgs, cmd: &FiltersCmd) -> Result<(), CliError> {
     let store = store(global)?;
-    let filters = store.load()?;
+    let (filters, defaults) = store.load_with_defaults()?;
     match cmd {
         FiltersCmd::List(a) => {
             let screens: Vec<Screen> = match a.screen.as_deref().and_then(Screen::parse) {
@@ -342,14 +447,29 @@ pub fn run(global: &GlobalArgs, cmd: &FiltersCmd) -> Result<(), CliError> {
             };
             let mut rows = Vec::new();
             for screen in screens {
+                let problem = |name: &str, default: bool, e: String| FilterRow {
+                    screen: screen.as_str(),
+                    name: name.into(),
+                    default,
+                    summary: String::new(),
+                    error: Some(e),
+                    filter: serde_json::Value::Null,
+                };
                 if let Some(e) = filters.shape_error(screen) {
-                    rows.push(FilterRow {
-                        screen: screen.as_str(),
-                        name: "-".into(),
-                        summary: String::new(),
-                        error: Some(e),
-                        filter: serde_json::Value::Null,
-                    });
+                    rows.push(problem("-", false, e));
+                }
+                let default = match defaults.get(screen) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        rows.push(problem("-", true, e));
+                        None
+                    }
+                };
+                if let Some(d) = default
+                    && !filters.of(screen).contains_key(d)
+                {
+                    let e = format!("the default names no saved {screen} filter; it is ignored");
+                    rows.push(problem(d, true, e));
                 }
                 for (name, v) in filters.of(screen) {
                     let (summary, error) = match Saved::parse(screen, v) {
@@ -359,6 +479,7 @@ pub fn run(global: &GlobalArgs, cmd: &FiltersCmd) -> Result<(), CliError> {
                     rows.push(FilterRow {
                         screen: screen.as_str(),
                         name: name.clone(),
+                        default: default == Some(name.as_str()),
                         summary,
                         error,
                         filter: json_of(v),
@@ -388,10 +509,22 @@ pub fn run(global: &GlobalArgs, cmd: &FiltersCmd) -> Result<(), CliError> {
         }
         FiltersCmd::Rm(which) => {
             let (screen, name) = which.parts();
-            store.remove(screen, name)?;
+            let default_cleared = store.remove(screen, name)?;
             let out = RmResult {
                 screen: screen.as_str(),
                 name: name.to_string(),
+                default_cleared,
+                config_path: store.path.display().to_string(),
+            };
+            emit(global, &out, &store.profile)
+        }
+        FiltersCmd::Default(which) => {
+            let (screen, name) = which.parts();
+            let previous = store.set_default(screen, name)?;
+            let out = DefaultResult {
+                screen: screen.as_str(),
+                default: name.map(String::from),
+                previous,
                 config_path: store.path.display().to_string(),
             };
             emit(global, &out, &store.profile)

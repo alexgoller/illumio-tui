@@ -204,6 +204,7 @@ fn csv_refusal(command: &Command) -> Option<&'static str> {
         Command::Profile(profile::ProfileCmd::Add(_)) => Some("profile add"),
         Command::Marks(marks::MarksCmd::Export(_)) => Some("marks export"),
         Command::Filters(filters::FiltersCmd::Rm(_)) => Some("filters rm"),
+        Command::Filters(filters::FiltersCmd::Default(_)) => Some("filters default"),
         c if filters::saves_filter(c) => Some("--save-filter"),
         Command::Enforce(a) if !a.watch => Some("enforce --to/--rollback"),
         _ => None,

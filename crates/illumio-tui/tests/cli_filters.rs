@@ -1,7 +1,7 @@
 //! Saved filters on the command line: `--save-filter` writes the config
 //! file and never builds a client (the profile has no credentials, so any
 //! attempt would fail), `--filter` is the base the flags replace fields
-//! of, `filters list|show|rm`. Every run gets its own temporary config and
+//! of, `filters list|show|rm|default` and `--default-filter`. Every run gets its own temporary config and
 //! cache directories and an explicit `--config`.
 use assert_cmd::Command;
 use serde_json::Value;
@@ -324,9 +324,9 @@ fn filters_list_show_rm_and_csv() {
     assert_eq!(
         csv.lines().collect::<Vec<_>>(),
         vec![
-            "screen,name,summary",
-            "policy,badq,dst:",
-            "policy,deny-prod,dst:env=prod deny"
+            "screen,name,default,summary",
+            "policy,badq,,dst:",
+            "policy,deny-prod,,dst:env=prod deny"
         ]
     );
     let a = h
@@ -470,4 +470,257 @@ fn json_save_carries_screen_name_and_path_and_a_leading_dash_is_refused() {
     assert_eq!(d["config_path"], h.cfg().to_str().unwrap());
     let e = h.run(&["events", "--save-filter=-x"]).assert().code(2);
     assert!(stderr(&e).contains("starts with -"), "{}", stderr(&e));
+}
+
+/// The dry-run body of `traffic query` on profile `creds` with `extra`.
+fn creds_body(h: &Home, extra: &[&str]) -> Value {
+    let mut args = vec![
+        "--json",
+        "--profile",
+        "creds",
+        "traffic",
+        "query",
+        "--dry-run",
+    ];
+    args.extend_from_slice(extra);
+    let a = h.run(&args).assert().success();
+    json(&a)["data"].clone()
+}
+
+#[test]
+fn a_default_applies_only_with_default_filter_never_implicitly() {
+    let h = Home::new();
+    let plain = creds_body(&h, &[]);
+    let a = h
+        .run(&[
+            "--json",
+            "--profile",
+            "creds",
+            "filters",
+            "default",
+            "traffic",
+            "blocked",
+        ])
+        .assert()
+        .success();
+    let d = &json(&a)["data"];
+    assert_eq!(
+        (d["screen"].as_str(), d["default"].as_str()),
+        (Some("traffic"), Some("blocked"))
+    );
+    assert!(d["previous"].is_null(), "{d}");
+    assert!(
+        h.text().contains("[profiles.creds.filter_defaults]"),
+        "{}",
+        h.text()
+    );
+    assert!(h.text().contains(SECRET) && h.text().contains("future_key"));
+    // Without the flag: the same body as before the default was set.
+    assert_eq!(creds_body(&h, &[]), plain);
+    let with = creds_body(&h, &["--default-filter", "--max-results", "50"]);
+    assert_eq!(with["max_results"], 50, "a flag still wins: {with}");
+    assert_eq!(
+        with["policy_decisions"],
+        serde_json::json!(["blocked"]),
+        "{with}"
+    );
+    assert_eq!(
+        with,
+        creds_body(&h, &["--filter", "blocked", "--max-results", "50"])
+    );
+    // It conflicts with --filter.
+    let e = h
+        .run(&[
+            "--profile",
+            "creds",
+            "traffic",
+            "query",
+            "--dry-run",
+            "--default-filter",
+            "--filter",
+            "blocked",
+        ])
+        .assert()
+        .code(2);
+    assert!(stderr(&e).contains("cannot be used with"), "{}", stderr(&e));
+    // A screen without a default: an error, nothing sent.
+    let e = h
+        .run(&["--profile", "creds", "events", "--default-filter"])
+        .assert()
+        .code(2);
+    assert!(
+        stderr(&e).contains("profile creds has no default events filter")
+            && stderr(&e).contains("filters default events NAME"),
+        "{}",
+        stderr(&e)
+    );
+}
+
+#[test]
+fn default_filter_keeps_the_policy_search_term_rewrite() {
+    let h = Home::new();
+    h.run(&["filters", "default", "policy", "deny-prod"])
+        .assert()
+        .success();
+    let a = h
+        .run(&[
+            "--json",
+            "policy",
+            "search",
+            "--default-filter",
+            "-scope:env=dev",
+            "--save-filter",
+            "from-default",
+        ])
+        .assert()
+        .success();
+    let q = json(&a)["data"]["filter"].as_str().unwrap().to_string();
+    assert!(
+        q.contains("dst:env=prod") && q.contains("-scope:env=dev"),
+        "{q}"
+    );
+}
+
+#[test]
+fn filters_default_sets_unsets_lists_and_goes_with_rm() {
+    let h = Home::new();
+    let e = h
+        .run(&["filters", "default", "traffic", "nope"])
+        .assert()
+        .code(2);
+    assert!(
+        stderr(&e).contains("saved: baddec, blocked, broken"),
+        "{}",
+        stderr(&e)
+    );
+    h.run(&["filters", "default", "traffic"]).assert().code(2);
+    h.run(&["filters", "default", "traffic", "blocked", "--unset"])
+        .assert()
+        .code(2);
+    let a = h
+        .run(&["--table", "filters", "default", "policy", "deny-prod"])
+        .assert()
+        .success();
+    let out = String::from_utf8_lossy(&a.get_output().stdout).into_owned();
+    assert!(out.contains("deny-prod"), "{out}");
+    // list: a default column in JSON, CSV and the table.
+    let a = h
+        .run(&["--json", "filters", "list", "--screen", "policy"])
+        .assert()
+        .success();
+    let rows = json(&a)["data"].as_array().unwrap().clone();
+    let defaults: Vec<(&str, bool)> = rows
+        .iter()
+        .map(|r| (r["name"].as_str().unwrap(), r["default"].as_bool().unwrap()))
+        .collect();
+    assert_eq!(defaults, vec![("badq", false), ("deny-prod", true)]);
+    let a = h
+        .run(&["--csv", "filters", "list", "--screen", "policy"])
+        .assert()
+        .success();
+    let csv = String::from_utf8_lossy(&a.get_output().stdout).into_owned();
+    assert!(
+        csv.contains("policy,deny-prod,yes,dst:env=prod deny"),
+        "{csv}"
+    );
+    let a = h
+        .run(&["--table", "filters", "list", "--screen", "policy"])
+        .assert()
+        .success();
+    let table = String::from_utf8_lossy(&a.get_output().stdout).into_owned();
+    assert!(table.lines().next().unwrap().contains("default"), "{table}");
+    // rm of the default clears it and says so.
+    let a = h
+        .run(&["--json", "filters", "rm", "policy", "deny-prod"])
+        .assert()
+        .success();
+    assert_eq!(json(&a)["data"]["default_cleared"], true);
+    assert!(!h.text().contains("filter_defaults"), "{}", h.text());
+    h.run(&["filters", "default", "traffic", "blocked"])
+        .assert()
+        .success();
+    let a = h
+        .run(&["--table", "filters", "rm", "traffic", "blocked"])
+        .assert()
+        .success();
+    let out = String::from_utf8_lossy(&a.get_output().stdout).into_owned();
+    assert!(
+        out.contains("traffic filter blocked and the traffic default"),
+        "{out}"
+    );
+    // --unset.
+    h.run(&["filters", "default", "events", "badtype"])
+        .assert()
+        .success();
+    let a = h
+        .run(&["--json", "filters", "default", "events", "--unset"])
+        .assert()
+        .success();
+    let d = &json(&a)["data"];
+    assert!(d["default"].is_null() && d["previous"] == "badtype", "{d}");
+    h.run(&["--csv", "filters", "default", "events", "--unset"])
+        .assert()
+        .code(2);
+}
+
+#[test]
+fn a_hand_edited_default_that_does_not_resolve_is_said_where_used() {
+    let h = Home::new();
+    let text = h.text().replace(
+        "[profiles.demo.filters.traffic.blocked]",
+        "[profiles.demo.filter_defaults]\ntraffic = \"broken\"\npolicy = \"gone\"\nevents = 4\n\n\
+         [profiles.demo.filters.traffic.blocked]",
+    );
+    std::fs::write(h.cfg(), text).unwrap();
+    let e = h
+        .run(&["traffic", "query", "--default-filter", "--save-filter", "x"])
+        .assert()
+        .code(2);
+    assert!(
+        stderr(&e).contains("--default-filter: profile demo: traffic filter broken: field src"),
+        "{}",
+        stderr(&e)
+    );
+    let e = h
+        .run(&["policy", "search", "--default-filter", "--save-filter", "x"])
+        .assert()
+        .code(2);
+    assert!(
+        stderr(&e).contains("--default-filter: profile demo: no policy filter")
+            && stderr(&e).contains("gone"),
+        "{}",
+        stderr(&e)
+    );
+    let e = h
+        .run(&["events", "--default-filter", "--save-filter", "x"])
+        .assert()
+        .code(2);
+    assert!(
+        stderr(&e).contains("filter_defaults.events is a integer"),
+        "{}",
+        stderr(&e)
+    );
+    // list shows each, other commands are not stopped.
+    let a = h.run(&["--json", "filters", "list"]).assert().success();
+    let rows = json(&a)["data"].as_array().unwrap().clone();
+    let gone = rows.iter().find(|r| r["name"] == "gone").unwrap();
+    assert!(
+        gone["default"].as_bool().unwrap() && gone["error"].as_str().unwrap().contains("ignored")
+    );
+    let broken = rows.iter().find(|r| r["name"] == "broken").unwrap();
+    assert!(broken["default"].as_bool().unwrap(), "{broken}");
+    assert!(
+        rows.iter()
+            .any(|r| r["screen"] == "events" && r["name"] == "-" && r["default"] == true)
+    );
+    h.run(&[
+        "traffic",
+        "query",
+        "--filter",
+        "blocked",
+        "--save-filter",
+        "y",
+    ])
+    .assert()
+    .success();
 }
