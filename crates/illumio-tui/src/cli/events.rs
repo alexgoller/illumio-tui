@@ -56,16 +56,27 @@ impl EventsArgs {
     /// The saved filter `s` as the base: its type where no `--type` or
     /// `--exclude-type` is given, its severity and window where no
     /// `--severity` or `--since` is.
-    pub fn with_saved(&mut self, s: &crate::filters::EventsSaved) {
-        if self.event_type.is_empty() && self.exclude_type.is_empty() {
-            self.event_type = s.event_type.iter().cloned().collect();
+    pub fn with_saved(&mut self, s: &crate::filters::EventsSaved) -> Result<(), String> {
+        if self.event_type.is_empty()
+            && self.exclude_type.is_empty()
+            && let Some(t) = &s.event_type
+        {
+            TypeFilter::parse(t).map_err(|e| format!("field type: {e}"))?;
+            self.event_type = vec![t.clone()];
         }
-        if self.severity.is_none() {
-            self.severity = s.severity.clone();
+        if self.severity.is_none()
+            && let Some(v) = &s.severity
+        {
+            SeverityFilter::parse(v).map_err(|e| format!("field severity: {e}"))?;
+            self.severity = Some(v.clone());
         }
-        if self.since.is_none() {
-            self.since = s.window.clone();
+        if self.since.is_none()
+            && let Some(w) = &s.window
+        {
+            parse_window(w).map_err(|e| format!("field window: {e}"))?;
+            self.since = Some(w.clone());
         }
+        Ok(())
     }
 
     /// The filter as the TUI's events editor saves it (the profile's
@@ -80,19 +91,7 @@ impl EventsArgs {
                 return Err(format!("{flag} is not part of a saved events filter"));
             }
         }
-        let excludes: Vec<&str> = self
-            .exclude_type
-            .iter()
-            .flat_map(|t| t.split(','))
-            .collect();
-        let mut terms: Vec<String> = self.event_type.clone();
-        terms.push(exclude_text(&excludes));
-        let text = terms
-            .iter()
-            .map(|t| t.trim())
-            .filter(|t| !t.is_empty())
-            .collect::<Vec<_>>()
-            .join(", ");
+        let text = type_text(&self.event_type, &self.exclude_type, &[]);
         let saved = crate::filters::EventsSaved {
             event_type: Some(text).filter(|t| !t.is_empty()),
             severity: self.severity.clone(),
@@ -241,6 +240,21 @@ impl TableRows for EventsOut {
     }
 }
 
+/// The type filter's text: the `--type` terms, then each `--exclude-type`
+/// (a comma list each) and `excludes` as `!` terms.
+fn type_text(types: &[String], exclude_types: &[String], excludes: &[String]) -> String {
+    let exclude_flags: Vec<&str> = exclude_types.iter().flat_map(|t| t.split(',')).collect();
+    let mut terms: Vec<String> = types.to_vec();
+    terms.push(exclude_text(&exclude_flags));
+    terms.push(exclude_text(excludes));
+    terms
+        .iter()
+        .map(|t| t.trim())
+        .filter(|t| !t.is_empty())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// The local filters of `args`: the type terms (`--type`, `--exclude-type`
 /// and, without `--all-types`, the profile's excludes) and the severity;
 /// with the words `meta.local_filter` names them by.
@@ -250,22 +264,12 @@ fn local_filters(
 ) -> Result<(TypeFilter, SeverityFilter, Vec<String>), CliError> {
     let severity =
         SeverityFilter::parse(args.severity.as_deref().unwrap_or("")).map_err(CliError::Args)?;
-    let excludes: Vec<&str> = args
-        .exclude_type
-        .iter()
-        .flat_map(|t| t.split(','))
-        .collect();
-    let mut terms: Vec<String> = args.event_type.clone();
-    terms.push(exclude_text(&excludes));
-    if !args.all_types {
-        terms.push(exclude_text(profile_excludes));
-    }
-    let text = terms
-        .iter()
-        .map(|t| t.trim())
-        .filter(|t| !t.is_empty())
-        .collect::<Vec<_>>()
-        .join(", ");
+    let profile: &[String] = if args.all_types {
+        &[]
+    } else {
+        profile_excludes
+    };
+    let text = type_text(&args.event_type, &args.exclude_type, profile);
     let types = TypeFilter::parse(&text).map_err(|e| CliError::Args(format!("--type: {e}")))?;
     let mut words = Vec::new();
     if !types.is_empty() {
@@ -376,12 +380,12 @@ mod tests {
             (Some("warning+"), Some("7d"))
         );
         let mut b = events_args(&["--since", "1h"]);
-        b.with_saved(&s);
+        b.with_saved(&s).unwrap();
         assert_eq!(b.event_type, vec!["sec_policy, !agent.*, !=user.login"]);
         assert_eq!(b.since.as_deref(), Some("1h"), "the flag wins");
         assert_eq!(b.severity.as_deref(), Some("warning+"));
         let mut c = events_args(&["--exclude-type", "x"]);
-        c.with_saved(&s);
+        c.with_saved(&s).unwrap();
         assert!(
             c.event_type.is_empty(),
             "--exclude-type replaces the type field"
@@ -393,6 +397,32 @@ mod tests {
             assert!(events_args(&argv).to_saved().unwrap_err().starts_with(flag));
         }
         assert!(events_args(&["--since", "soon"]).to_saved().is_err());
+        for (bad, field) in [
+            (
+                crate::filters::EventsSaved {
+                    event_type: Some("!".into()),
+                    ..Default::default()
+                },
+                "field type",
+            ),
+            (
+                crate::filters::EventsSaved {
+                    severity: Some("loud+".into()),
+                    ..Default::default()
+                },
+                "field severity",
+            ),
+            (
+                crate::filters::EventsSaved {
+                    window: Some("soon".into()),
+                    ..Default::default()
+                },
+                "field window",
+            ),
+        ] {
+            let e = events_args(&[]).with_saved(&bad).unwrap_err();
+            assert!(e.starts_with(field), "{e}");
+        }
     }
     use super::*;
 

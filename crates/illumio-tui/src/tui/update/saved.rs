@@ -62,7 +62,11 @@ pub(super) fn write_filter(model: &mut Model, name: &str, saved: &Saved) {
 /// `:filters`: the picker of the screen's saved filters.
 pub(super) fn open_filters(model: &mut Model) {
     let loaded = screen_of(model).and_then(|s| Ok((s, model.saved.load(&model.profile.name)?)));
+    let profile = model.profile.name.clone();
     match loaded {
+        Ok((_, f)) if let Some(e) = saved_shape(&f, &model.screen) => {
+            model.status = StatusLine::error(format!("profile {profile}: {e}"));
+        }
         Ok((screen, f)) if f.of(screen).is_empty() => {
             model.status = StatusLine::info(format!(
                 "no saved {screen} filters · :save NAME saves the one in force"
@@ -71,6 +75,11 @@ pub(super) fn open_filters(model: &mut Model) {
         Ok((screen, f)) => model.overlay = Overlay::FilterPicker(FilterPicker::new(screen, &f)),
         Err(e) => model.status = StatusLine::error(e),
     }
+}
+
+/// Why the screen's saved filters cannot be read (a wrong-shaped key).
+fn saved_shape(f: &crate::filters::SavedFilters, screen: &Screen) -> Option<String> {
+    saved::filter_screen(*screen).and_then(|s| f.shape_error(s))
 }
 
 /// Whether the screen has a saved filter `name` (`:filter NAME` loads it).

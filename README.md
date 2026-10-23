@@ -1229,8 +1229,9 @@ enforcement = "visibility_only"
 managed = true
 ```
 
-Names are `A-Z a-z 0-9 . _ -`, up to 64, case-sensitive. A filter that does not parse stops
-nothing at startup; using it says which profile, screen, filter and field.
+Names are `A-Z a-z 0-9 . _ -`, up to 64, case-sensitive, not starting with `-`. A filter that does not parse stops
+nothing at startup (nor does a screen key that is not a table); using it says which profile,
+screen, filter and field.
 
 In the TUI, `:save <name>` saves the filter in force on the screen (asking before it replaces
 one), `:filters` (`:fl`) lists the screen's saved filters with a summary each (type to narrow,
@@ -1244,8 +1245,10 @@ On the CLI, `--filter <name>` on `traffic query|groups|mesh`, `policy search`, `
 `workloads` starts from a saved filter; a flag replaces that field (`--src` the source,
 `--window` the window; `policy search` adds its terms to the saved query). `--save-filter
 <name>` saves the filter the flags (and `--filter`) make and exits without contacting the PCE
-(`--force` replaces an existing one). Repeated `--src` is `|` in the text, `--exclude-src X`
-is `!X`; what the text cannot hold (`--process`, `--from`/`--to`, `--status`, ...) is an error.
+(`--force` replaces an existing one); it prints `saved <screen> filter <name> to <path>`, or with
+JSON `data.screen`, `data.name`, `data.config_path` and `data.filter`. Repeated `--src` is `|` in the text, `--exclude-src X`
+is `!X`; what the text cannot hold (`--process`, `--from`/`--to`, `--status`, a bare `--proto`
+number other than 6, 17 or 1, a `|` or leading `!` inside a flag value, ...) is an error.
 
 ```sh
 illumio-tui traffic groups --src env=prod --exclude-dst app=backup --decision blocked --save-filter prod-blocked

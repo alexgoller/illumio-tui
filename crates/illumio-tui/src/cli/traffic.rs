@@ -339,9 +339,44 @@ pub struct FilterArgs {
     #[command(flatten)]
     pub saved: super::filters::SavedFilterArgs,
     /// A saved filter's services to include (`443/tcp`, `svc:NAME`), any
-    /// of them; set by `--filter` only, never with `--port`.
+    /// of them: the saved text's include terms, set by `--filter` only and
+    /// never with `--port` (not `traffic groups --services`, a view flag).
     #[arg(skip)]
-    pub services: Vec<String>,
+    pub saved_services: Vec<String>,
+}
+
+/// `value` of `flag` as one saved text term group: `|` and a leading `!`
+/// are the text's own operators, so a value holding them would change
+/// meaning; refused with the flag to use instead.
+fn plain(flag: &str, value: &str, exclude: &str) -> Result<(), String> {
+    if value.contains('|') {
+        return Err(format!(
+            "{flag} {value:?}: | separates alternatives in a saved filter; repeat {flag} instead"
+        ));
+    }
+    if let Some(t) = arg_terms(value).into_iter().find(|t| t.starts_with('!')) {
+        return Err(format!(
+            "{flag} {value:?}: {t:?} would read as an exclusion in a saved filter; {exclude}"
+        ));
+    }
+    Ok(())
+}
+
+/// `--proto` alone as a saved service term: a name (`tcp`), or 6, 17, 1
+/// as `tcp`, `udp`, `icmp`. The text reads a bare number as a port, so any
+/// other number is refused rather than saved as one.
+fn bare_proto(proto: &str) -> Result<String, String> {
+    let p = proto.trim().to_ascii_lowercase();
+    match p.parse::<u16>() {
+        Ok(6) => Ok("tcp".into()),
+        Ok(17) => Ok("udp".into()),
+        Ok(1) => Ok("icmp".into()),
+        Ok(n) => Err(format!(
+            "--proto {n} alone cannot be saved: a saved filter reads a bare number as a port \
+             (tcp, udp and icmp can; or give --port with it)"
+        )),
+        Err(_) => Ok(p),
+    }
 }
 
 /// One `--src`/`--dst` value's terms (`,` = AND); blanks dropped.
@@ -397,12 +432,17 @@ impl FilterArgs {
                     "a flow has one service; use | between services (443/tcp | 80/tcp)".into(),
                 ));
             }
-            self.services = terms.include.into_iter().flatten().collect();
+            self.saved_services = terms.include.into_iter().flatten().collect();
             self.exclude_service = terms.exclude;
         }
         if self.decision.is_empty()
             && let Some(d) = &s.decisions
         {
+            if let Some(bad) = d.iter().find(|d| PolicyDecision::parse(d).is_none()) {
+                return Err(format!(
+                    "field decisions: unknown {bad:?} (allowed, potentially_blocked, blocked)"
+                ));
+            }
             self.decision = d.clone();
         }
         if self.transmission.is_empty()
@@ -416,11 +456,22 @@ impl FilterArgs {
                 })
                 .collect::<Result<_, _>>()?;
         }
-        if self.window.is_none() && self.from.is_none() {
-            self.window = s.window.clone();
+        if self.window.is_none()
+            && self.from.is_none()
+            && let Some(w) = &s.window
+        {
+            parse_window(w).map_err(|e| format!("field window: {e}"))?;
+            self.window = Some(w.clone());
         }
-        if self.max_results.is_none() {
-            self.max_results = s.max_results;
+        if self.max_results.is_none()
+            && let Some(n) = s.max_results
+        {
+            if !(1..=MAX_TRAFFIC_MAX_RESULTS).contains(&n) {
+                return Err(format!(
+                    "field max_results: {n} is not between 1 and {MAX_TRAFFIC_MAX_RESULTS}"
+                ));
+            }
+            self.max_results = Some(n);
         }
         Ok(())
     }
@@ -449,6 +500,34 @@ impl FilterArgs {
                 return Err(format!("{flag}: {why}"));
             }
         }
+        for (flag, values, use_instead) in [
+            ("--src", &self.src, "use --exclude-src"),
+            ("--dst", &self.dst, "use --exclude-dst"),
+            (
+                "--exclude-src",
+                &self.exclude_src,
+                "give the term without !",
+            ),
+            (
+                "--exclude-dst",
+                &self.exclude_dst,
+                "give the term without !",
+            ),
+            (
+                "--exclude-service",
+                &self.exclude_service,
+                "give the term without !",
+            ),
+        ] {
+            for v in values {
+                plain(flag, v, use_instead)?;
+            }
+        }
+        for (flag, v) in [("--port", &self.port), ("--proto", &self.proto)] {
+            if let Some(v) = v {
+                plain(flag, v, "use --exclude-service")?;
+            }
+        }
         let side = |inc: &[String], exc: &[String]| {
             let include: Vec<Vec<String>> = inc
                 .iter()
@@ -460,8 +539,13 @@ impl FilterArgs {
         };
         let services: Vec<Vec<String>> = match (&self.port, &self.proto) {
             (Some(port), Some(proto)) => vec![vec![format!("{port}/{proto}")]],
-            (Some(one), None) | (None, Some(one)) => vec![vec![one.clone()]],
-            (None, None) => self.services.iter().map(|s| vec![s.clone()]).collect(),
+            (Some(port), None) => vec![vec![port.clone()]],
+            (None, Some(proto)) => vec![vec![bare_proto(proto)?]],
+            (None, None) => self
+                .saved_services
+                .iter()
+                .map(|s| vec![s.clone()])
+                .collect(),
         };
         let list = |v: Vec<String>| (!v.is_empty()).then_some(v);
         let saved = crate::filters::TrafficSaved {
@@ -595,7 +679,7 @@ async fn build_query(
         .collect::<Result<_, _>>()?;
     // A saved filter's services (never with `--port`): any of them.
     let in_svc: Vec<ServiceExpr> = args
-        .services
+        .saved_services
         .iter()
         .map(|s| ServiceExpr::parse(s).map_err(|e| CliError::Args(format!("service: {e}"))))
         .collect::<Result<_, _>>()?;
@@ -2131,7 +2215,7 @@ mod tests {
         back.with_saved(&s).unwrap();
         assert_eq!(back.src, vec!["app=web,env=prod", "ipl:Corp"]);
         assert_eq!(back.exclude_src, vec!["app=backup", "role=db"]);
-        assert_eq!(back.services, vec!["8000-8100/tcp"]);
+        assert_eq!(back.saved_services, vec!["8000-8100/tcp"]);
         assert_eq!(back.exclude_service, vec!["53/udp"]);
         assert_eq!(back.transmission, vec![TransmissionArg::Unicast]);
         assert_eq!(back.to_saved().unwrap(), s, "round trip");
@@ -2142,7 +2226,7 @@ mod tests {
         };
         let mut f = FilterArgs::default();
         f.with_saved(&tui).unwrap();
-        assert_eq!(f.services, vec!["443/tcp", "svc:HTTPS"]);
+        assert_eq!(f.saved_services, vec!["443/tcp", "svc:HTTPS"]);
         assert_eq!(f.to_saved().unwrap().service, tui.service);
     }
 
@@ -2170,7 +2254,7 @@ mod tests {
         assert!(f.src.is_empty(), "--exclude-src replaces the whole source");
         assert_eq!(f.exclude_src, vec!["app=db"]);
         assert_eq!(f.exclude_dst, vec!["app=backup"], "kept");
-        assert!(f.services.is_empty(), "--port replaces the service");
+        assert!(f.saved_services.is_empty(), "--port replaces the service");
         assert_eq!(f.window, None, "--from/--to replace the window");
         assert_eq!(f.max_results, Some(500));
     }
@@ -2192,11 +2276,69 @@ mod tests {
             .to_saved()
             .unwrap_err();
         assert!(e.contains("source"), "checked as the f editor checks: {e}");
-        let bad = crate::filters::TrafficSaved {
-            transmission: Some(vec!["anycast".into()]),
-            ..Default::default()
-        };
-        let e = FilterArgs::default().with_saved(&bad).unwrap_err();
-        assert!(e.contains("field transmission"), "{e}");
+        for (bad, field) in [
+            (
+                crate::filters::TrafficSaved {
+                    transmission: Some(vec!["anycast".into()]),
+                    ..Default::default()
+                },
+                "field transmission",
+            ),
+            (
+                crate::filters::TrafficSaved {
+                    decisions: Some(vec!["nope".into()]),
+                    ..Default::default()
+                },
+                "field decisions",
+            ),
+            (
+                crate::filters::TrafficSaved {
+                    window: Some("soon".into()),
+                    ..Default::default()
+                },
+                "field window",
+            ),
+            (
+                crate::filters::TrafficSaved {
+                    max_results: Some(0),
+                    ..Default::default()
+                },
+                "field max_results",
+            ),
+        ] {
+            let e = FilterArgs::default().with_saved(&bad).unwrap_err();
+            assert!(e.starts_with(field), "{e}");
+        }
+        // The text's own operators in a flag value: refused, naming the flag.
+        for (argv, flag) in [
+            (vec!["--src", "!app=x"], "--exclude-src"),
+            (vec!["--dst", "app=a | app=b"], "repeat --dst"),
+            (vec!["--exclude-src", "!app=x"], "without !"),
+        ] {
+            let e = query_filter(&argv).to_saved().unwrap_err();
+            assert!(e.contains(flag), "{e}");
+        }
+    }
+
+    #[test]
+    fn a_bare_protocol_saves_as_its_name_and_other_numbers_are_refused() {
+        for (proto, text) in [("6", "tcp"), ("17", "udp"), ("1", "icmp"), ("TCP", "tcp")] {
+            let s = query_filter(&["--proto", proto]).to_saved().unwrap();
+            assert_eq!(s.service.as_deref(), Some(text), "{proto}");
+            let mut back = FilterArgs::default();
+            back.with_saved(&s).unwrap();
+            assert_eq!(back.saved_services, vec![text]);
+            let e = ServiceExpr::parse(text).unwrap();
+            assert!(
+                format!("{e:?}").to_lowercase().contains("proto"),
+                "{text} reads back as a protocol: {e:?}"
+            );
+        }
+        let e = query_filter(&["--proto", "47"]).to_saved().unwrap_err();
+        assert!(e.contains("--proto 47 alone cannot be saved"), "{e}");
+        let s = query_filter(&["--port", "443", "--proto", "6"])
+            .to_saved()
+            .unwrap();
+        assert_eq!(s.service.as_deref(), Some("443/6"));
     }
 }

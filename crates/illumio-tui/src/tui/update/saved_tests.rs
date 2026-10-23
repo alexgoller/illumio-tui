@@ -367,3 +367,31 @@ fn tab_in_the_prompt_completes_the_screens_saved_names() {
         }
     );
 }
+
+#[test]
+fn a_wrong_shaped_screen_key_is_said_where_it_is_used() {
+    let (mut m, _d, path) = with_config(model_with_events());
+    let text = std::fs::read_to_string(&path).unwrap().replace(
+        "[profiles.demo.filters.events.agents]",
+        "[profiles.demo.filters]\nworkloads = 3\n\n[profiles.demo.filters.events.agents]",
+    );
+    let text = text.replace(
+        "[profiles.demo.filters.workloads.prod-idle]\nlabels = \"env=prod\"\nenforcement = \"idle\"\n",
+        "",
+    );
+    std::fs::write(&path, text).unwrap();
+    m.screen = Screen::Workloads;
+    cmd(&mut m, "fl");
+    assert_eq!(m.status.kind, StatusKind::Error);
+    assert!(
+        m.status.text.contains("profile demo") && m.status.text.contains("filters.workloads"),
+        "{}",
+        m.status.text
+    );
+    m.screen = Screen::Events;
+    cmd(&mut m, "fl");
+    assert!(
+        matches!(m.overlay, Overlay::FilterPicker(_)),
+        "other screens work"
+    );
+}

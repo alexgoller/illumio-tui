@@ -906,7 +906,7 @@ exclude_types = ["=user.login", "agent.*"]  <span class="c"># hidden by default<
       <h3>Event types hidden by default</h3>
       <p><code>exclude_types</code> lists event types the Events screen and <code>events</code> hide unless asked: each a substring, a <code>*</code> glob or an exact type (<code>=user.login</code>), added as a <code>!term</code> to the type filter. The TUI's Type field starts with them (<code>f</code> drops one for the session); <code>events --all-types</code> shows every type. The tool reads this setting and never writes it.</p>
       <h3>Saved filters</h3>
-      <p><code>[profiles.&lt;name&gt;.filters.&lt;screen&gt;.&lt;filter&gt;]</code> holds named filters for Traffic, Policy, Events and Workloads in the <kbd>f</kbd> editors' text (a policy filter is one search query). <code>:save</code> and <code>--save-filter</code> write them, keeping every other setting; one that does not parse fails only when used. Names: letters, digits, <code>.</code> <code>_</code> <code>-</code>, up to 64.</p>
+      <p><code>[profiles.&lt;name&gt;.filters.&lt;screen&gt;.&lt;filter&gt;]</code> holds named filters for Traffic, Policy, Events and Workloads in the <kbd>f</kbd> editors' text (a policy filter is one search query). <code>:save</code> and <code>--save-filter</code> write them, keeping every other setting; one that does not parse fails only when used. Names: letters, digits, <code>.</code> <code>_</code> <code>-</code>, up to 64, not starting with <code>-</code>.</p>
 <pre><code>[profiles.demo.filters.traffic.prod-blocked]
 src = "env=prod"
 dst = "!app=backup"

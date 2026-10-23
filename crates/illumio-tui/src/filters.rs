@@ -51,10 +51,16 @@ impl std::fmt::Display for Screen {
 /// Longest filter name.
 pub const MAX_NAME: usize = 64;
 
-/// A name is 1 to 64 of `A-Z a-z 0-9 . _ -` (case-sensitive).
+/// A name is 1 to 64 of `A-Z a-z 0-9 . _ -` (case-sensitive), not
+/// starting with `-` (a flag to the CLI).
 pub fn check_name(name: &str) -> Result<(), String> {
     if name.is_empty() {
         return Err("a filter name is empty".into());
+    }
+    if name.starts_with('-') {
+        return Err(format!(
+            "filter name {name:?} starts with -, which reads as a flag"
+        ));
     }
     if name.chars().count() > MAX_NAME {
         return Err(format!(
@@ -73,8 +79,10 @@ pub fn check_name(name: &str) -> Result<(), String> {
 }
 
 /// A profile's saved filters as the file holds them, per screen and name;
-/// each parsed only where it is used ([`Saved::parse`]).
-#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+/// each parsed only where it is used ([`Saved::parse`]). A screen key that
+/// is not a table (`traffic = "x"`) stays in `extra`, written back as it
+/// was: that screen's filters fail where they are used, nothing else does.
+#[derive(Debug, Default, Clone, PartialEq, Serialize)]
 pub struct SavedFilters {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub traffic: BTreeMap<String, toml::Value>,
@@ -89,7 +97,43 @@ pub struct SavedFilters {
     pub extra: toml::Table,
 }
 
+impl<'de> Deserialize<'de> for SavedFilters {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let mut extra = toml::Table::deserialize(d)?;
+        let mut f = SavedFilters::default();
+        for screen in Screen::ALL {
+            match extra.remove(screen.as_str()) {
+                Some(toml::Value::Table(t)) => *f.of_mut(screen) = t.into_iter().collect(),
+                Some(other) => {
+                    extra.insert(screen.as_str().to_string(), other);
+                }
+                None => {}
+            }
+        }
+        f.extra = extra;
+        Ok(f)
+    }
+}
+
 impl SavedFilters {
+    /// Why `screen`'s filters cannot be read: its key is not a table.
+    pub fn shape_error(&self, screen: Screen) -> Option<String> {
+        self.extra.get(screen.as_str()).map(|v| {
+            format!(
+                "filters.{screen} is a {}, not a table of filters",
+                v.type_str()
+            )
+        })
+    }
+
+    /// The screen's filters, or why they cannot be read.
+    pub fn checked(&self, screen: Screen) -> Result<&BTreeMap<String, toml::Value>, String> {
+        match self.shape_error(screen) {
+            Some(e) => Err(e),
+            None => Ok(self.of(screen)),
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         Screen::ALL.iter().all(|s| self.of(*s).is_empty()) && self.extra.is_empty()
     }
@@ -120,7 +164,7 @@ impl SavedFilters {
     /// The filter `name` of `screen`, parsed; the error names the screen,
     /// the filter and the field.
     pub fn get(&self, screen: Screen, name: &str) -> Result<Saved, String> {
-        match self.of(screen).get(name) {
+        match self.checked(screen)?.get(name) {
             Some(v) => Saved::parse(screen, v).map_err(|e| format!("{screen} filter {name}: {e}")),
             None => {
                 let known = self.names(screen);
@@ -283,24 +327,25 @@ impl Saved {
     /// and their types); what the text means is checked where it is
     /// applied. The error names the field.
     pub fn parse(screen: Screen, v: &toml::Value) -> Result<Self, String> {
-        if screen == Screen::Policy {
-            return match v {
-                toml::Value::String(s) => Ok(Saved::Policy(s.clone())),
-                other => Err(format!(
-                    "a policy filter is a query string, not {}",
-                    other.type_str()
-                )),
-            };
-        }
-        let toml::Value::Table(t) = v else {
-            return Err(format!(
-                "expected a table of fields, found a {}",
-                v.type_str()
-            ));
+        let table = || match v {
+            toml::Value::Table(t) => Ok(Fields(t)),
+            other => Err(format!(
+                "expected a table of fields, found {}",
+                other.type_str()
+            )),
         };
-        let f = Fields(t);
         Ok(match screen {
+            Screen::Policy => match v {
+                toml::Value::String(s) => Saved::Policy(s.clone()),
+                other => {
+                    return Err(format!(
+                        "a policy filter is a query string, not {}",
+                        other.type_str()
+                    ));
+                }
+            },
             Screen::Traffic => {
+                let f = table()?;
                 f.only(&[
                     "src",
                     "dst",
@@ -321,6 +366,7 @@ impl Saved {
                 })
             }
             Screen::Events => {
+                let f = table()?;
                 f.only(&["type", "severity", "window"])?;
                 Saved::Events(EventsSaved {
                     event_type: f.text("type")?,
@@ -328,7 +374,8 @@ impl Saved {
                     window: f.text("window")?,
                 })
             }
-            Screen::Workloads | Screen::Policy => {
+            Screen::Workloads => {
+                let f = table()?;
                 f.only(&["labels", "enforcement", "managed", "offline", "unlabeled"])?;
                 let enforcement = f.text("enforcement")?;
                 if let Some(e) = &enforcement
@@ -484,6 +531,12 @@ impl Store {
         check_name(name).map_err(ConfigError::Message)?;
         let screen = saved.screen();
         self.change(|f| {
+            if let Some(e) = f.shape_error(screen) {
+                return Err(ConfigError::Message(format!(
+                    "profile {}: {e}",
+                    self.profile
+                )));
+            }
             let map = f.of_mut(screen);
             let replaced = map.contains_key(name);
             if replaced && !force {
@@ -660,7 +713,7 @@ org_id = 1
         for ok in ["a", "prod-blocked", "A.b_c-1", &"x".repeat(64)] {
             assert!(check_name(ok).is_ok(), "{ok}");
         }
-        for bad in ["", "a b", "a/b", "ünïcode", "a=b", &"x".repeat(65)] {
+        for bad in ["", "-x", "a b", "a/b", "ünïcode", "a=b", &"x".repeat(65)] {
             assert!(check_name(bad).is_err(), "{bad}");
         }
     }
@@ -780,6 +833,49 @@ org_id = 1
             store
                 .save("x", &Saved::Policy("deny".into()), false)
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn a_screen_key_of_the_wrong_shape_fails_only_that_screen() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let text = CONFIG.replace(
+            "[profiles.demo.filters]\nfuture_screen = { a = 1 }",
+            "[profiles.demo.filters]\nfuture_screen = { a = 1 }\nevents = \"oops\"",
+        )
+        .replace(
+            "[profiles.demo.filters.events.noise-free]\ntype = \"!agent.*, !=user.login\"\nseverity = \"warning+\"\nwindow = \"7d\"\n",
+            "",
+        );
+        assert!(text.contains("events = \"oops\""), "{text}");
+        std::fs::write(&path, &text).unwrap();
+        // The file loads: other commands and profiles are not stopped.
+        let file = config::load_config_file(&path).expect("loads");
+        assert!(file.profiles.contains_key("lab"));
+        let store = Store::new(path.clone(), "demo");
+        let f = store.load().unwrap();
+        let e = f.get(Screen::Events, "x").unwrap_err();
+        assert!(e.contains("filters.events is a string"), "{e}");
+        assert!(
+            f.get(Screen::Traffic, "prod-blocked").is_ok(),
+            "other screens work"
+        );
+        // A save elsewhere keeps the odd value as it was; one there is refused.
+        let p = Saved::Policy("deny".into());
+        store.save("d", &p, false).unwrap();
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("events = \"oops\"")
+        );
+        let e = store
+            .save("e", &Saved::Events(EventsSaved::default()), false)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("profile demo") && e.contains("filters.events"),
+            "{e}"
         );
     }
 

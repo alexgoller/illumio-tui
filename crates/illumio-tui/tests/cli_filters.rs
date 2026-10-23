@@ -28,8 +28,15 @@ max_results = 500
 [profiles.demo.filters.traffic.broken]
 src = 3
 
+[profiles.demo.filters.traffic.baddec]
+decisions = ["nope"]
+
 [profiles.demo.filters.policy]
 deny-prod = "dst:env=prod deny"
+badq = "dst:"
+
+[profiles.demo.filters.events.badtype]
+type = "!"
 
 [profiles.creds]
 host = "127.0.0.1"
@@ -300,12 +307,15 @@ fn filters_list_show_rm_and_csv() {
     assert_eq!(
         names,
         vec![
+            ("traffic".into(), "baddec".into()),
             ("traffic".into(), "blocked".into()),
             ("traffic".into(), "broken".into()),
-            ("policy".into(), "deny-prod".into())
+            ("policy".into(), "badq".into()),
+            ("policy".into(), "deny-prod".into()),
+            ("events".into(), "badtype".into())
         ]
     );
-    assert!(rows[1]["error"].as_str().unwrap().contains("src"));
+    assert!(rows[2]["error"].as_str().unwrap().contains("src"));
     let a = h
         .run(&["--csv", "filters", "list", "--screen", "policy"])
         .assert()
@@ -313,7 +323,11 @@ fn filters_list_show_rm_and_csv() {
     let csv = String::from_utf8_lossy(&a.get_output().stdout).into_owned();
     assert_eq!(
         csv.lines().collect::<Vec<_>>(),
-        vec!["screen,name,summary", "policy,deny-prod,dst:env=prod deny"]
+        vec![
+            "screen,name,summary",
+            "policy,badq,dst:",
+            "policy,deny-prod,dst:env=prod deny"
+        ]
     );
     let a = h
         .run(&["--json", "filters", "show", "traffic", "blocked"])
@@ -362,4 +376,98 @@ fn an_env_file_or_env_only_connection_has_no_saved_filters() {
     h.run(&["--csv", "events", "--save-filter", "x"])
         .assert()
         .code(2);
+}
+
+#[test]
+fn every_broken_saved_field_names_profile_screen_filter_and_field() {
+    let h = Home::new();
+    for (args, want) in [
+        (
+            vec![
+                "traffic",
+                "query",
+                "--filter",
+                "baddec",
+                "--save-filter",
+                "x",
+            ],
+            "profile demo, traffic filter baddec: field decisions",
+        ),
+        (
+            vec!["policy", "search", "--filter", "badq", "--save-filter", "x"],
+            "profile demo, policy filter badq: query",
+        ),
+        (
+            vec!["events", "--filter", "badtype", "--save-filter", "x"],
+            "profile demo, events filter badtype: field type",
+        ),
+    ] {
+        let e = h.run(&args).assert().code(2);
+        let err = stderr(&e);
+        assert!(err.contains(want), "{args:?}: {err}");
+    }
+}
+
+#[test]
+fn a_wrong_shaped_screen_key_breaks_only_that_screen() {
+    let h = Home::new();
+    let text = h
+        .text()
+        .replace("[profiles.demo.filters.events.badtype]\ntype = \"!\"\n", "");
+    let text = text.replace(
+        "[profiles.demo.filters.traffic.blocked]",
+        "[profiles.demo.filters]\nevents = \"oops\"\n\n[profiles.demo.filters.traffic.blocked]",
+    );
+    std::fs::write(h.cfg(), text).unwrap();
+    h.run(&["--json", "profile", "list"]).assert().success();
+    h.run(&["--json", "--profile", "creds", "filters", "list"])
+        .assert()
+        .success();
+    let a = h
+        .run(&["--json", "filters", "list", "--screen", "events"])
+        .assert()
+        .success();
+    let rows = json(&a)["data"].clone();
+    assert!(
+        rows[0]["error"]
+            .as_str()
+            .unwrap()
+            .contains("filters.events"),
+        "{rows}"
+    );
+    let e = h
+        .run(&["events", "--filter", "x", "--save-filter", "y"])
+        .assert()
+        .code(2);
+    let err = stderr(&e);
+    assert!(
+        err.contains("profile demo") && err.contains("filters.events"),
+        "{err}"
+    );
+    h.run(&[
+        "traffic",
+        "query",
+        "--filter",
+        "blocked",
+        "--save-filter",
+        "b2",
+    ])
+    .assert()
+    .success();
+    assert!(h.text().contains("events = \"oops\""), "kept as it was");
+}
+
+#[test]
+fn json_save_carries_screen_name_and_path_and_a_leading_dash_is_refused() {
+    let h = Home::new();
+    let a = h
+        .run(&["--json", "events", "--type", "agent", "--save-filter", "ag"])
+        .assert()
+        .success();
+    let d = &json(&a)["data"];
+    assert_eq!(d["screen"], "events");
+    assert_eq!(d["name"], "ag");
+    assert_eq!(d["config_path"], h.cfg().to_str().unwrap());
+    let e = h.run(&["events", "--save-filter=-x"]).assert().code(2);
+    assert!(stderr(&e).contains("starts with -"), "{}", stderr(&e));
 }

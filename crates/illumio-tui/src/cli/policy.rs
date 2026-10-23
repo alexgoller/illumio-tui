@@ -85,8 +85,10 @@ pub struct SearchArgs {
 impl SearchArgs {
     /// The saved query `q` as the base: the terms and flags given hold too
     /// (AND).
-    pub fn with_saved(&mut self, q: &str) {
+    pub fn with_saved(&mut self, q: &str) -> Result<(), String> {
+        pce::RuleFilter::parse(q).map_err(|e| format!("query: {e}"))?;
         self.terms.insert(0, q.to_string());
+        Ok(())
     }
 
     /// The search the terms and flags make, as one query (the TUI's).

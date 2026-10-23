@@ -23,7 +23,9 @@ pub struct SavedFilterArgs {
     #[arg(long, value_name = "NAME")]
     pub filter: Option<String>,
     /// Save the filter these flags (and --filter) make as NAME in the profile, and exit without
-    /// contacting the PCE. Names: letters, digits, . _ - (up to 64)
+    /// contacting the PCE; prints `saved <screen> filter NAME to <config path>` (JSON:
+    /// data.screen, data.name, data.config_path, data.replaced, data.filter). Names: letters,
+    /// digits, . _ - (up to 64, not starting with -)
     #[arg(long, value_name = "NAME")]
     pub save_filter: Option<String>,
     /// With --save-filter: replace a saved filter of that name
@@ -180,14 +182,8 @@ fn merge(command: &mut Command, saved: &Saved) -> Result<(), String> {
             Some(f) => f.with_saved(s),
             None => Ok(()),
         },
-        (Command::Policy(PolicyCmd::Search(a)), Saved::Policy(q)) => {
-            a.with_saved(q);
-            Ok(())
-        }
-        (Command::Events(a), Saved::Events(s)) => {
-            a.with_saved(s);
-            Ok(())
-        }
+        (Command::Policy(PolicyCmd::Search(a)), Saved::Policy(q)) => a.with_saved(q),
+        (Command::Events(a), Saved::Events(s)) => a.with_saved(s),
         (Command::Workloads(w), Saved::Workloads(s)) => w.list.with_saved(s),
         _ => Err("not this command's filter".into()),
     }
@@ -346,6 +342,15 @@ pub fn run(global: &GlobalArgs, cmd: &FiltersCmd) -> Result<(), CliError> {
             };
             let mut rows = Vec::new();
             for screen in screens {
+                if let Some(e) = filters.shape_error(screen) {
+                    rows.push(FilterRow {
+                        screen: screen.as_str(),
+                        name: "-".into(),
+                        summary: String::new(),
+                        error: Some(e),
+                        filter: serde_json::Value::Null,
+                    });
+                }
                 for (name, v) in filters.of(screen) {
                     let (summary, error) = match Saved::parse(screen, v) {
                         Ok(s) => (s.summary(), None),
