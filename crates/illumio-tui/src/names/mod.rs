@@ -283,10 +283,15 @@ pub enum Kind {
     /// `provider:`) labels, `ipl:`, `wl:` and `all`; a leading `-` and a
     /// `!` before a label kept.
     Search,
+    /// Saved filter names of a screen, from the config file (no cache).
+    TrafficFilters,
+    PolicyFilters,
+    EventsFilters,
+    WorkloadsFilters,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 13] = [
+    pub const ALL: [Kind; 17] = [
         Kind::Labels,
         Kind::LabelFilter,
         Kind::LabelKeys,
@@ -300,6 +305,10 @@ impl Kind {
         Kind::Scope,
         Kind::Actors,
         Kind::Search,
+        Kind::TrafficFilters,
+        Kind::PolicyFilters,
+        Kind::EventsFilters,
+        Kind::WorkloadsFilters,
     ];
 
     pub fn name(self) -> &'static str {
@@ -317,6 +326,23 @@ impl Kind {
             Kind::Scope => "scope",
             Kind::Actors => "actors",
             Kind::Search => "search",
+            Kind::TrafficFilters => "filters-traffic",
+            Kind::PolicyFilters => "filters-policy",
+            Kind::EventsFilters => "filters-events",
+            Kind::WorkloadsFilters => "filters-workloads",
+        }
+    }
+
+    /// The screen whose saved filter names this kind completes; those come
+    /// from the config file, not the names cache.
+    pub fn filters(self) -> Option<crate::filters::Screen> {
+        use crate::filters::Screen;
+        match self {
+            Kind::TrafficFilters => Some(Screen::Traffic),
+            Kind::PolicyFilters => Some(Screen::Policy),
+            Kind::EventsFilters => Some(Screen::Events),
+            Kind::WorkloadsFilters => Some(Screen::Workloads),
+            _ => None,
         }
     }
 
@@ -362,6 +388,10 @@ impl Kind {
             Kind::IpLists => n.ip_lists.clone(),
             Kind::LabelGroups => n.label_groups.clone(),
             Kind::ServiceTerms => prefixed("svc:", &n.services),
+            Kind::TrafficFilters
+            | Kind::PolicyFilters
+            | Kind::EventsFilters
+            | Kind::WorkloadsFilters => Vec::new(),
         };
         match self {
             Kind::Traffic => {

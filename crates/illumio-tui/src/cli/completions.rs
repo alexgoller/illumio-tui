@@ -4,8 +4,8 @@
 //! `illumio-tui __complete <kind>` helper for values only known locally.
 //!
 //! The helper reads local files only and never builds a client: the config
-//! file (`profiles`, and which profile and whether `completion_cache` is
-//! on) and the profile's names cache, `names.json` (labels, label keys,
+//! file (`profiles`, the profile's saved filter names, and which profile
+//! and whether `completion_cache` is on) and the profile's names cache, `names.json` (labels, label keys,
 //! apps, hostnames, services, IP lists, label groups; see
 //! [`crate::names`]). That file is filled as a side effect of the lists
 //! the CLI and the TUI read anyway, and by `completions refresh`; with no
@@ -242,6 +242,32 @@ pub const HOOKS: &[Hook] = &[
     (&["traffic", "explain"], "--dst", Kind::Traffic),
     (&["marks", "add"], "--src", Kind::Traffic),
     (&["marks", "add"], "--dst", Kind::Traffic),
+    (&["traffic", "query"], "--filter", Kind::TrafficFilters),
+    (&["traffic", "groups"], "--filter", Kind::TrafficFilters),
+    (&["traffic", "mesh"], "--filter", Kind::TrafficFilters),
+    (&["policy", "search"], "--filter", Kind::PolicyFilters),
+    (&["events"], "--filter", Kind::EventsFilters),
+    (&["workloads"], "--filter", Kind::WorkloadsFilters),
+    (
+        &["filters", "show", "traffic"],
+        "name",
+        Kind::TrafficFilters,
+    ),
+    (&["filters", "show", "policy"], "name", Kind::PolicyFilters),
+    (&["filters", "show", "events"], "name", Kind::EventsFilters),
+    (
+        &["filters", "show", "workloads"],
+        "name",
+        Kind::WorkloadsFilters,
+    ),
+    (&["filters", "rm", "traffic"], "name", Kind::TrafficFilters),
+    (&["filters", "rm", "policy"], "name", Kind::PolicyFilters),
+    (&["filters", "rm", "events"], "name", Kind::EventsFilters),
+    (
+        &["filters", "rm", "workloads"],
+        "name",
+        Kind::WorkloadsFilters,
+    ),
 ];
 
 /// The marker a hooked argument's help carries into the generated text.
@@ -725,9 +751,15 @@ pub fn helper(args: &[OsString], out: &mut impl Write) -> std::io::Result<()> {
             .into_iter()
             .filter(|v| v.starts_with(&prefix))
             .collect(),
-        Some(k) => match (Kind::parse(k), names::lookup(&config_path, profile)) {
-            (Some(kind), Some(n)) => names::complete(kind, &n, &prefix),
-            _ => Vec::new(),
+        Some(k) => match Kind::parse(k) {
+            Some(kind) if kind.filters().is_some() => {
+                saved_filters(&config_path, profile, kind, &prefix)
+            }
+            Some(kind) => match names::lookup(&config_path, profile) {
+                Some(n) => names::complete(kind, &n, &prefix),
+                None => Vec::new(),
+            },
+            None => Vec::new(),
         },
         None => Vec::new(),
     };
@@ -735,6 +767,34 @@ pub fn helper(args: &[OsString], out: &mut impl Write) -> std::io::Result<()> {
         writeln!(out, "{v}")?;
     }
     Ok(())
+}
+
+/// The saved filter names of `kind`'s screen starting with `prefix`, of
+/// the profile (`--profile`, `ILLUMIO_PROFILE`, `default_profile`), from
+/// the config file alone.
+fn saved_filters(
+    path: &std::path::Path,
+    named: Option<String>,
+    kind: Kind,
+    prefix: &str,
+) -> Vec<String> {
+    let (Some(screen), Ok(file)) = (kind.filters(), config::load_config_file(path)) else {
+        return Vec::new();
+    };
+    let named = named.or_else(|| {
+        std::env::var("ILLUMIO_PROFILE")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    });
+    let (profile, _) = config::profile_name(&file, named);
+    file.profiles
+        .get(&profile)
+        .map(|p| p.filters.names(screen))
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|n| n.starts_with(prefix))
+        .collect()
 }
 
 /// The config file's profile names, sorted; none when it is missing or
@@ -768,6 +828,46 @@ mod tests {
         let p = path.to_str().unwrap();
         assert_eq!(run_helper(&["profiles", "--config", p]), "lab\nprod\n");
         assert_eq!(run_helper(&["profiles", "--config", p, "pr"]), "prod\n");
+    }
+
+    #[test]
+    fn helper_lists_a_screens_saved_filter_names_from_the_config_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "completion_cache = false
+[profiles.lab]
+host = \"a\"
+\
+             [profiles.lab.filters.traffic.prod-blocked]
+src = \"env=prod\"
+\
+             [profiles.lab.filters.traffic.lab]
+src = 1
+\
+             [profiles.lab.filters.policy]
+deny-prod = \"deny\"
+\
+             [profiles.other.filters.traffic.elsewhere]
+src = \"x=y\"
+",
+        )
+        .unwrap();
+        let p = path.to_str().unwrap();
+        let ask = |kind: &str, prefix: &str| {
+            run_helper(&[kind, "--config", p, "--profile", "lab", "--", prefix])
+        };
+        // No names cache needed (completion_cache = false), none written.
+        assert_eq!(ask("filters-traffic", ""), "lab\nprod-blocked\n");
+        assert_eq!(ask("filters-traffic", "pr"), "prod-blocked\n");
+        assert_eq!(ask("filters-policy", ""), "deny-prod\n");
+        assert_eq!(ask("filters-events", ""), "");
+        assert_eq!(
+            run_helper(&["filters-traffic", "--config", p, "--profile", "other"]),
+            "elsewhere\n"
+        );
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 
     #[test]
