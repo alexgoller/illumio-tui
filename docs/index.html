@@ -35,6 +35,7 @@
       <a href="#configure"><kbd>8</kbd>configure</a>
       <a href="#protection"><kbd>9</kbd>protection</a>
       <a href="#roadmap"><kbd>10</kbd>roadmap</a>
+      <a href="changelog.html">changelog</a>
     </nav>
   </div>
 </header>
@@ -107,7 +108,7 @@
 <span class="p">&gt; </span>scoop update illumio-tui     <span class="c"># later, for a new release</span></code></pre>
 
   <h3>Release archives</h3>
-  <p>Every <a href="https://github.com/alexgoller/illumio-tui/releases">GitHub Release</a> carries one archive per platform, the <code>.deb</code>/<code>.rpm</code> packages, the Windows <code>.msi</code> and a <code>SHA256SUMS</code> file covering all of them. The current release is <a href="https://github.com/alexgoller/illumio-tui/releases/tag/v0.5.3">v0.5.3</a>.</p>
+  <p>Every <a href="https://github.com/alexgoller/illumio-tui/releases">GitHub Release</a> carries one archive per platform, the <code>.deb</code>/<code>.rpm</code> packages, the Windows <code>.msi</code> and a <code>SHA256SUMS</code> file covering all of them. The current release is <a href="https://github.com/alexgoller/illumio-tui/releases/tag/v0.5.3">v0.5.3</a>; the <a href="changelog.html">changelog</a> lists what every release brought.</p>
 
   <div class="table-scroll">
     <table>
@@ -469,7 +470,7 @@ org_id  5636114
 status  [{"generated_at":"2026-10-19T21:21:07+00:00","listen_only_m…
 writes  false
 default · 1 api call · 0.1 KB · cache none · 2102 ms</code></pre>
-      <p>The last line goes to stderr on every command: what it cost.</p>
+      <p>The last line goes to stderr on every command: what it cost. To keep the connection, <code>illumio-tui profile add demo --from-env-file pce.env</code> turns the same file into a profile (no request).</p>
 
       <h3>2. Look around</h3>
 <pre><code><span class="p">$ </span>illumio-tui labels --key app
@@ -963,12 +964,16 @@ events = "noise-free"</code></pre>
 
 <section class="panel" id="roadmap" aria-labelledby="roadmap-h">
   <h2 id="roadmap-h"><span class="key">10</span>Roadmap</h2>
-  <p>New in v0.4.0: the readiness and enforcement overlay (<a href="https://github.com/alexgoller/illumio-tui/issues/55">#55</a>), policy search (<a href="https://github.com/alexgoller/illumio-tui/issues/51">#51</a>), enabling and disabling rules and rulesets (<a href="https://github.com/alexgoller/illumio-tui/issues/52">#52</a>) and the drill from a rule&rsquo;s impact to its workloads (<a href="https://github.com/alexgoller/illumio-tui/issues/53">#53</a>). Ideas for what comes next are collected in the <a href="https://github.com/alexgoller/illumio-tui/issues/5">idea backlog, issue #5</a>. Among them:</p>
+  <p>New in the 0.5 line (v0.5.0 to v0.5.3): PCE names in shell completion from a local per-profile cache, with <code>completions refresh</code> (<a href="https://github.com/alexgoller/illumio-tui/issues/64">#64</a>); the intra- and extra-scope rule form, with what a rule means and warnings as you type (<a href="https://github.com/alexgoller/illumio-tui/issues/65">#65</a>); <code>profile add</code> from an env file or flags (<a href="https://github.com/alexgoller/illumio-tui/issues/66">#66</a>); event type filters with excludes, exact types and per-profile defaults (<a href="https://github.com/alexgoller/illumio-tui/issues/67">#67</a>); the policy search grammar with <code>scope:</code>, <code>src:</code>, <code>dst:</code> and negation (<a href="https://github.com/alexgoller/illumio-tui/issues/68">#68</a>); saved filters (<a href="https://github.com/alexgoller/illumio-tui/issues/70">#70</a>) and a default filter per screen (<a href="https://github.com/alexgoller/illumio-tui/issues/74">#74</a>). The <a href="changelog.html">changelog</a> has the notes of every release.</p>
+  <p>Open now:</p>
   <ul>
-    <li>Saved filters and bookmarks per profile.</li>
-    <li>A <code>schema</code> command and <code>--fields</code> for agents: the output shapes, machine-readable, and only the fields asked for.</li>
-    <li>An MCP mode: the same read and write layer, with its throttle and guards, as tools for an agent.</li>
+    <li>Events by actor: a TUI field and keys, <code>--actor</code> and <code>--exclude-actor</code> (<a href="https://github.com/alexgoller/illumio-tui/issues/71">#71</a>).</li>
+    <li>VEN health on Workloads: a summary and a health filter, in the TUI and the CLI (<a href="https://github.com/alexgoller/illumio-tui/issues/72">#72</a>, in progress).</li>
+    <li>A <code>schema</code> command and <code>--fields</code> for agents and scripts: the output shapes, machine-readable, and only the fields asked for (<a href="https://github.com/alexgoller/illumio-tui/issues/73">#73</a>).</li>
+    <li>winget: automatic submissions once the first winget-pkgs PR is merged (<a href="https://github.com/alexgoller/illumio-tui/issues/69">#69</a>).</li>
+    <li>An idea: an MCP mode, the same read and write layer, with its throttle and guards, as tools for an agent.</li>
   </ul>
+  <p>More ideas wait in the list in <a href="https://github.com/alexgoller/illumio-tui/issues/5">issue #5</a>.</p>
   <p>What it leaves to others: <a href="https://github.com/brian1917/workloader">workloader</a> is the established batch tool for the PCE, and the two work side by side. illumio-tui is for interactive analysis, rule drafting and agents; for bulk import and export, automated labelling, VEN lifecycle, rule and port usage reports and running across many PCEs, use workloader.</p>
   <p>Suggestions and bug reports are welcome in the <a href="https://github.com/alexgoller/illumio-tui/issues">issue tracker</a>.</p>
 </section>
@@ -979,6 +984,7 @@ events = "noise-free"</code></pre>
   <p>The design was written up as a spec and approved before any code existed; each implementation plan was then carried out task by task, every task independently reviewed before the next one started. AI coding agents in Claude Code did the implementation and review work, under the owner's direction.</p>
   <ul>
     <li><a href="https://github.com/alexgoller/illumio-tui">illumio-tui on GitHub</a>: source, issues and the <a href="https://github.com/alexgoller/illumio-tui#readme">README</a>, the full reference.</li>
+    <li><a href="changelog.html">Changelog</a>: every release, newest first.</li>
     <li><a href="https://github.com/alexgoller/illumio-tui/blob/main/docs/architecture.md">Architecture notes</a>: how the library, CLI and TUI fit together.</li>
     <li><a href="https://github.com/alexgoller/illumio-tui/blob/main/docs/superpowers/specs/2026-10-10-illumio-tui-design.md">Design spec</a> and <a href="https://github.com/alexgoller/illumio-tui/tree/main/docs/superpowers/plans">implementation plans</a>: how it was made.</li>
     <li><a href="https://github.com/alexgoller/illumio-mcp-server">illumio-mcp-server</a>: the same PCE, exposed to AI assistants over the Model Context Protocol, by the same author.</li>

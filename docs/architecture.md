@@ -5,7 +5,9 @@
 - `crates/pce`: the library. No terminal code, no process-global state.
 - `crates/illumio-tui`: the binary. `cli/` is the non-interactive mode;
   the TUI (`tui/`) sits next to it and reuses every library type.
-- `crates/xtask`: developer tooling (`cargo xtask record`).
+- `crates/xtask`: developer tooling (`cargo xtask record`, and
+  `cargo xtask changelog`, which renders `docs/changelog.html` from
+  `CHANGELOG.md`; see Releasing).
 
 ## One request, top to bottom
 
@@ -65,6 +67,9 @@ Module map under `crates/illumio-tui/src/tui/`:
 | `update/generator` | the generator's transitions: open, keys, rebuilds, `Enter`'s batch plan |
 | `event_diff` | an audit event as a change diff (Events detail and `events --diff`); pure |
 | `export` | `:export`: the table on screen through the CLI's CSV writer |
+| `rule_search` | `f` on Policy: the one-line search editor; the grammar is `pce::RuleFilter`'s; pure |
+| `events_editor` | `f` on Events: severity, type terms and window; pure |
+| `saved` | saved filters in the TUI (`:save`, `:filters`, `:load`, `:default`); applying goes through each screen's own `f` path |
 | `ui/` | theme, layout, per-screen drawing and widgets (panels, overlays) |
 
 One message, top to bottom: pressing `r` on Traffic.
@@ -421,6 +426,47 @@ a shape it does not read stays visible as JSON. The Events detail and
 selection to the previous or next event; the scroll keys move inside one.
 `:export` (`tui/export.rs`) writes the table on screen through the CLI's CSV
 writer as `Cmd::Export`; it never touches the PCE.
+
+### Config file, saved filters and the names cache
+
+`config.rs` reads the config file and resolves a profile (flag, then
+environment, then profile, then default). Three things write it, all through
+`config::write_config_file` (a temporary file beside it, then a rename; mode
+0600): `profile add` and `profile use` (`cli/profile.rs`), and saving a filter
+or a default (`filters.rs`, from `cli/filters.rs` and `tui/saved.rs`). Each
+rewrite keeps the other profiles, the secret and unknown keys; TOML comments
+are lost. None of them sends a request.
+
+Saved filters (`filters.rs`) are kept as the raw text the `f` editors take,
+per profile and screen, so one that does not parse fails only where it is
+used. A default (`filter_defaults`) is applied by the TUI at startup and after
+`:profile` through the same path as `f` + `Enter`, before the screen's first
+load and without a request of its own; the CLI applies one only with
+`--default-filter`.
+
+Shell completion of PCE names (`names/`) reads a per-profile JSON file. The
+library reports every fresh list read to a `pce::ListObserver`; the
+`names::record::Recorder` merges it into the file on a thread of its own.
+The completion helper (`illumio-tui __complete`, `cli/completions.rs`) reads
+only the config file and that cache, never the PCE. `completions refresh`
+(`cli/names_cache.rs`) is the five list reads any list command makes.
+
+Intra- and extra-scope rules (`rule_scope.rs`): what a rule's consumers mean
+against its ruleset's scopes, the warnings, and how switching between the two
+rewrites the consumers. Pure; the TUI rule form and `policy rules add` share
+it.
+
+## Releasing
+
+`CHANGELOG.md` at the repository root is the source of the release notes:
+one `## vX.Y.Z — date` section per release, newest first. `cargo xtask
+changelog` (`crates/xtask/src/changelog.rs`, a small dependency-free Markdown
+converter) renders it to `docs/changelog.html`, the site's changelog page, and
+`--check` fails CI while the page is stale. On a tag, the release workflow's
+`notes` job extracts the tag's section with `scripts/release-notes.sh` and the
+GitHub release uses it as its body; without a section, GitHub generates the
+notes. The steps are in the README, under "Cutting a release". `docs/`
+carries `.nojekyll`, so GitHub Pages serves `changelog.html` as it is.
 
 ## Testing
 

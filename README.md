@@ -11,6 +11,9 @@ Screenshots and a short recording: https://alexgoller.github.io/illumio-tui/#scr
 Workflows (marks, draft, explain, generator, bulk, readiness and enforce, policy search) with screenshots:
 https://alexgoller.github.io/illumio-tui/#workflows
 
+What changed in each release: [CHANGELOG.md](CHANGELOG.md), also on the site at
+https://alexgoller.github.io/illumio-tui/changelog.html
+
 ## Install
 
 ### Homebrew (macOS, Linux)
@@ -177,14 +180,23 @@ yourself.
 
 1. Bump `version` in `[workspace.package]` of the root `Cargo.toml` and run
    `cargo check` so `Cargo.lock` follows.
-2. Commit, then tag and push: `git tag v0.3.5 && git push --tags`.
+2. Write the release notes at the top of `CHANGELOG.md` as
+   `## v0.5.4 — 2026-10-24` (an em dash, the release date), their sections
+   as `###` (`### New`, `### Changed`, `### Fixes`). Reference issues as
+   `#NN`; on the site they link to the issue.
+3. Run `cargo xtask changelog`, which renders `docs/changelog.html` (the
+   site's changelog page) from `CHANGELOG.md`. CI fails while the page is
+   stale (`cargo xtask changelog --check`).
+4. Commit, then tag and push: `git tag v0.5.4 && git push origin main --tags`.
 
 The `Release` workflow builds all targets, builds the `.deb`/`.rpm` packages
 (nfpm, `packaging/nfpm.yaml`) and install-tests them in Debian, Ubuntu, Rocky
 and Alma containers, builds the Windows MSI (WiX, `packaging/windows/`) and
 installs, upgrades and uninstalls it on a Windows runner, then publishes the
-release with generated notes; it fails if the tag does not match the Cargo
-version. Afterwards it renders `Formula/illumio-tui.rb` from
+release; it fails if the tag does not match the Cargo version. The release
+body is the tag's section of `CHANGELOG.md` (`scripts/release-notes.sh v0.5.4`
+prints it, its headings back at `##`); a tag without a section gets GitHub's
+generated notes instead, as before. Afterwards it renders `Formula/illumio-tui.rb` from
 `packaging/homebrew/illumio-tui.rb.tmpl` and `bucket/illumio-tui.json` from
 `packaging/scoop/illumio-tui.json.tmpl` with the new sha256s and commits both
 to `main` as `brew, scoop: illumio-tui <version>`
@@ -194,7 +206,8 @@ the templates, not the formula or manifest. Never change the MSI's
 `UpgradeCode` in `packaging/windows/illumio-tui.wxs`: it is what lets a new
 MSI replace an installed one. Run the workflow manually
 (`workflow_dispatch`) for a dry run that builds and tests everything and only
-uploads artifacts; it also installs the committed Scoop manifest with Scoop
+uploads artifacts (the Cargo version's `CHANGELOG.md` section among them, as
+`release-notes`); it also installs the committed Scoop manifest with Scoop
 and checks its `autoupdate` against the release's `SHA256SUMS`.
 
 winget: the workflow renders the winget manifests (`packaging/winget/`, schema
@@ -1859,6 +1872,7 @@ across many PCEs, use workloader. illumio-tui does not plan to cover those.
 
     cargo test --workspace
     cargo xtask record --env-file ../illumio-mcp-server/.env   # refresh fixtures/recorded
+    cargo xtask changelog                                       # CHANGELOG.md -> docs/changelog.html (--check: is it current?)
     PCE_LIVE=1 cargo test -p pce --test live                    # needs PCE_* env
     PCE_LIVE_WRITES=1 cargo test -p pce --test live_writes -- --test-threads=1   # non-production PCE only
 
