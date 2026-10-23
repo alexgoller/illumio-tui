@@ -411,7 +411,7 @@ takes `:traffic`, `:policy`, `:objects`, `:workloads`, `:events`, `:iplists` (Ob
 IP lists tab), `:filter <expr>`, `:window <dur>`, `:profile <name>`, `:writes [on|off]`,
 `:export <path>`, `:draft`, `:active`, `:unicast`, `:focus [app]`, `:app [app]`, `:gen [app]`,
 `:readiness`, `:enforce [app]`, `:batch`, `:save <name>`, `:filters` (`:fl`), `:load <name>`,
-`:help` and `:q` (each described below; saved filters under [Saved filters](#saved-filters)). `:export <path>` writes the table on
+`:default <name>|off`, `:help` and `:q` (each described below; saved filters under [Saved filters](#saved-filters)). `:export <path>` writes the table on
 screen as CSV (the rows shown, with the search and filters applied and in sort order; every
 column, whatever the terminal width, each cell whole; `~/` is the home directory), the same
 format as the CLI's `--csv`, and sends nothing; it refuses an existing file, `:export! <path>`
@@ -1240,6 +1240,28 @@ completes the name) applies one. Applying is the same as typing it into `f` and 
 `Enter`: Traffic runs one query through the usual checks and cost confirm, Policy, Workloads
 and Events filter locally (Events asks the PCE again only for a new window or severity). The
 filter line shows `[name]` until you change the filter. After `:profile X` the filters are X's.
+An events filter's type terms get the profile's `events.exclude_types` on top (each one the
+text lacks is added as a `!` term), so both apply; `f` drops one for the session.
+
+Each screen can have one **default** filter, a saved filter's name under its own table:
+
+```toml
+[profiles.demo.filter_defaults]
+traffic = "prod-blocked"
+events = "noise-free"
+```
+
+The TUI puts the defaults in force at startup and after `:profile X` (X's defaults), before a
+screen loads anything, and shows `[name]` as `:load` does. A default sends no request of its
+own: Events and Workloads load once on the first visit as always, with the default in force;
+Policy searches locally; Traffic still runs nothing until you press `r` (or `f`), and a default
+over the cost thresholds (long window, large cap) asks first like any other filter. A default
+that names no filter, or one that does not parse, is ignored with a warning on the status
+line; startup goes on. In `:filters` the default is marked `*`, and `*` makes the selected
+filter the default (again: no default); `:default <name>` sets it and `:default off` clears
+it, both written to the config file. Editing the filter, `:load`, or a screen's clear changes
+only the session. Deleting a filter that is a default (`D`, `filters rm`) removes the default
+too and says so.
 
 On the CLI, `--filter <name>` on `traffic query|groups|mesh`, `policy search`, `events` and
 `workloads` starts from a saved filter; a flag replaces that field (`--src` the source,
@@ -1256,9 +1278,18 @@ illumio-tui traffic groups --filter prod-blocked --window 1d
 illumio-tui filters list --screen traffic      # also --json, --csv
 illumio-tui filters show traffic prod-blocked
 illumio-tui filters rm traffic prod-blocked
+illumio-tui filters default traffic prod-blocked   # --unset clears it
+illumio-tui traffic groups --default-filter --window 1d
 ```
 
-`--filter` and `filters show|rm` complete saved names from the config file. Saved filters need
+The CLI never applies a default on its own, so scripts and agents get the same output whatever
+the profile says. `--default-filter` (on the same commands as `--filter`, and not together with
+it) starts from the screen's default; it is an error when there is none or it does not parse.
+`filters default <screen> <name>` sets a default (the filter must exist) and `filters default
+<screen> --unset` clears it; `filters list` has a `default` column (`yes` in the table and CSV,
+`default: true` in JSON) and a row for a default that names no filter.
+
+`--filter`, `filters show|rm` and `filters default <screen>` complete saved names from the config file. Saved filters need
 a profile from the config file: with `--env-file` or an env-only connection there are none.
 
 ## Writes

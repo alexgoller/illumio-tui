@@ -195,7 +195,7 @@ illumio-tui 0.5.2</code></pre>
         <li><kbd>4</kbd><strong>Workloads.</strong> VEN health columns and a summary line, <code>h</code> unhealthy only, <code>H</code> by severity, <code>t</code> / <code>T</code> jump to Traffic with the workload as source / destination. A workload without a VEN shows enforcement <code>unmanaged</code>, as in the PCE UI, whatever mode the API reports for it (often <code>visibility_only</code>). Local filters, no request: <code>E</code> enforcement, <code>m</code> managed, <code>o</code> offline, <code>u</code> unlabeled (a <code>missing</code> column names the absent scope or role keys), <code>c</code> clears them and <code>h</code> (not the search); a filter line shows what is on and the count. <code>f</code> filters by label (<code>app=shop,crm env=prod !role=db</code>: comma any of, space all of, <code>!</code> excludes, <code>app=-</code> no app label), <code>x</code> groups the list by app and env (the <code>g</code> keys) with VEN health and enforcement per group, <code>Space</code> / <code>z</code> fold, <code>s</code> orders the groups, <code>Enter</code> on a group narrows to it. All local, no request. <code>Space</code> on a workload marks it (<code>●</code>), <code>V</code> marks a group or everything shown, <code>Esc</code> clears; with writes armed <code>L</code> sets labels and <code>M</code> the enforcement of the marked workloads, a group or the row, in bulk.</li>
         <li><kbd>5</kbd><strong>Events.</strong> Severity-coloured audit events, filtered by severity, type and window. The type filter takes comma-separated terms (<code>sec_policy, rule_set</code>), <code>!term</code> hides (<code>!user.*</code>), <code>*</code> globs the whole type (<code>*.delete</code>) and a leading <code>=</code> is exact (<code>!=user.login</code> hides that type only); <code>Ctrl-N</code> completes the loaded types. <code>warning+</code> keeps that severity and worse. <code>x</code> hides the row's exact type, <code>o</code> shows only it, <code>t</code> lists the types by count (<code>Enter</code> only, <code>x</code> hide). All of this filters the loaded events, no request; the header says what is hidden (<code>hiding 3 types · 812 of 1,240</code>) and when the PCE's page was full. <code>Enter</code> shows what changed as a diff: only the changed fields, <code>-</code> before and <code>+</code> after, lists diffed by element, hrefs read as names; <code>J</code> toggles the raw JSON; in the detail <code>j</code>/<code>k</code> (or the arrows) step through the events and <code>Ctrl-d</code>/<code>Ctrl-u</code> scroll.</li>
       </ul>
-      <p>The <code>:</code> prompt takes <code>:traffic</code>, <code>:policy</code>, <code>:objects</code>, <code>:workloads</code>, <code>:events</code>, <code>:iplists</code>, <code>:filter</code>, <code>:window</code>, <code>:profile &lt;name&gt;</code>, <code>:focus</code>, <code>:app</code>, <code>:gen</code>, <code>:unicast</code>, <code>:marks</code>, <code>:export &lt;path&gt;</code>, <code>:writes on|off</code>, <code>:batch</code>, <code>:draft</code>, <code>:active</code>, <code>:save</code>, <code>:filters</code>, <code>:load</code>, <code>:help</code> and <code>:q</code>. <code>?</code> shows the keys of where you are first; <code>Tab</code> steps through the other groups, <code>a</code> shows them all.</p>
+      <p>The <code>:</code> prompt takes <code>:traffic</code>, <code>:policy</code>, <code>:objects</code>, <code>:workloads</code>, <code>:events</code>, <code>:iplists</code>, <code>:filter</code>, <code>:window</code>, <code>:profile &lt;name&gt;</code>, <code>:focus</code>, <code>:app</code>, <code>:gen</code>, <code>:unicast</code>, <code>:marks</code>, <code>:export &lt;path&gt;</code>, <code>:writes on|off</code>, <code>:batch</code>, <code>:draft</code>, <code>:active</code>, <code>:save</code>, <code>:filters</code>, <code>:load</code>, <code>:default</code>, <code>:help</code> and <code>:q</code>. <code>?</code> shows the keys of where you are first; <code>Tab</code> steps through the other groups, <code>a</code> shows them all.</p>
     </div>
     <div>
       <h3>Five views of one traffic result</h3>
@@ -757,15 +757,22 @@ created_on = "demo100.illum.io"
 <pre><code><span class="p">$ </span>illumio-tui traffic groups --src env=prod --exclude-dst app=backup --decision blocked --save-filter prod-blocked
 saved traffic filter prod-blocked to ~/.config/illumio-tui/config.toml
 <span class="p">$ </span>illumio-tui traffic groups --filter prod-blocked --window 1d   <span class="c"># the flag wins</span>
+<span class="p">$ </span>illumio-tui filters default traffic prod-blocked   <span class="c"># the TUI opens with it</span>
+screen   default       previous  config_path
+traffic  prod-blocked  -         ~/.config/illumio-tui/config.toml
 <span class="p">$ </span>illumio-tui filters list
-screen   name          summary
-traffic  prod-blocked  src env=prod · dst !app=backup · decision blocked
+screen   name          default  summary
+traffic  prod-blocked  yes      src env=prod · dst !app=backup · decision blocked
 <span class="p">$ </span>cat ~/.config/illumio-tui/config.toml
 ...
 [profiles.demo.filters.traffic.prod-blocked]
 decisions = ["blocked"]
 dst = "!app=backup"
-src = "env=prod"</code></pre>
+src = "env=prod"
+
+[profiles.demo.filter_defaults]
+traffic = "prod-blocked"</code></pre>
+      <p>A default is in force when the TUI starts (and after <code>:profile</code>) without a request of its own: Traffic still waits for <kbd>r</kbd>, and asks first when the default is expensive. In <code>:filters</code> it is marked <code>*</code> and <kbd>*</kbd> toggles it; <code>:default NAME|off</code> does the same. The CLI never applies it unless you pass <code>--default-filter</code>.</p>
     </article>
 
     <article class="recipe" aria-labelledby="r-prov-h">
@@ -924,7 +931,12 @@ severity = "warning+"
 [profiles.demo.filters.workloads.prod-unenforced]
 labels = "env=prod"
 enforcement = "visibility_only"
-managed = true</code></pre>
+managed = true
+
+[profiles.demo.filter_defaults]       <span class="c"># one per screen, a saved filter's name</span>
+traffic = "prod-blocked"
+events = "noise-free"</code></pre>
+      <p><code>filter_defaults</code> names each screen's default: the TUI applies it at startup and after <code>:profile</code>, before the screen loads and without an extra request; the CLI only with <code>--default-filter</code>. One that names no filter or does not parse is ignored with a warning. Removing a filter that is a default removes the default. An events filter's type terms get <code>exclude_types</code> on top, so both apply.</p>
       <h3>The generator</h3>
       <p><code>ruleset_name</code> names a ruleset the policy generator creates, as a template over the scope keys (<code>RF-shop-prod</code>); every <code>{key}</code> must be a scope key and every scope key must appear. <code>consolidate_min_peers</code> is how many inbound peers on one port make it a fan-in line; DNS, NTP, Kerberos, LDAP, SMB, syslog, SNMP and monitoring-agent ports need 3.</p>
     </div>
