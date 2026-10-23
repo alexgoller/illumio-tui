@@ -7,6 +7,7 @@ pub mod context;
 pub mod enforce;
 pub mod error;
 pub mod events;
+pub mod filters;
 pub mod generate;
 pub mod health;
 pub mod marked;
@@ -156,6 +157,15 @@ pub enum Command {
     /// flows are left out, the others carry their mark. --no-marks ignores the file.
     #[command(subcommand)]
     Marks(marks::MarksCmd),
+    /// Saved filters of the profile in the config file: list, show, rm (local, no request)
+    ///
+    /// --filter NAME on traffic query|groups|mesh, policy search, events and workloads starts
+    /// from a saved filter (a flag given replaces that field); --save-filter NAME saves the
+    /// filter the flags make and exits without contacting the PCE. The TUI saves and loads the
+    /// same ones (:save, :filters, :load). Stored per profile as
+    /// [profiles.<name>.filters.<screen>.<filter>], in the TUI editor's text.
+    #[command(subcommand)]
+    Filters(filters::FiltersCmd),
     /// Print the shell completion script: bash, zsh, fish or powershell (local, no request)
     ///
     /// e.g. `illumio-tui completions zsh > ~/.zfunc/_illumio-tui`. Profile names complete
@@ -193,6 +203,8 @@ fn csv_refusal(command: &Command) -> Option<&'static str> {
         Command::Profile(profile::ProfileCmd::Use { .. }) => Some("profile use"),
         Command::Profile(profile::ProfileCmd::Add(_)) => Some("profile add"),
         Command::Marks(marks::MarksCmd::Export(_)) => Some("marks export"),
+        Command::Filters(filters::FiltersCmd::Rm(_)) => Some("filters rm"),
+        c if filters::saves_filter(c) => Some("--save-filter"),
         Command::Enforce(a) if !a.watch => Some("enforce --to/--rollback"),
         _ => None,
     }
@@ -213,6 +225,13 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
     if let Command::Marks(m) = &command {
         return marks::run(&global, m);
     }
+    if let Command::Filters(f) = &command {
+        return filters::run(&global, f);
+    }
+    // Saved filters, from the config file alone: `--save-filter` ends here.
+    let Some(command) = filters::prepare(&global, command)? else {
+        return Ok(());
+    };
     if let Command::Completions(c) = &command {
         match &c.action {
             None => return completions::run(c),
@@ -238,7 +257,7 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
         Command::Policy(p) => policy::run(&ctx, &p).await,
         Command::Traffic(t) => traffic::run(&ctx, &t).await,
         Command::Completions(_) => names_cache::refresh(&ctx).await,
-        Command::Profile(_) | Command::Marks(_) => {
+        Command::Profile(_) | Command::Marks(_) | Command::Filters(_) => {
             unreachable!("handled above")
         }
     }

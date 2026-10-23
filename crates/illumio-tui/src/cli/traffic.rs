@@ -74,6 +74,15 @@ impl TrafficCmd {
             TrafficCmd::Explain(_) => None,
         }
     }
+
+    pub fn filter_mut(&mut self) -> Option<&mut FilterArgs> {
+        match self {
+            TrafficCmd::Query(a) => Some(&mut a.filter),
+            TrafficCmd::Groups(a) => Some(&mut a.filter),
+            TrafficCmd::Mesh(a) => Some(&mut a.filter),
+            TrafficCmd::Explain(_) => None,
+        }
+    }
 }
 
 /// `traffic query`: the filter, then how to print the flows.
@@ -327,6 +336,159 @@ pub struct FilterArgs {
     /// Ignore marks.toml: no mark fields, nothing left out, no meta.squelched
     #[arg(long)]
     pub no_marks: bool,
+    #[command(flatten)]
+    pub saved: super::filters::SavedFilterArgs,
+    /// A saved filter's services to include (`443/tcp`, `svc:NAME`), any
+    /// of them; set by `--filter` only, never with `--port`.
+    #[arg(skip)]
+    pub services: Vec<String>,
+}
+
+/// One `--src`/`--dst` value's terms (`,` = AND); blanks dropped.
+fn arg_terms(v: &str) -> Vec<String> {
+    v.split(',')
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(String::from)
+        .collect()
+}
+
+/// A saved side (`a,b | c, !d`) as `--src` values and `--exclude-src` ones.
+fn side_args(text: &str) -> Result<(Vec<String>, Vec<String>), String> {
+    let t = crate::filters::parse_terms(text, |e| {
+        FilterExpr::parse(e).map_err(|err| err.to_string())?;
+        Ok(e.to_string())
+    })?;
+    Ok((t.include.iter().map(|g| g.join(",")).collect(), t.exclude))
+}
+
+impl FilterArgs {
+    /// The saved filter `s` as the base: each of its fields where no flag
+    /// sets that field (`--src`/`--exclude-src` the source, `--port`,
+    /// `--proto`, `--process`, `--exclude-service` the service, `--window`,
+    /// `--from`/`--to` the window).
+    pub fn with_saved(&mut self, s: &crate::filters::TrafficSaved) -> Result<(), String> {
+        if self.src.is_empty()
+            && self.exclude_src.is_empty()
+            && let Some(t) = &s.src
+        {
+            (self.src, self.exclude_src) = side_args(t).map_err(|e| format!("field src: {e}"))?;
+        }
+        if self.dst.is_empty()
+            && self.exclude_dst.is_empty()
+            && let Some(t) = &s.dst
+        {
+            (self.dst, self.exclude_dst) = side_args(t).map_err(|e| format!("field dst: {e}"))?;
+        }
+        if self.port.is_none()
+            && self.proto.is_none()
+            && self.process.is_none()
+            && self.exclude_service.is_empty()
+            && let Some(t) = &s.service
+        {
+            let bad = |e: String| format!("field service: {e}");
+            let terms = crate::filters::parse_terms(t, |e| {
+                ServiceExpr::parse(e)?;
+                Ok(e.to_string())
+            })
+            .map_err(bad)?;
+            if terms.include.iter().any(|g| g.len() > 1) {
+                return Err(bad(
+                    "a flow has one service; use | between services (443/tcp | 80/tcp)".into(),
+                ));
+            }
+            self.services = terms.include.into_iter().flatten().collect();
+            self.exclude_service = terms.exclude;
+        }
+        if self.decision.is_empty()
+            && let Some(d) = &s.decisions
+        {
+            self.decision = d.clone();
+        }
+        if self.transmission.is_empty()
+            && let Some(list) = &s.transmission
+        {
+            self.transmission = list
+                .iter()
+                .map(|t| {
+                    TransmissionArg::from_str(t, true)
+                        .map_err(|_| format!("field transmission: unknown {t:?}"))
+                })
+                .collect::<Result<_, _>>()?;
+        }
+        if self.window.is_none() && self.from.is_none() {
+            self.window = s.window.clone();
+        }
+        if self.max_results.is_none() {
+            self.max_results = s.max_results;
+        }
+        Ok(())
+    }
+
+    /// The filter as the TUI's text saves it, checked as the `f` editor
+    /// checks it; what the text cannot hold is an error, never dropped.
+    pub fn to_saved(&self) -> Result<crate::filters::TrafficSaved, String> {
+        for (given, flag, why) in [
+            (
+                self.from.is_some(),
+                "--from/--to",
+                "a saved filter keeps a relative --window",
+            ),
+            (
+                self.process.is_some(),
+                "--process",
+                "a saved traffic filter has no process field",
+            ),
+            (
+                self.app.is_some(),
+                "--app",
+                "a focus is not part of a saved filter",
+            ),
+        ] {
+            if given {
+                return Err(format!("{flag}: {why}"));
+            }
+        }
+        let side = |inc: &[String], exc: &[String]| {
+            let include: Vec<Vec<String>> = inc
+                .iter()
+                .map(|v| arg_terms(v))
+                .filter(|g| !g.is_empty())
+                .collect();
+            let exclude: Vec<String> = exc.iter().flat_map(|v| arg_terms(v)).collect();
+            Some(crate::filters::terms_text(&include, &exclude)).filter(|t| !t.is_empty())
+        };
+        let services: Vec<Vec<String>> = match (&self.port, &self.proto) {
+            (Some(port), Some(proto)) => vec![vec![format!("{port}/{proto}")]],
+            (Some(one), None) | (None, Some(one)) => vec![vec![one.clone()]],
+            (None, None) => self.services.iter().map(|s| vec![s.clone()]).collect(),
+        };
+        let list = |v: Vec<String>| (!v.is_empty()).then_some(v);
+        let saved = crate::filters::TrafficSaved {
+            src: side(&self.src, &self.exclude_src),
+            dst: side(&self.dst, &self.exclude_dst),
+            service: {
+                let exclude: Vec<String> = self
+                    .exclude_service
+                    .iter()
+                    .flat_map(|v| arg_terms(v))
+                    .collect();
+                Some(crate::filters::terms_text(&services, &exclude)).filter(|t| !t.is_empty())
+            },
+            decisions: list(self.decision.iter().flat_map(|d| arg_terms(d)).collect()),
+            transmission: list(
+                self.transmission
+                    .iter()
+                    .map(|t| Transmission::from(*t).as_str().to_string())
+                    .collect(),
+            ),
+            window: self.window.clone(),
+            max_results: self.max_results,
+        };
+        let check = crate::tui::filter::TrafficFilter::defaults("24h", 10_000);
+        crate::tui::saved::traffic_filter(&saved, &check)?;
+        Ok(saved)
+    }
 }
 
 /// RFC 3339, or a date; a date-only `--to` means 23:59:59 of that day.
@@ -431,6 +593,12 @@ async fn build_query(
             ServiceExpr::parse(s).map_err(|e| CliError::Args(format!("--exclude-service: {e}")))
         })
         .collect::<Result<_, _>>()?;
+    // A saved filter's services (never with `--port`): any of them.
+    let in_svc: Vec<ServiceExpr> = args
+        .services
+        .iter()
+        .map(|s| ServiceExpr::parse(s).map_err(|e| CliError::Args(format!("service: {e}"))))
+        .collect::<Result<_, _>>()?;
     let decisions: Vec<PolicyDecision> = args
         .decision
         .iter()
@@ -489,10 +657,17 @@ async fn build_query(
     };
     // `svc:NAME` expands to the service's ports from the cached service
     // list: the index's when the actors load it, else that one list.
-    let named = ex_svc.iter().any(ServiceExpr::is_named);
-    let exclude_services = |mut b: TrafficQueryBuilder,
-                            services: &[&pce::models::Service]|
+    let named = ex_svc.iter().chain(&in_svc).any(ServiceExpr::is_named);
+    let apply_services = |mut b: TrafficQueryBuilder,
+                          services: &[&pce::models::Service]|
      -> Result<TrafficQueryBuilder, CliError> {
+        for e in &in_svc {
+            for m in resolve_service(e, services)
+                .map_err(|err| CliError::Args(format!("service: {err}")))?
+            {
+                b = b.service(m);
+            }
+        }
         for e in &ex_svc {
             for m in resolve_service(e, services)
                 .map_err(|err| CliError::Args(format!("--exclude-service: {err}")))?
@@ -505,9 +680,9 @@ async fn build_query(
     if all().next().is_none() {
         let b = if named {
             let services = ctx.pce.services(ctx.cache_mode).await?.value;
-            exclude_services(b, &services.iter().collect::<Vec<_>>())?
+            apply_services(b, &services.iter().collect::<Vec<_>>())?
         } else {
-            exclude_services(b, &[])?
+            apply_services(b, &[])?
         };
         return Ok(BuiltQuery {
             query: b.build()?,
@@ -545,7 +720,7 @@ async fn build_query(
     for m in resolve(&ex_dst)?.into_iter().flatten() {
         b = b.exclude_destination(m);
     }
-    let b = exclude_services(b, &idx.services())?;
+    let b = apply_services(b, &idx.services())?;
     Ok(BuiltQuery {
         query: b.build()?,
         index: Some(idx),
@@ -1895,5 +2070,133 @@ mod tests {
         assert_eq!(json["sections"][0]["direction"], "in");
         assert_eq!(json["sections"][0]["totals"]["connections"], 102);
         assert_eq!(json["sections"][0]["rows"][0]["service"], "8443/tcp");
+    }
+
+    fn query_filter(argv: &[&str]) -> FilterArgs {
+        use clap::Parser;
+        let mut full = vec!["illumio-tui", "traffic", "query"];
+        full.extend_from_slice(argv);
+        let cli = crate::cli::Cli::try_parse_from(full).expect("parses");
+        match cli.command {
+            Some(crate::cli::Command::Traffic(TrafficCmd::Query(a))) => a.filter,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn flags_save_as_the_tui_text_and_the_text_reads_back_as_flags() {
+        let f = query_filter(&[
+            "--src",
+            "app=web,env=prod",
+            "--src",
+            "ipl:Corp",
+            "--exclude-src",
+            "app=backup,role=db",
+            "--dst",
+            "app=db",
+            "--port",
+            "8000-8100",
+            "--proto",
+            "tcp",
+            "--exclude-service",
+            "53/udp",
+            "--decision",
+            "blocked,potentially_blocked",
+            "--transmission",
+            "unicast",
+            "--window",
+            "7d",
+            "--max-results",
+            "20000",
+        ]);
+        let s = f.to_saved().unwrap();
+        assert_eq!(
+            s.src.as_deref(),
+            Some("app=web,env=prod | ipl:Corp, !app=backup, !role=db"),
+            "repeat = |, --exclude-src = !"
+        );
+        assert_eq!(s.service.as_deref(), Some("8000-8100/tcp, !53/udp"));
+        assert_eq!(
+            s.decisions,
+            Some(vec!["blocked".into(), "potentially_blocked".into()])
+        );
+        assert_eq!(s.transmission, Some(vec!["unicast".into()]));
+        assert_eq!(
+            (s.window.as_deref(), s.max_results),
+            (Some("7d"), Some(20000))
+        );
+
+        // Back: the same flags, the services as the saved alternatives.
+        let mut back = FilterArgs::default();
+        back.with_saved(&s).unwrap();
+        assert_eq!(back.src, vec!["app=web,env=prod", "ipl:Corp"]);
+        assert_eq!(back.exclude_src, vec!["app=backup", "role=db"]);
+        assert_eq!(back.services, vec!["8000-8100/tcp"]);
+        assert_eq!(back.exclude_service, vec!["53/udp"]);
+        assert_eq!(back.transmission, vec![TransmissionArg::Unicast]);
+        assert_eq!(back.to_saved().unwrap(), s, "round trip");
+        // A TUI-only form: several services, svc:NAME.
+        let tui = crate::filters::TrafficSaved {
+            service: Some("443/tcp | svc:HTTPS, !udp".into()),
+            ..Default::default()
+        };
+        let mut f = FilterArgs::default();
+        f.with_saved(&tui).unwrap();
+        assert_eq!(f.services, vec!["443/tcp", "svc:HTTPS"]);
+        assert_eq!(f.to_saved().unwrap().service, tui.service);
+    }
+
+    #[test]
+    fn a_flag_replaces_its_saved_field_and_the_rest_stays() {
+        let saved = crate::filters::TrafficSaved {
+            src: Some("app=web".into()),
+            dst: Some("!app=backup".into()),
+            service: Some("443/tcp".into()),
+            window: Some("7d".into()),
+            max_results: Some(500),
+            ..Default::default()
+        };
+        let mut f = query_filter(&[
+            "--exclude-src",
+            "app=db",
+            "--port",
+            "22",
+            "--from",
+            "2026-10-01",
+            "--to",
+            "2026-10-02",
+        ]);
+        f.with_saved(&saved).unwrap();
+        assert!(f.src.is_empty(), "--exclude-src replaces the whole source");
+        assert_eq!(f.exclude_src, vec!["app=db"]);
+        assert_eq!(f.exclude_dst, vec!["app=backup"], "kept");
+        assert!(f.services.is_empty(), "--port replaces the service");
+        assert_eq!(f.window, None, "--from/--to replace the window");
+        assert_eq!(f.max_results, Some(500));
+    }
+
+    #[test]
+    fn what_the_text_cannot_hold_is_said_not_dropped() {
+        for (argv, flag) in [
+            (vec!["--process", "nginx"], "--process"),
+            (
+                vec!["--from", "2026-10-01", "--to", "2026-10-02"],
+                "--from/--to",
+            ),
+            (vec!["--app", "shop/prod"], "--app"),
+        ] {
+            let e = query_filter(&argv).to_saved().unwrap_err();
+            assert!(e.starts_with(flag), "{e}");
+        }
+        let e = query_filter(&["--src", "fqdn:x.example"])
+            .to_saved()
+            .unwrap_err();
+        assert!(e.contains("source"), "checked as the f editor checks: {e}");
+        let bad = crate::filters::TrafficSaved {
+            transmission: Some(vec!["anycast".into()]),
+            ..Default::default()
+        };
+        let e = FilterArgs::default().with_saved(&bad).unwrap_err();
+        assert!(e.contains("field transmission"), "{e}");
     }
 }

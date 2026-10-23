@@ -103,6 +103,74 @@ pub struct WorkloadsCmd {
         default_missing_value = ""
     )]
     pub group: Option<Vec<String>>,
+    #[command(flatten)]
+    pub saved: super::filters::SavedFilterArgs,
+}
+
+impl WorkloadsArgs {
+    /// The saved filter `s` as the base: its labels where no `--label` is
+    /// given, its enforcement, managed, offline and unlabeled where those
+    /// flags are not.
+    pub fn with_saved(&mut self, s: &crate::filters::WorkloadsSaved) -> Result<(), String> {
+        if self.labels.is_empty()
+            && let Some(text) = &s.labels
+        {
+            self.labels = LabelFilter::parse(text)
+                .map_err(|e| format!("field labels: {e}"))?
+                .terms
+                .iter()
+                .map(ToString::to_string)
+                .collect();
+        }
+        if self.enforcement.is_none() {
+            self.enforcement = s.enforcement.clone();
+        }
+        if self.managed.is_none() {
+            self.managed = s.managed;
+        }
+        self.offline |= s.offline == Some(true);
+        if self.unlabeled.is_none() && s.unlabeled == Some(true) {
+            // `--unlabeled` alone: the label model's keys.
+            self.unlabeled = Some(Vec::new());
+        }
+        Ok(())
+    }
+
+    /// The filter as the TUI's Workloads screen saves it; flags it has no
+    /// field for are an error, never dropped.
+    pub fn to_saved(&self) -> Result<crate::filters::WorkloadsSaved, String> {
+        for (given, flag) in [
+            (self.hostname.is_some(), "--hostname"),
+            (self.name.is_some(), "--name"),
+            (self.ip.is_some(), "--ip"),
+            (self.online.is_some(), "--online"),
+            (self.max_results.is_some(), "--max-results"),
+            (self.unhealthy, "--unhealthy"),
+        ] {
+            if given {
+                return Err(format!("{flag} is not part of a saved workloads filter"));
+            }
+        }
+        if self
+            .unlabeled
+            .as_ref()
+            .is_some_and(|keys| keys.iter().any(|k| !k.trim().is_empty()))
+        {
+            return Err(
+                "--unlabeled KEYS: a saved filter's unlabeled is the label model's keys \
+                 (--unlabeled alone)"
+                    .into(),
+            );
+        }
+        let labels = LabelFilter::from_terms(&self.labels)?.to_string();
+        Ok(crate::filters::WorkloadsSaved {
+            labels: Some(labels).filter(|l| !l.is_empty()),
+            enforcement: self.enforcement.clone(),
+            managed: self.managed,
+            offline: self.offline.then_some(true),
+            unlabeled: self.unlabeled.is_some().then_some(true),
+        })
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -966,6 +1034,55 @@ fn local_filter(
 
 #[cfg(test)]
 mod tests {
+
+    fn list_args(argv: &[&str]) -> WorkloadsArgs {
+        use clap::Parser;
+        let mut full = vec!["illumio-tui", "workloads"];
+        full.extend_from_slice(argv);
+        match crate::cli::Cli::try_parse_from(full)
+            .expect("parses")
+            .command
+        {
+            Some(crate::cli::Command::Workloads(w)) => w.list,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn workloads_flags_save_as_the_screens_filter_and_back() {
+        let a = list_args(&[
+            "--label",
+            "app=shop,crm",
+            "--label",
+            "!role=db",
+            "--enforcement",
+            "visibility_only",
+            "--managed",
+            "true",
+            "--offline",
+            "--unlabeled",
+        ]);
+        let s = a.to_saved().unwrap();
+        assert_eq!(s.labels.as_deref(), Some("app=shop,crm !role=db"));
+        assert_eq!(
+            (s.enforcement.as_deref(), s.managed, s.offline, s.unlabeled),
+            (Some("visibility_only"), Some(true), Some(true), Some(true))
+        );
+        let mut b = list_args(&["--enforcement", "idle"]);
+        b.with_saved(&s).unwrap();
+        assert_eq!(b.labels, vec!["app=shop,crm", "!role=db"]);
+        assert_eq!(b.enforcement.as_deref(), Some("idle"), "the flag wins");
+        assert!(b.offline && b.unlabeled.is_some());
+        for (argv, flag) in [
+            (vec!["--hostname", "web"], "--hostname"),
+            (vec!["--unhealthy"], "--unhealthy"),
+            (vec!["--max-results", "5"], "--max-results"),
+        ] {
+            assert!(list_args(&argv).to_saved().unwrap_err().starts_with(flag));
+        }
+        let e = list_args(&["--unlabeled", "app"]).to_saved().unwrap_err();
+        assert!(e.contains("label model"), "{e}");
+    }
     use super::*;
 
     fn fixture() -> Vec<Workload> {

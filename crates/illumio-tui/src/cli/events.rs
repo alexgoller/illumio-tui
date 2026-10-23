@@ -34,9 +34,9 @@ pub struct EventsArgs {
     /// success | failure (PCE-side filter)
     #[arg(long)]
     pub status: Option<String>,
-    /// Window ending now, e.g. 1h, 24h, 7d
-    #[arg(long, default_value = "24h")]
-    pub since: String,
+    /// Window ending now, e.g. 1h, 24h, 7d (default 24h)
+    #[arg(long)]
+    pub since: Option<String>,
     /// Row cap sent to the PCE (default 500)
     #[arg(long)]
     pub max_results: Option<u32>,
@@ -45,6 +45,62 @@ pub struct EventsArgs {
     /// index (cached) to show names for hrefs.
     #[arg(long)]
     pub diff: bool,
+    #[command(flatten)]
+    pub saved: super::filters::SavedFilterArgs,
+}
+
+/// `--since` without one.
+const DEFAULT_SINCE: &str = "24h";
+
+impl EventsArgs {
+    /// The saved filter `s` as the base: its type where no `--type` or
+    /// `--exclude-type` is given, its severity and window where no
+    /// `--severity` or `--since` is.
+    pub fn with_saved(&mut self, s: &crate::filters::EventsSaved) {
+        if self.event_type.is_empty() && self.exclude_type.is_empty() {
+            self.event_type = s.event_type.iter().cloned().collect();
+        }
+        if self.severity.is_none() {
+            self.severity = s.severity.clone();
+        }
+        if self.since.is_none() {
+            self.since = s.window.clone();
+        }
+    }
+
+    /// The filter as the TUI's events editor saves it (the profile's
+    /// hidden types are not part of it), checked as the editor checks it.
+    pub fn to_saved(&self) -> Result<crate::filters::EventsSaved, String> {
+        for (given, flag) in [
+            (self.status.is_some(), "--status"),
+            (self.max_results.is_some(), "--max-results"),
+            (self.all_types, "--all-types"),
+        ] {
+            if given {
+                return Err(format!("{flag} is not part of a saved events filter"));
+            }
+        }
+        let excludes: Vec<&str> = self
+            .exclude_type
+            .iter()
+            .flat_map(|t| t.split(','))
+            .collect();
+        let mut terms: Vec<String> = self.event_type.clone();
+        terms.push(exclude_text(&excludes));
+        let text = terms
+            .iter()
+            .map(|t| t.trim())
+            .filter(|t| !t.is_empty())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let saved = crate::filters::EventsSaved {
+            event_type: Some(text).filter(|t| !t.is_empty()),
+            severity: self.severity.clone(),
+            window: self.since.clone(),
+        };
+        crate::tui::saved::events_edit(&saved, "").to_filter(jiff::Timestamp::now())?;
+        Ok(saved)
+    }
 }
 
 const HEADERS: [&str; 6] = [
@@ -226,11 +282,12 @@ fn local_filters(
 
 pub async fn run(ctx: &Context, args: &EventsArgs) -> Result<(), CliError> {
     let (types, severity, words) = local_filters(args, &ctx.config.event_exclude_types)?;
-    let window = parse_window(&args.since).map_err(|e| CliError::Args(e.to_string()))?;
+    let since_text = args.since.as_deref().unwrap_or(DEFAULT_SINCE);
+    let window = parse_window(since_text).map_err(|e| CliError::Args(e.to_string()))?;
     let until = jiff::Timestamp::now();
     let since = jiff::Span::try_from(window)
         .and_then(|span| until.checked_sub(span))
-        .map_err(|e| CliError::Args(format!("bad window {:?}: {e}", args.since)))?;
+        .map_err(|e| CliError::Args(format!("bad window {since_text:?}: {e}")))?;
     let filter = EventFilter {
         severity: severity.pce_value(),
         event_type: None,
@@ -283,6 +340,60 @@ pub async fn run(ctx: &Context, args: &EventsArgs) -> Result<(), CliError> {
 
 #[cfg(test)]
 mod tests {
+
+    fn events_args(argv: &[&str]) -> EventsArgs {
+        use clap::Parser;
+        let mut full = vec!["illumio-tui", "events"];
+        full.extend_from_slice(argv);
+        match crate::cli::Cli::try_parse_from(full)
+            .expect("parses")
+            .command
+        {
+            Some(crate::cli::Command::Events(a)) => a,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn events_flags_save_as_the_editor_text_and_flags_win_over_the_saved_fields() {
+        let a = events_args(&[
+            "--type",
+            "sec_policy",
+            "--exclude-type",
+            "agent.*,=user.login",
+            "--severity",
+            "warning+",
+            "--since",
+            "7d",
+        ]);
+        let s = a.to_saved().unwrap();
+        assert_eq!(
+            s.event_type.as_deref(),
+            Some("sec_policy, !agent.*, !=user.login")
+        );
+        assert_eq!(
+            (s.severity.as_deref(), s.window.as_deref()),
+            (Some("warning+"), Some("7d"))
+        );
+        let mut b = events_args(&["--since", "1h"]);
+        b.with_saved(&s);
+        assert_eq!(b.event_type, vec!["sec_policy, !agent.*, !=user.login"]);
+        assert_eq!(b.since.as_deref(), Some("1h"), "the flag wins");
+        assert_eq!(b.severity.as_deref(), Some("warning+"));
+        let mut c = events_args(&["--exclude-type", "x"]);
+        c.with_saved(&s);
+        assert!(
+            c.event_type.is_empty(),
+            "--exclude-type replaces the type field"
+        );
+        for (argv, flag) in [
+            (vec!["--status", "failure"], "--status"),
+            (vec!["--all-types"], "--all-types"),
+        ] {
+            assert!(events_args(&argv).to_saved().unwrap_err().starts_with(flag));
+        }
+        assert!(events_args(&["--since", "soon"]).to_saved().is_err());
+    }
     use super::*;
 
     #[test]

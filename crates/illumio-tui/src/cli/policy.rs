@@ -78,6 +78,23 @@ pub struct SearchArgs {
     /// Search draft policy (the default; explicit for scripts)
     #[arg(long)]
     pub draft: bool,
+    #[command(flatten)]
+    pub saved: super::filters::SavedFilterArgs,
+}
+
+impl SearchArgs {
+    /// The saved query `q` as the base: the terms and flags given hold too
+    /// (AND).
+    pub fn with_saved(&mut self, q: &str) {
+        self.terms.insert(0, q.to_string());
+    }
+
+    /// The search the terms and flags make, as one query (the TUI's).
+    pub fn to_saved(&self) -> Result<String, String> {
+        search_filter(self)
+            .map(|f| f.to_string())
+            .map_err(|e| e.to_string())
+    }
 }
 
 #[derive(Args, Debug)]
@@ -2130,6 +2147,7 @@ mod tests {
             deny: false,
             active: false,
             draft: false,
+            saved: Default::default(),
         })
         .unwrap();
         assert_eq!(f.to_string(), "scope:global -deny");
