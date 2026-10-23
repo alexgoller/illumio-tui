@@ -2,7 +2,8 @@ name: Release
 
 # Tag push (v*) builds every target, the .deb/.rpm packages and the Windows
 # MSI, tests the packages in distro containers and the MSI on Windows,
-# publishes a GitHub Release, updates the Homebrew formula
+# publishes a GitHub Release (its body is the tag's section of CHANGELOG.md,
+# else generated notes), updates the Homebrew formula
 # (Formula/illumio-tui.rb) and the Scoop manifest (bucket/illumio-tui.json)
 # on main, tests the winget manifests against the release MSI and submits
 # them to winget-pkgs (Komac, when WINGET_TOKEN is set).
@@ -346,8 +347,45 @@ jobs:
           path: dist/SHA256SUMS
           if-no-files-found: error
 
+  # The release body: the tag's section of CHANGELOG.md
+  # (scripts/release-notes.sh), uploaded as the release-notes artifact. Without
+  # a section, `release` lets GitHub generate the notes, as before. Dry runs
+  # look up the Cargo version's section, so they show what a tag would publish.
+  notes:
+    runs-on: ubuntu-latest
+    outputs:
+      found: ${{ steps.notes.outputs.found }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract release notes
+        id: notes
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            tag="$GITHUB_REF_NAME"
+          else
+            tag="v$(cargo metadata --no-deps --format-version 1 \
+              | jq -r '.packages[] | select(.name == "illumio-tui") | .version')"
+          fi
+          if scripts/release-notes.sh "$tag" CHANGELOG.md > release-notes.md; then
+            echo "Release notes for $tag from CHANGELOG.md:"
+            cat release-notes.md
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::CHANGELOG.md has no section for $tag; the release uses generated notes"
+            rm -f release-notes.md
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: steps.notes.outputs.found == 'true'
+        with:
+          name: release-notes
+          path: release-notes.md
+          if-no-files-found: error
+
   release:
-    needs: [checksums, package-test]
+    needs: [checksums, package-test, notes]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -359,7 +397,8 @@ jobs:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body_path: ${{ needs.notes.outputs.found == 'true' && 'dist/release-notes.md' || '' }}
+          generate_release_notes: ${{ needs.notes.outputs.found != 'true' }}
           fail_on_unmatched_files: true
           files: |
             dist/*.tar.gz

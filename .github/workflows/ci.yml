@@ -20,6 +20,8 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      # docs/changelog.html is rendered from CHANGELOG.md; fail when it is stale.
+      - run: cargo xtask changelog --check
       # The marks speed check (200k flows x 200 marks; 300 ms locally),
       # release only, on one runner. Shared runners are about 2x slower and
       # noisy, so CI guards only against gross regressions.
