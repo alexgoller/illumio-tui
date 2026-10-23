@@ -33,6 +33,10 @@ pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
             Vec::new()
         }
         Command::Load(name) => saved::load_filter(model, &name),
+        Command::Default(name) => {
+            saved::default_command(model, &name);
+            Vec::new()
+        }
         // A saved filter of the screen's by that name wins over the expression.
         Command::Filter(name) if saved::has_filter(model, &name) => {
             saved::load_filter(model, &name)

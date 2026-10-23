@@ -1526,6 +1526,8 @@ pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
         cfg.tier_key.clone(),
         cfg.ignore_keys.clone(),
     );
+    // The profile's default filters, before anything loads (no request).
+    crate::tui::update::apply_defaults(&mut model);
     let (mut rt, _tx) = Runtime::with_args(Arc::new(ctx.pce), model, global);
     rt.writer = writer.map(Arc::new);
     rt.write_inputs = Some(inputs);

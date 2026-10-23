@@ -1,10 +1,11 @@
 //! Saved filters on the current screen: `:save NAME`, `:filters` (`:fl`),
-//! `:load NAME` (and `:filter NAME`). The config file is read and written
-//! here (a local file, as `marks.toml` is); applying a filter goes through
-//! the screen's `f` path, so Traffic runs its one query through the cost
-//! guard and the others filter locally.
+//! `:load NAME` (and `:filter NAME`), `:default NAME|off`, and the
+//! profile's defaults applied before any screen loads. The config file is
+//! read and written here (a local file, as `marks.toml` is); applying a
+//! filter goes through the screen's `f` path, so Traffic runs its one
+//! query through the cost guard and the others filter locally.
 use super::*;
-use crate::filters::Saved;
+use crate::filters::{FilterDefaults, Saved, SavedFilters, Screen as FilterScreen};
 use crate::tui::saved::{self, FilterPicker, PickerOutcome};
 
 /// The current screen's saved filters, or why it has none.
@@ -61,20 +62,33 @@ pub(super) fn write_filter(model: &mut Model, name: &str, saved: &Saved) {
 
 /// `:filters`: the picker of the screen's saved filters.
 pub(super) fn open_filters(model: &mut Model) {
-    let loaded = screen_of(model).and_then(|s| Ok((s, model.saved.load(&model.profile.name)?)));
+    let loaded = screen_of(model).and_then(|s| Ok((s, load_with_defaults(model)?)));
     let profile = model.profile.name.clone();
     match loaded {
-        Ok((_, f)) if let Some(e) = saved_shape(&f, &model.screen) => {
+        Ok((_, (f, _))) if let Some(e) = saved_shape(&f, &model.screen) => {
             model.status = StatusLine::error(format!("profile {profile}: {e}"));
         }
-        Ok((screen, f)) if f.of(screen).is_empty() => {
+        Ok((screen, (f, _))) if f.of(screen).is_empty() => {
             model.status = StatusLine::info(format!(
                 "no saved {screen} filters · :save NAME saves the one in force"
             ));
         }
-        Ok((screen, f)) => model.overlay = Overlay::FilterPicker(FilterPicker::new(screen, &f)),
+        Ok((screen, (f, d))) => model.overlay = Overlay::FilterPicker(picker(screen, &f, &d)),
         Err(e) => model.status = StatusLine::error(e),
     }
+}
+
+/// The profile's saved filters and defaults, read from the file now.
+fn load_with_defaults(model: &Model) -> Result<(SavedFilters, FilterDefaults), String> {
+    model
+        .saved
+        .store(&model.profile.name)?
+        .load_with_defaults()
+        .map_err(|e| e.to_string())
+}
+
+fn picker(screen: FilterScreen, f: &SavedFilters, d: &FilterDefaults) -> FilterPicker {
+    FilterPicker::new(screen, f, d.get(screen).ok().flatten())
 }
 
 /// Why the screen's saved filters cannot be read (a wrong-shaped key).
@@ -105,8 +119,44 @@ pub(super) fn picker_key(model: &mut Model, p: FilterPicker, k: KeyEvent) -> Vec
                 action: PendingAction::DeleteFilter(p, name),
             };
         }
+        PickerOutcome::Default(mut p, name) => {
+            let unset = p.default.as_deref() == Some(name.as_str());
+            if write_default(model, p.screen, (!unset).then_some(name.as_str())) {
+                p.default = (!unset).then_some(name);
+            }
+            model.overlay = Overlay::FilterPicker(p);
+        }
     }
     Vec::new()
+}
+
+/// `:default NAME` makes the screen's saved filter its default; `:default
+/// off` clears it. The config file only: nothing is applied now.
+pub(super) fn default_command(model: &mut Model, arg: &str) {
+    match screen_of(model) {
+        Ok(screen) => {
+            write_default(model, screen, (arg != "off").then_some(arg));
+        }
+        Err(e) => model.status = StatusLine::error(e),
+    }
+}
+
+/// Writes (or clears) `screen`'s default and says so; whether it was
+/// written.
+fn write_default(model: &mut Model, screen: FilterScreen, name: Option<&str>) -> bool {
+    let written = model
+        .saved
+        .store(&model.profile.name)
+        .and_then(|s| s.set_default(screen, name).map_err(|e| e.to_string()));
+    model.status = match (written.as_ref(), name) {
+        (Err(e), _) => StatusLine::error(e.clone()),
+        (Ok(_), Some(n)) => StatusLine::info(format!(
+            "{screen} default: {n} (applied at startup and after :profile)"
+        )),
+        (Ok(Some(old)), None) => StatusLine::info(format!("{screen} default {old} cleared")),
+        (Ok(None), None) => StatusLine::info(format!("no {screen} default to clear")),
+    };
+    written.is_ok()
 }
 
 /// `y` on a delete: the filter leaves the file; the picker comes back
@@ -116,11 +166,14 @@ pub(super) fn delete_filter(model: &mut Model, p: FilterPicker, name: &str) {
         .saved
         .store(&model.profile.name)
         .and_then(|s| s.remove(p.screen, name).map_err(|e| e.to_string()));
-    if let Err(e) = removed {
-        model.status = StatusLine::error(e);
-        model.overlay = Overlay::FilterPicker(p);
-        return;
-    }
+    let was_default = match removed {
+        Ok(d) => d,
+        Err(e) => {
+            model.status = StatusLine::error(e);
+            model.overlay = Overlay::FilterPicker(p);
+            return;
+        }
+    };
     let a = &mut model.saved.applied;
     let unname = |n: Option<&String>| n.is_some_and(|n| n == name);
     match p.screen {
@@ -138,10 +191,17 @@ pub(super) fn delete_filter(model: &mut Model, p: FilterPicker, name: &str) {
         }
         _ => {}
     }
-    model.status = StatusLine::info(format!("deleted {} filter {name}", p.screen));
-    model.overlay = match model.saved.load(&model.profile.name) {
-        Ok(f) if !f.of(p.screen).is_empty() => {
-            Overlay::FilterPicker(FilterPicker::new(p.screen, &f).with_input(&p.input))
+    model.status = StatusLine::info(if was_default {
+        format!(
+            "deleted {} filter {name}; it was the default, now there is none",
+            p.screen
+        )
+    } else {
+        format!("deleted {} filter {name}", p.screen)
+    });
+    model.overlay = match load_with_defaults(model) {
+        Ok((f, d)) if !f.of(p.screen).is_empty() => {
+            Overlay::FilterPicker(picker(p.screen, &f, &d).with_input(&p.input))
         }
         _ => Overlay::None,
     };
@@ -221,7 +281,7 @@ pub(super) fn complete_prompt(model: &mut Model, input: &str) -> String {
     let Some((cmd, typed)) = input.split_once(' ') else {
         return input.to_string();
     };
-    if !matches!(cmd, "load" | "filter" | "f") {
+    if !matches!(cmd, "load" | "filter" | "f" | "default") {
         return input.to_string();
     }
     let names = match (screen_of(model), model.saved.load(&model.profile.name)) {
@@ -242,4 +302,92 @@ pub(super) fn complete_prompt(model: &mut Model, input: &str) -> String {
         Some(done) => format!("{cmd} {done}"),
         None => input.to_string(),
     }
+}
+
+/// The profile's default filters, put in force before any screen loads:
+/// at startup and after `:profile`. They send nothing: Traffic's waits for
+/// the run the user starts (`r`, `f`), which asks first when it is
+/// expensive, as any other; Events' and Workloads' shape their first load;
+/// Policy's search is local. A default naming no filter, or one that does
+/// not parse, is ignored and said on the status line.
+pub fn apply_defaults(model: &mut Model) {
+    model.saved.warning = None;
+    // The screens' own messages (a label filter's count) are not news here.
+    let status = model.status.clone();
+    // No config file profile (an `--env-file` or env-only one): none.
+    let Ok((filters, defaults)) = load_with_defaults(model) else {
+        return;
+    };
+    let mut ignored = Vec::new();
+    for screen in FilterScreen::ALL {
+        let applied = defaults.resolve(&filters, screen).and_then(|d| match d {
+            Some((name, saved)) => apply_default(model, &name, saved)
+                .map_err(|e| format!("default {screen} filter {name:?}: {e}")),
+            None => Ok(()),
+        });
+        if let Err(e) = applied {
+            ignored.push(e);
+        }
+    }
+    model.status = status;
+    if !ignored.is_empty() {
+        let text = format!(
+            "profile {}: {} (ignored)",
+            model.profile.name,
+            ignored.join("; ")
+        );
+        model.status = StatusLine::warn(text.clone());
+        model.saved.warning = Some(text);
+    }
+}
+
+/// One default, in force as `:load` would put it, but sending nothing.
+fn apply_default(model: &mut Model, name: &str, saved: Saved) -> Result<(), String> {
+    match saved {
+        Saved::Traffic(s) => {
+            let f = saved::traffic_filter(&s, &model.traffic.filter)?;
+            model.traffic.filter = f.clone();
+            model.saved.applied.traffic = Some((name.to_string(), f));
+        }
+        Saved::Policy(q) => {
+            apply_rule_search(model, pce::RuleFilter::parse(&q)?);
+            saved::mark_applied(model, Screen::Policy, name);
+        }
+        Saved::Events(s) => {
+            let edit = saved::events_edit(&s, &model.limits.event_type_filter());
+            edit.to_filter(jiff::Timestamp::now())?;
+            model.events.filter = edit;
+            model.events.rebuild();
+            saved::mark_applied(model, Screen::Events, name);
+        }
+        Saved::Workloads(s) => {
+            let (filters, labels) = saved::workload_filters(&s);
+            pce::LabelFilter::parse(&labels).map_err(|e| format!("labels: {e}"))?;
+            model.workloads.filters = filters;
+            apply_workload_labels(model, &labels)?;
+            saved::mark_applied(model, Screen::Workloads, name);
+        }
+    }
+    Ok(())
+}
+
+/// Once the names load: a rule search set before them (a default) gets
+/// its names resolved, as `f` resolves them; the names that match none.
+pub(super) fn resolve_search(model: &mut Model) -> Vec<String> {
+    let (Some(search), Some(idx)) = (model.policy.search.clone(), model.index().cloned()) else {
+        return Vec::new();
+    };
+    let before = search.to_string();
+    let (f, unknown) = search.resolve(&idx);
+    let after = f.to_string();
+    if after != before {
+        if let Some((_, q)) = model.saved.applied.policy.as_mut()
+            && *q == before
+        {
+            *q = after.clone();
+        }
+        model.policy.last_search = after;
+        model.policy.search = Some(f);
+    }
+    unknown
 }

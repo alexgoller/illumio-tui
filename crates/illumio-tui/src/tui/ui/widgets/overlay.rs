@@ -234,7 +234,7 @@ pub fn render_filter_picker(
     let r = centered(area, area.width.saturating_sub(4).min(100), shown + 4);
     f.render_widget(Clear, r);
     let title = format!("Saved {} filters", p.screen);
-    let block = panel(&title, "Enter apply · D delete · Esc", t, true);
+    let block = panel(&title, "Enter apply · * default · D delete · Esc", t, true);
     let mut lines = vec![
         Line::from(vec![
             Span::styled("filter: ", t.header_style()),
@@ -260,8 +260,13 @@ pub fn render_filter_picker(
         } else {
             t.base()
         };
+        let mark = if p.default.as_deref() == Some(e.name.as_str()) {
+            '*'
+        } else {
+            ' '
+        };
         lines.push(Line::from(vec![
-            Span::styled(format!("  {:<width$}", e.name), style),
+            Span::styled(format!("{mark} {:<width$}", e.name), style),
             Span::styled(format!("  {}", e.summary), t.dim_style()),
         ]));
     }

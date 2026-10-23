@@ -3501,3 +3501,125 @@ async fn the_watch_query_asks_for_blocked_unicast_flows_past_the_cache_each_time
     assert_eq!(model.busy, 0);
     server.verify().await;
 }
+
+/// A config file whose profile `t` (the test model's) has a default filter
+/// on every screen.
+fn defaults_config(dir: &std::path::Path) -> std::path::PathBuf {
+    let cfg = dir.join("config.toml");
+    std::fs::write(
+        &cfg,
+        "completion_cache = false\n[profiles.t]\nhost = \"h\"\norg_id = 5\n\
+         [profiles.t.filter_defaults]\ntraffic = \"web\"\nevents = \"errs\"\nworkloads = \"prod\"\npolicy = \"deny\"\n\
+         [profiles.t.filters.traffic.web]\nsrc = \"app=web\"\nwindow = \"30d\"\n\
+         [profiles.t.filters.events.errs]\nseverity = \"err\"\nwindow = \"7d\"\n\
+         [profiles.t.filters.workloads.prod]\nlabels = \"env=prod\"\n\
+         [profiles.t.filters.policy]\ndeny = \"deny\"\n",
+    )
+    .unwrap();
+    cfg
+}
+
+#[tokio::test]
+async fn default_filters_at_startup_cost_no_request_and_shape_the_first_loads() {
+    // The same requests as without defaults (health, four lists, one events
+    // list, one workloads list); the traffic default (30d) runs nothing.
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/health"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "normal"})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    mount_objects(&server).await;
+    mount_events(&server, 1).await;
+    mount_workloads(&server, 1).await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = model();
+    m.saved.path = Ok(defaults_config(dir.path()));
+    illumio_tui::tui::update::apply_defaults(&mut m);
+    let (mut rt, _tx) = Runtime::new(pce_for(&server), m);
+    rt.execute(Cmd::Connect);
+    let keys = [(500, '5'), (300, '4'), (300, '1'), (300, 'q')];
+    let events = stream::iter(keys.to_vec()).then(|(ms, c)| async move {
+        tokio::time::sleep(Duration::from_millis(ms)).await;
+        Event::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))
+    });
+    let model = run_loop(&mut rt, Box::pin(events), &mut |_| {}).await;
+    assert_eq!(
+        model.stats.calls, 7,
+        "health + four lists + events + workloads"
+    );
+    assert_eq!(model.traffic.filter.src, "app=web");
+    assert_eq!(model.traffic.filter.window, "30d");
+    assert!(model.traffic.data.is_none(), "no traffic query");
+    assert_eq!(model.workloads.labels.to_string(), "env=prod");
+    assert_eq!(model.events.filter.window, "7d");
+    let events_req = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|r| r.url.path().ends_with("/events"))
+        .unwrap();
+    assert!(
+        events_req
+            .url
+            .query_pairs()
+            .any(|(k, v)| k == "severity" && v == "err"),
+        "{}",
+        events_req.url
+    );
+    assert!(model.saved.warning.is_none());
+    assert_eq!(model.busy, 0);
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn a_switch_applies_the_new_profiles_defaults_and_sends_only_the_startup_sequence() {
+    use illumio_tui::cli::GlobalArgs;
+    use illumio_tui::tui::msg::Msg;
+    let a = MockServer::start().await;
+    let b = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/health"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .expect(1)
+        .mount(&b)
+        .await;
+    mount_objects(&b).await;
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = two_profile_config(dir.path(), &b);
+    let mut text = std::fs::read_to_string(&cfg).unwrap();
+    text.push_str(
+        "[profiles.b.filter_defaults]\ntraffic = \"big\"\n\
+         [profiles.b.filters.traffic.big]\ndst = \"env=prod\"\nmax_results = 50000\n",
+    );
+    std::fs::write(&cfg, text).unwrap();
+    let global = GlobalArgs {
+        config: Some(cfg.clone()),
+        profile: Some("a".into()),
+        ..Default::default()
+    };
+    let mut m = model();
+    m.saved.path = Ok(cfg);
+    let (mut rt, tx) = Runtime::with_args(pce_for(&a), m, global);
+    tx.send(Msg::Command(illumio_tui::tui::commands::Command::Profile(
+        "b".into(),
+    )))
+    .unwrap();
+    let events = stream::once(async {
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
+    });
+    let model = run_loop(&mut rt, Box::pin(events), &mut |_| {}).await;
+    assert_eq!(model.profile.name, "b");
+    assert_eq!(model.traffic.filter.dst, "env=prod");
+    assert_eq!(model.traffic.filter.max_results, 50000);
+    assert_eq!(
+        model.traffic.filter.window, "1h",
+        "the profile's own window"
+    );
+    assert_eq!(model.stats.calls, 5, "health + four lists, nothing else");
+    assert!(a.received_requests().await.unwrap_or_default().is_empty());
+    assert_eq!(b.received_requests().await.unwrap().len(), 5);
+}

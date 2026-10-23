@@ -103,6 +103,8 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
             key("", ":save <name>  the screen's filter, in the profile"),
             key("", ":filters (:fl)  its saved filters (Enter, D delete)"),
             key("", ":load <name>  (or :filter <name>; Tab completes)"),
+            key("", ":default <name>|off  applied at startup, :profile"),
+            key("", "(in :filters * sets or unsets it)"),
         ],
     },
     HelpGroup {

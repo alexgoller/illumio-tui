@@ -34,6 +34,8 @@ use std::time::Instant;
 mod app_overlay;
 mod bulk;
 mod cmdline;
+#[cfg(test)]
+mod default_filter_tests;
 mod enforce;
 mod events;
 mod explain;
@@ -56,6 +58,7 @@ mod writes;
 pub use cmdline::on_command;
 pub use events::event_detail_lines;
 pub use policy::{REVERT_WORD, deny_unloaded_text};
+pub use saved::apply_defaults;
 pub(crate) use workloads::apply_workload_labels;
 
 use app_overlay::*;
@@ -266,7 +269,14 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 index: Some(index),
                 index_age_secs: age_secs,
             };
-            model.status = StatusLine::info("ready");
+            let unresolved = saved::resolve_search(model);
+            model.status = match model.saved.warning.take() {
+                Some(w) => StatusLine::warn(w),
+                None if !unresolved.is_empty() => {
+                    StatusLine::warn(format!("ready · rule search: {}", unresolved.join(", ")))
+                }
+                None => StatusLine::info("ready"),
+            };
             model.objects.index_failed = false;
             model.workloads.index_failed = false;
             model.refresh_label_warnings();
@@ -807,6 +817,8 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 model.connection = Connection::Connecting;
                 model.status =
                     StatusLine::info(format!("switched to {}; connecting…", model.profile.name));
+                // The new profile's defaults, before anything loads.
+                apply_defaults(model);
                 vec![Cmd::Connect]
             }
             Err(e) => {

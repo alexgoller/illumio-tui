@@ -1,6 +1,7 @@
 //! Saved filters in the TUI (`:save`, `:filters`, `:load`): the filter in
 //! force on a screen as the config file stores it and back, the `[name]`
-//! tag while an applied filter is unchanged, and the `:filters` picker.
+//! tag while an applied filter is unchanged, the `:filters` picker, and
+//! each screen's default (`*` in the picker, `:default`).
 //! Pure but for [`SavedState::store`]'s file reads; applying goes through
 //! the screens' own `f` paths in `update`.
 use crate::filters::{
@@ -40,6 +41,9 @@ pub struct SavedState {
     /// `--env-file` connection; tests until they set one).
     pub path: Result<PathBuf, String>,
     pub applied: Applied,
+    /// Why a default filter was ignored, said again once the names load
+    /// (the connection's own messages replace the status line before).
+    pub warning: Option<String>,
 }
 
 impl Default for SavedState {
@@ -47,6 +51,7 @@ impl Default for SavedState {
         Self {
             path: Err("no config file".into()),
             applied: Applied::default(),
+            warning: None,
         }
     }
 }
@@ -194,16 +199,13 @@ pub fn events_saved(e: &EventsFilterEdit) -> EventsSaved {
 }
 
 /// The saved events filter as the editor holds it; a missing field is the
-/// default: `types` (the profile's hidden types), any severity, 24h.
+/// default: any severity, 24h. `types` (the profile's hidden types, `!a,
+/// !b`) apply on top of the saved type terms: each one the text lacks is
+/// added after them.
 pub fn events_edit(s: &EventsSaved, types: &str) -> EventsFilterEdit {
     EventsFilterEdit {
         severity: s.severity.clone().unwrap_or_default().trim().to_string(),
-        event_type: s
-            .event_type
-            .clone()
-            .unwrap_or_else(|| types.to_string())
-            .trim()
-            .to_string(),
+        event_type: with_terms(s.event_type.as_deref().unwrap_or(""), types),
         window: s
             .window
             .clone()
@@ -211,6 +213,24 @@ pub fn events_edit(s: &EventsSaved, types: &str) -> EventsFilterEdit {
             .trim()
             .to_string(),
     }
+}
+
+/// `text`'s `,` terms, then each term of `extra` it does not hold.
+fn with_terms(text: &str, extra: &str) -> String {
+    let terms = |t: &str| -> Vec<String> {
+        t.split(',')
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(String::from)
+            .collect()
+    };
+    let mut out = terms(text);
+    for t in terms(extra) {
+        if !out.contains(&t) {
+            out.push(t);
+        }
+    }
+    out.join(", ")
 }
 
 pub fn workloads_saved(f: &WorkloadFilters, labels: &str) -> WorkloadsSaved {
@@ -250,14 +270,17 @@ pub struct PickerEntry {
     pub summary: String,
 }
 
-/// `:filters`: the current screen's saved filters. Typing narrows (any
-/// case), `↑`/`↓` move, `Enter` applies, `D` deletes (after a confirm),
-/// `Esc` closes.
+/// `:filters`: the current screen's saved filters, the default marked
+/// `*`. Typing narrows (any case), `↑`/`↓` move, `Enter` applies, `*`
+/// makes the selected one the default (or no longer), `D` deletes (after
+/// a confirm), `Esc` closes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FilterPicker {
     pub screen: FilterScreen,
     pub input: String,
     pub entries: Vec<PickerEntry>,
+    /// The screen's default filter.
+    pub default: Option<String>,
     /// Index into `matches()`.
     pub selected: usize,
 }
@@ -268,10 +291,12 @@ pub enum PickerOutcome {
     Close,
     Apply(String),
     Delete(FilterPicker, String),
+    /// `*`: the default toggled on this filter.
+    Default(FilterPicker, String),
 }
 
 impl FilterPicker {
-    pub fn new(screen: FilterScreen, filters: &SavedFilters) -> Self {
+    pub fn new(screen: FilterScreen, filters: &SavedFilters, default: Option<&str>) -> Self {
         let entries = filters
             .names(screen)
             .into_iter()
@@ -287,6 +312,7 @@ impl FilterPicker {
             screen,
             input: String::new(),
             entries,
+            default: default.map(String::from),
             selected: 0,
         }
     }
@@ -324,6 +350,11 @@ impl FilterPicker {
             // Typing narrows any case, so a capital D is free for delete.
             KeyCode::Char('D') => match self.selected_name() {
                 Some(name) => PickerOutcome::Delete(self, name),
+                None => PickerOutcome::Open(self),
+            },
+            // No name holds a `*`, so it is free too.
+            KeyCode::Char('*') => match self.selected_name() {
+                Some(name) => PickerOutcome::Default(self, name),
                 None => PickerOutcome::Open(self),
             },
             KeyCode::Down | KeyCode::Up => {
@@ -428,7 +459,13 @@ mod tests {
             event_type: "!agent.*".into(),
             window: "7d".into(),
         };
-        assert_eq!(events_edit(&events_saved(&e), "!x"), e);
+        assert_eq!(events_edit(&events_saved(&e), "!agent.*"), e);
+        // The profile's hidden types apply on top, each once.
+        assert_eq!(
+            events_edit(&events_saved(&e), "!agent.*, !=user.login").event_type,
+            "!agent.*, !=user.login"
+        );
+        assert_eq!(events_edit(&events_saved(&e), "").event_type, "!agent.*");
         let d = events_edit(&EventsSaved::default(), "!agent.*");
         assert_eq!(
             (
@@ -451,8 +488,9 @@ mod tests {
 
     #[test]
     fn the_picker_narrows_any_case_applies_and_asks_to_delete() {
-        let p = FilterPicker::new(FilterScreen::Traffic, &filters());
+        let p = FilterPicker::new(FilterScreen::Traffic, &filters(), Some("web"));
         assert_eq!(p.entries.len(), 3);
+        assert_eq!(p.default.as_deref(), Some("web"));
         assert!(
             p.entries[1].summary.contains("does not parse"),
             "{:?}",
@@ -478,11 +516,20 @@ mod tests {
             p.clone().key(k(KeyCode::Enter)),
             PickerOutcome::Apply("Db".into())
         );
-        match p.key(KeyEvent::new(KeyCode::Char('D'), KeyModifiers::SHIFT)) {
+        match p
+            .clone()
+            .key(KeyEvent::new(KeyCode::Char('D'), KeyModifiers::SHIFT))
+        {
             PickerOutcome::Delete(_, name) => assert_eq!(name, "Db"),
             o => panic!("{o:?}"),
         }
-        let p = FilterPicker::new(FilterScreen::Traffic, &filters()).key(k(KeyCode::Esc));
+        match p.key(k(KeyCode::Char('*'))) {
+            PickerOutcome::Default(p, name) => {
+                assert_eq!((name.as_str(), p.input.as_str()), ("Db", "db"))
+            }
+            o => panic!("{o:?}"),
+        }
+        let p = FilterPicker::new(FilterScreen::Traffic, &filters(), None).key(k(KeyCode::Esc));
         assert_eq!(p, PickerOutcome::Close);
     }
 

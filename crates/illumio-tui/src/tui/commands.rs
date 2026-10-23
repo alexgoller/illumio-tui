@@ -43,6 +43,9 @@ pub enum Command {
     Filters,
     /// `:load <name>`: the screen's saved filter, applied.
     Load(String),
+    /// `:default <name>|off`: the screen's default saved filter, set or
+    /// cleared.
+    Default(String),
     Quit,
     Help,
 }
@@ -112,6 +115,7 @@ pub fn parse(input: &str) -> Result<Command, String> {
         "save" => with_arg(Command::Save, "save <name>"),
         "filters" | "fl" => no_arg(Command::Filters),
         "load" => with_arg(Command::Load, "load <name>"),
+        "default" => with_arg(Command::Default, "default <name> | off"),
         "q" | "quit" => no_arg(Command::Quit),
         "help" | "h" | "?" => no_arg(Command::Help),
         other => Err(format!("unknown command :{other}; try :help")),
@@ -194,6 +198,19 @@ mod tests {
         assert_eq!(parse("filters").unwrap(), Command::Filters);
         assert_eq!(parse("fl").unwrap(), Command::Filters);
         assert_eq!(parse("load web").unwrap(), Command::Load("web".into()));
+        assert_eq!(
+            parse("default web").unwrap(),
+            Command::Default("web".into())
+        );
+        assert_eq!(
+            parse("default off").unwrap(),
+            Command::Default("off".into())
+        );
+        assert!(
+            parse("default")
+                .unwrap_err()
+                .contains("default <name> | off")
+        );
         assert!(parse("save").unwrap_err().contains("usage"));
         assert!(parse("load").unwrap_err().contains("usage"));
         assert!(parse("fl x").unwrap_err().contains("takes no argument"));
