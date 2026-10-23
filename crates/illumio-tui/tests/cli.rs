@@ -4732,3 +4732,113 @@ async fn gen_consolidate_refuses_a_bad_spec_before_any_request_and_a_non_candida
     let err = String::from_utf8_lossy(&a.get_output().stderr).to_string();
     assert!(err.contains("nothing to switch off"), "{err}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn workloads_health_ven_version_and_ven_summary_cost_the_one_list_request() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/workloads.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(6)
+        .mount(&server)
+        .await;
+    let hrefs = |out: &Value| -> Vec<String> {
+        out["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["href"].as_str().unwrap().to_string())
+            .collect()
+    };
+    // The fixture's heartbeats are days old: every VEN is offline.
+    let out = stdout_json(
+        cmd(&server)
+            .args(["workloads", "--health", "unmanaged,warning"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(hrefs(&out), ["/orgs/5/workloads/aaaa-3"]);
+    assert_eq!(out["meta"]["api_calls"], 1);
+    assert_eq!(
+        out["meta"]["local_filter"],
+        json!(["health warning,unmanaged"])
+    );
+    let out = stdout_json(
+        cmd(&server)
+            .args(["workloads", "--ven-version", "23.2.*"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(
+        hrefs(&out),
+        ["/orgs/5/workloads/aaaa-1", "/orgs/5/workloads/aaaa-4"]
+    );
+    assert_eq!(out["meta"]["local_filter"], json!(["ven 23.2.*"]));
+    // The summary: the same one read, nothing more.
+    let out = stdout_json(
+        cmd(&server)
+            .args(["workloads", "ven-summary"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["meta"]["api_calls"], 1, "one list request");
+    let d = &out["data"];
+    assert_eq!(
+        (d["workloads"].as_u64(), d["vens"].as_u64()),
+        (Some(4), Some(3))
+    );
+    assert_eq!(d["newest"], "23.2.31-3113");
+    assert_eq!(d["behind"], 1);
+    assert_eq!(
+        d["versions"][0],
+        json!({"version": "23.2.31-3113", "count": 2, "newest": true})
+    );
+    assert_eq!(d["health"][3], json!({"health": "offline", "count": 3}));
+    assert_eq!(
+        d["messages"][0]["message"],
+        "policy_sync: policy out of date"
+    );
+    // Filters narrow the summary too.
+    let out = stdout_json(
+        cmd(&server)
+            .args(["workloads", "ven-summary", "--ven-version", "22.*"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"]["vens"], 1);
+    cmd(&server)
+        .args(["workloads", "ven-summary", "--table"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("health · 3 VENs · 4 workloads")
+                .and(predicate::str::contains(
+                    "versions · newest 23.2.31-3113 · 1 behind",
+                ))
+                .and(predicate::str::contains("visibility_only")),
+        );
+    let a = cmd(&server)
+        .args(["workloads", "ven-summary", "--csv"])
+        .assert()
+        .success();
+    let csv = String::from_utf8_lossy(&a.get_output().stdout).to_string();
+    let lines: Vec<&str> = csv.lines().collect();
+    assert_eq!(lines[0], "section,name,count,note");
+    assert!(lines.contains(&"health,offline,3,"), "{csv}");
+    assert!(lines.contains(&"version,23.2.31-3113,2,newest"), "{csv}");
+    assert!(lines.contains(&"enforcement,unmanaged,1,"), "{csv}");
+    assert!(
+        lines.contains(&"message,policy_sync: policy out of date,1,warning"),
+        "{csv}"
+    );
+    // A bad state is clap's argument error, before any request.
+    cmd(&server)
+        .args(["workloads", "--health", "warn"])
+        .assert()
+        .code(2);
+}

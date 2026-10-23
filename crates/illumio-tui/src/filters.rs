@@ -336,7 +336,7 @@ pub struct EventsSaved {
 }
 
 /// A workloads filter: the label filter (`f`) and the local filters
-/// (`E` `m` `o` `u`).
+/// (`E` `m` `o` `u`, the VEN health `v` and version).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct WorkloadsSaved {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -349,6 +349,12 @@ pub struct WorkloadsSaved {
     pub offline: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unlabeled: Option<bool>,
+    /// VEN health states, any of (`warning`, `error`, ...).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub health: Option<Vec<String>>,
+    /// The VEN version: exact, or a `*` glob (`23.2.*`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ven_version: Option<String>,
 }
 
 /// A stored filter's fields, read one by one so an error names its field.
@@ -502,7 +508,15 @@ impl Saved {
             }
             Screen::Workloads => {
                 let f = table()?;
-                f.only(&["labels", "enforcement", "managed", "offline", "unlabeled"])?;
+                f.only(&[
+                    "labels",
+                    "enforcement",
+                    "managed",
+                    "offline",
+                    "unlabeled",
+                    "health",
+                    "ven_version",
+                ])?;
                 let enforcement = f.text("enforcement")?;
                 if let Some(e) = &enforcement
                     && !ENFORCEMENTS.contains(&e.trim())
@@ -512,12 +526,26 @@ impl Saved {
                         ENFORCEMENTS.join(", ")
                     ));
                 }
+                let health = f.list("health")?;
+                let health = match health {
+                    Some(h) => Some(
+                        pce::ven::HealthSet::from_names(&h)
+                            .map_err(|e| format!("field health: {e}"))?
+                            .names(),
+                    ),
+                    None => None,
+                };
                 Saved::Workloads(WorkloadsSaved {
                     labels: f.text("labels")?,
                     enforcement: enforcement.map(|e| e.trim().to_string()),
                     managed: f.flag("managed")?,
                     offline: f.flag("offline")?,
                     unlabeled: f.flag("unlabeled")?,
+                    health: health.filter(|h| !h.is_empty()),
+                    ven_version: f
+                        .text("ven_version")?
+                        .map(|v| v.trim().to_string())
+                        .filter(|v| !v.is_empty()),
                 })
             }
         })
@@ -564,6 +592,8 @@ impl Saved {
             Saved::Workloads(w) => {
                 text("labels", &w.labels);
                 text("enforcement", &w.enforcement);
+                text("health", &w.health.as_ref().map(|h| h.join(",")));
+                text("ven", &w.ven_version);
                 if let Some(m) = w.managed {
                     parts.push(if m { "managed" } else { "unmanaged" }.into());
                 }
@@ -921,6 +951,32 @@ org_id = 1
                 .unwrap_err()
                 .contains("prod-blocked")
         );
+    }
+
+    #[test]
+    fn workloads_health_and_ven_version_parse_round_trip_and_name_a_bad_state() {
+        let v: toml::Value = toml::from_str(
+            "health = \"offline, Warning\"\nven_version = \" 23.2.* \"\noffline = true",
+        )
+        .unwrap();
+        let s = Saved::parse(Screen::Workloads, &v).unwrap();
+        let Saved::Workloads(w) = &s else { panic!() };
+        assert_eq!(
+            w.health.as_deref(),
+            Some(&["warning".to_string(), "offline".to_string()][..])
+        );
+        assert_eq!(w.ven_version.as_deref(), Some("23.2.*"));
+        assert_eq!(s.summary(), "health warning,offline · ven 23.2.* · offline");
+        assert_eq!(Saved::parse(Screen::Workloads, &s.to_value()).unwrap(), s);
+        let bad: toml::Value = toml::from_str("health = [\"warn\"]").unwrap();
+        let e = Saved::parse(Screen::Workloads, &bad).unwrap_err();
+        assert!(
+            e.starts_with("field health:") && e.contains("\"warn\""),
+            "{e}"
+        );
+        let bad: toml::Value = toml::from_str("ven_version = 23").unwrap();
+        let e = Saved::parse(Screen::Workloads, &bad).unwrap_err();
+        assert!(e.starts_with("field ven_version:"), "{e}");
     }
 
     #[test]

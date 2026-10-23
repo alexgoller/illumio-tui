@@ -390,6 +390,12 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
                 "E m o u c",
                 "enforcement · managed · offline · unlabeled · clear",
             ),
+            key(
+                "v / :ven",
+                "VEN health: all → warning → error → offline · fleet",
+            ),
+            more("", ":ven: health, versions, enforcement, messages"),
+            more("", "Enter on a row there filters the list to it"),
             more("", "local, no request; c clears them and h, not /"),
             key("f", "label filter: app=shop,crm env=prod !role=db app=-"),
             more(

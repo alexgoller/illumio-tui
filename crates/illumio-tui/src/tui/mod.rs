@@ -33,6 +33,7 @@ pub mod test_support;
 pub mod traffic_marks;
 pub mod ui;
 pub mod update;
+pub mod ven_view;
 pub mod wl_groups;
 
 pub use model::Model;

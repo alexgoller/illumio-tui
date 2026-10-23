@@ -1193,6 +1193,8 @@ mod tests;
 #[cfg(test)]
 mod toggle_tests;
 #[cfg(test)]
+mod ven_tests;
+#[cfg(test)]
 mod window_step_tests;
 #[cfg(test)]
 mod workload_group_tests;

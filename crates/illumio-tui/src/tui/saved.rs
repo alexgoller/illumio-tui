@@ -137,7 +137,14 @@ pub fn mark_applied(model: &mut crate::tui::Model, screen: Screen, name: &str) {
         Screen::Workloads => {
             a.workloads = Some((
                 name,
-                (model.workloads.filters, model.workloads.labels.to_string()),
+                (
+                    // As saved: a message filter is not part of it.
+                    WorkloadFilters {
+                        message: None,
+                        ..model.workloads.filters.clone()
+                    },
+                    model.workloads.labels.to_string(),
+                ),
             ))
         }
         Screen::Objects => {}
@@ -240,6 +247,8 @@ pub fn workloads_saved(f: &WorkloadFilters, labels: &str) -> WorkloadsSaved {
         managed: f.managed,
         offline: f.offline.then_some(true),
         unlabeled: f.unlabeled.then_some(true),
+        health: Some(f.health.names()).filter(|h| !h.is_empty()),
+        ven_version: f.ven_version.clone(),
     }
 }
 
@@ -258,6 +267,14 @@ pub fn workload_filters(s: &WorkloadsSaved) -> (WorkloadFilters, String) {
             managed: s.managed,
             offline: s.offline.unwrap_or(false),
             unlabeled: s.unlabeled.unwrap_or(false),
+            // Parsed already: names only the known states.
+            health: s
+                .health
+                .as_deref()
+                .and_then(|h| pce::ven::HealthSet::from_names(h).ok())
+                .unwrap_or_default(),
+            ven_version: s.ven_version.clone(),
+            message: None,
         },
         s.labels.clone().unwrap_or_default().trim().to_string(),
     )
@@ -480,10 +497,23 @@ mod tests {
             managed: Some(false),
             offline: true,
             unlabeled: false,
+            health: pce::ven::HealthSet::parse("error,warning").unwrap(),
+            ven_version: Some("23.2.*".into()),
+            message: None,
         };
         let s = workloads_saved(&w, "env=prod !app=x");
         assert_eq!(s.unlabeled, None);
-        assert_eq!(workload_filters(&s), (w, "env=prod !app=x".into()));
+        assert_eq!(
+            s.health.as_deref(),
+            Some(&["warning".to_string(), "error".to_string()][..])
+        );
+        assert_eq!(workload_filters(&s), (w.clone(), "env=prod !app=x".into()));
+        // A message filter is a look from `:ven`, never saved.
+        let with_message = WorkloadFilters {
+            message: Some("policy_sync: x".into()),
+            ..w.clone()
+        };
+        assert_eq!(workloads_saved(&with_message, "env=prod !app=x"), s);
     }
 
     #[test]

@@ -54,7 +54,14 @@ pub(super) fn write_filter(model: &mut Model, name: &str, saved: &Saved) {
     model.status = match written {
         Ok(_) => {
             saved::mark_applied(model, model.screen, name);
-            StatusLine::info(format!("saved {} filter {name}", saved.screen()))
+            // A `:ven` message bucket is a look, not a saved field.
+            let note = match saved {
+                Saved::Workloads(_) if model.workloads.filters.message.is_some() => {
+                    " (without the message filter)"
+                }
+                _ => "",
+            };
+            StatusLine::info(format!("saved {} filter {name}{note}", saved.screen()))
         }
         Err(e) => StatusLine::error(e),
     };

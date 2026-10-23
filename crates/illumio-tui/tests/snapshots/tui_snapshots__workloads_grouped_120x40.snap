@@ -4,7 +4,7 @@ expression: out
 ---
  illumio-tui pce.example · org 5 ●                                                                api 5 calls · 20.8 KB
   1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
-healthy 6 · warning 1 · error 0 · offline 6 · unmanaged 1  ████████████████████████
+VEN 13 · healthy 6 · warning 1 · error 0 · offline 6 · unmanaged 1  ████████████████████████
 ╭ Workloads by app | env ─────────────────────────────────────────────────── by size ↓ · 6 groups · 14 · cached 5s ago ╮
 │  hostname               name           ip              labels   enforcement     online agent     health    heartbeat │
 │  ▾ crm | prod            5 wl  ██████████  3 ok · 2 offline          full 3 vis 2                                    │

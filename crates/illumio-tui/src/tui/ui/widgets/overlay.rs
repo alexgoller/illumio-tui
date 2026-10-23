@@ -777,6 +777,97 @@ pub fn render_event_types(model: &Model, selected: usize, f: &mut Frame, area: R
     );
 }
 
+/// The key line of the VEN fleet.
+const VEN_KEYS: &str = "Enter filters the list to it · j/k move · Esc close";
+
+/// A health state's colour, as the Workloads rows use it.
+pub fn health_style(h: pce::models::VenHealth, t: &Theme) -> Style {
+    use pce::models::VenHealth;
+    match h {
+        VenHealth::Healthy => Style::new().fg(t.ok),
+        VenHealth::Warning => Style::new().fg(t.warn),
+        VenHealth::Error | VenHealth::Offline => Style::new().fg(t.bad),
+        VenHealth::Unmanaged => t.dim_style(),
+    }
+}
+
+/// `:ven`: the VEN fleet of the loaded workloads in four sections
+/// (health, versions newest first, enforcement, health messages); the
+/// cursor is on a bucket, the list scrolls to keep it shown.
+pub fn render_ven(model: &Model, selected: usize, f: &mut Frame, area: Rect) {
+    use crate::tui::ven_view::{VenBucket, VenLine, bucket_lines, lines as ven_lines};
+    let t = &model.theme;
+    let s = &model.workloads.ven;
+    let all = ven_lines(s);
+    let at = bucket_lines(&all);
+    let sel_line = at
+        .get(selected.min(at.len().saturating_sub(1)))
+        .copied()
+        .unwrap_or(0);
+    let r = centered(area, 72, (all.len() as u16).saturating_add(3).clamp(8, 30));
+    f.render_widget(Clear, r);
+    // Rows inside the borders, less the key line.
+    let rows = (r.height.saturating_sub(2) as usize).saturating_sub(1);
+    let first = sel_line.saturating_sub(rows.saturating_sub(1));
+    let width = (r.width as usize).saturating_sub(2);
+    let count_w = 6;
+    let tag_w = 8;
+    let name_w = width.saturating_sub(2 + tag_w + count_w + 1);
+    let mut lines: Vec<Line> = all
+        .iter()
+        .enumerate()
+        .skip(first)
+        .take(rows)
+        .map(|(i, l)| match l {
+            VenLine::Section(title, note) => {
+                let mut spans = vec![Span::styled(title.to_string(), t.header_style())];
+                if !note.is_empty() {
+                    spans.push(Span::styled(format!("  {note}"), t.dim_style()));
+                }
+                Line::from(spans)
+            }
+            VenLine::Note(text) => Line::from(Span::styled(format!("  {text}"), t.dim_style())),
+            VenLine::Bucket { bucket, tag, count } => {
+                let (name, style) = match bucket {
+                    VenBucket::Health(h) => (h.as_str().to_string(), health_style(*h, t)),
+                    VenBucket::Version(v) => (plain(v), t.base()),
+                    VenBucket::Enforcement(e) => (e.clone(), t.base()),
+                    VenBucket::Message(m) => (plain(m), t.base()),
+                };
+                let style = if *count == 0 { t.dim_style() } else { style };
+                let tag_style = match *tag {
+                    "error" => Style::new().fg(t.bad),
+                    "warning" | "behind" => Style::new().fg(t.warn),
+                    "newest" => Style::new().fg(t.ok),
+                    _ => t.dim_style(),
+                };
+                Line::from(vec![
+                    Span::styled(
+                        if i == sel_line { "▸ " } else { "  " },
+                        Style::new().fg(t.accent),
+                    ),
+                    Span::styled(format!("{:<name_w$}", clip(&name, name_w)), style),
+                    Span::styled(format!("{tag:>tag_w$}"), tag_style),
+                    Span::styled(format!("{count:>count_w$}"), style),
+                ])
+            }
+        })
+        .collect();
+    lines.resize(rows, Line::from(""));
+    lines.push(Line::from(Span::styled(VEN_KEYS, t.dim_style())));
+    let meta = if s.truncated {
+        format!("{} VENs of {} loaded (capped)", s.vens, s.workloads)
+    } else {
+        format!("{} VENs · {} workloads", s.vens, s.workloads)
+    };
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(panel("VEN health", &meta, t, true))
+            .style(t.base()),
+        r,
+    );
+}
+
 /// Most lines shown for one event; the rest scrolls. A smaller terminal
 /// shows fewer: the cut follows the box height.
 const EVENT_DETAIL_LINES: usize = 30;
@@ -1403,7 +1494,7 @@ pub fn screen_hint_more(screen: Screen, view: TrafficView) -> &'static str {
             "+/- window  ]/[ cap  x mode  o service  d decision"
         }
         (Screen::Traffic, _) => "+/- window  ]/[ cap  D draft  :fl saved",
-        (Screen::Workloads, _) => "h/H health  E/m/o/u  c clear",
+        (Screen::Workloads, _) => "h/H/v health  :ven  E/m/o/u  c clear",
         (Screen::Events, _) => "S severity  r refresh  a auto  :fl saved",
         (Screen::Policy, _) => ":fl saved",
         _ => "",

@@ -4,7 +4,7 @@ expression: out
 ---
  illumio-tui pce.example · org 5 ●                                                                                    api 5 calls · 20.8 KB
   1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
-healthy 1 · warning 1 · error 0 · offline 1 · unmanaged 1  ████████████████████████
+VEN 3 · healthy 1 · warning 1 · error 0 · offline 1 · unmanaged 1 · of 4 loaded (capped)  ████████████████████████
 filter offline · 1 of 4 · partial: the list is truncated
 ╭ Workloads ──────────────────────────────────────────────────────────────────────────────────────────────────────────── 1 · cached 5s ago ╮
 │  hostname               name           ip             labels   enforcement     online agent     health    heartbeat sync     ven         │
@@ -31,4 +31,4 @@ filter offline · 1 of 4 · partial: the list is truncated
 │                                                                                                                                          │
 │                                                                                                                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-ready                                             t/T traffic  x group  f labels  Enter detail  h/H health  E/m/o/u  c clear  : cmd  ? help
+ready                                     t/T traffic  x group  f labels  Enter detail  h/H/v health  :ven  E/m/o/u  c clear  : cmd  ? help

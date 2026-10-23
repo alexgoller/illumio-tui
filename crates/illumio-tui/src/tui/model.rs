@@ -29,6 +29,7 @@ use pce::traffic::{
     group_by_service, group_key, group_text, in_app, in_peer, keys_or_default, keys_seen, mesh,
     mesh_key, order_sections,
 };
+use pce::ven::{HealthSet, VenSummary, VenTally};
 use pce::write::Plan;
 use pce::{
     IpListSize, KeyOrder, LabelFilter, NameIndex, RuleKind, RuleSetView, RuleView, StatsSnapshot,
@@ -239,6 +240,11 @@ pub enum Overlay {
     EventTypes {
         selected: usize,
     },
+    /// `:ven` on Workloads: the VEN fleet of the loaded workloads
+    /// (`WorkloadsState::ven`); `selected` is the bucket under the cursor.
+    Ven {
+        selected: usize,
+    },
     /// The selected audit event as a change diff, or as pretty JSON when
     /// `raw` (`J` toggles); `scroll` is the first shown line.
     EventDetail {
@@ -364,7 +370,8 @@ impl PartialEq for Overlay {
             // `RuleView` is not `PartialEq`; a rule is identified by its href.
             (Overlay::RuleDetail(a), Overlay::RuleDetail(b)) => a.href == b.href,
             (Overlay::EventsEditor(a), Overlay::EventsEditor(b)) => a == b,
-            (Overlay::EventTypes { selected: a }, Overlay::EventTypes { selected: b }) => a == b,
+            (Overlay::EventTypes { selected: a }, Overlay::EventTypes { selected: b })
+            | (Overlay::Ven { selected: a }, Overlay::Ven { selected: b }) => a == b,
             (
                 Overlay::EventDetail {
                     event: a,

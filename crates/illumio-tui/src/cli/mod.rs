@@ -184,7 +184,7 @@ fn csv_refusal(command: &Command) -> Option<&'static str> {
         Command::Labels(c) if c.action.is_some() => Some("labels add/update/delete"),
         Command::Iplists(c) if c.action.is_some() => Some("iplists add/update/delete"),
         Command::Services(c) if c.action.is_some() => Some("services add/update/delete"),
-        Command::Workloads(c) if c.action.is_some() => {
+        Command::Workloads(c) if c.filter_args().is_none() => {
             Some("workloads add/update/delete/enforce/relabel")
         }
         Command::Policy(P::Rulesets(c)) if c.action.is_some() => {

@@ -378,9 +378,27 @@ fn an_env_file_or_env_only_connection_has_no_saved_filters() {
         .code(2);
 }
 
+/// Workloads filters with the VEN health fields (#72), one broken.
+const VEN_FILTERS: &str = r#"
+[profiles.demo.filters.workloads.badhealth]
+health = ["warn"]
+
+[profiles.demo.filters.workloads.unhealthy]
+health = "warning, error,offline"
+ven_version = "23.2.*"
+"#;
+
+impl Home {
+    fn with_ven_filters() -> Self {
+        let h = Home::new();
+        std::fs::write(h.cfg(), config() + VEN_FILTERS).unwrap();
+        h
+    }
+}
+
 #[test]
 fn every_broken_saved_field_names_profile_screen_filter_and_field() {
-    let h = Home::new();
+    let h = Home::with_ven_filters();
     for (args, want) in [
         (
             vec![
@@ -400,6 +418,21 @@ fn every_broken_saved_field_names_profile_screen_filter_and_field() {
         (
             vec!["events", "--filter", "badtype", "--save-filter", "x"],
             "profile demo, events filter badtype: field type",
+        ),
+        (
+            vec!["workloads", "--filter", "badhealth", "--save-filter", "x"],
+            "profile demo: workloads filter badhealth: field health",
+        ),
+        (
+            vec![
+                "workloads",
+                "ven-summary",
+                "--filter",
+                "badhealth",
+                "--save-filter",
+                "x",
+            ],
+            "profile demo: workloads filter badhealth: field health",
         ),
     ] {
         let e = h.run(&args).assert().code(2);
@@ -805,4 +838,54 @@ fn wrong_shaped_filters_or_defaults_stop_nothing_else() {
     h.run(&["--profile", "creds", "traffic", "query", "--dry-run"])
         .assert()
         .success();
+}
+
+#[test]
+fn workloads_health_and_ven_version_save_and_load_list_and_ven_summary_alike() {
+    let h = Home::with_ven_filters();
+    h.run(&[
+        "workloads",
+        "--health",
+        "error,warning",
+        "--ven-version",
+        "23.*",
+        "--save-filter",
+        "mine",
+    ])
+    .assert()
+    .success();
+    let text = h.text();
+    assert!(
+        text.contains("[profiles.demo.filters.workloads.mine]"),
+        "{text}"
+    );
+    let mine = &text[text.find("workloads.mine]").unwrap()..];
+    let health: String = mine.split_whitespace().collect();
+    assert!(
+        health.contains(r#"health=["warning","error",]"#),
+        "the known order: {text}"
+    );
+    assert!(text.contains(r#"ven_version = "23.*""#), "{text}");
+    // The saved base under ven-summary; a flag replaces its field.
+    h.run(&[
+        "workloads",
+        "ven-summary",
+        "--filter",
+        "unhealthy",
+        "--ven-version",
+        "22.*",
+        "--save-filter",
+        "copy",
+    ])
+    .assert()
+    .success();
+    let a = h
+        .run(&["--json", "filters", "show", "workloads", "copy"])
+        .assert()
+        .success();
+    let out = json(&a);
+    let body = out["data"].to_string();
+    assert!(body.contains("offline"), "{body}");
+    assert!(body.contains("22.*"), "the flag wins: {body}");
+    assert!(!body.contains("23.2.*"), "{body}");
 }

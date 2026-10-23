@@ -37,6 +37,8 @@ pub enum Command {
     Batch,
     /// `:marks [action]`: the marks overlay, filtered to one action.
     Marks(Option<String>),
+    /// `:ven`: the VEN fleet of the loaded workloads (Workloads).
+    Ven,
     /// `:save <name>`: the screen's filter in force, saved under the name.
     Save(String),
     /// `:filters` / `:fl`: a picker of the screen's saved filters.
@@ -111,6 +113,7 @@ pub fn parse(input: &str) -> Result<Command, String> {
         "draft" => no_arg(Command::Draft),
         "active" => no_arg(Command::Active),
         "batch" => no_arg(Command::Batch),
+        "ven" | "vens" => no_arg(Command::Ven),
         "marks" => Ok(Command::Marks((!arg.is_empty()).then(|| arg.to_string()))),
         "save" => with_arg(Command::Save, "save <name>"),
         "filters" | "fl" => no_arg(Command::Filters),

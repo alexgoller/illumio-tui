@@ -117,6 +117,13 @@ pub const HOOKS: &[Hook] = &[
     (&["workloads", "enforce"], "--hostname", Kind::Hostnames),
     (&["workloads", "enforce"], "--label", Kind::LabelFilter),
     (&["workloads", "enforce"], "--unlabeled", Kind::LabelKeys),
+    (&["workloads", "ven-summary"], "--hostname", Kind::Hostnames),
+    (&["workloads", "ven-summary"], "--label", Kind::LabelFilter),
+    (
+        &["workloads", "ven-summary"],
+        "--unlabeled",
+        Kind::LabelKeys,
+    ),
     (&["workloads", "relabel"], "--hostname", Kind::Hostnames),
     (&["workloads", "relabel"], "--label", Kind::LabelFilter),
     (&["workloads", "relabel"], "--unlabeled", Kind::LabelKeys),
@@ -248,6 +255,11 @@ pub const HOOKS: &[Hook] = &[
     (&["policy", "search"], "--filter", Kind::PolicyFilters),
     (&["events"], "--filter", Kind::EventsFilters),
     (&["workloads"], "--filter", Kind::WorkloadsFilters),
+    (
+        &["workloads", "ven-summary"],
+        "--filter",
+        Kind::WorkloadsFilters,
+    ),
     (
         &["filters", "show", "traffic"],
         "name",

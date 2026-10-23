@@ -307,9 +307,14 @@ pub(super) const ENFORCEMENT_CYCLE: [&str; 5] = [
     pce::models::UNMANAGED,
 ];
 
-/// The Workloads screen's local filters (`E` `m` `o` `u`, `c` clears):
-/// applied to the loaded list, no request. `h` stays its own toggle.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// `v`'s steps after `all`.
+pub(super) const HEALTH_CYCLE: [VenHealth; 3] =
+    [VenHealth::Warning, VenHealth::Error, VenHealth::Offline];
+
+/// The Workloads screen's local filters (`E` `m` `o` `u` `v`, a `:ven`
+/// bucket; `c` clears): applied to the loaded list, no request. `h` stays
+/// its own toggle.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WorkloadFilters {
     /// The effective enforcement, `unmanaged` included.
     pub enforcement: Option<&'static str>,
@@ -320,6 +325,12 @@ pub struct WorkloadFilters {
     pub offline: bool,
     /// Some label model key has no label ([`Workload::missing_label_keys`]).
     pub unlabeled: bool,
+    /// The VEN health is one of these (`v`, `:ven`, a saved filter's `health`).
+    pub health: HealthSet,
+    /// The VEN version: exact, or a `*` glob ([`pce::ven::version_matches`]).
+    pub ven_version: Option<String>,
+    /// The VEN reports this health message (`:ven`'s messages).
+    pub message: Option<String>,
 }
 
 impl WorkloadFilters {
@@ -343,6 +354,21 @@ impl WorkloadFilters {
         };
     }
 
+    /// `v`: all → warning → error → offline → all; from any other set
+    /// (a `:ven` bucket, a saved filter), warning.
+    pub fn next_health(&mut self) {
+        let at = self
+            .health
+            .single()
+            .and_then(|h| HEALTH_CYCLE.iter().position(|c| *c == h));
+        self.health = match (self.health.is_empty(), at) {
+            (true, _) | (false, None) => HealthSet::one(HEALTH_CYCLE[0]),
+            (false, Some(i)) => HEALTH_CYCLE
+                .get(i + 1)
+                .map_or_else(HealthSet::default, |h| HealthSet::one(*h)),
+        };
+    }
+
     pub fn is_empty(&self) -> bool {
         *self == Self::default()
     }
@@ -354,6 +380,15 @@ impl WorkloadFilters {
             // `health` is `ven_health` at the row's clock.
             && (!self.offline || v.health == VenHealth::Offline)
             && (!self.unlabeled || !v.missing.is_empty())
+            && self.health.keeps(v.health)
+            && self.ven_version.as_deref().is_none_or(|p| {
+                !w.is_unmanaged() && pce::ven::version_matches(p, &v.ven)
+            })
+            && self.message.as_deref().is_none_or(|m| {
+                v.health != VenHealth::Healthy
+                    && w.agent_status_view()
+                        .is_some_and(|a| a.errors.iter().chain(&a.warnings).any(|x| x == m))
+            })
     }
 }
 
@@ -395,6 +430,8 @@ pub struct WorkloadsState {
     pub now: Option<jiff::Timestamp>,
     /// Workloads per health state in rank order (healthy, unmanaged, warning, offline, error).
     counts: [usize; 5],
+    /// The fleet of every loaded workload (`:ven`, the summary strip).
+    pub ven: VenSummary,
     pub age_secs: u64,
     pub loaded_at: Option<Instant>,
     pub loading: bool,
@@ -452,6 +489,7 @@ impl WorkloadsState {
             model_keys: Vec::new(),
             now: None,
             counts: [0; 5],
+            ven: VenSummary::default(),
             age_secs: 0,
             loaded_at: None,
             loading: false,
@@ -594,9 +632,12 @@ impl WorkloadsState {
             .map(|w| WorkloadRowView::new(w, now, order))
             .collect();
         self.counts = [0; 5];
+        let mut tally = VenTally::default();
         for v in &views {
             self.counts[usize::from(v.health.rank())] += 1;
+            tally.add(&v.workload, v.health);
         }
+        self.ven = tally.finish(self.truncated);
         let unhealthy = |h: VenHealth| {
             matches!(
                 h,
@@ -794,7 +835,8 @@ impl WorkloadsState {
         })
     }
 
-    /// Any filter beyond search: `h`, `E` `m` `o` `u` or the label filter.
+    /// Any filter beyond search: `h`, `E` `m` `o` `u` `v`, a `:ven` bucket
+    /// or the label filter.
     pub fn filtered(&self) -> bool {
         self.unhealthy_only || !self.filters.is_empty() || !self.labels.is_empty()
     }
@@ -836,6 +878,18 @@ impl WorkloadsState {
         }
         if f.unlabeled {
             parts.push(format!("unlabeled ({})", self.model_keys.join(", ")));
+        }
+        if !f.health.is_empty() {
+            parts.push(format!("health {}", f.health));
+        }
+        if let Some(v) = &f.ven_version {
+            parts.push(format!("ven {v}"));
+        }
+        if let Some(m) = &f.message {
+            parts.push(format!(
+                "message {}",
+                crate::tui::ui::screens::workloads::plain(m)
+            ));
         }
         parts.push(format!("{} of {}", self.table.len(), self.raw.len()));
         if self.truncated {

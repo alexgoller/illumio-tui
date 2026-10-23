@@ -29,6 +29,7 @@ pub mod readiness;
 pub mod resolve;
 pub mod rule_filter;
 pub mod traffic;
+pub mod ven;
 pub mod write;
 
 use std::sync::Arc;

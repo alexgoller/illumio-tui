@@ -72,6 +72,7 @@ pub fn view(model: &Model, f: &mut Frame) {
         Overlay::EventTypes { selected } => {
             widgets::overlay::render_event_types(model, *selected, f, area)
         }
+        Overlay::Ven { selected } => widgets::overlay::render_ven(model, *selected, f, area),
         Overlay::EventDetail { event, scroll, raw } => {
             widgets::overlay::render_event_detail(model, event, *scroll, *raw, f, area)
         }

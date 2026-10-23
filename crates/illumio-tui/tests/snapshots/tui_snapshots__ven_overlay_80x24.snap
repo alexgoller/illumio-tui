@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+VEN ╭ VEN health ──────────────────────────────────── 3 VENs · 4 workloads ╮████
+╭ Wo│health                                                                │go ╮
+│  h│  healthy                                                           1 │   │
+│▸ h│  warning                                                           1 │   │
+│  h│  error                                                             0 │   │
+│  u│  offline                                                           1 │   │
+│  h│  unmanaged                                                         1 │   │
+│   │versions  newest 23.2.31-3113 · 1 behind                              │   │
+│   │▸ 23.2.31-3113                                           newest     2 │   │
+│   │  22.5.10-1                                              behind     1 │   │
+│   │enforcement                                                           │   │
+│   │  full                                                              1 │   │
+│   │  selective                                                         1 │   │
+│   │  unmanaged                                                         1 │   │
+│   │  visibility_only                                                   1 │   │
+│   │messages                                                              │   │
+│   │  policy_sync: policy out of date                       warning     1 │   │
+│   │Enter filters the list to it · j/k move · Esc close                   │   │
+│   ╰──────────────────────────────────────────────────────────────────────╯   │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ready               t/T traffic  x group  f labels  Enter detail  : cmd  ? help

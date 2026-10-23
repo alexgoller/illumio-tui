@@ -35,7 +35,7 @@ impl Term {
 
 /// `*` matches any run of characters (none included); everything else
 /// itself. The whole of `text` must match.
-fn glob(pattern: &str, text: &str) -> bool {
+pub(crate) fn glob(pattern: &str, text: &str) -> bool {
     let mut parts = pattern.split('*');
     // `split` always yields a first part; without a `*` it is the pattern.
     let first = parts.next().unwrap_or("");

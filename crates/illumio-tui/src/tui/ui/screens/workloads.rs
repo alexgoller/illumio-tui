@@ -439,14 +439,13 @@ fn uptime_text(secs: u64) -> String {
     }
 }
 
-/// `healthy 1 · warning 0 · error 0 · offline 1 · unmanaged 1` plus a stacked bar that fills what is left.
+/// The VEN strip: `VEN 3 · healthy 1 · warning 1 · error 0 · offline 1 ·
+/// unmanaged 1`, each state in its colour (dim at 0), `· of 500 loaded
+/// (capped)` on a capped list, then a stacked bar in what is left. Narrow,
+/// the words shorten (`ok 1 · warn 1 …`), then the zero counts go.
 fn summary_line(model: &Model, width: u16) -> Line<'static> {
     let t = &model.theme;
-    // summary() is in rank order: healthy, unmanaged, warning, offline, error.
-    let [healthy, unmanaged, warning, offline, error] = model.workloads.summary();
-    let text = format!(
-        "healthy {healthy} · warning {warning} · error {error} · offline {offline} · unmanaged {unmanaged}"
-    );
+    let s = &model.workloads.ven;
     // Marks for a bulk change first: they decide what L and M change.
     let marked = model.workloads.marked.len();
     let hidden = model.workloads.marked_hidden();
@@ -455,9 +454,18 @@ fn summary_line(model: &Model, width: u16) -> Line<'static> {
         (m, 0) => format!("{m} marked · "),
         (m, h) => format!("{m} marked ({h} hidden by the filter) · "),
     };
-    let bar_w = (width as usize)
-        .saturating_sub(mark.chars().count() + text.chars().count() + 2)
-        .min(24);
+    let room = (width as usize).saturating_sub(cells(&mark));
+    let variants = [(true, true), (false, true), (false, false)];
+    let mut parts = Vec::new();
+    for (i, (long, zeros)) in variants.into_iter().enumerate() {
+        parts = strip_parts(s, long, zeros, t);
+        let len: usize = parts.iter().map(|p: &Span| p.width()).sum();
+        if len <= room || i == variants.len() - 1 {
+            break;
+        }
+    }
+    let used: usize = cells(&mark) + parts.iter().map(Span::width).sum::<usize>();
+    let bar_w = (width as usize).saturating_sub(used + 2).min(24);
     let mut spans = Vec::new();
     if marked > 0 {
         spans.push(Span::styled(
@@ -465,16 +473,48 @@ fn summary_line(model: &Model, width: u16) -> Line<'static> {
             Style::new().fg(t.accent).add_modifier(Modifier::BOLD),
         ));
     }
-    spans.push(Span::raw(text));
+    spans.extend(parts);
     if bar_w >= 4 {
         spans.push(Span::raw("  "));
-        spans.extend(health_bar(
-            [healthy, warning, error, offline, unmanaged],
-            bar_w,
-            t,
-        ));
+        spans.extend(health_bar(VenHealth::ALL.map(|h| s.count(h)), bar_w, t));
     }
     Line::from(spans)
+}
+
+/// The strip's parts: `VEN n`, then each state (`long` words or short
+/// ones; `zeros` keeps the states at 0), then the cap note.
+fn strip_parts(s: &pce::ven::VenSummary, long: bool, zeros: bool, t: &Theme) -> Vec<Span<'static>> {
+    let mut out = vec![Span::raw(format!("VEN {}", s.vens))];
+    for h in VenHealth::ALL {
+        let n = s.count(h);
+        if n == 0 && !zeros {
+            continue;
+        }
+        let word = match (h, long) {
+            (_, true) => h.as_str(),
+            (VenHealth::Healthy, false) => "ok",
+            (VenHealth::Warning, false) => "warn",
+            (VenHealth::Error, false) => "err",
+            (VenHealth::Offline, false) => "off",
+            (VenHealth::Unmanaged, false) => "unm",
+        };
+        let style = if n == 0 {
+            t.dim_style()
+        } else {
+            crate::tui::ui::widgets::overlay::health_style(h, t)
+        };
+        out.push(Span::raw(" · "));
+        out.push(Span::styled(format!("{word} {n}"), style));
+    }
+    if s.truncated {
+        let note = if long {
+            format!(" · of {} loaded (capped)", s.workloads)
+        } else {
+            " · capped".to_string()
+        };
+        out.push(Span::styled(note, Style::new().fg(t.warn)));
+    }
+    out
 }
 
 /// Segments in the order healthy, warning, error, offline, unmanaged; rounding leftovers go to the largest.

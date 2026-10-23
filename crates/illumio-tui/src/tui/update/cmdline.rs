@@ -27,6 +27,10 @@ pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
             Vec::new()
         }
         Command::Marks(action) => marks::open_marks(model, action.as_deref()),
+        Command::Ven => {
+            open_ven(model);
+            Vec::new()
+        }
         Command::Save(name) => saved::save_filter(model, &name),
         Command::Filters => {
             saved::open_filters(model);

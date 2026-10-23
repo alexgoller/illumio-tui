@@ -83,6 +83,22 @@ pub enum VenHealth {
 }
 
 impl VenHealth {
+    /// Every state, in the order summaries list them.
+    pub const ALL: [VenHealth; 5] = [
+        VenHealth::Healthy,
+        VenHealth::Warning,
+        VenHealth::Error,
+        VenHealth::Offline,
+        VenHealth::Unmanaged,
+    ];
+
+    /// The state named `s` (`as_str`'s words, any case).
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|h| h.as_str().eq_ignore_ascii_case(s.trim()))
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             VenHealth::Healthy => "healthy",
@@ -304,7 +320,16 @@ impl Workload {
     }
 
     pub fn ven_version(&self) -> Option<String> {
-        self.agent_status_view().and_then(|a| a.version)
+        self.agent_version().map(str::to_string)
+    }
+
+    /// `agent.status.agent_version`, borrowed: no health folding.
+    pub fn agent_version(&self) -> Option<&str> {
+        self.agent
+            .as_ref()?
+            .get("status")?
+            .get("agent_version")?
+            .as_str()
     }
 
     /// Time since the last heartbeat; `None` when unmanaged or the timestamp is missing or unparseable.

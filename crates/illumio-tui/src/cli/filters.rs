@@ -17,7 +17,7 @@ use clap::{Args, Subcommand};
 use serde::Serialize;
 
 /// `--filter`, `--save-filter` and `--force` on `traffic query|groups|mesh`,
-/// `policy search`, `events` and `workloads`.
+/// `policy search`, `events`, `workloads` and `workloads ven-summary`.
 #[derive(Args, Debug, Clone, Default)]
 pub struct SavedFilterArgs {
     /// Start from this saved filter of the profile (config file): a flag given here replaces
@@ -136,7 +136,7 @@ pub fn saved_args(command: &Command) -> Option<(Screen, &SavedFilterArgs)> {
         Command::Traffic(t) => t.filter().map(|f| (Screen::Traffic, &f.saved)),
         Command::Policy(PolicyCmd::Search(a)) => Some((Screen::Policy, &a.saved)),
         Command::Events(a) => Some((Screen::Events, &a.saved)),
-        Command::Workloads(w) if w.action.is_none() => Some((Screen::Workloads, &w.saved)),
+        Command::Workloads(w) => w.filter_args().map(|(_, saved)| (Screen::Workloads, saved)),
         _ => None,
     }
 }
@@ -254,7 +254,10 @@ fn merge(command: &mut Command, saved: &Saved) -> Result<(), String> {
         },
         (Command::Policy(PolicyCmd::Search(a)), Saved::Policy(q)) => a.with_saved(q),
         (Command::Events(a), Saved::Events(s)) => a.with_saved(s),
-        (Command::Workloads(w), Saved::Workloads(s)) => w.list.with_saved(s),
+        (Command::Workloads(w), Saved::Workloads(s)) => match w.filter_args_mut() {
+            Some(list) => list.with_saved(s),
+            None => Ok(()),
+        },
         _ => Err("not this command's filter".into()),
     }
 }
@@ -269,7 +272,10 @@ fn effective(command: &Command) -> Result<Saved, String> {
         },
         Command::Policy(PolicyCmd::Search(a)) => a.to_saved().map(Saved::Policy),
         Command::Events(a) => a.to_saved().map(Saved::Events),
-        Command::Workloads(w) => w.list.to_saved().map(Saved::Workloads),
+        Command::Workloads(w) => match w.filter_args() {
+            Some((list, _)) => list.to_saved().map(Saved::Workloads),
+            None => Err("this command has no saved filters".into()),
+        },
         _ => Err("this command has no saved filters".into()),
     }
 }

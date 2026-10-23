@@ -730,7 +730,10 @@ fn workloads_filtered_80x24_and_140x30() {
         "{out}"
     );
     assert!(!out.contains("missing"), "u off: {out}");
-    assert!(out.contains("h/H health  E/m/o/u  c clear"), "{out}");
+    assert!(
+        out.contains("h/H/v health  :ven  E/m/o/u  c clear"),
+        "{out}"
+    );
     insta::assert_snapshot!("workloads_offline_truncated_140x30", out);
     m.workloads.filters.offline = false;
     m.workloads.filters.enforcement = Some("idle");
@@ -3375,4 +3378,34 @@ fn enforce_overlay_watch_with_a_record_120x40() {
         assert!(out.contains(s), "missing {s:?}:\n{out}");
     }
     insta::assert_snapshot!("enforce_overlay_watch_120x40", out);
+}
+
+#[test]
+fn ven_overlay_160x48_and_80x24_and_the_strip_narrow() {
+    use illumio_tui::tui::model::{Overlay, Screen};
+    use illumio_tui::tui::test_support::model_with_workloads;
+    let mut m = model_with_workloads();
+    m.screen = Screen::Workloads;
+    // The cursor on the newest version.
+    m.overlay = Overlay::Ven { selected: 5 };
+    let out = render_to_string(&m, 160, 48);
+    assert!(out.contains("VEN health"), "{out}");
+    assert!(out.contains("3 VENs · 4 workloads"), "{out}");
+    assert!(out.contains("newest 23.2.31-3113 · 1 behind"), "{out}");
+    assert!(out.contains("▸ 23.2.31-3113"), "{out}");
+    assert!(out.contains("policy_sync: policy out of date"), "{out}");
+    insta::assert_snapshot!("ven_overlay_160x48", out);
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("▸ 23.2.31-3113"), "scrolled to it: {out}");
+    insta::assert_snapshot!("ven_overlay_80x24", out);
+    // Narrow, the strip shortens its words.
+    m.overlay = Overlay::None;
+    m.workloads.truncated = true;
+    m.workloads.rebuild(&m.limits.key_order());
+    let out = render_to_string(&m, 60, 20);
+    assert!(
+        out.contains("VEN 3 · ok 1 · warn 1 · err 0 · off 1 · unm 1 · capped"),
+        "{out}"
+    );
+    insta::assert_snapshot!("workloads_ven_strip_60x20", out);
 }

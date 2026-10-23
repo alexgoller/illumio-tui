@@ -11,6 +11,7 @@ use pce::label_filter::{
     LabelFilter, LabelTerm, MAX_COMBINATIONS, QueryError, group_filter, group_key, group_title,
 };
 use pce::models::{UNMANAGED, VenHealth, Workload, WorkloadFilter};
+use pce::ven::{HealthSet, VenSummary, VenTally};
 use pce::write::{
     IfMissing, InterfaceSpec, LabelRemoval, LabelsPatch, WorkloadDraft, WorkloadPatch,
 };
@@ -54,6 +55,19 @@ pub struct WorkloadsArgs {
     /// for 15 minutes (local filter, the app's `o`)
     #[arg(long)]
     pub offline: bool,
+    /// Only workloads whose VEN health is one of these (comma-separated; local
+    /// filter, the app's `v`)
+    #[arg(
+        long,
+        value_name = "STATES",
+        value_delimiter = ',',
+        value_parser = ["healthy", "warning", "error", "offline", "unmanaged"]
+    )]
+    pub health: Vec<String>,
+    /// Only workloads whose VEN reports this version: exact, or a `*` glob
+    /// such as 23.2.* (local filter)
+    #[arg(long, value_name = "VERSION")]
+    pub ven_version: Option<String>,
     /// Only workloads without a label for one of these keys (comma-separated);
     /// alone, the profile's scope keys and tier key (local filter, the app's `u`)
     #[arg(
@@ -79,7 +93,14 @@ impl WorkloadsArgs {
             || self.managed.is_some()
             || self.unhealthy
             || self.offline
+            || !self.health.is_empty()
+            || self.ven_version.is_some()
             || self.unlabeled.is_some()
+    }
+
+    /// `--health` as a set (clap checked the names).
+    pub fn health_set(&self) -> HealthSet {
+        HealthSet::from_names(&self.health).unwrap_or_default()
     }
 }
 
@@ -109,8 +130,8 @@ pub struct WorkloadsCmd {
 
 impl WorkloadsArgs {
     /// The saved filter `s` as the base: its labels where no `--label` is
-    /// given, its enforcement, managed, offline and unlabeled where those
-    /// flags are not.
+    /// given, its enforcement, managed, offline, unlabeled, health and VEN
+    /// version where those flags are not.
     pub fn with_saved(&mut self, s: &crate::filters::WorkloadsSaved) -> Result<(), String> {
         if self.labels.is_empty()
             && let Some(text) = &s.labels
@@ -132,6 +153,16 @@ impl WorkloadsArgs {
         if self.unlabeled.is_none() && s.unlabeled == Some(true) {
             // `--unlabeled` alone: the label model's keys.
             self.unlabeled = Some(Vec::new());
+        }
+        if self.health.is_empty()
+            && let Some(h) = &s.health
+        {
+            self.health = HealthSet::from_names(h)
+                .map_err(|e| format!("field health: {e}"))?
+                .names();
+        }
+        if self.ven_version.is_none() {
+            self.ven_version = s.ven_version.clone();
         }
         Ok(())
     }
@@ -169,6 +200,13 @@ impl WorkloadsArgs {
             managed: self.managed,
             offline: self.offline.then_some(true),
             unlabeled: self.unlabeled.is_some().then_some(true),
+            health: Some(self.health_set().names()).filter(|h| !h.is_empty()),
+            ven_version: self
+                .ven_version
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(String::from),
         })
     }
 }
@@ -187,6 +225,39 @@ pub enum WorkloadsAction {
     /// Set or remove labels on every workload the filters select, managed
     /// and unmanaged, in bulk_update requests of 100
     Relabel(WorkloadRelabelArgs),
+    /// The VEN fleet of the workloads the filters select: counts per health
+    /// state, VEN version (newest first, how many behind), enforcement and
+    /// health message. The one workloads read `workloads` makes (cached);
+    /// nothing else. CSV: one row per bucket with a section column
+    VenSummary(VenSummaryArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct VenSummaryArgs {
+    #[command(flatten)]
+    pub select: WorkloadsArgs,
+    #[command(flatten)]
+    pub saved: super::filters::SavedFilterArgs,
+}
+
+impl WorkloadsCmd {
+    /// The list filters and the saved filter flags: of the list, or of
+    /// `ven-summary`; `None` for the other subcommands.
+    pub fn filter_args(&self) -> Option<(&WorkloadsArgs, &super::filters::SavedFilterArgs)> {
+        match &self.action {
+            None => Some((&self.list, &self.saved)),
+            Some(WorkloadsAction::VenSummary(a)) => Some((&a.select, &a.saved)),
+            Some(_) => None,
+        }
+    }
+
+    pub fn filter_args_mut(&mut self) -> Option<&mut WorkloadsArgs> {
+        match &mut self.action {
+            None => Some(&mut self.list),
+            Some(WorkloadsAction::VenSummary(a)) => Some(&mut a.select),
+            Some(_) => None,
+        }
+    }
 }
 
 #[derive(Args, Debug)]
@@ -308,6 +379,7 @@ pub async fn workloads_cmd(ctx: &Context, cmd: &WorkloadsCmd) -> Result<(), CliE
         Some(WorkloadsAction::Delete(a)) => workload_delete(ctx, a).await,
         Some(WorkloadsAction::Enforce(a)) => super::bulk::enforce(ctx, a).await,
         Some(WorkloadsAction::Relabel(a)) => super::bulk::relabel(ctx, a).await,
+        Some(WorkloadsAction::VenSummary(a)) => ven_summary(ctx, &a.select).await,
     }
 }
 
@@ -757,6 +829,7 @@ pub async fn select(
         );
     }
     let now = jiff::Timestamp::now();
+    let health = args.health_set();
     let rows: Vec<WorkloadRow> = c
         .value
         .into_iter()
@@ -782,6 +855,15 @@ pub async fn select(
         })
         // Offline is the VEN health, as the app's `o`.
         .filter(|r| !args.offline || r.health == VenHealth::Offline)
+        .filter(|r| health.keeps(r.health))
+        .filter(|r| {
+            args.ven_version.as_deref().is_none_or(|p| {
+                r.health != VenHealth::Unmanaged
+                    && r.workload
+                        .agent_version()
+                        .is_some_and(|v| pce::ven::version_matches(p, v))
+            })
+        })
         .filter(|r| r.missing_labels.as_ref().is_none_or(|m| !m.is_empty()))
         // The whole label filter, as the app applies it: the query carried
         // the plain any-of terms, `!` and `-` are only checked here.
@@ -797,6 +879,7 @@ pub async fn select(
         local_filter: local_filter(
             args.unhealthy,
             args.offline,
+            (health, args.ven_version.as_deref()),
             unlabeled.as_deref(),
             &local_labels,
         ),
@@ -1007,11 +1090,181 @@ impl Grouped {
     }
 }
 
+/// `workloads ven-summary`: the selection `workloads` would list (one
+/// read, cached), summarised. No other request.
+async fn ven_summary(ctx: &Context, args: &WorkloadsArgs) -> Result<(), CliError> {
+    let sel = select(ctx, args, ctx.cache_mode).await?;
+    for w in &sel.warnings {
+        eprintln!("warning: {w}");
+    }
+    let cache = if sel.nothing {
+        "none"
+    } else {
+        cache_label(sel.hit, ctx.cache_mode)
+    };
+    let mut meta = ctx.meta(cache, sel.truncated, None);
+    meta.local_filter = sel.local_filter;
+    meta.warnings = Some(sel.warnings).filter(|w| !w.is_empty());
+    let summary = summarise(&sel.rows, sel.truncated);
+    let sections = VenSections(&summary);
+    if ctx.format == super::output::OutputFormat::Csv {
+        return ctx.emit_report(&summary, &[(String::new(), &sections)], &meta);
+    }
+    let tables = sections.tables();
+    let refs: Vec<(String, &dyn TableRows)> = tables
+        .iter()
+        .map(|(title, t)| (title.clone(), t as &dyn TableRows))
+        .collect();
+    ctx.emit_report(&summary, &refs, &meta)
+}
+
+/// The fleet of `rows`, their health as listed.
+pub fn summarise(rows: &[WorkloadRow], truncated: bool) -> VenSummary {
+    let mut t = VenTally::default();
+    for r in rows {
+        t.add(&r.workload, r.health);
+    }
+    t.finish(truncated)
+}
+
+/// One section of `ven-summary`'s table.
+pub struct Section {
+    headers: Vec<&'static str>,
+    rows: Vec<Vec<String>>,
+}
+
+impl TableRows for Section {
+    fn headers(&self) -> Vec<&'static str> {
+        self.headers.clone()
+    }
+    fn rows(&self) -> Vec<Vec<String>> {
+        self.rows.clone()
+    }
+}
+
+/// `ven-summary` as tables (one per section) and as one CSV with a
+/// `section` column: `section,name,count,note`.
+pub struct VenSections<'a>(pub &'a VenSummary);
+
+impl VenSections<'_> {
+    /// `(section, name, count, note)` rows, in the overlay's order.
+    fn entries(&self) -> Vec<(&'static str, String, usize, String)> {
+        let s = self.0;
+        let mut out: Vec<(&'static str, String, usize, String)> = s
+            .health
+            .iter()
+            .map(|c| {
+                (
+                    "health",
+                    c.health.as_str().to_string(),
+                    c.count,
+                    String::new(),
+                )
+            })
+            .collect();
+        out.extend(s.versions.iter().map(|v| {
+            let note = if v.newest { "newest" } else { "behind" };
+            ("version", v.version.clone(), v.count, note.to_string())
+        }));
+        if s.no_version > 0 {
+            out.push(("version", String::new(), s.no_version, "no version".into()));
+        }
+        out.extend(
+            s.enforcement
+                .iter()
+                .map(|e| ("enforcement", e.enforcement.clone(), e.count, String::new())),
+        );
+        out.extend(s.messages.iter().map(|m| {
+            (
+                "message",
+                m.message.clone(),
+                m.count,
+                m.severity.to_string(),
+            )
+        }));
+        out
+    }
+
+    /// One titled table per section.
+    pub fn tables(&self) -> Vec<(String, Section)> {
+        let s = self.0;
+        let entries = self.entries();
+        let of = |section: &str, note: bool| -> Vec<Vec<String>> {
+            entries
+                .iter()
+                .filter(|e| e.0 == section)
+                .map(|(_, name, n, extra)| {
+                    let mut row = vec![name.clone(), n.to_string()];
+                    if note {
+                        row.push(extra.clone());
+                    }
+                    row
+                })
+                .collect()
+        };
+        let loaded = if s.truncated {
+            format!(
+                "{} VENs of {} workloads loaded (capped)",
+                s.vens, s.workloads
+            )
+        } else {
+            format!("{} VENs · {} workloads", s.vens, s.workloads)
+        };
+        let versions = match &s.newest {
+            Some(v) => format!("versions · newest {v} · {} behind", s.behind),
+            None => "versions".to_string(),
+        };
+        vec![
+            (
+                format!("health · {loaded}"),
+                Section {
+                    headers: vec!["health", "count"],
+                    rows: of("health", false),
+                },
+            ),
+            (
+                versions,
+                Section {
+                    headers: vec!["version", "count", "note"],
+                    rows: of("version", true),
+                },
+            ),
+            (
+                "enforcement".to_string(),
+                Section {
+                    headers: vec!["enforcement", "count"],
+                    rows: of("enforcement", false),
+                },
+            ),
+            (
+                "messages".to_string(),
+                Section {
+                    headers: vec!["message", "count", "severity"],
+                    rows: of("message", true),
+                },
+            ),
+        ]
+    }
+}
+
+impl TableRows for VenSections<'_> {
+    fn headers(&self) -> Vec<&'static str> {
+        vec!["section", "name", "count", "note"]
+    }
+    fn rows(&self) -> Vec<Vec<String>> {
+        self.entries()
+            .into_iter()
+            .map(|(section, name, n, note)| vec![section.to_string(), name, n.to_string(), note])
+            .collect()
+    }
+}
+
 /// `meta.local_filter`: the filters applied here after the one request,
 /// as the app's filter line names them.
 fn local_filter(
     unhealthy: bool,
     offline: bool,
+    (health, ven_version): (HealthSet, Option<&str>),
     unlabeled: Option<&[String]>,
     labels: &[&LabelTerm],
 ) -> Option<Vec<String>> {
@@ -1021,6 +1274,12 @@ fn local_filter(
     }
     if offline {
         out.push("offline".to_string());
+    }
+    if !health.is_empty() {
+        out.push(format!("health {health}"));
+    }
+    if let Some(v) = ven_version {
+        out.push(format!("ven {v}"));
     }
     if let Some(keys) = unlabeled {
         out.push(format!("unlabeled ({})", keys.join(", ")));
@@ -1129,15 +1388,28 @@ mod tests {
             unlabeled_keys(&[" env".into(), "os".into(), "env".into()], &model),
             ["env", "os"]
         );
-        assert_eq!(local_filter(false, false, None, &[]), None);
+        let none = (HealthSet::default(), None);
+        assert_eq!(local_filter(false, false, none, None, &[]), None);
         assert_eq!(
-            local_filter(true, true, Some(&model), &[]).unwrap(),
+            local_filter(true, true, none, Some(&model), &[]).unwrap(),
             ["unhealthy", "offline", "unlabeled (app, env, role)"]
+        );
+        let ven = (HealthSet::parse("error,warning").unwrap(), Some("23.2.*"));
+        assert_eq!(
+            local_filter(false, false, ven, None, &[]).unwrap(),
+            ["health warning,error", "ven 23.2.*"]
         );
         let t = LabelTerm::parse("!role=db").unwrap();
         let none = LabelTerm::parse("app=-").unwrap();
         assert_eq!(
-            local_filter(false, false, None, &[&t, &none]).unwrap(),
+            local_filter(
+                false,
+                false,
+                (HealthSet::default(), None),
+                None,
+                &[&t, &none]
+            )
+            .unwrap(),
             ["labels !role=db app=-"]
         );
     }

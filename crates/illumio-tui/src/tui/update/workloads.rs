@@ -163,32 +163,22 @@ pub(super) fn workloads_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 model.workloads.ensure_visible(page);
                 return Vec::new();
             }
-            KeyCode::Char(c @ ('h' | 'E' | 'm' | 'o' | 'u' | 'c')) => {
+            KeyCode::Char(c @ ('h' | 'E' | 'm' | 'o' | 'u' | 'v' | 'c')) => {
                 // Local filters over the loaded list: no request.
                 let order = model.limits.key_order();
                 if c == 'u' && !model.workloads.filters.unlabeled && order.first().is_empty() {
                     model.status = StatusLine::info("no label model keys");
                     return Vec::new();
                 }
-                let w = &mut model.workloads;
-                let href = w.selected_row().map(|r| r.workload.href.clone());
-                match c {
+                refilter(model, |w| match c {
                     'h' => w.unhealthy_only = !w.unhealthy_only,
                     'E' => w.filters.next_enforcement(),
                     'm' => w.filters.next_managed(),
                     'o' => w.filters.offline = !w.filters.offline,
                     'u' => w.filters.unlabeled = !w.filters.unlabeled,
+                    'v' => w.filters.next_health(),
                     _ => w.clear_filters(),
-                }
-                w.rebuild(&order);
-                // The same workload while it is still shown.
-                if let Some(href) = href {
-                    w.select_href(&href);
-                }
-                w.show_detail &= w.selected_row().is_some();
-                // The filter line comes and goes: the page size with it.
-                let page = workloads_page(model);
-                model.workloads.ensure_visible(page);
+                });
                 return Vec::new();
             }
             KeyCode::Char('H') => {
@@ -235,6 +225,85 @@ pub(super) fn workloads_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         table_key(&mut w.sections, k, page);
     }
     w.sections.ensure_visible(page);
+    Vec::new()
+}
+
+/// Changes the local filters with `change` and rebuilds the rows: the
+/// cursor stays on its workload while it is shown. No request.
+fn refilter(model: &mut Model, change: impl FnOnce(&mut crate::tui::model::WorkloadsState)) {
+    let order = model.limits.key_order();
+    let w = &mut model.workloads;
+    let href = w.selected_row().map(|r| r.workload.href.clone());
+    change(w);
+    w.rebuild(&order);
+    if let Some(href) = href {
+        w.select_href(&href);
+    }
+    w.show_detail &= w.selected_row().is_some();
+    // The filter line comes and goes: the page size with it.
+    let page = workloads_page(model);
+    model.workloads.ensure_visible(page);
+}
+
+/// `:ven`: the VEN fleet of the loaded workloads, on Workloads. Without
+/// a loaded list it says so: it never loads one.
+pub(super) fn open_ven(model: &mut Model) {
+    if model.workloads.loaded_at.is_none() {
+        model.status = StatusLine::info(if model.workloads.loading {
+            "workloads are still loading"
+        } else {
+            "no workloads loaded: 4 (Workloads) loads them"
+        });
+        return;
+    }
+    model.screen = Screen::Workloads;
+    model.overlay = Overlay::Ven { selected: 0 };
+}
+
+/// Keys of `:ven`: `j`/`k` move over the buckets, `Enter` filters the
+/// list to the bucket (other filters kept) and closes, `Esc`/`q` close.
+/// Never a request.
+pub(super) fn ven_key(model: &mut Model, selected: usize, k: KeyEvent) -> Vec<Cmd> {
+    let lines = crate::tui::ven_view::lines(&model.workloads.ven);
+    let last = crate::tui::ven_view::bucket_lines(&lines)
+        .len()
+        .saturating_sub(1);
+    let selected = match k.code {
+        KeyCode::Esc | KeyCode::Char('q') => {
+            model.overlay = Overlay::None;
+            return Vec::new();
+        }
+        KeyCode::Char('?') => {
+            open_help(model);
+            return Vec::new();
+        }
+        KeyCode::Down | KeyCode::Char('j') => (selected + 1).min(last),
+        KeyCode::Up | KeyCode::Char('k') => selected.saturating_sub(1),
+        KeyCode::PageDown => (selected + 10).min(last),
+        KeyCode::PageUp => selected.saturating_sub(10),
+        KeyCode::Home | KeyCode::Char('g') => 0,
+        KeyCode::End | KeyCode::Char('G') => last,
+        KeyCode::Enter => {
+            let Some(bucket) = crate::tui::ven_view::bucket_at(&lines, selected).cloned() else {
+                return Vec::new();
+            };
+            let mut filters = model.workloads.filters.clone();
+            if let Err(e) = bucket.apply(&mut filters) {
+                model.status = StatusLine::warn(e);
+                return Vec::new();
+            }
+            model.overlay = Overlay::None;
+            refilter(model, |w| w.filters = filters);
+            let w = &model.workloads;
+            model.status = StatusLine::info(format!(
+                "{} · filtered locally, no request",
+                w.filter_line().unwrap_or_default()
+            ));
+            return Vec::new();
+        }
+        _ => selected,
+    };
+    model.overlay = Overlay::Ven { selected };
     Vec::new()
 }
 
