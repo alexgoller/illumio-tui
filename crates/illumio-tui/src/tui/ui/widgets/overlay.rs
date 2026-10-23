@@ -800,15 +800,17 @@ pub fn render_ven(model: &Model, selected: usize, f: &mut Frame, area: Rect) {
     let s = &model.workloads.ven;
     let all = ven_lines(s);
     let at = bucket_lines(&all);
-    let sel_line = at
-        .get(selected.min(at.len().saturating_sub(1)))
-        .copied()
-        .unwrap_or(0);
+    let sel = selected.min(at.len().saturating_sub(1));
+    let sel_line = at.get(sel).copied().unwrap_or(0);
     let r = centered(area, 72, (all.len() as u16).saturating_add(3).clamp(8, 30));
     f.render_widget(Clear, r);
     // Rows inside the borders, less the key line.
     let rows = (r.height.saturating_sub(2) as usize).saturating_sub(1);
-    let first = sel_line.saturating_sub(rows.saturating_sub(1));
+    let mut first = sel_line.saturating_sub(rows.saturating_sub(1));
+    // On the last bucket, the notes after it (`none`) scroll in too.
+    if sel + 1 >= at.len() {
+        first = first.max(all.len().saturating_sub(rows)).min(sel_line);
+    }
     let width = (r.width as usize).saturating_sub(2);
     let count_w = 6;
     let tag_w = 8;
@@ -832,7 +834,7 @@ pub fn render_ven(model: &Model, selected: usize, f: &mut Frame, area: Rect) {
                     VenBucket::Health(h) => (h.as_str().to_string(), health_style(*h, t)),
                     VenBucket::Version(v) => (plain(v), t.base()),
                     VenBucket::Enforcement(e) => (e.clone(), t.base()),
-                    VenBucket::Message(m) => (plain(m), t.base()),
+                    VenBucket::Message(_, m) => (plain(m), t.base()),
                 };
                 let style = if *count == 0 { t.dim_style() } else { style };
                 let tag_style = match *tag {

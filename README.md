@@ -765,6 +765,8 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   · error 2 · offline 13 · unmanaged 40`, each state in its colour, `· of 500 loaded
   (capped)` when the list was capped (narrow terminals shorten the words: `ok 100 · warn 5`).
   `v` cycles a health filter (all, warning, error, offline, all; `H` stays the health sort).
+  Health is one filter: `v` or a health row in `:ven` turns `o` and `h` off, and `o` or `h`
+  turns the health filter off, so the filter line always says what is in force.
   `:ven` opens the fleet view: counts per health state, per VEN version (newest first, marked,
   with how many VENs are behind it), per enforcement mode, and the most common health
   messages (errors and warnings, grouped). `Enter` on a row filters the list to that bucket
@@ -961,7 +963,9 @@ the `missing` keys with `; `, as its other lists.
 `--health warning,error` keeps the workloads whose VEN health is any of those (`healthy`,
 `warning`, `error`, `offline`, `unmanaged`; the app's `v`), and `--ven-version V` those whose
 VEN reports version `V`, exactly or as a `*` glob (`23.2.*`); both filter the one read
-locally. `workloads ven-summary` takes the same filters and prints what the app's `:ven`
+locally. Health is one filter: with `--health`, `--offline` adds `offline` to its states and
+`--unhealthy` adds `warning,error,offline` (a union; `meta.local_filter` names the one set), and
+a saved filter with both `offline = true` and `health` reads the same way. `workloads ven-summary` takes the same filters and prints what the app's `:ven`
 shows, from that one read (cached) and nothing else: counts per health state, per VEN version
 (newest first, with how many are behind it), per enforcement mode, and per health message.
 The table prints a section each; JSON puts `{workloads, vens, truncated, health, versions,

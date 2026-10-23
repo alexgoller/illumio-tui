@@ -96,8 +96,10 @@ fn version_part(p: &str) -> (Option<u64>, &str) {
 
 /// VEN versions in release order: numeric per part (`23.10` after `23.2`),
 /// parts split at `.` `-` `_` `+`; a part without a number (`rc1`) comes
-/// before one with; more parts are later (`23.2.31-3113` after
-/// `23.2.31`). Equal parts fall back to the text, so the order is total.
+/// before one with. A further numeric part is later (`23.2.31-3113` after
+/// `23.2.31`), a further text part is a pre-release, earlier
+/// (`23.2.31-rc1` before `23.2.31`). Equal parts fall back to the text, so
+/// the order is total.
 pub fn cmp_versions(a: &str, b: &str) -> Ordering {
     let split = |s: &str| -> Vec<(Option<u64>, String)> {
         s.trim()
@@ -108,13 +110,32 @@ pub fn cmp_versions(a: &str, b: &str) -> Ordering {
             })
             .collect()
     };
-    split(a).cmp(&split(b)).then_with(|| a.cmp(b))
+    let (x, y) = (split(a), split(b));
+    // What one version has past the other's end: numeric is later, text earlier.
+    let tail = |extra: &(Option<u64>, String)| {
+        if extra.0.is_some() {
+            Ordering::Greater
+        } else {
+            Ordering::Less
+        }
+    };
+    let parts = x
+        .iter()
+        .zip(&y)
+        .map(|(p, q)| p.cmp(q))
+        .find(|o| o.is_ne())
+        .unwrap_or_else(|| match (x.get(y.len()), y.get(x.len())) {
+            (Some(extra), _) => tail(extra),
+            (_, Some(extra)) => tail(extra).reverse(),
+            _ => Ordering::Equal,
+        });
+    parts.then_with(|| a.trim().cmp(b.trim()))
 }
 
 /// `--ven-version`: the exact version, or a `*` glob (`23.2.*`); any case.
 pub fn version_matches(pattern: &str, version: &str) -> bool {
     let p = pattern.trim().to_ascii_lowercase();
-    let v = version.to_ascii_lowercase();
+    let v = version.trim().to_ascii_lowercase();
     if p.contains('*') {
         glob(&p, &v)
     } else {
@@ -327,8 +348,8 @@ mod tests {
             [
                 "23.10.0",
                 "23.2.31-3113",
-                "23.2.31-rc1",
                 "23.2.31",
+                "23.2.31-rc1",
                 "23.2.4",
                 "22.5.10-1",
                 "9.9"
@@ -336,6 +357,8 @@ mod tests {
         );
         assert_eq!(cmp_versions("23.10", "23.2"), Ordering::Greater);
         assert_eq!(cmp_versions("23.2", "23.2"), Ordering::Equal);
+        assert_eq!(cmp_versions("23.2.31-rc1", "23.2.31"), Ordering::Less);
+        assert_eq!(cmp_versions("23.2.31", "23.2.31-rc1"), Ordering::Greater);
         // Equal numbers, different text: still a total order.
         assert_ne!(cmp_versions("23.02", "23.2"), Ordering::Equal);
     }
@@ -351,6 +374,9 @@ mod tests {
         assert!(version_matches("*-3113", "23.2.31-3113"));
         assert!(!version_matches("22.*", "23.2.31-3113"));
         assert!(version_matches(" 23.2.31-RC1 ", "23.2.31-rc1"));
+        // A padded version as the PCE may report it: the bucket is trimmed.
+        assert!(version_matches("23.2.31", " 23.2.31 "));
+        assert!(version_matches("23.2.*", "23.2.31 "));
     }
 
     #[test]

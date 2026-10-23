@@ -98,6 +98,7 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
             key("", ":app <app>  the app overlay (alone: the picker)"),
             key("", ":gen <app>  the policy generator (alone: the picker)"),
             key("", ":readiness  :enforce <app>  (alone: the picker)"),
+            key("", ":ven  the VEN fleet of the loaded workloads"),
             key("", ":writes [on|off]  :export[!] <path>  :batch"),
             key("", "(the table on screen as CSV; ! overwrites)"),
             key("", ":save <name>  the screen's filter, in the profile"),

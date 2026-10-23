@@ -253,8 +253,20 @@ pub fn workloads_saved(f: &WorkloadFilters, labels: &str) -> WorkloadsSaved {
 }
 
 /// The saved workloads filter's local filters and label text; a missing
-/// field is off.
+/// field is off. Health is one dimension: `offline` with a `health` list
+/// adds offline to it, as `--offline --health` does.
 pub fn workload_filters(s: &WorkloadsSaved) -> (WorkloadFilters, String) {
+    // Parsed already: names only the known states.
+    let mut health = s
+        .health
+        .as_deref()
+        .and_then(|h| pce::ven::HealthSet::from_names(h).ok())
+        .unwrap_or_default();
+    let mut offline = s.offline.unwrap_or(false);
+    if offline && !health.is_empty() {
+        health.insert(pce::models::VenHealth::Offline);
+        offline = false;
+    }
     let enforcement = s.enforcement.as_deref().and_then(|e| {
         crate::filters::ENFORCEMENTS
             .iter()
@@ -265,14 +277,9 @@ pub fn workload_filters(s: &WorkloadsSaved) -> (WorkloadFilters, String) {
         WorkloadFilters {
             enforcement,
             managed: s.managed,
-            offline: s.offline.unwrap_or(false),
+            offline,
             unlabeled: s.unlabeled.unwrap_or(false),
-            // Parsed already: names only the known states.
-            health: s
-                .health
-                .as_deref()
-                .and_then(|h| pce::ven::HealthSet::from_names(h).ok())
-                .unwrap_or_default(),
+            health,
             ven_version: s.ven_version.clone(),
             message: None,
         },
@@ -495,7 +502,7 @@ mod tests {
         let w = WorkloadFilters {
             enforcement: Some("idle"),
             managed: Some(false),
-            offline: true,
+            offline: false,
             unlabeled: false,
             health: pce::ven::HealthSet::parse("error,warning").unwrap(),
             ven_version: Some("23.2.*".into()),
@@ -510,10 +517,23 @@ mod tests {
         assert_eq!(workload_filters(&s), (w.clone(), "env=prod !app=x".into()));
         // A message filter is a look from `:ven`, never saved.
         let with_message = WorkloadFilters {
-            message: Some("policy_sync: x".into()),
+            message: Some(("warning", "policy_sync: x".into())),
             ..w.clone()
         };
         assert_eq!(workloads_saved(&with_message, "env=prod !app=x"), s);
+        // `offline` beside a `health` list (hand-written) joins it: one dimension.
+        let both = WorkloadsSaved {
+            offline: Some(true),
+            ..s.clone()
+        };
+        let (f, _) = workload_filters(&both);
+        assert!(!f.offline);
+        assert_eq!(f.health.to_string(), "warning,error,offline");
+        let alone = WorkloadsSaved {
+            offline: Some(true),
+            ..WorkloadsSaved::default()
+        };
+        assert!(workload_filters(&alone).0.offline, "offline alone stays o");
     }
 
     #[test]

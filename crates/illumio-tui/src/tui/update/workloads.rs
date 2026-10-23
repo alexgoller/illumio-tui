@@ -171,12 +171,12 @@ pub(super) fn workloads_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     return Vec::new();
                 }
                 refilter(model, |w| match c {
-                    'h' => w.unhealthy_only = !w.unhealthy_only,
+                    'h' => w.toggle_unhealthy(),
                     'E' => w.filters.next_enforcement(),
                     'm' => w.filters.next_managed(),
-                    'o' => w.filters.offline = !w.filters.offline,
+                    'o' => w.toggle_offline(),
                     'u' => w.filters.unlabeled = !w.filters.unlabeled,
-                    'v' => w.filters.next_health(),
+                    'v' => w.next_health(),
                     _ => w.clear_filters(),
                 });
                 return Vec::new();
@@ -293,7 +293,12 @@ pub(super) fn ven_key(model: &mut Model, selected: usize, k: KeyEvent) -> Vec<Cm
                 return Vec::new();
             }
             model.overlay = Overlay::None;
-            refilter(model, |w| w.filters = filters);
+            refilter(model, |w| {
+                // Health is one dimension: a health bucket replaces `o` and `h`.
+                let health = filters.health;
+                w.filters = filters;
+                w.set_health(health);
+            });
             let w = &model.workloads;
             model.status = StatusLine::info(format!(
                 "{} · filtered locally, no request",

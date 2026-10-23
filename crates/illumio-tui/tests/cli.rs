@@ -4842,3 +4842,42 @@ async fn workloads_health_ven_version_and_ven_summary_cost_the_one_list_request(
         .assert()
         .code(2);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn health_is_one_filter_offline_joins_health_and_states_take_any_case() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/workloads.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(2)
+        .mount(&server)
+        .await;
+    // Every fixture VEN is offline (old heartbeats): --offline joins the set.
+    let out = stdout_json(
+        cmd(&server)
+            .args(["workloads", "--health", "Unmanaged", "--offline"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"].as_array().unwrap().len(), 4, "a union, not 0");
+    assert_eq!(
+        out["meta"]["local_filter"],
+        json!(["health offline,unmanaged"])
+    );
+    let out = stdout_json(
+        cmd(&server)
+            .args(["workloads", "--health", "WARNING", "--unhealthy"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        out["meta"]["local_filter"],
+        json!(["health warning,error,offline"])
+    );
+}

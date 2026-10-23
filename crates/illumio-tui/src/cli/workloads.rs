@@ -55,12 +55,14 @@ pub struct WorkloadsArgs {
     /// for 15 minutes (local filter, the app's `o`)
     #[arg(long)]
     pub offline: bool,
-    /// Only workloads whose VEN health is one of these (comma-separated; local
-    /// filter, the app's `v`)
+    /// Only workloads whose VEN health is one of these (comma-separated, any
+    /// case; local filter, the app's `v`). With --offline or --unhealthy
+    /// their states are added to these (health is one filter)
     #[arg(
         long,
         value_name = "STATES",
         value_delimiter = ',',
+        ignore_case = true,
         value_parser = ["healthy", "warning", "error", "offline", "unmanaged"]
     )]
     pub health: Vec<String>,
@@ -101,6 +103,25 @@ impl WorkloadsArgs {
     /// `--health` as a set (clap checked the names).
     pub fn health_set(&self) -> HealthSet {
         HealthSet::from_names(&self.health).unwrap_or_default()
+    }
+
+    /// The health filter in force as `(unhealthy, offline, health)`: health
+    /// is one dimension, so with `--health` the states of `--offline` and
+    /// `--unhealthy` join its set (a union) and those two are off.
+    pub fn health_filter(&self) -> (bool, bool, HealthSet) {
+        let mut set = self.health_set();
+        if set.is_empty() {
+            return (self.unhealthy, self.offline, set);
+        }
+        if self.offline {
+            set.insert(VenHealth::Offline);
+        }
+        if self.unhealthy {
+            for h in [VenHealth::Warning, VenHealth::Error, VenHealth::Offline] {
+                set.insert(h);
+            }
+        }
+        (false, false, set)
     }
 }
 
@@ -829,7 +850,7 @@ pub async fn select(
         );
     }
     let now = jiff::Timestamp::now();
-    let health = args.health_set();
+    let (unhealthy, offline, health) = args.health_filter();
     let rows: Vec<WorkloadRow> = c
         .value
         .into_iter()
@@ -847,14 +868,14 @@ pub async fn select(
                 .is_none_or(|e| r.enforcement.as_deref() == Some(e))
         })
         .filter(|r| {
-            !args.unhealthy
+            !unhealthy
                 || matches!(
                     r.health,
                     VenHealth::Warning | VenHealth::Error | VenHealth::Offline
                 )
         })
         // Offline is the VEN health, as the app's `o`.
-        .filter(|r| !args.offline || r.health == VenHealth::Offline)
+        .filter(|r| !offline || r.health == VenHealth::Offline)
         .filter(|r| health.keeps(r.health))
         .filter(|r| {
             args.ven_version.as_deref().is_none_or(|p| {
@@ -877,8 +898,8 @@ pub async fn select(
         nothing,
         warnings,
         local_filter: local_filter(
-            args.unhealthy,
-            args.offline,
+            unhealthy,
+            offline,
             (health, args.ven_version.as_deref()),
             unlabeled.as_deref(),
             &local_labels,

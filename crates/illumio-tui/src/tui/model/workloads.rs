@@ -329,8 +329,9 @@ pub struct WorkloadFilters {
     pub health: HealthSet,
     /// The VEN version: exact, or a `*` glob ([`pce::ven::version_matches`]).
     pub ven_version: Option<String>,
-    /// The VEN reports this health message (`:ven`'s messages).
-    pub message: Option<String>,
+    /// The VEN reports this health message with this severity (`error`
+    /// or `warning`): a `:ven` message bucket.
+    pub message: Option<(&'static str, String)>,
 }
 
 impl WorkloadFilters {
@@ -384,10 +385,12 @@ impl WorkloadFilters {
             && self.ven_version.as_deref().is_none_or(|p| {
                 !w.is_unmanaged() && pce::ven::version_matches(p, &v.ven)
             })
-            && self.message.as_deref().is_none_or(|m| {
+            && self.message.as_ref().is_none_or(|(sev, m)| {
                 v.health != VenHealth::Healthy
-                    && w.agent_status_view()
-                        .is_some_and(|a| a.errors.iter().chain(&a.warnings).any(|x| x == m))
+                    && w.agent_status_view().is_some_and(|a| {
+                        let list = if *sev == "error" { &a.errors } else { &a.warnings };
+                        list.iter().any(|x| x == m)
+                    })
             })
     }
 }
@@ -428,8 +431,6 @@ pub struct WorkloadsState {
     model_keys: Vec<String>,
     /// Test-only fixed clock so ages in snapshots are deterministic.
     pub now: Option<jiff::Timestamp>,
-    /// Workloads per health state in rank order (healthy, unmanaged, warning, offline, error).
-    counts: [usize; 5],
     /// The fleet of every loaded workload (`:ven`, the summary strip).
     pub ven: VenSummary,
     pub age_secs: u64,
@@ -488,7 +489,6 @@ impl WorkloadsState {
             groups: Vec::new(),
             model_keys: Vec::new(),
             now: None,
-            counts: [0; 5],
             ven: VenSummary::default(),
             age_secs: 0,
             loaded_at: None,
@@ -621,7 +621,7 @@ impl WorkloadsState {
             .then_some((self.raw.as_slice(), self.truncated))
     }
 
-    /// Recomputes the table rows (and health counts) from `raw`, labels in
+    /// Recomputes the table rows (and the VEN summary) from `raw`, labels in
     /// `order`, and the sections from them while grouped.
     pub fn rebuild(&mut self, order: &KeyOrder) {
         let now = self.now.unwrap_or_else(jiff::Timestamp::now);
@@ -631,10 +631,8 @@ impl WorkloadsState {
             .cloned()
             .map(|w| WorkloadRowView::new(w, now, order))
             .collect();
-        self.counts = [0; 5];
         let mut tally = VenTally::default();
         for v in &views {
-            self.counts[usize::from(v.health.rank())] += 1;
             tally.add(&v.workload, v.health);
         }
         self.ven = tally.finish(self.truncated);
@@ -885,9 +883,9 @@ impl WorkloadsState {
         if let Some(v) = &f.ven_version {
             parts.push(format!("ven {v}"));
         }
-        if let Some(m) = &f.message {
+        if let Some((sev, m)) = &f.message {
             parts.push(format!(
-                "message {}",
+                "{sev} message {}",
                 crate::tui::ui::screens::workloads::plain(m)
             ));
         }
@@ -898,10 +896,42 @@ impl WorkloadsState {
         Some(parts.join(" · "))
     }
 
-    /// Counts per state in rank order (healthy, unmanaged, warning, offline, error)
-    /// over all loaded workloads, ignoring the unhealthy-only filter.
-    pub fn summary(&self) -> [usize; 5] {
-        self.counts
+    /// Health is one dimension: `h` (unhealthy), `o` (offline) and the
+    /// health set (`v`, a `:ven` bucket) replace each other, so the filter
+    /// line says exactly what is in force. Sets the health set; `o` and `h`
+    /// go off when it is not empty.
+    pub fn set_health(&mut self, health: HealthSet) {
+        if !health.is_empty() {
+            self.filters.offline = false;
+            self.unhealthy_only = false;
+        }
+        self.filters.health = health;
+    }
+
+    /// `v`: the next health set ([`WorkloadFilters::next_health`]); `o` and
+    /// `h` go off.
+    pub fn next_health(&mut self) {
+        let mut f = self.filters.clone();
+        f.next_health();
+        self.set_health(f.health);
+    }
+
+    /// `o`: offline on or off; on, the health set and `h` go.
+    pub fn toggle_offline(&mut self) {
+        self.filters.offline = !self.filters.offline;
+        if self.filters.offline {
+            self.filters.health = HealthSet::default();
+            self.unhealthy_only = false;
+        }
+    }
+
+    /// `h`: unhealthy only on or off; on, the health set and `o` go.
+    pub fn toggle_unhealthy(&mut self) {
+        self.unhealthy_only = !self.unhealthy_only;
+        if self.unhealthy_only {
+            self.filters.health = HealthSet::default();
+            self.filters.offline = false;
+        }
     }
 
     /// `H`: worst health first; pressing it again flips the direction.

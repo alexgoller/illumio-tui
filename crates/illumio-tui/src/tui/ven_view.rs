@@ -12,7 +12,8 @@ pub enum VenBucket {
     Version(String),
     /// The effective enforcement (`unmanaged` without a VEN).
     Enforcement(String),
-    Message(String),
+    /// A health message with its severity (`error`, `warning`).
+    Message(&'static str, String),
 }
 
 impl VenBucket {
@@ -30,7 +31,7 @@ impl VenBucket {
                         .ok_or_else(|| format!("enforcement {e} cannot be filtered on"))?,
                 );
             }
-            VenBucket::Message(m) => f.message = Some(m.clone()),
+            VenBucket::Message(sev, m) => f.message = Some((sev, m.clone())),
         }
         Ok(())
     }
@@ -89,7 +90,7 @@ pub fn lines(s: &VenSummary) -> Vec<VenLine> {
     }
     out.push(VenLine::Section("messages", String::new()));
     out.extend(s.messages.iter().map(|m| VenLine::Bucket {
-        bucket: VenBucket::Message(m.message.clone()),
+        bucket: VenBucket::Message(m.severity, m.message.clone()),
         tag: m.severity,
         count: m.count,
     }));
@@ -149,6 +150,7 @@ mod tests {
         assert_eq!(
             bucket_at(&l, 99),
             Some(&VenBucket::Message(
+                "warning",
                 "policy_sync: policy out of date".into()
             )),
             "clamped"

@@ -3409,3 +3409,26 @@ fn ven_overlay_160x48_and_80x24_and_the_strip_narrow() {
     );
     insta::assert_snapshot!("workloads_ven_strip_60x20", out);
 }
+
+#[test]
+fn ven_overlay_scrolls_to_the_notes_after_the_last_bucket() {
+    use illumio_tui::tui::model::{Overlay, Screen};
+    use illumio_tui::tui::test_support::model_with_workloads;
+    let mut m = model_with_workloads();
+    m.screen = Screen::Workloads;
+    // No VEN with a message, and enough versions to scroll at 80x24.
+    m.workloads.raw.remove(1);
+    let base = m.workloads.raw[0].clone();
+    for i in 0..15 {
+        let mut w = base.clone();
+        w.href = format!("/orgs/5/workloads/v-{i}");
+        let status = w.agent.as_mut().unwrap()["status"].as_object_mut().unwrap();
+        status.insert("agent_version".into(), format!("23.1.{i}").into());
+        m.workloads.raw.push(w);
+    }
+    m.workloads.rebuild(&m.limits.key_order());
+    m.overlay = Overlay::Ven { selected: 99 };
+    let out = render_to_string(&m, 80, 24);
+    let messages = out.find("│messages").expect(&out);
+    assert!(out[messages..].contains("│  none"), "{out}");
+}

@@ -928,11 +928,12 @@ fn workload_filter_keys_are_local_combine_and_c_clears_them() {
     update(&mut m, key('m'));
     assert_eq!(hosts(&m), ["unmanaged-nas"]);
     update(&mut m, key('m'));
-    // o: offline only; with h too.
+    // o: offline only; h replaces it (health is one filter, #72).
     update(&mut m, key('o'));
     assert_eq!(hosts(&m), ["host-2.example"]);
     update(&mut m, key('h'));
-    assert_eq!(hosts(&m), ["host-2.example"]);
+    assert!(!m.workloads.filters.offline);
+    assert_eq!(hosts(&m), ["host-2.example", "host-4.example"]);
     // `/` combines with them.
     update(&mut m, key('/'));
     update(&mut m, key('z'));
@@ -1080,11 +1081,8 @@ fn h_with_no_unhealthy_rows_is_empty_not_a_panic_and_capital_h_flips() {
     update(&mut m, key('h'));
     assert_eq!(m.workloads.table.len(), 0);
     assert!(m.workloads.table.selected_item().is_none());
-    assert_eq!(
-        m.workloads.summary(),
-        [1, 1, 0, 0, 0],
-        "summary ignores the filter"
-    );
+    let counts = pce::models::VenHealth::ALL.map(|h| m.workloads.ven.count(h));
+    assert_eq!(counts, [1, 0, 0, 0, 1], "summary ignores the filter");
     update(&mut m, key('h'));
     update(&mut m, key('H'));
     assert_eq!(m.workloads.table.sort(), Some((8, true)));
