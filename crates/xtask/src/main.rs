@@ -1,5 +1,8 @@
 //! Developer tasks. `cargo xtask record` pulls a small, anonymised sample
 //! of each object type from the configured PCE into fixtures/recorded/.
+//! `cargo xtask changelog` renders docs/changelog.html from CHANGELOG.md.
+mod changelog;
+
 use clap::{Parser, Subcommand};
 use pce::client::{ClientConfig, PceClient};
 use pce::models::PolicyScope;
@@ -33,6 +36,12 @@ enum Cmd {
         input: PathBuf,
         #[arg(long)]
         output: PathBuf,
+    },
+    /// Render docs/changelog.html from CHANGELOG.md.
+    Changelog {
+        /// Write nothing; exit 1 when docs/changelog.html is stale.
+        #[arg(long)]
+        check: bool,
     },
 }
 
@@ -186,6 +195,7 @@ async fn raw_list(pce: &Pce, path: &str, max: u32) -> Value {
 async fn main() {
     let args = Xtask::parse();
     match args.cmd {
+        Cmd::Changelog { check } => changelog::run(check),
         Cmd::Anonymise { input, output } => {
             let raw = std::fs::read_to_string(&input).expect("read input");
             let mut value: Value = serde_json::from_str(&raw).expect("parse input");

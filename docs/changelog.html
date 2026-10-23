@@ -1,0 +1,794 @@
+<!doctype html>
+<!-- Generated from CHANGELOG.md by `cargo xtask changelog`. Do not edit. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Changelog · illumio-tui</title>
+<meta name="description" content="Every illumio-tui release, newest first: what is new, what changed and what was fixed.">
+<meta name="theme-color" content="#0e1622">
+<link rel="canonical" href="https://alexgoller.github.io/illumio-tui/changelog.html">
+<link rel="icon" href="assets/mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&amp;family=Martian+Mono:wdth,wght@75..112.5,400..800&amp;display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="topbar">
+  <div class="wrap">
+    <a class="brand" href="./"><img src="assets/mark.svg" alt="" width="20" height="20">illumio-tui</a>
+    <nav aria-label="Sections">
+      <a href="./#install"><kbd>1</kbd>install</a>
+      <a href="./#screens"><kbd>2</kbd>screens</a>
+      <a href="./#workflows"><kbd>3</kbd>workflows</a>
+      <a href="./#start"><kbd>4</kbd>start</a>
+      <a href="./#cli"><kbd>5</kbd>cli</a>
+      <a href="./#recipes"><kbd>6</kbd>recipes</a>
+      <a href="./#writes"><kbd>7</kbd>writes</a>
+      <a href="./#configure"><kbd>8</kbd>configure</a>
+      <a href="./#protection"><kbd>9</kbd>protection</a>
+      <a href="./#roadmap"><kbd>10</kbd>roadmap</a>
+      <a href="changelog.html" aria-current="page">changelog</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<div class="wrap">
+
+<section class="panel changelog-intro" aria-labelledby="changelog-h">
+  <h2 id="changelog-h">Changelog</h2>
+<p>Every illumio-tui release, newest first. Downloads, packages and checksums for each one are on <a href="https://github.com/alexgoller/illumio-tui/releases">GitHub Releases</a>.</p>
+<p><a href="./">&larr; Back to the site</a></p>
+<nav class="toc" aria-label="Releases">
+<ul>
+<li><a href="#v0.5.3">v0.5.3</a> <span>2026-10-23</span></li>
+<li><a href="#v0.5.2">v0.5.2</a> <span>2026-10-21</span></li>
+<li><a href="#v0.5.1">v0.5.1</a> <span>2026-10-21</span></li>
+<li><a href="#v0.5.0">v0.5.0</a> <span>2026-10-21</span></li>
+<li><a href="#v0.4.2">v0.4.2</a> <span>2026-10-20</span></li>
+<li><a href="#v0.4.1">v0.4.1</a> <span>2026-10-20</span></li>
+<li><a href="#v0.4.0">v0.4.0</a> <span>2026-10-20</span></li>
+<li><a href="#v0.3.5">v0.3.5</a> <span>2026-10-19</span></li>
+<li><a href="#v0.3.4">v0.3.4</a> <span>2026-10-18</span></li>
+<li><a href="#v0.3.3">v0.3.3</a> <span>2026-10-17</span></li>
+<li><a href="#v0.3.2">v0.3.2</a> <span>2026-10-17</span></li>
+<li><a href="#v0.3.1">v0.3.1</a> <span>2026-10-17</span></li>
+<li><a href="#v0.3.0">v0.3.0</a> <span>2026-10-17</span></li>
+<li><a href="#v0.2.0">v0.2.0</a> <span>2026-10-16</span></li>
+<li><a href="#v0.1.12">v0.1.12</a> <span>2026-10-15</span></li>
+<li><a href="#v0.1.11">v0.1.11</a> <span>2026-10-14</span></li>
+<li><a href="#v0.1.10">v0.1.10</a> <span>2026-10-14</span></li>
+<li><a href="#v0.1.9">v0.1.9</a> <span>2026-10-14</span></li>
+<li><a href="#v0.1.8">v0.1.8</a> <span>2026-10-14</span></li>
+<li><a href="#v0.1.7">v0.1.7</a> <span>2026-10-13</span></li>
+<li><a href="#v0.1.6">v0.1.6</a> <span>2026-10-13</span></li>
+<li><a href="#v0.1.5">v0.1.5</a> <span>2026-10-12</span></li>
+<li><a href="#v0.1.4">v0.1.4</a> <span>2026-10-12</span></li>
+<li><a href="#v0.1.3">v0.1.3</a> <span>2026-10-12</span></li>
+<li><a href="#v0.1.2">v0.1.2</a> <span>2026-10-12</span></li>
+<li><a href="#v0.1.1">v0.1.1</a> <span>2026-10-12</span></li>
+<li><a href="#v0.1.0">v0.1.0</a> <span>2026-10-12</span></li>
+</ul>
+</nav>
+</section>
+
+<section class="panel release" id="v0.5.3" aria-labelledby="v0.5.3-h">
+  <h2 id="v0.5.3-h"><a href="#v0.5.3">v0.5.3</a> <span class="date">2026-10-23</span></h2>
+<h3>New</h3>
+<ul>
+<li><strong>Saved filters</strong> (<a href="https://github.com/alexgoller/illumio-tui/issues/70">#70</a>). Name the filters you use often and get them back in one step, per profile, on Traffic, Policy, Events and Workloads.
+<ul>
+<li>TUI: <code>:save NAME</code> saves the filter in force on the current screen. <code>:filters</code> (<code>:fl</code>) lists that screen's saved filters: Enter applies, <code>D</code> deletes. <code>:load NAME</code> applies one directly. The title shows <code>[NAME]</code> while the saved filter is unchanged.</li>
+<li>CLI: <code>--filter NAME</code> on <code>traffic</code>, <code>policy search</code>, <code>events</code> and <code>workloads</code>; a flag you add replaces that field of the saved filter. <code>--save-filter NAME</code> saves the effective filter and exits <strong>without contacting the PCE</strong>. <code>filters list | show | rm</code> (with <code>--json</code> / <code>--csv</code>).</li>
+<li>Stored in the config file, in the same syntax you type in <code>f</code>:<pre><code class="language-toml">[profiles.demo.filters.policy]
+deny-prod = &quot;dst:env=Production deny&quot;
+
+[profiles.demo.filters.events.quiet]
+type = &quot;!agent.*&quot;
+severity = &quot;warning+&quot;
+</code></pre>
+</li>
+<li>Applying a saved traffic filter is the same as <code>f</code> + Enter: same checks, same cost confirm, one query you caused.</li>
+<li>Shell completion offers the saved names.</li>
+</ul>
+</li>
+<li><strong>A default filter per screen</strong> (<a href="https://github.com/alexgoller/illumio-tui/issues/74">#74</a>). <code>[profiles.demo.filter_defaults] policy = &quot;deny-prod&quot;</code>.
+<ul>
+<li>The TUI applies it at startup and after <code>:profile</code>, before the screen's first load. It never sends an extra request or starts a traffic query on its own.</li>
+<li><code>*</code> in <code>:filters</code> sets or unsets the default; <code>:default NAME</code> and <code>:default off</code> do the same by command.</li>
+<li>On the CLI a default is never applied implicitly: <code>--default-filter</code> opts in. <code>filters default SCREEN NAME | --unset</code>.</li>
+</ul>
+</li>
+</ul>
+<h3>Changed</h3>
+<ul>
+<li>Loading a saved Events filter keeps the profile's <code>exclude_types</code> in force, on top of the filter's own type terms. Before, a saved type replaced them. To see a hidden type for one session, edit the filter with <code>f</code>.</li>
+</ul>
+<h3>Notes</h3>
+<ul>
+<li>Saving a filter or a default rewrites the config file, as <code>profile add</code> does. Settings, the secret and unknown keys are kept; TOML comments are not.</li>
+<li>A malformed <code>filters</code> or <code>filter_defaults</code> entry never stops the TUI or other commands; it is ignored with a warning and kept as written.</li>
+</ul>
+</section>
+
+<section class="panel release" id="v0.5.2" aria-labelledby="v0.5.2-h">
+  <h2 id="v0.5.2-h"><a href="#v0.5.2">v0.5.2</a> <span class="date">2026-10-21</span></h2>
+<h3>New</h3>
+<ul>
+<li><strong>Event type filters</strong> (<a href="https://github.com/alexgoller/illumio-tui/issues/67">#67</a>). The events type filter takes several terms and excludes:
+<ul>
+<li><code>rule_set, sec_policy.*</code> (either), <code>!user.login</code> (hide), <code>=user.login</code> / <code>!=user.login</code> (exactly that type), <code>*</code> globs. Same syntax in the TUI <code>f</code> Type field and in <code>events --type</code> (repeatable), plus <code>--exclude-type</code>.</li>
+<li>TUI Events screen: <code>x</code> hides the selected row's type, <code>o</code> shows only it, <code>t</code> opens a per-type count summary (Enter = only, <code>x</code> = hide). Ctrl-N completes types from the loaded events.</li>
+<li>The header always says what is hidden: <code>hiding 2 types · warning+ · 1 of 4 · capped at 4</code>. CLI JSON reports <code>meta.hidden</code> and <code>meta.local_filter</code>.</li>
+<li><code>--severity warning+</code> (and the TUI severity field): that severity and worse.</li>
+<li>Default excludes per profile: <code>[profiles.&lt;name&gt;.events] exclude_types = [&quot;=user.login&quot;]</code>; <code>events --all-types</code> ignores them.</li>
+<li>Type and <code>X+</code> changes refilter the loaded events: no request. Before, every Enter in the events filter sent one.</li>
+</ul>
+</li>
+<li><strong>Policy search: where, what not, which kind</strong> (<a href="https://github.com/alexgoller/illumio-tui/issues/68">#68</a>). TUI <code>f</code> on Policy and <code>policy search</code>:
+<ul>
+<li><code>scope:app=shop</code>, <code>src:role=web</code> (consumers), <code>dst:role=db</code> (providers); <code>src:</code>/<code>dst:</code> also take <code>ipl:</code>, <code>wl:</code>, <code>all</code>; <code>scope:global</code>.</li>
+<li><code>src:!env=prod</code> finds rules whose consumers use an <em>All except env=prod</em> exclusion.</li>
+<li>A leading <code>-</code> negates any term: <code>app=shop -deny -scope:env=dev</code>. On the command line <code>-terms</code> work without <code>--</code>; quote <code>!</code> terms in bash/zsh (<code>'src:!env=prod'</code>).</li>
+<li><code>intra</code>, <code>extra</code>, <code>enabled</code>, <code>allow</code>.</li>
+<li>Results say <code>N of M rules matched</code>. Labels complete after the prefixes, in the TUI and in the shell.</li>
+</ul>
+</li>
+</ul>
+<h3>Changed</h3>
+<ul>
+<li>The TUI now applies the profile's limits at startup, not only after <code>:profile</code>. In particular <code>traffic_auto_backfill = true</code> / <code>ILLUMIO_AUTO_BACKFILL=1</code> now takes effect from the first truncated traffic query you run (it was silently ignored before a profile switch). Nothing new is requested at startup.</li>
+</ul>
+</section>
+
+<section class="panel release" id="v0.5.1" aria-labelledby="v0.5.1-h">
+  <h2 id="v0.5.1-h"><a href="#v0.5.1">v0.5.1</a> <span class="date">2026-10-21</span></h2>
+<h3>New</h3>
+<ul>
+<li><strong><code>profile add</code></strong> (<a href="https://github.com/alexgoller/illumio-tui/issues/66">#66</a>): create a profile without hand-editing <code>config.toml</code>.
+<ul>
+<li>From an env file, e.g. the one an Illumio MCP server uses: <code>illumio-tui profile add demo --from-env-file path/.env</code> reads <code>PCE_HOST</code>, <code>PCE_PORT</code>, <code>PCE_ORG_ID</code>, <code>API_KEY</code>, <code>API_SECRET</code> (and <code>PCE_SCHEME</code>, <code>PCE_TLS_VERIFY</code>). <code>--from-env-file -</code> reads pasted text; CRLF, <code>export</code>, quotes, comments and a BOM are handled.</li>
+<li>Or from flags: <code>--host</code>, <code>--port</code>, <code>--org-id</code>, <code>--api-key</code>, <code>--insecure</code>, <code>--writes</code>, <code>--default</code>.</li>
+<li>The secret can be plain text (env file, <code>--api-secret-stdin</code>, or <code>--api-secret VALUE</code>, which may land in shell history) or a command (<code>--api-secret-cmd &quot;op read …&quot;</code>), which stores nothing secret. The secret is never printed, and env-file errors give the line number, never its content.</li>
+<li>Refuses to replace an existing profile without <code>--force</code>. <code>--force</code> updates the connection and credentials and keeps everything else (limits, label model, generator settings, unknown keys).</li>
+<li>The first profile becomes the default. Since v0.5.0, PCE name completion needs a config-file profile, so this is the quickest way to get it: <code>profile add</code>, then <code>completions refresh</code>.</li>
+</ul>
+</li>
+</ul>
+<h3>Fixes</h3>
+<ul>
+<li>Rewriting <code>config.toml</code> (<code>profile add</code>, <code>profile use</code>) is now atomic and safe against a planted temp-file symlink, leaves the file at mode 0600, and keeps unknown keys inside <code>limits</code>, <code>labels</code> and <code>generator</code> (they were dropped before). Comments are still not kept.</li>
+<li>The test suite no longer writes completion caches into the developer's real <code>~/.cache</code>.</li>
+</ul>
+</section>
+
+<section class="panel release" id="v0.5.0" aria-labelledby="v0.5.0-h">
+  <h2 id="v0.5.0-h"><a href="#v0.5.0">v0.5.0</a> <span class="date">2026-10-21</span></h2>
+<h3>Security</h3>
+<ul>
+<li><strong>TLS dependency update</strong> for RUSTSEC-2026-0382 (rustls-webpki: distrusted intermediates) and RUSTSEC-2026-0383 (webpki-root-certs: emSign roots). All earlier releases are affected; please upgrade.</li>
+</ul>
+<h3>New</h3>
+<ul>
+<li><strong>Shell completion of PCE names</strong> (<a href="https://github.com/alexgoller/illumio-tui/issues/64">#64</a>). Tab now completes labels (<code>env=P</code> → <code>PCI</code>, <code>Production</code>), apps, workload hostnames, services (<code>svc:NAME</code>), IP lists and label groups in bash, zsh, fish and PowerShell.
+<ul>
+<li>Tab never contacts the PCE: it reads a small per-profile cache file (~7 ms).</li>
+<li>Fill it once with <code>illumio-tui completions refresh</code> (5 requests); normal list commands and the TUI keep it current. Nothing refreshes on its own. <code>completions refresh --clear</code> deletes it.</li>
+<li>Only for profiles from the config file (host and org not overridden by flags or env), so one PCE's names never end up under another profile. Set <code>completion_cache = false</code> to keep PCE names off disk.</li>
+<li>Re-run <code>illumio-tui completions &lt;shell&gt;</code> to install the new script.</li>
+</ul>
+</li>
+<li><strong>Intra- and extra-scope rules made visible and safe</strong> (<a href="https://github.com/alexgoller/illumio-tui/issues/65">#65</a>).
+<ul>
+<li>The rule form's <code>Unscoped y/n</code> is now <strong>Scope: intra | extra</strong> (Space switches, <code>i</code>/<code>e</code> pick).</li>
+<li>A line under Consumers says what the rule means as you type, e.g. &quot;role=web inside app=shop env=prod&quot; or &quot;role=Web in any app, env&quot;.</li>
+<li>Switching never widens a rule: to intra drops only labels the ruleset scope already pins; to extra in the <code>w</code> form adds the flow source's scope labels; switching back restores what was there.</li>
+<li>Warnings in the form, at confirm, and on <code>policy rules add</code> (no extra request): &quot;matches role=Web in every app, env&quot;, &quot;never matches: env=Development is outside the ruleset scope&quot;, and intra-scope in a global ruleset.</li>
+<li>Policy rules pane: scope column, intra-scope rules first, &quot;N intra · M extra&quot; in the title. Rule detail says intra-scope / extra-scope.</li>
+<li>CLI: <code>--extra-scope</code> / <code>--intra-scope</code> aliases for <code>--unscoped-consumers</code> / <code>--scoped-consumers</code>.</li>
+</ul>
+</li>
+</ul>
+</section>
+
+<section class="panel release" id="v0.4.2" aria-labelledby="v0.4.2-h">
+  <h2 id="v0.4.2-h"><a href="#v0.4.2">v0.4.2</a> <span class="date">2026-10-20</span></h2>
+<p>v0.4.2 lets you negate conditions and use port ranges in traffic queries. It also adds winget packaging.</p>
+<h3>Traffic: exclusions (<a href="https://github.com/alexgoller/illumio-tui/issues/62">#62</a>)</h3>
+<ul>
+<li><strong>TUI</strong> (<code>f</code> on Traffic): a <code>!</code> in front of a term excludes it, in the Src, Dst and Service fields: <code>env=prod, !app=monitoring</code> · <code>!22/tcp</code> · <code>!svc:SSH</code>.
+<ul>
+<li>Exclusions go into Explorer's own exclude lists, so the PCE filters them out and the query costs nothing extra.</li>
+<li>An exclusion applies to the whole field, even inside a <code>|</code> group, and the editor says so.</li>
+<li>A field with only <code>!</code> terms means &quot;everything except&quot;.</li>
+<li>Completion works after <code>!</code>.</li>
+</ul>
+</li>
+<li><strong>CLI:</strong> <code>--exclude-service</code> joins <code>--exclude-src</code> / <code>--exclude-dst</code> on every traffic subcommand: <code>illumio-tui traffic query --dst env=prod --exclude-src app=monitoring --exclude-service 22/tcp --exclude-service svc:SSH</code></li>
+<li><strong><code>svc:NAME</code></strong> expands to the service's ports, included or excluded, in the TUI and the CLI.</li>
+<li><strong>Excludable:</strong>
+<ul>
+<li>sources: labels, IP lists, workloads, IPs;</li>
+<li>destinations: the same, plus <code>fqdn:</code>;</li>
+<li>services: port, protocol, port/protocol, range, or a named service.</li>
+</ul>
+</li>
+<li><strong>Behaviour change:</strong> <code>fqdn:</code> on the source side is now rejected up front, even as an include. Explorer accepts FQDNs on destinations only, so the PCE used to refuse it instead.</li>
+</ul>
+<h3>Traffic: port ranges (<a href="https://github.com/alexgoller/illumio-tui/issues/63">#63</a>)</h3>
+<ul>
+<li><code>8000-8100/tcp</code> in the TUI Service field (<code>!8000-8100/tcp</code> excludes it). CLI: <code>--port 8000-8100 --proto tcp</code>, <code>--exclude-service 8000-8100/tcp</code>. <code>--port 443/tcp</code> also works now.</li>
+<li>Services that contain a range (e.g. <code>svc:Web</code> with 8000-8099/tcp) are accepted instead of rejected.</li>
+</ul>
+<h3>Windows: winget (<a href="https://github.com/alexgoller/illumio-tui/issues/61">#61</a>)</h3>
+<ul>
+<li>winget manifests are rendered and tested on every release: validate, install, upgrade in place, uninstall on a Windows runner.</li>
+<li>The first submission is <a href="https://github.com/microsoft/winget-pkgs/pull/456974">microsoft/winget-pkgs#456974</a>. It has passed validation and is waiting for moderator review. Once it's merged: <code>winget install AlexGoller.IllumioTUI</code>, then <code>winget upgrade AlexGoller.IllumioTUI</code>.</li>
+</ul>
+<p>Queries without exclusions or ranges send exactly the same request as before.</p>
+</section>
+
+<section class="panel release" id="v0.4.1" aria-labelledby="v0.4.1-h">
+  <h2 id="v0.4.1-h"><a href="#v0.4.1">v0.4.1</a> <span class="date">2026-10-20</span></h2>
+<p>v0.4.1 brings Windows packages that update in place (<a href="https://github.com/alexgoller/illumio-tui/issues/60">#60</a>).</p>
+<h3>Windows</h3>
+<ul>
+<li><strong>MSI installer</strong> (<code>illumio-tui-0.4.1-x86_64-pc-windows-msvc.msi</code>): installs for the current user without admin rights into <code>%LOCALAPPDATA%\Programs\illumio-tui</code> and adds it to your user <code>PATH</code>. A newer MSI upgrades the installed version in place, and uninstalling (Settings &gt; Apps) removes the <code>PATH</code> entry too. Every release installs, upgrades and uninstalls the MSI on a Windows runner before publishing it.
+<ul>
+<li>Double-click it, or install silently: <code>msiexec /i illumio-tui-0.4.1-x86_64-pc-windows-msvc.msi /qn</code></li>
+<li>The MSI is not code-signed yet, so SmartScreen may warn: <em>More info</em>, then <em>Run anyway</em>.</li>
+</ul>
+</li>
+<li><strong>Scoop:</strong> <code>scoop bucket add illumio-tui https://github.com/alexgoller/illumio-tui</code>, then <code>scoop install illumio-tui</code>. <code>scoop update illumio-tui</code> picks up new releases; the manifest is updated on every release, like the Homebrew formula.</li>
+<li><strong>PowerShell completions:</strong> <code>illumio-tui completions powershell | Out-String | Invoke-Expression</code> (add it to your <code>$PROFILE</code>).</li>
+</ul>
+<p>The MSI is covered by <code>SHA256SUMS</code> like every other asset.</p>
+</section>
+
+<section class="panel release" id="v0.4.0" aria-labelledby="v0.4.0-h">
+  <h2 id="v0.4.0-h"><a href="#v0.4.0">v0.4.0</a> <span class="date">2026-10-20</span></h2>
+<p>v0.4.0 takes an app from observed traffic to enforced policy, with an exact rollback. It also adds explain, policy search and shell completions. Every write path was verified against a live PCE.</p>
+<h3>From visibility to enforcement (<a href="https://github.com/alexgoller/illumio-tui/issues/54">#54</a>, <a href="https://github.com/alexgoller/illumio-tui/issues/55">#55</a>, <a href="https://github.com/alexgoller/illumio-tui/issues/56">#56</a>)</h3>
+<ul>
+<li><strong><code>illumio-tui readiness</code></strong> judges every app: workloads, enforcement mix, coverage of the draft policy, the flows enforcement would block (as policy tuples), and the pending changes that reach it. The verdict is <code>not_evaluated</code>, <code>needs_rules</code>, <code>needs_provision</code>, <code>ready</code> or <code>enforced</code>. It costs one Explorer query plus the draft evaluation.</li>
+<li><strong><code>illumio-tui enforce &lt;app&gt; --to full|selective</code></strong> refuses unless the app is ready (or <code>--force</code>). It moves the app's managed workloads in bulk and writes a change record (<code>~/.local/state/illumio-tui/enforcements/</code>) before and after the send.</li>
+<li><strong><code>--watch</code></strong> lists what was blocked since the change, and exits 7 when there is anything.</li>
+<li><strong><code>--rollback</code></strong> restores each workload's previous mode exactly. It skips workloads someone else changed since, and refuses a record that was already rolled back.</li>
+<li><strong>TUI:</strong> <code>:readiness</code> shows every app's verdict. <code>:enforce &lt;app&gt;</code> (or <code>e</code> in the app overlay) opens a five-step overlay: Readiness, Rules (gaps to the generator <code>G</code>, the rule form <code>w</code>, accept-blocked marks <code>m</code>), Provision (<code>P</code>), Enforce, and Watch with rollback (<code>R</code>).
+<ul>
+<li>A result that is filtered, truncated, incomplete or focused on another app counts as not ready, so you have to type <code>enforce</code>.</li>
+</ul>
+</li>
+</ul>
+<h3>Analyst workflow (<a href="https://github.com/alexgoller/illumio-tui/issues/50">#50</a>, <a href="https://github.com/alexgoller/illumio-tui/issues/51">#51</a>, <a href="https://github.com/alexgoller/illumio-tui/issues/52">#52</a>, <a href="https://github.com/alexgoller/illumio-tui/issues/53">#53</a>)</h3>
+<ul>
+<li><strong><code>E</code> explains a flow.</strong> It shows the reported and draft decision and the rules that allow or block the flow, resolved to ruleset, scope, consumers → providers and services. With no rule it says why the flow still passes (e.g. &quot;allowed now only because the destination is not fully enforced&quot;). <code>Enter</code> jumps to the rule in Policy. CLI: <code>traffic explain --src … --dst … --port … --proto …</code>.</li>
+<li><strong>Policy search:</strong> <code>f</code> on Policy, or <code>policy search</code>. Rules across every ruleset by label (label groups included, exclusions honoured), IP list, service or port, workload, href, <code>disabled</code>, <code>deny</code>.</li>
+<li><strong><code>t</code></strong> enables or disables a rule, deny rule or ruleset (a draft change). CLI: <code>policy rules|rulesets enable|disable</code>.</li>
+<li><strong><code>I</code></strong> lists the workloads a rule matches on each side. Search, export and jump work from that list. CLI: <code>--list</code>.</li>
+</ul>
+<h3>Also</h3>
+<ul>
+<li><strong>Shell completions:</strong> <code>illumio-tui completions bash|zsh|fish</code>. Homebrew and the .deb/.rpm packages install them. Profile names complete from your config (<a href="https://github.com/alexgoller/illumio-tui/issues/57">#57</a>).</li>
+<li><strong>Flows view:</strong> the draft column shows only the draft decision (<code>→ allowed</code>, <code>→ blocked</code>), so it fits at 120 columns (<a href="https://github.com/alexgoller/illumio-tui/issues/59">#59</a>).</li>
+<li><strong>Apple Terminal:</strong> before macOS 26 it garbled the 24-bit theme colours. Colours are now mapped to the xterm 256 there; <code>ILLUMIO_TUI_COLORS=256|truecolor</code> overrides.</li>
+<li><strong>Docs:</strong> eight workflows with real screenshots, including the <code>:readiness</code> / <code>:enforce</code> overlay and &quot;Find rules fast&quot; (<code>f</code>, <code>t</code>, <code>I</code>), plus &quot;CLI: getting started&quot; and &quot;Cool things you can do with the CLI&quot; (<a href="https://github.com/alexgoller/illumio-tui/issues/58">#58</a>).</li>
+<li><strong>Live write suite:</strong> <code>scripts/live-smoke.sh --env-file … --workload …</code> runs every write path against a PCE you designate and restores what it changes (<a href="https://github.com/alexgoller/illumio-tui/issues/49">#49</a>). Its first run found two bugs, both fixed:
+<ul>
+<li>interface updates sent the read-only <code>network_detection_mode</code> (406);</li>
+<li>the draft evaluation of an empty result failed (405).</li>
+</ul>
+</li>
+<li><strong>Code layout:</strong> <code>update.rs</code> and <code>model.rs</code> are split by screen (<a href="https://github.com/alexgoller/illumio-tui/issues/48">#48</a>).</li>
+</ul>
+</section>
+
+<section class="panel release" id="v0.3.5" aria-labelledby="v0.3.5-h">
+  <h2 id="v0.3.5-h"><a href="#v0.3.5">v0.3.5</a> <span class="date">2026-10-19</span></h2>
+<h3>Ctrl-U empties the line, everywhere</h3>
+<p>Ctrl-U now clears the line being typed in every text input, as in a shell. Before, only the forms handled it; elsewhere it typed a literal <code>u</code>.</p>
+<ul>
+<li>the <code>:</code> command line</li>
+<li><code>/</code> search (the search stays open)</li>
+<li>the traffic and events filter editors (only the active field is cleared)</li>
+<li>the Workloads label filter (<code>f</code>)</li>
+<li>the group-key picker (<code>x</code>) and the app picker</li>
+<li>the typed confirmations: the <code>revert</code> word and the bulk count</li>
+</ul>
+<p>The help screen lists it under &quot;Everywhere&quot;.</p>
+</section>
+
+<section class="panel release" id="v0.3.4" aria-labelledby="v0.3.4-h">
+  <h2 id="v0.3.4-h"><a href="#v0.3.4">v0.3.4</a> <span class="date">2026-10-18</span></h2>
+<h3>Workloads: labels and enforcement in bulk (<a href="https://github.com/alexgoller/illumio-tui/issues/47">#47</a>)</h3>
+<p>Set labels or the enforcement mode on one workload, a marked list or a whole group, from the Workloads screen or the CLI. Changes go out in <code>bulk_update</code> requests of 100.</p>
+<p><strong>TUI</strong> (Workloads screen, after <code>:writes on</code>)</p>
+<ul>
+<li><code>Space</code> marks a workload; <code>V</code> marks the group under the cursor or everything shown.</li>
+<li><code>M</code> sets the enforcement mode and visibility level. Unmanaged workloads are skipped.</li>
+<li><code>L</code> sets or removes labels; Ctrl-A creates a missing label.</li>
+<li>A preview lists every change and every skip before you confirm with <code>y</code>. <code>d</code> runs an optional draft check (≈ flows the rules would leave out). Delete moved to <code>X</code>.</li>
+</ul>
+<p><strong>CLI</strong></p>
+<ul>
+<li><code>illumio-tui workloads enforce &lt;idle|visibility_only|selective|full&gt; [--visibility LEVEL] &lt;filters&gt; --yes</code></li>
+<li><code>illumio-tui workloads relabel --set key=value --remove-label key &lt;filters&gt; --yes</code></li>
+<li><code>--dry-run</code> prints each request body before anything is sent.</li>
+</ul>
+<p><strong>Safety</strong></p>
+<ul>
+<li>Writes must be armed: <code>writes = true</code> in the profile or <code>ILLUMIO_WRITES=1</code>, plus <code>--yes</code> (CLI) or <code>:writes on</code> (TUI).</li>
+<li>No filter at all needs <code>--all</code>.</li>
+<li>More than 25 workloads, or <code>selective</code>/<code>full</code> on more than one, asks you to type the count (<code>--confirm-count N</code>).</li>
+<li>Targets are re-read (or the selection read must be at most 5 s old). A workload that changed in between is dropped, not overwritten. A batch the PCE answered without per-item results is reported as &quot;may have applied&quot;.</li>
+<li>Relabel sends each workload's full label set (the kept labels plus the changes), because <code>bulk_update</code> replaces it.</li>
+<li>Each write is logged in <code>~/.local/state/illumio-tui/writes.jsonl</code>.</li>
+</ul>
+<h3>Fixes</h3>
+<ul>
+<li>Workloads grouped by app|env: the section headers line up in columns, folded or open.</li>
+<li>A filtered list read (e.g. <code>workloads --hostname x</code>) is no longer reported as truncated. The PCE's <code>X-Total-Count</code> is the size of the whole collection, not the number of matches, so a filtered read now counts as truncated only when it fills the row cap. Before this, filtered <code>enforce</code>/<code>relabel --yes</code> refused.</li>
+</ul>
+</section>
+
+<section class="panel release" id="v0.3.3" aria-labelledby="v0.3.3-h">
+  <h2 id="v0.3.3-h"><a href="#v0.3.3">v0.3.3</a> <span class="date">2026-10-17</span></h2>
+<h3>What's new</h3>
+<h4>Workloads: group by app|env and filter by labels (<a href="https://github.com/alexgoller/illumio-tui/issues/46">#46</a>)</h4>
+<ul>
+<li><strong><code>x</code> groups the Workloads screen</strong> by the label keys the Traffic <code>g</code> picker uses (app, env by default).
+<ul>
+<li>Each group's header shows the workload count, a health bar, the health breakdown and the enforcement mix.</li>
+<li><code>Space</code> / <code>z</code> fold, <code>s</code> orders the groups (size, name, most unhealthy), and <code>Enter</code> on a header narrows the list to that group.</li>
+<li>Workloads missing a label show as <code>(no app)</code> / <code>(no env)</code>.</li>
+</ul>
+</li>
+<li><strong><code>f</code> opens a label filter:</strong> <code>app=shop,crm env=prod !role=db loc=-</code>.
+<ul>
+<li>A comma means any of those values, a space means every term must match, <code>!</code> excludes, and <code>key=-</code> means &quot;no label for this key&quot;.</li>
+<li><code>Ctrl-N</code> completes keys and values; unknown values are flagged.</li>
+<li><code>:filter &lt;expr&gt;</code> works on Workloads too, and <code>c</code> clears every filter.</li>
+</ul>
+</li>
+<li>Grouping and filtering use the list already loaded and make <strong>no extra PCE requests</strong>.</li>
+<li><strong>Changed key:</strong> deleting an unmanaged workload on Workloads is now <strong><code>X</code></strong>, because <code>x</code> groups there. Objects and Policy keep <code>x</code>.</li>
+</ul>
+<h4>CLI</h4>
+<ul>
+<li><code>workloads --group [app,env]</code> prints workloads grouped, with per-group counts and health. JSON output has <code>groups[]</code>; CSV has a leading <code>group</code> column you can paste into <code>--label</code>.</li>
+<li><code>workloads --label app=shop,crm</code> matches any of the listed values and is still one request. <code>!</code> and <code>key=-</code> terms are filtered locally. Same-key terms that can't both match return an empty result without any request.</li>
+</ul>
+<h4>Docs</h4>
+<ul>
+<li>New help screenshot showing the grouped, context-first help.</li>
+</ul>
+<h3>Install</h3>
+<ul>
+<li>Homebrew: <code>brew upgrade illumio-tui</code> (tap: <code>brew tap alexgoller/illumio-tui https://github.com/alexgoller/illumio-tui</code>)</li>
+<li>Debian/Ubuntu: <code>sudo apt install ./illumio-tui_0.3.3-1_amd64.deb</code></li>
+<li>RHEL/Rocky/Alma: <code>sudo dnf install ./illumio-tui-0.3.3-1.x86_64.rpm</code></li>
+<li>Archives for every platform plus <code>SHA256SUMS</code> are attached below.</li>
+</ul>
+</section>
+
+<section class="panel release" id="v0.3.2" aria-labelledby="v0.3.2-h">
+  <h2 id="v0.3.2-h"><a href="#v0.3.2">v0.3.2</a> <span class="date">2026-10-17</span></h2>
+<h3>What's new</h3>
+<h4>Flow detail in columns (<a href="https://github.com/alexgoller/illumio-tui/issues/45">#45</a>)</h4>
+<p>In the Flows view, the detail pane now shows <strong>SOURCE | DESTINATION | SERVICE</strong> side by side:</p>
+<ul>
+<li><strong>Source and destination columns:</strong> the name, then the IP, then the labels one per line in your configured key order (ignored keys hidden). IP-list endpoints show their list names instead.</li>
+<li><strong>Service column:</strong> port/proto, process, user, the policy decision and the draft decision when it's loaded.</li>
+<li><strong>Full-width lines below:</strong> first/last seen, bytes, rules, and the mark line.</li>
+<li><strong>Smaller terminals:</strong> columns need at least 92×31. Below that you get the stacked layout, which now cuts long lines with <code>…</code> instead of wrapping, so the mark line stays visible.</li>
+</ul>
+<h4>Help that starts with the screen you're on (<a href="https://github.com/alexgoller/illumio-tui/issues/44">#44</a>)</h4>
+<ul>
+<li><code>?</code> opens on the keys of the current screen or window (Flows, App-to-app, Blocked, Mesh, Treemap, Policy, Objects, Workloads, Events, the app view, the generator, the pending list, the marks list, an event detail), followed by the shared keys.</li>
+<li>Every screen's help page fits on one screen: the Flows page is 31 lines, down from 45.</li>
+<li><code>Tab</code> / <code>S-Tab</code> step through the other groups, <code>a</code> shows them all, and <code>Esc</code> returns you to the window you were in.</li>
+<li>Detail lines (window steps, cap steps, draft-query notes) only show on a group's own page or with <code>a</code>.</li>
+</ul>
+<h3>Install</h3>
+<ul>
+<li>Homebrew: <code>brew tap alexgoller/illumio-tui https://github.com/alexgoller/illumio-tui &amp;&amp; brew install illumio-tui</code> (or <code>brew upgrade illumio-tui</code>)</li>
+<li>Debian/Ubuntu: <code>sudo apt install ./illumio-tui_0.3.2-1_amd64.deb</code></li>
+<li>RHEL/Rocky/Alma: <code>sudo dnf install ./illumio-tui-0.3.2-1.x86_64.rpm</code></li>
+<li>Archives for every platform plus <code>SHA256SUMS</code> are attached below.</li>
+</ul>
+</section>
+
+<section class="panel release" id="v0.3.1" aria-labelledby="v0.3.1-h">
+  <h2 id="v0.3.1-h"><a href="#v0.3.1">v0.3.1</a> <span class="date">2026-10-17</span></h2>
+<h3>What's new</h3>
+<h4>Traffic: app sections (<a href="https://github.com/alexgoller/illumio-tui/issues/43">#43</a>)</h4>
+<ul>
+<li><strong>App-to-app:</strong> in section mode (<code>x</code>), <code>s</code> cycles the section order: connections ↓, app name A→Z, flows ↓. The panel title shows the current order.</li>
+<li><strong>Flows view:</strong> <code>x</code> / <code>X</code> cycle flat → by source app → by destination app. Each section is a header with its totals and the raw flows below it.
+<ul>
+<li><code>Space</code> / <code>z</code> fold sections, and <code>s</code> sorts them.</li>
+<li><code>Enter</code> on a header drills into that app. If a drill is already active, it only narrows it, for example from one app to an app pair.</li>
+<li>A search or sort set in the flat view carries into the sections.</li>
+</ul>
+</li>
+<li>Fast at 200k flows: grouping takes 54–75 ms, folding and sorting 2–11 ms. A speed check in CI guards these numbers.</li>
+</ul>
+<h4>Fixes</h4>
+<ul>
+<li><strong>Events (<a href="https://github.com/alexgoller/illumio-tui/issues/37">#37</a>):</strong> the &quot;truncated&quot; marker now appears only when the row cap is actually reached. <code>X-Total-Count</code> on <code>/events</code> counts every retained event, so the marker used to show up too often.</li>
+</ul>
+<h3>Install</h3>
+<ul>
+<li>Homebrew: <code>brew tap alexgoller/illumio-tui https://github.com/alexgoller/illumio-tui &amp;&amp; brew install illumio-tui</code></li>
+<li>Debian/Ubuntu: <code>sudo apt install ./illumio-tui_0.3.1-1_amd64.deb</code></li>
+<li>RHEL/Rocky/Alma: <code>sudo dnf install ./illumio-tui-0.3.1-1.x86_64.rpm</code></li>
+<li>Archives for every platform plus <code>SHA256SUMS</code> are attached below.</li>
+</ul>
+</section>
+
+<section class="panel release" id="v0.3.0" aria-labelledby="v0.3.0-h">
+  <h2 id="v0.3.0-h"><a href="#v0.3.0">v0.3.0</a> <span class="date">2026-10-17</span></h2>
+<h3>Install</h3>
+<ul>
+<li><strong>Homebrew:</strong> <code>brew tap alexgoller/illumio-tui https://github.com/alexgoller/illumio-tui</code>, then <code>brew install illumio-tui</code>. The formula updates itself on every release.</li>
+<li><strong>Debian / Ubuntu:</strong> <code>sudo apt install ./illumio-tui_0.3.0-1_amd64.deb</code> (arm64 too).</li>
+<li><strong>RHEL / Rocky / Alma / Fedora:</strong> <code>sudo dnf install ./illumio-tui-0.3.0-1.x86_64.rpm</code> (aarch64 too).</li>
+</ul>
+<p>The x86_64 packages carry the static musl build, so they run on Debian 11+ and EL8+. CI installs every package in Debian 12, Ubuntu 22.04, Rocky 9 and Alma 8 containers before the release is published. SHA256SUMS covers every asset.</p>
+<h3>Flow marks (<a href="https://github.com/alexgoller/illumio-tui/issues/40">#40</a>, <a href="https://github.com/alexgoller/illumio-tui/issues/41">#41</a>, <a href="https://github.com/alexgoller/illumio-tui/issues/42">#42</a>)</h3>
+<p>Mark flows you have looked at, kept in <code>marks.toml</code> next to your config, never on the PCE.</p>
+<ul>
+<li><strong>A mark</strong> is a match (src, dst, service, decision, and optionally the draft decision), plus an action, an expiry and a <strong>required comment</strong> saying why the flows were marked.
+<ul>
+<li>Actions, strongest first: <code>critical</code>, <code>important</code>, <code>revisit</code>, <code>accept-blocked</code>, <code>reviewed</code>, <code>squelch</code>.</li>
+<li>A highlight always beats a squelch.</li>
+</ul>
+</li>
+<li><strong>Scope:</strong> marks are portable across PCEs by label names, IPs and IP lists. A mark can also be scoped to one PCE; marks created in the TUI default to the current PCE.</li>
+<li><strong>Expiry:</strong> default expiries per action (squelch and accept-blocked 90d, reviewed 30d, revisit 7d, critical and important never).</li>
+<li><strong>TUI:</strong>
+<ul>
+<li><code>m</code> on any traffic row opens a mark form filled in from the row, with a live preview.</li>
+<li>Squelched flows leave every view, and each view says how many it hides; <code>M</code> shows them.</li>
+<li>critical rows are red, important yellow, revisit get ◆, reviewed are dimmed; Blocked counts accept-blocked flows as accepted.</li>
+<li><code>:marks</code> lists marks to edit, delete (<code>x</code>) or extend (<code>e</code>).</li>
+</ul>
+</li>
+<li><strong>CLI:</strong>
+<ul>
+<li><code>illumio-tui marks list|add|rm|export|import</code>.</li>
+<li><code>traffic</code>, <code>app</code> and <code>gen</code> apply marks: <code>meta.squelched</code>, <code>mark</code> fields on rows, <code>--show-squelched</code>, <code>--no-marks</code>.</li>
+<li>Marks with a draft decision apply with <code>--draft</code>.</li>
+</ul>
+</li>
+<li><strong>The policy generator ignores squelch</strong>, because legit flows still need allow rules; its header shows how many of its flows are squelched.</li>
+</ul>
+<h3>Policy generator</h3>
+<ul>
+<li><strong>IP list rows (<a href="https://github.com/alexgoller/illumio-tui/issues/38">#38</a>):</strong>
+<ul>
+<li>IP peers in an existing IP list are grouped into one row per list.</li>
+<li>Membership is checked against the draft ranges.</li>
+<li>Lists that cover everything are never used.</li>
+<li>The narrowest list wins, unless an existing rule in the target ruleset already names a list that covers the flow's port.</li>
+</ul>
+</li>
+<li><strong>Fan-in consolidation (<a href="https://github.com/alexgoller/illumio-tui/issues/39">#39</a>):</strong>
+<ul>
+<li>A port reached by at least 5 peers, or 3 on infrastructure ports (DNS, Kerberos, LDAP, SMB, NTP, syslog, SNMP, monitoring), is flagged.</li>
+<li><code>c</code> cycles off, Any (destination enforces; checked managed peers keep their own rules) and All Workloads (one extra-scope rule; every VEN recomputes).</li>
+<li>On the CLI: <code>gen --consolidate &lt;port&gt;/&lt;proto&gt;=any|all</code>.</li>
+</ul>
+</li>
+<li><strong>Crash fix:</strong> the generator no longer panics in a narrow terminal. Every screen is now render-tested at every width from 20 to 130 columns.</li>
+</ul>
+<h3>Events</h3>
+<ul>
+<li><strong>Detail navigation:</strong> in the detail, <code>j</code>/<code>k</code> or the arrow keys step to the previous or next event; <code>Ctrl-d</code>/<code>Ctrl-u</code>, <code>PgDn</code>/<code>PgUp</code>, <code>Ctrl-e</code>/<code>Ctrl-y</code> and <code>g</code>/<code>G</code> scroll.</li>
+</ul>
+<h3>Changes for scripts</h3>
+<ul>
+<li><strong><code>gen</code> JSON:</strong>
+<ul>
+<li>List rows have <code>kind: &quot;ip_list&quot;</code> with <code>ip_list {name, href}</code> and <code>ips</code>, and <code>peer</code> is display text.</li>
+<li>The <code>uses IP list</code> warning is kept but deprecated.</li>
+<li>New <code>consolidations</code> array.</li>
+</ul>
+</li>
+<li><strong>Traffic JSON:</strong> with active marks, <code>meta.squelched</code> and <code>meta.marks</code> are present, and squelched rows are omitted unless <code>--show-squelched</code> is given.</li>
+</ul>
+<h3>Docs</h3>
+<ul>
+<li>A full documentation pass, with regenerated screenshots and tour.</li>
+</ul>
+<p>Known: <code>events</code> can warn &quot;result truncated&quot; even when it returned fewer events than <code>max_results</code> (<a href="https://github.com/alexgoller/illumio-tui/issues/37">#37</a>).</p>
+</section>
+
+<section class="panel release" id="v0.2.0" aria-labelledby="v0.2.0-h">
+  <h2 id="v0.2.0-h"><a href="#v0.2.0">v0.2.0</a> <span class="date">2026-10-16</span></h2>
+<h3>Policy generator (<a href="https://github.com/alexgoller/illumio-tui/issues/33">#33</a>, <a href="https://github.com/alexgoller/illumio-tui/issues/34">#34</a>, <a href="https://github.com/alexgoller/illumio-tui/issues/35">#35</a>)</h3>
+<p>Proposes the allow rules one app needs, built from its own traffic, and writes them in one confirmed batch.</p>
+<ul>
+<li><strong>Open it:</strong> <code>G</code> in the app view (<code>A</code>), or <code>:gen &lt;app&gt;/&lt;env&gt;</code>.</li>
+<li><strong>Granularity:</strong> a slider with four stops: app·all, app·ports (the default), role·ports and role·all. <code>←</code>/<code>→</code> sets it for every row; <code>&lt;</code>/<code>&gt;</code> sets it for the selected row only.</li>
+<li><strong>Peers:</strong> one row per peer app|env, one for traffic inside the app, and one per IP peer.
+<ul>
+<li><code>Space</code> checks or unchecks a row. Same-env peers start checked; other envs and IP peers start unchecked.</li>
+<li>Rows carry flags: env mismatch, uses IP list, ephemeral port, override deny, no target.</li>
+<li>An IP peer already in an IP list uses that list; one in no list gets a new list.</li>
+</ul>
+</li>
+<li><strong>Inbound</strong> rules go into the app's ruleset. A new ruleset is named by the profile setting <code>[profiles.&lt;name&gt;.generator] ruleset_name</code>, default <code>RF-{app}-{env}</code>. <strong>Outbound</strong> (<code>o</code>, off by default) rules go into the peers' rulesets.</li>
+<li><strong>Preview:</strong> the rule count and how many flows are covered or not, computed locally. <code>p</code> lists the exact rules.</li>
+<li><strong>Dedupe:</strong> rules that already exist in the draft are not proposed again. Rules that differ only in one label key merge (role=web, role=db → one rule).</li>
+<li><strong>Incomplete traffic</strong> (truncated, filtered, or one direction missing) is refused; <code>r</code> re-queries.</li>
+<li><strong><code>Enter</code>:</strong> one fresh read of the draft, then a single confirmation that shows every request. Writes must be on.
+<ul>
+<li>Requests are sent one at a time and the batch stops at the first failure.</li>
+<li>Each request is written to the audit log.</li>
+<li>Before each rule update the rule is read again, and the batch stops if someone else changed it.</li>
+<li>A batch report is kept (<code>:batch</code>).</li>
+<li>The draft decision is re-evaluated once after the batch.</li>
+</ul>
+</li>
+<li><strong>CLI:</strong> <code>illumio-tui gen &lt;app&gt;/&lt;env&gt; [--granularity …] [--outbound]</code> is a read-only dry run that prints the same proposal as JSON or a table.</li>
+</ul>
+<h3>Events diff (<a href="https://github.com/alexgoller/illumio-tui/issues/36">#36</a>)</h3>
+<ul>
+<li><strong>Detail:</strong> the event detail is now a readable change diff. Updates show only the changed fields, before (red) and after (green). Lists are compared item by item, and objects are shown by name. <code>J</code> toggles the raw JSON.</li>
+<li><strong>CLI:</strong> <code>illumio-tui events --diff</code> prints the same per-event diff. It loads the cached name index, so 5 requests instead of 1. Plain <code>events</code> is unchanged.</li>
+</ul>
+<h3>Also</h3>
+<ul>
+<li>A rule write re-evaluates the draft decision on screen (<a href="https://github.com/alexgoller/illumio-tui/issues/32">#32</a>).</li>
+<li>rustls 0.23.46 (RUSTSEC-2026-0346 to 0349).</li>
+<li><code>?</code> opens the help in the app view and the generator; closing it returns there.</li>
+<li><code>events</code> table and CSV: the actor column names more creator kinds, e.g. <code>service_account:ci-bot</code>.</li>
+</ul>
+<p>Known: <code>events</code> can warn &quot;result truncated&quot; even when it returned fewer events than <code>max_results</code> (<a href="https://github.com/alexgoller/illumio-tui/issues/37">#37</a>).</p>
+</section>
+
+<section class="panel release" id="v0.1.12" aria-labelledby="v0.1.12-h">
+  <h2 id="v0.1.12-h"><a href="#v0.1.12">v0.1.12</a> <span class="date">2026-10-15</span></h2>
+<h3>Security update</h3>
+<p>v0.1.12 is v0.1.11 with rustls, the TLS library the PCE client uses, updated from 0.23.45 to 0.23.46. That update fixes four advisories published on 2026-10-14:</p>
+<ul>
+<li>RUSTSEC-2026-0346: <code>Debug</code> impls for client session values expose TLS secrets</li>
+<li>RUSTSEC-2026-0347: buffered application data sent to the outer server after ECH rejection</li>
+<li>RUSTSEC-2026-0348: Brotli certificate decompression can allocate up to 1 GiB before authentication</li>
+<li>RUSTSEC-2026-0349: an unauthenticated ServerHello can downgrade later connections to classical key exchange</li>
+</ul>
+<p>The v0.1.11 downloads were built with the affected version, so upgrade to v0.1.12. Nothing else changed. See <a href="https://github.com/alexgoller/illumio-tui/releases/tag/v0.1.11">v0.1.11</a> for its features: a rule write re-evaluates the draft decision on screen (<a href="https://github.com/alexgoller/illumio-tui/issues/32">#32</a>).</p>
+</section>
+
+<section class="panel release" id="v0.1.11" aria-labelledby="v0.1.11-h">
+  <h2 id="v0.1.11-h"><a href="#v0.1.11">v0.1.11</a> <span class="date">2026-10-14</span></h2>
+<blockquote><p><strong>Superseded by <a href="https://github.com/alexgoller/illumio-tui/releases/tag/v0.1.12">v0.1.12</a>:</strong> these downloads use rustls 0.23.45 (RUSTSEC-2026-0346 to 0349). Use v0.1.12.</p></blockquote>
+<h3>What's new</h3>
+<p><strong>A rule write re-evaluates the draft decision on screen (<a href="https://github.com/alexgoller/illumio-tui/issues/32">#32</a>).</strong> Before, a successful write cleared the draft decisions and you pressed <code>D</code> again. Now a successful write re-evaluates them itself when:</p>
+<ul>
+<li>draft decisions were on screen (or a draft run was in flight), or</li>
+<li>the rule came from the Traffic <code>w</code> rule form, including from the app overlay.</li>
+</ul>
+<p>How it works:</p>
+<ul>
+<li>It is the same request as <code>D</code>: one <code>update_rules</code> PUT per query, or two for a both-directions focus. If the cached draft still stands (for example after a label write), no PUT is sent.</li>
+<li>The status line shows the run. <code>Esc</code> cancels it; off the Traffic screen the status line says to cancel from there.</li>
+<li>With <code>Ctrl-R</code> (new ruleset, then rule) it runs once, after the rule. The draft stays on screen through the ruleset step and if you cancel the rule.</li>
+<li>A failed write, an unanswered write, or a write with no Traffic result open sends nothing. Where <code>D</code> would ask for confirmation, nothing runs, and the status says &quot;draft cleared: D re-evaluates&quot;.</li>
+<li>A draft answer overtaken by a later write is never shown or cached, so two quick writes cannot bring back decisions from before the second one.</li>
+</ul>
+</section>
+
+<section class="panel release" id="v0.1.10" aria-labelledby="v0.1.10-h">
+  <h2 id="v0.1.10-h"><a href="#v0.1.10">v0.1.10</a> <span class="date">2026-10-14</span></h2>
+<p>Draft policy decisions, a better <code>w</code> rule form, Workloads filters, and two app-view fixes.</p>
+<h3>New</h3>
+<ul>
+<li><strong>Draft policy decision (<a href="https://github.com/alexgoller/illumio-tui/issues/29">#29</a>).</strong> <code>D</code> in Traffic, or <code>--draft</code> on <code>traffic query|groups|mesh</code> and <code>app</code>, shows for each flow what the <strong>draft</strong> policy would decide, next to the reported decision. Use it to check whether your draft rules fix the blocked flows before you provision.
+<ul>
+<li>The PCE's own Explorer <code>update_rules</code> re-evaluates the query you already ran. That costs one status check, one PUT on our own query, polls and one download. It changes no policy, needs no writes armed, and is not audited. Without a known query, <code>D</code> asks first, then re-runs.</li>
+<li>Flows gets a <code>draft</code> column (e.g. <code>blocked → allowed</code>). Pairs, sections, Mesh and the app overlay show <code>would allow</code> / <code>would block</code> counts. <code>d</code> gains a <code>fixed by draft</code> step. The Result header shows <code>draft ✓ N fixed</code>.</li>
+<li>In JSON each flow carries <code>draft_policy_decision</code>, and <code>meta.draft</code> summarises the changes. CSV gets <code>draft_allowed</code> / <code>draft_blocked</code>.</li>
+<li>Draft answers are cached for 2 minutes and dropped on every policy or workload write.</li>
+</ul>
+</li>
+<li><strong>Workloads filters (<a href="https://github.com/alexgoller/illumio-tui/issues/31">#31</a>).</strong> All filters are local and send no request; they combine with <code>h</code> and <code>/</code>.
+<ul>
+<li><code>E</code> cycles enforcement (all → full → selective → visibility_only → idle → unmanaged).</li>
+<li><code>m</code> cycles managed → unmanaged.</li>
+<li><code>o</code> shows offline workloads only.</li>
+<li><code>u</code> shows unlabeled workloads (missing any scope key or role), with a <code>missing</code> column.</li>
+<li><code>c</code> clears the filters and <code>h</code>.</li>
+<li>A filter line shows what is on, with the count.</li>
+<li>CLI: <code>workloads --offline</code> and <code>workloads --unlabeled [keys]</code>, with <code>meta.local_filter</code> and <code>meta.warnings</code>.</li>
+</ul>
+</li>
+</ul>
+<h3>Improved</h3>
+<ul>
+<li><strong>The <code>w</code> rule form (<a href="https://github.com/alexgoller/illumio-tui/issues/30">#30</a>).</strong>
+<ul>
+<li>The form now loads the draft rulesets itself (one counted, cached request). It pre-selects the ruleset whose scope covers the flow's destination (any of its labels; label groups are expanded) and says how many rulesets cover it.</li>
+<li>Tab and <code>Ctrl-N</code> complete ruleset names.</li>
+<li><code>Ctrl-R</code> creates a new ruleset scoped like the destination. It checks the PCE first and never creates a duplicate: if the name exists, the form comes back naming it and its scope.</li>
+<li>A form opened from the app overlay returns to it.</li>
+</ul>
+</li>
+<li><strong>App overlay.</strong>
+<ul>
+<li>A warning or error, such as <code>writes off; :writes on to enable</code> after <code>w</code>, now takes the status line instead of being cut off by the key hints.</li>
+<li>The cursor always sits on the peer panel that the direction shows.</li>
+</ul>
+</li>
+<li><strong>Tables</strong> keep the selected row in view when a filter shrinks the list.</li>
+<li>Traffic and draft polling give up after 30 minutes (the PCE may still finish the query).</li>
+</ul>
+<h3>Changed</h3>
+<ul>
+<li>The CLI <code>--table</code> draft cell shows the change (<code>blocked → allowed</code>).</li>
+</ul>
+<p>Download the archive for your platform below and check it against <code>SHA256SUMS</code>.</p>
+</section>
+
+<section class="panel release" id="v0.1.9" aria-labelledby="v0.1.9-h">
+  <h2 id="v0.1.9-h"><a href="#v0.1.9">v0.1.9</a> <span class="date">2026-10-14</span></h2>
+<p>Traffic accuracy and speed. This release fixes the findings of an external side-by-side test against workloader. <strong>It has breaking changes; read the Changed and Removed sections.</strong></p>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Inflated connection counts (<a href="https://github.com/alexgoller/illumio-tui/issues/22">#22</a>).</strong> Explorer returns stored aggregate records that overlap the query window, with lifetime counters; it does not split them by time. Backfill used to sum overlapping slices, which inflated connections about 12×. Flows are now merged by record (flow tuple + <code>first_detected</code>, the latest version wins) and never summed.</li>
+<li><strong>False &quot;truncated&quot; (<a href="https://github.com/alexgoller/illumio-tui/issues/23">#23</a>).</strong> A complete result was flagged truncated because <code>matches_count</code> was read as a total. Truncation is now <code>flows_count &gt;= cap</code>, per region on a supercluster; a region that did not answer sets the new <code>incomplete</code> flag instead.</li>
+<li><strong>Unmanaged workloads (<a href="https://github.com/alexgoller/illumio-tui/issues/24">#24</a>)</strong> show and count as <code>unmanaged</code> (Workloads screen, <code>workloads</code> CLI, app overlay), not as the <code>visibility_only</code> the API reports. JSON keeps the raw <code>enforcement_mode</code> and adds an effective <code>enforcement</code>; CSV has both.</li>
+<li><strong>Unused labels (<a href="https://github.com/alexgoller/illumio-tui/issues/25">#25</a>).</strong> <code>labels --unused</code> and TUI <code>u</code> use the PCE's own usage flags (<code>labels?usage=true</code>): one request instead of four, and labels held by pairing profiles, permissions, enforcement boundaries etc. are no longer reported unused. The TUI shows what holds each label.</li>
+<li><strong>Speed (<a href="https://github.com/alexgoller/illumio-tui/issues/28">#28</a>).</strong> gzip downloads, polls capped at 3 s, and the CLI submits the query while label data loads. A one-day query on a demo PCE went from ~17 s to ~6 s. Large results get their own 300 s download timeout.</li>
+</ul>
+<h3>New</h3>
+<ul>
+<li><strong>Per-decision connections (<a href="https://github.com/alexgoller/illumio-tui/issues/26">#26</a>).</strong> <code>traffic groups</code> (pairs, <code>--services</code>, sections, <code>traffic query --blocked</code>) adds <code>allowed_conns</code>, <code>pot_blocked_conns</code>, <code>blocked_conns</code> and <code>unknown_conns</code> (they sum to <code>connections</code>) in JSON and CSV, appended after the existing columns. CLI tables print the unit: <code>flows</code> = flow records, <code>conns</code>/<code>bytes</code> = lifetime counts of those records.</li>
+<li><strong>Transmission filter (<a href="https://github.com/alexgoller/illumio-tui/issues/27">#27</a>).</strong> <code>--transmission unicast|broadcast|multicast</code> on <code>traffic query|groups|mesh</code> and <code>app</code>; a transmission field in the TUI filter and <code>:unicast</code>. The default stays all kinds (workloader defaults to unicast only).</li>
+<li><strong><code>meta.cap</code>, <code>meta.cap_steps</code>, <code>meta.incomplete</code>.</strong></li>
+</ul>
+<h3>Changed (breaking)</h3>
+<ul>
+<li><strong><code>--backfill</code> / <code>B</code> raise the cap</strong> instead of splitting the window into time slices: a result truncated below 10,000 re-runs at 10,000, then 25k → 50k → 100k → 200k, each step above 10,000 confirmed (<code>y</code> / <code>--yes</code>). With a focus set, <code>B</code> raises the focused query's cap. <code>traffic_auto_backfill</code> raises to 10,000 at most.</li>
+<li><strong><code>meta.covered</code></strong> is the window when the result is complete and <code>null</code> when it is truncated (it used to be a span estimated from <code>last_detected</code>).</li>
+<li><code>--enforcement &lt;mode&gt;</code> now also sends <code>managed=true</code> (so workloads without a VEN stay out); <code>--enforcement unmanaged</code> sends <code>managed=false</code>. Invalid values exit 2.</li>
+<li>The TUI <code>:export</code> of App-to-app pairs now writes exactly the <code>traffic groups --csv</code> columns.</li>
+<li>CLI <code>--table</code> traffic output starts with a unit line.</li>
+</ul>
+<h3>Removed (breaking)</h3>
+<ul>
+<li><strong>The app timeline</strong>: the overlay's &quot;blocked over time&quot; panel, <code>t</code>, spikes, <code>app --timeline</code> and the <code>timeline</code> section. Explorer's aggregated, lifetime-counted records allow no honest view over time. The Traffic summary sparkline went for the same reason.</li>
+<li><strong>Time-slice backfill</strong>: <code>--max-slices</code> (now exits 2 with an explanation) and <code>meta.slices</code>.</li>
+</ul>
+<p>Download the archive for your platform below and check it against <code>SHA256SUMS</code>.</p>
+</section>
+
+<section class="panel release" id="v0.1.8" aria-labelledby="v0.1.8-h">
+  <h2 id="v0.1.8-h"><a href="#v0.1.8">v0.1.8</a> <span class="date">2026-10-14</span></h2>
+<h3>New</h3>
+<ul>
+<li><strong>App focus (<a href="https://github.com/alexgoller/illumio-tui/issues/19">#19</a>).</strong> In Traffic, <code>F</code> on any row narrows every view (Flows, App-to-app, Mesh, Treemap, Blocked) to that row's app; <code>X</code> cycles in → out → both; <code>Esc</code> clears it. <code>:focus &lt;app&gt;</code> opens a picker. The header shows <code>focus shop/prod · in</code>. Focusing sends nothing. If the loaded result was cut at the cap, <code>r</code> re-queries just that app (one query per direction, two for <code>both</code>, confirmed and cached); clearing the focus brings the full result back from memory.
+<ul>
+<li>CLI: <code>traffic query|groups|mesh --app shop/prod --direction in|out|both</code> puts the app's labels into the query, so the cap is spent on that app. <code>meta.queries</code> counts the queries.</li>
+</ul>
+</li>
+<li><strong>App overlay (<a href="https://github.com/alexgoller/illumio-tui/issues/20">#20</a>).</strong> <code>A</code> on a row, or <code>:app &lt;app&gt;</code>, opens everything about one app: workloads with their enforcement modes and VEN health, inbound and outbound peers by service and decision, the rulesets that cover or name it (draft or active, label-group sub-groups followed), and an approximate blocked timeline. Opening it sends at most two counted requests (workloads, and rulesets if not cached); reopening the same app sends none. <code>Tab</code> moves between panels, <code>Enter</code> jumps to the peer's flows, the workload or the ruleset, <code>w</code> drafts an allow rule from a blocked peer, <code>r</code> reloads after asking.
+<ul>
+<li>CLI: <code>illumio-tui app &lt;app&gt; [--direction] [--section workloads|inbound|outbound|policy|timeline]</code>, one envelope with all sections (<code>--table</code> prints each; <code>--csv</code> needs <code>--section</code>).</li>
+</ul>
+</li>
+<li><strong>Exact blocked timeline and spikes (<a href="https://github.com/alexgoller/illumio-tui/issues/21">#21</a>).</strong> In the overlay, <code>t</code> replaces the approximate timeline with an exact one: one blocked-only query per time bucket (1d = 24×1h, 1w = 28×6h, 4w = 28×1d, 30d = 30×1d, otherwise up to 24 buckets of at least 5 minutes), confirmed with the query count, run one at a time. <code>Esc</code> stops; <code>t</code> resumes with only the missing buckets. A bucket that hit the cap is a lower bound (<code>+</code>). Both timelines name the worst spike: a bucket at least 3× the median of the non-zero buckets (needs 4 non-zero buckets).
+<ul>
+<li>CLI: <code>illumio-tui app &lt;app&gt; --timeline</code>; above 24 queries it needs <code>--yes</code>.</li>
+</ul>
+</li>
+</ul>
+<h3>Changed</h3>
+<ul>
+<li><strong><code>traffic groups --app</code> now focuses the query.</strong> <code>--app</code> used to keep one app's sections from the loaded flows; it now also narrows the query to that app, works without <code>--by</code> (pairs), and an app that matches no labels exits 2 with the closest names instead of printing empty sections. <code>--direction</code> conflicts with <code>--by</code>. <code>--backfill</code> is refused together with <code>--app</code>.</li>
+<li>Traffic results now keep separate cache slots for the full result, the focused sides and timeline buckets, so they no longer evict each other.</li>
+<li>Deny-rule fallback requests are only sent from the Policy screen.</li>
+</ul>
+<p>Related: an &quot;app profile&quot; skill for agents is proposed in <a href="https://github.com/alexgoller/illumio-mcp-skills/issues/1">illumio-mcp-skills#1</a>.</p>
+<p>Download the archive for your platform below and check it against <code>SHA256SUMS</code>.</p>
+</section>
+
+<section class="panel release" id="v0.1.7" aria-labelledby="v0.1.7-h">
+  <h2 id="v0.1.7-h"><a href="#v0.1.7">v0.1.7</a> <span class="date">2026-10-13</span></h2>
+<h3>New</h3>
+<ul>
+<li><strong>App-to-app pairs by port/proto (<a href="https://github.com/alexgoller/illumio-tui/issues/17">#17</a>).</strong> In Traffic → App-to-app pairs, <code>o</code> switches to one row per source group → destination group → port/proto (<code>pairs · by service</code>). Hosts, IPs, users and processes collapse, so each row is close to one allow rule. No request: it regroups the result on screen.
+<ul>
+<li><code>Enter</code> drills into the flows behind the row.</li>
+<li>With writes on, <code>w</code> drafts the allow rule from the row: consumers = the row's source group, providers = its destination group (under the <code>g</code> keys), service = its port/proto, description naming the groups. A ruleset is pre-selected only when the <code>g</code> keys cover the profile's scope keys. A <code>-</code> slot (no label for a key) widens that side to the labels it has.</li>
+<li><code>:export</code> writes the same columns as the CLI: <code>src, dst, service, flows, conns, bytes, allowed, pot.blocked, blocked</code>.</li>
+<li>CLI: <code>traffic groups --services</code> (table, <code>--json</code>, <code>--csv</code>); rejected together with <code>--by</code>, whose sections already list one row per service.</li>
+</ul>
+</li>
+<li><strong><code>d</code> filters the pairs (<a href="https://github.com/alexgoller/illumio-tui/issues/18">#18</a>).</strong> The decision filter (<code>all</code> → <code>blocked</code> = blocked and potentially blocked → <code>blocked only</code>) now applies to App-to-app pairs too, plain and by service. Rows count only the kept flows, rows with none disappear, the header shows the filter, and drills match the row. The treemap keeps every flow. CLI: <code>traffic groups --show blocked</code> now works for pairs and <code>--services</code>, e.g. <code>traffic groups --services --show blocked --csv</code> for the list of rules still to write.</li>
+</ul>
+<h3>Changed</h3>
+<ul>
+<li><code>traffic groups --show</code> without <code>--by</code> used to be a usage error; it now filters the pairs. <code>--app</code> still needs <code>--by</code>.</li>
+</ul>
+<p>Download the archive for your platform below and check it against <code>SHA256SUMS</code>.</p>
+</section>
+
+<section class="panel release" id="v0.1.6" aria-labelledby="v0.1.6-h">
+  <h2 id="v0.1.6-h"><a href="#v0.1.6">v0.1.6</a> <span class="date">2026-10-13</span></h2>
+<h3>⚠️ Read first</h3>
+<ul>
+<li><strong>The default traffic cap is now 10000 rows</strong> (was 1000). Queries, <code>B</code> backfill and opt-in auto-backfill download up to ten times more per request by default. Set <code>traffic_max_results = 1000</code> in a profile's <code>[limits]</code> to keep the old start.</li>
+<li><strong><code>traffic_max_results</code> no longer limits the cap.</strong> It is now only the starting cap; <code>]</code>, <code>--max-results</code> and backfill can always go up to the hard maximum of 200000. Values of 0 or above 200000 are rejected when the config loads.</li>
+<li>Anything above 10000 still asks first (<code>--yes</code> in the CLI, <code>y</code> in the TUI). One <code>--yes</code> on <code>--backfill</code> allows up to 50 slice queries of up to 200000 rows each.</li>
+</ul>
+<h3>New</h3>
+<ul>
+<li><strong>CSV output (<a href="https://github.com/alexgoller/illumio-tui/issues/15">#15</a>).</strong> <code>--csv</code> on every command that prints a table: RFC 4180, CRLF, UTF-8 without BOM, a header row, full untrimmed columns (exact numbers, every label including ignored keys, lists joined with <code>; </code>), and the meta line on stderr so stdout is pure CSV. Commands without a table (writes, <code>health</code>, <code>provision</code>, <code>revert</code>, traffic <code>--dry-run</code>, ...) refuse <code>--csv</code> before sending anything. <code>--csv</code> conflicts with <code>--json</code> and <code>--table</code>.</li>
+<li><strong><code>:export &lt;path&gt;</code> in the TUI (<a href="https://github.com/alexgoller/illumio-tui/issues/15">#15</a>).</strong> Writes the table on screen as CSV: filter, search and sort applied, folded sections included, cells as in the CLI's CSV. Refuses to overwrite an existing file; <code>:export! &lt;path&gt;</code> overwrites. Sends nothing to the PCE.</li>
+<li><strong>Traffic cap 10000, steppable to 200000 (<a href="https://github.com/alexgoller/illumio-tui/issues/16">#16</a>).</strong> <code>]</code> / <code>[</code> step 500, 1000, 2000, 5000, 10000, 25000, 50000, 100000, 200000; a profile value between rungs is its own rung. Auto-refresh stays off for a cap above 10000, since it would need a confirmation every run.</li>
+</ul>
+<p>Download the archive for your platform below and check it against <code>SHA256SUMS</code>.</p>
+</section>
+
+<section class="panel release" id="v0.1.5" aria-labelledby="v0.1.5-h">
+  <h2 id="v0.1.5-h"><a href="#v0.1.5">v0.1.5</a> <span class="date">2026-10-12</span></h2>
+<h3>⚠️ Read first</h3>
+<ul>
+<li><strong>Breaking: <code>traffic query --blocked --json</code> changed shape.</strong> It now returns <code>{&quot;sections&quot;: [...]}</code> (the in+blocked preset of the new app-sections engine). Scripts reading the old blocked-group output need updating.</li>
+<li><strong>Policy revert is not yet verified against a live PCE.</strong> It uses <code>PUT /orgs/N/sec_policy/delete</code> with a <code>change_subset</code> body and is covered by tests only. Run <code>illumio-tui policy revert ... --dry-run</code> against a lab PCE before using it for real.</li>
+</ul>
+<h3>New</h3>
+<ul>
+<li><strong>Policy revert (<a href="https://github.com/alexgoller/illumio-tui/issues/7">#7</a>).</strong> <code>policy revert [--all | targets] [--dry-run | --yes]</code> in the CLI. In the TUI pending overlay, <code>R</code> reverts the marked changes after you type <code>revert</code> and press Enter; the confirm lists each object and what happens to it.</li>
+<li><strong>Label-group diffs (<a href="https://github.com/alexgoller/illumio-tui/issues/8">#8</a>).</strong> The pending overlay shows label-group changes; <code>policy pending --diff</code> prints full diffs (a <code>diff</code> array in JSON with the flag).</li>
+<li><strong>App sections (<a href="https://github.com/alexgoller/illumio-tui/issues/12">#12</a>).</strong> App-to-app cycles pairs / in / out / both with <code>x</code>/<code>X</code>, <code>d</code> filters by decision, <code>Space</code>/<code>z</code> fold, Enter drills into a peer or app, <code>w</code> works on peer rows. Blocked is now a preset of the same view. CLI: <code>traffic groups --by/--show/--app</code>.</li>
+<li><strong>Coverage and backfill (<a href="https://github.com/alexgoller/illumio-tui/issues/13">#13</a>).</strong> The result header shows how much of the window the capped result covers (e.g. <code>covers 4m of 1d</code>). <code>B</code> proposes a cap that fits, or walks back in batches of up to 50 slices, one request at a time. Opt-in auto-backfill via <code>traffic_auto_backfill</code> / <code>ILLUMIO_AUTO_BACKFILL=1</code>. CLI: <code>--backfill [--max-slices 1..50]</code>, with <code>meta.covered</code> and <code>meta.slices</code>.</li>
+<li><strong>Filter editor completion (<a href="https://github.com/alexgoller/illumio-tui/issues/14">#14</a>).</strong> <code>Ctrl-N</code>/<code>Ctrl-P</code> complete labels, IP lists, workloads already loaded, services, protocols, decisions and windows in the traffic filter editor.</li>
+</ul>
+<p>Download the archive for your platform below and check it against <code>SHA256SUMS</code>.</p>
+</section>
+
+<section class="panel release" id="v0.1.4" aria-labelledby="v0.1.4-h">
+  <h2 id="v0.1.4-h"><a href="#v0.1.4">v0.1.4</a> <span class="date">2026-10-12</span></h2>
+<p><strong>Full Changelog</strong>: <a href="https://github.com/alexgoller/illumio-tui/compare/v0.1.3...v0.1.4">https://github.com/alexgoller/illumio-tui/compare/v0.1.3...v0.1.4</a></p>
+</section>
+
+<section class="panel release" id="v0.1.3" aria-labelledby="v0.1.3-h">
+  <h2 id="v0.1.3-h"><a href="#v0.1.3">v0.1.3</a> <span class="date">2026-10-12</span></h2>
+<p><strong>Full Changelog</strong>: <a href="https://github.com/alexgoller/illumio-tui/compare/v0.1.2...v0.1.3">https://github.com/alexgoller/illumio-tui/compare/v0.1.2...v0.1.3</a></p>
+</section>
+
+<section class="panel release" id="v0.1.2" aria-labelledby="v0.1.2-h">
+  <h2 id="v0.1.2-h"><a href="#v0.1.2">v0.1.2</a> <span class="date">2026-10-12</span></h2>
+<p><strong>Full Changelog</strong>: <a href="https://github.com/alexgoller/illumio-tui/compare/v0.1.1...v0.1.2">https://github.com/alexgoller/illumio-tui/compare/v0.1.1...v0.1.2</a></p>
+</section>
+
+<section class="panel release" id="v0.1.1" aria-labelledby="v0.1.1-h">
+  <h2 id="v0.1.1-h"><a href="#v0.1.1">v0.1.1</a> <span class="date">2026-10-12</span></h2>
+<p><strong>Full Changelog</strong>: <a href="https://github.com/alexgoller/illumio-tui/compare/v0.1.0...v0.1.1">https://github.com/alexgoller/illumio-tui/compare/v0.1.0...v0.1.1</a></p>
+</section>
+
+<section class="panel release" id="v0.1.0" aria-labelledby="v0.1.0-h">
+  <h2 id="v0.1.0-h"><a href="#v0.1.0">v0.1.0</a> <span class="date">2026-10-12</span></h2>
+<p><strong>Full Changelog</strong>: <a href="https://github.com/alexgoller/illumio-tui/commits/v0.1.0">https://github.com/alexgoller/illumio-tui/commits/v0.1.0</a></p>
+</section>
+
+<p class="changelog-back"><a href="./">&larr; Back to the site</a> · <a href="https://github.com/alexgoller/illumio-tui/releases">GitHub Releases</a></p>
+
+</div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>illumio-tui, GPL-3.0-only</span>
+    <span>By Alex Goller. Built with Claude Code.</span>
+  </div>
+</footer>
+</body>
+</html>
