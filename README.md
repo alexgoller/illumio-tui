@@ -410,7 +410,8 @@ Five screens: `1` Traffic, `2` Policy, `3` Objects, `4` Workloads, `5` Events. T
 takes `:traffic`, `:policy`, `:objects`, `:workloads`, `:events`, `:iplists` (Objects on its
 IP lists tab), `:filter <expr>`, `:window <dur>`, `:profile <name>`, `:writes [on|off]`,
 `:export <path>`, `:draft`, `:active`, `:unicast`, `:focus [app]`, `:app [app]`, `:gen [app]`,
-`:readiness`, `:enforce [app]`, `:batch`, `:help` and `:q` (each described below). `:export <path>` writes the table on
+`:readiness`, `:enforce [app]`, `:batch`, `:save <name>`, `:filters` (`:fl`), `:load <name>`,
+`:help` and `:q` (each described below; saved filters under [Saved filters](#saved-filters)). `:export <path>` writes the table on
 screen as CSV (the rows shown, with the search and filters applied and in sort order; every
 column, whatever the terminal width, each cell whole; `~/` is the home directory), the same
 format as the CLI's `--csv`, and sends nothing; it refuses an existing file, `:export! <path>`
@@ -1194,6 +1195,68 @@ rows also `flows`, the per-action `marks` and the `squelched` records they hide)
 last `mark` column, and `meta.squelched` counts the rows and flows left out. `gen` proposes the
 same rules either way and reports `meta.squelched`. An invalid file is a warning (the command
 runs without marks); `add`, `rm` and `import` refuse to write it (exit 2), a held lock exits 3.
+
+### Saved filters
+
+Long filters (traffic `!` excludes and port ranges, `src:`/`dst:` rule searches, event type
+terms) can be saved by name, per profile, in the config file. Traffic, Policy (rule search),
+Events and Workloads have them; each field holds the text you type into that screen's `f`
+editor, unchanged, and a policy filter is one rule search query. A field left out is not set;
+on Traffic a filter without `window` or `max_results` keeps the ones in force.
+
+```toml
+[profiles.demo.filters.traffic.prod-blocked]
+src = "env=prod"
+dst = "!app=backup"
+service = "!53/udp, 8000-8100/tcp"
+decisions = ["blocked", "potentially_blocked"]
+transmission = ["unicast"]
+window = "7d"
+max_results = 20000
+
+[profiles.demo.filters.policy]
+deny-prod = "dst:env=prod deny"
+pos-in = "dst:app=pos -src:app=pos"
+
+[profiles.demo.filters.events.noise-free]
+type = "!agent.*, !=user.login"
+severity = "warning+"
+window = "7d"
+
+[profiles.demo.filters.workloads.prod-unenforced]
+labels = "env=prod"
+enforcement = "visibility_only"
+managed = true
+```
+
+Names are `A-Z a-z 0-9 . _ -`, up to 64, case-sensitive. A filter that does not parse stops
+nothing at startup; using it says which profile, screen, filter and field.
+
+In the TUI, `:save <name>` saves the filter in force on the screen (asking before it replaces
+one), `:filters` (`:fl`) lists the screen's saved filters with a summary each (type to narrow,
+`Enter` applies, `D` deletes after a confirm), and `:load <name>` (or `:filter <name>`; `Tab`
+completes the name) applies one. Applying is the same as typing it into `f` and pressing
+`Enter`: Traffic runs one query through the usual checks and cost confirm, Policy, Workloads
+and Events filter locally (Events asks the PCE again only for a new window or severity). The
+filter line shows `[name]` until you change the filter. After `:profile X` the filters are X's.
+
+On the CLI, `--filter <name>` on `traffic query|groups|mesh`, `policy search`, `events` and
+`workloads` starts from a saved filter; a flag replaces that field (`--src` the source,
+`--window` the window; `policy search` adds its terms to the saved query). `--save-filter
+<name>` saves the filter the flags (and `--filter`) make and exits without contacting the PCE
+(`--force` replaces an existing one). Repeated `--src` is `|` in the text, `--exclude-src X`
+is `!X`; what the text cannot hold (`--process`, `--from`/`--to`, `--status`, ...) is an error.
+
+```sh
+illumio-tui traffic groups --src env=prod --exclude-dst app=backup --decision blocked --save-filter prod-blocked
+illumio-tui traffic groups --filter prod-blocked --window 1d
+illumio-tui filters list --screen traffic      # also --json, --csv
+illumio-tui filters show traffic prod-blocked
+illumio-tui filters rm traffic prod-blocked
+```
+
+`--filter` and `filters show|rm` complete saved names from the config file. Saved filters need
+a profile from the config file: with `--env-file` or an env-only connection there are none.
 
 ## Writes
 
