@@ -1,0 +1,13 @@
+{
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "kind": {"enum": ["command", "shared"]},
+      "command": {"type": ["string", "null"]},
+      "schema": {"type": "string"}
+    },
+    "required": ["kind", "command", "schema"],
+    "additionalProperties": false
+  }
+}

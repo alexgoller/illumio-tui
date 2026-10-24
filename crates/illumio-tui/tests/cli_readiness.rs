@@ -4,6 +4,8 @@
 //! `--app` narrowing, marks counting as accepted, and the cost guard. The
 //! helpers repeat those of cli.rs (test files share no code without a
 //! module).
+#[path = "common/schema_check.rs"]
+mod schema_check;
 use assert_cmd::Command;
 use serde_json::{Value, json};
 use std::path::Path;
@@ -39,7 +41,7 @@ fn home_with(marks: &str) -> tempfile::TempDir {
 }
 
 fn json_out(a: assert_cmd::assert::Assert) -> Value {
-    serde_json::from_slice(&a.get_output().stdout).expect("stdout is JSON")
+    schema_check::envelope(&a.get_output().stdout)
 }
 
 fn answer(body: &str) -> ResponseTemplate {

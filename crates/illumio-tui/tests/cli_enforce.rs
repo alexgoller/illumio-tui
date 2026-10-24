@@ -5,6 +5,8 @@
 //! workload skipped, the rest grouped). Records go to a temporary
 //! `XDG_STATE_HOME`. The helpers repeat those of cli_readiness.rs (test
 //! files share no code without a module).
+#[path = "common/schema_check.rs"]
+mod schema_check;
 use assert_cmd::Command;
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -107,7 +109,7 @@ impl Env {
 }
 
 fn json_out(a: &assert_cmd::assert::Assert) -> Value {
-    serde_json::from_slice(&a.get_output().stdout).expect("stdout is JSON")
+    schema_check::envelope(&a.get_output().stdout)
 }
 
 fn stderr(a: &assert_cmd::assert::Assert) -> String {

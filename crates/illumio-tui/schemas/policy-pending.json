@@ -1,0 +1,24 @@
+{
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "href": {"type": "string"},
+      "change_type": {"type": "string"},
+      "object_type": {"type": "string"},
+      "name": {"type": "string"},
+      "diff": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {"sign": {"type": "string"}, "text": {"type": "string"}},
+          "required": ["sign", "text"],
+          "additionalProperties": false
+        },
+        "description": "with --diff"
+      }
+    },
+    "required": ["href", "change_type", "object_type"],
+    "additionalProperties": false
+  }
+}

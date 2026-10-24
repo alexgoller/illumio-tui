@@ -1,0 +1,60 @@
+{
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "href": {"type": "string"},
+        "kind": {"enum": ["allow", "deny", "override_deny"]},
+        "enabled": {"type": "boolean"},
+        "description": {"type": ["string", "null"]},
+        "consumers": {"type": "array", "items": {"$ref": "#/$defs/resolved_actor"}},
+        "providers": {"type": "array", "items": {"$ref": "#/$defs/resolved_actor"}},
+        "services": {"type": "array", "items": {"$ref": "#/$defs/resolved_service"}},
+        "unscoped_consumers": {"type": "boolean"},
+        "update_type": {"type": ["string", "null"]},
+        "impact": {"$ref": "#/$defs/impact"}
+      },
+      "required": [
+        "href",
+        "kind",
+        "enabled",
+        "description",
+        "consumers",
+        "providers",
+        "services",
+        "unscoped_consumers",
+        "update_type"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "rule": {"type": "string"},
+        "side": {"type": "string"},
+        "count": {"type": "integer"},
+        "note": {"type": ["string", "null"]},
+        "truncated": {"type": "boolean"},
+        "workloads": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "href": {"type": "string"},
+              "hostname": {"type": ["string", "null"]},
+              "name": {"type": ["string", "null"]},
+              "labels": {"type": "array", "items": {"type": "string"}},
+              "enforcement": {"type": "string"},
+              "online": {"type": ["boolean", "null"]}
+            },
+            "required": ["href", "hostname", "name", "labels", "enforcement", "online"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["rule", "side", "count", "note", "truncated", "workloads"],
+      "additionalProperties": false,
+      "description": "with --list"
+    }
+  ]
+}

@@ -1,0 +1,109 @@
+{
+  "$comment": "what a write prints: the request (--dry-run), the object written, or why nothing was sent",
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "method": {"enum": ["POST", "PUT", "DELETE"]},
+        "path": {"type": "string"},
+        "summary": {"type": "string"},
+        "body": {"$comment": "the request body as sent: any JSON"},
+        "objects": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["method", "path", "summary"],
+      "additionalProperties": false,
+      "description": "--dry-run: the request"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "href": {"type": "string"},
+        "pending": {"type": "boolean"},
+        "status": {"type": "integer"},
+        "object": {"$comment": "the PCE's answer, passed through: an object, a string or null"},
+        "dropped_fields": {"type": "array", "items": {"type": "string"}},
+        "warnings": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["href", "pending", "status", "object", "dropped_fields", "warnings"],
+      "additionalProperties": false,
+      "description": "written"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "skipped": {"type": "boolean"},
+        "href": {"type": "string"},
+        "reason": {"type": "string"}
+      },
+      "required": ["skipped", "href", "reason"],
+      "additionalProperties": false,
+      "description": "--if-missing and it exists: nothing sent"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "method": {"enum": ["POST", "PUT", "DELETE"]},
+        "path": {"type": "string"},
+        "summary": {"type": "string"},
+        "counts": {
+          "type": "object",
+          "additionalProperties": {"type": "integer"},
+          "description": "changes per object type"
+        },
+        "body": {"$comment": "the request body as sent: any JSON"},
+        "objects": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["method", "path", "summary", "counts"],
+      "additionalProperties": false,
+      "description": "policy provision|revert --dry-run"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "href": {"type": "string"},
+        "pending": {"type": "boolean"},
+        "status": {"type": "integer"},
+        "object": {"$comment": "the PCE's answer, passed through: an object, a string or null"},
+        "dropped_fields": {"type": "array", "items": {"type": "string"}},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+        "counts": {
+          "type": "object",
+          "additionalProperties": {"type": "integer"},
+          "description": "changes per object type"
+        }
+      },
+      "required": ["href", "pending", "status", "object", "dropped_fields", "warnings", "counts"],
+      "additionalProperties": false,
+      "description": "policy provision|revert"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "method": {"enum": ["POST", "PUT", "DELETE"]},
+        "path": {"type": "string"},
+        "summary": {"type": "string"},
+        "impact": {"$ref": "#/$defs/impact"},
+        "body": {"$comment": "the request body as sent: any JSON"},
+        "objects": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["method", "path", "summary", "impact"],
+      "additionalProperties": false,
+      "description": "--impact --dry-run"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "href": {"type": "string"},
+        "pending": {"type": "boolean"},
+        "status": {"type": "integer"},
+        "object": {"$comment": "the PCE's answer, passed through: an object, a string or null"},
+        "dropped_fields": {"type": "array", "items": {"type": "string"}},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+        "impact": {"$ref": "#/$defs/impact"}
+      },
+      "required": ["href", "pending", "status", "object", "dropped_fields", "warnings", "impact"],
+      "additionalProperties": false,
+      "description": "--impact"
+    }
+  ]
+}

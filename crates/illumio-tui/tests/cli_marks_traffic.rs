@@ -3,6 +3,8 @@
 //! file a warning; `gen` only counts them. The 4-flow fixture through a
 //! mock PCE, marks in a temp `XDG_CONFIG_HOME`. The helpers repeat those of
 //! cli.rs (test files share no code without a module).
+#[path = "common/schema_check.rs"]
+mod schema_check;
 use assert_cmd::Command;
 use serde_json::{Value, json};
 use std::path::Path;
@@ -63,7 +65,7 @@ fn home_with(marks: &str) -> tempfile::TempDir {
 }
 
 fn json_out(a: assert_cmd::assert::Assert) -> Value {
-    serde_json::from_slice(&a.get_output().stdout).expect("stdout is JSON")
+    schema_check::envelope(&a.get_output().stdout)
 }
 
 /// The object lists, the traffic query (any POST), the draft rulesets.

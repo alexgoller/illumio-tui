@@ -1,0 +1,19 @@
+{
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "screen": {
+        "type": "string",
+        "description": "traffic, policy, events or workloads; - for an entry that is no screen's"
+      },
+      "name": {"type": "string"},
+      "default": {"type": "boolean"},
+      "summary": {"type": "string"},
+      "filter": {"$ref": "#/$defs/saved_filter_value"},
+      "error": {"type": "string"}
+    },
+    "required": ["screen", "name", "default", "summary", "filter"],
+    "additionalProperties": false
+  }
+}

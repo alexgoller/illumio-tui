@@ -1,0 +1,6 @@
+{
+  "type": "object",
+  "properties": {"default_profile": {"type": "string"}, "config_path": {"type": "string"}},
+  "required": ["default_profile", "config_path"],
+  "additionalProperties": false
+}

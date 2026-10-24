@@ -1,0 +1,18 @@
+{
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "href": {"type": "string"},
+      "name": {"type": "string"},
+      "ip_ranges": {"type": "array", "items": {"$ref": "#/$defs/ip_range"}},
+      "fqdns": {"type": "array", "items": {"$ref": "#/$defs/fqdn"}},
+      "size": {"$ref": "#/$defs/ip_list_size"},
+      "description": {"type": "string"},
+      "update_type": {"type": "string"},
+      "external_data_set": {"type": "string"}
+    },
+    "required": ["href", "name", "ip_ranges", "fqdns", "size"],
+    "additionalProperties": false
+  }
+}

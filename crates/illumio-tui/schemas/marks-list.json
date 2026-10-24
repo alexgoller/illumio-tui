@@ -1,0 +1,40 @@
+{
+  "type": "array",
+  "items": {
+    "$comment": "other keys of the mark in marks.toml are passed through",
+    "type": "object",
+    "properties": {
+      "id": {"type": "string"},
+      "action": {"$ref": "#/$defs/mark_action"},
+      "src": {"type": "string"},
+      "dst": {"type": "string"},
+      "service": {"type": "array", "items": {"type": "string"}},
+      "decision": {"type": "array", "items": {"type": "string"}},
+      "draft_decision": {"type": "array", "items": {"type": "string"}},
+      "pce": {"type": ["string", "null"]},
+      "org": {"type": ["integer", "null"]},
+      "expires": {"type": ["string", "null"]},
+      "active": {"type": "boolean"},
+      "comment": {"type": "string"},
+      "created": {"type": ["string", "null"]},
+      "created_on": {"type": ["string", "null"]}
+    },
+    "required": [
+      "id",
+      "action",
+      "src",
+      "dst",
+      "service",
+      "decision",
+      "draft_decision",
+      "pce",
+      "org",
+      "expires",
+      "active",
+      "comment",
+      "created",
+      "created_on"
+    ],
+    "additionalProperties": true
+  }
+}

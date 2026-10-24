@@ -1,0 +1,6 @@
+{
+  "type": "object",
+  "properties": {"removed": {"type": "array", "items": {"type": "string"}}},
+  "required": ["removed"],
+  "additionalProperties": false
+}

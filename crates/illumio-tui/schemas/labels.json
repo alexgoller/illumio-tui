@@ -1,0 +1,23 @@
+{
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "href": {"type": "string"},
+      "key": {"type": "string"},
+      "value": {"type": "string"},
+      "deleted": {"type": "boolean"},
+      "created_at": {"type": "string"},
+      "updated_at": {"type": "string"},
+      "usage": {
+        "$comment": "the PCE's usage flags (GET /labels?usage=true), passed through",
+        "type": "object",
+        "additionalProperties": true
+      },
+      "workloads": {"type": "integer", "description": "--unused: workloads holding the label"},
+      "rules": {"type": "integer", "description": "--unused: rules and scopes using the label"}
+    },
+    "required": ["href", "key", "value"],
+    "additionalProperties": false
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "description": "printed to stderr (not stdout) when a command fails; the process exits with exit_code",
+  "type": "object",
+  "properties": {
+    "error": {
+      "type": "object",
+      "properties": {
+        "kind": {"type": "string"},
+        "message": {"type": "string"},
+        "exit_code": {
+          "type": "integer",
+          "description": "1 generic, 2 arguments/config, 3 auth, 4 PCE error, 5 rate limited, 6 write refused, 7 blocked since an enforcement"
+        }
+      },
+      "required": ["kind", "message", "exit_code"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["error"],
+  "additionalProperties": false
+}

@@ -1,0 +1,196 @@
+{
+  "type": "object",
+  "properties": {
+    "app": {"type": "string"},
+    "keys": {"type": "array", "items": {"type": "string"}},
+    "window": {"type": "string"},
+    "granularity": {"type": "string"},
+    "outbound": {"type": "boolean"},
+    "target": {
+      "type": "object",
+      "properties": {
+        "name": {"type": "string"},
+        "href": {"type": ["string", "null"]},
+        "action": {"type": "string"}
+      },
+      "required": ["name", "href", "action"],
+      "additionalProperties": false
+    },
+    "rows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "side": {"enum": ["inbound", "outbound"]},
+          "peer": {"type": "string"},
+          "kind": {"type": "string"},
+          "checked": {"type": "boolean"},
+          "checkable": {"type": "boolean"},
+          "granularity": {"type": "string"},
+          "flows": {"type": "integer"},
+          "services": {"type": "array", "items": {"type": "string"}},
+          "decisions": {
+            "type": "object",
+            "properties": {
+              "allowed": {"type": "integer"},
+              "blocked": {"type": "integer"},
+              "draft_allowed": {"type": "integer"}
+            },
+            "required": ["allowed", "blocked"],
+            "additionalProperties": false
+          },
+          "warnings": {"type": "array", "items": {"type": "string"}},
+          "ip_list": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}, "href": {"type": "string"}},
+            "required": ["name", "href"],
+            "additionalProperties": false
+          },
+          "ips": {"type": "array", "items": {"type": "string"}},
+          "consolidated": {"type": "array", "items": {"type": "string"}}
+        },
+        "required": [
+          "side",
+          "peer",
+          "kind",
+          "checked",
+          "checkable",
+          "granularity",
+          "flows",
+          "services",
+          "decisions",
+          "warnings"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "ip_lists": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "ranges": {"type": "array", "items": {"type": "string"}}
+        },
+        "required": ["name", "ranges"],
+        "additionalProperties": false
+      }
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "ruleset": {"type": "string"},
+          "action": {"type": "string"},
+          "providers": {"type": "array", "items": {"type": "string"}},
+          "consumers": {"type": "array", "items": {"type": "string"}},
+          "unscoped_consumers": {"type": "boolean"},
+          "services": {"type": "array", "items": {"type": "string"}},
+          "rows": {"type": "array", "items": {"type": "integer"}},
+          "existing_rule": {"type": ["string", "null"]},
+          "description": {"type": "string"},
+          "body": {"$comment": "the rule body the PCE would be sent"},
+          "override_deny": {"type": "array", "items": {"type": "string"}}
+        },
+        "required": [
+          "ruleset",
+          "action",
+          "providers",
+          "consumers",
+          "unscoped_consumers",
+          "services",
+          "rows",
+          "existing_rule",
+          "description",
+          "body"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "consolidations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "service": {"type": "string"},
+          "peers": {"type": "integer"},
+          "peer_names": {"type": "array", "items": {"type": "string"}},
+          "reason": {"type": "string"},
+          "mode": {"type": "string"},
+          "rule": {"type": ["integer", "null"]},
+          "to": {"type": ["string", "null"]},
+          "also_allows": {"type": "array", "items": {"type": "string"}},
+          "warnings": {"type": "array", "items": {"type": "string"}}
+        },
+        "required": [
+          "service",
+          "peers",
+          "peer_names",
+          "reason",
+          "mode",
+          "rule",
+          "to",
+          "also_allows"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "preview": {
+      "type": "object",
+      "properties": {
+        "rules": {"type": "integer"},
+        "create": {"type": "integer"},
+        "add_services": {"type": "integer"},
+        "exists": {"type": "integer"},
+        "covered_flows": {"type": "integer"},
+        "uncovered_flows": {"type": "integer"},
+        "uncovered_by": {
+          "type": "object",
+          "properties": {
+            "unchecked": {"type": "integer"},
+            "folded_ips": {"type": "integer"},
+            "unsupported_proto": {"type": "integer"},
+            "broadcast_multicast": {"type": "integer"},
+            "no_target": {"type": "integer"},
+            "override_deny": {"type": "integer"}
+          },
+          "required": [
+            "unchecked",
+            "folded_ips",
+            "unsupported_proto",
+            "broadcast_multicast",
+            "no_target",
+            "override_deny"
+          ],
+          "additionalProperties": false
+        },
+        "blocker": {"type": "string"}
+      },
+      "required": [
+        "rules",
+        "create",
+        "add_services",
+        "exists",
+        "covered_flows",
+        "uncovered_flows",
+        "uncovered_by"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "app",
+    "keys",
+    "window",
+    "granularity",
+    "outbound",
+    "target",
+    "rows",
+    "ip_lists",
+    "rules",
+    "consolidations",
+    "preview"
+  ],
+  "additionalProperties": false
+}

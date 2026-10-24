@@ -1,0 +1,70 @@
+{
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "user": {"type": ["string", "null"]},
+      "process": {"type": ["string", "null"]},
+      "src": {"type": "array", "items": {"type": "string"}},
+      "dst": {"type": "array", "items": {"type": "string"}},
+      "port": {"type": ["integer", "null"]},
+      "proto": {"type": "string"},
+      "dst_process": {"type": ["string", "null"]},
+      "flows": {"type": "integer"},
+      "connections": {"type": "integer"},
+      "bytes": {"type": "integer"},
+      "allowed": {"type": "integer"},
+      "potentially_blocked": {"type": "integer"},
+      "blocked": {"type": "integer"},
+      "draft_allowed": {
+        "type": "integer",
+        "description": "with --draft: flow records the draft would allow"
+      },
+      "draft_blocked": {
+        "type": "integer",
+        "description": "with --draft: flow records the draft would block"
+      },
+      "mark": {
+        "type": "object",
+        "properties": {
+          "action": {"$ref": "#/$defs/mark_action"},
+          "id": {"type": ["string", "null"]},
+          "flows": {"type": "integer"}
+        },
+        "required": ["action", "id", "flows"],
+        "additionalProperties": false,
+        "description": "the strongest mark on the row's flows (marks active)"
+      },
+      "marks": {
+        "type": "object",
+        "properties": {
+          "critical": {"type": "integer"},
+          "important": {"type": "integer"},
+          "revisit": {"type": "integer"},
+          "accept-blocked": {"type": "integer"},
+          "reviewed": {"type": "integer"},
+          "squelch": {"type": "integer"}
+        },
+        "additionalProperties": false,
+        "description": "flow records per mark action, non-zero only"
+      },
+      "squelched": {"type": "integer", "description": "squelched flow records the row hides"}
+    },
+    "required": [
+      "user",
+      "process",
+      "src",
+      "dst",
+      "port",
+      "proto",
+      "dst_process",
+      "flows",
+      "connections",
+      "bytes",
+      "allowed",
+      "potentially_blocked",
+      "blocked"
+    ],
+    "additionalProperties": false
+  }
+}

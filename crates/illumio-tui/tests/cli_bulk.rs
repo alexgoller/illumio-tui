@@ -1,6 +1,8 @@
 //! `workloads enforce` and `workloads relabel` against a mock PCE: the
 //! guard and flags before any request, the typed count, dry runs, chunks,
 //! the re-read, the audit and exit codes.
+#[path = "common/schema_check.rs"]
+mod schema_check;
 use assert_cmd::Command;
 use serde_json::{Value, json};
 use wiremock::matchers::{method, path};
@@ -43,7 +45,7 @@ fn writer(server: &MockServer, state: &std::path::Path) -> Command {
 }
 
 fn stdout_json(a: &assert_cmd::assert::Assert) -> Value {
-    serde_json::from_slice(&a.get_output().stdout).expect("stdout is JSON")
+    schema_check::envelope(&a.get_output().stdout)
 }
 
 fn audit_lines(state: &std::path::Path) -> Vec<Value> {

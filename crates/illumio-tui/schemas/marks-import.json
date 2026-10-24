@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "added": {"type": "integer"},
+    "replaced": {"type": "integer"},
+    "skipped": {"type": "array", "items": {"type": "string"}}
+  },
+  "required": ["added", "replaced", "skipped"],
+  "additionalProperties": false
+}

@@ -1,0 +1,33 @@
+{
+  "type": "object",
+  "properties": {
+    "path": {"type": "string"},
+    "cleared": {"type": "boolean", "description": "--clear: whether there was a file to delete"},
+    "written_at": {"type": "string"},
+    "age_seconds": {"type": "integer"},
+    "counts": {
+      "type": "object",
+      "properties": {
+        "labels": {"type": "integer"},
+        "label_keys": {"type": "integer"},
+        "apps": {"type": "integer"},
+        "hostnames": {"type": "integer"},
+        "services": {"type": "integer"},
+        "ip_lists": {"type": "integer"},
+        "label_groups": {"type": "integer"}
+      },
+      "required": [
+        "labels",
+        "label_keys",
+        "apps",
+        "hostnames",
+        "services",
+        "ip_lists",
+        "label_groups"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}

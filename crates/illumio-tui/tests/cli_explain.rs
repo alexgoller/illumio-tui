@@ -3,6 +3,8 @@
 //! rulesets, the cost in `--help` and `meta.cost`. The 4-flow fixture
 //! through a mock PCE; the helpers repeat those of cli.rs (test files share
 //! no code without a module).
+#[path = "common/schema_check.rs"]
+mod schema_check;
 use assert_cmd::Command;
 use serde_json::{Value, json};
 use wiremock::matchers::{method, path};
@@ -27,7 +29,7 @@ fn cmd(server: &MockServer, home: &std::path::Path) -> Command {
 }
 
 fn json_out(a: assert_cmd::assert::Assert) -> Value {
-    serde_json::from_slice(&a.get_output().stdout).expect("stdout is JSON")
+    schema_check::envelope(&a.get_output().stdout)
 }
 
 /// A status that changes on every poll (`updated_at`), as the PCE's does

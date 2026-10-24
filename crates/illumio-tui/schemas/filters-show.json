@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "screen": {"$ref": "#/$defs/screen"},
+    "name": {"type": "string"},
+    "summary": {"type": "string"},
+    "filter": {"$ref": "#/$defs/saved_filter_value"}
+  },
+  "required": ["screen", "name", "summary", "filter"],
+  "additionalProperties": false
+}

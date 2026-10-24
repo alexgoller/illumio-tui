@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "properties": {
+    "ok": {"type": "boolean"},
+    "host": {"type": "string"},
+    "org_id": {"type": "integer"},
+    "status": {"$comment": "the PCE's /health answer, passed through"},
+    "writes": {"type": "boolean"}
+  },
+  "required": ["ok", "host", "org_id", "status", "writes"],
+  "additionalProperties": false
+}

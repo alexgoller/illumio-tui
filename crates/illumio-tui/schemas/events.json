@@ -1,0 +1,53 @@
+{
+  "type": "array",
+  "items": {
+    "$comment": "an audit event of the PCE: other fields of the PCE's event are passed through",
+    "type": "object",
+    "properties": {
+      "href": {"type": "string"},
+      "notifications": {"type": "array", "items": {"$comment": "passed through"}},
+      "resource_changes": {"type": "array", "items": {"$comment": "passed through"}},
+      "timestamp": {"type": "string"},
+      "event_type": {"type": "string"},
+      "severity": {"type": "string"},
+      "status": {"type": "string"},
+      "created_by": {"$comment": "passed through"},
+      "action": {"$comment": "passed through"},
+      "pce_fqdn": {"type": "string"},
+      "changes": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "change_type": {"type": "string"},
+            "resource_type": {"type": "string"},
+            "resource": {"type": "string"},
+            "fields": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "field": {"type": "string"},
+                  "before": {"type": "string"},
+                  "after": {"type": "string"},
+                  "added": {"type": "array", "items": {"type": "string"}},
+                  "removed": {"type": "array", "items": {"type": "string"}},
+                  "value": {"type": "string"}
+                },
+                "required": ["field"],
+                "additionalProperties": false
+              }
+            },
+            "href": {"type": "string"},
+            "raw": {"type": "string"}
+          },
+          "required": ["change_type", "resource_type", "resource", "fields"],
+          "additionalProperties": false
+        },
+        "description": "with --diff: each resource change, read"
+      }
+    },
+    "required": ["href", "notifications", "resource_changes"],
+    "additionalProperties": true
+  }
+}

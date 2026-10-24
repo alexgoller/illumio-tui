@@ -1,3 +1,5 @@
+#[path = "common/schema_check.rs"]
+mod schema_check;
 use assert_cmd::Command;
 use predicates::prelude::*;
 use serde_json::{Value, json};
@@ -31,7 +33,7 @@ pub fn cmd(server: &MockServer) -> Command {
 }
 
 pub fn stdout_json(assert: assert_cmd::assert::Assert) -> Value {
-    serde_json::from_slice(&assert.get_output().stdout).expect("stdout is JSON")
+    schema_check::envelope(&assert.get_output().stdout)
 }
 
 /// No output may carry the API secret the command was given.
@@ -95,6 +97,7 @@ fn every_flag_has_help_text() {
         vec!["workloads", "add", "--help"],
         vec!["workloads", "update", "--help"],
         vec!["workloads", "delete", "--help"],
+        vec!["schema", "--help"],
         vec!["marks", "--help"],
         vec!["marks", "list", "--help"],
         vec!["marks", "add", "--help"],

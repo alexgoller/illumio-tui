@@ -1,0 +1,958 @@
+{
+  "$comment": "Shapes several schemas share; `illumio-tui schema NAME` inlines those it uses under $defs.",
+  "$defs": {
+    "ref": {
+      "type": "object",
+      "properties": {"href": {"type": "string"}},
+      "required": ["href"],
+      "additionalProperties": false
+    },
+    "label": {
+      "type": "object",
+      "properties": {
+        "href": {"type": "string"},
+        "key": {"type": "string"},
+        "value": {"type": "string"},
+        "deleted": {"type": "boolean"},
+        "created_at": {"type": "string"},
+        "updated_at": {"type": "string"},
+        "usage": {
+          "$comment": "the PCE's usage flags (GET /labels?usage=true), passed through",
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "required": ["href", "key", "value"],
+      "additionalProperties": false
+    },
+    "label_group": {
+      "type": "object",
+      "properties": {
+        "href": {"type": "string"},
+        "name": {"type": "string"},
+        "key": {"type": "string"},
+        "labels": {"type": "array", "items": {"$ref": "#/$defs/ref"}},
+        "sub_groups": {"type": "array", "items": {"$ref": "#/$defs/ref"}},
+        "update_type": {"type": "string"}
+      },
+      "required": ["href", "name", "key", "labels", "sub_groups"],
+      "additionalProperties": false
+    },
+    "ip_range": {
+      "$comment": "other fields of the PCE's range are passed through",
+      "type": "object",
+      "properties": {
+        "from_ip": {"type": "string"},
+        "to_ip": {"type": "string"},
+        "exclusion": {"type": "boolean"},
+        "description": {"type": "string"}
+      },
+      "required": ["from_ip"],
+      "additionalProperties": true
+    },
+    "fqdn": {
+      "$comment": "other fields of the PCE's entry are passed through",
+      "type": "object",
+      "properties": {"fqdn": {"type": "string"}, "description": {"type": "string"}},
+      "required": ["fqdn"],
+      "additionalProperties": true
+    },
+    "ip_list_size": {
+      "type": "object",
+      "properties": {
+        "v4": {"type": "string", "description": "addresses, as a decimal string"},
+        "v6": {"type": "string", "description": "addresses, as a decimal string"},
+        "unbounded": {"type": ["string", "null"]},
+        "ranges": {"type": "integer"},
+        "fqdns": {"type": "integer"}
+      },
+      "required": ["v4", "v6", "unbounded", "ranges", "fqdns"],
+      "additionalProperties": false
+    },
+    "service_port": {
+      "type": "object",
+      "properties": {
+        "port": {"type": "integer"},
+        "to_port": {"type": "integer"},
+        "proto": {"type": "integer"},
+        "icmp_type": {"type": "integer"},
+        "icmp_code": {"type": "integer"}
+      },
+      "additionalProperties": false
+    },
+    "service": {
+      "type": "object",
+      "properties": {
+        "href": {"type": "string"},
+        "name": {"type": "string"},
+        "service_ports": {"type": "array", "items": {"$ref": "#/$defs/service_port"}},
+        "description": {"type": "string"},
+        "update_type": {"type": "string"},
+        "external_data_set": {"type": "string"},
+        "external_data_reference": {"type": "string"}
+      },
+      "required": ["href", "name", "service_ports"],
+      "additionalProperties": false
+    },
+    "workload_label": {
+      "type": "object",
+      "properties": {
+        "href": {"type": "string"},
+        "key": {"type": "string"},
+        "value": {"type": "string"}
+      },
+      "required": ["href"],
+      "additionalProperties": false
+    },
+    "interface": {
+      "$comment": "other fields of the PCE's interface are passed through",
+      "type": "object",
+      "properties": {
+        "name": {"type": "string"},
+        "address": {"type": "string"},
+        "cidr_block": {"type": "integer"},
+        "link_state": {"type": "string"}
+      },
+      "required": ["name", "address"],
+      "additionalProperties": true
+    },
+    "ven_health": {"enum": ["healthy", "warning", "error", "offline", "unmanaged"]},
+    "workload_row": {
+      "type": "object",
+      "properties": {
+        "href": {"type": "string"},
+        "name": {"type": ["string", "null"]},
+        "hostname": {"type": ["string", "null"]},
+        "interfaces": {"type": "array", "items": {"$ref": "#/$defs/interface"}},
+        "labels": {"type": "array", "items": {"$ref": "#/$defs/workload_label"}},
+        "enforcement_mode": {"type": ["string", "null"]},
+        "visibility_level": {"type": ["string", "null"]},
+        "online": {"type": ["boolean", "null"]},
+        "managed": {"type": ["boolean", "null"]},
+        "enforcement": {
+          "type": ["string", "null"],
+          "description": "the effective mode: the PCE's, or unmanaged"
+        },
+        "health": {"$ref": "#/$defs/ven_health"},
+        "sync_state": {"type": ["string", "null"]},
+        "heartbeat_age_secs": {"type": ["integer", "null"]},
+        "description": {"type": "string"},
+        "os_id": {"type": "string"},
+        "agent": {"$comment": "the PCE's agent object, passed through"},
+        "ven": {"$ref": "#/$defs/ref"},
+        "deleted": {"type": "boolean"},
+        "missing_labels": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "with --unlabeled: the scope keys the workload has no label of"
+        }
+      },
+      "required": [
+        "href",
+        "name",
+        "hostname",
+        "interfaces",
+        "labels",
+        "enforcement_mode",
+        "visibility_level",
+        "online",
+        "managed",
+        "enforcement",
+        "health",
+        "sync_state",
+        "heartbeat_age_secs"
+      ],
+      "additionalProperties": false
+    },
+    "policy_decision": {"enum": ["allowed", "potentially_blocked", "blocked", "unknown"]},
+    "draft_decision": {
+      "type": "string",
+      "description": "the draft's decision: allowed, potentially_blocked, blocked, or another value of the PCE"
+    },
+    "mark_action": {
+      "enum": ["critical", "important", "revisit", "accept-blocked", "reviewed", "squelch"]
+    },
+    "resolved_actor": {
+      "type": "object",
+      "properties": {
+        "kind": {"type": "string"},
+        "href": {"type": ["string", "null"]},
+        "name": {"type": "string"},
+        "exclusion": {"type": "boolean"}
+      },
+      "required": ["kind", "href", "name", "exclusion"],
+      "additionalProperties": false
+    },
+    "resolved_service": {
+      "type": "object",
+      "properties": {"href": {"type": ["string", "null"]}, "name": {"type": "string"}},
+      "required": ["href", "name"],
+      "additionalProperties": false
+    },
+    "ruleset_view": {
+      "type": "object",
+      "properties": {
+        "href": {"type": "string"},
+        "name": {"type": "string"},
+        "description": {"type": ["string", "null"]},
+        "enabled": {"type": "boolean"},
+        "scopes": {"type": "array", "items": {"type": "string"}},
+        "rule_count": {"type": "integer"},
+        "deny_count": {"type": "integer"},
+        "update_type": {"type": ["string", "null"]}
+      },
+      "required": [
+        "href",
+        "name",
+        "description",
+        "enabled",
+        "scopes",
+        "rule_count",
+        "deny_count",
+        "update_type"
+      ],
+      "additionalProperties": false
+    },
+    "impact": {
+      "type": "object",
+      "properties": {
+        "providers": {"type": "integer"},
+        "consumers": {"type": "integer"},
+        "per_scope": {"type": "array", "items": {"$ref": "#/$defs/scope_impact"}},
+        "ip_lists": {"type": "array", "items": {"$ref": "#/$defs/impact_ip_list"}},
+        "unsupported": {"type": "array", "items": {"type": "string"}},
+        "truncated": {"type": "boolean"}
+      },
+      "required": ["providers", "consumers", "per_scope", "ip_lists", "unsupported", "truncated"],
+      "additionalProperties": false
+    },
+    "scope_impact": {
+      "type": "object",
+      "properties": {
+        "scope": {"type": "array", "items": {"type": "string"}},
+        "providers": {"type": "integer"},
+        "consumers": {"type": "integer"}
+      },
+      "required": ["scope", "providers", "consumers"],
+      "additionalProperties": false
+    },
+    "impact_ip_list": {
+      "type": "object",
+      "properties": {
+        "name": {"type": "string"},
+        "href": {"type": "string"},
+        "size": {"anyOf": [{"$ref": "#/$defs/ip_list_size"}, {"type": "null"}]},
+        "side": {"enum": ["provider", "consumer"]}
+      },
+      "required": ["name", "href", "size", "side"],
+      "additionalProperties": false
+    },
+    "pending_change": {
+      "type": "object",
+      "properties": {
+        "href": {"type": "string"},
+        "change_type": {"type": "string"},
+        "object_type": {"type": "string"},
+        "name": {"type": "string"}
+      },
+      "required": ["href", "change_type", "object_type"],
+      "additionalProperties": false
+    },
+    "write_request": {
+      "type": "object",
+      "properties": {
+        "method": {"enum": ["POST", "PUT", "DELETE"]},
+        "path": {"type": "string"},
+        "summary": {"type": "string"},
+        "body": {"$comment": "the request body as sent: any JSON"},
+        "objects": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["method", "path", "summary"],
+      "additionalProperties": false
+    },
+    "flow_group": {
+      "type": "object",
+      "properties": {
+        "src": {"type": "array", "items": {"type": "string"}},
+        "dst": {"type": "array", "items": {"type": "string"}},
+        "flows": {"type": "integer"},
+        "connections": {"type": "integer"},
+        "bytes": {"type": "integer"},
+        "allowed": {"type": "integer"},
+        "potentially_blocked": {"type": "integer"},
+        "blocked": {"type": "integer"},
+        "allowed_conns": {"type": "integer"},
+        "pot_blocked_conns": {"type": "integer"},
+        "blocked_conns": {"type": "integer"},
+        "unknown_conns": {"type": "integer"},
+        "service": {"type": "string"},
+        "draft_allowed": {
+          "type": "integer",
+          "description": "with --draft: flow records the draft would allow"
+        },
+        "draft_blocked": {
+          "type": "integer",
+          "description": "with --draft: flow records the draft would block"
+        },
+        "mark": {
+          "type": "object",
+          "properties": {
+            "action": {"$ref": "#/$defs/mark_action"},
+            "id": {"type": ["string", "null"]},
+            "flows": {"type": "integer"}
+          },
+          "required": ["action", "id", "flows"],
+          "additionalProperties": false,
+          "description": "the strongest mark on the row's flows (marks active)"
+        },
+        "marks": {
+          "type": "object",
+          "properties": {
+            "critical": {"type": "integer"},
+            "important": {"type": "integer"},
+            "revisit": {"type": "integer"},
+            "accept-blocked": {"type": "integer"},
+            "reviewed": {"type": "integer"},
+            "squelch": {"type": "integer"}
+          },
+          "additionalProperties": false,
+          "description": "flow records per mark action, non-zero only"
+        },
+        "squelched": {"type": "integer", "description": "squelched flow records the row hides"}
+      },
+      "required": [
+        "src",
+        "dst",
+        "flows",
+        "connections",
+        "bytes",
+        "allowed",
+        "potentially_blocked",
+        "blocked",
+        "allowed_conns",
+        "pot_blocked_conns",
+        "blocked_conns",
+        "unknown_conns"
+      ],
+      "additionalProperties": false
+    },
+    "resolved_label": {
+      "type": "object",
+      "properties": {
+        "href": {"type": "string"},
+        "key": {"type": "string"},
+        "value": {"type": "string"}
+      },
+      "required": ["href", "key", "value"],
+      "additionalProperties": false
+    },
+    "resolved_endpoint": {
+      "type": "object",
+      "properties": {
+        "ip": {"type": ["string", "null"]},
+        "fqdn": {"type": ["string", "null"]},
+        "hostname": {"type": ["string", "null"]},
+        "name": {"type": ["string", "null"]},
+        "workload_href": {"type": ["string", "null"]},
+        "labels": {"type": "array", "items": {"$ref": "#/$defs/resolved_label"}},
+        "ip_lists": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["ip", "fqdn", "hostname", "name", "workload_href", "labels", "ip_lists"],
+      "additionalProperties": false
+    },
+    "resolved_flow": {
+      "type": "object",
+      "properties": {
+        "src": {"$ref": "#/$defs/resolved_endpoint"},
+        "dst": {"$ref": "#/$defs/resolved_endpoint"},
+        "port": {"type": ["integer", "null"]},
+        "proto": {"type": "string"},
+        "process_name": {"type": ["string", "null"]},
+        "user_name": {"type": ["string", "null"]},
+        "num_connections": {"type": "integer"},
+        "policy_decision": {"$ref": "#/$defs/policy_decision"},
+        "draft_policy_decision": {"anyOf": [{"$ref": "#/$defs/draft_decision"}, {"type": "null"}]},
+        "flow_direction": {"type": ["string", "null"]},
+        "first_detected": {"type": ["string", "null"]},
+        "last_detected": {"type": ["string", "null"]},
+        "rules": {"type": "array", "items": {"type": "string"}},
+        "bytes_in": {"type": ["integer", "null"]},
+        "bytes_out": {"type": ["integer", "null"]},
+        "mark": {
+          "type": "object",
+          "properties": {"action": {"$ref": "#/$defs/mark_action"}, "id": {"type": "string"}},
+          "required": ["action", "id"],
+          "additionalProperties": false,
+          "description": "the flow's mark (marks active)"
+        }
+      },
+      "required": [
+        "src",
+        "dst",
+        "port",
+        "proto",
+        "process_name",
+        "user_name",
+        "num_connections",
+        "policy_decision",
+        "draft_policy_decision",
+        "flow_direction",
+        "first_detected",
+        "last_detected",
+        "rules",
+        "bytes_in",
+        "bytes_out"
+      ],
+      "additionalProperties": false
+    },
+    "peer_row": {
+      "type": "object",
+      "properties": {
+        "peer": {"type": "array", "items": {"type": "string"}},
+        "peer_names": {"type": "array", "items": {"type": "string"}},
+        "peer_hosts": {"type": "integer"},
+        "service": {"type": "string"},
+        "flows": {"type": "integer"},
+        "connections": {"type": "integer"},
+        "bytes": {"type": "integer"},
+        "allowed": {"type": "integer"},
+        "potentially_blocked": {"type": "integer"},
+        "blocked": {"type": "integer"},
+        "allowed_conns": {"type": "integer"},
+        "pot_blocked_conns": {"type": "integer"},
+        "blocked_conns": {"type": "integer"},
+        "unknown_conns": {"type": "integer"},
+        "app_names": {"type": "array", "items": {"type": "string"}},
+        "app_hosts": {"type": "integer"},
+        "last_detected": {"type": ["string", "null"]},
+        "draft_allowed": {
+          "type": "integer",
+          "description": "with --draft: flow records the draft would allow"
+        },
+        "draft_blocked": {
+          "type": "integer",
+          "description": "with --draft: flow records the draft would block"
+        },
+        "mark": {
+          "type": "object",
+          "properties": {
+            "action": {"$ref": "#/$defs/mark_action"},
+            "id": {"type": ["string", "null"]},
+            "flows": {"type": "integer"}
+          },
+          "required": ["action", "id", "flows"],
+          "additionalProperties": false,
+          "description": "the strongest mark on the row's flows (marks active)"
+        },
+        "marks": {
+          "type": "object",
+          "properties": {
+            "critical": {"type": "integer"},
+            "important": {"type": "integer"},
+            "revisit": {"type": "integer"},
+            "accept-blocked": {"type": "integer"},
+            "reviewed": {"type": "integer"},
+            "squelch": {"type": "integer"}
+          },
+          "additionalProperties": false,
+          "description": "flow records per mark action, non-zero only"
+        },
+        "squelched": {"type": "integer", "description": "squelched flow records the row hides"}
+      },
+      "required": [
+        "peer",
+        "peer_names",
+        "peer_hosts",
+        "service",
+        "flows",
+        "connections",
+        "bytes",
+        "allowed",
+        "potentially_blocked",
+        "blocked",
+        "allowed_conns",
+        "pot_blocked_conns",
+        "blocked_conns",
+        "unknown_conns",
+        "app_names",
+        "app_hosts",
+        "last_detected"
+      ],
+      "additionalProperties": false
+    },
+    "totals": {
+      "type": "object",
+      "properties": {
+        "groups": {"type": "integer"},
+        "flows": {"type": "integer"},
+        "connections": {"type": "integer"},
+        "bytes": {"type": "integer"},
+        "allowed": {"type": "integer"},
+        "potentially_blocked": {"type": "integer"},
+        "blocked": {"type": "integer"},
+        "draft_allowed": {
+          "type": "integer",
+          "description": "with --draft: flow records the draft would allow"
+        },
+        "draft_blocked": {
+          "type": "integer",
+          "description": "with --draft: flow records the draft would block"
+        }
+      },
+      "required": [
+        "groups",
+        "flows",
+        "connections",
+        "bytes",
+        "allowed",
+        "potentially_blocked",
+        "blocked"
+      ],
+      "additionalProperties": false
+    },
+    "app_section": {
+      "type": "object",
+      "properties": {
+        "app": {"type": "array", "items": {"type": "string"}},
+        "direction": {"enum": ["in", "out"]},
+        "rows": {"type": "array", "items": {"$ref": "#/$defs/peer_row"}},
+        "totals": {"$ref": "#/$defs/totals"}
+      },
+      "required": ["app", "direction", "rows", "totals"],
+      "additionalProperties": false
+    },
+    "sections": {
+      "type": "object",
+      "properties": {"sections": {"type": "array", "items": {"$ref": "#/$defs/app_section"}}},
+      "required": ["sections"],
+      "additionalProperties": false
+    },
+    "enforcement_counts": {
+      "type": "object",
+      "properties": {
+        "enforced": {"type": "integer"},
+        "selective": {"type": "integer"},
+        "visibility": {"type": "integer"},
+        "idle": {"type": "integer"},
+        "unmanaged": {"type": "integer"},
+        "other": {"type": "integer"}
+      },
+      "required": ["enforced", "selective", "visibility", "idle", "unmanaged", "other"],
+      "additionalProperties": false
+    },
+    "side_counts": {
+      "type": "object",
+      "properties": {
+        "flows": {"type": "integer"},
+        "connections": {"type": "integer"},
+        "allowed": {"type": "integer"},
+        "would_block": {"type": "integer"},
+        "accepted": {"type": "integer"},
+        "would_block_flows": {"type": "integer"},
+        "undecided": {"type": "integer"}
+      },
+      "required": [
+        "flows",
+        "connections",
+        "allowed",
+        "would_block",
+        "accepted",
+        "would_block_flows",
+        "undecided"
+      ],
+      "additionalProperties": false
+    },
+    "gap": {
+      "type": "object",
+      "properties": {
+        "direction": {"enum": ["in", "out"]},
+        "peer": {"type": "array", "items": {"type": "string"}},
+        "peer_text": {"type": "string"},
+        "service": {"type": "string"},
+        "flows": {"type": "integer"},
+        "connections": {"type": "integer"}
+      },
+      "required": ["direction", "peer", "peer_text", "service", "flows", "connections"],
+      "additionalProperties": false
+    },
+    "readiness_warning": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {"const": "little_evidence"},
+            "window": {"type": "string"},
+            "flows": {"type": "integer"}
+          },
+          "required": ["kind", "window", "flows"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {"kind": {"const": "truncated"}},
+          "required": ["kind"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {"kind": {"const": "incomplete"}},
+          "required": ["kind"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {"kind": {"const": "undecided"}, "flows": {"type": "integer"}},
+          "required": ["kind", "flows"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {"const": "missing_tier"},
+            "key": {"type": "string"},
+            "workloads": {"type": "integer"}
+          },
+          "required": ["kind", "key", "workloads"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {"kind": {"const": "offline_vens"}, "workloads": {"type": "integer"}},
+          "required": ["kind", "workloads"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {"kind": {"const": "unmanaged"}, "workloads": {"type": "integer"}},
+          "required": ["kind", "workloads"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {"kind": {"const": "no_managed_workloads"}},
+          "required": ["kind"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "app_readiness": {
+      "type": "object",
+      "properties": {
+        "app": {"type": "string"},
+        "verdict": {
+          "enum": ["not_evaluated", "needs_rules", "needs_provision", "ready", "enforced"]
+        },
+        "workloads": {
+          "type": "object",
+          "properties": {
+            "total": {"type": "integer"},
+            "managed": {"type": "integer"},
+            "unmanaged": {"type": "integer"},
+            "enforcement": {"$ref": "#/$defs/enforcement_counts"},
+            "offline": {"type": "integer"},
+            "missing_tier": {"type": "integer"},
+            "missing_tier_names": {"type": "array", "items": {"type": "string"}}
+          },
+          "required": [
+            "total",
+            "managed",
+            "unmanaged",
+            "enforcement",
+            "offline",
+            "missing_tier",
+            "missing_tier_names"
+          ],
+          "additionalProperties": false
+        },
+        "evidence": {
+          "type": "object",
+          "properties": {
+            "window": {"type": "string"},
+            "flows": {"type": "integer"},
+            "connections": {"type": "integer"},
+            "little": {"type": "boolean"},
+            "truncated": {"type": "boolean"},
+            "incomplete": {"type": "boolean"}
+          },
+          "required": ["window", "flows", "connections", "little", "truncated", "incomplete"],
+          "additionalProperties": false
+        },
+        "coverage": {
+          "type": "object",
+          "properties": {
+            "inbound": {"$ref": "#/$defs/side_counts"},
+            "outbound": {"$ref": "#/$defs/side_counts"},
+            "total": {"$ref": "#/$defs/side_counts"},
+            "ratio": {"type": ["number", "null"]}
+          },
+          "required": ["inbound", "outbound", "total", "ratio"],
+          "additionalProperties": false
+        },
+        "gap_count": {"type": "integer"},
+        "pending": {
+          "type": "object",
+          "properties": {
+            "count": {"type": "integer"},
+            "changes": {"type": "array", "items": {"$ref": "#/$defs/pending_change"}}
+          },
+          "required": ["count", "changes"],
+          "additionalProperties": false
+        },
+        "warnings": {"type": "array", "items": {"$ref": "#/$defs/readiness_warning"}},
+        "gaps": {"type": "array", "items": {"$ref": "#/$defs/gap"}}
+      },
+      "required": [
+        "app",
+        "verdict",
+        "workloads",
+        "evidence",
+        "coverage",
+        "gap_count",
+        "pending",
+        "warnings"
+      ],
+      "additionalProperties": false
+    },
+    "mode_state": {
+      "type": "object",
+      "properties": {
+        "mode": {"type": ["string", "null"]},
+        "visibility": {"type": ["string", "null"]}
+      },
+      "required": ["mode", "visibility"],
+      "additionalProperties": false
+    },
+    "bulk_dry_run": {
+      "type": "object",
+      "properties": {
+        "dry_run": {"type": "boolean"},
+        "change": {"type": "string"},
+        "summary": {"type": "string"},
+        "count": {"type": "integer"},
+        "needs_confirm_count": {"type": "boolean"},
+        "workloads": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "href": {"type": "string"},
+              "name": {"type": "string"},
+              "change": {"type": "string"},
+              "body": {"$comment": "the workload's part of the bulk_update body"}
+            },
+            "required": ["href", "name", "change", "body"],
+            "additionalProperties": false
+          }
+        },
+        "skipped": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "href": {"type": "string"},
+              "name": {"type": "string"},
+              "reason": {"type": "string"}
+            },
+            "required": ["href", "name", "reason"],
+            "additionalProperties": false
+          }
+        },
+        "reads": {"type": "integer"},
+        "reread": {"type": "string"},
+        "requests": {"type": "array", "items": {"$ref": "#/$defs/write_request"}}
+      },
+      "required": [
+        "dry_run",
+        "change",
+        "summary",
+        "count",
+        "needs_confirm_count",
+        "workloads",
+        "skipped",
+        "reads",
+        "reread",
+        "requests"
+      ],
+      "additionalProperties": false
+    },
+    "bulk_report": {
+      "type": "object",
+      "properties": {
+        "target": {"type": "string"},
+        "change": {"type": "string"},
+        "reads": {"type": "integer"},
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "method": {"enum": ["POST", "PUT", "DELETE"]},
+              "path": {"type": "string"},
+              "summary": {"type": "string"},
+              "status": {"enum": ["written", "partial", "failed", "unanswered", "not_sent"]},
+              "href": {"type": "string"},
+              "http_status": {"type": "integer"},
+              "error": {"type": "string"},
+              "audit_failed": {"type": "string"}
+            },
+            "required": ["method", "path", "summary", "status"],
+            "additionalProperties": false
+          }
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "href": {"type": "string"},
+              "name": {"type": "string"},
+              "change": {"type": "string"},
+              "status": {
+                "enum": [
+                  "updated",
+                  "failed",
+                  "unanswered",
+                  "not_sent",
+                  "changed",
+                  "missing",
+                  "skipped"
+                ]
+              },
+              "error": {"type": "string"}
+            },
+            "required": ["href", "name", "change", "status"],
+            "additionalProperties": false
+          }
+        },
+        "labels_changed": {"type": "boolean"},
+        "labels_created": {"type": "boolean"},
+        "refused": {"type": "string"},
+        "reread_skipped": {"type": "string"},
+        "failure": {
+          "enum": [
+            "invalid",
+            "refused",
+            "auth",
+            "rate_limited",
+            "pce",
+            "unanswered",
+            "partial",
+            "audit_failed"
+          ]
+        }
+      },
+      "required": [
+        "target",
+        "change",
+        "reads",
+        "steps",
+        "items",
+        "labels_changed",
+        "labels_created"
+      ],
+      "additionalProperties": false
+    },
+    "traffic_query": {
+      "type": "object",
+      "properties": {
+        "start_date": {"type": "string"},
+        "end_date": {"type": "string"},
+        "sources": {"$ref": "#/$defs/actor_filter"},
+        "destinations": {"$ref": "#/$defs/actor_filter"},
+        "services": {
+          "type": "object",
+          "properties": {
+            "include": {"type": "array", "items": {"$ref": "#/$defs/service_match"}},
+            "exclude": {"type": "array", "items": {"$ref": "#/$defs/service_match"}}
+          },
+          "required": ["include", "exclude"],
+          "additionalProperties": false
+        },
+        "policy_decisions": {"type": "array", "items": {"$ref": "#/$defs/policy_decision"}},
+        "exclude_workloads_from_ip_list_query": {"type": "boolean"},
+        "sources_destinations_query_op": {"type": "string"},
+        "max_results": {"type": "integer"},
+        "query_name": {"type": "string"}
+      },
+      "required": [
+        "start_date",
+        "end_date",
+        "sources",
+        "destinations",
+        "services",
+        "policy_decisions",
+        "exclude_workloads_from_ip_list_query",
+        "sources_destinations_query_op",
+        "max_results",
+        "query_name"
+      ],
+      "additionalProperties": false
+    },
+    "actor_filter": {
+      "type": "object",
+      "properties": {
+        "include": {
+          "type": "array",
+          "items": {"type": "array", "items": {"$ref": "#/$defs/actor_match"}}
+        },
+        "exclude": {"type": "array", "items": {"$ref": "#/$defs/actor_match"}}
+      },
+      "required": ["include", "exclude"],
+      "additionalProperties": false
+    },
+    "actor_match": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {"label": {"$ref": "#/$defs/ref"}},
+          "required": ["label"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {"ip_list": {"$ref": "#/$defs/ref"}},
+          "required": ["ip_list"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {"workload": {"$ref": "#/$defs/ref"}},
+          "required": ["workload"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {"ip_address": {"type": "string"}},
+          "required": ["ip_address"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {"fqdn": {"type": "string"}},
+          "required": ["fqdn"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {"transmission": {"enum": ["unicast", "broadcast", "multicast"]}},
+          "required": ["transmission"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "service_match": {
+      "type": "object",
+      "properties": {
+        "port": {"type": "integer"},
+        "to_port": {"type": "integer"},
+        "proto": {"type": "integer"},
+        "process_name": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "saved_filter_value": {
+      "$comment": "the filter as stored in the config file: an object of its fields (traffic, events, workloads) or the query text (policy); a stored value that does not read is passed through, null when there is none"
+    },
+    "screen": {"enum": ["traffic", "policy", "events", "workloads"]}
+  }
+}

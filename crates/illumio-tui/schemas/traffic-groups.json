@@ -1,0 +1,10 @@
+{
+  "anyOf": [
+    {
+      "type": "array",
+      "items": {"$ref": "#/$defs/flow_group"},
+      "description": "label pairs (--by pairs, the default)"
+    },
+    {"$ref": "#/$defs/sections", "description": "--by in|out|both: sections per app"}
+  ]
+}

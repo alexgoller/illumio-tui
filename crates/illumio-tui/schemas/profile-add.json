@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "properties": {
+    "name": {"type": "string"},
+    "host": {"type": "string"},
+    "port": {"type": ["integer", "null"]},
+    "org_id": {"type": "integer"},
+    "api_key": {"type": "string", "description": "never the key itself"},
+    "api_secret": {"type": "string", "description": "where the secret is kept, never the secret"},
+    "is_default": {"type": "boolean"},
+    "replaced": {"type": "boolean"},
+    "config_path": {"type": "string"}
+  },
+  "required": [
+    "name",
+    "host",
+    "port",
+    "org_id",
+    "api_key",
+    "api_secret",
+    "is_default",
+    "replaced",
+    "config_path"
+  ],
+  "additionalProperties": false
+}

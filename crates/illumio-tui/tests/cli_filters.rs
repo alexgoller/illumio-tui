@@ -3,6 +3,8 @@
 //! attempt would fail), `--filter` is the base the flags replace fields
 //! of, `filters list|show|rm|default` and `--default-filter`. Every run gets its own temporary config and
 //! cache directories and an explicit `--config`.
+#[path = "common/schema_check.rs"]
+mod schema_check;
 use assert_cmd::Command;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -87,7 +89,7 @@ impl Home {
 }
 
 fn json(assert: &assert_cmd::assert::Assert) -> Value {
-    serde_json::from_slice(&assert.get_output().stdout).expect("stdout is JSON")
+    schema_check::envelope(&assert.get_output().stdout)
 }
 
 fn stderr(assert: &assert_cmd::assert::Assert) -> String {

@@ -1,0 +1,39 @@
+{
+  "type": "object",
+  "properties": {
+    "app": {"type": "string"},
+    "record": {"type": "string"},
+    "dry_run": {"type": "boolean"},
+    "count": {"type": "integer"},
+    "needs_confirm_count": {"type": "boolean"},
+    "skipped": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "href": {"type": "string"},
+          "hostname": {"type": "string"},
+          "reason": {"type": "string"}
+        },
+        "required": ["href", "hostname", "reason"],
+        "additionalProperties": false
+      }
+    },
+    "groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "to": {"$ref": "#/$defs/mode_state"},
+          "plan": {"$ref": "#/$defs/bulk_dry_run"},
+          "bulk": {"$ref": "#/$defs/bulk_report"}
+        },
+        "required": ["to", "plan"],
+        "additionalProperties": false
+      }
+    },
+    "rollback_record": {"type": "string"}
+  },
+  "required": ["app", "record", "dry_run", "count", "needs_confirm_count", "skipped", "groups"],
+  "additionalProperties": false
+}

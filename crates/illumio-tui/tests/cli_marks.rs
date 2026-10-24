@@ -1,5 +1,7 @@
 //! `illumio-tui marks`: the local marks file through the CLI, in a temp
 //! `XDG_CONFIG_HOME`. No PCE: none of these commands sends a request.
+#[path = "common/schema_check.rs"]
+mod schema_check;
 use assert_cmd::Command;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -18,7 +20,7 @@ fn file(home: &Path) -> PathBuf {
 }
 
 fn json_out(a: assert_cmd::assert::Assert) -> Value {
-    serde_json::from_slice(&a.get_output().stdout).expect("stdout is JSON")
+    schema_check::envelope(&a.get_output().stdout)
 }
 
 fn stderr(a: &assert_cmd::assert::Assert) -> String {

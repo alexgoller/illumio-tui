@@ -1,12 +1,16 @@
 //! The JSON envelope every command prints, the table renderer shared with
 //! the TUI (same ratatui Table widget, drawn into an off-screen buffer), and
-//! the CSV writer `--csv` and the TUI's `:export` share.
+//! the CSV writer `--csv` and the TUI's `:export` share. `--fields` is
+//! applied here, to what a command built, so no command handles it.
+use super::error::CliError;
 use pce::WriteMethod;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Rect};
 use ratatui::widgets::{Row, Table, Widget};
 use serde::Serialize;
+use serde_json::{Map, Value};
 use std::io::Write;
+use std::sync::OnceLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputFormat {
@@ -147,7 +151,146 @@ pub struct MarksMeta {
 #[derive(Debug, Clone, Serialize)]
 pub struct Envelope<'a, T: Serialize> {
     pub data: &'a T,
+    pub meta: MetaOut<'a>,
+}
+
+/// `meta` as printed: the schema of the envelope first (`illumio-tui
+/// schema NAME` prints it), then the command's meta.
+#[derive(Debug, Clone, Serialize)]
+pub struct MetaOut<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema: Option<&'static str>,
+    #[serde(flatten)]
     pub meta: &'a Meta,
+}
+
+/// What the invocation asked of the output, set once by `cli::run` before
+/// the command runs: the schema its envelope follows and `--fields`.
+#[derive(Debug, Clone, Default)]
+pub struct Selection {
+    pub schema: Option<&'static str>,
+    /// Deduplicated, in the order given.
+    pub fields: Vec<String>,
+}
+
+static SELECTION: OnceLock<Selection> = OnceLock::new();
+
+/// Sets the process's [`Selection`]; only the first call counts.
+pub fn select(selection: Selection) {
+    let _ = SELECTION.set(selection);
+}
+
+fn selection() -> Option<&'static Selection> {
+    SELECTION.get()
+}
+
+/// `--fields` as given: comma lists split, blanks dropped, duplicates
+/// dropped, order kept.
+pub fn parse_fields(given: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for f in given.iter().flat_map(|g| g.split(',')).map(str::trim) {
+        if !f.is_empty() && !out.iter().any(|o| o == f) {
+            out.push(f.to_string());
+        }
+    }
+    out
+}
+
+/// A selection of dotted paths as a tree: a leaf keeps the whole value.
+#[derive(Debug, Default)]
+struct PathTree(Vec<(String, Option<PathTree>)>);
+
+impl PathTree {
+    fn new(fields: &[String]) -> Self {
+        let mut t = PathTree::default();
+        for f in fields {
+            t.insert(f.split('.'));
+        }
+        t
+    }
+
+    fn insert<'a>(&mut self, mut parts: impl Iterator<Item = &'a str>) {
+        let Some(head) = parts.next() else { return };
+        let rest: Vec<&str> = parts.collect();
+        match self.0.iter_mut().find(|(k, _)| k == head) {
+            // The whole value is kept already.
+            Some((_, None)) => {}
+            Some((_, sub @ Some(_))) if rest.is_empty() => *sub = None,
+            Some((_, Some(sub))) => sub.insert(rest.into_iter()),
+            None if rest.is_empty() => self.0.push((head.to_string(), None)),
+            None => {
+                let mut sub = PathTree::default();
+                sub.insert(rest.into_iter());
+                self.0.push((head.to_string(), Some(sub)));
+            }
+        }
+    }
+
+    /// An array: each element. An object: the named keys, in its order.
+    /// Anything else (a `null` where an object may be) as it is.
+    fn apply(&self, v: Value) -> Value {
+        match v {
+            Value::Array(items) => Value::Array(items.into_iter().map(|i| self.apply(i)).collect()),
+            Value::Object(obj) => {
+                let mut out = Map::new();
+                for (k, v) in obj {
+                    match self.0.iter().find(|(name, _)| *name == k) {
+                        Some((_, None)) => {
+                            out.insert(k, v);
+                        }
+                        Some((_, Some(sub))) => {
+                            out.insert(k, sub.apply(v));
+                        }
+                        None => {}
+                    }
+                }
+                Value::Object(out)
+            }
+            other => other,
+        }
+    }
+}
+
+/// `--fields` on JSON `data`: only the named fields, nesting kept, through
+/// arrays element by element. The names are checked against the schema
+/// before the command runs.
+pub fn pick_json(data: Value, fields: &[String]) -> Value {
+    PathTree::new(fields).apply(data)
+}
+
+/// `--fields` on CSV: the named columns, in the order named.
+pub fn pick_csv(
+    headers: &[&str],
+    rows: &[Vec<String>],
+    fields: &[String],
+) -> Result<(Vec<String>, Vec<Vec<String>>), CliError> {
+    if let Some(f) = fields.iter().find(|f| f.contains('.')) {
+        return Err(CliError::Args(format!(
+            "--fields {f}: a dotted path is for --json; the CSV columns are: {}",
+            headers.join(", ")
+        )));
+    }
+    let mut at = Vec::with_capacity(fields.len());
+    for f in fields {
+        match headers.iter().position(|h| h == f) {
+            Some(i) => at.push(i),
+            None => {
+                return Err(CliError::Args(format!(
+                    "--fields: no column {f:?}; the CSV columns are: {}",
+                    headers.join(", ")
+                )));
+            }
+        }
+    }
+    let rows = rows
+        .iter()
+        .map(|r| {
+            at.iter()
+                .map(|&i| r.get(i).cloned().unwrap_or_default())
+                .collect()
+        })
+        .collect();
+    Ok((fields.to_vec(), rows))
 }
 
 /// Anything the CLI can print as a table.
@@ -300,7 +443,18 @@ pub fn write_json<T: Serialize>(
     data: &T,
     meta: &Meta,
 ) -> std::io::Result<()> {
-    serde_json::to_writer_pretty(&mut *out, &Envelope { data, meta })?;
+    let sel = selection();
+    let meta = MetaOut {
+        schema: sel.and_then(|s| s.schema),
+        meta,
+    };
+    match sel.filter(|s| !s.fields.is_empty()) {
+        None => serde_json::to_writer_pretty(&mut *out, &Envelope { data, meta })?,
+        Some(s) => {
+            let data = pick_json(serde_json::to_value(data)?, &s.fields);
+            serde_json::to_writer_pretty(&mut *out, &Envelope { data: &data, meta })?
+        }
+    }
     writeln!(out)
 }
 
@@ -327,12 +481,22 @@ pub fn write_table<T: TableRows + ?Sized>(out: &mut impl Write, data: &T) -> std
     Ok(())
 }
 
-/// A table's full rows as CSV.
+/// A table's full rows as CSV, the columns `--fields` names.
 pub fn write_table_csv<T: TableRows + ?Sized>(
     out: &mut impl Write,
     data: &T,
-) -> std::io::Result<()> {
-    write_csv(out, &data.full_headers(), &data.full_rows())
+) -> Result<(), CliError> {
+    let headers = data.full_headers();
+    let rows = data.full_rows();
+    match selection().filter(|s| !s.fields.is_empty()) {
+        None => write_csv(out, &headers, &rows)?,
+        Some(s) => {
+            let (headers, rows) = pick_csv(&headers, &rows, &s.fields)?;
+            let headers: Vec<&str> = headers.iter().map(String::as_str).collect();
+            write_csv(out, &headers, &rows)?
+        }
+    }
+    Ok(())
 }
 
 /// One line for stderr in table and CSV mode so stdout stays clean.
@@ -473,6 +637,58 @@ mod tests {
         write_table_csv(&mut out, &T).unwrap();
         assert_eq!(String::from_utf8(out).unwrap(), "a\r\n1\r\n");
         assert_eq!(join_list(["a", "b"]), "a; b");
+    }
+
+    #[test]
+    fn fields_split_on_commas_drop_duplicates_and_keep_order() {
+        let given = vec!["b,a".to_string(), " a ".into(), "c,".into()];
+        assert_eq!(parse_fields(&given), vec!["b", "a", "c"]);
+    }
+
+    #[test]
+    fn pick_json_keeps_nesting_and_goes_through_arrays() {
+        let data = serde_json::json!([
+            {"a": 1, "b": {"c": 2, "d": 3}, "l": [{"k": 1, "v": 2}], "n": null},
+            {"a": 4, "b": null, "l": []}
+        ]);
+        let f = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            pick_json(data.clone(), &f(&["b.c", "l.k", "n.x"])),
+            serde_json::json!([
+                {"b": {"c": 2}, "l": [{"k": 1}], "n": null},
+                {"b": null, "l": []}
+            ])
+        );
+        // The whole value wins over a part of it, in either order.
+        assert_eq!(
+            pick_json(data.clone(), &f(&["b.c", "b"]))[0],
+            serde_json::json!({"b": {"c": 2, "d": 3}})
+        );
+        assert_eq!(
+            pick_json(serde_json::json!({"a": 1, "b": 2}), &f(&["b"])),
+            serde_json::json!({"b": 2})
+        );
+    }
+
+    #[test]
+    fn pick_csv_orders_columns_and_names_the_valid_ones() {
+        let rows = vec![vec!["1".to_string(), "2".into(), "3".into()]];
+        let (h, r) = pick_csv(&["a", "b", "c"], &rows, &["c".into(), "a".into()]).unwrap();
+        assert_eq!(
+            (h, r),
+            (
+                vec!["c".to_string(), "a".into()],
+                vec![vec!["3".to_string(), "1".into()]]
+            )
+        );
+        let e = pick_csv(&["a", "b"], &rows, &["x".into()])
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("no column \"x\"") && e.contains("a, b"), "{e}");
+        let e = pick_csv(&["a"], &rows, &["a.b".into()])
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("dotted path"), "{e}");
     }
 
     #[test]

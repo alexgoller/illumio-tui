@@ -1,0 +1,15 @@
+{
+  "description": "--save-filter: the filter saved; the command ran no query",
+  "type": "object",
+  "properties": {
+    "screen": {"$ref": "#/$defs/screen"},
+    "name": {"type": "string"},
+    "profile": {"type": "string"},
+    "config_path": {"type": "string"},
+    "replaced": {"type": "boolean"},
+    "summary": {"type": "string"},
+    "filter": {"$ref": "#/$defs/saved_filter_value"}
+  },
+  "required": ["screen", "name", "profile", "config_path", "replaced", "summary", "filter"],
+  "additionalProperties": false
+}

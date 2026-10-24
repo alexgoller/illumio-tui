@@ -1,0 +1,68 @@
+{
+  "type": "object",
+  "properties": {
+    "workloads": {"type": "integer"},
+    "vens": {"type": "integer"},
+    "truncated": {"type": "boolean"},
+    "health": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {"health": {"$ref": "#/$defs/ven_health"}, "count": {"type": "integer"}},
+        "required": ["health", "count"],
+        "additionalProperties": false
+      }
+    },
+    "versions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "version": {"type": "string"},
+          "count": {"type": "integer"},
+          "newest": {"type": "boolean"}
+        },
+        "required": ["version", "count", "newest"],
+        "additionalProperties": false
+      }
+    },
+    "newest": {"type": ["string", "null"]},
+    "behind": {"type": "integer"},
+    "no_version": {"type": "integer"},
+    "enforcement": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {"enforcement": {"type": "string"}, "count": {"type": "integer"}},
+        "required": ["enforcement", "count"],
+        "additionalProperties": false
+      }
+    },
+    "messages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "severity": {"type": "string"},
+          "message": {"type": "string"},
+          "count": {"type": "integer"}
+        },
+        "required": ["severity", "message", "count"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "workloads",
+    "vens",
+    "truncated",
+    "health",
+    "versions",
+    "newest",
+    "behind",
+    "no_version",
+    "enforcement",
+    "messages"
+  ],
+  "additionalProperties": false
+}

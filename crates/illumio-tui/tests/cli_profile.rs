@@ -1,6 +1,8 @@
 //! `profile add`: a profile from flags, an env file or a stdin paste, written
 //! atomically, mode 0600, never printing the secret. Every run gets its own
 //! temporary config and cache directories and an explicit `--config`.
+#[path = "common/schema_check.rs"]
+mod schema_check;
 use assert_cmd::Command;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -43,7 +45,7 @@ impl Home {
 }
 
 fn json(assert: &assert_cmd::assert::Assert) -> Value {
-    serde_json::from_slice(&assert.get_output().stdout).expect("stdout is JSON")
+    schema_check::envelope(&assert.get_output().stdout)
 }
 
 fn assert_no_secret(assert: &assert_cmd::assert::Assert) {

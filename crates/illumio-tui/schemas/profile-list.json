@@ -1,0 +1,14 @@
+{
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "name": {"type": "string"},
+      "host": {"type": "string"},
+      "org_id": {"type": ["integer", "null"]},
+      "is_default": {"type": "boolean"}
+    },
+    "required": ["name", "host", "org_id", "is_default"],
+    "additionalProperties": false
+  }
+}

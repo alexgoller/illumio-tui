@@ -18,6 +18,7 @@ pub mod output;
 pub mod policy;
 pub mod profile;
 pub mod readiness;
+pub mod schema;
 pub mod traffic;
 pub mod traffic_explain;
 pub mod workloads;
@@ -75,6 +76,11 @@ pub struct GlobalArgs {
     /// the meta line goes to stderr
     #[arg(long, global = true, conflicts_with_all = ["json", "table"])]
     pub csv: bool,
+    /// Only these fields of --json `data` (dotted paths reach into nested objects and
+    /// through lists: a,b,c.d) or these --csv columns, in this order; names from
+    /// `illumio-tui schema COMMAND` (comma-separated or repeatable)
+    #[arg(long, global = true, value_name = "FIELDS", value_delimiter = ',')]
+    pub fields: Vec<String>,
     /// Ignore cached responses
     #[arg(long, global = true)]
     pub no_cache: bool,
@@ -173,6 +179,14 @@ pub enum Command {
     /// the profile's names cache, which list commands, the TUI and `completions refresh` fill.
     /// Nothing a completion does contacts the PCE.
     Completions(completions::CompletionsArgs),
+    /// The JSON Schema of a command's --json output, or the list of them (local, no request)
+    ///
+    /// `illumio-tui schema` lists every command and the schema its envelope follows (also
+    /// meta.schema of each envelope); `illumio-tui schema workloads ven-summary` prints that
+    /// envelope's schema (JSON Schema draft 2020-12): `data` of the command, `meta` shared.
+    /// A schema name works too (`schema write`, `schema envelope`, `schema meta`,
+    /// `schema error`). The field names --fields takes are the schema's `data` properties.
+    Schema(schema::SchemaArgs),
 }
 
 /// The command's name for `--csv`'s refusal when it prints no table (a
@@ -207,8 +221,40 @@ fn csv_refusal(command: &Command) -> Option<&'static str> {
         Command::Filters(filters::FiltersCmd::Default(_)) => Some("filters default"),
         c if filters::saves_filter(c) => Some("--save-filter"),
         Command::Enforce(a) if !a.watch => Some("enforce --to/--rollback"),
+        Command::Schema(a) if !a.command.is_empty() => Some("schema COMMAND"),
         _ => None,
     }
+}
+
+/// The envelope's schema and `--fields`, checked before any request: JSON
+/// names against the schema (so an empty result checks too), CSV names
+/// against the header row when it prints.
+fn select_output(global: &GlobalArgs, command: &Command) -> Result<(), CliError> {
+    let schema = schema::schema_of(command);
+    let fields = output::parse_fields(&global.fields);
+    if !fields.is_empty() {
+        let format = output::choose_format(global.json, global.table, global.csv);
+        match (format, schema) {
+            (output::OutputFormat::Table, _) => {
+                return Err(CliError::Args("--fields needs --json or --csv".into()));
+            }
+            (_, None) => {
+                return Err(CliError::Args(
+                    "--fields: this command prints no JSON envelope or CSV".into(),
+                ));
+            }
+            (output::OutputFormat::Csv, Some(_)) => {
+                if let Some(f) = fields.iter().find(|f| f.contains('.')) {
+                    return Err(CliError::Args(format!(
+                        "--fields {f}: a dotted path is for --json; --csv takes column names"
+                    )));
+                }
+            }
+            (output::OutputFormat::Json, Some(name)) => schema::check_fields(name, &fields)?,
+        }
+    }
+    output::select(output::Selection { schema, fields });
+    Ok(())
 }
 
 pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
@@ -219,6 +265,10 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
         return Err(CliError::Args(format!(
             "--csv: {name} prints no table; use --json or --table"
         )));
+    }
+    select_output(&global, &command)?;
+    if let Command::Schema(s) = &command {
+        return schema::run(&global, s);
     }
     if let Command::Profile(p) = &command {
         return profile::run(&global, p);
@@ -258,7 +308,7 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
         Command::Policy(p) => policy::run(&ctx, &p).await,
         Command::Traffic(t) => traffic::run(&ctx, &t).await,
         Command::Completions(_) => names_cache::refresh(&ctx).await,
-        Command::Profile(_) | Command::Marks(_) | Command::Filters(_) => {
+        Command::Profile(_) | Command::Marks(_) | Command::Filters(_) | Command::Schema(_) => {
             unreachable!("handled above")
         }
     }

@@ -1,0 +1,4 @@
+{
+  "$comment": "the plan (--dry-run, or nothing to change) or the report of what was sent",
+  "anyOf": [{"$ref": "#/$defs/bulk_dry_run"}, {"$ref": "#/$defs/bulk_report"}]
+}

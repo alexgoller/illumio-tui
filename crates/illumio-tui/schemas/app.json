@@ -1,0 +1,120 @@
+{
+  "description": "with --section: app, direction and that section only",
+  "type": "object",
+  "properties": {
+    "app": {"type": "string"},
+    "direction": {"enum": ["in", "out", "both"]},
+    "workloads": {
+      "type": "object",
+      "properties": {
+        "truncated": {"type": "boolean"},
+        "summary": {
+          "type": "object",
+          "properties": {
+            "workloads": {"type": "integer"},
+            "enforcement": {"$ref": "#/$defs/enforcement_counts"},
+            "ven_active": {"type": "integer"},
+            "ven_stale": {"type": "integer"},
+            "unmanaged": {"type": "integer"}
+          },
+          "required": ["workloads", "enforcement", "ven_active", "ven_stale", "unmanaged"],
+          "additionalProperties": false
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "href": {"type": "string"},
+              "name": {"type": "string"},
+              "role": {"type": ["string", "null"]},
+              "enforcement": {"type": "string"},
+              "enforcement_mode": {"type": ["string", "null"]},
+              "ven": {"$ref": "#/$defs/ven_health"}
+            },
+            "required": ["href", "name", "role", "enforcement", "enforcement_mode", "ven"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["truncated", "summary", "rows"],
+      "additionalProperties": false
+    },
+    "inbound": {"type": "array", "items": {"$ref": "#/$defs/app_peer"}},
+    "outbound": {"type": "array", "items": {"$ref": "#/$defs/app_peer"}},
+    "policy": {
+      "type": "object",
+      "properties": {
+        "scope": {"enum": ["draft", "active"]},
+        "truncated": {"type": "boolean"},
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "href": {"type": "string"},
+              "name": {"type": "string"},
+              "enabled": {"type": "boolean"},
+              "reason": {"enum": ["scope", "all_workloads", "rules"]},
+              "rules": {"type": "integer"}
+            },
+            "required": ["href", "name", "enabled", "reason", "rules"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["scope", "truncated", "rows"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["app", "direction"],
+  "additionalProperties": false,
+  "$defs": {
+    "app_peer": {
+      "type": "object",
+      "properties": {
+        "peer": {"type": "array", "items": {"type": "string"}},
+        "service": {"type": "string"},
+        "decision": {"$ref": "#/$defs/policy_decision"},
+        "flows": {"type": "integer"},
+        "connections": {"type": "integer"},
+        "bytes": {"type": "integer"},
+        "draft_allowed": {
+          "type": "integer",
+          "description": "with --draft: flow records the draft would allow"
+        },
+        "draft_blocked": {
+          "type": "integer",
+          "description": "with --draft: flow records the draft would block"
+        },
+        "mark": {
+          "type": "object",
+          "properties": {
+            "action": {"$ref": "#/$defs/mark_action"},
+            "id": {"type": ["string", "null"]},
+            "flows": {"type": "integer"}
+          },
+          "required": ["action", "id", "flows"],
+          "additionalProperties": false,
+          "description": "the strongest mark on the row's flows (marks active)"
+        },
+        "marks": {
+          "type": "object",
+          "properties": {
+            "critical": {"type": "integer"},
+            "important": {"type": "integer"},
+            "revisit": {"type": "integer"},
+            "accept-blocked": {"type": "integer"},
+            "reviewed": {"type": "integer"},
+            "squelch": {"type": "integer"}
+          },
+          "additionalProperties": false,
+          "description": "flow records per mark action, non-zero only"
+        },
+        "squelched": {"type": "integer", "description": "squelched flow records the row hides"}
+      },
+      "required": ["peer", "service", "decision", "flows", "connections", "bytes"],
+      "additionalProperties": false
+    }
+  }
+}

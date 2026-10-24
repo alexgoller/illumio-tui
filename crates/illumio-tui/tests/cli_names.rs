@@ -4,6 +4,8 @@
 //! never written with `completion_cache = false` or for a PCE a flag or
 //! the environment names. A temp `XDG_CACHE_HOME`; the PCE is the config
 //! file's profile `lab` (only the credentials come from the environment).
+#[path = "common/schema_check.rs"]
+mod schema_check;
 use assert_cmd::Command;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -183,7 +185,7 @@ async fn a_cache_that_cannot_be_written_fails_no_list_command() {
     // The cache directory is a file: every write fails.
     std::fs::write(home.path().join("cache"), "not a directory").unwrap();
     let out = cmd(&server, home.path()).arg("labels").assert().success();
-    let v: Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    let v: Value = schema_check::envelope(&out.get_output().stdout);
     assert_eq!(v["data"].as_array().unwrap().len(), 2);
 }
 
@@ -197,7 +199,7 @@ async fn refresh_reads_each_list_once_and_clear_sends_nothing() {
         .args(["completions", "refresh"])
         .assert()
         .success();
-    let v: Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    let v: Value = schema_check::envelope(&out.get_output().stdout);
     assert_eq!(
         v["data"]["counts"],
         json!({"labels": 2, "label_keys": 2, "apps": 1, "hostnames": 1,

@@ -1,0 +1,48 @@
+{
+  "anyOf": [
+    {"type": "array", "items": {"$ref": "#/$defs/workload_row"}},
+    {
+      "type": "object",
+      "properties": {
+        "group_by": {"type": "array", "items": {"type": "string"}},
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "object",
+                "additionalProperties": {"type": ["string", "null"]},
+                "description": "the group's label per key; null: none"
+              },
+              "filter": {"type": "string"},
+              "count": {"type": "integer"},
+              "health": {
+                "type": "object",
+                "properties": {
+                  "healthy": {"type": "integer"},
+                  "warning": {"type": "integer"},
+                  "error": {"type": "integer"},
+                  "offline": {"type": "integer"},
+                  "unmanaged": {"type": "integer"}
+                },
+                "additionalProperties": false
+              },
+              "enforcement": {
+                "type": "object",
+                "additionalProperties": {"type": "integer"},
+                "description": "workloads per enforcement mode"
+              },
+              "workloads": {"type": "array", "items": {"$ref": "#/$defs/workload_row"}}
+            },
+            "required": ["key", "filter", "count", "health", "enforcement", "workloads"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["group_by", "groups"],
+      "additionalProperties": false,
+      "description": "with --group"
+    }
+  ]
+}

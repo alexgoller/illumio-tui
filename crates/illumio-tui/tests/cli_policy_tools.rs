@@ -1,6 +1,8 @@
 //! The Policy tools on the CLI: `policy search` (#51), the impact's
 //! workload list `policy rules impact --list` (#53), and the help of
 //! `enable`/`disable` (#52). Reads only; never more than one read per list.
+#[path = "common/schema_check.rs"]
+mod schema_check;
 use assert_cmd::Command;
 use serde_json::{Value, json};
 use wiremock::matchers::{method, path};
@@ -33,7 +35,7 @@ fn cmd(server: &MockServer) -> Command {
 }
 
 fn stdout_json(assert: assert_cmd::assert::Assert) -> Value {
-    serde_json::from_slice(&assert.get_output().stdout).expect("stdout is JSON")
+    schema_check::envelope(&assert.get_output().stdout)
 }
 
 fn stdout(assert: &assert_cmd::assert::Assert) -> String {

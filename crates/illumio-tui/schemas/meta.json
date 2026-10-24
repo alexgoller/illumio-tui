@@ -1,0 +1,102 @@
+{
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "description": "the schema this envelope follows: `illumio-tui schema NAME`"
+    },
+    "profile": {"type": "string"},
+    "elapsed_ms": {"type": "integer"},
+    "api_calls": {"type": "integer"},
+    "bytes": {"type": "integer"},
+    "cache": {"enum": ["hit", "miss", "bypass", "none"]},
+    "truncated": {"type": "boolean"},
+    "window": {
+      "type": "object",
+      "properties": {"start": {"type": "string"}, "end": {"type": "string"}},
+      "required": ["start", "end"],
+      "additionalProperties": false
+    },
+    "covered": {
+      "type": ["string", "null"],
+      "description": "traffic: the window's length when the result is complete, null when truncated"
+    },
+    "cap": {"type": "integer", "description": "traffic: the cap the result was fetched at"},
+    "cap_steps": {
+      "type": "array",
+      "items": {"type": "integer"},
+      "description": "traffic with --backfill: every cap tried, in order"
+    },
+    "incomplete": {
+      "type": "boolean",
+      "description": "traffic: a supercluster region did not respond"
+    },
+    "queries": {
+      "type": "integer",
+      "description": "traffic with --app: the Explorer queries the result took"
+    },
+    "draft": {
+      "type": "object",
+      "properties": {
+        "evaluated": {"type": "boolean"},
+        "fixed": {"type": "integer"},
+        "newly_blocked": {"type": "integer"}
+      },
+      "required": ["evaluated", "fixed", "newly_blocked"],
+      "additionalProperties": false,
+      "description": "traffic with --draft: the re-evaluation and its counts"
+    },
+    "write": {
+      "type": "object",
+      "properties": {
+        "method": {"enum": ["POST", "PUT", "DELETE"]},
+        "path": {"type": "string"},
+        "status": {"type": "integer"},
+        "audit": {"type": "string", "description": "audit log location"}
+      },
+      "required": ["method", "path", "status", "audit"],
+      "additionalProperties": false,
+      "description": "what a write did"
+    },
+    "usage": {"type": "string", "description": "labels --unused: where label usage came from"},
+    "local_filter": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "filters applied locally after the request"
+    },
+    "hidden": {"type": "integer", "description": "events: loaded rows the local filters hid"},
+    "warnings": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "warnings about the arguments that did not stop the command (also on stderr)"
+    },
+    "marks": {
+      "type": "object",
+      "properties": {
+        "active": {"type": "integer"},
+        "file": {"type": "string"},
+        "waiting_draft": {"type": "integer"}
+      },
+      "required": ["active", "file"],
+      "additionalProperties": false,
+      "description": "the marks applied"
+    },
+    "squelched": {
+      "type": "object",
+      "properties": {"flows": {"type": "integer"}, "rows": {"type": "integer"}},
+      "required": ["flows"],
+      "additionalProperties": false,
+      "description": "rows and flow records squelch removed"
+    },
+    "cost": {"type": "string", "description": "traffic explain: the requests it makes, in words"},
+    "matched": {
+      "type": "object",
+      "properties": {"matched": {"type": "integer"}, "loaded": {"type": "integer"}},
+      "required": ["matched", "loaded"],
+      "additionalProperties": false,
+      "description": "policy search: the rules found of the rules loaded"
+    }
+  },
+  "required": ["schema", "profile", "elapsed_ms", "api_calls", "bytes", "cache", "truncated"],
+  "additionalProperties": false
+}

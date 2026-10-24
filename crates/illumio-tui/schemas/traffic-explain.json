@@ -1,0 +1,64 @@
+{
+  "type": "object",
+  "properties": {
+    "flows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "src": {"type": "string"},
+          "dst": {"type": "string"},
+          "service": {"type": "string"},
+          "connections": {"type": "integer"},
+          "reported": {"$ref": "#/$defs/policy_decision"},
+          "evaluated": {"type": "boolean"},
+          "rules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "href": {"type": "string"},
+                "kind": {"enum": ["allow", "deny", "override_deny", "essential", "unknown"]},
+                "resolved": {"type": "boolean"},
+                "scopes": {"type": "array", "items": {"type": "string"}},
+                "consumers": {"type": "array", "items": {"type": "string"}},
+                "providers": {"type": "array", "items": {"type": "string"}},
+                "services": {"type": "array", "items": {"type": "string"}},
+                "ruleset": {"type": "string"},
+                "ruleset_href": {"type": "string"},
+                "enabled": {"type": "boolean"},
+                "description": {"type": "string"}
+              },
+              "required": [
+                "href",
+                "kind",
+                "resolved",
+                "scopes",
+                "consumers",
+                "providers",
+                "services"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "verdict": {"type": "string"},
+          "process": {"type": "string"},
+          "draft": {"$ref": "#/$defs/draft_decision"}
+        },
+        "required": [
+          "src",
+          "dst",
+          "service",
+          "connections",
+          "reported",
+          "evaluated",
+          "rules",
+          "verdict"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["flows"],
+  "additionalProperties": false
+}

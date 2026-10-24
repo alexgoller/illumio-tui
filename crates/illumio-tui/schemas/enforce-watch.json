@@ -1,0 +1,14 @@
+{
+  "type": "object",
+  "properties": {
+    "app": {"type": "string"},
+    "since": {"type": "string"},
+    "flows": {"type": "integer"},
+    "connections": {"type": "integer"},
+    "accepted": {"type": "integer"},
+    "tuples": {"type": "array", "items": {"$ref": "#/$defs/gap"}},
+    "record": {"type": "string"}
+  },
+  "required": ["app", "since", "flows", "connections", "accepted", "tuples"],
+  "additionalProperties": false
+}

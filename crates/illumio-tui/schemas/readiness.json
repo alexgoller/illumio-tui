@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "window": {"type": "string"},
+    "draft": {"type": "boolean"},
+    "apps": {"type": "array", "items": {"$ref": "#/$defs/app_readiness"}}
+  },
+  "required": ["window", "draft", "apps"],
+  "additionalProperties": false
+}

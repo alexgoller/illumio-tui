@@ -1,0 +1,7 @@
+{
+  "anyOf": [
+    {"type": "array", "items": {"$ref": "#/$defs/resolved_flow"}, "description": "flow records"},
+    {"type": "array", "items": {"$ref": "#/$defs/flow_group"}, "description": "with --group"},
+    {"$ref": "#/$defs/sections", "description": "with --blocked"}
+  ]
+}

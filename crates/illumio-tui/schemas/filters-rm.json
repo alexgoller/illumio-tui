@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "screen": {"$ref": "#/$defs/screen"},
+    "name": {"type": "string"},
+    "default_cleared": {"type": "boolean"},
+    "config_path": {"type": "string"}
+  },
+  "required": ["screen", "name", "default_cleared", "config_path"],
+  "additionalProperties": false
+}

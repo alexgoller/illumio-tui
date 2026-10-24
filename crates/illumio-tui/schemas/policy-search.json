@@ -1,0 +1,37 @@
+{
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "ruleset": {"type": "string"},
+      "ruleset_href": {"type": "string"},
+      "ruleset_enabled": {"type": "boolean"},
+      "scopes": {"type": "array", "items": {"type": "string"}},
+      "href": {"type": "string"},
+      "kind": {"enum": ["allow", "deny", "override_deny"]},
+      "enabled": {"type": "boolean"},
+      "description": {"type": ["string", "null"]},
+      "consumers": {"type": "array", "items": {"$ref": "#/$defs/resolved_actor"}},
+      "providers": {"type": "array", "items": {"$ref": "#/$defs/resolved_actor"}},
+      "services": {"type": "array", "items": {"$ref": "#/$defs/resolved_service"}},
+      "unscoped_consumers": {"type": "boolean"},
+      "update_type": {"type": ["string", "null"]}
+    },
+    "required": [
+      "ruleset",
+      "ruleset_href",
+      "ruleset_enabled",
+      "scopes",
+      "href",
+      "kind",
+      "enabled",
+      "description",
+      "consumers",
+      "providers",
+      "services",
+      "unscoped_consumers",
+      "update_type"
+    ],
+    "additionalProperties": false
+  }
+}

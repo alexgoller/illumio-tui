@@ -1,0 +1,15 @@
+{
+  "type": "object",
+  "properties": {
+    "app": {"type": "string"},
+    "to": {"$ref": "#/$defs/mode_state"},
+    "dry_run": {"type": "boolean"},
+    "forced": {"type": "boolean"},
+    "readiness": {"$ref": "#/$defs/app_readiness"},
+    "plan": {"$ref": "#/$defs/bulk_dry_run"},
+    "bulk": {"$ref": "#/$defs/bulk_report"},
+    "record": {"type": "string", "description": "the change record written"}
+  },
+  "required": ["app", "to", "dry_run", "forced", "readiness"],
+  "additionalProperties": false
+}
