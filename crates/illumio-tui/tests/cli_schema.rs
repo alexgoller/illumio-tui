@@ -184,6 +184,31 @@ fn the_error_envelope_follows_its_schema() {
     assert!(schema_check::validate(&doc, &err).is_empty(), "{err}");
 }
 
+#[test]
+fn a_closed_stdout_ends_quietly_with_141() {
+    // The read end is closed before the run starts: its first write fails.
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader);
+    for args in [vec!["schema", "--json"], vec!["schema", "workloads"]] {
+        let dir = std::env::temp_dir().join(format!("illumio-tui-pipe-{}", std::process::id()));
+        let out = std::process::Command::new(assert_cmd::cargo::cargo_bin("illumio-tui"))
+            .env_clear()
+            .env("XDG_CONFIG_HOME", dir.join("config"))
+            .env("XDG_CACHE_HOME", dir.join("cache"))
+            .args(&args)
+            .stdout(writer.try_clone().unwrap())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(141), "{args:?}");
+        assert!(
+            out.stderr.is_empty(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
 // ---- --fields, JSON ----
 
 #[tokio::test(flavor = "multi_thread")]

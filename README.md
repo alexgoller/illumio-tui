@@ -937,7 +937,7 @@ with `--yes`; without it the run stops at 10000 and stderr names the next cap.
 Errors go to stderr as JSON. Exit codes: 1 generic, 2 arguments or
 config, 3 auth, 4 PCE error, 5 rate limited, 6 write refused (by the guard, or `enforce` on an
 app that is not ready), 7 flows blocked since an enforcement (`enforce --watch`,
-`blocked_since_enforcement`).
+`blocked_since_enforcement`), 141 stdout closed by its reader (`| head`; quiet, no error).
 
 `--csv` (beside `--table` and `--json`, exclusive with both) prints the same table as RFC 4180
 CSV for spreadsheets: a header row, `,` separators, quotes only around cells holding `,`, `"`
@@ -1401,8 +1401,10 @@ Comma-separated or repeated (`--fields a,b --fields c`); duplicates are dropped.
 
 A failed command prints `{"error": {"kind", "message", "exit_code"}}` to stderr (schema
 `error`) and exits with `exit_code` (argument errors clap catches, such as an unknown flag or a
-missing value, print clap's usage text instead, exit 2): 1 generic, 2 arguments or config, 3 auth, 4 PCE error, 5
-rate limited, 6 write refused, 7 flows blocked since an enforcement.
+missing value, print clap's usage text instead, exit 2): 1 generic, 2 arguments or config, 3
+auth, 4 PCE error, 5 rate limited, 6 write refused, 7 flows blocked since an enforcement. When
+the reader closes stdout early (`illumio-tui schema | head -3`) the command stops quietly, with
+no error, and exits 141 (128 + SIGPIPE, as a shell reports a process the signal ended).
 
 ## Writes
 

@@ -19,7 +19,10 @@ fn main() {
         Some(command) => rt.block_on(run(cli.global, command)),
     };
     if let Err(e) = result {
-        eprintln!("{}", e.to_json());
+        // `| head` closed stdout: nothing to report, the reader is done.
+        if !e.is_broken_pipe() {
+            eprintln!("{}", e.to_json());
+        }
         std::process::exit(e.exit_code());
     }
 }

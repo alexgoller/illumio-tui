@@ -1,6 +1,6 @@
 //! CLI errors and their exit codes: 1 generic, 2 arguments/config, 3 auth,
 //! 4 PCE error, 5 rate limited, 6 write refused, 7 blocked since an
-//! enforcement (`enforce --watch`).
+//! enforcement (`enforce --watch`); 141 stdout closed by its reader (quiet).
 use crate::config::ConfigError;
 use crate::marks::MarksError;
 use pce::PceError;
@@ -46,7 +46,18 @@ pub enum CliError {
     Marks(crate::marks::MarksError),
 }
 
+/// The exit status of a run whose stdout reader went away (`| head`):
+/// 128 + SIGPIPE, as a shell reports a process the signal ended.
+pub const BROKEN_PIPE_EXIT: i32 = 141;
+
 impl CliError {
+    /// Writing stdout failed because the reader closed it: the consumer
+    /// has what it wanted, so the run ends quietly with
+    /// [`BROKEN_PIPE_EXIT`], no error envelope.
+    pub fn is_broken_pipe(&self) -> bool {
+        matches!(self, CliError::Io(e) if e.kind() == std::io::ErrorKind::BrokenPipe)
+    }
+
     pub fn exit_code(&self) -> i32 {
         match self {
             CliError::Args(_) | CliError::Config(_) => 2,
@@ -58,6 +69,7 @@ impl CliError {
             CliError::Refused(_) => 6,
             CliError::Blocked(_) => 7,
             CliError::Write(e) => write_exit_code(e),
+            CliError::Io(_) if self.is_broken_pipe() => BROKEN_PIPE_EXIT,
             CliError::Io(_) | CliError::Other(_) => 1,
             CliError::Marks(e) => match e {
                 MarksError::Parse(_) | MarksError::Gone(_) => 2,
@@ -158,5 +170,15 @@ mod tests {
             (7, "blocked_since_enforcement")
         );
         assert!(wrapped.to_string().contains("audit"));
+    }
+
+    #[test]
+    fn a_closed_pipe_is_its_own_exit() {
+        let pipe = CliError::Io(std::io::Error::from(std::io::ErrorKind::BrokenPipe));
+        assert!(pipe.is_broken_pipe());
+        assert_eq!(pipe.exit_code(), BROKEN_PIPE_EXIT);
+        let other = CliError::Io(std::io::Error::from(std::io::ErrorKind::NotFound));
+        assert!(!other.is_broken_pipe());
+        assert_eq!(other.exit_code(), 1);
     }
 }
