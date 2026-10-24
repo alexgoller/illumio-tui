@@ -799,19 +799,27 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   Marks survive filters, search, sort and `x`. With writes on, `L` sets labels and `M` the
   enforcement of the marked workloads, else of the group under the cursor (on its header),
   else of the row: see [Bulk labels and enforcement](#bulk-labels-and-enforcement).
-- **Events**: severity-coloured audit events, `f` edit severity / type / window, `S` sort by
+- **Events**: severity-coloured audit events, `f` edit severity / type / actor / window, `S` sort by
   severity. The Type field takes comma-separated terms, any of which keeps an event
   (`sec_policy, rule_set`); `!term` hides (`!user.login, !agent.update`), applied after the
   others; a term with `*` must match the whole type (`sec_policy.*`, `*.delete`), as must one
   starting with `=` (`=user.login` is that type only, `!=user.login` hides only it and keeps
   `user.login_session_terminated`), else it is a substring; case-insensitive. `Ctrl-N`/`Ctrl-P`
   complete the event types of the loaded events, also after `,`, `!`, `=` or `!=`. A severity is sent to the PCE (it takes one); `warning+` is
-  that and worse (`err+`, `info+` …), filtered here, as is the type. `x` (or `!`) hides the
+  that and worse (`err+`, `info+` …), filtered here, as is the type. The Actor field takes the
+  same terms over the actor the Actor column shows (`user:alex@ryte.de`, `agent:web01`,
+  `system`, `service_account:ci`, `?`); a term matches the whole actor or the name after its
+  kind, so `=alex@ryte.de`, `user:*`, `!system` and `!agent:*` all work, and `Ctrl-N`/`Ctrl-P`
+  complete the actors of the loaded events. `x` (or `!`) hides the
   selected row's exact type (`!=type`; hiding the type you show only empties the view), `o`
-  shows only it (`=type`), `t` lists the loaded types by count (`Enter` only this one, `x` hide
-  it, `Esc` close; a type whose events the severity floor hides says `(severity)`). None of these sends a request: they filter the loaded
-  events, and only a new PCE severity or window in `f` (or `r`) loads again. The header says
-  what is hidden (`hiding 3 types · warning+ · 812 of 1,240`) and `capped at 500` when the PCE
+  shows only it (`=type`); `U` hides the row's actor (`!=actor`) and `u` shows only it
+  (`=actor`). `t` lists the loaded types by count (`Enter` or `o` only this one, `x` hide
+  it, `Tab` switches to the actors by count, where the same keys act on the actor, `Esc` close;
+  a type or actor whose events another filter hides says which: `(severity)`, `(actor)`,
+  `(type)`). None of these sends a request: they filter the loaded
+  events, and only a new PCE severity or window in `f` (or `r`) loads again. The PCE is never
+  asked to filter by actor. The header says
+  what is hidden (`hiding 3 types · actor !system · warning+ · 812 of 1,240`) and `capped at 500` when the PCE
   returned a full page, so more events may exist than were filtered. `Enter` the event as a
   change diff: a header (time,
   type, severity and status, actor, API request and source), then one block per resource
@@ -868,6 +876,8 @@ the API call and byte counters at all times.
     illumio-tui events --type sec_rule --diff
     illumio-tui events --exclude-type =user.login --exclude-type 'agent.*' --severity warning+
     illumio-tui events --type 'sec_policy, rule_set, !*.delete' --all-types --table
+    illumio-tui events --actor =alex@ryte.de --since 7d --table
+    illumio-tui events --exclude-actor system --exclude-actor 'agent:*' --csv
     illumio-tui traffic query --window 24h --src app=web --dst app=db --json
     illumio-tui traffic query --window 1h --group app,env
     illumio-tui traffic query --window 1h --blocked
@@ -1261,6 +1271,7 @@ pos-in = "dst:app=pos -src:app=pos"
 
 [profiles.demo.filters.events.noise-free]
 type = "!agent.*, !=user.login"
+actor = "!system"
 severity = "warning+"
 window = "7d"
 
@@ -1566,7 +1577,13 @@ globs and a leading `=` match the whole type, else a substring; case-insensitive
 is `--type '!X'`. The profile's `events.exclude_types` apply unless `--all-types`. `--severity
 warning+` (that and worse) sends no severity and filters here; a plain severity goes to the
 PCE as before. All of these filter the loaded page: the cap (`--max-results`, default 500)
-still applies, and `meta.truncated` says when the page was full. `meta.local_filter` names the
+still applies, and `meta.truncated` says when the page was full. `events --actor` takes the
+same terms over the actor column (`user:alex@ryte.de`, `agent:web01`, `system`), each matching
+the whole actor or the name after its kind (`--actor =alex@ryte.de`, `--actor 'user:*'`), and
+is repeatable; `--exclude-actor X` is `--actor '!X'` (a comma list hides each). The actor
+filter is local too: the PCE events API is not asked to filter by actor (its `created_by`
+query is not documented well enough to rely on). It works with `--json`, `--csv`, `--table`,
+`--filter` and `--save-filter` (a saved events filter's `actor`). `meta.local_filter` names the
 local filters and `meta.hidden` counts the rows they hid. They work with `--diff`.
 
 `events --diff` prints each event's resource changes under its row, as the Events detail
