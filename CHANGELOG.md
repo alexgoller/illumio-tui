@@ -2,6 +2,22 @@
 
 Every illumio-tui release, newest first. Downloads, packages and checksums for each one are on [GitHub Releases](https://github.com/alexgoller/illumio-tui/releases).
 
+## v0.5.4 — 2026-10-24
+
+### New
+
+- **VEN health on Workloads** (#72). See the state of your VEN fleet without leaving the screen, from data already loaded. No extra requests.
+  - A strip under the table: `VEN n · healthy · warning · error · offline · unmanaged`.
+  - `:ven` opens an overlay with health, VEN versions (newest first, with how many VENs are behind), enforcement modes and the most common health messages with their severity. Enter on a line filters the table to it.
+  - `v` cycles a health filter (healthy, warning, error). It shares one dimension with `o` (offline) and `h` (unhealthy): each replaces the others.
+  - CLI: `workloads --health healthy,warning,error` (case-insensitive, combines with `--offline` / `--unhealthy`), `--ven-version 24.2.*` (exact or glob), and `workloads ven-summary` (table, `--json`, `--csv`).
+  - Saved Workloads filters keep `health` and `ven_version`.
+- **The changelog on the docs site**: every release's notes at [alexgoller.github.io/illumio-tui/changelog.html](https://alexgoller.github.io/illumio-tui/changelog.html). Release notes now come from `CHANGELOG.md`.
+
+### Security
+
+- tokio 1.54.1 (RUSTSEC-2026-0386).
+
 ## v0.5.3 — 2026-10-23
 
 ### New

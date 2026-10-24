@@ -45,6 +45,7 @@
 <p><a href="./">&larr; Back to the site</a></p>
 <nav class="toc" aria-label="Releases">
 <ul>
+<li><a href="#v0.5.4">v0.5.4</a> <span>2026-10-24</span></li>
 <li><a href="#v0.5.3">v0.5.3</a> <span>2026-10-23</span></li>
 <li><a href="#v0.5.2">v0.5.2</a> <span>2026-10-21</span></li>
 <li><a href="#v0.5.1">v0.5.1</a> <span>2026-10-21</span></li>
@@ -74,6 +75,27 @@
 <li><a href="#v0.1.0">v0.1.0</a> <span>2026-10-12</span></li>
 </ul>
 </nav>
+</section>
+
+<section class="panel release" id="v0.5.4" aria-labelledby="v0.5.4-h">
+  <h2 id="v0.5.4-h"><a href="#v0.5.4">v0.5.4</a> <span class="date">2026-10-24</span></h2>
+<h3>New</h3>
+<ul>
+<li><strong>VEN health on Workloads</strong> (<a href="https://github.com/alexgoller/illumio-tui/issues/72">#72</a>). See the state of your VEN fleet without leaving the screen, from data already loaded. No extra requests.
+<ul>
+<li>A strip under the table: <code>VEN n · healthy · warning · error · offline · unmanaged</code>.</li>
+<li><code>:ven</code> opens an overlay with health, VEN versions (newest first, with how many VENs are behind), enforcement modes and the most common health messages with their severity. Enter on a line filters the table to it.</li>
+<li><code>v</code> cycles a health filter (healthy, warning, error). It shares one dimension with <code>o</code> (offline) and <code>h</code> (unhealthy): each replaces the others.</li>
+<li>CLI: <code>workloads --health healthy,warning,error</code> (case-insensitive, combines with <code>--offline</code> / <code>--unhealthy</code>), <code>--ven-version 24.2.*</code> (exact or glob), and <code>workloads ven-summary</code> (table, <code>--json</code>, <code>--csv</code>).</li>
+<li>Saved Workloads filters keep <code>health</code> and <code>ven_version</code>.</li>
+</ul>
+</li>
+<li><strong>The changelog on the docs site</strong>: every release's notes at <a href="https://alexgoller.github.io/illumio-tui/changelog.html">alexgoller.github.io/illumio-tui/changelog.html</a>. Release notes now come from <code>CHANGELOG.md</code>.</li>
+</ul>
+<h3>Security</h3>
+<ul>
+<li>tokio 1.54.1 (RUSTSEC-2026-0386).</li>
+</ul>
 </section>
 
 <section class="panel release" id="v0.5.3" aria-labelledby="v0.5.3-h">
