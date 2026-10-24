@@ -32,8 +32,8 @@ fn thousands(n: usize) -> String {
 
 /// `cached 5s · 4 rows · window 24h`, with the sort, search and
 /// auto-refresh parts. Rows hidden locally are never silent: `hiding 3
-/// types · warning+ · 812 of 1,240`; a full page from the PCE says
-/// `capped`.
+/// types · actor !system · warning+ · 812 of 1,240`; a full page from the
+/// PCE says `capped`.
 fn meta(model: &Model) -> String {
     let e = &model.events;
     let mut parts = Vec::new();
@@ -55,6 +55,9 @@ fn meta(model: &Model) -> String {
     if e.hidden_types > 0 {
         let s = if e.hidden_types == 1 { "" } else { "s" };
         parts.push(format!("hiding {} type{s}", e.hidden_types));
+    }
+    if !e.actor_filter().is_empty() {
+        parts.push(format!("actor {}", e.filter.actor.trim()));
     }
     if let Ok(sev) = pce::models::SeverityFilter::parse(&e.filter.severity)
         && sev.is_local()
@@ -89,7 +92,9 @@ pub fn render_screen(model: &Model, f: &mut Frame, body: Rect) {
     } else if e.raw.is_empty() {
         Some("no events in this window · f edits the filter")
     } else if e.table.rows().is_empty() {
-        Some("every loaded event is hidden by the filter · f edits it, t lists the types")
+        Some(
+            "every loaded event is hidden by the filter · f edits it, t lists the types and actors",
+        )
     } else {
         None
     };

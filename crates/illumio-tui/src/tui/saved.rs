@@ -200,6 +200,7 @@ pub fn events_saved(e: &EventsFilterEdit) -> EventsSaved {
     let text = |s: &str| Some(s.trim().to_string()).filter(|s| !s.is_empty());
     EventsSaved {
         event_type: text(&e.event_type),
+        actor: text(&e.actor),
         severity: text(&e.severity),
         window: text(&e.window),
     }
@@ -213,6 +214,7 @@ pub fn events_edit(s: &EventsSaved, types: &str) -> EventsFilterEdit {
     EventsFilterEdit {
         severity: s.severity.clone().unwrap_or_default().trim().to_string(),
         event_type: with_terms(s.event_type.as_deref().unwrap_or(""), types),
+        actor: s.actor.clone().unwrap_or_default().trim().to_string(),
         window: s
             .window
             .clone()
@@ -481,6 +483,7 @@ mod tests {
         let e = EventsFilterEdit {
             severity: "warning+".into(),
             event_type: "!agent.*".into(),
+            actor: "!system, =alex@ryte.de".into(),
             window: "7d".into(),
         };
         assert_eq!(events_edit(&events_saved(&e), "!agent.*"), e);
@@ -491,6 +494,7 @@ mod tests {
         );
         assert_eq!(events_edit(&events_saved(&e), "").event_type, "!agent.*");
         let d = events_edit(&EventsSaved::default(), "!agent.*");
+        assert_eq!(d.actor, "", "no actor saved: every actor");
         assert_eq!(
             (
                 d.severity.as_str(),

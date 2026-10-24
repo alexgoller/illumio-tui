@@ -69,8 +69,8 @@ pub fn view(model: &Model, f: &mut Frame) {
         Overlay::Pending => widgets::overlay::render_pending(model, f, area),
         Overlay::Error(text) => widgets::overlay::render_error(model, text, f, area),
         Overlay::EventsEditor(e) => widgets::overlay::render_events_editor(model, e, f, area),
-        Overlay::EventTypes { selected } => {
-            widgets::overlay::render_event_types(model, *selected, f, area)
+        Overlay::EventTypes { selected, actors } => {
+            widgets::overlay::render_event_types(model, *selected, *actors, f, area)
         }
         Overlay::Ven { selected } => widgets::overlay::render_ven(model, *selected, f, area),
         Overlay::EventDetail { event, scroll, raw } => {

@@ -96,7 +96,7 @@ pub fn complete(
         }
         FieldKind::RuleFilter => rule_filter_term(token, idx, workloads),
         // From the loaded events, not the index: see `event_types`.
-        FieldKind::EventTypes => Vec::new(),
+        FieldKind::EventTypes | FieldKind::EventActors => Vec::new(),
     };
     let mut seen = std::collections::HashSet::new();
     out.retain(|c| seen.insert(c.clone()));
@@ -109,24 +109,49 @@ pub fn complete(
 /// without `!` and `=`) left out. A typed `!`, `=` or `!=` prefix stays on
 /// each candidate. Pure.
 pub fn event_types(token: &str, earlier: &[String], events: &[Event]) -> Vec<String> {
-    let used: Vec<String> = earlier
+    let used = used_bodies(earlier, pce::models::TermText::parse);
+    let types = events
         .iter()
-        .filter_map(|t| pce::models::TermText::parse(t.trim()).ok())
+        .filter_map(|e| e.event_type.clone())
+        .filter(|ty| !ty.is_empty() && !used.contains(&ty.to_lowercase()));
+    event_terms(token, types)
+}
+
+/// The Events actor filter's candidates, as [`event_types`]: the actors
+/// of the loaded `events` (`user:alex@ryte.de`), an actor an earlier term
+/// names by its whole string or by the name after its kind left out.
+pub fn event_actors(token: &str, earlier: &[String], events: &[Event]) -> Vec<String> {
+    let used = used_bodies(earlier, pce::models::TermText::parse_actor);
+    let actors = events.iter().map(Event::actor).filter(|a| {
+        !pce::models::actor_names(a)
+            .iter()
+            .any(|n| used.contains(&n.to_lowercase()))
+    });
+    event_terms(token, actors)
+}
+
+/// The bodies of the `earlier` terms that parse, lowercase.
+fn used_bodies(
+    earlier: &[String],
+    parse: fn(&str) -> Result<pce::models::TermText, String>,
+) -> Vec<String> {
+    earlier
+        .iter()
+        .filter_map(|t| parse(t.trim()).ok())
         .map(|p| p.body.to_lowercase())
-        .collect();
-    let mut counts: Vec<(&str, usize)> = Vec::new();
-    for ty in events.iter().filter_map(|e| e.event_type.as_deref()) {
-        if ty.is_empty() || used.contains(&ty.to_lowercase()) {
-            continue;
-        }
-        match counts.iter_mut().find(|(t, _)| *t == ty) {
-            Some((_, n)) => *n += 1,
-            None => counts.push((ty, 1)),
-        }
+        .collect()
+}
+
+/// `values` ranked against `token`, most frequent first (then by name);
+/// a typed `!`, `=` or `!=` (blanks after each allowed) stays on every
+/// candidate, written tight.
+fn event_terms(token: &str, values: impl Iterator<Item = String>) -> Vec<String> {
+    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for v in values {
+        *seen.entry(v).or_default() += 1;
     }
-    counts.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
-    // A typed `!`, `=` or `!=` (blanks after each allowed) stays on
-    // every candidate, written tight.
+    let mut counts: Vec<(String, usize)> = seen.into_iter().collect();
+    counts.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     let (neg, rest) = match token.strip_prefix('!') {
         Some(r) => ("!", r.trim_start()),
         None => ("", token),
@@ -135,15 +160,10 @@ pub fn event_types(token: &str, earlier: &[String], events: &[Event]) -> Vec<Str
         Some(r) => ("=", r.trim_start()),
         None => ("", rest),
     };
-    let mut out: Vec<String> = ranked(
-        rest,
-        counts
-            .iter()
-            .map(|(ty, _)| (ty.to_string(), ty.to_string())),
-    )
-    .into_iter()
-    .map(|c| format!("{neg}{exact}{c}"))
-    .collect();
+    let mut out: Vec<String> = ranked(rest, counts.into_iter().map(|(v, _)| (v.clone(), v)))
+        .into_iter()
+        .map(|c| format!("{neg}{exact}{c}"))
+        .collect();
     out.truncate(MAX_CANDIDATES);
     out
 }

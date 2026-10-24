@@ -324,11 +324,14 @@ pub struct TrafficSaved {
     pub max_results: Option<u32>,
 }
 
-/// An events filter: type terms, severity and window as typed in `f`.
+/// An events filter: type and actor terms, severity and window as typed
+/// in `f`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct EventsSaved {
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub event_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actor: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub severity: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -499,9 +502,10 @@ impl Saved {
             }
             Screen::Events => {
                 let f = table()?;
-                f.only(&["type", "severity", "window"])?;
+                f.only(&["type", "actor", "severity", "window"])?;
                 Saved::Events(EventsSaved {
                     event_type: f.text("type")?,
+                    actor: f.text("actor")?,
                     severity: f.text("severity")?,
                     window: f.text("window")?,
                 })
@@ -586,6 +590,7 @@ impl Saved {
             }
             Saved::Events(e) => {
                 text("type", &e.event_type);
+                text("actor", &e.actor);
                 text("severity", &e.severity);
                 text("window", &e.window);
             }
@@ -977,6 +982,24 @@ org_id = 1
         let bad: toml::Value = toml::from_str("ven_version = 23").unwrap();
         let e = Saved::parse(Screen::Workloads, &bad).unwrap_err();
         assert!(e.starts_with("field ven_version:"), "{e}");
+    }
+
+    #[test]
+    fn an_events_actor_parses_round_trips_and_names_a_wrong_shape() {
+        let v: toml::Value =
+            toml::from_str("actor = \"user:*, !=alex@ryte.de\"\nseverity = \"warning+\"").unwrap();
+        let s = Saved::parse(Screen::Events, &v).unwrap();
+        let Saved::Events(e) = &s else { panic!() };
+        assert_eq!(e.actor.as_deref(), Some("user:*, !=alex@ryte.de"));
+        assert_eq!(e.event_type, None);
+        assert_eq!(
+            s.summary(),
+            "actor user:*, !=alex@ryte.de · severity warning+"
+        );
+        assert_eq!(Saved::parse(Screen::Events, &s.to_value()).unwrap(), s);
+        let bad: toml::Value = toml::from_str("actor = 3").unwrap();
+        let e = Saved::parse(Screen::Events, &bad).unwrap_err();
+        assert!(e.starts_with("field actor:"), "{e}");
     }
 
     #[test]

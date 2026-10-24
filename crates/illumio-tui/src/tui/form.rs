@@ -81,6 +81,9 @@ pub enum FieldKind {
     /// The Events type filter: event types from the loaded events, comma
     /// list, `!` excludes.
     EventTypes,
+    /// The Events actor filter: actors from the loaded events, as
+    /// `EventTypes`.
+    EventActors,
     /// An allow rule's Scope, `intra` or `extra`: not typed; `Space`
     /// switches it (`i`, `e` pick one) and rewrites the Consumers to match
     /// ([`crate::rule_scope::switch_consumers`]). Nothing to complete.
@@ -96,7 +99,8 @@ impl FieldKind {
             | Self::Services
             | Self::Decisions
             | Self::Transmission
-            | Self::EventTypes => &[','],
+            | Self::EventTypes
+            | Self::EventActors => &[','],
             Self::Scope | Self::TrafficActors | Self::TrafficSource | Self::TrafficService => {
                 &[',', '|']
             }
@@ -150,7 +154,8 @@ impl FieldKind {
             | Self::Services
             | Self::Decisions
             | Self::Transmission
-            | Self::EventTypes => tokens(head),
+            | Self::EventTypes
+            | Self::EventActors => tokens(head),
             Self::Scope | Self::TrafficActors | Self::TrafficSource => {
                 tokens(head.rsplit('|').next().unwrap_or(head))
             }

@@ -233,12 +233,14 @@ pub enum Overlay {
     Pending,
     /// A failure too long for the status line, or an authentication failure.
     Error(String),
-    /// Events filter: severity, type (local), window.
+    /// Events filter: severity, type and actor (local), window.
     EventsEditor(crate::tui::events_editor::EventsEditor),
-    /// `t` on Events: the loaded events' types with their counts, most
-    /// frequent first; `selected` is the cursor row.
+    /// `t` on Events: the loaded events' types (or with `actors`, after
+    /// `Tab`, their actors) with their counts, most frequent first;
+    /// `selected` is the cursor row.
     EventTypes {
         selected: usize,
+        actors: bool,
     },
     /// `:ven` on Workloads: the VEN fleet of the loaded workloads
     /// (`WorkloadsState::ven`); `selected` is the bucket under the cursor.
@@ -370,8 +372,17 @@ impl PartialEq for Overlay {
             // `RuleView` is not `PartialEq`; a rule is identified by its href.
             (Overlay::RuleDetail(a), Overlay::RuleDetail(b)) => a.href == b.href,
             (Overlay::EventsEditor(a), Overlay::EventsEditor(b)) => a == b,
-            (Overlay::EventTypes { selected: a }, Overlay::EventTypes { selected: b })
-            | (Overlay::Ven { selected: a }, Overlay::Ven { selected: b }) => a == b,
+            (
+                Overlay::EventTypes {
+                    selected: a,
+                    actors: x,
+                },
+                Overlay::EventTypes {
+                    selected: b,
+                    actors: y,
+                },
+            ) => a == b && x == y,
+            (Overlay::Ven { selected: a }, Overlay::Ven { selected: b }) => a == b,
             (
                 Overlay::EventDetail {
                     event: a,

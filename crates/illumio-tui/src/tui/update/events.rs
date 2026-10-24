@@ -1,8 +1,8 @@
 //! The Events screen's transitions: loading, the filter, its keys, the
-//! type summary and the detail's height. Filtering by type (and by a
-//! `X+` severity) is local: it never sends a request.
+//! type and actor summary and the detail's height. Filtering by type, by
+//! actor (and by a `X+` severity) is local: it never sends a request.
 use super::*;
-use crate::tui::events_editor::{EventsEditor, TYPE};
+use crate::tui::events_editor::{ACTOR, EventsEditor, SEVERITY, TYPE, WINDOW};
 use crate::tui::model::EventsState;
 
 /// A failed request: the status line says what failed (or that a failing
@@ -65,6 +65,7 @@ pub(super) fn events_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 model.overlay = Overlay::EventsEditor(EventsEditor::new([
                     f.severity.clone(),
                     f.event_type.clone(),
+                    f.actor.clone(),
                     f.window.clone(),
                 ]));
                 return Vec::new();
@@ -83,11 +84,24 @@ pub(super) fn events_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 }
                 return Vec::new();
             }
+            KeyCode::Char('u') | KeyCode::Char('U')
+                if !k.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                let only = k.code == KeyCode::Char('u');
+                match model.events.table.selected_item().map(|e| e.actor()) {
+                    Some(actor) => actor_action(model, &actor, only),
+                    None => model.status = StatusLine::info("no event to filter by"),
+                }
+                return Vec::new();
+            }
             KeyCode::Char('t') => {
                 if model.events.raw.is_empty() {
                     model.status = StatusLine::info("no events loaded");
                 } else {
-                    model.overlay = Overlay::EventTypes { selected: 0 };
+                    model.overlay = Overlay::EventTypes {
+                        selected: 0,
+                        actors: false,
+                    };
                 }
                 return Vec::new();
             }
@@ -137,6 +151,20 @@ fn type_action(model: &mut Model, ty: &str, only: bool) {
     model.status = StatusLine::info(format!("{what} {ty} · {}", shown_text(&model.events)));
 }
 
+/// `U` (hide) or `u` (only this) on the actor `actor`, and the same in
+/// the summary's Actors view: the Actor filter changes and the loaded
+/// events are filtered again; no request.
+fn actor_action(model: &mut Model, actor: &str, only: bool) {
+    let e = &mut model.events;
+    if only {
+        e.only_actor(actor);
+    } else {
+        e.hide_actor(actor);
+    }
+    let what = if only { "only" } else { "hiding" };
+    model.status = StatusLine::info(format!("{what} {actor} · {}", shown_text(&model.events)));
+}
+
 /// `812 of 1,240 events shown` (or `4 events`), with `capped` when the
 /// PCE returned a full page.
 pub(super) fn shown_text(e: &EventsState) -> String {
@@ -158,18 +186,24 @@ pub(super) fn events_loaded_text(e: &EventsState) -> String {
 }
 
 /// Keys of the events editor: Tab/↑/↓ move between fields, `Ctrl-N`/
-/// `Ctrl-P` complete the Type field from the loaded events, `Esc` closes
-/// (first puts a completed token back), `Enter` applies. A change of the
-/// type terms alone, or of a `X+` severity, filters the loaded events
-/// again; only a change of what the PCE is asked (one severity, the
-/// window) sends a request.
+/// `Ctrl-P` complete the Type and Actor fields from the loaded events,
+/// `Esc` closes (first puts a completed token back), `Enter` applies. A
+/// change of the type or actor terms alone, or of a `X+` severity,
+/// filters the loaded events again; only a change of what the PCE is
+/// asked (one severity, the window) sends a request.
 pub(super) fn events_editor_key(model: &mut Model, mut e: EventsEditor, k: KeyEvent) -> Vec<Cmd> {
     let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
     if ctrl && matches!(k.code, KeyCode::Char('n' | 'p')) {
-        if e.active == TYPE {
+        if e.active == TYPE || e.active == ACTOR {
             complete_field(model, &mut e, k.code == KeyCode::Char('n'));
             if !e.completing() {
-                model.status = StatusLine::info("no event type to complete from the loaded events");
+                let what = if e.active == TYPE {
+                    "event type"
+                } else {
+                    "actor"
+                };
+                model.status =
+                    StatusLine::info(format!("no {what} to complete from the loaded events"));
             }
         }
         model.overlay = Overlay::EventsEditor(e);
@@ -203,9 +237,10 @@ pub(super) fn events_editor_key(model: &mut Model, mut e: EventsEditor, k: KeyEv
 
 fn apply_events_filter(model: &mut Model, mut e: EventsEditor) -> Vec<Cmd> {
     let edit = EventsFilterEdit {
-        severity: e.values[0].trim().to_string(),
-        event_type: e.values[1].trim().to_string(),
-        window: e.values[2].trim().to_string(),
+        severity: e.values[SEVERITY].trim().to_string(),
+        event_type: e.values[TYPE].trim().to_string(),
+        actor: e.values[ACTOR].trim().to_string(),
+        window: e.values[WINDOW].trim().to_string(),
     };
     match apply_events_edit(model, edit) {
         Ok(cmds) => cmds,
@@ -218,7 +253,7 @@ fn apply_events_filter(model: &mut Model, mut e: EventsEditor) -> Vec<Cmd> {
 }
 
 /// The editor's `Enter` (and a saved events filter): `edit` checked, then
-/// in force. A change of the type terms alone, or of a `X+` severity,
+/// in force. A change of the type or actor terms alone, or of a `X+` severity,
 /// filters the loaded events again; only a change of what the PCE is asked
 /// (one severity, the window) sends a request. Closes the overlay.
 pub(super) fn apply_events_edit(
@@ -252,14 +287,24 @@ pub(super) fn apply_events_edit(
     Ok(request_events(model, filter, CacheMode::Use))
 }
 
-/// Keys of the type summary: `j`/`k` move, `Enter` shows only the type
-/// (and closes), `x`/`!` hides it (the list stays open for more), `Esc`
-/// or `q` closes. Never a request.
-pub(super) fn event_types_key(model: &mut Model, selected: usize, k: KeyEvent) -> Vec<Cmd> {
-    let types = model.events.type_counts();
-    let last = types.len().saturating_sub(1);
-    let ty = types.get(selected.min(last)).map(|(t, _)| t.clone());
-    let selected = match k.code {
+/// Keys of the summary (`actors`: its Actors view, else Types): `j`/`k`
+/// move, `Tab` switches the view, `Enter` or `o` shows only the type or
+/// actor (and closes), `x`/`!` hides it (the list stays open for more),
+/// `Esc` or `q` closes. Never a request.
+pub(super) fn event_types_key(
+    model: &mut Model,
+    selected: usize,
+    actors: bool,
+    k: KeyEvent,
+) -> Vec<Cmd> {
+    let values = if actors {
+        model.events.actor_counts()
+    } else {
+        model.events.type_counts()
+    };
+    let last = values.len().saturating_sub(1);
+    let value = values.get(selected.min(last)).map(|(v, _)| v.clone());
+    let (selected, actors) = match k.code {
         KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('t') => {
             model.overlay = Overlay::None;
             return Vec::new();
@@ -268,15 +313,17 @@ pub(super) fn event_types_key(model: &mut Model, selected: usize, k: KeyEvent) -
             open_help(model);
             return Vec::new();
         }
-        KeyCode::Down | KeyCode::Char('j') => (selected + 1).min(last),
-        KeyCode::Up | KeyCode::Char('k') => selected.saturating_sub(1),
-        KeyCode::PageDown => (selected + 10).min(last),
-        KeyCode::PageUp => selected.saturating_sub(10),
-        KeyCode::Home | KeyCode::Char('g') => 0,
-        KeyCode::End | KeyCode::Char('G') => last,
-        KeyCode::Enter | KeyCode::Char('x') | KeyCode::Char('!') => {
-            let only = k.code == KeyCode::Enter;
-            match ty.filter(|t| !t.is_empty()) {
+        KeyCode::Tab | KeyCode::BackTab => (0, !actors),
+        KeyCode::Down | KeyCode::Char('j') => ((selected + 1).min(last), actors),
+        KeyCode::Up | KeyCode::Char('k') => (selected.saturating_sub(1), actors),
+        KeyCode::PageDown => ((selected + 10).min(last), actors),
+        KeyCode::PageUp => (selected.saturating_sub(10), actors),
+        KeyCode::Home | KeyCode::Char('g') => (0, actors),
+        KeyCode::End | KeyCode::Char('G') => (last, actors),
+        KeyCode::Enter | KeyCode::Char('o') | KeyCode::Char('x') | KeyCode::Char('!') => {
+            let only = matches!(k.code, KeyCode::Enter | KeyCode::Char('o'));
+            match value.filter(|v| !v.is_empty()) {
+                Some(a) if actors => actor_action(model, &a, only),
                 Some(ty) => type_action(model, &ty, only),
                 None => model.status = StatusLine::info("events without a type cannot be named"),
             }
@@ -284,10 +331,10 @@ pub(super) fn event_types_key(model: &mut Model, selected: usize, k: KeyEvent) -
                 model.overlay = Overlay::None;
                 return Vec::new();
             }
-            selected
+            (selected, actors)
         }
-        _ => selected,
+        _ => (selected, actors),
     };
-    model.overlay = Overlay::EventTypes { selected };
+    model.overlay = Overlay::EventTypes { selected, actors };
     Vec::new()
 }

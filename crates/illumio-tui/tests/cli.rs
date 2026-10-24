@@ -2475,6 +2475,111 @@ async fn events_type_terms_excludes_profile_defaults_and_severity_floor() {
     }
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn events_actor_terms_filter_locally_in_every_format_and_from_a_saved_filter() {
+    use wiremock::matchers::query_param_is_missing;
+    let server = MockServer::start().await;
+    // The actor is never asked of the PCE.
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/events"))
+        .and(query_param_is_missing("created_by"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/events.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(6)
+        .mount(&server)
+        .await;
+    let types = |out: &Value| -> Vec<String> {
+        out["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["event_type"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let out = stdout_json(
+        cmd(&server)
+            .args(["events", "--actor", "user:*", "--exclude-actor", "=user-2"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(types(&out), ["user.login"]);
+    assert_eq!(out["meta"]["hidden"], 3);
+    assert_eq!(
+        out["meta"]["local_filter"],
+        json!(["actor user:*, !=user-2"])
+    );
+    // Repeatable, ORed; `!` tolerated in --exclude-actor; with --type.
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "events",
+                "--actor",
+                "system",
+                "--actor",
+                "agent:*",
+                "--exclude-actor",
+                "!host-1*",
+                "--type",
+                "system",
+            ])
+            .assert()
+            .success(),
+    );
+    assert_eq!(types(&out), ["system.license_expiring"]);
+    cmd(&server)
+        .args(["--csv", "events", "--exclude-actor", "system,agent:*"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("user:user-1"))
+        .stdout(predicate::str::contains("system.license_expiring").not())
+        .stdout(predicate::str::contains("host-1.example").not());
+    cmd(&server)
+        .args(["--table", "events", "--actor", "=host-1.example"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("agent:host-1.example"))
+        .stdout(predicate::str::contains("user:user-1").not())
+        .stderr(predicate::str::contains(
+            "filtered locally: actor =host-1.example · 3 hidden",
+        ));
+    // A saved filter's actor, and a flag replacing it.
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = dir.path().join("config.toml");
+    std::fs::write(
+        &cfg,
+        "[profiles.default]\nhost = \"ignored.example\"\norg_id = 5\n\n[profiles.default.filters.events.people]\nactor = \"user:*\"\n",
+    )
+    .unwrap();
+    let config = cfg.to_str().unwrap();
+    let out = stdout_json(
+        cmd(&server)
+            .args(["--config", config, "events", "--filter", "people"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(types(&out), ["user.login", "sec_policy.create"]);
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "--config", config, "events", "--filter", "people", "--actor", "system",
+            ])
+            .assert()
+            .success(),
+    );
+    assert_eq!(types(&out), ["system.license_expiring"], "the flag wins");
+    // Refused before any request.
+    for bad in [["--actor", "!"], ["--exclude-actor", "a!b"]] {
+        cmd(&server)
+            .args(["events", bad[0], bad[1]])
+            .assert()
+            .code(2)
+            .stderr(predicate::str::contains("--actor"));
+    }
+}
+
 /// The fixture workloads behind `--impact`, read `n` times (once per command
 /// that needs them); `total` makes the PCE report more than it returned.
 async fn mount_workloads(server: &MockServer, n: u64, total: Option<u64>) {

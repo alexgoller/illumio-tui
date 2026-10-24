@@ -505,6 +505,46 @@ fn json_save_carries_screen_name_and_path_and_a_leading_dash_is_refused() {
     assert!(stderr(&e).contains("starts with -"), "{}", stderr(&e));
 }
 
+#[test]
+fn an_events_actor_saves_as_the_editor_text_and_shows() {
+    let h = Home::new();
+    h.run(&[
+        "events",
+        "--actor",
+        "user:*",
+        "--exclude-actor",
+        "system,=alex@ryte.de",
+        "--save-filter",
+        "people",
+    ])
+    .assert()
+    .success();
+    assert!(
+        h.text().contains(
+            "[profiles.demo.filters.events.people]\nactor = \"user:*, !system, !=alex@ryte.de\"\n"
+        ),
+        "{}",
+        h.text()
+    );
+    let a = h
+        .run(&["--json", "filters", "list", "--screen", "events"])
+        .assert()
+        .success();
+    let rows = json(&a)["data"].as_array().unwrap().clone();
+    assert!(
+        rows.iter().any(|r| r["name"] == "people"
+            && r["summary"]
+                .as_str()
+                .is_some_and(|s| s == "actor user:*, !system, !=alex@ryte.de")),
+        "{rows:?}"
+    );
+    let e = h
+        .run(&["events", "--actor", "a !b", "--save-filter", "bad"])
+        .assert()
+        .code(2);
+    assert!(stderr(&e).contains("actor"), "{}", stderr(&e));
+}
+
 /// The dry-run body of `traffic query` on profile `creds` with `extra`.
 fn creds_body(h: &Home, extra: &[&str]) -> Value {
     let mut args = vec![

@@ -395,3 +395,29 @@ fn a_wrong_shaped_screen_key_is_said_where_it_is_used() {
         "other screens work"
     );
 }
+
+#[test]
+fn an_events_actor_saves_and_loads_and_a_filter_without_one_clears_it() {
+    let (mut m, _d, path) = with_config(model_with_events());
+    m.screen = Screen::Events;
+    m.events
+        .table
+        .select_where(|e| e.event_type.as_deref() == Some("user.login"));
+    assert!(update(&mut m, key('u')).is_empty());
+    assert_eq!(m.events.filter.actor, "=user:user-1");
+    cmd(&mut m, "save people");
+    let Saved::Events(e) = store(&path, "demo")
+        .get(FilterScreen::Events, "people")
+        .unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(e.actor.as_deref(), Some("=user:user-1"));
+    assert!(cmd(&mut m, "load agents").is_empty());
+    assert_eq!(m.events.filter.actor, "", "a missing actor is the default");
+    assert_eq!(m.events.table.len(), 1);
+    assert!(cmd(&mut m, "load people").is_empty(), "local, no request");
+    assert_eq!(m.events.filter.actor, "=user:user-1");
+    assert_eq!(m.events.table.len(), 1);
+    assert!(render_to_string(&m, 160, 48).contains("[people]"));
+}

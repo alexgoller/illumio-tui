@@ -1169,6 +1169,8 @@ mod ctrl_u_tests;
 #[cfg(test)]
 mod draft_tests;
 #[cfg(test)]
+mod event_actors_tests;
+#[cfg(test)]
 mod event_types_tests;
 #[cfg(test)]
 mod filter_completion_tests;

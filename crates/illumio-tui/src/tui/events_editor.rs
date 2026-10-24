@@ -1,27 +1,28 @@
-//! `f` on Events: severity, type and window. Pure: keys change the text;
-//! `update` applies it on `Enter` and completes the Type field on
-//! `Ctrl-N`/`Ctrl-P` from the event types of the loaded events (never a
-//! request).
+//! `f` on Events: severity, type, actor and window. Pure: keys change the
+//! text; `update` applies it on `Enter` and completes the Type and Actor
+//! fields on `Ctrl-N`/`Ctrl-P` from the event types and actors of the
+//! loaded events (never a request).
 use crate::tui::form::{Completing, Completion, FieldKind};
 
-/// The fields, in order: severity, type, window.
+/// The fields, in order: severity, type, actor, window.
 pub const SEVERITY: usize = 0;
 pub const TYPE: usize = 1;
-pub const WINDOW: usize = 2;
+pub const ACTOR: usize = 2;
+pub const WINDOW: usize = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EventsEditor {
-    pub values: [String; 3],
+    pub values: [String; 4],
     pub active: usize,
     /// The last `Enter`'s error; the filter in force is kept.
     pub error: Option<String>,
-    /// The completion being cycled (the Type field only); any key but
+    /// The completion being cycled (the Type and Actor fields only); any key but
     /// `Ctrl-N`/`Ctrl-P` ends it.
     pub completion: Option<Box<Completion>>,
 }
 
 impl EventsEditor {
-    pub fn new(values: [String; 3]) -> Self {
+    pub fn new(values: [String; 4]) -> Self {
         Self {
             values,
             active: 0,
@@ -31,10 +32,10 @@ impl EventsEditor {
     }
 
     fn kind(&self) -> FieldKind {
-        if self.active == TYPE {
-            FieldKind::EventTypes
-        } else {
-            FieldKind::Text
+        match self.active {
+            TYPE => FieldKind::EventTypes,
+            ACTOR => FieldKind::EventActors,
+            _ => FieldKind::Text,
         }
     }
 

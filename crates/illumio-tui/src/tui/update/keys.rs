@@ -15,9 +15,12 @@ pub(super) fn field_candidates(model: &Model, editor: &impl Completing) -> Vec<S
     let Some((kind, token, earlier)) = editor.completion_request() else {
         return Vec::new();
     };
-    // Event types come from the loaded events, with or without an index.
+    // Event types and actors come from the loaded events, with or without an index.
     if kind == FieldKind::EventTypes {
         return crate::tui::complete::event_types(&token, &earlier, &model.events.raw);
+    }
+    if kind == FieldKind::EventActors {
+        return crate::tui::complete::event_actors(&token, &earlier, &model.events.raw);
     }
     let Some(idx) = model.index() else {
         return Vec::new();
@@ -309,7 +312,7 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             _ => Vec::new(),
         },
         Overlay::EventsEditor(e) => events_editor_key(model, e, k),
-        Overlay::EventTypes { selected } => event_types_key(model, selected, k),
+        Overlay::EventTypes { selected, actors } => event_types_key(model, selected, actors, k),
         Overlay::Ven { selected } => ven_key(model, selected, k),
         Overlay::EventDetail { event, scroll, raw } => {
             // The renderer clamps to the last page; here only the top is a hard stop.

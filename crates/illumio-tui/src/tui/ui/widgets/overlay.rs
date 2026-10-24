@@ -641,10 +641,11 @@ pub(crate) fn completion_line<'a>(
 }
 
 /// Field names of the events editor, in the order of `EventsEditor::values`.
-const EVENTS_FIELDS: [&str; 3] = ["severity", "type", "window"];
+const EVENTS_FIELDS: [&str; 4] = ["severity", "type", "actor", "window"];
 
-/// The events editor: severity, type, window; the completion strip under
-/// the Type field while completing; then the error or the syntax.
+/// The events editor: severity, type, actor, window; the completion strip
+/// under the Type or Actor field while completing; then the error or the
+/// syntax.
 pub fn render_events_editor(
     model: &Model,
     e: &crate::tui::events_editor::EventsEditor,
@@ -653,11 +654,11 @@ pub fn render_events_editor(
 ) {
     let t = &model.theme;
     let strip = e.completion_strip();
-    let r = centered(area, 76, 9 + u16::from(strip.is_some()));
+    let r = centered(area, 76, 11 + u16::from(strip.is_some()));
     f.render_widget(Clear, r);
     let block = panel(
         "Edit events",
-        "Tab next · Ctrl-N type · Enter apply · Esc cancel",
+        "Tab next · Ctrl-N complete · Enter apply · Esc cancel",
         t,
         true,
     );
@@ -697,7 +698,8 @@ pub fn render_events_editor(
             for hint in [
                 "severity: err (asks the PCE) · warning+ that and worse (local)",
                 "type: sec_policy, rule_set · !user.* hides · =exact · *.delete",
-                "window e.g. 24h · empty severity or type = any",
+                "actor: user:*, !system, =alex@ryte.de (local, like type)",
+                "window e.g. 24h · empty severity, type or actor = any",
             ] {
                 lines.push(Line::from(Span::styled(hint, t.dim_style())));
             }
@@ -706,40 +708,60 @@ pub fn render_events_editor(
     f.render_widget(Paragraph::new(lines).block(block).style(t.base()), r);
 }
 
-/// The key line of the type summary.
-const EVENT_TYPES_KEYS: &str = "Enter only this · x/! hide · Esc close";
+/// The key line of the summary.
+const EVENT_TYPES_KEYS: &str = "Enter/o only this · x/! hide · Tab types/actors · Esc close";
 
-/// `t` on Events: every event type of the load with its count, most
-/// frequent first; the types the filter hides are dim and say so.
-pub fn render_event_types(model: &Model, selected: usize, f: &mut Frame, area: Rect) {
+/// `t` on Events: every event type of the load (with `actors`, every
+/// actor) with its count, most frequent first; those the filter hides
+/// are dim and say so, as are those another filter empties.
+pub fn render_event_types(model: &Model, selected: usize, actors: bool, f: &mut Frame, area: Rect) {
     let t = &model.theme;
     let e = &model.events;
-    let types = e.type_counts();
-    let filter = pce::models::TypeFilter::parse(&e.filter.event_type).unwrap_or_default();
-    let by_severity = e.severity_hidden_types();
+    let values = if actors {
+        e.actor_counts()
+    } else {
+        e.type_counts()
+    };
+    let types = pce::models::TypeFilter::parse(&e.filter.event_type).unwrap_or_default();
+    let actor_filter = e.actor_filter();
+    let keeps = |v: &str| {
+        if actors {
+            actor_filter.keeps_actor(v)
+        } else {
+            types.keeps_type(v)
+        }
+    };
+    let elsewhere = e.hidden_elsewhere(actors);
     let r = centered(
         area,
         64,
-        (types.len() as u16).saturating_add(3).clamp(6, 24),
+        (values.len() as u16).saturating_add(3).clamp(6, 24),
     );
     f.render_widget(Clear, r);
     // Rows inside the borders, less the key line.
     let rows = (r.height.saturating_sub(2) as usize).saturating_sub(1);
-    let sel = selected.min(types.len().saturating_sub(1));
+    let sel = selected.min(values.len().saturating_sub(1));
     let first = sel.saturating_sub(rows.saturating_sub(1));
     let width = (r.width as usize).saturating_sub(2);
-    let count_w = types.first().map_or(1, |(_, n)| n.to_string().len()).max(5);
+    let count_w = values
+        .first()
+        .map_or(1, |(_, n)| n.to_string().len())
+        .max(5);
     let name_w = width.saturating_sub(2 + count_w + 2 + 10);
-    let mut lines: Vec<Line> = types
+    let mut lines: Vec<Line> = values
         .iter()
         .enumerate()
         .skip(first)
         .take(rows)
-        .map(|(i, (ty, n))| {
-            let hidden = !filter.keeps_type(ty);
-            let severity = !hidden && by_severity.contains(ty);
-            let name = if ty.is_empty() { "(no type)" } else { ty };
-            let style = if hidden || severity {
+        .map(|(i, (v, n))| {
+            let hidden = !keeps(v);
+            let other = if hidden {
+                None
+            } else {
+                elsewhere.iter().find(|(x, _)| x == v).map(|(_, why)| *why)
+            };
+            let name = if v.is_empty() { "(no type)" } else { v };
+            let style = if hidden || other.is_some() {
                 t.dim_style()
             } else {
                 t.base()
@@ -753,8 +775,8 @@ pub fn render_event_types(model: &Model, selected: usize, f: &mut Frame, area: R
                 Span::styled(format!("{n:>count_w$}"), style),
                 if hidden {
                     Span::styled("  hidden", Style::new().fg(t.warn))
-                } else if severity {
-                    Span::styled("  (severity)", t.dim_style())
+                } else if let Some(why) = other {
+                    Span::styled(format!("  ({why})"), t.dim_style())
                 } else {
                     Span::raw("")
                 },
@@ -764,14 +786,20 @@ pub fn render_event_types(model: &Model, selected: usize, f: &mut Frame, area: R
     lines.resize(rows, Line::from(""));
     lines.push(Line::from(Span::styled(EVENT_TYPES_KEYS, t.dim_style())));
     let meta = format!(
-        "{} types · {} events{}",
-        types.len(),
+        "{} {} · {} events{}",
+        values.len(),
+        if actors { "actors" } else { "types" },
         e.raw.len(),
         if e.truncated { " · capped" } else { "" }
     );
+    let title = if actors {
+        "Event actors"
+    } else {
+        "Event types"
+    };
     f.render_widget(
         Paragraph::new(lines)
-            .block(panel("Event types", &meta, t, true))
+            .block(panel(title, &meta, t, true))
             .style(t.base()),
         r,
     );

@@ -2,6 +2,7 @@
 //! `x`/`o`, the `t` type summary, `X+` severities and Type completion.
 //! Every one of them filters the loaded events: no request.
 use super::*;
+use crate::tui::events_editor::WINDOW;
 use crate::tui::model::{Limits, Model, Overlay, Screen};
 use crate::tui::msg::Msg;
 use crate::tui::test_support::model_with_events;
@@ -171,11 +172,9 @@ fn types_the_severity_floor_empties_are_noted() {
     m.events.filter.severity = "warning+".into();
     m.events.filter.event_type = "!=sec_policy.create".into();
     m.events.rebuild();
-    let mut by_sev = m.events.severity_hidden_types();
-    by_sev.sort();
     assert_eq!(
-        by_sev,
-        ["user.login"],
+        m.events.hidden_elsewhere(false),
+        [("user.login".to_string(), "severity")],
         "sec_policy.create is hidden by type"
     );
 }
@@ -183,7 +182,7 @@ fn types_the_severity_floor_empties_are_noted() {
 #[test]
 fn a_failed_request_is_retried_by_a_type_only_edit() {
     let mut m = events();
-    edit_field(&mut m, 2, "1h");
+    edit_field(&mut m, WINDOW, "1h");
     let cmds = send(&mut m, KeyCode::Enter, KeyModifiers::NONE);
     assert!(matches!(&cmds[..], [Cmd::LoadEvents { .. }]), "{cmds:?}");
     update(&mut m, Msg::EventsLoaded(Err("boom".into())));
@@ -224,7 +223,13 @@ fn the_type_summary_counts_hides_and_picks_one() {
     m.events.raw.push(e);
     m.events.rebuild();
     assert!(press(&mut m, 't').is_empty());
-    assert_eq!(m.overlay, Overlay::EventTypes { selected: 0 });
+    assert_eq!(
+        m.overlay,
+        Overlay::EventTypes {
+            selected: 0,
+            actors: false
+        }
+    );
     let counts = m.events.type_counts();
     assert_eq!(
         counts[0],
@@ -236,7 +241,13 @@ fn the_type_summary_counts_hides_and_picks_one() {
     assert!(press(&mut m, 'j').is_empty());
     assert!(press(&mut m, 'x').is_empty());
     assert_eq!(m.events.filter.event_type, "!=agent.tampering");
-    assert_eq!(m.overlay, Overlay::EventTypes { selected: 1 });
+    assert_eq!(
+        m.overlay,
+        Overlay::EventTypes {
+            selected: 1,
+            actors: false
+        }
+    );
     // Enter: only this type, and the list closes.
     assert!(press(&mut m, 'k').is_empty());
     assert!(send(&mut m, KeyCode::Enter, KeyModifiers::NONE).is_empty());
@@ -285,7 +296,7 @@ fn the_editor_refilters_locally_unless_the_pce_side_changes() {
     // A new window too.
     m.events.loading = false;
     edit_field(&mut m, 0, "");
-    edit_field(&mut m, 2, "1h");
+    edit_field(&mut m, WINDOW, "1h");
     let cmds = send(&mut m, KeyCode::Enter, KeyModifiers::NONE);
     assert!(
         matches!(&cmds[..], [Cmd::LoadEvents { filter, .. }] if filter.severity.is_none()),

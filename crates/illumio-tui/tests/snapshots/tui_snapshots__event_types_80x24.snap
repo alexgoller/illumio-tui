@@ -15,7 +15,7 @@ expression: out
 │       │▸ sec_policy.create                              1  (severity)│       │
 │       │  system.license_expiring                        1  hidden    │       │
 │       │  user.login                                     1  hidden    │       │
-│       │Enter only this · x/! hide · Esc close                        │       │
+│       │Enter/o only this · x/! hide · Tab types/actors · Esc close   │       │
 │       ╰──────────────────────────────────────────────────────────────╯       │
 │                                                                              │
 │                                                                              │

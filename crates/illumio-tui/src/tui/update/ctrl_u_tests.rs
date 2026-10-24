@@ -73,6 +73,7 @@ fn ctrl_u_empties_the_active_events_field() {
     let mut e = crate::tui::events_editor::EventsEditor::new([
         "err".into(),
         "user.login".into(),
+        "user:*".into(),
         "24h".into(),
     ]);
     e.active = 1;
@@ -80,6 +81,6 @@ fn ctrl_u_empties_the_active_events_field() {
     ctrl_u(&mut m);
     assert!(matches!(
         &m.overlay,
-        Overlay::EventsEditor(e) if e.values[0] == "err" && e.values[1].is_empty() && e.values[2] == "24h"
+        Overlay::EventsEditor(e) if e.values[0] == "err" && e.values[1].is_empty() && e.values[2] == "user:*" && e.values[3] == "24h"
     ));
 }

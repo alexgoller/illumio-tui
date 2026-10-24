@@ -1,8 +1,10 @@
 //! What of the loaded events is shown: the event-type terms
-//! (`sec_policy, !=user.login, *.delete`) and a severity floor (`warning+`).
-//! Both are local, over events already fetched: the PCE events API takes
-//! one `event_type` and one `severity`, so neither a list nor a range can
-//! be sent. Shared by `events` (CLI) and the Events screen (TUI).
+//! (`sec_policy, !=user.login, *.delete`), the actor terms in the same
+//! syntax (`!system, user:*`) and a severity floor (`warning+`). All are
+//! local, over events already fetched: the PCE events API takes one
+//! `event_type` and one `severity`, so neither a list nor a range can be
+//! sent, and it is not asked to filter by actor. Shared by `events` (CLI)
+//! and the Events screen (TUI).
 use super::events::Event;
 
 /// One term: a substring, or a glob when it holds a `*` or starts with
@@ -55,6 +57,26 @@ pub(crate) fn glob(pattern: &str, text: &str) -> bool {
     rest.len() >= last.len() && rest.ends_with(last)
 }
 
+/// What a filter's errors call a term, with examples.
+struct Words {
+    /// ` type`, ` actor`: after `a`, so `a type`, `an actor`.
+    noun: &'static str,
+    eg: &'static str,
+    list_eg: &'static str,
+}
+
+const TYPE_WORDS: Words = Words {
+    noun: " type",
+    eg: "user.login",
+    list_eg: "agent, !agent.update",
+};
+
+const ACTOR_WORDS: Words = Words {
+    noun: "n actor",
+    eg: "system",
+    list_eg: "user:*, !system",
+};
+
 /// One term of the type filter's text, taken apart: `!` (excludes), `=`
 /// (exact: the whole type) and the type, substring or glob.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,12 +93,23 @@ impl TermText {
     /// the traffic filter (`!`, `!!a`, `a !b`, `!a !b` are errors); so does
     /// `=` (`=`, `!=`, `==a`, `a=b`).
     pub fn parse(t: &str) -> Result<Self, String> {
+        Self::parse_as(t, &TYPE_WORDS)
+    }
+
+    /// As [`parse`](Self::parse), for an actor term (`!system`,
+    /// `=alex@ryte.de`): the errors name an actor.
+    pub fn parse_actor(t: &str) -> Result<Self, String> {
+        Self::parse_as(t, &ACTOR_WORDS)
+    }
+
+    fn parse_as(t: &str, w: &Words) -> Result<Self, String> {
+        let Words { noun, eg, list_eg } = w;
         let (exclude, rest) = match t.strip_prefix('!') {
             Some(r) => (true, r.trim_start()),
             None => (false, t),
         };
         if exclude && rest.is_empty() {
-            return Err("! needs a type after it, e.g. !=user.login".into());
+            return Err(format!("! needs a{noun} after it, e.g. !={eg}"));
         }
         if rest.starts_with('!') {
             return Err(format!("{t:?}: one ! per term (no double negation)"));
@@ -86,15 +119,13 @@ impl TermText {
             None => (false, rest),
         };
         if exact && body.is_empty() {
-            return Err("= needs a type after it, e.g. =user.login".into());
+            return Err(format!("= needs a{noun} after it, e.g. ={eg}"));
         }
         if body.contains('!') {
-            return Err(format!("{t:?}: use , before ! (agent, !agent.update)"));
+            return Err(format!("{t:?}: use , before ! ({list_eg})"));
         }
         if body.contains('=') {
-            return Err(format!(
-                "{t:?}: = starts its term (=user.login, !=user.login)"
-            ));
+            return Err(format!("{t:?}: = starts its term (={eg}, !={eg})"));
         }
         Ok(Self {
             exclude,
@@ -118,9 +149,13 @@ impl TypeFilter {
     /// `!=user.login` (not this exact type), `*.delete`. See
     /// [`TermText::parse`] for what is refused.
     pub fn parse(text: &str) -> Result<Self, String> {
+        Self::parse_as(text, &TYPE_WORDS)
+    }
+
+    fn parse_as(text: &str, w: &Words) -> Result<Self, String> {
         let mut f = Self::default();
         for t in text.split(',').map(str::trim).filter(|t| !t.is_empty()) {
-            let p = TermText::parse(t)?;
+            let p = TermText::parse_as(t, w)?;
             let list = if p.exclude {
                 &mut f.exclude
             } else {
@@ -147,9 +182,16 @@ impl TypeFilter {
 
     /// An event of type `ty` (missing: empty) is kept.
     pub fn keeps_type(&self, ty: &str) -> bool {
-        let ty = ty.to_lowercase();
-        (self.include.is_empty() || self.include.iter().any(|t| t.matches(&ty)))
-            && !self.exclude.iter().any(|t| t.matches(&ty))
+        self.keeps_any(&[ty])
+    }
+
+    /// A term matches when it matches any of `names` (one value under
+    /// several names, as an actor is): kept when an include matches (or
+    /// there is none) and no exclude does.
+    fn keeps_any(&self, names: &[&str]) -> bool {
+        let names: Vec<String> = names.iter().map(|n| n.to_lowercase()).collect();
+        let hit = |terms: &[Term]| terms.iter().any(|t| names.iter().any(|n| t.matches(n)));
+        (self.include.is_empty() || hit(&self.include)) && !hit(&self.exclude)
     }
 
     pub fn keeps(&self, e: &Event) -> bool {
@@ -169,6 +211,45 @@ impl TypeFilter {
             }
         }
         self
+    }
+}
+
+/// The names an actor (as [`Event::actor`] writes it) answers to: the
+/// whole string and, for `kind:name`, the name alone (`user:alex@ryte.de`
+/// and `alex@ryte.de`; `system` only itself).
+pub fn actor_names(actor: &str) -> Vec<&str> {
+    let mut names = vec![actor];
+    if let Some((_, name)) = actor.split_once(':') {
+        names.push(name);
+    }
+    names
+}
+
+/// The actor filter: the type filter's terms (`,` lists, `!` excludes,
+/// `=` exact, `*` globs, any case), each matched against the whole actor
+/// string and the part after `kind:` (see [`actor_names`]), so
+/// `=alex@ryte.de`, `user:*`, `!system` and `!agent:*` all work.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EventActorFilter(TypeFilter);
+
+impl EventActorFilter {
+    /// See [`TypeFilter::parse`]; the errors name an actor.
+    pub fn parse(text: &str) -> Result<Self, String> {
+        TypeFilter::parse_as(text, &ACTOR_WORDS).map(Self)
+    }
+
+    /// No term: every actor is kept.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// The actor `actor` (`user:alex@ryte.de`, `system`, `?`) is kept.
+    pub fn keeps_actor(&self, actor: &str) -> bool {
+        self.0.keeps_any(&actor_names(actor))
+    }
+
+    pub fn keeps(&self, e: &Event) -> bool {
+        self.keeps_actor(&e.actor())
     }
 }
 
@@ -375,6 +456,53 @@ mod tests {
         let f = TypeFilter::excluding(&["user.login"]).unwrap();
         assert!(!f.keeps_type("user.login") && f.keeps_type("agent.update"));
         assert!(TypeFilter::excluding::<&str>(&[]).unwrap().is_empty());
+    }
+
+    fn keeps_actor(f: &str, actor: &str) -> bool {
+        EventActorFilter::parse(f).unwrap().keeps_actor(actor)
+    }
+
+    #[test]
+    fn actor_terms_match_the_whole_actor_or_the_name_after_its_kind() {
+        let alex = "user:alex@ryte.de";
+        assert!(
+            keeps_actor("", alex) && keeps_actor("", "?"),
+            "blank keeps all"
+        );
+        assert!(keeps_actor("=alex@ryte.de", alex), "exact, after the kind");
+        assert!(keeps_actor("=user:alex@ryte.de", alex), "exact, whole");
+        assert!(!keeps_actor("=alex", alex), "exact is not a substring");
+        assert!(keeps_actor("alex", alex), "substring");
+        assert!(keeps_actor("user:*", alex) && !keeps_actor("user:*", "agent:web01"));
+        assert!(keeps_actor("alex*", alex), "a glob anchors on the name too");
+        assert!(!keeps_actor("ryte*", alex), "anchored");
+        assert!(keeps_actor("*@ryte.de", alex));
+        assert!(!keeps_actor("!system", "system") && keeps_actor("!system", alex));
+        assert!(!keeps_actor("!agent:*", "agent:web01") && keeps_actor("!agent:*", alex));
+        assert!(
+            !keeps_actor("!=web01", "agent:web01"),
+            "an exclude by name alone"
+        );
+        assert!(keeps_actor("=USER:Alex@Ryte.DE", alex), "case-insensitive");
+        assert!(keeps_actor("system, user:*", "system") && keeps_actor("system, user:*", alex));
+        assert!(!keeps_actor("system, user:*", "agent:web01"), "includes OR");
+        assert!(!keeps_actor("user:*, !=alex@ryte.de", alex), "excludes win");
+        assert!(keeps_actor("user:*, !=alex@ryte.de", "user:bob@ryte.de"));
+        assert!(keeps_actor("=?", "?") && !keeps_actor("!=?", "?"));
+        assert!(keeps_actor("=ci", "service_account:ci"));
+        assert_eq!(actor_names("system"), ["system"]);
+        assert_eq!(actor_names(alex), [alex, "alex@ryte.de"]);
+    }
+
+    #[test]
+    fn actor_errors_name_an_actor() {
+        let e = EventActorFilter::parse("!").unwrap_err();
+        assert!(e.contains("an actor") && e.contains("!=system"), "{e}");
+        let e = EventActorFilter::parse("a !b").unwrap_err();
+        assert!(e.contains("user:*, !system"), "{e}");
+        let e = TypeFilter::parse("!").unwrap_err();
+        assert_eq!(e, "! needs a type after it, e.g. !=user.login");
+        assert!(EventActorFilter::parse(" , ").unwrap().is_empty());
     }
 
     fn event(sev: Option<&str>) -> Event {

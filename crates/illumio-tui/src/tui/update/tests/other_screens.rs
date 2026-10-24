@@ -1810,14 +1810,13 @@ fn opening_events_loads_once_and_editor_reloads() {
     );
     assert!(matches!(m.overlay, Overlay::None));
     update(&mut m, key('f'));
-    update(
-        &mut m,
-        Msg::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)),
-    );
-    update(
-        &mut m,
-        Msg::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)),
-    );
+    // Severity, type, actor, then the window.
+    for _ in 0..3 {
+        update(
+            &mut m,
+            Msg::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)),
+        );
+    }
     for _ in 0..3 {
         update(
             &mut m,

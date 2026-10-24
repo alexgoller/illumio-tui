@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭iding 2 types · actor !=system · warning+ · 1 of 4 · capped at 4 · window 24h ╮
+│  timestamp      severity type                     actor                      │
+│▸ 10-10 07:32:00 err      agent.tampering          agent:host-1.example       │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│       ╭ Event actors ────────────────── 4 actors · 4 events · capped ╮       │
+│       │▸ agent:host-1.example                           1            │       │
+│       │  system                                         1  hidden    │       │
+│       │  user:user-1                                    1  (type)    │       │
+│       │  user:user-2                                    1  (severity)│       │
+│       │Enter/o only this · x/! hide · Tab types/actors · Esc close   │       │
+│       ╰──────────────────────────────────────────────────────────────╯       │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ready        f filter  x/o hide/only type  t types  Enter detail  : cmd  ? help

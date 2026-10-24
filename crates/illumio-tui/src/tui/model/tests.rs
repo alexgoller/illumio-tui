@@ -88,6 +88,7 @@ fn events_window_is_whole_minutes_and_open_ended_so_the_cache_can_hit() {
     let edit = EventsFilterEdit {
         severity: " err ".into(),
         event_type: "agent".into(),
+        actor: String::new(),
         window: "24h".into(),
     };
     let a = edit.to_filter(at("2026-10-10T08:00:07Z")).unwrap();
@@ -114,6 +115,7 @@ fn events_empty_severity_is_none_and_a_bad_window_is_an_error() {
     let mut edit = EventsFilterEdit {
         severity: "  ".into(),
         event_type: String::new(),
+        actor: String::new(),
         window: "1h".into(),
     };
     assert!(

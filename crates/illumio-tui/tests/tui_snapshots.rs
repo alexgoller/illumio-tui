@@ -1075,6 +1075,7 @@ fn events_wide_editor_and_light_styled() {
     let mut e = illumio_tui::tui::events_editor::EventsEditor::new([
         "err".into(),
         "agent".into(),
+        String::new(),
         "24h".into(),
     ]);
     e.active = 1;
@@ -1103,11 +1104,30 @@ fn events_hidden_types_capped_summary_and_type_completion() {
         "{out}"
     );
     insta::assert_snapshot!("events_hidden_capped_80x24", out);
-    m.overlay = Overlay::EventTypes { selected: 1 };
+    m.overlay = Overlay::EventTypes {
+        selected: 1,
+        actors: false,
+    };
     let out = render_to_string(&m, 80, 24);
     assert!(out.contains("hidden"), "{out}");
     assert!(out.contains("(severity)"), "{out}");
     insta::assert_snapshot!("event_types_80x24", out);
+    // The Actors view (Tab): the actor filter hides one, and the types
+    // filter and severity floor empty the others.
+    m.events.filter.actor = "!=system".into();
+    m.events.rebuild();
+    m.overlay = Overlay::EventTypes {
+        selected: 0,
+        actors: true,
+    };
+    let out = render_to_string(&m, 80, 24);
+    assert!(
+        out.contains("Event actors") && out.contains("(type)"),
+        "{out}"
+    );
+    insta::assert_snapshot!("event_actors_80x24", out);
+    m.events.filter.actor.clear();
+    m.events.rebuild();
     // The Type field completes the loaded types after a `!`.
     m.overlay = Overlay::None;
     update(

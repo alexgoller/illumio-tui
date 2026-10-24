@@ -8,18 +8,18 @@ expression: out
 │  timestamp      severity type                     actor                      │
 │▸ 10-10 07:32:00 err      agent.tampering          agent:host-1.example       │
 │                                                                              │
-│                                                                              │
-│ ╭ Edit events ────────── Tab next · Ctrl-N type · Enter apply · Esc cancel ╮ │
+│ ╭ Edit events ────── Tab next · Ctrl-N complete · Enter apply · Esc cancel ╮ │
 │ │  severity    warning+                                                    │ │
 │ │▸ type        !user.login, !system.*, !agent.tampering▏                   │ │
 │ │              !agent.tampering  !sec_policy.create                        │ │
+│ │  actor                                                                   │ │
 │ │  window      24h                                                         │ │
 │ │                                                                          │ │
 │ │severity: err (asks the PCE) · warning+ that and worse (local)            │ │
 │ │type: sec_policy, rule_set · !user.* hides · =exact · *.delete            │ │
-│ │window e.g. 24h · empty severity or type = any                            │ │
+│ │actor: user:*, !system, =alex@ryte.de (local, like type)                  │ │
+│ │window e.g. 24h · empty severity, type or actor = any                     │ │
 │ ╰──────────────────────────────────────────────────────────────────────────╯ │
-│                                                                              │
 │                                                                              │
 │                                                                              │
 │                                                                              │
