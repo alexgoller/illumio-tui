@@ -299,6 +299,18 @@ fn events_defaults_apply_on_top_of_the_profiles_hidden_types() {
     m.events.filter.event_type = m.limits.event_type_filter();
     apply_defaults(&mut m);
     assert_eq!(m.events.filter.event_type, "agent, !=user.login, !agent.*");
+    // A default's actor applies at startup too, with no request.
+    let (_d2, path2) = config(|c| {
+        c.replace(
+            "[profiles.demo.filters.events.agents]\n",
+            "[profiles.demo.filters.events.agents]\nactor = \"!system\"\n",
+        )
+    });
+    let mut m2 = starting(Some(&path2));
+    apply_defaults(&mut m2);
+    assert!(!m2.events.loading, "applied, nothing asked");
+    assert_eq!(m2.events.filter.actor, "!system");
+    assert_eq!(m2.events.filter.event_type, "agent");
     // `:load` is the same.
     let mut m = model_fixture();
     m.saved.path = Ok(path);

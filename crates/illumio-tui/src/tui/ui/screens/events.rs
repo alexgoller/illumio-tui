@@ -17,6 +17,9 @@ pub fn table_rows(body: Rect) -> usize {
     body.height.saturating_sub(3) as usize
 }
 
+/// The most of the actor terms the header shows.
+const ACTOR_META: usize = 24;
+
 /// `1,240`: digits in groups of three.
 fn thousands(n: usize) -> String {
     let digits = n.to_string();
@@ -56,8 +59,13 @@ fn meta(model: &Model) -> String {
         let s = if e.hidden_types == 1 { "" } else { "s" };
         parts.push(format!("hiding {} type{s}", e.hidden_types));
     }
+    // Typed free text: clipped, so it never crowds out the rest (`f`
+    // shows it whole).
     if !e.actor_filter().is_empty() {
-        parts.push(format!("actor {}", e.filter.actor.trim()));
+        parts.push(format!(
+            "actor {}",
+            crate::tui::form::clip(e.filter.actor.trim(), ACTOR_META)
+        ));
     }
     if let Ok(sev) = pce::models::SeverityFilter::parse(&e.filter.severity)
         && sev.is_local()

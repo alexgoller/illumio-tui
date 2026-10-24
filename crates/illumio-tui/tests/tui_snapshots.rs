@@ -1114,7 +1114,7 @@ fn events_hidden_types_capped_summary_and_type_completion() {
     insta::assert_snapshot!("event_types_80x24", out);
     // The Actors view (Tab): the actor filter hides one, and the types
     // filter and severity floor empty the others.
-    m.events.filter.actor = "!=system".into();
+    m.events.filter.actor = "!=system, !=alex@ryte.de, !=bob@ryte.de".into();
     m.events.rebuild();
     m.overlay = Overlay::EventTypes {
         selected: 0,
@@ -1125,6 +1125,8 @@ fn events_hidden_types_capped_summary_and_type_completion() {
         out.contains("Event actors") && out.contains("(type)"),
         "{out}"
     );
+    // The typed actor terms are clipped in the header.
+    assert!(out.contains("actor !=system, !=alex@ryte.d… ·"), "{out}");
     insta::assert_snapshot!("event_actors_80x24", out);
     m.events.filter.actor.clear();
     m.events.rebuild();

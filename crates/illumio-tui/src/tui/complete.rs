@@ -122,10 +122,12 @@ pub fn event_types(token: &str, earlier: &[String], events: &[Event]) -> Vec<Str
 /// names by its whole string or by the name after its kind left out.
 pub fn event_actors(token: &str, earlier: &[String], events: &[Event]) -> Vec<String> {
     let used = used_bodies(earlier, pce::models::TermText::parse_actor);
+    // A name with `,` `!` `=` or `*` would not stay one term.
     let actors = events.iter().map(Event::actor).filter(|a| {
-        !pce::models::actor_names(a)
-            .iter()
-            .any(|n| used.contains(&n.to_lowercase()))
+        pce::models::is_one_term(a)
+            && !pce::models::actor_names(a)
+                .iter()
+                .any(|n| used.contains(&n.to_lowercase()))
     });
     event_terms(token, actors)
 }

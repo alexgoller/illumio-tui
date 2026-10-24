@@ -12,7 +12,7 @@ pub mod workloads;
 pub use common::{PolicyDecision, Ref, proto_name, proto_number};
 pub use event_select::{
     EventActorFilter, SEVERITIES, SeverityFilter, TermText, TypeFilter, actor_names, exclude_text,
-    severity_level,
+    is_one_term, severity_level,
 };
 pub use events::{Event, EventFilter};
 pub use labels::{Fqdn, IpList, IpRange, Label, LabelGroup, LabelUsageFlags, Service, ServicePort};

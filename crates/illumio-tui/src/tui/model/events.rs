@@ -382,16 +382,22 @@ impl EventsState {
         self.rebuild();
     }
 
-    /// `U`: hides the actor `actor` (no request).
-    pub fn hide_actor(&mut self, actor: &str) {
-        self.filter.actor = hide_actor(&self.filter.actor, actor);
+    /// `u` (`only`) shows only the actor `actor`, `U` hides it (no
+    /// request). `false`, the filter kept, for a name the term syntax
+    /// cannot hold as one term (`,` `!` `=` `*`): never a filter text that
+    /// does not parse, which would silently keep everything.
+    pub fn actor_action(&mut self, actor: &str, only: bool) -> bool {
+        let text = if only {
+            only_actor(&self.filter.actor, actor)
+        } else {
+            hide_actor(&self.filter.actor, actor)
+        };
+        if !pce::models::is_one_term(actor) || EventActorFilter::parse(&text).is_err() {
+            return false;
+        }
+        self.filter.actor = text;
         self.rebuild();
-    }
-
-    /// `u`: shows only the actor `actor` (no request).
-    pub fn only_actor(&mut self, actor: &str) {
-        self.filter.actor = only_actor(&self.filter.actor, actor);
-        self.rebuild();
+        true
     }
 
     /// `S`: worst severity first; pressing it again flips the direction.

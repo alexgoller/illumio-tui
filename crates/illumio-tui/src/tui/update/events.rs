@@ -154,12 +154,12 @@ fn type_action(model: &mut Model, ty: &str, only: bool) {
 /// `U` (hide) or `u` (only this) on the actor `actor`, and the same in
 /// the summary's Actors view: the Actor filter changes and the loaded
 /// events are filtered again; no request.
+/// An actor name the term syntax cannot hold as one term (`,` `!` `=`
+/// `*`) is refused and the filter kept: it is typed in `f` instead.
 fn actor_action(model: &mut Model, actor: &str, only: bool) {
-    let e = &mut model.events;
-    if only {
-        e.only_actor(actor);
-    } else {
-        e.hide_actor(actor);
+    if !model.events.actor_action(actor, only) {
+        model.status = StatusLine::warn("actor name has , ! = or *: type a filter in f");
+        return;
     }
     let what = if only { "only" } else { "hiding" };
     model.status = StatusLine::info(format!("{what} {actor} · {}", shown_text(&model.events)));

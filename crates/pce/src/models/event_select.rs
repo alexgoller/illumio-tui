@@ -216,13 +216,24 @@ impl TypeFilter {
 
 /// The names an actor (as [`Event::actor`] writes it) answers to: the
 /// whole string and, for `kind:name`, the name alone (`user:alex@ryte.de`
-/// and `alex@ryte.de`; `system` only itself).
+/// and `alex@ryte.de`; `system` only itself). The placeholder name `?`
+/// of an unnamed user or agent (`agent:?`) is not a name: `=?` is the
+/// actor-less event only.
 pub fn actor_names(actor: &str) -> Vec<&str> {
     let mut names = vec![actor];
-    if let Some((_, name)) = actor.split_once(':') {
+    if let Some((_, name)) = actor.split_once(':')
+        && name != "?"
+    {
         names.push(name);
     }
     names
+}
+
+/// `actor` can be written as one exact term (`=actor`, `!=actor`): it
+/// holds none of `,` (a term break), `!`, `=` (refused inside a term) or
+/// `*` (a glob).
+pub fn is_one_term(actor: &str) -> bool {
+    !actor.contains([',', '!', '=', '*'])
 }
 
 /// The actor filter: the type filter's terms (`,` lists, `!` excludes,
@@ -489,6 +500,14 @@ mod tests {
         assert!(!keeps_actor("user:*, !=alex@ryte.de", alex), "excludes win");
         assert!(keeps_actor("user:*, !=alex@ryte.de", "user:bob@ryte.de"));
         assert!(keeps_actor("=?", "?") && !keeps_actor("!=?", "?"));
+        // `?` is a placeholder, not a name: `agent:?` is another actor.
+        assert!(keeps_actor("!=?", "agent:?") && !keeps_actor("=?", "agent:?"));
+        assert!(!keeps_actor("=?", "user:?") && keeps_actor("=agent:?", "agent:?"));
+        assert_eq!(actor_names("agent:?"), ["agent:?"]);
+        assert!(is_one_term(alex) && is_one_term("agent:?"));
+        for bad in ["service_account:ci, nightly", "svc!deploy", "a=b", "web*"] {
+            assert!(!is_one_term(bad), "{bad}");
+        }
         assert!(keeps_actor("=ci", "service_account:ci"));
         assert_eq!(actor_names("system"), ["system"]);
         assert_eq!(actor_names(alex), [alex, "alex@ryte.de"]);

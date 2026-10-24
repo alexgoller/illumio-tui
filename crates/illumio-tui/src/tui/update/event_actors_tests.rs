@@ -273,3 +273,79 @@ fn actor_candidates_need_no_index_and_keep_a_typed_prefix() {
     );
     assert!(event_actors("x", &[], &[]).is_empty());
 }
+
+/// The fixture with one more event by an actor named `name` (a service
+/// account), selected.
+fn with_actor(name: &str) -> Model {
+    let mut m = events();
+    let mut e = m.events.raw[0].clone();
+    e.href = "/orgs/5/events/e5".into();
+    e.created_by = Some(serde_json::json!({"service_account": {"name": name}}));
+    m.events.raw.push(e);
+    m.events.rebuild();
+    select(&mut m, &format!("service_account:{name}"));
+    m
+}
+
+#[test]
+fn an_actor_name_the_terms_cannot_hold_is_refused_and_the_filter_kept() {
+    for name in ["ci, nightly", "svc!deploy", "a=b", "web*"] {
+        let mut m = with_actor(name);
+        m.events.filter.actor = "!system".into();
+        m.events.rebuild();
+        for key in ['u', 'U'] {
+            assert!(press(&mut m, key).is_empty());
+            assert_eq!(m.events.filter.actor, "!system", "{name} {key}");
+            assert_eq!(
+                m.status.text, "actor name has , ! = or *: type a filter in f",
+                "{name}"
+            );
+            assert_eq!(m.status.kind, crate::tui::model::StatusKind::Warn);
+        }
+        assert_eq!(m.events.table.len(), 4, "still filtered by !system");
+        // The summary's Actors view refuses it too.
+        let actors = m.events.actor_counts();
+        let at = actors
+            .iter()
+            .position(|(a, _)| *a == format!("service_account:{name}"))
+            .unwrap();
+        m.overlay = Overlay::EventTypes {
+            selected: at,
+            actors: true,
+        };
+        assert!(press(&mut m, 'x').is_empty());
+        assert!(send(&mut m, KeyCode::Enter, KeyModifiers::NONE).is_empty());
+        assert_eq!(m.events.filter.actor, "!system");
+        // And it is no Ctrl-N candidate.
+        let c = crate::tui::complete::event_actors("service", &[], &m.events.raw);
+        assert!(c.is_empty(), "{name}: {c:?}");
+    }
+    // A plain service account name works.
+    let mut m = with_actor("ci");
+    assert!(press(&mut m, 'u').is_empty());
+    assert_eq!(m.events.filter.actor, "=service_account:ci");
+    assert_eq!(m.events.table.len(), 1);
+}
+
+#[test]
+fn hiding_the_actorless_events_keeps_an_unnamed_agent() {
+    let mut m = events();
+    let mut e = m.events.raw[0].clone();
+    e.href = "/orgs/5/events/e5".into();
+    e.created_by = None;
+    m.events.raw.push(e.clone());
+    e.href = "/orgs/5/events/e6".into();
+    e.created_by = Some(serde_json::json!({"agent": {"href": "/orgs/5/agents/7"}}));
+    m.events.raw.push(e);
+    m.events.rebuild();
+    select(&mut m, "?");
+    assert!(press(&mut m, 'U').is_empty());
+    assert_eq!(m.events.filter.actor, "!=?");
+    assert!(shown_actors(&m).contains(&"agent:?".to_string()));
+    assert!(!shown_actors(&m).contains(&"?".to_string()));
+    m.events.filter.actor.clear();
+    m.events.rebuild();
+    select(&mut m, "?");
+    assert!(press(&mut m, 'u').is_empty());
+    assert_eq!(shown_actors(&m), ["?"], "only the actor-less event");
+}
