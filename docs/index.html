@@ -649,6 +649,14 @@ counts   rule_sets=9, services=2</code></pre>
       </dl>
     </div>
   </div>
+
+  <h3 id="agents">Agents and scripts: <code>schema</code> and <code>--fields</code></h3>
+  <p>JSON is the default whenever stdout is not a terminal, so an agent gets the envelope without asking. Every envelope names its schema in <code>meta.schema</code>; <code>illumio-tui schema</code> lists them all (plus the shared <code>envelope</code>, <code>meta</code> and <code>error</code>), and <code>illumio-tui schema workloads ven-summary</code> prints that envelope&rsquo;s JSON Schema (draft 2020-12). No profile, no request. The CLI&rsquo;s tests check every command&rsquo;s real output against its schema, so the schema is the contract.</p>
+<pre><code><span class="p">$ </span>illumio-tui schema
+<span class="p">$ </span>illumio-tui schema workloads ven-summary     <span class="c"># or a schema name: write, envelope, meta, error</span>
+<span class="p">$ </span>illumio-tui workloads --label app=shop --fields hostname,health,labels.value --json
+<span class="p">$ </span>illumio-tui labels --csv --fields key,value &gt; labels.csv</code></pre>
+  <p><code>--fields</code> keeps only the named fields of <code>data</code> (each element of a list), dotted paths reach into nested objects and through lists and keep the nesting; <code>meta</code> is never filtered. With <code>--csv</code> the names are columns, picked and ordered. Names are checked against the schema before any request (exit 2, listing the valid ones), with a table it is exit 2, and it never changes what is asked of the PCE. Failures go to stderr as <code>{"error": {...}}</code> with the exit codes above.</p>
 </section>
 
 <section class="panel" id="recipes" aria-labelledby="recipes-h">

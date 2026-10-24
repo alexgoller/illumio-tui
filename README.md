@@ -1349,6 +1349,52 @@ it) starts from the screen's default; it is an error when there is none or it do
 `--filter`, `filters show|rm` and `filters default <screen>` complete saved names from the config file. Saved filters need
 a profile from the config file: with `--env-file` or an env-only connection there are none.
 
+## Agents and scripts
+
+Every command that prints data prints one JSON envelope on stdout: `{"data": ..., "meta":
+...}`. JSON is the default when stdout is not a terminal (a pipe, a file, an agent's
+subprocess); `--table` and `--csv` override it, `--json` forces it at a terminal. `data` is the
+command's result; `meta` says what it cost (`api_calls`, `bytes`, `elapsed_ms`, `cache`),
+whether it is complete (`truncated`, and for traffic `covered`, `cap`, `incomplete`), any
+`warnings`, and `meta.schema`: the name of the schema the envelope follows.
+
+`illumio-tui schema` lists every command and its schema, plus the shared shapes (`envelope`,
+`meta`, `error`). `illumio-tui schema workloads ven-summary` (the command's words) or
+`illumio-tui schema write` (a schema name) prints the JSON Schema (draft 2020-12) of that
+envelope: `data` of the command, `meta` shared under `$defs`. Several commands share one: every
+write prints `write`, `--save-filter` prints `saved-filter`, traffic `--dry-run` prints
+`traffic-dry-run`. `schema` needs no profile and sends no request. Objects are closed
+(`additionalProperties: false`) except where a PCE object is passed through as the PCE sent it
+(a `$comment` says so); the CLI's tests check every command's real output against its schema,
+so a field the schema does not name is a bug.
+
+    illumio-tui schema
+    illumio-tui schema workloads ven-summary
+    illumio-tui schema --json | jq -r '.data[] | select(.kind == "command") | .command'
+
+`--fields` keeps only the named fields, a pure transform of what the command built: it never
+changes what is asked of the PCE.
+
+- With `--json` it filters `data`: each element of a list, or the object itself. A dotted path
+  reaches into nested objects and through lists element by element, and keeps the nesting:
+  `--fields hostname,labels.key` gives `{"hostname": "web01", "labels": [{"key": "app"}, ...]}`.
+  `meta` is never filtered. The names come from the command's schema, so an unknown name is exit
+  2 before any request, also when the result would be empty, and the message lists the valid
+  ones.
+- With `--csv` the names are column headers: `--fields` picks the columns and sets their order
+  (`--fields href,key`). A dotted path is exit 2. An unknown column is exit 2 with the header row.
+- With table output it is exit 2: `--fields needs --json or --csv`.
+
+Comma-separated or repeated (`--fields a,b --fields c`); duplicates are dropped.
+
+    illumio-tui workloads --label app=shop --fields hostname,health,labels.value --json
+    illumio-tui policy search deny --fields ruleset,href,consumers.name --json
+    illumio-tui labels --csv --fields key,value > labels.csv
+
+A failed command prints `{"error": {"kind", "message", "exit_code"}}` to stderr (schema
+`error`) and exits with `exit_code`: 1 generic, 2 arguments or config, 3 auth, 4 PCE error, 5
+rate limited, 6 write refused, 7 flows blocked since an enforcement.
+
 ## Writes
 
 Writes are off unless the profile says yes (`writes = true`, or
