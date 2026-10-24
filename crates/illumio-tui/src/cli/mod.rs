@@ -2,6 +2,7 @@
 //! and gets a `Context`.
 pub mod app;
 pub mod bulk;
+pub mod columns;
 pub mod completions;
 pub mod context;
 pub mod enforce;
@@ -77,8 +78,9 @@ pub struct GlobalArgs {
     #[arg(long, global = true, conflicts_with_all = ["json", "table"])]
     pub csv: bool,
     /// Only these fields of --json `data` (dotted paths reach into nested objects and
-    /// through lists: a,b,c.d) or these --csv columns, in this order; names from
-    /// `illumio-tui schema COMMAND` (comma-separated or repeatable)
+    /// through lists: a,b,c.d; names from `illumio-tui schema COMMAND`), or these --csv
+    /// columns in this order (the header row; `schema COMMAND` lists them in its $comment).
+    /// Comma-separated or repeatable; checked before any request
     #[arg(long, global = true, value_name = "FIELDS", value_delimiter = ',')]
     pub fields: Vec<String>,
     /// Ignore cached responses
@@ -185,7 +187,9 @@ pub enum Command {
     /// meta.schema of each envelope); `illumio-tui schema workloads ven-summary` prints that
     /// envelope's schema (JSON Schema draft 2020-12): `data` of the command, `meta` shared.
     /// A schema name works too (`schema write`, `schema envelope`, `schema meta`,
-    /// `schema error`). The field names --fields takes are the schema's `data` properties.
+    /// `schema error`); a row with a flag types as listed (`schema traffic query --dry-run`).
+    /// --json --fields takes the schema's `data` properties; --csv --fields takes the CSV
+    /// columns, which `schema COMMAND` names in its top-level $comment.
     Schema(schema::SchemaArgs),
 }
 
@@ -231,7 +235,14 @@ fn csv_refusal(command: &Command) -> Option<&'static str> {
 /// against the header row when it prints.
 fn select_output(global: &GlobalArgs, command: &Command) -> Result<(), CliError> {
     let schema = schema::schema_of(command);
+    let csv_columns = columns::csv_columns(command);
     let fields = output::parse_fields(&global.fields);
+    if !global.fields.is_empty() && fields.is_empty() {
+        return Err(CliError::Args("--fields: no field names".into()));
+    }
+    if let Some(f) = fields.iter().find(|f| f.split('.').any(str::is_empty)) {
+        return Err(CliError::Args(format!("--fields {f}: an empty name")));
+    }
     if !fields.is_empty() {
         let format = output::choose_format(global.json, global.table, global.csv);
         match (format, schema) {
@@ -249,11 +260,23 @@ fn select_output(global: &GlobalArgs, command: &Command) -> Result<(), CliError>
                         "--fields {f}: a dotted path is for --json; --csv takes column names"
                     )));
                 }
+                if let Some(f) = fields.iter().find(|f| !csv_columns.contains(&f.as_str())) {
+                    return Err(CliError::Args(format!(
+                        "--fields: no CSV column {f:?}; the columns are: {}",
+                        csv_columns.join(", ")
+                    )));
+                }
             }
-            (output::OutputFormat::Json, Some(name)) => schema::check_fields(name, &fields)?,
+            (output::OutputFormat::Json, Some(name)) => {
+                schema::check_fields(name, schema::branch_of(command), &fields)?
+            }
         }
     }
-    output::select(output::Selection { schema, fields });
+    output::select(output::Selection {
+        schema,
+        fields,
+        csv_columns,
+    });
     Ok(())
 }
 

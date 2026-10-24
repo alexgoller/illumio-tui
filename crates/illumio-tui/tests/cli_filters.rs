@@ -556,6 +556,11 @@ fn creds_body(h: &Home, extra: &[&str]) -> Value {
         "traffic",
         "query",
         "--dry-run",
+        // A fixed window: two runs a second apart give the same body.
+        "--from",
+        "2026-01-01T00:00:00Z",
+        "--to",
+        "2026-01-02T00:00:00Z",
     ];
     args.extend_from_slice(extra);
     let a = h.run(&args).assert().success();

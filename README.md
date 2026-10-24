@@ -1361,12 +1361,14 @@ whether it is complete (`truncated`, and for traffic `covered`, `cap`, `incomple
 `illumio-tui schema` lists every command and its schema, plus the shared shapes (`envelope`,
 `meta`, `error`). `illumio-tui schema workloads ven-summary` (the command's words) or
 `illumio-tui schema write` (a schema name) prints the JSON Schema (draft 2020-12) of that
-envelope: `data` of the command, `meta` shared under `$defs`. Several commands share one: every
-write prints `write`, `--save-filter` prints `saved-filter`, traffic `--dry-run` prints
-`traffic-dry-run`. `schema` needs no profile and sends no request. Objects are closed
+envelope: `data` of the command, `meta` shared under `$defs`, and, by command words, the
+`--csv` columns in its top-level `$comment`. Several commands share one: every write prints
+`write`, `--save-filter` prints `saved-filter`, traffic `--dry-run` prints `traffic-dry-run`; a
+row with a flag types as listed (`illumio-tui schema events --save-filter`). `schema` needs no
+profile and sends no request. Objects are closed
 (`additionalProperties: false`) except where a PCE object is passed through as the PCE sent it
-(a `$comment` says so); the CLI's tests check every command's real output against its schema,
-so a field the schema does not name is a bug.
+(a `$comment` says so); every envelope the CLI's tests read is checked against its schema, and
+each schema has such a test, so a field the schema does not name is a bug.
 
     illumio-tui schema
     illumio-tui schema workloads ven-summary
@@ -1380,9 +1382,15 @@ changes what is asked of the PCE.
   `--fields hostname,labels.key` gives `{"hostname": "web01", "labels": [{"key": "app"}, ...]}`.
   `meta` is never filtered. The names come from the command's schema, so an unknown name is exit
   2 before any request, also when the result would be empty, and the message lists the valid
-  ones.
-- With `--csv` the names are column headers: `--fields` picks the columns and sets their order
-  (`--fields href,key`). A dotted path is exit 2. An unknown column is exit 2 with the header row.
+  ones. Where the output is one of several shapes, the names are those of the shape the flags
+  print (`group_by` needs `workloads --group`). Below a PCE object passed through as is
+  (`events` `action`, `health` `status`) any name goes: `--fields action.api_endpoint`.
+- With `--csv` the names are column headers, not the JSON names (`profile list` has the column
+  `default`, JSON `is_default`): `--fields` picks the columns and sets their order (`--fields
+  href,key`). They are checked before any request against every column the command can print
+  (`schema COMMAND` lists them; `--csv` without `--fields` prints the header row); a column this
+  run does not print (a draft column without `--draft`) comes out empty. A dotted path or an
+  unknown column is exit 2.
 - With table output it is exit 2: `--fields needs --json or --csv`.
 
 Comma-separated or repeated (`--fields a,b --fields c`); duplicates are dropped.
@@ -1392,7 +1400,8 @@ Comma-separated or repeated (`--fields a,b --fields c`); duplicates are dropped.
     illumio-tui labels --csv --fields key,value > labels.csv
 
 A failed command prints `{"error": {"kind", "message", "exit_code"}}` to stderr (schema
-`error`) and exits with `exit_code`: 1 generic, 2 arguments or config, 3 auth, 4 PCE error, 5
+`error`) and exits with `exit_code` (argument errors clap catches, such as an unknown flag or a
+missing value, print clap's usage text instead, exit 2): 1 generic, 2 arguments or config, 3 auth, 4 PCE error, 5
 rate limited, 6 write refused, 7 flows blocked since an enforcement.
 
 ## Writes

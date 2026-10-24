@@ -236,7 +236,7 @@ async fn refresh_reads_each_list_once_and_clear_sends_nothing() {
             .env("XDG_CACHE_HOME", h.join("cache"))
             .args(["--json", "completions", "refresh", "--clear"]);
         let out = c.assert().success();
-        serde_json::from_slice::<Value>(&out.get_output().stdout).unwrap()
+        schema_check::envelope(&out.get_output().stdout)
     };
     let requests = server.received_requests().await.unwrap().len();
     assert_eq!(clear(h)["data"]["cleared"], true);

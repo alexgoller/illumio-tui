@@ -8,20 +8,29 @@ use serde_json::{Value, json};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-/// No profile, no PCE, no config: what `schema` needs.
+/// No profile, no PCE, no config: what `schema` needs. A config and cache
+/// directory of this call only, never created.
 fn bare() -> Command {
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let dir = std::env::temp_dir().join(format!("illumio-tui-schema-{}-{n}", std::process::id()));
     let mut c = Command::cargo_bin("illumio-tui").unwrap();
     c.env_clear()
         .env("PATH", std::env::var("PATH").unwrap_or_default())
-        .env(
-            "XDG_CONFIG_HOME",
-            std::env::temp_dir().join("illumio-tui-schema-none"),
-        )
-        .env(
-            "XDG_CACHE_HOME",
-            std::env::temp_dir().join("illumio-tui-schema-none"),
-        );
+        .env("XDG_CONFIG_HOME", dir.join("config"))
+        .env("XDG_CACHE_HOME", dir.join("cache"));
     c
+}
+
+/// A server that fails the test if anything reaches it.
+async fn silent() -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(wiremock::matchers::any())
+        .respond_with(ResponseTemplate::new(500))
+        .expect(0)
+        .mount(&server)
+        .await;
+    server
 }
 
 fn cmd(server: &MockServer) -> Command {
@@ -131,6 +140,22 @@ fn schema_of_a_command_is_its_envelope_with_the_shared_meta() {
         let a = bare().args(["schema", name]).assert().success();
         let doc: Value = serde_json::from_slice(&a.get_output().stdout).unwrap();
         assert_eq!(doc["title"], format!("illumio-tui {name}"));
+    }
+}
+
+#[test]
+fn a_row_with_a_flag_types_as_listed() {
+    for (words, title) in [
+        (vec!["events", "--save-filter"], "saved-filter"),
+        (
+            vec!["traffic", "query", "--dry-run", "--json"],
+            "traffic-dry-run",
+        ),
+        (vec!["enforce", "--watch"], "enforce-watch"),
+    ] {
+        let a = bare().arg("schema").args(&words).assert().success();
+        let doc: Value = serde_json::from_slice(&a.get_output().stdout).unwrap();
+        assert_eq!(doc["title"], format!("illumio-tui {title}"), "{words:?}");
     }
 }
 
@@ -282,12 +307,80 @@ async fn csv_fields_pick_the_columns_in_their_order() {
     let mut lines = text.lines();
     assert_eq!(lines.next(), Some("href,key"));
     assert_eq!(lines.next(), Some("/orgs/5/labels/1,role"));
+    // A column this run does not print (only --unused has it) is empty.
+    let a = cmd(&server)
+        .args(["labels", "--csv", "--fields", "key,workloads"])
+        .assert()
+        .success();
+    assert_eq!(stdout(&a).lines().nth(1), Some("role,"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unknown_csv_column_exits_2_before_any_request() {
+    let server = silent().await;
     let bad = cmd(&server)
         .args(["labels", "--csv", "--fields", "nope"])
         .assert()
         .code(2);
     let err = stderr(&bad);
-    assert!(err.contains("key, value, deleted, href"), "{err}");
+    assert!(err.contains(r#"no CSV column \"nope\""#), "{err}");
+    assert!(
+        err.contains("key, value, workloads, rules, deleted, href"),
+        "{err}"
+    );
+    // Traffic too: no Explorer query for a typo.
+    let bad = cmd(&server)
+        .args(["traffic", "query", "--csv", "--fields", "nope"])
+        .assert()
+        .code(2);
+    assert!(stderr(&bad).contains("last seen"), "{}", stderr(&bad));
+    // A JSON name is no CSV column.
+    cmd(&server)
+        .args(["profile", "list", "--csv", "--fields", "is_default"])
+        .assert()
+        .code(2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn names_under_a_pass_through_object_are_open_but_not_at_the_top() {
+    let server = silent().await;
+    for args in [
+        vec!["events", "--json", "--fields", "evnt_type"],
+        vec!["marks", "list", "--json", "--fields", "typo"],
+        // A --group field on the plain list.
+        vec!["workloads", "--json", "--fields", "group_by"],
+        vec!["traffic", "query", "--json", "--fields", "sections"],
+    ] {
+        let a = cmd(&server).args(&args).assert().code(2);
+        assert!(stderr(&a).contains("no field"), "{args:?}: {}", stderr(&a));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn empty_field_names_are_refused() {
+    let server = silent().await;
+    for f in ["", ",", "status..x", ".a"] {
+        let a = cmd(&server)
+            .args(["health", "--json", "--fields", f])
+            .assert()
+            .code(2);
+        assert!(stderr(&a).contains("--fields"), "{f:?}: {}", stderr(&a));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn services_follow_their_schema() {
+    let server = MockServer::start().await;
+    mount(
+        &server,
+        "/api/v2/orgs/5/sec_policy/draft/services",
+        include_str!("../../../fixtures/services.json"),
+    )
+    .await;
+    let a = cmd(&server).args(["services", "--json"]).assert().success();
+    let out = json_out(&a);
+    assert_eq!(out["meta"]["schema"], "services");
+    assert!(!out["data"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread")]

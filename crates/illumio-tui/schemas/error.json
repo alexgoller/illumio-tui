@@ -1,5 +1,5 @@
 {
-  "description": "printed to stderr (not stdout) when a command fails; the process exits with exit_code",
+  "description": "printed to stderr (not stdout) when a command fails; the process exits with exit_code. Argument errors clap catches (an unknown flag, a missing value) print clap's usage text instead, exit 2",
   "type": "object",
   "properties": {
     "error": {

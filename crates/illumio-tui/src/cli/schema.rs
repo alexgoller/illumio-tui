@@ -2,7 +2,7 @@
 //! command's envelope, and the field names `--fields` accepts. The schemas
 //! are hand-kept files under `schemas/`, embedded here; the CLI tests check
 //! every command's real output against them, so they cannot drift.
-use super::output::{Meta, OutputFormat, TableRows, choose_format, meta_line, write_json};
+use super::output::{Meta, OutputFormat, TableRows, choose_format, write_json};
 use super::{CliError, Command, GlobalArgs};
 use clap::Args;
 use serde::Serialize;
@@ -12,7 +12,9 @@ use std::collections::BTreeSet;
 #[derive(Args, Debug, Clone, Default)]
 pub struct SchemaArgs {
     /// A command's words (`workloads ven-summary`) or a schema name
-    /// (`write`, `envelope`, `meta`, `error`); none lists them all
+    /// (`write`, `envelope`, `meta`, `error`); none lists them all. A row with a
+    /// flag types as listed: `schema events --save-filter`
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     pub command: Vec<String>,
 }
 
@@ -63,7 +65,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("app", "app"),
     ("gen", "gen"),
     ("readiness", "readiness"),
-    ("enforce", "enforce"),
+    ("enforce --to", "enforce"),
     ("enforce --rollback", "enforce-rollback"),
     ("enforce --watch", "enforce-watch"),
     ("policy rulesets", "policy-rulesets"),
@@ -386,9 +388,14 @@ fn deref<'a>(doc: &'a Value, v: &'a Value) -> &'a Value {
 
 /// The dotted field names of `data` in schema `name`, and the prefixes
 /// under which any name goes (a raw PCE object passed through).
-pub fn fields(name: &str) -> Option<(BTreeSet<String>, BTreeSet<String>)> {
+/// `branch`: of a `data` that is one of several shapes (`anyOf`), the one
+/// the command's flags print ([`branch_of`]); `None`: all of them.
+pub fn fields(name: &str, branch: Option<usize>) -> Option<(BTreeSet<String>, BTreeSet<String>)> {
     let doc = document(name)?;
-    let data = doc.get("properties")?.get("data")?;
+    let mut data = doc.get("properties")?.get("data")?;
+    if let Some(b) = branch.and_then(|i| data.get("anyOf")?.get(i)) {
+        data = b;
+    }
     let mut names = BTreeSet::new();
     let mut open = BTreeSet::new();
     collect(&doc, data, "", &mut names, &mut open, 0);
@@ -427,7 +434,8 @@ fn collect(
             collect(doc, sub, &path, names, open, depth + 1);
         }
     }
-    if is_open(v) {
+    // Open only below a named field: a name at the top must be listed.
+    if !prefix.is_empty() && is_open(v) {
         open.insert(prefix.to_string());
     }
 }
@@ -457,11 +465,10 @@ fn is_open(v: &Value) -> bool {
 }
 
 /// `--fields` against schema `name`: every name a field of `data`.
-pub fn check_fields(name: &str, wanted: &[String]) -> Result<(), CliError> {
-    let (names, open) = fields(name).unwrap_or_default();
+pub fn check_fields(name: &str, branch: Option<usize>, wanted: &[String]) -> Result<(), CliError> {
+    let (names, open) = fields(name, branch).unwrap_or_default();
     for f in wanted {
         let known = names.contains(f)
-            || open.contains("")
             || open.iter().any(|p| {
                 f.strip_prefix(p.as_str())
                     .is_some_and(|r| r.starts_with('.'))
@@ -472,8 +479,13 @@ pub fn check_fields(name: &str, wanted: &[String]) -> Result<(), CliError> {
             } else {
                 names.iter().cloned().collect::<Vec<_>>().join(", ")
             };
+            let shape = if branch.is_some() {
+                " as these flags print it"
+            } else {
+                ""
+            };
             return Err(CliError::Args(format!(
-                "--fields: no field {f:?} in {name}; valid: {valid}"
+                "--fields: no field {f:?} in {name}{shape}; valid: {valid}"
             )));
         }
     }
@@ -571,6 +583,98 @@ pub fn schema_of(command: &Command) -> Option<&'static str> {
     })
 }
 
+/// Of a schema whose `data` is one of several shapes (`anyOf`), the shape
+/// the command's flags select, so `--fields` takes only its names. `None`:
+/// one shape, or one the outcome decides (a bulk plan or report, a write's
+/// variants), where the names of every shape go.
+pub fn branch_of(command: &Command) -> Option<usize> {
+    use super::policy::{PolicyCmd as P, RulesAction as RA};
+    use super::traffic::{ByArg, TrafficCmd as T};
+    if super::filters::saves_filter(command) {
+        return None;
+    }
+    match command {
+        // workloads.json: the list, then --group.
+        Command::Workloads(c) if c.action.is_none() => Some(usize::from(c.group.is_some())),
+        Command::Traffic(t) if t.filter().is_some_and(|f| f.dry_run) => None,
+        // traffic-query.json: flows, --group, --blocked.
+        Command::Traffic(T::Query(q)) if q.blocked => Some(2),
+        Command::Traffic(T::Query(q)) => Some(usize::from(!q.group.is_empty())),
+        // traffic-groups.json: pairs, sections.
+        Command::Traffic(T::Groups(g)) => Some(usize::from(!matches!(g.by, ByArg::Pairs))),
+        // policy-rules-impact.json: the rule, --list.
+        Command::Policy(P::Rules(c)) => match &c.action {
+            Some(RA::Impact(i)) => Some(usize::from(i.list.is_some())),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The command a `COMMANDS` row names, parsed as clap would (placeholder
+/// values for its required arguments); `None` when it does not parse.
+pub fn command_for(row: &str) -> Option<Command> {
+    use clap::{CommandFactory, Parser};
+    let mut parts = row.split(" --");
+    let words = parts.next()?;
+    let mut argv: Vec<String> = vec!["illumio-tui".into()];
+    let mut cmd = super::Cli::command();
+    cmd.build();
+    for w in words.split(' ') {
+        argv.push(w.into());
+        cmd = cmd.find_subcommand(w)?.clone();
+    }
+    let placeholder = |a: &clap::Arg| {
+        a.get_possible_values()
+            .first()
+            .map(|v| v.get_name().to_string())
+            .unwrap_or_else(|| "1".into())
+    };
+    for flag in parts {
+        argv.push(format!("--{flag}"));
+        let arg = cmd.get_arguments().find(|a| a.get_long() == Some(flag))?;
+        if arg.get_action().takes_values() {
+            argv.push(placeholder(arg));
+        }
+    }
+    for a in cmd
+        .get_opts()
+        .filter(|a| a.is_required_set() && !a.is_global_set())
+    {
+        argv.push(format!("--{}", a.get_long()?));
+        argv.push(placeholder(a));
+    }
+    for g in cmd.get_groups().filter(|g| g.is_required_set()) {
+        let given = |a: &clap::Arg| {
+            a.get_long()
+                .is_some_and(|l| argv.contains(&format!("--{l}")))
+        };
+        let members: Vec<&clap::Arg> = g
+            .get_args()
+            .filter_map(|id| cmd.get_arguments().find(|a| a.get_id() == id))
+            .collect();
+        if members.iter().any(|a| given(a)) {
+            continue;
+        }
+        if let Some((a, long)) = members.first().and_then(|a| Some((*a, a.get_long()?))) {
+            argv.push(format!("--{long}"));
+            argv.push(placeholder(a));
+        }
+    }
+    // The required positionals; failing that (`required_unless_present`),
+    // every positional.
+    let mut positionals: Vec<&clap::Arg> = cmd.get_positionals().collect();
+    positionals.sort_by_key(|a| a.get_index());
+    let with = |all: bool| {
+        let mut argv = argv.clone();
+        for a in positionals.iter().filter(|a| all || a.is_required_set()) {
+            argv.push(placeholder(a));
+        }
+        super::Cli::try_parse_from(argv).ok()
+    };
+    with(false).or_else(|| with(true))?.command
+}
+
 /// A row of `schema`'s list.
 #[derive(Debug, Serialize)]
 pub struct SchemaRow {
@@ -627,24 +731,39 @@ pub fn run(global: &GlobalArgs, args: &SchemaArgs) -> Result<(), CliError> {
         let mut out = std::io::stdout().lock();
         match format {
             OutputFormat::Json => write_json(&mut out, &rows, &meta)?,
-            OutputFormat::Table => {
-                super::output::write_table(&mut out, &rows)?;
-                eprintln!("{}", meta_line(&meta));
-            }
-            OutputFormat::Csv => {
-                super::output::write_table_csv(&mut out, &rows)?;
-                eprintln!("{}", meta_line(&meta));
-            }
+            // No meta line: nothing was asked of a PCE.
+            OutputFormat::Table => super::output::write_table(&mut out, &rows)?,
+            OutputFormat::Csv => super::output::write_table_csv(&mut out, &rows)?,
         }
         return Ok(());
     }
-    let words = args.command.join(" ");
+    // Output flags given after the words land among them.
+    let words: Vec<&str> = args
+        .command
+        .iter()
+        .map(String::as_str)
+        .filter(|w| !matches!(*w, "--json" | "--table" | "--csv"))
+        .collect();
+    let words = words.join(" ");
     let name = resolve(&words).ok_or_else(|| {
-        let mut valid: Vec<&str> = COMMANDS.iter().map(|(c, _)| *c).collect();
-        valid.dedup();
+        let first = words.split(' ').next().unwrap_or_default();
+        let near: Vec<&str> = COMMANDS
+            .iter()
+            .map(|(c, _)| *c)
+            .filter(|c| c.split(' ').next() == Some(first))
+            .collect();
+        let valid = if near.is_empty() {
+            let mut top: Vec<&str> = COMMANDS
+                .iter()
+                .filter_map(|(c, _)| c.split(' ').next())
+                .collect();
+            top.dedup();
+            format!("commands: {}", top.join(", "))
+        } else {
+            format!("{first} commands: {}", near.join(", "))
+        };
         CliError::Args(format!(
-            "schema: no command or schema {words:?}; commands: {}; shared: {}",
-            valid.join(", "),
+            "schema: no command or schema {words:?}; {valid}; shared: {}",
             SHARED
                 .iter()
                 .map(|(s, _)| *s)
@@ -652,7 +771,21 @@ pub fn run(global: &GlobalArgs, args: &SchemaArgs) -> Result<(), CliError> {
                 .join(", ")
         ))
     })?;
-    let doc = document(name).expect("every listed schema is embedded");
+    let mut doc = document(name).expect("every listed schema is embedded");
+    // By command words: also the CSV columns `--csv --fields` takes.
+    let columns = COMMANDS
+        .iter()
+        .any(|(c, _)| *c == words)
+        .then(|| command_for(&words))
+        .flatten()
+        .map(|c| super::columns::csv_columns(&c))
+        .filter(|c| !c.is_empty());
+    if let (Some(cols), Some(o)) = (columns, doc.as_object_mut()) {
+        o.insert(
+            "$comment".into(),
+            Value::String(format!("--csv columns: {}", cols.join(", "))),
+        );
+    }
     let mut out = std::io::stdout().lock();
     serde_json::to_writer_pretty(&mut out, &doc).map_err(std::io::Error::from)?;
     use std::io::Write;
@@ -689,7 +822,9 @@ mod tests {
         leaves(&super::super::Cli::command(), "", &mut paths);
         assert!(paths.len() > 50, "{paths:?}");
         for p in &paths {
-            let listed = COMMANDS.iter().any(|(c, _)| c == p);
+            let listed = COMMANDS
+                .iter()
+                .any(|(c, _)| c.split(" --").next() == Some(p.as_str()));
             let none = NO_ENVELOPE.iter().any(|c| c == p);
             assert!(
                 listed || none,
@@ -717,6 +852,115 @@ mod tests {
             if *name != "defs" {
                 assert!(document(name).is_some(), "{name}");
             }
+        }
+    }
+
+    #[test]
+    fn every_row_names_the_schema_its_command_prints() {
+        for (row, name) in COMMANDS {
+            let cmd = command_for(row).unwrap_or_else(|| panic!("{row}: does not parse"));
+            assert_eq!(schema_of(&cmd), Some(*name), "{row}");
+        }
+    }
+
+    #[test]
+    fn every_command_with_csv_lists_its_columns() {
+        let mut wrong = Vec::new();
+        for (row, _) in COMMANDS {
+            let cmd = command_for(row).unwrap();
+            let refused = super::super::csv_refusal(&cmd).is_some();
+            let cols = super::super::columns::csv_columns(&cmd);
+            // `app` prints CSV per --section only.
+            let per_section = matches!(cmd, Command::App(_));
+            if cols.is_empty() != (refused || per_section) {
+                wrong.push(format!("{row}: refused {refused}, columns {cols:?}"));
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    /// Every embedded file: only the validator's keywords, every `$ref`
+    /// resolves, `required` names its properties, and every object says
+    /// whether it is closed (`additionalProperties`), or is a documented
+    /// pass-through (`$comment`).
+    #[test]
+    fn schema_files_are_closed_and_well_formed() {
+        const KNOWN: &[&str] = &[
+            "$schema",
+            "$defs",
+            "$comment",
+            "$ref",
+            "title",
+            "description",
+            "examples",
+            "type",
+            "properties",
+            "required",
+            "additionalProperties",
+            "items",
+            "enum",
+            "const",
+            "oneOf",
+            "anyOf",
+        ];
+        fn walk(doc: &Value, v: &Value, at: &str) {
+            let Some(o) = v.as_object() else {
+                panic!("{at}: a schema is an object")
+            };
+            for k in o.keys() {
+                assert!(KNOWN.contains(&k.as_str()), "{at}: keyword {k:?}");
+            }
+            if let Some(r) = o.get("$ref").and_then(Value::as_str) {
+                let name = r.strip_prefix("#/$defs/").expect("local ref");
+                assert!(doc["$defs"].get(name).is_some(), "{at}: no $defs/{name}");
+            }
+            let object = o.get("type").is_some_and(|t| {
+                t == "object"
+                    || t.as_array()
+                        .is_some_and(|a| a.iter().any(|t| t == "object"))
+            }) || o.contains_key("properties");
+            if object {
+                assert!(
+                    o.contains_key("additionalProperties") || o.contains_key("$comment"),
+                    "{at}: say additionalProperties"
+                );
+            }
+            if let (Some(req), Some(props)) = (o.get("required"), o.get("properties")) {
+                for r in req.as_array().unwrap() {
+                    assert!(
+                        props.get(r.as_str().unwrap()).is_some(),
+                        "{at}: required {r}"
+                    );
+                }
+            }
+            for (k, sub) in o {
+                match k.as_str() {
+                    "properties" | "$defs" => {
+                        for (n, x) in sub.as_object().unwrap() {
+                            walk(doc, x, &format!("{at}.{n}"));
+                        }
+                    }
+                    "items" => walk(doc, sub, &format!("{at}[]")),
+                    "additionalProperties" if sub.is_object() => walk(doc, sub, &format!("{at}.*")),
+                    "anyOf" | "oneOf" => {
+                        for (i, b) in sub.as_array().unwrap().iter().enumerate() {
+                            walk(doc, b, &format!("{at}|{i}"));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let names = FILES.iter().map(|(n, _)| *n).filter(|n| *n != "defs");
+        for name in names.chain(["envelope"]) {
+            let doc = document(name).unwrap();
+            walk(&doc, &doc, name);
+        }
+        // defs.json: every shared shape, used or not.
+        let (_, defs) = split_defs(file("defs").unwrap());
+        let doc = json!({"$defs": defs});
+        for (n, d) in &defs {
+            walk(&doc, d, n);
         }
     }
 
@@ -756,10 +1000,17 @@ mod tests {
 
     #[test]
     fn unknown_fields_name_the_valid_ones() {
-        let e = check_fields("health", &["nope".into()]).unwrap_err();
+        let e = check_fields("health", None, &["nope".into()]).unwrap_err();
         let msg = e.to_string();
         assert!(msg.contains("no field \"nope\" in health"), "{msg}");
         assert!(msg.contains("host"), "{msg}");
-        assert!(check_fields("health", &["host".into(), "ok".into()]).is_ok());
+        assert!(check_fields("health", None, &["host".into(), "ok".into()]).is_ok());
+        // An open object takes any name below it, never at the top.
+        assert!(check_fields("health", None, &["status.anything".into()]).is_ok());
+        assert!(check_fields("events", None, &["evnt_type".into()]).is_err());
+        assert!(check_fields("events", None, &["action.api_endpoint".into()]).is_ok());
+        // A shape's names only on the flags that print it.
+        assert!(check_fields("workloads", Some(0), &["group_by".into()]).is_err());
+        assert!(check_fields("workloads", Some(1), &["group_by".into()]).is_ok());
     }
 }

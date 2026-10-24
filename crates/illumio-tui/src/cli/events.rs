@@ -124,7 +124,7 @@ impl EventsArgs {
     }
 }
 
-const HEADERS: [&str; 6] = [
+pub(crate) const HEADERS: [&str; 6] = [
     "timestamp",
     "severity",
     "type",

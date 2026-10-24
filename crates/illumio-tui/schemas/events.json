@@ -12,8 +12,10 @@
       "severity": {"type": "string"},
       "status": {"type": "string"},
       "created_by": {"$comment": "passed through"},
-      "action": {"$comment": "passed through"},
+      "action": {"$comment": "passed through: the API call (api_endpoint, api_method, http_status_code, src_ip)"},
       "pce_fqdn": {"type": "string"},
+      "info": {"$comment": "passed through"},
+      "version": {"$comment": "passed through"},
       "changes": {
         "type": "array",
         "items": {

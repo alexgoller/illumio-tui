@@ -171,6 +171,9 @@ pub struct Selection {
     pub schema: Option<&'static str>,
     /// Deduplicated, in the order given.
     pub fields: Vec<String>,
+    /// Every column the command can print with `--csv`
+    /// (`columns::csv_columns`).
+    pub csv_columns: Vec<&'static str>,
 }
 
 static SELECTION: OnceLock<Selection> = OnceLock::new();
@@ -258,11 +261,24 @@ pub fn pick_json(data: Value, fields: &[String]) -> Value {
     PathTree::new(fields).apply(data)
 }
 
-/// `--fields` on CSV: the named columns, in the order named.
+/// Non-empty `data` that `--fields` left with nothing: `{}`, or only `{}`s.
+fn picked_nothing(data: &Value) -> bool {
+    let empty = |v: &Value| v.as_object().is_some_and(Map::is_empty);
+    match data {
+        Value::Array(a) => !a.is_empty() && a.iter().all(empty),
+        v => empty(v),
+    }
+}
+
+/// `--fields` on CSV: the named columns, in the order named. A column the
+/// command can print (`known`) that this table has not (a draft column
+/// without `--draft`) is printed empty; any other name is an error (a
+/// backstop: the names were checked against `known` before the request).
 pub fn pick_csv(
     headers: &[&str],
     rows: &[Vec<String>],
     fields: &[String],
+    known: &[&str],
 ) -> Result<(Vec<String>, Vec<Vec<String>>), CliError> {
     if let Some(f) = fields.iter().find(|f| f.contains('.')) {
         return Err(CliError::Args(format!(
@@ -273,7 +289,8 @@ pub fn pick_csv(
     let mut at = Vec::with_capacity(fields.len());
     for f in fields {
         match headers.iter().position(|h| h == f) {
-            Some(i) => at.push(i),
+            Some(i) => at.push(Some(i)),
+            None if known.contains(&f.as_str()) => at.push(None),
             None => {
                 return Err(CliError::Args(format!(
                     "--fields: no column {f:?}; the CSV columns are: {}",
@@ -286,7 +303,7 @@ pub fn pick_csv(
         .iter()
         .map(|r| {
             at.iter()
-                .map(|&i| r.get(i).cloned().unwrap_or_default())
+                .map(|i| i.and_then(|i| r.get(i).cloned()).unwrap_or_default())
                 .collect()
         })
         .collect();
@@ -452,6 +469,14 @@ pub fn write_json<T: Serialize>(
         None => serde_json::to_writer_pretty(&mut *out, &Envelope { data, meta })?,
         Some(s) => {
             let data = pick_json(serde_json::to_value(data)?, &s.fields);
+            if picked_nothing(&data) {
+                // A shape the outcome chose (a plan, not a report) without
+                // those fields: say so rather than print empty objects.
+                eprintln!(
+                    "warning: --fields {}: no field of this output",
+                    s.fields.join(",")
+                );
+            }
             serde_json::to_writer_pretty(&mut *out, &Envelope { data: &data, meta })?
         }
     }
@@ -488,10 +513,19 @@ pub fn write_table_csv<T: TableRows + ?Sized>(
 ) -> Result<(), CliError> {
     let headers = data.full_headers();
     let rows = data.full_rows();
+    if let Some(s) = selection() {
+        // `--fields` names were checked against this list before the
+        // request: it must hold every column printed.
+        debug_assert!(
+            headers.iter().all(|h| s.csv_columns.contains(h)),
+            "columns::csv_columns misses some of {headers:?} for {:?}",
+            s.schema
+        );
+    }
     match selection().filter(|s| !s.fields.is_empty()) {
         None => write_csv(out, &headers, &rows)?,
         Some(s) => {
-            let (headers, rows) = pick_csv(&headers, &rows, &s.fields)?;
+            let (headers, rows) = pick_csv(&headers, &rows, &s.fields, &s.csv_columns)?;
             let headers: Vec<&str> = headers.iter().map(String::as_str).collect();
             write_csv(out, &headers, &rows)?
         }
@@ -673,7 +707,7 @@ mod tests {
     #[test]
     fn pick_csv_orders_columns_and_names_the_valid_ones() {
         let rows = vec![vec!["1".to_string(), "2".into(), "3".into()]];
-        let (h, r) = pick_csv(&["a", "b", "c"], &rows, &["c".into(), "a".into()]).unwrap();
+        let (h, r) = pick_csv(&["a", "b", "c"], &rows, &["c".into(), "a".into()], &[]).unwrap();
         assert_eq!(
             (h, r),
             (
@@ -681,14 +715,29 @@ mod tests {
                 vec![vec!["3".to_string(), "1".into()]]
             )
         );
-        let e = pick_csv(&["a", "b"], &rows, &["x".into()])
+        let e = pick_csv(&["a", "b"], &rows, &["x".into()], &[])
             .unwrap_err()
             .to_string();
         assert!(e.contains("no column \"x\"") && e.contains("a, b"), "{e}");
-        let e = pick_csv(&["a"], &rows, &["a.b".into()])
+        let e = pick_csv(&["a"], &rows, &["a.b".into()], &["a.b"])
             .unwrap_err()
             .to_string();
         assert!(e.contains("dotted path"), "{e}");
+        // A known column this table lacks prints empty.
+        let (h, r) = pick_csv(
+            &["a"],
+            &rows,
+            &["draft".into(), "a".into()],
+            &["a", "draft"],
+        )
+        .unwrap();
+        assert_eq!(
+            (h, r),
+            (
+                vec!["draft".to_string(), "a".into()],
+                vec![vec![String::new(), "1".into()]]
+            )
+        );
     }
 
     #[test]
