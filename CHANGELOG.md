@@ -2,6 +2,25 @@
 
 Every illumio-tui release, newest first. Downloads, packages and checksums for each one are on [GitHub Releases](https://github.com/alexgoller/illumio-tui/releases).
 
+## v0.5.5 — 2026-10-24
+
+### New
+
+- **Events: filter by actor** (#71). Find who changed what without leaving the screen. It filters the loaded events only: no extra requests and no reload.
+  - Same term syntax as the type filter: comma terms, `!` excludes, `=` exact, `*` globs, case-insensitive. A term matches the whole actor (`user:alex@ryte.de`, `agent:web01`, `system`) or the name after its kind, so `=alex@ryte.de`, `user:*` and `!system` all work.
+  - TUI: an **Actor** field in `f` with `Ctrl-N`/`Ctrl-P` completion from the loaded events. **`u`** keeps only the selected row's actor, **`U`** hides it. In the `t` overlay, **`Tab`** switches between Types and Actors.
+  - CLI: `events --actor TERMS` and `--exclude-actor TERMS` (both repeatable).
+  - Saved Events filters keep `actor`.
+- **For agents and scripts** (#73).
+  - `illumio-tui schema` lists every command with JSON output; `schema workloads ven-summary` prints that command's JSON Schema (and its CSV columns). No PCE or profile needed. The schemas are checked against real output in the test suite, so they cannot drift.
+  - Every JSON envelope names its schema in `meta.schema`.
+  - `--fields a,b.c` on every `--json` / `--csv` command. JSON: keeps only those fields of `data` (row by row for lists; dotted paths reach nested fields). CSV: picks the columns and sets their order. An unknown name is exit 2, with the valid names listed, **before any request to the PCE**.
+  - See "Agents and scripts" in the README and on the site.
+
+### Changed
+
+- When the reader closes the pipe (`illumio-tui … | head`), a command now ends quietly with exit status 141 instead of printing a "Broken pipe" error.
+
 ## v0.5.4 — 2026-10-24
 
 ### New

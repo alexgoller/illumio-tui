@@ -45,6 +45,7 @@
 <p><a href="./">&larr; Back to the site</a></p>
 <nav class="toc" aria-label="Releases">
 <ul>
+<li><a href="#v0.5.5">v0.5.5</a> <span>2026-10-24</span></li>
 <li><a href="#v0.5.4">v0.5.4</a> <span>2026-10-24</span></li>
 <li><a href="#v0.5.3">v0.5.3</a> <span>2026-10-23</span></li>
 <li><a href="#v0.5.2">v0.5.2</a> <span>2026-10-21</span></li>
@@ -75,6 +76,33 @@
 <li><a href="#v0.1.0">v0.1.0</a> <span>2026-10-12</span></li>
 </ul>
 </nav>
+</section>
+
+<section class="panel release" id="v0.5.5" aria-labelledby="v0.5.5-h">
+  <h2 id="v0.5.5-h"><a href="#v0.5.5">v0.5.5</a> <span class="date">2026-10-24</span></h2>
+<h3>New</h3>
+<ul>
+<li><strong>Events: filter by actor</strong> (<a href="https://github.com/alexgoller/illumio-tui/issues/71">#71</a>). Find who changed what without leaving the screen. It filters the loaded events only: no extra requests and no reload.
+<ul>
+<li>Same term syntax as the type filter: comma terms, <code>!</code> excludes, <code>=</code> exact, <code>*</code> globs, case-insensitive. A term matches the whole actor (<code>user:alex@ryte.de</code>, <code>agent:web01</code>, <code>system</code>) or the name after its kind, so <code>=alex@ryte.de</code>, <code>user:*</code> and <code>!system</code> all work.</li>
+<li>TUI: an <strong>Actor</strong> field in <code>f</code> with <code>Ctrl-N</code>/<code>Ctrl-P</code> completion from the loaded events. <strong><code>u</code></strong> keeps only the selected row's actor, <strong><code>U</code></strong> hides it. In the <code>t</code> overlay, <strong><code>Tab</code></strong> switches between Types and Actors.</li>
+<li>CLI: <code>events --actor TERMS</code> and <code>--exclude-actor TERMS</code> (both repeatable).</li>
+<li>Saved Events filters keep <code>actor</code>.</li>
+</ul>
+</li>
+<li><strong>For agents and scripts</strong> (<a href="https://github.com/alexgoller/illumio-tui/issues/73">#73</a>).
+<ul>
+<li><code>illumio-tui schema</code> lists every command with JSON output; <code>schema workloads ven-summary</code> prints that command's JSON Schema (and its CSV columns). No PCE or profile needed. The schemas are checked against real output in the test suite, so they cannot drift.</li>
+<li>Every JSON envelope names its schema in <code>meta.schema</code>.</li>
+<li><code>--fields a,b.c</code> on every <code>--json</code> / <code>--csv</code> command. JSON: keeps only those fields of <code>data</code> (row by row for lists; dotted paths reach nested fields). CSV: picks the columns and sets their order. An unknown name is exit 2, with the valid names listed, <strong>before any request to the PCE</strong>.</li>
+<li>See &quot;Agents and scripts&quot; in the README and on the site.</li>
+</ul>
+</li>
+</ul>
+<h3>Changed</h3>
+<ul>
+<li>When the reader closes the pipe (<code>illumio-tui … | head</code>), a command now ends quietly with exit status 141 instead of printing a &quot;Broken pipe&quot; error.</li>
+</ul>
 </section>
 
 <section class="panel release" id="v0.5.4" aria-labelledby="v0.5.4-h">
