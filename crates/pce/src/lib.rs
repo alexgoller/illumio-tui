@@ -30,6 +30,7 @@ pub mod resolve;
 pub mod rule_filter;
 pub mod traffic;
 pub mod ven;
+pub mod where_used;
 pub mod write;
 
 use std::sync::Arc;
@@ -44,7 +45,7 @@ pub use key_order::KeyOrder;
 pub use label_filter::{LabelFilter, LabelTerm};
 pub use resolve::{
     NameIndex, ResolvedActor, ResolvedLabel, ResolvedService, RuleKind, RuleSetView, RuleView,
-    describe_actor, describe_ingress_service,
+    describe_actor, describe_ingress_service, pane_order,
 };
 pub use rule_filter::{ActorTerm, Position, RuleFilter, RuleRef, RuleTerm};
 
@@ -341,6 +342,29 @@ impl Pce {
             .await?;
         self.observe(&c, |o, v, all| o.workloads(v, all && unfiltered));
         Ok(c)
+    }
+
+    /// How many workloads carry label `href`, as far as one row tells:
+    /// one read filtered by the label with `max_results=1` (cached like any
+    /// workload read), never the list. No row is an exact zero, one row a
+    /// lower bound ([`where_used::WorkloadCount::from_probe`]).
+    pub async fn label_workload_probe(
+        &self,
+        href: &str,
+        mode: CacheMode,
+    ) -> Result<Cached<where_used::WorkloadCount>> {
+        let filter = models::WorkloadFilter {
+            labels: vec![vec![href.to_string()]],
+            max_results: Some(1),
+            ..models::WorkloadFilter::default()
+        };
+        let c = self.workloads(&filter, mode).await?;
+        Ok(Cached {
+            value: where_used::WorkloadCount::from_probe(c.value.len()),
+            age: c.age,
+            hit: c.hit,
+            truncated: false,
+        })
     }
 
     pub const DEFAULT_EVENTS_MAX_RESULTS: u32 = 500;

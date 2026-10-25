@@ -20,14 +20,9 @@ pub(super) fn service_names(v: &[pce::ResolvedService]) -> String {
     plain_names(v.iter().map(|s| s.name.as_str()))
 }
 
-/// Evaluation order of the rule kinds: an override deny beats an allow,
-/// which beats a plain deny.
+/// Evaluation order of the rule kinds ([`RuleKind::rank`]).
 pub(super) fn rule_rank(kind: RuleKind) -> u8 {
-    match kind {
-        RuleKind::OverrideDeny => 0,
-        RuleKind::Allow => 1,
-        RuleKind::Deny => 2,
-    }
+    kind.rank()
 }
 
 pub fn rule_kind_name(kind: RuleKind) -> &'static str {
@@ -167,10 +162,7 @@ pub fn scope_cell(r: &RuleView) -> &'static str {
 /// The order of the rules pane: by evaluation ([`rule_rank`]), the allow
 /// rules intra-scope first, then extra-scope, as the PCE lists them.
 pub(super) fn rule_order(r: &RuleView) -> (u8, bool) {
-    (
-        rule_rank(r.kind),
-        r.kind == RuleKind::Allow && r.unscoped_consumers,
-    )
+    pce::pane_order(r.kind, r.unscoped_consumers)
 }
 
 pub fn rule_columns() -> Vec<Column<RuleRow>> {

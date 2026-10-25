@@ -1284,3 +1284,52 @@ async fn the_observer_hears_of_fresh_reads_only_and_whether_they_are_whole() {
         "a cache hit is not told; a truncated or filtered read is a part"
     );
 }
+
+#[tokio::test]
+async fn label_workload_probe_reads_one_row_filtered_by_the_label_once() {
+    // The X-Total-Count (the whole collection) says nothing of the label:
+    // one row is "at least one", none an exact zero.
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .and(query_param("labels", r#"[["/orgs/5/labels/4"]]"#))
+        .and(query_param("max_results", "1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!([{"href": "/orgs/5/workloads/1"}]))
+                .insert_header("X-Total-Count", "206"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .and(query_param("labels", r#"[["/orgs/5/labels/5"]]"#))
+        .and(query_param("max_results", "1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!([]))
+                .insert_header("X-Total-Count", "206"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let p = pce_for(&server);
+    let one = p
+        .label_workload_probe("/orgs/5/labels/4", CacheMode::Use)
+        .await
+        .unwrap();
+    assert_eq!((one.value.count, one.value.exact, one.hit), (1, false, false));
+    let again = p
+        .label_workload_probe("/orgs/5/labels/4", CacheMode::Use)
+        .await
+        .unwrap();
+    assert!(again.hit, "cached: no second request");
+    let none = p
+        .label_workload_probe("/orgs/5/labels/5", CacheMode::Use)
+        .await
+        .unwrap();
+    assert_eq!((none.value.count, none.value.exact), (0, true));
+    assert_eq!(p.stats().calls, 2);
+    server.verify().await;
+}

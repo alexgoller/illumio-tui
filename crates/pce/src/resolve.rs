@@ -423,6 +423,25 @@ pub enum RuleKind {
     OverrideDeny,
 }
 
+impl RuleKind {
+    /// Evaluation order of the rule kinds: an override deny beats an
+    /// allow, which beats a plain deny.
+    pub fn rank(self) -> u8 {
+        match self {
+            RuleKind::OverrideDeny => 0,
+            RuleKind::Allow => 1,
+            RuleKind::Deny => 2,
+        }
+    }
+}
+
+/// The order the Policy screen lists a ruleset's rules in (where-used
+/// numbers them by it): by evaluation ([`RuleKind::rank`]), the allow rules
+/// intra-scope first, then extra-scope (`unscoped`).
+pub fn pane_order(kind: RuleKind, unscoped: bool) -> (u8, bool) {
+    (kind.rank(), kind == RuleKind::Allow && unscoped)
+}
+
 /// A rule with every href turned into a name. What the CLI prints and the
 /// TUI lists.
 #[derive(Debug, Clone, Serialize)]
