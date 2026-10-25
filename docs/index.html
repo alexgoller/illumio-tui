@@ -816,7 +816,7 @@ summary  provision 9 rule_sets, 2 services</code></pre>
 <section class="panel" id="writes" aria-labelledby="writes-h">
   <h2 id="writes-h"><span class="key">7</span>Writes, on purpose</h2>
   <p class="lede">Off unless the profile says yes. Planned, shown, confirmed, audited.</p>
-  <p>illumio-tui writes labels, IP lists, services, unmanaged workloads, and policy: rulesets, allow and deny rules, provisioning, and the labels of VEN-managed workloads. None of it happens by accident:</p>
+  <p>illumio-tui writes labels, IP lists, services, unmanaged workloads, pairing profiles (CLI), and policy: rulesets, allow and deny rules, provisioning, and the labels of VEN-managed workloads. None of it happens by accident:</p>
   <ul>
     <li><strong>The profile gates it.</strong> Without <code>writes = true</code> (or <code>ILLUMIO_WRITES=1</code>) every write is refused with exit code 6, even a dry run.</li>
     <li><strong>The CLI needs <code>--yes</code>.</strong> <code>--dry-run</code> prints the exact method, path and JSON body and sends nothing; with neither flag nothing is sent. Nothing is ever retried.</li>
@@ -850,7 +850,10 @@ summary  provision 9 rule_sets, 2 services</code></pre>
 <span class="p">$ </span>illumio-tui policy rules add Web-Tier --provider app=web --consumer iplist:Corp --service 443/tcp --dry-run --impact
 <span class="p">$ </span>illumio-tui policy provision --all --dry-run
 <span class="p">$ </span>illumio-tui workloads enforce full --label app=shop --label env=prod --yes --confirm-count 14
-<span class="p">$ </span>illumio-tui workloads relabel --set env=prod,role=- --label app=shop --dry-run</code></pre>
+<span class="p">$ </span>illumio-tui workloads relabel --set env=prod,role=- --label app=shop --dry-run
+<span class="p">$ </span>illumio-tui pairing-profiles create shop-prod --label app=shop --label env=prod --enforcement visibility_only --lifespan 7d --lock app,env --dry-run
+<span class="p">$ </span>illumio-tui pp delete shop-prod --yes</code></pre>
+  <p><code>pairing-profiles create</code> sends the name plus only the flags given, so the PCE's defaults apply to the rest; a taken name or an unknown label is exit 2 before anything is sent. Pairing keys are left out: an activation code is a secret.</p>
   <p>Rules use a compact token grammar: <code>app=web</code>, <code>group:NAME</code>, <code>iplist:NAME</code>, <code>workload:HOST</code>, <code>all</code>, and <code>!</code> to exclude. <code>--impact</code> on a rule write reports the workloads it will touch before anything is sent. The <a href="https://github.com/alexgoller/illumio-tui#writes">README</a> has the full reference.</p>
 </section>
 

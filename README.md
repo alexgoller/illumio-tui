@@ -143,7 +143,8 @@ so do enum values (`--direction`, `--format`, `--theme`, `events --severity`
 
 PCE names complete too, from a per-profile names cache on disk: labels as
 `key=value` (`workloads --label`, `relabel --set`, `--add-label`,
-`--remove-label`, `workloads add --label`, `policy search --label`), apps
+`--remove-label`, `workloads add --label`, `policy search --label`,
+`pairing-profiles create --label`), apps
 (`readiness --app`, `enforce`, `app`, `gen`, `traffic --app`), workload
 hostnames (`--hostname`, `workloads update`), traffic terms (`--src`, `--dst`,
 `--exclude-src`, `--exclude-dst`: `key=value`, `wl:HOST`, `ipl:NAME`),
@@ -893,6 +894,7 @@ the API call and byte counters at all times.
     illumio-tui policy search scope:app=payment -svc:443/tcp --table
     illumio-tui policy search src:all -deny --json
     illumio-tui iplists --table
+    illumio-tui pairing-profiles list --table      # alias: pp list
     illumio-tui policy pending
     illumio-tui policy pending --diff --table
     illumio-tui events --since 1h --severity err
@@ -1509,6 +1511,53 @@ connection, gateway status (502/503/504) or undecodable 2xx body is
 retrying"), audited with `phase: "sent"`. Exit code 6 means the guard refused
 (profile, flag, or audit log not writable). `health --json` reports
 `"writes": true|false`. Policy writes are below.
+
+### Pairing profiles
+
+`pairing-profiles` (alias `pp`) lists the PCE's pairing profiles and creates
+or deletes one. Pairing keys (activation codes) are left out: a key is a
+secret. Updating a profile is not supported; delete and create it.
+
+    illumio-tui pairing-profiles list --table
+    illumio-tui pp list --csv --fields name,enabled,labels
+    illumio-tui pairing-profiles create shop-prod --label app=shop --label env=prod \
+        --enforcement visibility_only --visibility flow_summary --ven-type server \
+        --uses 1 --lifespan 7d --lock app,env,enforcement --description "shop web tier" --dry-run
+    illumio-tui pairing-profiles create lab-endpoints --disabled --yes
+    illumio-tui pairing-profiles delete shop-prod --yes
+
+`list` is one cached read of `/pairing_profiles`, plus the labels list
+(cached) when a profile carries labels, to print them as `key=value`.
+Columns: name, enabled, labels, enforcement, visibility, ven type, uses per
+key, key lifespan, the locks set, href; `--json` passes every profile
+through as the PCE returned it, `--csv` prints the lifespan in seconds.
+
+`create NAME` sends `name` plus only the flags given, so the PCE applies its
+own defaults to the rest:
+
+| Flag | Sent as |
+|------|---------|
+| `--description TEXT` | `description` |
+| `--label KEY=VALUE` (repeatable, one per key) | `labels: [{href}]`, resolved through the labels list |
+| `--enforcement idle\|visibility_only\|selective\|full` (`visibility-only` too) | `enforcement_mode` |
+| `--visibility flow_summary\|flow_drops\|flow_off\|enhanced_data_collection` (or `blocked-allowed`, `blocked`, `off`, `enhanced`) | `visibility_level` |
+| `--ven-type server\|endpoint\|specified-during-activation` | `ven_type` (`specified_during_activation`) |
+| `--uses N\|unlimited` | `allowed_uses_per_key`: a number ≥ 1 or `"unlimited"` |
+| `--lifespan DURATION\|unlimited` (`3600`, `1h`, `7d`) | `key_lifespan` in seconds, or `"unlimited"` |
+| `--disabled` | `enabled: false` (the default is enabled) |
+| `--lock role,app,env,loc,enforcement,visibility,log-traffic` | `role_label_lock`, `app_label_lock`, `env_label_lock`, `loc_label_lock`, `enforcement_mode_lock`, `visibility_level_lock`, `log_traffic_lock`: `true` |
+
+The name must be new: a name already in the pairing profile list (one
+cached read) is exit 2, as is an unknown label (with the similar ones
+listed), a second label of one key, an unknown lock or a bad value; nothing
+is sent. Sent, `data` is the created profile as the PCE returned it (the
+table shows its name and href), with `meta.write` as for every write.
+`delete NAME|HREF` resolves an exact name against the list (exit 2 if
+unknown or ambiguous; an href is used as given, with no read), sends
+`DELETE` on the href and prints `deleted NAME` (`--json`:
+`{"deleted", "href"}`). Pairing profiles are not policy objects: a write
+applies at once, nothing waits for provisioning. A dry run prints the request
+as every write does.
 
 ### Policy writes
 
