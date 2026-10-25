@@ -22,6 +22,7 @@ pub mod readiness;
 pub mod schema;
 pub mod traffic;
 pub mod traffic_explain;
+pub mod where_used;
 pub mod workloads;
 pub mod write;
 
@@ -153,6 +154,20 @@ pub enum Command {
     /// Rulesets, rules, deny rules, pending changes, provisioning
     #[command(subcommand)]
     Policy(policy::PolicyCmd),
+    /// What names a label, label group, IP list or service in the draft policy (read-only)
+    ///
+    /// One row per reference: ruleset scopes, rules (provider, consumer or service side; allow,
+    /// deny or override deny; pending and disabled marked) and the label groups holding it,
+    /// directly or through a nested group (via); a rule naming such a group is listed via it.
+    /// For a label, a last row counts the workloads carrying it. Rules are numbered as the
+    /// TUI's Policy screen lists them. Requests, all cached: the object's own list (to find it
+    /// by name or href), the draft rulesets, the label groups (labels and label groups only)
+    /// and, for a label, one workloads read of at most one row filtered by it: no row is 0, one
+    /// row is at least 1 (the PCE's X-Total-Count is the whole collection's size). Deny rules
+    /// as the ruleset list carries them. Not searched: virtual services, enforcement
+    /// boundaries, pairing profiles, container workload profiles.
+    #[command(subcommand)]
+    WhereUsed(where_used::WhereUsedCmd),
     /// Explorer traffic queries
     #[command(subcommand)]
     Traffic(traffic::TrafficCmd),
@@ -329,6 +344,7 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
         Command::Readiness(a) => readiness::run(&ctx, &a).await,
         Command::Enforce(a) => enforce::run(&ctx, &a).await,
         Command::Policy(p) => policy::run(&ctx, &p).await,
+        Command::WhereUsed(w) => where_used::run(&ctx, &w).await,
         Command::Traffic(t) => traffic::run(&ctx, &t).await,
         Command::Completions(_) => names_cache::refresh(&ctx).await,
         Command::Profile(_) | Command::Marks(_) | Command::Filters(_) | Command::Schema(_) => {

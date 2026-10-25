@@ -126,6 +126,7 @@ impl Context {
             squelched: None,
             cost: None,
             matched: None,
+            where_used: None,
         }
     }
 

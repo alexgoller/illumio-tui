@@ -120,6 +120,25 @@ pub struct Meta {
     /// `policy search`: the rules found of the rules loaded.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub matched: Option<MatchedMeta>,
+    /// `where-used`: the object, its references and workload count.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub where_used: Option<WhereUsedMeta>,
+}
+
+/// `meta.where_used`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct WhereUsedMeta {
+    pub object: pce::where_used::ObjectType,
+    /// `env=prod` for a label, else the object's name.
+    pub name: String,
+    pub href: String,
+    /// The references found (the workloads row not counted).
+    pub total: usize,
+    /// A label's workloads; `null` for the other kinds.
+    pub workloads: Option<pce::where_used::WorkloadCount>,
+    /// Rulesets whose deny rules were not searched.
+    pub deny_unread: usize,
+    pub not_searched: &'static str,
 }
 
 /// `meta.matched`.
@@ -567,6 +586,19 @@ pub fn meta_line(meta: &Meta) -> String {
             if m.loaded == 1 { "" } else { "s" }
         ));
     }
+    if let Some(w) = &meta.where_used {
+        s.push_str(&format!(
+            " · {} reference{} to {} {}",
+            w.total,
+            if w.total == 1 { "" } else { "s" },
+            w.object.word(),
+            w.name
+        ));
+        if let Some(n) = w.workloads {
+            s.push_str(&format!(" · {} workloads", n.text()));
+        }
+        s.push_str(&format!(" · {}", w.not_searched));
+    }
     if let Some(f) = &meta.local_filter {
         s.push_str(&format!(" · filtered locally: {}", f.join(", ")));
     }
@@ -770,6 +802,7 @@ mod tests {
             squelched: None,
             cost: None,
             matched: None,
+            where_used: None,
         };
         assert!(meta_line(&meta).contains("POST /orgs/5/labels → 201"));
         let m = Meta {

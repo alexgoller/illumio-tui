@@ -95,6 +95,27 @@
       "required": ["matched", "loaded"],
       "additionalProperties": false,
       "description": "policy search: the rules found of the rules loaded"
+    },
+    "where_used": {
+      "type": "object",
+      "properties": {
+        "object": {"enum": ["label", "label_group", "ip_list", "service"]},
+        "name": {"type": "string", "description": "key=value for a label, else the name"},
+        "href": {"type": "string"},
+        "total": {"type": "integer", "description": "references found, the workloads row not counted"},
+        "workloads": {
+          "type": ["object", "null"],
+          "properties": {"count": {"type": "integer"}, "exact": {"type": "boolean"}},
+          "required": ["count", "exact"],
+          "additionalProperties": false,
+          "description": "a label's workloads (exact false: at least count); null for the other kinds"
+        },
+        "deny_unread": {"type": "integer", "description": "rulesets whose deny rules were not searched"},
+        "not_searched": {"type": "string"}
+      },
+      "required": ["object", "name", "href", "total", "workloads", "deny_unread", "not_searched"],
+      "additionalProperties": false,
+      "description": "where-used: the object, its references and workload count"
     }
   },
   "required": ["schema", "profile", "elapsed_ms", "api_calls", "bytes", "cache", "truncated"],

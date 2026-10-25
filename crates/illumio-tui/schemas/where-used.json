@@ -1,0 +1,56 @@
+{
+  "type": "array",
+  "description": "one row per reference: scopes, rules, label groups, then (labels only) the workload count",
+  "items": {
+    "type": "object",
+    "properties": {
+      "kind": {"enum": ["scope", "rule", "label_group", "workloads"]},
+      "ruleset": {"type": ["string", "null"], "description": "scope, rule: the ruleset's name"},
+      "ruleset_href": {"type": ["string", "null"]},
+      "rule": {
+        "type": ["integer", "null"],
+        "description": "rule: its position in the ruleset as the TUI's Policy screen lists it, from 1"
+      },
+      "side": {"enum": ["provider", "consumer", "service", null]},
+      "action": {"enum": ["allow", "deny", "override_deny", null]},
+      "pending": {
+        "type": "boolean",
+        "description": "a change not provisioned: the rule, its ruleset or the group has an update_type"
+      },
+      "disabled": {"type": "boolean", "description": "the rule or its ruleset is disabled"},
+      "via": {
+        "type": ["string", "null"],
+        "description": "the label group it is reached through, when not named directly"
+      },
+      "name": {"type": ["string", "null"], "description": "label_group: the group's name"},
+      "count": {
+        "type": ["integer", "null"],
+        "description": "workloads: how many workloads carry the label"
+      },
+      "exact": {
+        "type": ["boolean", "null"],
+        "description": "workloads: false when count is a lower bound (at least)"
+      },
+      "href": {
+        "type": "string",
+        "description": "the rule's, the ruleset's (scope), the group's, or the label's (workloads)"
+      }
+    },
+    "required": [
+      "kind",
+      "ruleset",
+      "ruleset_href",
+      "rule",
+      "side",
+      "action",
+      "pending",
+      "disabled",
+      "via",
+      "name",
+      "count",
+      "exact",
+      "href"
+    ],
+    "additionalProperties": false
+  }
+}

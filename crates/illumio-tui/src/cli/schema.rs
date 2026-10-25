@@ -89,6 +89,10 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("policy pending", "policy-pending"),
     ("policy provision", "write"),
     ("policy revert", "write"),
+    ("where-used label", "where-used"),
+    ("where-used label-group", "where-used"),
+    ("where-used iplist", "where-used"),
+    ("where-used service", "where-used"),
     ("traffic query", "traffic-query"),
     ("traffic query --dry-run", "traffic-dry-run"),
     ("traffic query --save-filter", "saved-filter"),
@@ -245,6 +249,7 @@ const FILES: &[(&str, &str)] = &[
         "workloads-ven-summary",
         include_str!("../../schemas/workloads-ven-summary.json"),
     ),
+    ("where-used", include_str!("../../schemas/where-used.json")),
     ("write", include_str!("../../schemas/write.json")),
 ];
 
@@ -549,6 +554,7 @@ pub fn schema_of(command: &Command) -> Option<&'static str> {
             P::Search(_) => "policy-search",
             P::Pending(_) => "policy-pending",
         },
+        Command::WhereUsed(_) => "where-used",
         Command::Traffic(t) => match t {
             _ if t.filter().is_some_and(|f| f.dry_run) => "traffic-dry-run",
             T::Query(_) => "traffic-query",

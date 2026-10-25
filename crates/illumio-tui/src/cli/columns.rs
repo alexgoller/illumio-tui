@@ -212,6 +212,7 @@ pub fn csv_columns(command: &Command) -> Vec<&'static str> {
             P::Pending(_) => vec!["object_type", "change_type", "name", "href", "diff"],
             P::Rulesets(_) | P::DenyRules(_) | P::Provision(_) | P::Revert(_) => Vec::new(),
         },
+        Command::WhereUsed(_) => super::where_used::HEADERS.to_vec(),
         Command::Traffic(t) => match t {
             _ if t.filter().is_some_and(|f| f.dry_run) => Vec::new(),
             T::Query(_) => cat(&[FLOWS, &traffic_views()]),

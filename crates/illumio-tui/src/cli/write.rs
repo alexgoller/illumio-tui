@@ -415,7 +415,7 @@ fn not_pending_delete(update_type: Option<&str>) -> bool {
     update_type != Some("delete")
 }
 
-fn ip_list_in(lists: &[IpList], name: &str) -> Result<String, CliError> {
+pub(crate) fn ip_list_in(lists: &[IpList], name: &str) -> Result<String, CliError> {
     pick_one(
         "IP list",
         name.trim(),
@@ -426,7 +426,7 @@ fn ip_list_in(lists: &[IpList], name: &str) -> Result<String, CliError> {
     )
 }
 
-fn service_in(services: &[Service], name: &str) -> Result<String, CliError> {
+pub(crate) fn service_in(services: &[Service], name: &str) -> Result<String, CliError> {
     pick_one(
         "service",
         name.trim(),
@@ -437,7 +437,7 @@ fn service_in(services: &[Service], name: &str) -> Result<String, CliError> {
     )
 }
 
-fn label_group_in(groups: &[LabelGroup], name: &str) -> Result<String, CliError> {
+pub(crate) fn label_group_in(groups: &[LabelGroup], name: &str) -> Result<String, CliError> {
     pick_one(
         "label group",
         name.trim(),

@@ -627,7 +627,10 @@ mod tests {
         let w = search(label(2), &sets, &groups());
         assert!(!w.refs[0].disabled, "the override deny is on");
         assert!(w.refs[1].disabled, "rule 1 is off");
-        assert_eq!(w.refs[1].line(), "Shop-Prod · #2 · provider · allow · disabled");
+        assert_eq!(
+            w.refs[1].line(),
+            "Shop-Prod · #2 · provider · allow · disabled"
+        );
         let svc = Target::new(ObjectType::Service, "/orgs/5/sec_policy/draft/services/30");
         let w = search(svc, &rule_sets(), &groups());
         assert!(w.refs[0].disabled, "Global-Infra is disabled");
@@ -708,9 +711,9 @@ mod tests {
     #[test]
     fn named_directly_beats_through_a_group_on_the_same_side() {
         let mut sets = rule_sets();
-        sets[1].rules[0].consumers.push(
-            serde_json::from_value(json!({"label": {"href": "/orgs/5/labels/4"}})).unwrap(),
-        );
+        sets[1].rules[0]
+            .consumers
+            .push(serde_json::from_value(json!({"label": {"href": "/orgs/5/labels/4"}})).unwrap());
         let w = search(label(4), &sets, &groups());
         assert_eq!(w.refs[1].via, None);
     }

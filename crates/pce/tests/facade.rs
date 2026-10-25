@@ -1319,7 +1319,10 @@ async fn label_workload_probe_reads_one_row_filtered_by_the_label_once() {
         .label_workload_probe("/orgs/5/labels/4", CacheMode::Use)
         .await
         .unwrap();
-    assert_eq!((one.value.count, one.value.exact, one.hit), (1, false, false));
+    assert_eq!(
+        (one.value.count, one.value.exact, one.hit),
+        (1, false, false)
+    );
     let again = p
         .label_workload_probe("/orgs/5/labels/4", CacheMode::Use)
         .await
