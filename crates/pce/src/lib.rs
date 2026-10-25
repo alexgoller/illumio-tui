@@ -264,6 +264,23 @@ impl Pce {
         Ok(c)
     }
 
+    /// The pairing profiles, cached with the object lists; a pairing
+    /// profile write drops only this list.
+    pub async fn pairing_profiles(
+        &self,
+        mode: CacheMode,
+    ) -> Result<Cached<Vec<models::PairingProfile>>> {
+        let path = self.client.org_path("pairing_profiles");
+        self.cached_list(
+            "objects:pairing_profiles",
+            &path,
+            vec![],
+            self.ttls.objects,
+            mode,
+        )
+        .await
+    }
+
     /// Provisioned IP lists, for the TUI's pending diff. Cached under
     /// `objects:` so a write invalidates them with the draft lists; kept five
     /// minutes like the rest of the active policy.

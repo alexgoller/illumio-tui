@@ -89,6 +89,11 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("policy pending", "policy-pending"),
     ("policy provision", "write"),
     ("policy revert", "write"),
+    ("pairing-profiles list", "pairing-profiles"),
+    ("pairing-profiles create", "pairing-profiles-create"),
+    ("pairing-profiles create --dry-run", "write"),
+    ("pairing-profiles delete", "pairing-profiles-delete"),
+    ("pairing-profiles delete --dry-run", "write"),
     ("where-used label", "where-used"),
     ("where-used label-group", "where-used"),
     ("where-used iplist", "where-used"),
@@ -201,6 +206,18 @@ const FILES: &[(&str, &str)] = &[
     (
         "policy-search",
         include_str!("../../schemas/policy-search.json"),
+    ),
+    (
+        "pairing-profiles",
+        include_str!("../../schemas/pairing-profiles.json"),
+    ),
+    (
+        "pairing-profiles-create",
+        include_str!("../../schemas/pairing-profiles-create.json"),
+    ),
+    (
+        "pairing-profiles-delete",
+        include_str!("../../schemas/pairing-profiles-delete.json"),
     ),
     (
         "profile-add",
@@ -501,6 +518,7 @@ pub fn check_fields(name: &str, branch: Option<usize>, wanted: &[String]) -> Res
 pub fn schema_of(command: &Command) -> Option<&'static str> {
     use super::filters::FiltersCmd as F;
     use super::marks::MarksCmd as M;
+    use super::pairing_profiles::PairingProfilesCmd as PP;
     use super::policy::{PolicyCmd as P, RulesAction as RA, RulesetsAction as RS};
     use super::profile::ProfileCmd as PR;
     use super::traffic::TrafficCmd as T;
@@ -555,6 +573,12 @@ pub fn schema_of(command: &Command) -> Option<&'static str> {
             P::Pending(_) => "policy-pending",
         },
         Command::WhereUsed(_) => "where-used",
+        Command::PairingProfiles(c) => match c {
+            _ if c.write_flags().is_some_and(|f| f.dry_run) => "write",
+            PP::List => "pairing-profiles",
+            PP::Create(_) => "pairing-profiles-create",
+            PP::Delete(_) => "pairing-profiles-delete",
+        },
         Command::Traffic(t) => match t {
             _ if t.filter().is_some_and(|f| f.dry_run) => "traffic-dry-run",
             T::Query(_) => "traffic-query",

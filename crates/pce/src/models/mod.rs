@@ -5,6 +5,7 @@ pub mod common;
 pub mod event_select;
 pub mod events;
 pub mod labels;
+pub mod pairing_profiles;
 pub mod policy;
 pub mod traffic;
 pub mod workloads;
@@ -16,6 +17,7 @@ pub use event_select::{
 };
 pub use events::{Event, EventFilter};
 pub use labels::{Fqdn, IpList, IpRange, Label, LabelGroup, LabelUsageFlags, Service, ServicePort};
+pub use pairing_profiles::{PairingLabel, PairingProfile};
 pub use policy::{
     Actor, DenyRule, IngressService, PendingChange, PolicyScope, ResolveLabelsAs, Rule, RuleSet,
     UNKNOWN_CHANGE_TYPE, parse_pending,

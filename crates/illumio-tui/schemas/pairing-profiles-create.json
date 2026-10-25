@@ -1,0 +1,1 @@
+{"$ref": "#/$defs/pairing_profile", "description": "the created pairing profile as the PCE returned it"}

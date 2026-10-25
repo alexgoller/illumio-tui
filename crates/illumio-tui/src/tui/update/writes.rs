@@ -334,6 +334,8 @@ pub(super) fn reload_kind_after_write(model: &mut Model, kind: pce::write::Objec
         pce::write::ObjectKind::Label => load_objects(model, ObjectKind::Labels, CacheMode::Bypass),
         // Nothing writes label groups yet; the tab has no reload of its own.
         pce::write::ObjectKind::LabelGroup => Vec::new(),
+        // Only the CLI writes pairing profiles; the TUI shows none.
+        pce::write::ObjectKind::PairingProfile => Vec::new(),
         pce::write::ObjectKind::IpList => load_ip_lists(model, CacheMode::Bypass),
         pce::write::ObjectKind::Service => {
             load_objects(model, ObjectKind::Services, CacheMode::Bypass)

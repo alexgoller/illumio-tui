@@ -38,6 +38,44 @@
       "required": ["href", "name", "key", "labels", "sub_groups"],
       "additionalProperties": false
     },
+    "pairing_profile": {
+      "$comment": "a pairing profile as the PCE returned it; the fields named here are the ones the CLI reads, the rest (total_use_count, is_default, log_traffic, timestamps, ...) are passed through",
+      "type": "object",
+      "properties": {
+        "href": {"type": "string"},
+        "name": {"type": "string"},
+        "description": {"type": ["string", "null"]},
+        "enabled": {"type": ["boolean", "null"]},
+        "labels": {
+          "type": "array",
+          "items": {
+            "$comment": "the label's href; key and value only if the PCE sends them",
+            "type": "object",
+            "properties": {
+              "href": {"type": "string"},
+              "key": {"type": "string"},
+              "value": {"type": "string"}
+            },
+            "required": ["href"],
+            "additionalProperties": true
+          }
+        },
+        "enforcement_mode": {"type": ["string", "null"]},
+        "visibility_level": {"type": ["string", "null"]},
+        "ven_type": {"type": ["string", "null"]},
+        "allowed_uses_per_key": {"type": ["integer", "string", "null"], "description": "a number or \"unlimited\""},
+        "key_lifespan": {"type": ["integer", "string", "null"], "description": "seconds or \"unlimited\""},
+        "role_label_lock": {"type": ["boolean", "null"]},
+        "app_label_lock": {"type": ["boolean", "null"]},
+        "env_label_lock": {"type": ["boolean", "null"]},
+        "loc_label_lock": {"type": ["boolean", "null"]},
+        "enforcement_mode_lock": {"type": ["boolean", "null"]},
+        "visibility_level_lock": {"type": ["boolean", "null"]},
+        "log_traffic_lock": {"type": ["boolean", "null"]}
+      },
+      "required": ["href", "name"],
+      "additionalProperties": true
+    },
     "ip_range": {
       "$comment": "other fields of the PCE's range are passed through",
       "type": "object",

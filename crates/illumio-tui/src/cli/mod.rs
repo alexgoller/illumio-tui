@@ -16,6 +16,7 @@ pub mod marks;
 pub mod names_cache;
 pub mod objects;
 pub mod output;
+pub mod pairing_profiles;
 pub mod policy;
 pub mod profile;
 pub mod readiness;
@@ -154,6 +155,9 @@ pub enum Command {
     /// Rulesets, rules, deny rules, pending changes, provisioning
     #[command(subcommand)]
     Policy(policy::PolicyCmd),
+    /// Pairing profiles: list them; create or delete one (no pairing keys)
+    #[command(subcommand, visible_alias = "pp")]
+    PairingProfiles(pairing_profiles::PairingProfilesCmd),
     /// What names a label, label group, IP list or service in the draft policy (read-only)
     ///
     /// One row per reference: ruleset scopes, rules (provider, consumer or service side; allow,
@@ -232,6 +236,9 @@ fn csv_refusal(command: &Command) -> Option<&'static str> {
         Command::Policy(P::DenyRules(_)) => Some("policy deny-rules"),
         Command::Policy(P::Provision(_)) => Some("policy provision"),
         Command::Policy(P::Revert(_)) => Some("policy revert"),
+        Command::PairingProfiles(c) if c.write_flags().is_some() => {
+            Some("pairing-profiles create/delete")
+        }
         Command::Traffic(t) if t.filter().is_some_and(|f| f.dry_run) => Some("traffic --dry-run"),
         Command::Profile(profile::ProfileCmd::Use { .. }) => Some("profile use"),
         Command::Profile(profile::ProfileCmd::Add(_)) => Some("profile add"),
@@ -344,6 +351,7 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
         Command::Readiness(a) => readiness::run(&ctx, &a).await,
         Command::Enforce(a) => enforce::run(&ctx, &a).await,
         Command::Policy(p) => policy::run(&ctx, &p).await,
+        Command::PairingProfiles(p) => pairing_profiles::run(&ctx, &p).await,
         Command::WhereUsed(w) => where_used::run(&ctx, &w).await,
         Command::Traffic(t) => traffic::run(&ctx, &t).await,
         Command::Completions(_) => names_cache::refresh(&ctx).await,

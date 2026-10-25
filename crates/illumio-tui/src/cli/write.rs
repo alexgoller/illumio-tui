@@ -11,7 +11,7 @@ pub(crate) use crate::tokens::{similar, with_similar};
 use clap::Args;
 use pce::Impact;
 use pce::NameIndex;
-use pce::models::{IpList, Label, LabelGroup, Service};
+use pce::models::{IpList, Label, LabelGroup, PairingProfile, Service};
 use pce::write::provision_counts;
 use pce::write::{
     ActorKind, ActorRef, JsonlAudit, ObjectKind, Outcome, Plan, ServiceRef, WriteContext,
@@ -499,6 +499,18 @@ pub(crate) fn label_group_in(groups: &[LabelGroup], name: &str) -> Result<String
             .iter()
             .filter(|g| not_pending_delete(g.update_type.as_deref()))
             .map(|g| (g.name.as_str(), g.href.as_str())),
+    )
+}
+
+/// Pairing profiles are no policy objects: none is pending deletion.
+pub(crate) fn pairing_profile_in(
+    profiles: &[PairingProfile],
+    name: &str,
+) -> Result<String, CliError> {
+    pick_one(
+        "pairing profile",
+        name.trim(),
+        profiles.iter().map(|p| (p.name.as_str(), p.href.as_str())),
     )
 }
 

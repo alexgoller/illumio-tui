@@ -10,6 +10,7 @@ pub mod bulk;
 pub mod guard;
 pub mod ip_lists;
 pub mod labels;
+pub mod pairing_profiles;
 pub mod provision;
 pub mod revert;
 pub mod rule_sets;
@@ -34,6 +35,7 @@ pub use bulk::{
 pub use guard::{WriteContext, WriteGuard, WriteRefused};
 pub use ip_lists::{IpListDraft, IpListPatch};
 pub use labels::LabelDraft;
+pub use pairing_profiles::{Limit, PairingProfileDraft, VenType};
 pub use provision::{ProvisionRequest, ProvisionSubset, provision_counts};
 pub use revert::{BACK_TO_ACTIVE, FATE_UNKNOWN, REMOVED, RevertRequest};
 pub use rule_sets::{RuleSetDraft, RuleSetPatch};
@@ -67,6 +69,8 @@ pub enum ObjectKind {
     /// `PUT sec_policy/delete`: reverts draft policy objects of any type
     /// to their active version.
     Revert,
+    /// Not a policy object: applies at once.
+    PairingProfile,
 }
 
 impl ObjectKind {
@@ -92,6 +96,8 @@ impl ObjectKind {
             ObjectKind::Provision | ObjectKind::Revert => {
                 &["policy:", "objects:", "usage:", "draft:"]
             }
+            // Its own list; a label's usage flags name pairing profiles.
+            ObjectKind::PairingProfile => &["objects:pairing_profiles", "usage:"],
         }
     }
 
@@ -121,6 +127,7 @@ impl ObjectKind {
             ObjectKind::DenyRule => "deny_rule",
             ObjectKind::Provision => "provision",
             ObjectKind::Revert => "revert",
+            ObjectKind::PairingProfile => "pairing_profile",
         }
     }
 
@@ -651,6 +658,7 @@ mod tests {
             ObjectKind::DenyRule,
             ObjectKind::Provision,
             ObjectKind::Revert,
+            ObjectKind::PairingProfile,
         ] {
             assert!(k.cache_prefixes().contains(&"usage:"), "{k:?}");
         }
@@ -676,6 +684,12 @@ mod tests {
         assert_eq!(ObjectKind::DenyRule.as_str(), "deny_rule");
         assert_eq!(ObjectKind::Provision.as_str(), "provision");
         assert_eq!(ObjectKind::Revert.as_str(), "revert");
+        assert_eq!(
+            ObjectKind::PairingProfile.cache_prefixes(),
+            &["objects:pairing_profiles", "usage:"]
+        );
+        assert!(!ObjectKind::PairingProfile.pending());
+        assert_eq!(ObjectKind::PairingProfile.as_str(), "pairing_profile");
         assert_eq!(
             serde_json::to_value(ObjectKind::RuleSet).unwrap(),
             json!("rule_set")

@@ -135,6 +135,7 @@ pub const HOOKS: &[Hook] = &[
     (&["gen"], "app", Kind::Apps),
     (&["readiness"], "--app", Kind::Apps),
     (&["enforce"], "app", Kind::Apps),
+    (&["pairing-profiles", "create"], "--label", Kind::Labels),
     (&["where-used", "label"], "name", Kind::Labels),
     (&["where-used", "label-group"], "name", Kind::LabelGroups),
     (&["where-used", "iplist"], "name", Kind::IpLists),
@@ -1048,8 +1049,17 @@ src = \"x=y\"
     /// Every hooked argument completes through the helper, once.
     #[test]
     fn zsh_and_fish_hook_every_argument() {
+        // A command's alias (`pp`) is generated as a command of its own,
+        // its hooks with it.
+        let cmd = completion_command();
+        let hooked = HOOKS.len()
+            + HOOKS
+                .iter()
+                .filter_map(|h| cmd.find_subcommand(h.0[0]))
+                .map(|c| c.get_visible_aliases().count())
+                .sum::<usize>();
         let zsh = script(Shell::Zsh);
-        assert_eq!(zsh.matches(": _illumio-tui__names ").count(), HOOKS.len());
+        assert_eq!(zsh.matches(": _illumio-tui__names ").count(), hooked);
         assert!(zsh.contains("_illumio-tui__names() {"));
         assert!(zsh.contains("illumio-tui __complete $1 $reply -- \"${(Q)PREFIX}\""));
         // Through `_arguments` as written, not with its options first.
@@ -1061,7 +1071,7 @@ src = \"x=y\"
         let fish = script(Shell::Fish);
         assert_eq!(
             fish.matches("-f -a \"(__fish_illumio_tui_names ").count(),
-            HOOKS.len()
+            hooked
         );
         assert!(fish.contains("function __fish_illumio_tui_names"));
         // The conditions of the lines added for positionals are the

@@ -1857,3 +1857,59 @@ mod workloads {
         assert!(patch.apply(&current, &idx()).is_err());
     }
 }
+
+#[tokio::test]
+async fn a_pairing_profile_write_drops_only_the_pairing_profile_list() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/pairing_profiles"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .expect(2)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/labels"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/pairing_profiles"))
+        .and(body_json(json!({"name": "pp1", "enabled": false})))
+        .respond_with(ResponseTemplate::new(201).set_body_json(
+            json!({"href": "/orgs/5/pairing_profiles/3", "name": "pp1", "enabled": false}),
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let p = pce_for(&server);
+    let audit = MemoryAudit::new();
+    let guard = guard_with(audit.clone());
+    let existing = p.pairing_profiles(CacheMode::Use).await.unwrap().value;
+    p.labels(CacheMode::Use).await.unwrap();
+    let draft = pce::write::PairingProfileDraft {
+        disabled: true,
+        ..pce::write::PairingProfileDraft::new("pp1")
+    };
+    let plan = p
+        .writer(&guard)
+        .plan_create_pairing_profile(&draft, &existing)
+        .unwrap();
+    let Outcome::Written(w) = p.writer(&guard).execute(plan).await.unwrap() else {
+        panic!("written")
+    };
+    assert_eq!(w.href, "/orgs/5/pairing_profiles/3");
+    assert!(!w.pending);
+    assert_eq!(audit.entries().len(), 1);
+    assert!(!p.pairing_profiles(CacheMode::Use).await.unwrap().hit);
+    assert!(p.labels(CacheMode::Use).await.unwrap().hit);
+    // A taken name is refused before anything is sent.
+    let taken: Vec<pce::models::PairingProfile> =
+        serde_json::from_value(json!([{"href": "/orgs/5/pairing_profiles/3", "name": "pp1"}]))
+            .unwrap();
+    let e = p
+        .writer(&guard)
+        .plan_create_pairing_profile(&draft, &taken)
+        .unwrap_err();
+    assert!(matches!(e, WriteError::Invalid(_)), "{e}");
+}

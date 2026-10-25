@@ -213,6 +213,10 @@ pub fn csv_columns(command: &Command) -> Vec<&'static str> {
             P::Rulesets(_) | P::DenyRules(_) | P::Provision(_) | P::Revert(_) => Vec::new(),
         },
         Command::WhereUsed(_) => super::where_used::HEADERS.to_vec(),
+        Command::PairingProfiles(c) => match c.write_flags() {
+            None => super::pairing_profiles::HEADERS.to_vec(),
+            Some(_) => Vec::new(),
+        },
         Command::Traffic(t) => match t {
             _ if t.filter().is_some_and(|f| f.dry_run) => Vec::new(),
             T::Query(_) => cat(&[FLOWS, &traffic_views()]),

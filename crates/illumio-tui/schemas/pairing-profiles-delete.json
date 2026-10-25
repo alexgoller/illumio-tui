@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "deleted": {"type": "string", "description": "the name given, or the href when an href was given"},
+    "href": {"type": "string"}
+  },
+  "required": ["deleted", "href"],
+  "additionalProperties": false
+}
