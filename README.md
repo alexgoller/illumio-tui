@@ -148,7 +148,8 @@ PCE names complete too, from a per-profile names cache on disk: labels as
 hostnames (`--hostname`, `workloads update`), traffic terms (`--src`, `--dst`,
 `--exclude-src`, `--exclude-dst`: `key=value`, `wl:HOST`, `ipl:NAME`),
 `svc:NAME` (`--exclude-service`), rule sides and scopes (`group:NAME`,
-`iplist:NAME`, `workload:HOST`), label keys, services and IP lists.
+`iplist:NAME`, `workload:HOST`), label keys, services and IP lists, and the
+object of `where-used label|label-group|iplist|service`.
 
     illumio-tui completions refresh           # fill it: one read each of labels, label groups,
                                               # IP lists, services and workloads; prints counts and age
@@ -423,7 +424,7 @@ Five screens: `1` Traffic, `2` Policy, `3` Objects, `4` Workloads, `5` Events. T
 takes `:traffic`, `:policy`, `:objects`, `:workloads`, `:events`, `:iplists` (Objects on its
 IP lists tab), `:filter <expr>`, `:window <dur>`, `:profile <name>`, `:writes [on|off]`,
 `:export <path>`, `:draft`, `:active`, `:unicast`, `:focus [app]`, `:app [app]`, `:gen [app]`,
-`:readiness`, `:enforce [app]`, `:batch`, `:save <name>`, `:filters` (`:fl`), `:load <name>`,
+`:readiness`, `:enforce [app]`, `:used` (where the selected object is used, as `W`), `:batch`, `:save <name>`, `:filters` (`:fl`), `:load <name>`,
 `:default <name>|off`, `:help` and `:q` (each described below; saved filters under [Saved filters](#saved-filters)). `:export <path>` writes the table on
 screen as CSV (the rows shown, with the search and filters applied and in sort order; every
 column, whatever the terminal width, each cell whole; `~/` is the home directory), the same
@@ -749,6 +750,23 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   and scopes only)`, a deny rule the PCE serves through the per-ruleset fallback endpoint
   counts once that ruleset's deny rules have been loaded, and a truncated workload list is
   named in the header (`unused (workloads truncated)`).
+  `W` (or `:used`) on a row of any tab shows where the object is used, before you change or
+  delete it: the title names it (`where used: label env=Production`, with the total), then
+  the sections with their counts, empty ones left out: Rulesets (their scopes), Rules
+  (`Shop-Prod · #2 · provider · allow`, `deny` or `override deny`, plus `pending` or
+  `disabled`; `#n` is the rule's place as the Policy screen lists it), Label groups (direct
+  members, and groups holding it through a nested group, `via` that group; a rule naming such
+  a group is listed `via` it too) and, for a label, Workloads (how many carry it). It searches
+  the draft policy, what the Policy screen shows and what you would edit. It reads what is
+  loaded: the draft rulesets (else loaded once, as a `w` form loads them: one cached request,
+  `loading rulesets…` in the overlay, counted in its title and the api counter), the label
+  groups, and the workload list for the count; with no list it asks one cached read of at
+  most one row filtered by the label, so the count is exact at 0 and `≥1` otherwise (`Enter`
+  on that line gives the full list). Nothing runs on a timer, reopening loads nothing, and
+  `u` is left as it is. `Enter` opens a rule or ruleset on Policy (selected), a label group on
+  its tab, or the Workloads screen filtered by the label; `/` searches the list. Not
+  searched (the overlay says so): virtual services, enforcement boundaries, pairing profiles
+  and container workload profiles.
 - **Workloads**: VEN health columns and a summary line, `h` unhealthy only, `H` sort by
   severity, `t` / `T` jump to Traffic with the workload as source / destination. The
   enforcement column is the effective one: a workload without a VEN is `unmanaged`, as in
@@ -855,6 +873,8 @@ the API call and byte counters at all times.
     illumio-tui labels --key app
     illumio-tui labels --key app --key env --value-contains pay --ignore-keys
     illumio-tui labels --unused --json
+    illumio-tui where-used label env=Production --table
+    illumio-tui where-used iplist Corp --csv
     illumio-tui workloads --label app=web --online true
     illumio-tui workloads --unlabeled --json
     illumio-tui workloads --label app=shop,crm --label env=prod --group
@@ -1152,6 +1172,25 @@ draft rulesets and the label groups (through the cache, counted in `meta`), deny
 when the ruleset carries them inline (no fallback reads), and `meta.usage` (and the table's
 meta line) says `usage from workloads, rules and scopes only`. Without `--unused` the rows
 are unchanged.
+
+`where-used label KEY=VALUE`, `where-used label-group NAME`, `where-used iplist NAME` and
+`where-used service NAME` (each also takes the object's href) list what names the object in
+the draft policy, as the TUI's `W` does: one row per reference with `kind` (`scope`, `rule`,
+`label_group`, `workloads`), `ruleset`, `rule` (its place as the Policy screen lists it),
+`side` (`provider`, `consumer`, `service`), `action` (`allow`, `deny`, `override_deny`),
+`pending`, `disabled`, `via` (the label group it is reached through), `name` (a group's),
+`count` and `exact` (the `workloads` row of a label) and `href`; `meta.where_used` repeats
+the object, the total, the workload count and what is not searched. A name that is unknown
+or ambiguous is exit 2 with the candidates. Requests, all cached and shown on the meta line:
+the object's own list, the draft rulesets, the label groups (labels and groups only) and, for
+a label, one workloads read of at most one row filtered by it (0 rows is an exact 0, one row
+`≥1`: the PCE's `X-Total-Count` is the whole collection's size, not the label's). Deny rules
+count as the ruleset list carries them. For example, before deleting a label or an IP list:
+
+    illumio-tui where-used label env=Production --table
+    illumio-tui where-used label /orgs/1/labels/42 --json --fields kind,ruleset,rule,via
+    illumio-tui where-used iplist Corp --csv > corp-uses.csv
+    illumio-tui where-used label-group "All prod envs"
 
 `--impact` on `policy rules <ruleset>` adds each rule's `impact` (JSON) or a `P/C` column
 (table): `providers` and `consumers` (workloads matched, unions over the ruleset's scopes),
