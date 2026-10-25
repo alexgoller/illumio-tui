@@ -100,6 +100,7 @@ pub(super) fn ip_lists_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 model.status = model.objects.ip_lists.auto.toggle();
                 return Vec::new();
             }
+            KeyCode::Char('W') => return open_where_used(model),
             KeyCode::Char(c @ ('n' | 'e' | 'x')) => return ip_lists_edit_key(model, c),
             _ => {}
         }
@@ -191,6 +192,7 @@ pub(super) fn objects_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 model.status = model.objects.auto.toggle();
                 return Vec::new();
             }
+            KeyCode::Char('W') => return open_where_used(model),
             KeyCode::Char(c @ ('n' | 'e' | 'x')) => return objects_edit_key(model, c),
             KeyCode::Char('f') if kind == ObjectKind::Labels => {
                 model.overlay = Overlay::LabelKeys(open_label_key_picker(model));

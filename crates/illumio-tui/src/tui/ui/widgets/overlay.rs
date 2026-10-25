@@ -1527,6 +1527,6 @@ pub fn screen_hint_more(screen: Screen, view: TrafficView) -> &'static str {
         (Screen::Workloads, _) => "h/H/v health  :ven  E/m/o/u  c clear",
         (Screen::Events, _) => "S severity  r refresh  a auto  :fl saved",
         (Screen::Policy, _) => ":fl saved",
-        _ => "",
+        (Screen::Objects, _) => "W where used",
     }
 }

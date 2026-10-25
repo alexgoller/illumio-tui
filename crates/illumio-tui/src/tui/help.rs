@@ -99,6 +99,7 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
             key("", ":gen <app>  the policy generator (alone: the picker)"),
             key("", ":readiness  :enforce <app>  (alone: the picker)"),
             key("", ":ven  the VEN fleet of the loaded workloads"),
+            key("", ":used  where the selected object is used (Objects)"),
             key("", ":writes [on|off]  :export[!] <path>  :batch"),
             key("", "(the table on screen as CSV; ! overwrites)"),
             key("", ":save <name>  the screen's filter, in the profile"),
@@ -378,6 +379,12 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
                 "Enter",
                 "IP lists: detail: ranges · FQDNs · size · rules using it",
             ),
+            key(
+                "W / :used",
+                "where used: scopes, rules, label groups, workloads",
+            ),
+            more("", "draft policy; rulesets loaded once if missing (1 req)"),
+            more("", "Enter: the rule, ruleset, group, or Workloads filtered"),
         ],
     },
     HelpGroup {

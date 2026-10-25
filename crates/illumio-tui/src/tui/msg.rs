@@ -147,6 +147,11 @@ pub enum Msg {
     },
     /// The labels with the PCE's usage flags (`Cmd::LoadLabelUsage`).
     LabelUsageLoaded(Result<Vec<Label>, String>),
+    /// A label's workload probe (`Cmd::CountLabelWorkloads`).
+    LabelWorkloadsCounted {
+        href: String,
+        result: Result<pce::where_used::WorkloadCount, String>,
+    },
     /// The draft IP lists with the cache age in seconds.
     IpListsLoaded(Result<(Vec<IpList>, u64), String>),
     /// Workloads with the cache age in seconds.
@@ -275,6 +280,12 @@ pub enum Cmd {
     LoadIpLists(CacheMode),
     /// `u` on the Labels tab: the labels with the PCE's usage flags, one request.
     LoadLabelUsage(CacheMode),
+    /// Where-used on a label with no workload list loaded: one read of at
+    /// most one row filtered by the label (`Pce::label_workload_probe`).
+    CountLabelWorkloads {
+        href: String,
+        mode: CacheMode,
+    },
     LoadWorkloads(CacheMode),
     /// The app overlay's workloads: one read filtered by the app's labels.
     LoadAppWorkloads {
@@ -448,6 +459,10 @@ impl PartialEq for Cmd {
             }
             (Cmd::LoadIpLists(a), Cmd::LoadIpLists(b)) => a == b,
             (Cmd::LoadLabelUsage(a), Cmd::LoadLabelUsage(b)) => a == b,
+            (
+                Cmd::CountLabelWorkloads { href: ha, mode: ma },
+                Cmd::CountLabelWorkloads { href: hb, mode: mb },
+            ) => ha == hb && ma == mb,
             (Cmd::LoadWorkloads(a), Cmd::LoadWorkloads(b)) => a == b,
             (
                 Cmd::LoadAppWorkloads {

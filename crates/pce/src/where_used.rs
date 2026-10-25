@@ -246,10 +246,18 @@ impl Reference {
         f.join(" ")
     }
 
-    /// The row on one line: `Shop-Prod · #2 · provider · allow` (a rule),
-    /// `Shop-Prod` (a scope), the group's name, `2 workloads` (`target`
-    /// names the label); then the flags, then `via G`.
+    /// The row on one line: [`Self::what`], then `via G`.
     pub fn line(&self) -> String {
+        match &self.via {
+            Some(v) => format!("{} · via {v}", self.what()),
+            None => self.what(),
+        }
+    }
+
+    /// The row without its `via`: `Shop-Prod · #2 · provider · allow` (a
+    /// rule), `Shop-Prod` (a scope), the group's name, `2 workloads`; then
+    /// the flags.
+    pub fn what(&self) -> String {
         let mut parts: Vec<String> = Vec::new();
         match self.kind {
             RefKind::Rule => {
@@ -276,9 +284,6 @@ impl Reference {
         let flags = self.flags();
         if !flags.is_empty() {
             parts.push(flags);
-        }
-        if let Some(v) = &self.via {
-            parts.push(format!("via {v}"));
         }
         parts.join(" · ")
     }

@@ -1088,6 +1088,19 @@ impl Runtime {
                     let _ = tx.send(Msg::Stats(pce.stats()));
                 });
             }
+            Cmd::CountLabelWorkloads { href, mode } => {
+                self.model.busy += 1;
+                let (pce, tx) = self.task_ctx();
+                tokio::spawn(async move {
+                    let result = pce
+                        .label_workload_probe(&href, mode)
+                        .await
+                        .map(|c| c.value)
+                        .map_err(|e| e.to_string());
+                    let _ = tx.send(Msg::LabelWorkloadsCounted { href, result });
+                    let _ = tx.send(Msg::Stats(pce.stats()));
+                });
+            }
             Cmd::LoadIpLists(mode) => {
                 self.model.busy += 1;
                 let (pce, tx) = self.task_ctx();
@@ -1212,6 +1225,7 @@ impl Runtime {
                 | Msg::ObjectsLoaded { .. }
                 | Msg::IpListsLoaded(_)
                 | Msg::LabelUsageLoaded(_)
+                | Msg::LabelWorkloadsCounted { .. }
                 | Msg::WorkloadsLoaded(_)
                 | Msg::AppWorkloadsLoaded { .. }
                 | Msg::EventsLoaded(_)

@@ -52,6 +52,9 @@ mod saved;
 #[cfg(test)]
 mod saved_tests;
 mod traffic;
+mod where_used;
+#[cfg(test)]
+mod where_used_tests;
 mod workloads;
 mod writes;
 
@@ -68,6 +71,7 @@ use keys::*;
 use objects::*;
 use policy::*;
 use traffic::*;
+use where_used::*;
 use workloads::*;
 use writes::*;
 
@@ -83,7 +87,19 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
     let ours_before = enforce::is_ours(&model.overlay);
     let data = enforce::is_data(&msg);
     let write = enforce::is_write(&msg);
+    // What the where-used overlay reads: its rows follow when it lands.
+    let used_data = matches!(
+        msg,
+        Msg::RuleSetsLoaded { .. }
+            | Msg::DenyRulesLoaded { .. }
+            | Msg::WorkloadsLoaded(_)
+            | Msg::ObjectsLoaded { .. }
+            | Msg::IndexLoaded { .. }
+    );
     let mut cmds = on_msg(model, msg);
+    if used_data {
+        where_used_answer(model);
+    }
     // A traffic answer that lands under the open app overlay (or one of its
     // prompts): its peers follow (no request).
     let app_open = matches!(
@@ -674,6 +690,8 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     model.recount_labels();
                     model.refresh_confirm_impact();
                     model.refresh_label_warnings();
+                    // The list counts a label's workloads from now on.
+                    model.objects.workload_probes.clear();
                 }
                 Err(e) => {
                     model.workloads.error = Some(e.clone());
@@ -761,6 +779,10 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             Vec::new()
         }
         Msg::LabelUsageLoaded(result) => label_usage_loaded(model, result),
+        Msg::LabelWorkloadsCounted { href, result } => {
+            probe_answered(model, href, result);
+            Vec::new()
+        }
         Msg::IpListsLoaded(result) => {
             model.objects.ip_lists.loading = false;
             match result {
@@ -874,6 +896,8 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             result,
         } => {
             model.writes.in_flight = false;
+            // A write may change what carries a label: probes are asked again.
+            model.objects.workload_probes.clear();
             // The runtime dropped `policy:pending`; the next `p` fetches again.
             model.policy.pending = None;
             model.policy.pending_marked.clear();

@@ -415,6 +415,14 @@ pub struct ObjectsState {
     /// The startup index load failed; `r` retries it.
     pub index_failed: bool,
     pub auto: AutoRefresh,
+    /// `W` / `:used`: the open where-used overlay (`Overlay::WhereUsed`).
+    pub where_used: Option<crate::tui::where_used::WhereUsedView>,
+    /// Workload counts of labels from the one-row probe, by label href:
+    /// a second `W` on the label sends none. Dropped when the workload list
+    /// arrives (it counts instead) and by a write.
+    pub workload_probes: HashMap<String, pce::where_used::WorkloadCount>,
+    /// Probes on their way, by label href.
+    pub probes_loading: HashSet<String>,
 }
 
 impl ObjectsState {
@@ -440,6 +448,9 @@ impl ObjectsState {
             show_detail: false,
             index_failed: false,
             auto: AutoRefresh::new(min_refresh),
+            where_used: None,
+            workload_probes: HashMap::new(),
+            probes_loading: HashSet::new(),
         }
     }
 

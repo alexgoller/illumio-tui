@@ -1,0 +1,44 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                                                                api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+  Lab╭ where used: label env=prod ────────────────────────────────────────────────────────────────── 3 references ╮
+╭ Lab│Rulesets 1 · Rules 1 · Label groups 1 · Workloads 2                                                         │ows ╮
+│  ke│not searched: virtual services, enforcement boundaries, pairing profiles, container workload profiles       │    │
+│  ro│  section     reference                                                                                     │    │
+│  ro│▸ scope       Shop-Prod                                                                                     │    │
+│  ap│  rule        Global-Infra · #1 · consumer · allow · pending disabled · via All prod envs                   │    │
+│▸ en│  label group All prod envs                                                                                 │    │
+│  lo│  workloads   2 workloads                                                                                   │    │
+│  ap│                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │Enter open (rule, ruleset, group, workloads) · / search · Esc close                                         │    │
+│    ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────╯    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+where used: env=prod · 3 references                  Tab type  Enter detail  r refresh  a auto  / search  : cmd  ? help

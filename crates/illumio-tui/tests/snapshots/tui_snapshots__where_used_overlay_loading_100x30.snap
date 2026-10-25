@@ -1,0 +1,34 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                                            api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+  ╭ where used: label env=prod ──────────────────────────────────────────── 1 reference · 2 reqs ╮
+╭ │Label groups 1                                                                                │ ╮
+│ │loading rulesets, workload count…                                                             │ │
+│ │  section     reference                                                                       │ │
+│ │▸ label group All prod envs                                                                   │ │
+│ │                                                                                              │ │
+│▸│                                                                                              │ │
+│ │                                                                                              │ │
+│ │                                                                                              │ │
+│ │                                                                                              │ │
+│ │                                                                                              │ │
+│ │                                                                                              │ │
+│ │                                                                                              │ │
+│ │                                                                                              │ │
+│ │                                                                                              │ │
+│ │                                                                                              │ │
+│ │                                                                                              │ │
+│ │                                                                                              │ │
+│ │                                                                                              │ │
+│ │                                                                                              │ │
+│ │                                                                                              │ │
+│ │                                                                                              │ │
+│ │                                                                                              │ │
+│ │                                                                                              │ │
+│ │Enter open (rule, ruleset, group, workloads) · / search · Esc close                           │ │
+│ ╰──────────────────────────────────────────────────────────────────────────────────────────────╯ │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+where used: env=prod · loading r Tab type  Enter detail  r refresh  a auto  / search  : cmd  ? help

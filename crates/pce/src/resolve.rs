@@ -191,6 +191,13 @@ impl NameIndex {
             .map(|l| l.name.as_str())
     }
 
+    /// Every label group, by name.
+    pub fn label_groups(&self) -> Vec<&LabelGroup> {
+        let mut v: Vec<&LabelGroup> = self.label_groups.values().collect();
+        v.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.href.cmp(&b.href)));
+        v
+    }
+
     /// The label group with this href; an active href finds its draft.
     pub fn label_group(&self, href: &str) -> Option<&LabelGroup> {
         self.label_groups.get(canon(href).as_ref())

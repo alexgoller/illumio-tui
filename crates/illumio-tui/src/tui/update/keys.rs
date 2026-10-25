@@ -648,6 +648,7 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             _ => Vec::new(),
         },
         Overlay::Matched => matched_key(model, k),
+        Overlay::WhereUsed => where_used_key(model, k),
         Overlay::Error(_) => {
             if matches!(k.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) {
                 model.overlay = Overlay::None;
@@ -794,6 +795,7 @@ pub(super) fn open_help(model: &mut Model) {
         | Overlay::Readiness
         | Overlay::Enforce
         | Overlay::Matched
+        | Overlay::WhereUsed
         | Overlay::RuleFilter(_)) => o.clone(),
         _ => Overlay::None,
     };

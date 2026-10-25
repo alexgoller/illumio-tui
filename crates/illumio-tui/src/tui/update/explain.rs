@@ -307,6 +307,15 @@ fn jump_to_rule(model: &mut Model, v: Box<ExplainView>) -> Vec<Cmd> {
         return Vec::new();
     };
     let rule = r.href.clone();
+    open_policy_rule(model, rs, rule)
+}
+
+/// The draft ruleset `rs` and its rule `rule` (empty: the ruleset alone)
+/// selected on the Policy screen, the open overlay closed. Shows the draft
+/// first when the screen shows the active policy (as `d` there: one
+/// request, counted); a policy still on its way is selected in when it
+/// lands. Explain's and where-used's `Enter`.
+pub(super) fn open_policy_rule(model: &mut Model, rs: String, rule: String) -> Vec<Cmd> {
     if model.policy.scope != PolicyScope::Draft {
         if model.policy.loading {
             model.status = StatusLine::info("rulesets loading: Enter again once they are in");
@@ -368,6 +377,10 @@ pub(super) fn select_rule(model: &mut Model, rs: &str, rule: &str) -> Jump {
     };
     model.rebuild_rules();
     let p = &mut model.policy;
+    if rule.is_empty() {
+        model.status = StatusLine::info(name);
+        return Jump::Done;
+    }
     p.rules.select_where(|r| canon_href(&r.href) == rule);
     if let Some(r) = p
         .rules

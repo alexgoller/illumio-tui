@@ -3454,3 +3454,45 @@ fn ven_overlay_scrolls_to_the_notes_after_the_last_bucket() {
     let messages = out.find("│messages").expect(&out);
     assert!(out[messages..].contains("│  none"), "{out}");
 }
+
+/// `W` on a label (#75): with everything loaded, and with the rulesets and
+/// the workload probe still on their way.
+#[test]
+fn where_used_overlay_120x40_80x24_and_loading() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use illumio_tui::tui::Msg;
+    use illumio_tui::tui::model::Screen;
+    use illumio_tui::tui::update;
+    let w = || Msg::Key(KeyEvent::new(KeyCode::Char('W'), KeyModifiers::NONE));
+    let mut m = with_workloads(with_policy(model_with_objects()));
+    m.screen = Screen::Objects;
+    m.objects
+        .labels
+        .select_where(|r| r.href == "/orgs/5/labels/4");
+    update(&mut m, w());
+    let out = render_to_string(&m, 120, 40);
+    for s in [
+        "where used: label env=prod",
+        "3 references",
+        "Rulesets 1 · Rules 1 · Label groups 1 · Workloads 2",
+        "not searched: virtual services",
+        "Global-Infra · #1 · consumer · allow · pending disabled",
+        "All prod envs",
+        "Enter open",
+    ] {
+        assert!(out.contains(s), "missing {s:?}:\n{out}");
+    }
+    insta::assert_snapshot!("where_used_overlay_120x40", out);
+    insta::assert_snapshot!("where_used_overlay_80x24", render_to_string(&m, 80, 24));
+
+    let mut m = model_with_objects();
+    m.screen = Screen::Objects;
+    m.objects
+        .labels
+        .select_where(|r| r.href == "/orgs/5/labels/4");
+    update(&mut m, w());
+    let out = render_to_string(&m, 100, 30);
+    assert!(out.contains("loading rulesets, workload count…"), "{out}");
+    assert!(out.contains("2 reqs"), "{out}");
+    insta::assert_snapshot!("where_used_overlay_loading_100x30", out);
+}

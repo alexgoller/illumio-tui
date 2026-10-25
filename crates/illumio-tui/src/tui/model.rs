@@ -299,6 +299,9 @@ pub enum Overlay {
     Enforce,
     /// `:filters`: the current screen's saved filters.
     FilterPicker(crate::tui::saved::FilterPicker),
+    /// `W` / `:used` on Objects: what names the selected object; its state
+    /// is `ObjectsState::where_used`.
+    WhereUsed,
 }
 
 impl PartialEq for Overlay {
@@ -312,7 +315,8 @@ impl PartialEq for Overlay {
             | (Overlay::Marks, Overlay::Marks)
             | (Overlay::Readiness, Overlay::Readiness)
             | (Overlay::Enforce, Overlay::Enforce)
-            | (Overlay::Matched, Overlay::Matched) => true,
+            | (Overlay::Matched, Overlay::Matched)
+            | (Overlay::WhereUsed, Overlay::WhereUsed) => true,
             (Overlay::Prompt { input: a }, Overlay::Prompt { input: b })
             | (Overlay::Error(a), Overlay::Error(b)) => a == b,
             (Overlay::GroupKeys(a), Overlay::GroupKeys(b))

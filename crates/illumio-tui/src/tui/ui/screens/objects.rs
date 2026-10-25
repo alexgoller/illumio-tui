@@ -321,6 +321,124 @@ fn service_lines(s: &Service) -> Vec<DetailLine> {
     out
 }
 
+/// The where-used overlay's box and its parts.
+pub struct WhereUsedLayout {
+    pub rect: Rect,
+    pub head: Rect,
+    pub table: Rect,
+    pub foot: Rect,
+}
+
+/// The where-used box: centred, at most 110 wide; two head lines (the
+/// sections, then what is loading or not searched), the table, the keys.
+/// Shared by `view` and `update` (page size).
+pub fn where_used_layout(area: Rect) -> WhereUsedLayout {
+    let w = area.width.saturating_sub(4).min(110);
+    let h = area.height.saturating_sub(4);
+    let rect = crate::tui::ui::layout::centered(area, w, h);
+    let inner = Rect::new(
+        rect.x + 1,
+        rect.y + 1,
+        rect.width.saturating_sub(2),
+        rect.height.saturating_sub(2),
+    );
+    let [head, table, foot] = Layout::vertical([
+        Constraint::Length(2),
+        Constraint::Min(1),
+        Constraint::Length(1),
+    ])
+    .areas(inner);
+    WhereUsedLayout {
+        rect,
+        head,
+        table,
+        foot,
+    }
+}
+
+/// `text` cut with `…` to `width` characters.
+fn cut_to(text: &str, width: usize) -> String {
+    if text.chars().count() <= width {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(width.saturating_sub(1).max(1)).collect();
+    out.push('…');
+    out
+}
+
+/// `W` / `:used`: `where used: env=prod` with the total, the sections
+/// with their counts, what is still loading (or failed), else what is not
+/// searched, the references, the keys.
+pub fn render_where_used(model: &Model, f: &mut Frame, area: Rect) {
+    use ratatui::widgets::{Block, Clear};
+    let Some(v) = model.objects.where_used.as_ref() else {
+        return;
+    };
+    let t = &model.theme;
+    let l = where_used_layout(area);
+    f.render_widget(Clear, l.rect);
+    let n = v.total();
+    let mut meta = format!("{n} {}", if n == 1 { "reference" } else { "references" });
+    if v.requests > 0 {
+        meta.push_str(&format!(
+            " · {} req{}",
+            v.requests,
+            if v.requests == 1 { "" } else { "s" }
+        ));
+    }
+    let room = (l.rect.width as usize).saturating_sub(7 + meta.chars().count());
+    let title = cut_to(
+        &format!("where used: {} {}", v.target.kind.word(), v.name),
+        room,
+    );
+    f.render_widget(panel(&title, &meta, t, true), l.rect);
+    let width = l.head.width as usize;
+    let sections = v.sections();
+    let first = if sections.is_empty() && v.waiting.is_empty() && v.failed.is_none() {
+        "nothing in the draft policy or the label groups names it".to_string()
+    } else {
+        sections
+    };
+    let (second, style) = if let Some(e) = &v.failed {
+        (e.clone(), Style::new().fg(t.warn))
+    } else if !v.waiting.is_empty() {
+        (format!("loading {}…", v.waiting.join(", ")), t.dim_style())
+    } else if v.deny_unread > 0 {
+        (
+            format!(
+                "{} ruleset{} may hold deny rules not loaded (selecting one on Policy loads them) · {}",
+                v.deny_unread,
+                if v.deny_unread == 1 { "" } else { "s" },
+                pce::where_used::NOT_SEARCHED
+            ),
+            Style::new().fg(t.warn),
+        )
+    } else {
+        (pce::where_used::NOT_SEARCHED.to_string(), t.dim_style())
+    };
+    let head = vec![
+        Line::from(Span::styled(cut_to(&first, width), t.header_style())),
+        Line::from(Span::styled(cut_to(&second, width), style)),
+    ];
+    f.render_widget(Paragraph::new(head).style(t.base()), l.head);
+    let theme = t.clone();
+    render(f, l.table, &v.table, t, Block::default(), &move |r| {
+        if r.disabled {
+            theme.dim_style()
+        } else {
+            Style::default()
+        }
+    });
+    let foot = cut_to(
+        "Enter open (rule, ruleset, group, workloads) · / search · Esc close",
+        l.foot.width as usize,
+    );
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(foot, t.dim_style()))).style(t.base()),
+        l.foot,
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
