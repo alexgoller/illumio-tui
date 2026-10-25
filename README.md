@@ -751,7 +751,7 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   counts once that ruleset's deny rules have been loaded, and a truncated workload list is
   named in the header (`unused (workloads truncated)`).
   `W` (or `:used`) on a row of any tab shows where the object is used, before you change or
-  delete it: the title names it (`where used: label env=Production`, with the total), then
+  delete it: the title names it (`where used: env=Production`, with the total), then
   the sections with their counts, empty ones left out: Rulesets (their scopes), Rules
   (`Shop-Prod · #2 · provider · allow`, `deny` or `override deny`, plus `pending` or
   `disabled`; `#n` is the rule's place as the Policy screen lists it), Label groups (direct

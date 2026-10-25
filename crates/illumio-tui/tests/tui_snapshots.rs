@@ -3472,7 +3472,7 @@ fn where_used_overlay_120x40_80x24_and_loading() {
     update(&mut m, w());
     let out = render_to_string(&m, 120, 40);
     for s in [
-        "where used: label env=prod",
+        "where used: env=prod",
         "3 references",
         "Rulesets 1 · Rules 1 · Label groups 1 · Workloads 2",
         "not searched: virtual services",

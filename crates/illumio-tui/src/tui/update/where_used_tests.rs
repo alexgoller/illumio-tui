@@ -260,6 +260,8 @@ fn w_on_every_tab_and_used_as_a_command() {
         rows(&m),
         ["rule Shop-Prod · #3 · consumer · allow · pending"]
     );
+    let screen = crate::tui::test_support::render_to_string(&m, 100, 30);
+    assert!(screen.contains("where used: IP list Corp"), "{screen}");
 
     // Off the Objects screen `:used` says where it works.
     let mut m = with_policy(on_labels());
@@ -280,7 +282,7 @@ fn nothing_found_says_what_is_not_searched() {
         screen.contains("not searched: virtual services"),
         "{screen}"
     );
-    assert!(screen.contains("where used: label loc=eu"), "{screen}");
+    assert!(screen.contains("where used: loc=eu"), "{screen}");
 }
 
 #[test]

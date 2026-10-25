@@ -387,10 +387,12 @@ pub fn render_where_used(model: &Model, f: &mut Frame, area: Rect) {
         ));
     }
     let room = (l.rect.width as usize).saturating_sub(7 + meta.chars().count());
-    let title = cut_to(
-        &format!("where used: {} {}", v.target.kind.word(), v.name),
-        room,
-    );
+    // A label's `key=value` says what it is; other names get their kind.
+    let what = match v.target.kind {
+        pce::where_used::ObjectType::Label => v.name.clone(),
+        k => format!("{} {}", k.word(), v.name),
+    };
+    let title = cut_to(&format!("where used: {what}"), room);
     f.render_widget(panel(&title, &meta, t, true), l.rect);
     let width = l.head.width as usize;
     let sections = v.sections();

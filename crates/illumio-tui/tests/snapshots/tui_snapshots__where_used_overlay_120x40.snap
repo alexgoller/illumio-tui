@@ -4,7 +4,7 @@ expression: out
 ---
  illumio-tui pce.example · org 5 ●                                                                api 5 calls · 20.8 KB
   1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
-  Lab╭ where used: label env=prod ────────────────────────────────────────────────────────────────── 3 references ╮
+  Lab╭ where used: env=prod ──────────────────────────────────────────────────────────────────────── 3 references ╮
 ╭ Lab│Rulesets 1 · Rules 1 · Label groups 1 · Workloads 2                                                         │ows ╮
 │  ke│not searched: virtual services, enforcement boundaries, pairing profiles, container workload profiles       │    │
 │  ro│  section     reference                                                                                     │    │

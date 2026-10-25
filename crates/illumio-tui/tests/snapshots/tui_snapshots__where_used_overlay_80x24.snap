@@ -4,7 +4,7 @@ expression: "render_to_string(&m, 80, 24)"
 ---
  illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
   1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
-  ╭ where used: label env=prod ──────────────────────────────── 3 references ╮
+  ╭ where used: env=prod ────────────────────────────────────── 3 references ╮
 ╭ │Rulesets 1 · Rules 1 · Label groups 1 · Workloads 2                       │ ╮
 │ │not searched: virtual services, enforcement boundaries, pairing profiles,…│ │
 │ │  section     reference                                                   │ │

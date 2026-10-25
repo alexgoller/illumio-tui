@@ -4,7 +4,7 @@ expression: out
 ---
  illumio-tui pce.example · org 5 ●                                            api 5 calls · 20.8 KB
   1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
-  ╭ where used: label env=prod ──────────────────────────────────────────── 1 reference · 2 reqs ╮
+  ╭ where used: env=prod ────────────────────────────────────────────────── 1 reference · 2 reqs ╮
 ╭ │Label groups 1                                                                                │ ╮
 │ │loading rulesets, workload count…                                                             │ │
 │ │  section     reference                                                                       │ │
