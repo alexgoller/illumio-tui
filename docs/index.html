@@ -853,7 +853,7 @@ summary  provision 9 rule_sets, 2 services</code></pre>
 <span class="p">$ </span>illumio-tui workloads relabel --set env=prod,role=- --label app=shop --dry-run
 <span class="p">$ </span>illumio-tui pairing-profiles create shop-prod --label app=shop --label env=prod --enforcement visibility_only --lifespan 7d --lock app,env --dry-run
 <span class="p">$ </span>illumio-tui pp delete shop-prod --yes</code></pre>
-  <p><code>pairing-profiles create</code> sends the name plus only the flags given, so the PCE's defaults apply to the rest; a taken name or an unknown label is exit 2 before anything is sent. Pairing keys are left out: an activation code is a secret.</p>
+  <p><code>pairing-profiles create</code> sends the name plus only the flags given, so the PCE's defaults apply to the rest; a taken name or an unknown label is exit 2 before anything is sent. The PCE locks every setting whose lock is not sent: <code>--unlock</code> names the ones to leave changeable at pairing. Pairing keys are left out: an activation code is a secret.</p>
   <p>Rules use a compact token grammar: <code>app=web</code>, <code>group:NAME</code>, <code>iplist:NAME</code>, <code>workload:HOST</code>, <code>all</code>, and <code>!</code> to exclude. <code>--impact</code> on a rule write reports the workloads it will touch before anything is sent. The <a href="https://github.com/alexgoller/illumio-tui#writes">README</a> has the full reference.</p>
 </section>
 

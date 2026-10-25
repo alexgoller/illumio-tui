@@ -103,6 +103,11 @@ async fn list_prints_every_profile_with_label_names() {
     // As the PCE sent it, unknown fields too.
     assert_eq!(v["data"][0]["is_default"], true);
     assert_eq!(v["data"][1]["key_lifespan"], 86400);
+    // Labels named from the labels list read for them.
+    assert_eq!(
+        v["data"][1]["labels"][0],
+        json!({"href": "/orgs/5/labels/1", "key": "role", "value": "web"})
+    );
     let labels: Vec<Value> = serde_json::from_str(LABELS).unwrap();
     let name_of = |href: &str| {
         let l = labels.iter().find(|l| l["href"] == href).unwrap();
@@ -267,7 +272,9 @@ async fn create_maps_every_flag_and_resolves_labels() {
         "key_lifespan": 3600,
         "role_label_lock": true,
         "app_label_lock": true,
-        "log_traffic_lock": true
+        "log_traffic_lock": true,
+        "env_label_lock": false,
+        "loc_label_lock": false
     });
     let mut answer = body.clone();
     answer["href"] = json!("/orgs/5/pairing_profiles/10");
@@ -297,6 +304,7 @@ async fn create_maps_every_flag_and_resolves_labels() {
             "--lock",
             "app",
         ])
+        .args(["--unlock", "env,loc"])
         .args(["--table", "--yes"])
         .assert()
         .success();
@@ -346,6 +354,7 @@ async fn a_taken_name_or_an_unknown_label_sends_nothing() {
         &["--label", "app=a", "--label", "app=b"],
         &["--uses", "0"],
         &["--enforcement", "enforced"],
+        &["--lock", "env", "--unlock", "env"],
     ] {
         writer(&server, state.path())
             .args(["pairing-profiles", "create", "new", "--yes"])
@@ -495,6 +504,69 @@ async fn delete_by_href_reads_no_list() {
             .assert()
             .code(2);
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rejected_create_is_exit_4_and_audited() {
+    let server = MockServer::start().await;
+    expect_get(&server, LIST, PROFILES, 1).await;
+    Mock::given(method("POST"))
+        .and(path(LIST))
+        .respond_with(
+            ResponseTemplate::new(406)
+                .set_body_json(json!([{"token": "invalid_value", "message": "bad ven_type"}])),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let state = tempfile::tempdir().unwrap();
+    writer(&server, state.path())
+        .args(["pairing-profiles", "create", "pp1", "--yes"])
+        .assert()
+        .code(4);
+    let audit = audit_lines(state.path());
+    assert_eq!(audit.len(), 1);
+    assert_eq!(audit[0]["status"], 406);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_name_two_profiles_share_is_refused_with_both_hrefs() {
+    let server = MockServer::start().await;
+    let twins = json!([
+        {"href": "/orgs/5/pairing_profiles/1", "name": "dup"},
+        {"href": "/orgs/5/pairing_profiles/2", "name": "dup"}
+    ]);
+    expect_get(&server, LIST, &twins.to_string(), 1).await;
+    expect_none(&server, "DELETE").await;
+    let state = tempfile::tempdir().unwrap();
+    let a = writer(&server, state.path())
+        .args(["pairing-profiles", "delete", "dup", "--yes"])
+        .assert()
+        .code(2);
+    let err = stderr(&a);
+    assert!(
+        err.contains("/orgs/5/pairing_profiles/1") && err.contains("/orgs/5/pairing_profiles/2"),
+        "{err}"
+    );
+}
+
+#[test]
+fn schema_takes_the_alias() {
+    let out = Command::cargo_bin("illumio-tui")
+        .unwrap()
+        .env_clear()
+        .env("XDG_CONFIG_HOME", no_config_dir())
+        .args(["schema", "pp", "list"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let doc: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(doc["title"], "illumio-tui pairing-profiles");
+    assert!(doc["$comment"].as_str().unwrap().contains("key_lifespan"));
 }
 
 #[test]

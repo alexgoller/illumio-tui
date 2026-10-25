@@ -749,6 +749,24 @@ fn list() -> SchemaList {
     SchemaList(shared.chain(commands).collect())
 }
 
+/// `words` with a command alias as its first word (`pp`) spelled as the
+/// command it names, as `COMMANDS` lists it.
+fn canonical(words: &str) -> String {
+    use clap::CommandFactory;
+    let (first, rest) = words.split_once(' ').unwrap_or((words, ""));
+    let cmd = super::Cli::command();
+    let name = cmd
+        .get_subcommands()
+        .find(|c| c.get_all_aliases().any(|a| a == first))
+        .map(|c| c.get_name().to_string())
+        .unwrap_or_else(|| first.to_string());
+    if rest.is_empty() {
+        name
+    } else {
+        format!("{name} {rest}")
+    }
+}
+
 /// `illumio-tui schema [COMMAND...]`: local, no profile, no request.
 pub fn run(global: &GlobalArgs, args: &SchemaArgs) -> Result<(), CliError> {
     let format = choose_format(global.json, global.table, global.csv);
@@ -774,7 +792,7 @@ pub fn run(global: &GlobalArgs, args: &SchemaArgs) -> Result<(), CliError> {
         .map(String::as_str)
         .filter(|w| !matches!(*w, "--json" | "--table" | "--csv"))
         .collect();
-    let words = words.join(" ");
+    let words = canonical(&words.join(" "));
     let name = resolve(&words).ok_or_else(|| {
         let first = words.split(' ').next().unwrap_or_default();
         let near: Vec<&str> = COMMANDS
@@ -1004,6 +1022,10 @@ mod tests {
         assert_eq!(resolve("write"), Some("write"));
         assert_eq!(resolve("envelope"), Some("envelope"));
         assert_eq!(resolve("nope"), None);
+        assert_eq!(canonical("pp list"), "pairing-profiles list");
+        assert_eq!(canonical("pp"), "pairing-profiles");
+        assert_eq!(canonical("labels add"), "labels add");
+        assert_eq!(resolve(&canonical("pp create --dry-run")), Some("write"));
     }
 
     #[test]

@@ -7,8 +7,8 @@ use super::error::CliError;
 use super::output::{OutputFormat, TableRows, WriteMeta, join_list, meta_line, write_json};
 use super::write::{self, WriteFlags, WriteOutput, label_in, pairing_profile_in, parse_kv};
 use clap::{Args, Subcommand};
-use pce::models::PairingProfile;
 use pce::models::pairing_profiles::{lifespan_text, value_text};
+use pce::models::{Label, PairingProfile};
 use pce::write::pairing_profiles::{
     checked_pairing_href, parse_enforcement, parse_locks, parse_visibility,
 };
@@ -28,7 +28,7 @@ pub enum PairingProfilesCmd {
     /// defaults to the rest. The name must be new (checked against the
     /// pairing profile list); labels are resolved through the labels list.
     /// No pairing key or activation code is made.
-    Create(CreateArgs),
+    Create(Box<CreateArgs>),
     /// Delete a pairing profile by exact name or href
     Delete(DeleteArgs),
 }
@@ -63,9 +63,14 @@ pub struct CreateArgs {
     #[arg(long)]
     pub disabled: bool,
     /// Lock settings against change at pairing, comma-separated or repeatable:
-    /// role, app, env, loc, enforcement, visibility, log-traffic
+    /// role, app, env, loc, enforcement, visibility, log-traffic. The PCE locks
+    /// every one not given here or in --unlock
     #[arg(long, value_name = "LOCKS")]
     pub lock: Vec<String>,
+    /// Leave settings unlocked (sent as false), same names as --lock; the PCE
+    /// locks every one not given
+    #[arg(long, value_name = "LOCKS")]
+    pub unlock: Vec<String>,
     #[command(flatten)]
     pub write: WriteFlags,
 }
@@ -111,14 +116,24 @@ pub const HEADERS: [&str; 10] = [
     "href",
 ];
 
-/// The profiles as the PCE returned them; the labels' `key=value` by href
-/// for the table only.
+/// The profiles as the PCE returned them, their labels named
+/// ([`name_labels`]).
 #[derive(Debug, Serialize)]
 #[serde(transparent)]
 pub struct ProfileList {
     pub profiles: Vec<PairingProfile>,
-    #[serde(skip)]
-    pub label_names: HashMap<String, String>,
+}
+
+/// Gives every label the PCE sent as a bare href its key and value from
+/// `labels`; one not in it stays an href.
+pub fn name_labels(profiles: &mut [PairingProfile], labels: &[Label]) {
+    let by_href: HashMap<&str, &Label> = labels.iter().map(|l| (l.href.as_str(), l)).collect();
+    for l in profiles.iter_mut().flat_map(|p| p.labels.iter_mut()) {
+        if let (None, None, Some(known)) = (&l.key, &l.value, by_href.get(l.href.as_str())) {
+            l.key = Some(known.key.clone());
+            l.value = Some(known.value.clone());
+        }
+    }
 }
 
 impl ProfileList {
@@ -127,11 +142,7 @@ impl ProfileList {
             .iter()
             .map(|l| match (&l.key, &l.value) {
                 (Some(k), Some(v)) => format!("{k}={v}"),
-                _ => self
-                    .label_names
-                    .get(&l.href)
-                    .cloned()
-                    .unwrap_or_else(|| l.href.clone()),
+                _ => l.href.clone(),
             })
             .collect()
     }
@@ -195,20 +206,13 @@ async fn list(ctx: &Context) -> Result<(), CliError> {
         .iter()
         .flat_map(|p| &p.labels)
         .any(|l| l.key.is_none() || l.value.is_none());
-    let mut label_names = HashMap::new();
+    let mut profiles = c.value;
     if needs_names {
         let labels = ctx.pce.labels(ctx.cache_mode).await?;
         truncated |= labels.truncated;
-        label_names = labels
-            .value
-            .into_iter()
-            .map(|l| (l.href, format!("{}={}", l.key, l.value)))
-            .collect();
+        name_labels(&mut profiles, &labels.value);
     }
-    let data = ProfileList {
-        profiles: c.value,
-        label_names,
-    };
+    let data = ProfileList { profiles };
     ctx.emit(&data, cache_label(c.hit, ctx.cache_mode), truncated, None)
 }
 
@@ -277,7 +281,16 @@ fn draft_of(a: &CreateArgs) -> Result<(PairingProfileDraft, Vec<String>), CliErr
         .map(Limit::parse_lifespan)
         .transpose()
         .map_err(CliError::Args)?;
-    let locks = parse_locks(&a.lock).map_err(CliError::Args)?;
+    let locks = parse_locks("--lock", &a.lock).map_err(CliError::Args)?;
+    let unlocks = parse_locks("--unlock", &a.unlock).map_err(CliError::Args)?;
+    if let Some((name, _)) = pce::models::pairing_profiles::LOCKS
+        .iter()
+        .find(|(_, f)| locks.contains(f) && unlocks.contains(f))
+    {
+        return Err(CliError::Args(format!(
+            "{name} is in both --lock and --unlock"
+        )));
+    }
     let draft = PairingProfileDraft {
         name: name.to_string(),
         description: a.description.clone(),
@@ -289,6 +302,7 @@ fn draft_of(a: &CreateArgs) -> Result<(PairingProfileDraft, Vec<String>), CliErr
         lifespan,
         disabled: a.disabled,
         locks,
+        unlocks,
     };
     Ok((draft, a.label.clone()))
 }
@@ -324,7 +338,7 @@ pub struct Deleted {
 async fn create(ctx: &Context, a: &CreateArgs) -> Result<(), CliError> {
     let guard = write::prepare(ctx, &a.write)?;
     let (mut draft, specs) = draft_of(a)?;
-    let existing = ctx.pce.pairing_profiles(ctx.cache_mode).await?.value;
+    let existing = complete_list(ctx, "the name cannot be checked").await?;
     if !specs.is_empty() {
         let labels = ctx.pce.labels(ctx.cache_mode).await?.value;
         draft.labels = specs
@@ -336,7 +350,26 @@ async fn create(ctx: &Context, a: &CreateArgs) -> Result<(), CliError> {
         .pce
         .writer(&guard)
         .plan_create_pairing_profile(&draft, &existing)?;
-    send(ctx, &a.write, &guard, plan, None).await
+    send(ctx, &a.write, &guard, plan, Sent::Created(draft.name)).await
+}
+
+/// The whole pairing profile list; a truncated one is an argument error
+/// (`why` says what it stops), never a check against part of it.
+async fn complete_list(ctx: &Context, why: &str) -> Result<Vec<PairingProfile>, CliError> {
+    let c = ctx.pce.pairing_profiles(ctx.cache_mode).await?;
+    if c.truncated {
+        return Err(CliError::Args(format!(
+            "the pairing profile list is truncated: {why}"
+        )));
+    }
+    Ok(c.value)
+}
+
+/// What a sent write prints: the created profile (its name, should the PCE
+/// answer without a body), or the deleted one's name.
+enum Sent {
+    Created(String),
+    Deleted(String),
 }
 
 async fn delete(ctx: &Context, a: &DeleteArgs) -> Result<(), CliError> {
@@ -345,7 +378,7 @@ async fn delete(ctx: &Context, a: &DeleteArgs) -> Result<(), CliError> {
         let href = checked_pairing_href(&a.target, ctx.config.org_id)?;
         (href.clone(), href)
     } else {
-        let profiles = ctx.pce.pairing_profiles(ctx.cache_mode).await?.value;
+        let profiles = complete_list(ctx, "use the href").await?;
         let href = pairing_profile_in(&profiles, &a.target)?;
         (href, a.target.trim().to_string())
     };
@@ -353,17 +386,17 @@ async fn delete(ctx: &Context, a: &DeleteArgs) -> Result<(), CliError> {
         .pce
         .writer(&guard)
         .plan_delete_pairing_profile(&href, &name)?;
-    send(ctx, &a.write, &guard, plan, Some(name)).await
+    send(ctx, &a.write, &guard, plan, Sent::Deleted(name)).await
 }
 
 /// Dry run: the request, as every write prints it. Sent: the created
-/// profile as the PCE returned it, or `deleted NAME` (`deleted` given).
+/// profile as the PCE returned it, or `deleted NAME`.
 async fn send(
     ctx: &Context,
     flags: &WriteFlags,
     guard: &pce::write::WriteGuard,
     plan: Plan,
-    deleted: Option<String>,
+    sent: Sent,
 ) -> Result<(), CliError> {
     let Plan::Send { request, kind } = plan else {
         unreachable!("pairing profile plans always send")
@@ -402,9 +435,14 @@ async fn send(
         }
         meta.warnings = Some(warnings);
     }
-    match deleted {
-        None => ctx.emit_meta(&Created(w.object), &meta),
-        Some(name) => {
+    match sent {
+        // A POST answered without a body: what is known of the profile.
+        Sent::Created(name) if !w.object.is_object() => ctx.emit_meta(
+            &Created(serde_json::json!({"href": w.href, "name": name})),
+            &meta,
+        ),
+        Sent::Created(_) => ctx.emit_meta(&Created(w.object), &meta),
+        Sent::Deleted(name) => {
             let data = Deleted {
                 deleted: name,
                 href: w.href,
@@ -434,7 +472,7 @@ mod tests {
         full.extend_from_slice(argv);
         let cli = super::super::Cli::try_parse_from(full).unwrap();
         match cli.command {
-            Some(super::super::Command::PairingProfiles(PairingProfilesCmd::Create(a))) => a,
+            Some(super::super::Command::PairingProfiles(PairingProfilesCmd::Create(a))) => *a,
             other => panic!("{other:?}"),
         }
     }
@@ -460,6 +498,8 @@ mod tests {
             "--disabled",
             "--lock",
             "app,enforcement",
+            "--unlock",
+            "role,log_traffic",
         ]))
         .unwrap();
         assert_eq!(specs, ["app=shop", "env=prod"]);
@@ -475,6 +515,8 @@ mod tests {
                 "enabled": false,
                 "app_label_lock": true,
                 "enforcement_mode_lock": true,
+                "role_label_lock": false,
+                "log_traffic_lock": false,
             })
         );
     }
@@ -490,6 +532,8 @@ mod tests {
             &["p", "--uses", "0"],
             &["p", "--lifespan", "soon"],
             &["p", "--lock", "colour"],
+            &["p", "--unlock", "colour"],
+            &["p", "--lock", "app,env", "--unlock", "env"],
             &[" "],
         ] {
             let e = draft_of(&create_args(argv)).unwrap_err();
@@ -499,13 +543,17 @@ mod tests {
 
     #[test]
     fn the_table_names_labels_and_locks() {
-        let profiles: Vec<PairingProfile> =
+        let mut profiles: Vec<PairingProfile> =
             serde_json::from_str(include_str!("../../../../fixtures/pairing_profiles.json"))
                 .unwrap();
-        let list = ProfileList {
-            profiles,
-            label_names: HashMap::from([("/orgs/5/labels/1".into(), "role=web".into())]),
-        };
+        let labels: Vec<Label> = serde_json::from_value(serde_json::json!([
+            {"href": "/orgs/5/labels/1", "key": "role", "value": "web"}
+        ]))
+        .unwrap();
+        name_labels(&mut profiles, &labels);
+        assert_eq!(profiles[1].labels[0].key.as_deref(), Some("role"));
+        assert_eq!(profiles[1].labels[1].key, None, "not in the list: an href");
+        let list = ProfileList { profiles };
         let rows = list.rows();
         assert_eq!(
             rows[1],

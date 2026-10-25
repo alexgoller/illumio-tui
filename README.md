@@ -1522,7 +1522,8 @@ secret. Updating a profile is not supported; delete and create it.
     illumio-tui pp list --csv --fields name,enabled,labels
     illumio-tui pairing-profiles create shop-prod --label app=shop --label env=prod \
         --enforcement visibility_only --visibility flow_summary --ven-type server \
-        --uses 1 --lifespan 7d --lock app,env,enforcement --description "shop web tier" --dry-run
+        --uses 1 --lifespan 7d --lock app,env,enforcement --unlock role,loc,visibility,log-traffic \
+        --description "shop web tier" --dry-run
     illumio-tui pairing-profiles create lab-endpoints --disabled --yes
     illumio-tui pairing-profiles delete shop-prod --yes
 
@@ -1530,7 +1531,10 @@ secret. Updating a profile is not supported; delete and create it.
 (cached) when a profile carries labels, to print them as `key=value`.
 Columns: name, enabled, labels, enforcement, visibility, ven type, uses per
 key, key lifespan, the locks set, href; `--json` passes every profile
-through as the PCE returned it, `--csv` prints the lifespan in seconds.
+through as the PCE returned it, each label given its `key` and `value` from
+the labels list; `--csv` prints the lifespan in seconds. The CSV columns are
+the table's names (`enforcement`, `uses_per_key`, `locks`); `--json --fields`
+takes the PCE's (`enforcement_mode`, `allowed_uses_per_key`, `*_lock`).
 
 `create NAME` sends `name` plus only the flags given, so the PCE applies its
 own defaults to the rest:
@@ -1546,14 +1550,22 @@ own defaults to the rest:
 | `--lifespan DURATION\|unlimited` (`3600`, `1h`, `7d`) | `key_lifespan` in seconds, or `"unlimited"` |
 | `--disabled` | `enabled: false` (the default is enabled) |
 | `--lock role,app,env,loc,enforcement,visibility,log-traffic` | `role_label_lock`, `app_label_lock`, `env_label_lock`, `loc_label_lock`, `enforcement_mode_lock`, `visibility_level_lock`, `log_traffic_lock`: `true` |
+| `--unlock` (the same names) | the same fields: `false` |
+
+The PCE locks every setting whose `*_lock` is not sent: a profile created
+with `--lock env` comes back with `app_label_lock: true` too. Name what
+should stay changeable at pairing with `--unlock`; a name in both `--lock`
+and `--unlock` is exit 2.
 
 The name must be new: a name already in the pairing profile list (one
 cached read) is exit 2, as is an unknown label (with the similar ones
 listed), a second label of one key, an unknown lock or a bad value; nothing
-is sent. Sent, `data` is the created profile as the PCE returned it (the
+is sent. A truncated pairing profile list is exit 2 too: no name is checked,
+or deleted by name, against part of it. Sent, `data` is the created profile as the PCE returned it (the
 table shows its name and href), with `meta.write` as for every write.
 `delete NAME|HREF` resolves an exact name against the list (exit 2 if
-unknown or ambiguous; an href is used as given, with no read), sends
+unknown or ambiguous; an href is checked (this org, a pairing profile) and
+used with no read), sends
 `DELETE` on the href and prints `deleted NAME` (`--json`:
 `{"deleted", "href"}`). Pairing profiles are not policy objects: a write
 applies at once, nothing waits for provisioning. A dry run prints the request

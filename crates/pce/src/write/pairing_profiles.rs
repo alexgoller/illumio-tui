@@ -110,18 +110,20 @@ pub fn parse_visibility(s: &str) -> Option<VisibilityLevel> {
     })
 }
 
-/// `--lock role,app,...`: the PCE fields the names set, in [`LOCKS`]
-/// order, each once. An unknown name is an error naming the known ones.
-pub fn parse_locks(specs: &[String]) -> Result<Vec<&'static str>, String> {
+/// `--lock role,app,...` (or `--unlock`, the `flag` named in errors): the
+/// PCE fields the names set, in [`LOCKS`] order, each once; `_` for `-`
+/// too. An unknown name is an error naming the known ones.
+pub fn parse_locks(flag: &str, specs: &[String]) -> Result<Vec<&'static str>, String> {
     let mut on = Vec::new();
     for name in specs.iter().flat_map(|s| s.split(',')).map(str::trim) {
         if name.is_empty() {
             continue;
         }
-        let Some((_, field)) = LOCKS.iter().find(|(n, _)| *n == name) else {
+        let wanted = name.replace('_', "-");
+        let Some((_, field)) = LOCKS.iter().find(|(n, _)| *n == wanted) else {
             let known: Vec<&str> = LOCKS.iter().map(|(n, _)| *n).collect();
             return Err(format!(
-                "--lock: unknown lock {name:?}; known: {}",
+                "{flag}: unknown lock {name:?}; known: {}",
                 known.join(", ")
             ));
         };
@@ -152,6 +154,9 @@ pub struct PairingProfileDraft {
     pub disabled: bool,
     /// The `*_lock` fields to set to `true` ([`parse_locks`]).
     pub locks: Vec<&'static str>,
+    /// The `*_lock` fields to set to `false`: the PCE locks every field
+    /// not sent.
+    pub unlocks: Vec<&'static str>,
 }
 
 impl PairingProfileDraft {
@@ -193,6 +198,9 @@ impl PairingProfileDraft {
         }
         for field in &self.locks {
             v.insert((*field).into(), json!(true));
+        }
+        for field in &self.unlocks {
+            v.insert((*field).into(), json!(false));
         }
         Value::Object(v)
     }
@@ -255,12 +263,23 @@ impl Writer<'_> {
 /// [`checked_href`] without the `sec_policy` form: pairing profiles are
 /// not policy objects.
 pub fn checked_pairing_href(href: &str, org_id: u64) -> Result<String, WriteError> {
-    let out = checked_href(href, "pairing_profiles", org_id)?;
-    if out.contains("/sec_policy/") {
-        return Err(WriteError::invalid(format!(
+    let bad = || {
+        WriteError::invalid(format!(
             "{:?} is not a pairing_profiles href (expected /orgs/<org>/pairing_profiles/<id>)",
             href.trim()
-        )));
+        ))
+    };
+    // A foreign org keeps its own message; any other refusal names the
+    // one form a pairing profile has.
+    let out = checked_href(href, "pairing_profiles", org_id).map_err(|e| {
+        if e.to_string().contains("belongs to org") {
+            e
+        } else {
+            bad()
+        }
+    })?;
+    if out.contains("/sec_policy/") {
+        return Err(bad());
     }
     Ok(out)
 }
@@ -281,6 +300,7 @@ mod tests {
             lifespan: Some(Limit::Count(604_800)),
             disabled: true,
             locks: vec!["role_label_lock", "log_traffic_lock"],
+            unlocks: vec!["app_label_lock"],
         }
     }
 
@@ -309,6 +329,7 @@ mod tests {
                 "enabled": false,
                 "role_label_lock": true,
                 "log_traffic_lock": true,
+                "app_label_lock": false,
             })
         );
         let d = PairingProfileDraft {
@@ -384,11 +405,14 @@ mod tests {
     #[test]
     fn locks_map_to_fields_in_order_and_unknown_ones_fail() {
         assert_eq!(
-            parse_locks(&[
-                "visibility,role".into(),
-                "log-traffic".into(),
-                "role".into()
-            ]),
+            parse_locks(
+                "--lock",
+                &[
+                    "visibility,role".into(),
+                    "log-traffic".into(),
+                    "role".into()
+                ]
+            ),
             Ok(vec![
                 "role_label_lock",
                 "visibility_level_lock",
@@ -396,12 +420,20 @@ mod tests {
             ])
         );
         assert_eq!(
-            parse_locks(&["role,app,env,loc,enforcement,visibility,log-traffic".into()])
-                .unwrap()
-                .len(),
+            parse_locks(
+                "--lock",
+                &["role,app,env,loc,enforcement,visibility,log-traffic".into()]
+            )
+            .unwrap()
+            .len(),
             7
         );
-        let e = parse_locks(&["role,colour".into()]).unwrap_err();
+        assert_eq!(
+            parse_locks("--unlock", &["log_traffic".into()]),
+            Ok(vec!["log_traffic_lock"])
+        );
+        let e = parse_locks("--unlock", &["role,colour".into()]).unwrap_err();
+        assert!(e.starts_with("--unlock: "), "{e}");
         assert!(e.contains("\"colour\"") && e.contains("log-traffic"), "{e}");
     }
 
@@ -412,7 +444,17 @@ mod tests {
             "/orgs/5/pairing_profiles/7"
         );
         assert!(checked_pairing_href("/orgs/6/pairing_profiles/7", 5).is_err());
-        assert!(checked_pairing_href("/orgs/5/labels/7", 5).is_err());
+        let e = checked_pairing_href("/orgs/5/labels/7", 5)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("expected /orgs/<org>/pairing_profiles/<id>)") && !e.contains("sec_policy"),
+            "{e}"
+        );
+        let e = checked_pairing_href("/orgs/6/pairing_profiles/7", 5)
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("org 6") && e.contains("org 5"), "{e}");
         assert!(checked_pairing_href("/orgs/5/sec_policy/draft/pairing_profiles/7", 5).is_err());
         assert!(checked_pairing_href("/orgs/5/pairing_profiles/../labels", 5).is_err());
     }
