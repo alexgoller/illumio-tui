@@ -6,10 +6,10 @@ expression: out
   1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
   ╭ where used: env=prod ────────────────────────────────────────────────── 1 reference · 2 reqs ╮
 ╭ │Label groups 1                                                                                │ ╮
+│ │not searched: virtual services, boundaries, pairing/container profiles                        │ │
 │ │loading rulesets, workload count…                                                             │ │
 │ │  section     reference                                                                       │ │
 │ │▸ label group All prod envs                                                                   │ │
-│ │                                                                                              │ │
 │▸│                                                                                              │ │
 │ │                                                                                              │ │
 │ │                                                                                              │ │
@@ -31,4 +31,4 @@ expression: out
 │ │Enter open (rule, ruleset, group, workloads) · / search · Esc close                           │ │
 │ ╰──────────────────────────────────────────────────────────────────────────────────────────────╯ │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-where used: env=prod · loading r Tab type  Enter detail  r refresh  a auto  / search  : cmd  ? help
+where used: env=prod · loading rulesets, workload count…           │ Enter open  / search  Esc back

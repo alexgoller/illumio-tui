@@ -329,8 +329,13 @@ pub struct WhereUsedLayout {
     pub foot: Rect,
 }
 
-/// The where-used box: centred, at most 110 wide; two head lines (the
-/// sections, then what is loading or not searched), the table, the keys.
+/// `NOT_SEARCHED` where the box is too narrow for it (fits 74 columns).
+const NOT_SEARCHED_SHORT: &str =
+    "not searched: virtual services, boundaries, pairing/container profiles";
+
+/// The where-used box: centred, at most 110 wide; three head lines (the
+/// sections, what is not searched, then what is loading, failed or may be
+/// missing), the table, the keys.
 /// Shared by `view` and `update` (page size).
 pub fn where_used_layout(area: Rect) -> WhereUsedLayout {
     let w = area.width.saturating_sub(4).min(110);
@@ -343,7 +348,7 @@ pub fn where_used_layout(area: Rect) -> WhereUsedLayout {
         rect.height.saturating_sub(2),
     );
     let [head, table, foot] = Layout::vertical([
-        Constraint::Length(2),
+        Constraint::Length(3),
         Constraint::Min(1),
         Constraint::Length(1),
     ])
@@ -401,26 +406,32 @@ pub fn render_where_used(model: &Model, f: &mut Frame, area: Rect) {
     } else {
         sections
     };
-    let (second, style) = if let Some(e) = &v.failed {
+    // Always shown, whole: an empty result is not "unused everywhere".
+    let not_searched = if pce::where_used::NOT_SEARCHED.chars().count() <= width {
+        pce::where_used::NOT_SEARCHED
+    } else {
+        NOT_SEARCHED_SHORT
+    };
+    let (third, style) = if let Some(e) = &v.failed {
         (e.clone(), Style::new().fg(t.warn))
     } else if !v.waiting.is_empty() {
         (format!("loading {}…", v.waiting.join(", ")), t.dim_style())
     } else if v.deny_unread > 0 {
         (
             format!(
-                "{} ruleset{} may hold deny rules not loaded (selecting one on Policy loads them) · {}",
+                "{} ruleset{} may hold deny rules not loaded (selecting one on Policy loads them)",
                 v.deny_unread,
                 if v.deny_unread == 1 { "" } else { "s" },
-                pce::where_used::NOT_SEARCHED
             ),
             Style::new().fg(t.warn),
         )
     } else {
-        (pce::where_used::NOT_SEARCHED.to_string(), t.dim_style())
+        (String::new(), t.dim_style())
     };
     let head = vec![
         Line::from(Span::styled(cut_to(&first, width), t.header_style())),
-        Line::from(Span::styled(cut_to(&second, width), style)),
+        Line::from(Span::styled(cut_to(not_searched, width), t.dim_style())),
+        Line::from(Span::styled(cut_to(&third, width), style)),
     ];
     f.render_widget(Paragraph::new(head).style(t.base()), l.head);
     let theme = t.clone();

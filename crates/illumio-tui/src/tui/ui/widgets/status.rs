@@ -16,6 +16,8 @@ const STATUS_ROOM: usize = 40;
 const APP_HINTS: &str = " │ Tab panel  X dir  Enter open  w rule  r reload  Esc back ";
 /// The generator's keys, for the same reason.
 const GEN_HINTS: &str = " │ ←/→ stop  </> row  R pick  r re-query  Esc back ";
+/// The where-used overlay's keys, for the same reason.
+const USED_HINTS: &str = " │ Enter open  / search  Esc back ";
 
 pub fn render(model: &Model, f: &mut Frame, area: Rect) {
     let t = &model.theme;
@@ -27,9 +29,14 @@ pub fn render(model: &Model, f: &mut Frame, area: Rect) {
     let base = screen_hint(model.screen, model.writes.enabled);
     let more = screen_hint_more(model.screen, model.traffic.view);
     let width = usize::from(area.width);
-    let app = matches!(model.overlay, Overlay::App | Overlay::Generator);
+    let app = matches!(
+        model.overlay,
+        Overlay::App | Overlay::Generator | Overlay::WhereUsed
+    );
     let mut hints = if model.overlay == Overlay::Generator {
         GEN_HINTS.to_string()
+    } else if model.overlay == Overlay::WhereUsed {
+        USED_HINTS.to_string()
     } else if app {
         APP_HINTS.to_string()
     } else {

@@ -13,9 +13,13 @@
       },
       "side": {"enum": ["provider", "consumer", "service", null]},
       "action": {"enum": ["allow", "deny", "override_deny", null]},
-      "pending": {
+      "excluded": {
         "type": "boolean",
-        "description": "a change not provisioned: the rule, its ruleset or the group has an update_type"
+        "description": "the rule side or scope names it as an exclusion"
+      },
+      "pending": {
+        "type": ["string", "null"],
+        "description": "a draft change not provisioned yet, the PCE's update_type (create, update, delete) of the rule, else its ruleset (scope: the ruleset; label_group: the group); null when provisioned as it is"
       },
       "disabled": {"type": "boolean", "description": "the rule or its ruleset is disabled"},
       "via": {
@@ -43,6 +47,7 @@
       "rule",
       "side",
       "action",
+      "excluded",
       "pending",
       "disabled",
       "via",

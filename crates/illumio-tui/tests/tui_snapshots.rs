@@ -3476,7 +3476,7 @@ fn where_used_overlay_120x40_80x24_and_loading() {
         "3 references",
         "Rulesets 1 · Rules 1 · Label groups 1 · Workloads 2",
         "not searched: virtual services",
-        "Global-Infra · #1 · consumer · allow · pending disabled",
+        "Global-Infra · #1 · consumer · allow · pending create disabled",
         "All prod envs",
         "Enter open",
     ] {

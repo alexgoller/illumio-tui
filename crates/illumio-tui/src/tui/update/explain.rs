@@ -364,6 +364,11 @@ pub(super) fn select_rule(model: &mut Model, rs: &str, rule: &str) -> Jump {
     p.put_search_aside();
     p.pane = PolicyPane::RuleSets;
     p.rulesets.select_where(|r| canon_href(&r.href) == rs);
+    if p.selected_href().map(|h| canon_href(&h)).as_deref() != Some(rs.as_str()) {
+        // A table search hid it (as `open_found` does).
+        p.rulesets.search_clear();
+        p.rulesets.select_where(|r| canon_href(&r.href) == rs);
+    }
     let Some(name) = p
         .rulesets
         .selected_item()
@@ -376,11 +381,14 @@ pub(super) fn select_rule(model: &mut Model, rs: &str, rule: &str) -> Jump {
         return Jump::NoRuleset;
     };
     model.rebuild_rules();
+    let page = policy_page(model);
+    model.policy.rulesets.ensure_visible(page);
     let p = &mut model.policy;
     if rule.is_empty() {
         model.status = StatusLine::info(name);
         return Jump::Done;
     }
+    p.rules.search_clear();
     p.rules.select_where(|r| canon_href(&r.href) == rule);
     if let Some(r) = p
         .rules
@@ -389,6 +397,8 @@ pub(super) fn select_rule(model: &mut Model, rs: &str, rule: &str) -> Jump {
     {
         model.status = StatusLine::info(format!("{name}: {}", rule_line(r)));
         p.pane = PolicyPane::Rules;
+        let page = policy_page(model);
+        model.policy.rules.ensure_visible(page);
         return Jump::Done;
     }
     let deny_on_demand = MatchKind::of_href(&rule).is_deny()

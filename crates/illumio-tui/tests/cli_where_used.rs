@@ -136,7 +136,8 @@ async fn a_label_lists_its_scopes_rules_groups_and_workloads_in_four_reads() {
     assert_eq!(rule["rule"], 1);
     assert_eq!(rule["side"], "consumer");
     assert_eq!(rule["action"], "allow");
-    assert_eq!(rule["pending"], true);
+    assert_eq!(rule["pending"], "create");
+    assert_eq!(rule["excluded"], false);
     assert_eq!(rule["disabled"], true);
     assert_eq!(rule["via"], "All prod envs");
     assert_eq!(
@@ -197,15 +198,15 @@ async fn csv_prints_one_row_per_reference_and_fields_picks_columns() {
     let mut lines = out.lines();
     assert_eq!(
         lines.next().unwrap(),
-        "kind,ruleset,rule,side,action,pending,disabled,via,name,count,exact,href"
+        "kind,ruleset,rule,side,action,excluded,pending,disabled,via,name,count,exact,href"
     );
     assert_eq!(
         lines.nth(1).unwrap(),
-        "rule,Global-Infra,1,consumer,allow,true,true,All prod envs,,,,/orgs/5/sec_policy/draft/rule_sets/101/sec_rules/3"
+        "rule,Global-Infra,1,consumer,allow,false,create,true,All prod envs,,,,/orgs/5/sec_policy/draft/rule_sets/101/sec_rules/3"
     );
     assert_eq!(
         out.lines().last().unwrap(),
-        "workloads,,,,,false,false,,,1,false,/orgs/5/labels/4"
+        "workloads,,,,,false,,false,,,1,false,/orgs/5/labels/4"
     );
     server.verify().await;
 
@@ -317,7 +318,7 @@ async fn an_ip_list_reads_its_list_and_the_rulesets_only() {
     let data = v["data"].as_array().unwrap();
     assert_eq!(data.len(), 1);
     assert_eq!(data[0]["side"], "consumer");
-    assert_eq!(data[0]["pending"], true, "rule 2 is a pending update");
+    assert_eq!(data[0]["pending"], "update", "rule 2 is a pending update");
     assert_eq!(v["meta"]["where_used"]["workloads"], Value::Null);
     server.verify().await;
 }
@@ -435,6 +436,60 @@ async fn unknown_and_ambiguous_names_are_exit_2_with_the_candidates() {
         stderr(&a).contains("no service with href"),
         "{}",
         stderr(&a)
+    );
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn a_label_group_under_no_cache_reads_the_groups_once() {
+    let server = MockServer::start().await;
+    expect(
+        &server,
+        GROUPS,
+        include_str!("../../../fixtures/label_groups.json"),
+        1,
+    )
+    .await;
+    expect(
+        &server,
+        RULE_SETS,
+        include_str!("../../../fixtures/rule_sets.json"),
+        1,
+    )
+    .await;
+    let a = cmd(&server)
+        .args([
+            "--json",
+            "--no-cache",
+            "where-used",
+            "label-group",
+            "All prod envs",
+        ])
+        .assert()
+        .success();
+    let v = schema_check::envelope(&a.get_output().stdout);
+    assert_eq!(v["meta"]["api_calls"], 2);
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn an_unknown_service_lists_the_known_ones_when_few() {
+    let server = MockServer::start().await;
+    expect(
+        &server,
+        SERVICES,
+        include_str!("../../../fixtures/services.json"),
+        1,
+    )
+    .await;
+    let a = cmd(&server)
+        .args(["where-used", "service", "nosuchservice"])
+        .assert()
+        .code(2);
+    let err = stderr(&a);
+    assert!(
+        err.contains("known: All Services, PostgreSQL, Web"),
+        "{err}"
     );
     server.verify().await;
 }

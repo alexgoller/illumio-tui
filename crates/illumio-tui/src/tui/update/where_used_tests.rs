@@ -65,7 +65,7 @@ fn w_on_a_label_with_everything_loaded_asks_for_nothing_and_leaves_u_alone() {
         rows(&m),
         [
             "scope Shop-Prod",
-            "rule Global-Infra · #1 · consumer · allow · pending disabled · via All prod envs",
+            "rule Global-Infra · #1 · consumer · allow · pending create disabled · via All prod envs",
             "label_group All prod envs",
             "workloads 2 workloads",
         ]
@@ -113,6 +113,11 @@ fn what_is_missing_loads_once_through_the_cache_and_reopening_loads_nothing() {
     // A second W while they are on their way sends nothing more.
     assert_eq!(press(&mut m, KeyCode::Esc), Vec::<Cmd>::new());
     assert_eq!(press(&mut m, KeyCode::Char('W')), Vec::<Cmd>::new());
+    assert_eq!(
+        m.objects.where_used.as_ref().unwrap().requests,
+        2,
+        "still waiting for both: the title keeps counting them"
+    );
 
     assert_eq!(
         update(&mut m, rule_sets_loaded(PolicyScope::Draft)),
@@ -227,7 +232,7 @@ fn the_active_policy_on_screen_loads_the_drafts_apart() {
     // All Services (the first row): the disabled Global-Infra rule.
     assert_eq!(
         rows(&m),
-        ["rule Global-Infra · #1 · service · allow · pending disabled"]
+        ["rule Global-Infra · #1 · service · allow · pending create disabled"]
     );
 }
 
@@ -238,7 +243,7 @@ fn w_on_every_tab_and_used_as_a_command() {
     assert_eq!(press(&mut m, KeyCode::Char('W')), Vec::<Cmd>::new());
     assert_eq!(
         rows(&m),
-        ["rule Global-Infra · #1 · consumer · allow · pending disabled"]
+        ["rule Global-Infra · #1 · consumer · allow · pending create disabled"]
     );
     press(&mut m, KeyCode::Esc);
 
@@ -258,7 +263,7 @@ fn w_on_every_tab_and_used_as_a_command() {
     assert_eq!(press(&mut m, KeyCode::Char('W')), Vec::<Cmd>::new());
     assert_eq!(
         rows(&m),
-        ["rule Shop-Prod · #3 · consumer · allow · pending"]
+        ["rule Shop-Prod · #3 · consumer · allow · pending update"]
     );
     let screen = crate::tui::test_support::render_to_string(&m, 100, 30);
     assert!(screen.contains("where used: IP list Corp"), "{screen}");
@@ -390,4 +395,107 @@ fn w_before_the_name_index_waits() {
     assert_eq!(press(&mut m, KeyCode::Char('W')), Vec::<Cmd>::new());
     assert_eq!(m.overlay, Overlay::None);
     assert!(m.status.text.contains("still loading"));
+}
+
+#[test]
+fn enter_reaches_a_rule_and_a_ruleset_hidden_by_a_policy_table_search() {
+    let mut m = with_workloads(with_policy(on_labels()));
+    // `/Global` on the rulesets pane, `/deny` on the rules pane.
+    m.policy.rulesets.start_search();
+    for c in "Global".chars() {
+        m.policy.rulesets.search_push(c);
+    }
+    m.policy.rulesets.search_commit();
+    assert_eq!(m.policy.rulesets.visible().len(), 1);
+    m.policy.rules.start_search();
+    for c in "deny".chars() {
+        m.policy.rules.search_push(c);
+    }
+    m.policy.rules.search_commit();
+    select_label(&mut m, "/orgs/5/labels/1");
+    press(&mut m, KeyCode::Char('W'));
+    press(&mut m, KeyCode::Down);
+    assert_eq!(press(&mut m, KeyCode::Enter), Vec::<Cmd>::new());
+    assert_eq!(m.screen, Screen::Policy);
+    assert_eq!(m.policy.rulesets.selected_item().unwrap().name, "Shop-Prod");
+    assert_eq!(
+        m.policy.rules.selected_item().unwrap().href,
+        "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/2"
+    );
+    assert_eq!(m.policy.pane, PolicyPane::Rules);
+    assert!(!m.status.text.contains("reload"), "{}", m.status.text);
+
+    // A scope row's ruleset behind a search.
+    let mut m = with_workloads(with_policy(on_labels()));
+    m.policy.rulesets.start_search();
+    for c in "Global".chars() {
+        m.policy.rulesets.search_push(c);
+    }
+    m.policy.rulesets.search_commit();
+    select_label(&mut m, "/orgs/5/labels/3");
+    press(&mut m, KeyCode::Char('W'));
+    press(&mut m, KeyCode::Enter);
+    assert_eq!(
+        m.policy.rulesets.selected_item().unwrap().href,
+        "/orgs/5/sec_policy/draft/rule_sets/100"
+    );
+    assert_eq!(m.status.text, "Shop-Prod");
+}
+
+#[test]
+fn enter_while_the_active_policy_loads_keeps_the_overlay() {
+    let mut m = with_workloads(with_policy(on_labels()));
+    select_label(&mut m, "/orgs/5/labels/1");
+    press(&mut m, KeyCode::Char('W'));
+    m.policy.scope = PolicyScope::Active;
+    m.policy.loading = true;
+    assert_eq!(press(&mut m, KeyCode::Enter), Vec::<Cmd>::new());
+    assert_eq!(
+        m.overlay,
+        Overlay::WhereUsed,
+        "still open: Enter again works"
+    );
+    assert_eq!(m.screen, Screen::Objects);
+    assert!(m.status.text.contains("Enter again"));
+}
+
+#[test]
+fn enter_on_the_workloads_line_before_the_list_says_it_is_loading() {
+    let mut m = with_policy(on_labels());
+    m.objects
+        .workload_probes
+        .insert(PROD.into(), WorkloadCount::from_probe(1));
+    select_label(&mut m, PROD);
+    press(&mut m, KeyCode::Char('W'));
+    let v = m.objects.where_used.as_mut().unwrap();
+    v.table.select_where(|r| r.kind == RefKind::Workloads);
+    let cmds = press(&mut m, KeyCode::Enter);
+    assert_eq!(cmds, vec![Cmd::LoadWorkloads(CacheMode::Use)]);
+    assert_eq!(m.screen, Screen::Workloads);
+    assert_eq!(m.status.text, "labels env=prod · loading workloads…");
+}
+
+#[test]
+fn the_footer_shows_the_overlay_keys_and_not_searched_stays_whole() {
+    let mut m = with_workloads(with_policy(on_labels()));
+    select_label(&mut m, "/orgs/5/labels/5");
+    press(&mut m, KeyCode::Char('W'));
+    let screen = crate::tui::test_support::render_to_string(&m, 80, 24);
+    assert!(
+        screen.contains("Enter open  / search  Esc back"),
+        "{screen}"
+    );
+    assert!(!screen.contains("Tab type"), "{screen}");
+    assert!(
+        screen.contains("not searched: virtual services, boundaries, pairing/container profiles"),
+        "{screen}"
+    );
+    // With the deny note too, both show.
+    m.objects.where_used.as_mut().unwrap().deny_unread = 2;
+    let screen = crate::tui::test_support::render_to_string(&m, 120, 40);
+    assert!(screen.contains("container workload profiles"), "{screen}");
+    assert!(
+        screen.contains("2 rulesets may hold deny rules"),
+        "{screen}"
+    );
 }

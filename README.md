@@ -753,16 +753,19 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   `W` (or `:used`) on a row of any tab shows where the object is used, before you change or
   delete it: the title names it (`where used: env=Production`, with the total), then
   the sections with their counts, empty ones left out: Rulesets (their scopes), Rules
-  (`Shop-Prod · #2 · provider · allow`, `deny` or `override deny`, plus `pending` or
-  `disabled`; `#n` is the rule's place as the Policy screen lists it), Label groups (direct
+  (`Shop-Prod · #2 · provider · allow`, `deny` or `override deny`, plus `excluded` when it
+  names the object as an exclusion, `pending create`, `pending update` or `pending delete`
+  for a draft change not provisioned yet (the rule's, else its ruleset's), and `disabled`;
+  `#n` is the rule's place as the Policy screen lists it), Label groups (direct
   members, and groups holding it through a nested group, `via` that group; a rule naming such
   a group is listed `via` it too) and, for a label, Workloads (how many carry it). It searches
   the draft policy, what the Policy screen shows and what you would edit. It reads what is
   loaded: the draft rulesets (else loaded once, as a `w` form loads them: one cached request,
   `loading rulesets…` in the overlay, counted in its title and the api counter), the label
   groups, and the workload list for the count; with no list it asks one cached read of at
-  most one row filtered by the label, so the count is exact at 0 and `≥1` otherwise (`Enter`
-  on that line gives the full list). Nothing runs on a timer, reopening loads nothing, and
+  most one row filtered by the label, so the count is exact at 0 and `≥1` (at least one)
+  otherwise: the PCE's `X-Total-Count` is the size of the whole collection, not the label's.
+  `Enter` on that line opens Workloads filtered by the label, the exact list. Nothing runs on a timer, reopening loads nothing, and
   `u` is left as it is. `Enter` opens a rule or ruleset on Policy (selected), a label group on
   its tab, or the Workloads screen filtered by the label; `/` searches the list. Not
   searched (the overlay says so): virtual services, enforcement boundaries, pairing profiles
@@ -1178,13 +1181,17 @@ are unchanged.
 the draft policy, as the TUI's `W` does: one row per reference with `kind` (`scope`, `rule`,
 `label_group`, `workloads`), `ruleset`, `rule` (its place as the Policy screen lists it),
 `side` (`provider`, `consumer`, `service`), `action` (`allow`, `deny`, `override_deny`),
-`pending`, `disabled`, `via` (the label group it is reached through), `name` (a group's),
+`excluded` (named as an exclusion), `pending` (the draft change not provisioned yet, the
+PCE's `update_type`: `create`, `update` or `delete`; `null`, or empty in CSV, when
+provisioned as it is), `disabled`, `via` (the label group it is reached through), `name` (a group's),
 `count` and `exact` (the `workloads` row of a label) and `href`; `meta.where_used` repeats
 the object, the total, the workload count and what is not searched. A name that is unknown
-or ambiguous is exit 2 with the candidates. Requests, all cached and shown on the meta line:
+or ambiguous is exit 2 with the candidates: similar names, else every name when there are
+few, else how many there are; for an ambiguous one, the hrefs to use instead. Requests, all cached and shown on the meta line:
 the object's own list, the draft rulesets, the label groups (labels and groups only) and, for
 a label, one workloads read of at most one row filtered by it (0 rows is an exact 0, one row
-`≥1`: the PCE's `X-Total-Count` is the whole collection's size, not the label's). Deny rules
+`≥1`, `exact: false`: the PCE's `X-Total-Count` is the whole collection's size, not the
+label's; `workloads --label KEY=VALUE` gives the exact list). Deny rules
 count as the ruleset list carries them. For example, before deleting a label or an IP list:
 
     illumio-tui where-used label env=Production --table

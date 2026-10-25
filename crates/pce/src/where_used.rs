@@ -190,9 +190,13 @@ pub struct Reference {
     pub rule: Option<usize>,
     pub side: Option<RefSide>,
     pub action: Option<RuleKind>,
-    /// A change not provisioned yet: the rule, its ruleset or the group
-    /// has an `update_type`.
-    pub pending: bool,
+    /// A draft change not provisioned yet, as the PCE's `update_type`
+    /// names it (`create`, `update`, `delete`): the rule's, else its
+    /// ruleset's (a scope: the ruleset's; a group: the group's). `None`:
+    /// provisioned as it is.
+    pub pending: Option<String>,
+    /// The rule or scope names it as an exclusion (`exclusion: true`).
+    pub excluded: bool,
     /// The rule or its ruleset is disabled (a scope: the ruleset).
     pub disabled: bool,
     /// The label group it is reached through, when not named directly.
@@ -215,7 +219,8 @@ impl Reference {
             rule: None,
             side: None,
             action: None,
-            pending: false,
+            pending: None,
+            excluded: false,
             disabled: false,
             via: None,
             name: None,
@@ -234,14 +239,18 @@ impl Reference {
         }
     }
 
-    /// `pending`, `disabled`, both or neither, space-joined.
+    /// `excluded`, `pending create|update|delete`, `disabled`, those that
+    /// apply, space-joined.
     pub fn flags(&self) -> String {
         let mut f = Vec::new();
-        if self.pending {
-            f.push("pending");
+        if self.excluded {
+            f.push("excluded".to_string());
+        }
+        if let Some(u) = &self.pending {
+            f.push(format!("pending {u}"));
         }
         if self.disabled {
-            f.push("disabled");
+            f.push("disabled".to_string());
         }
         f.join(" ")
     }
@@ -375,7 +384,8 @@ pub fn where_used(target: &Target, inputs: &Inputs) -> WhereUsed {
     for (g, _) in &held {
         reach.insert(canon(&g.href).into_owned(), Some(g.name.clone()));
     }
-    let actor_via = |a: &Actor| -> Option<Option<String>> {
+    // An actor that reaches it: through which group, and whether excluded.
+    let actor_via = |a: &Actor| -> Option<(Option<String>, bool)> {
         let r = match target.kind {
             ObjectType::Label | ObjectType::LabelGroup => {
                 a.label.as_ref().or(a.label_group.as_ref())
@@ -383,19 +393,21 @@ pub fn where_used(target: &Target, inputs: &Inputs) -> WhereUsed {
             ObjectType::IpList => a.ip_list.as_ref(),
             ObjectType::Service => None,
         }?;
-        reach.get(canon(&r.href).as_ref()).cloned()
+        let via = reach.get(canon(&r.href).as_ref()).cloned()?;
+        Some((via, a.exclusion == Some(true)))
     };
     // The best match on one side: named directly beats through a group.
-    let side_via = |actors: &[Actor]| -> Option<Option<String>> {
-        let mut found: Option<Option<String>> = None;
+    let side_via = |actors: &[Actor]| -> Option<(Option<String>, bool)> {
+        let mut found: Option<(Option<String>, bool)> = None;
         for v in actors.iter().filter_map(actor_via) {
-            if v.is_none() {
-                return Some(None);
+            if v.0.is_none() {
+                return Some(v);
             }
             found.get_or_insert(v);
         }
         found
     };
+    let update = |u: &Option<String>| u.clone().filter(|s| !s.is_empty());
     let service_named = |services: &[IngressService]| {
         target.kind == ObjectType::Service
             && services.iter().any(|s| match s {
@@ -408,13 +420,14 @@ pub fn where_used(target: &Target, inputs: &Inputs) -> WhereUsed {
     let mut rules = Vec::new();
     let mut deny_unread = 0;
     for rs in inputs.rule_sets {
-        let set_pending = rs.update_type.is_some();
+        let set_pending = update(&rs.update_type);
         let in_scope = side_via(&rs.scopes.iter().flatten().cloned().collect::<Vec<_>>());
-        if let Some(via) = in_scope {
+        if let Some((via, excluded)) = in_scope {
             scopes.push(Reference {
                 ruleset: Some(rs.name.clone()),
                 ruleset_href: Some(rs.href.clone()),
-                pending: set_pending,
+                pending: set_pending.clone(),
+                excluded,
                 disabled: !rs.enabled,
                 via,
                 ..Reference::blank(RefKind::Scope, &rs.href)
@@ -437,7 +450,7 @@ pub fn where_used(target: &Target, inputs: &Inputs) -> WhereUsed {
             unscoped: bool,
             href: &'r str,
             enabled: bool,
-            pending: bool,
+            pending: Option<String>,
             providers: &'r [Actor],
             consumers: &'r [Actor],
             services: &'r [IngressService],
@@ -450,7 +463,7 @@ pub fn where_used(target: &Target, inputs: &Inputs) -> WhereUsed {
                 unscoped: r.unscoped_consumers.unwrap_or(false),
                 href: &r.href,
                 enabled: r.enabled,
-                pending: r.update_type.is_some(),
+                pending: update(&r.update_type),
                 providers: &r.providers,
                 consumers: &r.consumers,
                 services: &r.ingress_services,
@@ -464,7 +477,7 @@ pub fn where_used(target: &Target, inputs: &Inputs) -> WhereUsed {
                 unscoped: false,
                 href: &d.href,
                 enabled: d.enabled,
-                pending: d.update_type.is_some(),
+                pending: update(&d.update_type),
                 providers: &d.providers,
                 consumers: &d.consumers,
                 services: &d.ingress_services,
@@ -472,31 +485,32 @@ pub fn where_used(target: &Target, inputs: &Inputs) -> WhereUsed {
             .collect();
         all.sort_by_key(|r| pane_order(r.kind, r.unscoped));
         for (i, r) in all.iter().enumerate() {
-            let row = |side: RefSide, via: Option<String>| Reference {
+            let row = |side: RefSide, (via, excluded): (Option<String>, bool)| Reference {
                 ruleset: Some(rs.name.clone()),
                 ruleset_href: Some(rs.href.clone()),
                 rule: Some(i + 1),
                 side: Some(side),
                 action: Some(r.kind),
-                pending: r.pending || set_pending,
+                pending: r.pending.clone().or_else(|| set_pending.clone()),
+                excluded,
                 disabled: !r.enabled || !rs.enabled,
                 via,
                 ..Reference::blank(RefKind::Rule, r.href)
             };
-            if let Some(via) = side_via(r.providers) {
-                rules.push(row(RefSide::Provider, via));
+            if let Some(hit) = side_via(r.providers) {
+                rules.push(row(RefSide::Provider, hit));
             }
-            if let Some(via) = side_via(r.consumers) {
-                rules.push(row(RefSide::Consumer, via));
+            if let Some(hit) = side_via(r.consumers) {
+                rules.push(row(RefSide::Consumer, hit));
             }
             if service_named(r.services) {
-                rules.push(row(RefSide::Service, None));
+                rules.push(row(RefSide::Service, (None, false)));
             }
         }
     }
     let groups = held.into_iter().map(|(g, via)| Reference {
         name: Some(g.name.clone()),
-        pending: g.update_type.is_some(),
+        pending: update(&g.update_type),
         via: via.map(|v| v.name.clone()),
         ..Reference::blank(RefKind::LabelGroup, &g.href)
     });
@@ -566,7 +580,7 @@ mod tests {
             lines(&w),
             [
                 "scope Shop-Prod",
-                "rule Global-Infra · #1 · consumer · allow · pending disabled · via All prod envs",
+                "rule Global-Infra · #1 · consumer · allow · pending create disabled · via All prod envs",
                 "label_group All prod envs",
             ]
         );
@@ -598,7 +612,7 @@ mod tests {
             lines(&w),
             [
                 "rule Shop-Prod · #2 · consumer · allow",
-                "rule Shop-Prod · #3 · provider · allow · pending",
+                "rule Shop-Prod · #3 · provider · allow · pending update",
             ]
         );
     }
@@ -614,7 +628,7 @@ mod tests {
         let corp = Target::new(ObjectType::IpList, "/orgs/5/sec_policy/active/ip_lists/21");
         assert_eq!(
             lines(&search(corp, &rule_sets(), &groups())),
-            ["rule Shop-Prod · #3 · consumer · allow · pending"]
+            ["rule Shop-Prod · #3 · consumer · allow · pending update"]
         );
         let svc = Target::new(ObjectType::Service, "/orgs/5/sec_policy/draft/services/31");
         let w = search(svc, &rule_sets(), &groups());
@@ -642,21 +656,34 @@ mod tests {
     }
 
     #[test]
-    fn pending_is_a_change_in_draft_only() {
+    fn pending_names_the_draft_change() {
         let svc = Target::new(ObjectType::Service, "/orgs/5/sec_policy/draft/services/30");
         let w = search(svc, &rule_sets(), &groups());
-        assert!(w.refs[0].pending, "rule and ruleset are pending creation");
+        assert_eq!(
+            w.refs[0].pending.as_deref(),
+            Some("create"),
+            "rule and ruleset are pending creation"
+        );
         // Provisioned (no update_type anywhere): not pending.
         let mut sets = rule_sets();
         sets[1].update_type = None;
         sets[1].rules[0].update_type = None;
         let svc = Target::new(ObjectType::Service, "/orgs/5/sec_policy/draft/services/30");
-        assert!(!search(svc, &sets, &groups()).refs[0].pending);
+        assert_eq!(search(svc, &sets, &groups()).refs[0].pending, None);
         // A pending ruleset makes its scope row pending too.
         let mut sets = rule_sets();
         sets[0].update_type = Some("update".into());
         let w = search(label(3), &sets, &groups());
-        assert_eq!(w.refs[0].line(), "Shop-Prod · pending");
+        assert_eq!(w.refs[0].line(), "Shop-Prod · pending update");
+        // Pending deletion says so: not to be read as new.
+        let mut sets = rule_sets();
+        sets[0].rules[0].update_type = Some("delete".into());
+        let svc = Target::new(ObjectType::Service, "/orgs/5/sec_policy/draft/services/31");
+        let w = search(svc, &sets, &groups());
+        assert_eq!(
+            w.refs[0].line(),
+            "Shop-Prod · #2 · service · allow · pending delete"
+        );
     }
 
     #[test]
@@ -706,7 +733,7 @@ mod tests {
         assert_eq!(
             lines(&w),
             [
-                "rule Global-Infra · #1 · consumer · allow · pending disabled",
+                "rule Global-Infra · #1 · consumer · allow · pending create disabled",
                 "label_group Everything",
             ]
         );
@@ -721,6 +748,19 @@ mod tests {
             .push(serde_json::from_value(json!({"label": {"href": "/orgs/5/labels/4"}})).unwrap());
         let w = search(label(4), &sets, &groups());
         assert_eq!(w.refs[1].via, None);
+    }
+
+    #[test]
+    fn an_excluded_actor_is_marked() {
+        let mut sets = rule_sets();
+        sets[0].rules[0].providers[0].exclusion = Some(true);
+        let w = search(label(2), &sets, &groups());
+        assert!(w.refs[1].excluded);
+        assert_eq!(
+            w.refs[1].line(),
+            "Shop-Prod · #2 · provider · allow · excluded"
+        );
+        assert!(!w.refs[0].excluded);
     }
 
     #[test]

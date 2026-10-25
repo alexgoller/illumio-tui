@@ -79,8 +79,20 @@ pub(super) fn open_where_used(model: &mut Model) -> Vec<Cmd> {
             });
         }
     }
+    // The requests it waits for: those just sent, and those a W before
+    // (or the Policy screen) sent that are still on their way.
+    let rulesets_coming = if model.policy.scope == PolicyScope::Draft {
+        model.policy.loading
+    } else {
+        model.policy.form_drafts_loading
+    };
+    let probe_coming = model
+        .objects
+        .where_used
+        .as_ref()
+        .is_some_and(|v| model.objects.probes_loading.contains(&v.target.href));
     if let Some(v) = model.objects.where_used.as_mut() {
-        v.requests = cmds.len();
+        v.requests = usize::from(rulesets_coming) + usize::from(probe_coming);
     }
     refresh_where_used(model);
     model.status = where_used_status(model);
@@ -280,6 +292,13 @@ fn open_reference(model: &mut Model) -> Vec<Cmd> {
         return Vec::new();
     };
     let label = v.target.href.clone();
+    // The active policy on its way: the draft cannot be shown yet. The
+    // overlay stays, so Enter works once it is in.
+    let to_policy = matches!(r.kind, RefKind::Rule | RefKind::Scope);
+    if to_policy && model.policy.scope != PolicyScope::Draft && model.policy.loading {
+        model.status = StatusLine::info("rulesets loading: Enter again once they are in");
+        return Vec::new();
+    }
     model.objects.where_used = None;
     model.overlay = Overlay::None;
     match r.kind {
@@ -324,8 +343,12 @@ fn open_reference(model: &mut Model) -> Vec<Cmd> {
                 }],
             };
             let cmds = switch(model, Screen::Workloads);
-            if let Err(e) = apply_workload_labels(model, &filter.to_string()) {
+            let expr = filter.to_string();
+            if let Err(e) = apply_workload_labels(model, &expr) {
                 model.status = StatusLine::error(format!("label filter: {e}"));
+            } else if model.workloads.loaded_at.is_none() {
+                // No count from an empty table: the list is on its way.
+                model.status = StatusLine::info(format!("labels {expr} · loading workloads…"));
             }
             cmds
         }

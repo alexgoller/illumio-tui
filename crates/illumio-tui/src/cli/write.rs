@@ -399,9 +399,10 @@ fn pick_one<'a>(
         .collect();
     hrefs.sort_unstable();
     match hrefs.len() {
-        0 => Err(CliError::Args(with_similar(
-            format!("no {kind} named {name:?}"),
-            &similar(name, live.map(|(n, _)| n)),
+        0 => Err(CliError::Args(unknown_name(
+            kind,
+            name,
+            live.map(|(n, _)| n).collect(),
         ))),
         1 => Ok(hrefs[0].to_string()),
         _ => Err(CliError::Args(format!(
@@ -409,6 +410,59 @@ fn pick_one<'a>(
             hrefs.join(", ")
         ))),
     }
+}
+
+/// The most names an unknown-name error lists whole when none is like it.
+const LIST_ALL_BELOW: usize = 10;
+
+/// `no service named "x"` and what to try: names containing it (or that it
+/// contains, or within a few edits of it, case aside); else every name
+/// when there are few; else how many there are.
+fn unknown_name(kind: &str, name: &str, mut names: Vec<&str>) -> String {
+    let msg = format!("no {kind} named {name:?}");
+    let mut like = similar(name, names.iter().copied());
+    if like.is_empty() {
+        let needle = name.trim().to_lowercase();
+        like = names
+            .iter()
+            .filter(|n| {
+                let n = n.to_lowercase();
+                (n.len() >= 3 && needle.contains(&n)) || edit_distance(&n, &needle) <= 2
+            })
+            .map(|n| n.to_string())
+            .collect();
+        like.sort();
+        like.dedup();
+        like.truncate(5);
+    }
+    if !like.is_empty() {
+        return with_similar(msg, &like);
+    }
+    names.sort_unstable();
+    names.dedup();
+    match names.len() {
+        0 => format!("{msg}; there are none"),
+        n if n <= LIST_ALL_BELOW => format!("{msg}; known: {}", names.join(", ")),
+        n => {
+            format!("{msg}; none of the {n} is like it (list them with the {kind}s' list command)")
+        }
+    }
+}
+
+/// Levenshtein distance by characters.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut prev = row[0];
+        row[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let cur = row[j + 1];
+            row[j + 1] = (prev + usize::from(ca != *cb)).min(row[j] + 1).min(cur + 1);
+            prev = cur;
+        }
+    }
+    row[b.len()]
 }
 
 fn not_pending_delete(update_type: Option<&str>) -> bool {
@@ -725,7 +779,23 @@ mod tests {
             ("Corp", "/d"),
         ];
         let err = pick_one("IP list", "Corporate", live.iter().copied()).unwrap_err();
-        assert_eq!(err.to_string(), r#"no IP list named "Corporate""#);
+        assert_eq!(
+            err.to_string(),
+            r#"no IP list named "Corporate"; similar: Corp, corp"#,
+            "names it contains"
+        );
+        let err = pick_one("IP list", "Othr", live.iter().copied()).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            r#"no IP list named "Othr"; similar: Other"#,
+            "a few edits away"
+        );
+        let err = pick_one("IP list", "nosuchlist", live.iter().copied()).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            r#"no IP list named "nosuchlist"; known: Corp, Corp-DMZ, Other, corp"#,
+            "few: all of them"
+        );
         let err = pick_one("IP list", "CORP-", live.iter().copied()).unwrap_err();
         assert_eq!(
             err.to_string(),
@@ -754,6 +824,16 @@ mod tests {
                 .ends_with("similar: web0, web1, web2, web3, web4"),
             "at most five: {err}"
         );
+        let many: Vec<(String, String)> = (0..12)
+            .map(|i| (format!("service-{i}"), format!("/{i}")))
+            .collect();
+        let err = pick_one(
+            "service",
+            "nothing",
+            many.iter().map(|(n, h)| (n.as_str(), h.as_str())),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("none of the 12"), "{err}");
     }
 
     #[test]

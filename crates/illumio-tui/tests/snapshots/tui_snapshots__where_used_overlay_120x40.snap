@@ -7,12 +7,12 @@ expression: out
   Lab╭ where used: env=prod ──────────────────────────────────────────────────────────────────────── 3 references ╮
 ╭ Lab│Rulesets 1 · Rules 1 · Label groups 1 · Workloads 2                                                         │ows ╮
 │  ke│not searched: virtual services, enforcement boundaries, pairing profiles, container workload profiles       │    │
+│  ro│                                                                                                            │    │
 │  ro│  section     reference                                                                                     │    │
-│  ro│▸ scope       Shop-Prod                                                                                     │    │
-│  ap│  rule        Global-Infra · #1 · consumer · allow · pending disabled · via All prod envs                   │    │
-│▸ en│  label group All prod envs                                                                                 │    │
-│  lo│  workloads   2 workloads                                                                                   │    │
-│  ap│                                                                                                            │    │
+│  ap│▸ scope       Shop-Prod                                                                                     │    │
+│▸ en│  rule        Global-Infra · #1 · consumer · allow · pending create disabled · via All prod envs            │    │
+│  lo│  label group All prod envs                                                                                 │    │
+│  ap│  workloads   2 workloads                                                                                   │    │
 │    │                                                                                                            │    │
 │    │                                                                                                            │    │
 │    │                                                                                                            │    │
@@ -41,4 +41,4 @@ expression: out
 │    │Enter open (rule, ruleset, group, workloads) · / search · Esc close                                         │    │
 │    ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────╯    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-where used: env=prod · 3 references                  Tab type  Enter detail  r refresh  a auto  / search  : cmd  ? help
+where used: env=prod · 3 references                                                    │ Enter open  / search  Esc back

@@ -46,9 +46,9 @@ impl WhereUsedCmd {
 }
 
 /// The CSV columns, in order (`columns::csv_columns`).
-pub const HEADERS: [&str; 12] = [
-    "kind", "ruleset", "rule", "side", "action", "pending", "disabled", "via", "name", "count",
-    "exact", "href",
+pub const HEADERS: [&str; 13] = [
+    "kind", "ruleset", "rule", "side", "action", "excluded", "pending", "disabled", "via", "name",
+    "count", "exact", "href",
 ];
 
 /// One row per reference, the workload count of a label last.
@@ -87,7 +87,8 @@ impl TableRows for Rows {
                     r.action
                         .map(|a| pce::where_used::action_text(a).to_string())
                         .unwrap_or_default(),
-                    yes(r.pending),
+                    yes(r.excluded),
+                    opt(&r.pending),
                     yes(r.disabled),
                     opt(&r.via),
                     opt(&r.name),
@@ -114,7 +115,8 @@ impl TableRows for Rows {
                     r.action
                         .map(|a| crate::tui::model::rule_kind_name(a).to_string())
                         .unwrap_or_default(),
-                    r.pending.to_string(),
+                    r.excluded.to_string(),
+                    opt(&r.pending),
                     r.disabled.to_string(),
                     opt(&r.via),
                     opt(&r.name),
@@ -159,6 +161,8 @@ fn find<T>(
 pub async fn run(ctx: &Context, cmd: &WhereUsedCmd) -> Result<(), CliError> {
     let (kind, spec) = cmd.parts();
     let mut truncated = false;
+    // The label groups once read to find a group: the search reuses them.
+    let mut read_groups = None;
     // The object's own list: it is found there, by name or href.
     let (href, name, hit) = match kind {
         ObjectType::Label => {
@@ -185,6 +189,7 @@ pub async fn run(ctx: &Context, cmd: &WhereUsedCmd) -> Result<(), CliError> {
                 |g| g.name.clone(),
                 label_group_in,
             )?;
+            read_groups = Some(c.value);
             (h, n, c.hit)
         }
         ObjectType::IpList => {
@@ -220,7 +225,9 @@ pub async fn run(ctx: &Context, cmd: &WhereUsedCmd) -> Result<(), CliError> {
         .await?;
     truncated |= sets.truncated;
     // Only labels and label groups sit in label groups.
-    let groups = if matches!(kind, ObjectType::Label | ObjectType::LabelGroup) {
+    let groups = if let Some(g) = read_groups {
+        g
+    } else if kind == ObjectType::Label {
         let g = ctx.pce.label_groups(ctx.cache_mode).await?;
         truncated |= g.truncated;
         g.value
