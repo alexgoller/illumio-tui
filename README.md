@@ -762,15 +762,15 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   a group is listed `via` it too) and, for a label, Pairing profiles (those that give the
   label to the workloads they pair, by name, with `locked` when the profile locks that key:
   role, app, env or loc; `disabled` when the profile is off) and Workloads (how many carry
-  it). It searches
-  the draft policy, what the Policy screen shows and what you would edit. It reads what is
-  loaded: the draft rulesets (else loaded once, as a `w` form loads them: one cached request,
-  `loading rulesets…` in the overlay, counted in its title and the api counter), the label
-  groups, for a label the pairing profiles (one cached read the first time, `loading pairing
-  profiles…`, counted the same way; held for every later `W`), and the workload list for the
-  count; with no list it asks one cached read of at
-  most one row filtered by the label, so the count is exact at 0 and `≥1` (at least one)
-  otherwise: the PCE's `X-Total-Count` is the size of the whole collection, not the label's.
+  it). It searches the draft policy, what the Policy screen shows and what you would edit.
+  It reads what is loaded: the draft rulesets (else loaded once, as a `w` form loads them:
+  one cached request, `loading rulesets…` in the overlay, counted in its title and the api
+  counter), the label groups, for a label the pairing profiles (one cached read the first
+  time, `loading pairing profiles…`, counted the same way; held for every later `W`; a
+  failed read is named in the overlay with its error and `W` asks again), and the workload
+  list for the count; with no list it asks one cached read of at most one row filtered by
+  the label, so the count is exact at 0 and `≥1` (at least one) otherwise: the PCE's
+  `X-Total-Count` is the size of the whole collection, not the label's.
   `Enter` on that line opens Workloads filtered by the label, the exact list. Nothing runs on a timer, reopening loads nothing, and
   `u` is left as it is. `Enter` opens a rule or ruleset on Policy (selected), a label group on
   its tab, or the Workloads screen filtered by the label; on a pairing profile, which has no
@@ -1188,24 +1188,27 @@ are unchanged.
 `where-used label KEY=VALUE`, `where-used label-group NAME`, `where-used iplist NAME` and
 `where-used service NAME` (each also takes the object's href) list what names the object in
 the draft policy, as the TUI's `W` does: one row per reference with `kind` (`scope`, `rule`,
-`label_group`, `pairing_profile`, `workloads`), `ruleset`, `rule` (its place as the Policy screen lists it),
-`side` (`provider`, `consumer`, `service`), `action` (`allow`, `deny`, `override_deny`),
-`excluded` (named as an exclusion), `pending` (the draft change not provisioned yet, the
-PCE's `update_type`: `create`, `update` or `delete`; `null`, or empty in CSV, when
-provisioned as it is), `disabled` (for a pairing profile: `enabled: false`), `via` (the
-label group it is reached through), `name` (a group's or a pairing profile's), `count` and
-`exact` (the `workloads` row of a label), `locked` (a `pairing_profile` row: `true` when the
-profile locks the label's key, role, app, env or loc; `null`, empty in CSV, for other rows and
-keys with no lock) and `href`; `meta.where_used` repeats
-the object, the total, the workload count and what is not searched. A name that is unknown
-or ambiguous is exit 2 with the candidates: similar names, else every name when there are
-few, else how many there are; for an ambiguous one, the hrefs to use instead. Requests, all cached and shown on the meta line:
-the object's own list, the draft rulesets, the label groups (labels and groups only) and, for
-a label, the pairing profiles (one read, also under `--no-cache`) and one workloads read of
-at most one row filtered by it (0 rows is an exact 0, one row
-`≥1`, `exact: false`: the PCE's `X-Total-Count` is the whole collection's size, not the
-label's; `workloads --label KEY=VALUE` gives the exact list). Deny rules
-count as the ruleset list carries them. For example, before deleting a label or an IP list:
+`label_group`, `pairing_profile`, `workloads`), `ruleset`, `rule` (its place as the Policy
+screen lists it), `side` (`provider`, `consumer`, `service`), `action` (`allow`, `deny`,
+`override_deny`), `excluded` (named as an exclusion), `pending` (the draft change not
+provisioned yet, the PCE's `update_type`: `create`, `update` or `delete`; `null`, or empty
+in CSV, when provisioned as it is), `disabled` (for a pairing profile: `enabled: false`),
+`via` (the label group it is reached through), `name` (a group's or a pairing profile's),
+`count` and `exact` (the `workloads` row of a label), `locked` (a `pairing_profile` row:
+`true` when the profile locks the label's key, role, app, env or loc; `null`, empty in CSV,
+for other rows and keys with no lock) and `href`; `meta.where_used` repeats the object, the
+total, the workload count and what is not searched. A name that is unknown or ambiguous is
+exit 2 with the candidates: similar names, else every name when there are few, else how many
+there are; for an ambiguous one, the hrefs to use instead. Requests, all cached and shown on
+the meta line: the object's own list, the draft rulesets, the label groups (labels and
+groups only) and, for a label, the pairing profiles (one read, also under `--no-cache`) and
+one workloads read of at most one row filtered by it (0 rows is an exact 0, one row `≥1`,
+`exact: false`: the PCE's `X-Total-Count` is the whole collection's size, not the label's;
+`workloads --label KEY=VALUE` gives the exact list). Deny rules count as the ruleset list
+carries them. A failed pairing profile read (a role that may not list them: 403, or a server
+error) does not fail the command: the other rows print, a warning names the error on stderr
+(and in `meta.warnings`), and the not-searched text of that run adds `pairing profiles (read
+failed: …)`; the exit code stays 0. For example, before deleting a label or an IP list:
 
     illumio-tui where-used label env=Production --table
     illumio-tui where-used label /orgs/1/labels/42 --json --fields kind,ruleset,rule,via
