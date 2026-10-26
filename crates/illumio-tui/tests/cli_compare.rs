@@ -321,6 +321,16 @@ async fn a_dry_run_prints_both_bodies_and_since_ends_now() {
             .success(),
     );
     assert_eq!(out["data"]["end_date"], RECENT_END);
+    // A date and time without an offset is UTC.
+    let out = json_out(
+        cmd(&quiet, home.path())
+            .args(["traffic", "query", "--since", "2026-10-10T06:00"])
+            .args(["--to", "2026-10-10T08:00", "--dry-run"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"]["start_date"], RECENT_START);
+    assert_eq!(out["data"]["end_date"], RECENT_END);
     cmd(&quiet, home.path())
         .args(["traffic", "query", "--since", RECENT_START])
         .args(WINDOW)

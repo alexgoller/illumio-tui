@@ -267,7 +267,7 @@ pub struct FilterArgs {
     #[arg(long, requires = "start")]
     pub to: Option<String>,
     /// Start, as --from, with --to defaulting to now: "what is new since"
-    /// (2026-10-23T18:00:00Z, or a date)
+    /// (2026-10-23T18:00:00Z, 2026-10-23T18:00 in UTC, or a date)
     #[arg(long, group = "start")]
     pub since: Option<String>,
     /// Compare mode: also query the baseline, the same filter over this long before the
@@ -600,11 +600,21 @@ impl FilterArgs {
     }
 }
 
-/// RFC 3339, or a date; a date-only `--to` means 23:59:59 of that day.
+/// RFC 3339, a date and time without an offset (UTC), or a date; a
+/// date-only `--to` means 23:59:59 of that day.
 pub fn parse_time(s: &str, end_of_day: bool) -> Result<Timestamp, CliError> {
     let s = s.trim();
     if let Ok(t) = s.parse::<Timestamp>() {
         return Ok(t);
+    }
+    // `2026-10-23T18:00`: a date and time without an offset, in UTC.
+    if s.contains('T')
+        && let Ok(dt) = s.parse::<jiff::civil::DateTime>()
+    {
+        return dt
+            .to_zoned(jiff::tz::TimeZone::UTC)
+            .map(|z| z.timestamp())
+            .map_err(|e| CliError::Args(format!("bad time {s:?}: {e}")));
     }
     if let Ok(d) = s.parse::<Date>() {
         let dt = if end_of_day {
@@ -618,7 +628,7 @@ pub fn parse_time(s: &str, end_of_day: bool) -> Result<Timestamp, CliError> {
             .map_err(|e| CliError::Args(format!("bad time {s:?}: {e}")));
     }
     Err(CliError::Args(format!(
-        "bad time {s:?}: use RFC 3339 (2026-10-09T08:00:00Z) or YYYY-MM-DD"
+        "bad time {s:?}: use RFC 3339 (2026-10-09T08:00:00Z), 2026-10-09T08:00 (UTC) or YYYY-MM-DD"
     )))
 }
 
