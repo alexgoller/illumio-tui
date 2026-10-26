@@ -2,6 +2,20 @@
 
 Every illumio-tui release, newest first. Downloads, packages and checksums for each one are on [GitHub Releases](https://github.com/alexgoller/illumio-tui/releases).
 
+## v0.5.6 — 2026-10-26
+
+### New
+
+- **Where used** (#75). Before you delete or rename a label, label group, IP list or service, see every place the draft policy uses it.
+  - TUI: **`W`** (or `:used`) on any Objects tab opens an overlay with ruleset scopes, rule providers and consumers (`via` names the label group when the use is indirect), label groups that contain the object, and how many workloads carry a label. Each row shows deny, disabled, excluded, and a pending change with its update type. **Enter** jumps to the rule or ruleset on Policy, to the group, or to the filtered Workloads list.
+  - CLI: `where-used label env=Production`, `where-used label-group NAME`, `where-used iplist NAME`, `where-used service NAME` (or an href). Table, `--json`, `--csv`. An unknown name lists similar names.
+  - It uses the draft policy already loaded where it can. Virtual services, enforcement boundaries, pairing profiles and container workload profiles are not searched, and the result says so.
+- **Pairing profiles in the CLI** (#76).
+  - `pairing-profiles list` (alias `pp`): table, `--json`, `--csv`.
+  - `pairing-profiles create NAME` with `--description`, `--label KEY=VALUE`, `--enforcement`, `--visibility`, `--ven-type`, `--uses N|unlimited`, `--lifespan DURATION|unlimited`, `--disabled`, `--lock` and `--unlock`. Only the fields you set are sent. The PCE locks a setting you do not send, so `--unlock` leaves it changeable at pairing time. A name already taken is refused before anything is sent.
+  - `pairing-profiles delete NAME|HREF`.
+  - Same safety as every write: `writes = true`, `--dry-run` or `--yes`, each request logged to `writes.jsonl`. Pairing keys are not generated.
+
 ## v0.5.5 — 2026-10-24
 
 ### New

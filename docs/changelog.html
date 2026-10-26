@@ -45,6 +45,7 @@
 <p><a href="./">&larr; Back to the site</a></p>
 <nav class="toc" aria-label="Releases">
 <ul>
+<li><a href="#v0.5.6">v0.5.6</a> <span>2026-10-26</span></li>
 <li><a href="#v0.5.5">v0.5.5</a> <span>2026-10-24</span></li>
 <li><a href="#v0.5.4">v0.5.4</a> <span>2026-10-24</span></li>
 <li><a href="#v0.5.3">v0.5.3</a> <span>2026-10-23</span></li>
@@ -76,6 +77,28 @@
 <li><a href="#v0.1.0">v0.1.0</a> <span>2026-10-12</span></li>
 </ul>
 </nav>
+</section>
+
+<section class="panel release" id="v0.5.6" aria-labelledby="v0.5.6-h">
+  <h2 id="v0.5.6-h"><a href="#v0.5.6">v0.5.6</a> <span class="date">2026-10-26</span></h2>
+<h3>New</h3>
+<ul>
+<li><strong>Where used</strong> (<a href="https://github.com/alexgoller/illumio-tui/issues/75">#75</a>). Before you delete or rename a label, label group, IP list or service, see every place the draft policy uses it.
+<ul>
+<li>TUI: <strong><code>W</code></strong> (or <code>:used</code>) on any Objects tab opens an overlay with ruleset scopes, rule providers and consumers (<code>via</code> names the label group when the use is indirect), label groups that contain the object, and how many workloads carry a label. Each row shows deny, disabled, excluded, and a pending change with its update type. <strong>Enter</strong> jumps to the rule or ruleset on Policy, to the group, or to the filtered Workloads list.</li>
+<li>CLI: <code>where-used label env=Production</code>, <code>where-used label-group NAME</code>, <code>where-used iplist NAME</code>, <code>where-used service NAME</code> (or an href). Table, <code>--json</code>, <code>--csv</code>. An unknown name lists similar names.</li>
+<li>It uses the draft policy already loaded where it can. Virtual services, enforcement boundaries, pairing profiles and container workload profiles are not searched, and the result says so.</li>
+</ul>
+</li>
+<li><strong>Pairing profiles in the CLI</strong> (<a href="https://github.com/alexgoller/illumio-tui/issues/76">#76</a>).
+<ul>
+<li><code>pairing-profiles list</code> (alias <code>pp</code>): table, <code>--json</code>, <code>--csv</code>.</li>
+<li><code>pairing-profiles create NAME</code> with <code>--description</code>, <code>--label KEY=VALUE</code>, <code>--enforcement</code>, <code>--visibility</code>, <code>--ven-type</code>, <code>--uses N|unlimited</code>, <code>--lifespan DURATION|unlimited</code>, <code>--disabled</code>, <code>--lock</code> and <code>--unlock</code>. Only the fields you set are sent. The PCE locks a setting you do not send, so <code>--unlock</code> leaves it changeable at pairing time. A name already taken is refused before anything is sent.</li>
+<li><code>pairing-profiles delete NAME|HREF</code>.</li>
+<li>Same safety as every write: <code>writes = true</code>, <code>--dry-run</code> or <code>--yes</code>, each request logged to <code>writes.jsonl</code>. Pairing keys are not generated.</li>
+</ul>
+</li>
+</ul>
 </section>
 
 <section class="panel release" id="v0.5.5" aria-labelledby="v0.5.5-h">

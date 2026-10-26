@@ -31,13 +31,13 @@ prebuilt binaries from the GitHub Release (static musl build on Linux x86_64).
 Download the `.deb` for your architecture (`amd64` or `arm64`) from the
 [release page](https://github.com/alexgoller/illumio-tui/releases), then:
 
-    sudo apt install ./illumio-tui_0.5.5-1_amd64.deb
+    sudo apt install ./illumio-tui_0.5.6-1_amd64.deb
 
 ### RHEL, Rocky, Alma, Fedora
 
 Download the `.rpm` (`x86_64` or `aarch64`) from the release page, then:
 
-    sudo dnf install ./illumio-tui-0.5.5-1.x86_64.rpm
+    sudo dnf install ./illumio-tui-0.5.6-1.x86_64.rpm
 
 Both packages install `/usr/bin/illumio-tui` with no dependencies (the x86_64
 binary is static, the arm64 one needs glibc 2.18 or newer) and are tested on
@@ -102,11 +102,11 @@ covering all of them:
 | Windows x86_64 | `illumio-tui-<version>-x86_64-pc-windows-msvc.zip` |
 
 Download the archive for your platform and `SHA256SUMS`, then verify and
-install (example: macOS Apple Silicon, version 0.5.5):
+install (example: macOS Apple Silicon, version 0.5.6):
 
     sha256sum --check --ignore-missing SHA256SUMS      # macOS: shasum -a 256 -c --ignore-missing SHA256SUMS
-    tar -xzf illumio-tui-0.5.5-aarch64-apple-darwin.tar.gz
-    install -m 755 illumio-tui-0.5.5-aarch64-apple-darwin/illumio-tui ~/.local/bin/   # any directory on PATH
+    tar -xzf illumio-tui-0.5.6-aarch64-apple-darwin.tar.gz
+    install -m 755 illumio-tui-0.5.6-aarch64-apple-darwin/illumio-tui ~/.local/bin/   # any directory on PATH
     illumio-tui --version
 
 macOS may quarantine binaries downloaded with a browser; clear it with
@@ -183,20 +183,20 @@ yourself.
 1. Bump `version` in `[workspace.package]` of the root `Cargo.toml` and run
    `cargo check` so `Cargo.lock` follows.
 2. Write the release notes at the top of `CHANGELOG.md` as
-   `## v0.5.5 — 2026-10-24` (an em dash, the release date), their sections
+   `## v0.5.6 — 2026-10-26` (an em dash, the release date), their sections
    as `###` (`### New`, `### Changed`, `### Fixes`). Reference issues as
    `#NN`; on the site they link to the issue.
 3. Run `cargo xtask changelog`, which renders `docs/changelog.html` (the
    site's changelog page) from `CHANGELOG.md`. CI fails while the page is
    stale (`cargo xtask changelog --check`).
-4. Commit, then tag and push: `git tag v0.5.5 && git push origin main --tags`.
+4. Commit, then tag and push: `git tag v0.5.6 && git push origin main --tags`.
 
 The `Release` workflow builds all targets, builds the `.deb`/`.rpm` packages
 (nfpm, `packaging/nfpm.yaml`) and install-tests them in Debian, Ubuntu, Rocky
 and Alma containers, builds the Windows MSI (WiX, `packaging/windows/`) and
 installs, upgrades and uninstalls it on a Windows runner, then publishes the
 release; it fails if the tag does not match the Cargo version. The release
-body is the tag's section of `CHANGELOG.md` (`scripts/release-notes.sh v0.5.5`
+body is the tag's section of `CHANGELOG.md` (`scripts/release-notes.sh v0.5.6`
 prints it, its headings back at `##`); a tag without a section gets GitHub's
 generated notes instead, as before. Afterwards it renders `Formula/illumio-tui.rb` from
 `packaging/homebrew/illumio-tui.rb.tmpl` and `bucket/illumio-tui.json` from
