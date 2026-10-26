@@ -2,6 +2,24 @@
 
 Every illumio-tui release, newest first. Downloads, packages and checksums for each one are on [GitHub Releases](https://github.com/alexgoller/illumio-tui/releases).
 
+## v0.5.7 — 2026-10-26
+
+### New
+
+- **Traffic: what's new since** (#77, #79, #80). Compare recent traffic with a baseline: what started talking, what changed decision, what went quiet.
+  - The baseline is a second Explorer query over the N before the recent window (default 7 days), with the same filters. It runs only when you ask, through the usual cost guard, and has its own cache slot. Flows are matched on their endpoints, service, process and user, never on counts: Explorer's counters are lifetime values, so nothing is added or subtracted across windows.
+  - Each row is **new** (not in the baseline), **changed** (another set of decisions), **gone** (only in the baseline) or the same.
+  - TUI: **`c`** asks for the baseline length and runs it; **`n`** cycles all / new / changed / gone; **`C`** leaves compare mode. Every view except Treemap gets a `Δ` column and a `was→now` column: `allow→pot.bl` on a flow or service, and on an app pair what changed (`+2 svc`, `−1 svc`, `~1 svc` when a service changed decision). The header counts the rows the view shows: `vs 7d before 10-25 09:42 · 64 new · 5 changed · 75 gone`. `r` keeps the baseline; a new filter or window ends compare mode.
+  - CLI: `traffic query|groups|mesh --baseline 7d`, `--changes new,changed,gone,same`, and `--since 2026-10-23T18:00` (local time). Output gains `change`, `baseline_decision` and, for app pairs, `change_detail`; JSON has `meta.compare` with both windows, truncation per side and the counts.
+  - A truncated baseline is flagged in the header, on stderr and in the JSON: it makes "new" over-report.
+- **Where used: pairing profiles** (#78). `where-used label` also lists the pairing profiles that give the label, with `disabled` and a new `locked` column. One cached read; if it fails, the other results still show and the note says pairing profiles were not searched.
+- **Videos on the docs site** of where-used, traffic compare and the 0.5.6 CLI.
+
+### Fixed
+
+- The where-used overlay opened with the cursor on the last row when results arrived out of order (#79).
+- `--from` and `--to` also take a date and time without an offset (`2026-10-23T18:00`), read as local time. A date alone stays UTC, as before.
+
 ## v0.5.6 — 2026-10-26
 
 ### New

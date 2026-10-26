@@ -45,6 +45,7 @@
 <p><a href="./">&larr; Back to the site</a></p>
 <nav class="toc" aria-label="Releases">
 <ul>
+<li><a href="#v0.5.7">v0.5.7</a> <span>2026-10-26</span></li>
 <li><a href="#v0.5.6">v0.5.6</a> <span>2026-10-26</span></li>
 <li><a href="#v0.5.5">v0.5.5</a> <span>2026-10-24</span></li>
 <li><a href="#v0.5.4">v0.5.4</a> <span>2026-10-24</span></li>
@@ -77,6 +78,29 @@
 <li><a href="#v0.1.0">v0.1.0</a> <span>2026-10-12</span></li>
 </ul>
 </nav>
+</section>
+
+<section class="panel release" id="v0.5.7" aria-labelledby="v0.5.7-h">
+  <h2 id="v0.5.7-h"><a href="#v0.5.7">v0.5.7</a> <span class="date">2026-10-26</span></h2>
+<h3>New</h3>
+<ul>
+<li><strong>Traffic: what's new since</strong> (<a href="https://github.com/alexgoller/illumio-tui/issues/77">#77</a>, <a href="https://github.com/alexgoller/illumio-tui/issues/79">#79</a>, <a href="https://github.com/alexgoller/illumio-tui/issues/80">#80</a>). Compare recent traffic with a baseline: what started talking, what changed decision, what went quiet.
+<ul>
+<li>The baseline is a second Explorer query over the N before the recent window (default 7 days), with the same filters. It runs only when you ask, through the usual cost guard, and has its own cache slot. Flows are matched on their endpoints, service, process and user, never on counts: Explorer's counters are lifetime values, so nothing is added or subtracted across windows.</li>
+<li>Each row is <strong>new</strong> (not in the baseline), <strong>changed</strong> (another set of decisions), <strong>gone</strong> (only in the baseline) or the same.</li>
+<li>TUI: <strong><code>c</code></strong> asks for the baseline length and runs it; <strong><code>n</code></strong> cycles all / new / changed / gone; <strong><code>C</code></strong> leaves compare mode. Every view except Treemap gets a <code>Δ</code> column and a <code>was→now</code> column: <code>allow→pot.bl</code> on a flow or service, and on an app pair what changed (<code>+2 svc</code>, <code>−1 svc</code>, <code>~1 svc</code> when a service changed decision). The header counts the rows the view shows: <code>vs 7d before 10-25 09:42 · 64 new · 5 changed · 75 gone</code>. <code>r</code> keeps the baseline; a new filter or window ends compare mode.</li>
+<li>CLI: <code>traffic query|groups|mesh --baseline 7d</code>, <code>--changes new,changed,gone,same</code>, and <code>--since 2026-10-23T18:00</code> (local time). Output gains <code>change</code>, <code>baseline_decision</code> and, for app pairs, <code>change_detail</code>; JSON has <code>meta.compare</code> with both windows, truncation per side and the counts.</li>
+<li>A truncated baseline is flagged in the header, on stderr and in the JSON: it makes &quot;new&quot; over-report.</li>
+</ul>
+</li>
+<li><strong>Where used: pairing profiles</strong> (<a href="https://github.com/alexgoller/illumio-tui/issues/78">#78</a>). <code>where-used label</code> also lists the pairing profiles that give the label, with <code>disabled</code> and a new <code>locked</code> column. One cached read; if it fails, the other results still show and the note says pairing profiles were not searched.</li>
+<li><strong>Videos on the docs site</strong> of where-used, traffic compare and the 0.5.6 CLI.</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li>The where-used overlay opened with the cursor on the last row when results arrived out of order (<a href="https://github.com/alexgoller/illumio-tui/issues/79">#79</a>).</li>
+<li><code>--from</code> and <code>--to</code> also take a date and time without an offset (<code>2026-10-23T18:00</code>), read as local time. A date alone stays UTC, as before.</li>
+</ul>
 </section>
 
 <section class="panel release" id="v0.5.6" aria-labelledby="v0.5.6-h">
