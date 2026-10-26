@@ -77,6 +77,9 @@ pub struct WhereUsedView {
     pub deny_unread: usize,
     /// A load it needed failed: why.
     pub failed: Option<String>,
+    /// The user moved the cursor since the overlay opened: rows landing
+    /// keep it on the same reference; until then it stays on the first row.
+    pub moved: bool,
 }
 
 impl WhereUsedView {
@@ -89,6 +92,7 @@ impl WhereUsedView {
             requests: 0,
             deny_unread: 0,
             failed: None,
+            moved: false,
         }
     }
 
@@ -125,16 +129,24 @@ impl WhereUsedView {
             .join(" · ")
     }
 
-    /// Replaces the rows, the selection kept on the same reference.
-    pub fn set_rows(&mut self, rows: Vec<Reference>) {
-        let keep = self
-            .table
+    /// The selected reference's identity: section, href and side.
+    pub fn selected_id(&self) -> Option<(RefKind, String, Option<pce::where_used::RefSide>)> {
+        self.table
             .selected_item()
-            .map(|r| (r.kind, r.href.clone(), r.side));
+            .map(|r| (r.kind, r.href.clone(), r.side))
+    }
+
+    /// Replaces the rows (loads land in any order). The cursor stays on
+    /// the first row until the user moves it; after that, on the same
+    /// reference, wherever it lands.
+    pub fn set_rows(&mut self, rows: Vec<Reference>) {
+        let keep = self.selected_id().filter(|_| self.moved);
         self.table.set_rows(rows);
-        if let Some((kind, href, side)) = keep {
-            self.table
-                .select_where(|r| r.kind == kind && r.href == href && r.side == side);
+        match keep {
+            Some((kind, href, side)) => self
+                .table
+                .select_where(|r| r.kind == kind && r.href == href && r.side == side),
+            None => self.table.home(),
         }
     }
 }

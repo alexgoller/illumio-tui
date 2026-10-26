@@ -654,3 +654,101 @@ fn enter_on_a_pairing_profile_names_the_command_and_keeps_the_overlay() {
         "pairing profile shop-prod: illumio-tui pairing-profiles list"
     );
 }
+
+/// The overlay's selected row as `section reference`.
+fn selected(m: &Model) -> String {
+    let v = m.objects.where_used.as_ref().expect("the overlay is open");
+    let r = v.table.selected_item().expect("a row is selected");
+    format!("{} {}", r.kind.as_str(), r.line())
+}
+
+fn profiles_loaded() -> Msg {
+    Msg::PairingProfilesLoaded(Ok(serde_json::from_str(include_str!(
+        "../../../../../fixtures/pairing_profiles.json"
+    ))
+    .unwrap()))
+}
+
+fn probe_answered(href: &str) -> Msg {
+    Msg::LabelWorkloadsCounted {
+        href: href.into(),
+        result: Ok(WorkloadCount::from_probe(1)),
+    }
+}
+
+/// #79: the loads land in any order; the cursor stays on the first row
+/// while the user has not moved it.
+#[test]
+fn the_cursor_stays_on_the_first_row_whatever_order_the_loads_land_in() {
+    const WEB: &str = "/orgs/5/labels/1";
+    let orders: [[usize; 3]; 6] = [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ];
+    for order in orders {
+        let mut m = on_labels();
+        select_label(&mut m, WEB);
+        assert_eq!(press(&mut m, KeyCode::Char('W')).len(), 3, "{order:?}");
+        for step in order {
+            let msg = match step {
+                0 => rule_sets_loaded(PolicyScope::Draft),
+                1 => profiles_loaded(),
+                _ => probe_answered(WEB),
+            };
+            update(&mut m, msg);
+            if !rows(&m).is_empty() {
+                assert_eq!(selected(&m), rows(&m)[0], "{order:?} after {step}");
+            }
+        }
+        assert_eq!(rows(&m).len(), 4, "{order:?}");
+        assert_eq!(
+            selected(&m),
+            "rule Shop-Prod · #2 · consumer · allow",
+            "{order:?}"
+        );
+    }
+}
+
+/// #79: once the user moved the cursor, it stays on that row (by identity,
+/// not by index) as rows land above it, in any order.
+#[test]
+fn a_moved_cursor_stays_on_its_row_as_rows_land_above_it() {
+    const WEB: &str = "/orgs/5/labels/1";
+    for rulesets_first in [false, true] {
+        let mut m = on_labels();
+        select_label(&mut m, WEB);
+        press(&mut m, KeyCode::Char('W'));
+        update(&mut m, profiles_loaded());
+        update(&mut m, probe_answered(WEB));
+        assert_eq!(
+            rows(&m),
+            [
+                "pairing_profile shop-prod · locked · disabled",
+                "workloads ≥1 workloads"
+            ]
+        );
+        press(&mut m, KeyCode::Down);
+        assert_eq!(selected(&m), "workloads ≥1 workloads");
+        // Up and back down: still the user's choice.
+        press(&mut m, KeyCode::Up);
+        assert_eq!(
+            selected(&m),
+            "pairing_profile shop-prod · locked · disabled"
+        );
+        if rulesets_first {
+            press(&mut m, KeyCode::Down);
+        }
+        update(&mut m, rule_sets_loaded(PolicyScope::Draft));
+        assert_eq!(rows(&m).len(), 4);
+        let want = if rulesets_first {
+            "workloads ≥1 workloads"
+        } else {
+            "pairing_profile shop-prod · locked · disabled"
+        };
+        assert_eq!(selected(&m), want, "rulesets_first={rulesets_first}");
+    }
+}
