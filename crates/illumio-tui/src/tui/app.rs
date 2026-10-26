@@ -1101,6 +1101,19 @@ impl Runtime {
                     let _ = tx.send(Msg::Stats(pce.stats()));
                 });
             }
+            Cmd::LoadPairingProfiles(mode) => {
+                self.model.busy += 1;
+                let (pce, tx) = self.task_ctx();
+                tokio::spawn(async move {
+                    let result = pce
+                        .pairing_profiles(mode)
+                        .await
+                        .map(|c| c.value)
+                        .map_err(|e| e.to_string());
+                    let _ = tx.send(Msg::PairingProfilesLoaded(result));
+                    let _ = tx.send(Msg::Stats(pce.stats()));
+                });
+            }
             Cmd::LoadIpLists(mode) => {
                 self.model.busy += 1;
                 let (pce, tx) = self.task_ctx();
@@ -1226,6 +1239,7 @@ impl Runtime {
                 | Msg::IpListsLoaded(_)
                 | Msg::LabelUsageLoaded(_)
                 | Msg::LabelWorkloadsCounted { .. }
+                | Msg::PairingProfilesLoaded(_)
                 | Msg::WorkloadsLoaded(_)
                 | Msg::AppWorkloadsLoaded { .. }
                 | Msg::EventsLoaded(_)

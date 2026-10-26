@@ -783,6 +783,10 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             probe_answered(model, href, result);
             Vec::new()
         }
+        Msg::PairingProfilesLoaded(result) => {
+            pairing_answered(model, result);
+            Vec::new()
+        }
         Msg::IpListsLoaded(result) => {
             model.objects.ip_lists.loading = false;
             match result {

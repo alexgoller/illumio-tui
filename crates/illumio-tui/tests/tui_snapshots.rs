@@ -1,7 +1,8 @@
 use illumio_tui::tui::model::{Connection, Screen};
 use illumio_tui::tui::test_support::{
     model_fixture, model_with_flows, model_with_objects, model_with_policy, model_with_window,
-    model_with_workloads, render_styled, render_to_string, with_policy, with_workloads,
+    model_with_workloads, render_styled, render_to_string, with_pairing_profiles, with_policy,
+    with_workloads,
 };
 
 #[test]
@@ -3455,8 +3456,8 @@ fn ven_overlay_scrolls_to_the_notes_after_the_last_bucket() {
     assert!(out[messages..].contains("│  none"), "{out}");
 }
 
-/// `W` on a label (#75): with everything loaded, and with the rulesets and
-/// the workload probe still on their way.
+/// `W` on a label (#75): with everything loaded, and with the rulesets, the
+/// pairing profiles and the workload probe still on their way.
 #[test]
 fn where_used_overlay_120x40_80x24_and_loading() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -3464,7 +3465,7 @@ fn where_used_overlay_120x40_80x24_and_loading() {
     use illumio_tui::tui::model::Screen;
     use illumio_tui::tui::update;
     let w = || Msg::Key(KeyEvent::new(KeyCode::Char('W'), KeyModifiers::NONE));
-    let mut m = with_workloads(with_policy(model_with_objects()));
+    let mut m = with_pairing_profiles(with_workloads(with_policy(model_with_objects())));
     m.screen = Screen::Objects;
     m.objects
         .labels
@@ -3492,7 +3493,46 @@ fn where_used_overlay_120x40_80x24_and_loading() {
         .select_where(|r| r.href == "/orgs/5/labels/4");
     update(&mut m, w());
     let out = render_to_string(&m, 100, 30);
-    assert!(out.contains("loading rulesets, workload count…"), "{out}");
-    assert!(out.contains("2 reqs"), "{out}");
+    assert!(
+        out.contains("loading rulesets, pairing profiles, workload count…"),
+        "{out}"
+    );
+    assert!(out.contains("3 reqs"), "{out}");
     insta::assert_snapshot!("where_used_overlay_loading_100x30", out);
+}
+
+/// `W` on a label a pairing profile gives (#78): the profile's row with
+/// `locked`, after the rules, before the workloads.
+#[test]
+fn where_used_overlay_pairing_profile_120x40_80x24() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use illumio_tui::tui::Msg;
+    use illumio_tui::tui::model::Screen;
+    use illumio_tui::tui::update;
+    let mut m = with_pairing_profiles(with_workloads(with_policy(model_with_objects())));
+    m.screen = Screen::Objects;
+    m.objects
+        .labels
+        .select_where(|r| r.href == "/orgs/5/labels/1");
+    update(
+        &mut m,
+        Msg::Key(KeyEvent::new(KeyCode::Char('W'), KeyModifiers::NONE)),
+    );
+    let out = render_to_string(&m, 120, 40);
+    for s in [
+        "where used: role=web",
+        "Rules 2 · Pairing profiles 1 · Workloads 1",
+        "pairing profile shop-prod · locked · disabled",
+        "not searched: virtual services, enforcement boundaries, container workload profiles",
+    ] {
+        assert!(out.contains(s), "missing {s:?}:\n{out}");
+    }
+    insta::assert_snapshot!("where_used_overlay_pairing_120x40", out);
+    let out = render_to_string(&m, 80, 24);
+    assert!(
+        out.contains("not searched: virtual services, boundaries, container profiles"),
+        "{out}"
+    );
+    assert!(out.contains("shop-prod · locked · disabled"), "{out}");
+    insta::assert_snapshot!("where_used_overlay_pairing_80x24", out);
 }

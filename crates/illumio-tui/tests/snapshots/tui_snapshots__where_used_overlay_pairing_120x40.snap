@@ -1,0 +1,44 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                                                                api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+  Lab╭ where used: role=web ──────────────────────────────────────────────────────────────────────── 3 references ╮
+╭ Lab│Rules 2 · Pairing profiles 1 · Workloads 1                                                                  │ows ╮
+│  ke│not searched: virtual services, enforcement boundaries, container workload profiles                         │    │
+│▸ ro│                                                                                                            │    │
+│  ro│  section         reference                                                                                 │    │
+│  ap│▸ rule            Shop-Prod · #2 · consumer · allow                                                         │    │
+│  en│  rule            Shop-Prod · #3 · provider · allow · pending update                                        │    │
+│  lo│  pairing profile shop-prod · locked · disabled                                                             │    │
+│  ap│  workloads       1 workload                                                                                │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │Enter open (rule, ruleset, group, workloads) · / search · Esc close                                         │    │
+│    ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────╯    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+where used: role=web · 3 references                                                    │ Enter open  / search  Esc back

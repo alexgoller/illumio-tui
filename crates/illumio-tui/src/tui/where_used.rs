@@ -1,15 +1,16 @@
 //! `W` / `:used` on the Objects screen: what names the selected label,
 //! label group, IP list or service (`pce::where_used`), from what is loaded:
 //! the draft rulesets as the Policy screen loads them, the label groups and,
-//! for a label, the workload list or one cached one-row probe. What is
-//! missing is loaded once, on the key press; the view is rebuilt as it
-//! lands, never on a timer.
+//! for a label, the pairing profiles and the workload list or one cached
+//! one-row probe. What is missing is loaded once, on the key press; the
+//! view is rebuilt as it lands, never on a timer.
 use crate::tui::table::{Column, SortKey, TableView};
 use pce::where_used::{RefKind, Reference, Target};
 
 /// What the view still waits for, as its header says it.
 pub const WAIT_RULESETS: &str = "rulesets";
 pub const WAIT_COUNT: &str = "workload count";
+pub const WAIT_PROFILES: &str = "pairing profiles";
 
 fn col(title: &'static str, width: u16, cell: fn(&Reference) -> String) -> Column<Reference> {
     Column {
@@ -26,12 +27,14 @@ fn col(title: &'static str, width: u16, cell: fn(&Reference) -> String) -> Colum
     }
 }
 
-/// The section's name on a row: `scope`, `rule`, `label group`, `workloads`.
+/// The section's name on a row: `scope`, `rule`, `label group`, `pairing
+/// profile`, `workloads`.
 pub fn section_word(kind: RefKind) -> &'static str {
     match kind {
         RefKind::Scope => "scope",
         RefKind::Rule => "rule",
         RefKind::LabelGroup => "label group",
+        RefKind::PairingProfile => "pairing profile",
         RefKind::Workloads => "workloads",
     }
 }
@@ -43,7 +46,7 @@ pub fn columns() -> Vec<Column<Reference>> {
             key: |r| {
                 SortKey::Num(RefKind::ALL.iter().position(|k| *k == r.kind).unwrap_or(0) as u64)
             },
-            ..col("section", 11, |r| section_word(r.kind).to_string())
+            ..col("section", 15, |r| section_word(r.kind).to_string())
         },
         Column {
             key: |r| SortKey::Text(r.line()),
@@ -65,7 +68,8 @@ pub struct WhereUsedView {
     /// `env=prod` for a label, else the object's name.
     pub name: String,
     pub table: TableView<Reference>,
-    /// What is still on its way ([`WAIT_RULESETS`], [`WAIT_COUNT`]).
+    /// What is still on its way ([`WAIT_RULESETS`], [`WAIT_PROFILES`],
+    /// [`WAIT_COUNT`]).
     pub waiting: Vec<&'static str>,
     /// Requests this view sent (counted by the api counter too).
     pub requests: usize,

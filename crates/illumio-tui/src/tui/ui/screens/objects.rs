@@ -330,8 +330,7 @@ pub struct WhereUsedLayout {
 }
 
 /// `NOT_SEARCHED` where the box is too narrow for it (fits 74 columns).
-const NOT_SEARCHED_SHORT: &str =
-    "not searched: virtual services, boundaries, pairing/container profiles";
+const NOT_SEARCHED_SHORT: &str = "not searched: virtual services, boundaries, container profiles";
 
 /// The where-used box: centred, at most 110 wide; three head lines (the
 /// sections, what is not searched, then what is loading, failed or may be

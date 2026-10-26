@@ -1,9 +1,10 @@
 //! `where-used`: what names one label, label group, IP list or service in
 //! the draft policy and the label groups (`pce::where_used`), and for a
-//! label how many workloads carry it. Every read is cached: the object's
-//! own list (to find it by name), the draft rulesets, the label groups
-//! (labels and label groups only) and, for a label, one workloads read of
-//! at most one row filtered by it.
+//! label the pairing profiles giving it and how many workloads carry it.
+//! Every read is cached: the object's own list (to find it by name), the
+//! draft rulesets, the label groups (labels and label groups only) and, for
+//! a label, the pairing profiles and one workloads read of at most one row
+//! filtered by it.
 use super::context::{Context, cache_label};
 use super::error::CliError;
 use super::output::{OutputFormat, TableRows, WhereUsedMeta};
@@ -11,14 +12,15 @@ use super::write::{ip_list_in, is_href, label_group_in, label_in, service_in};
 use clap::{Args, Subcommand};
 use pce::models::PolicyScope;
 use pce::where_used::{
-    Inputs, NOT_SEARCHED, ObjectType, Reference, Target, WorkloadCount, where_used,
+    Inputs, NOT_SEARCHED, ObjectType, Reference, Target, WorkloadCount, pairing_profiles,
+    where_used,
 };
 use serde::Serialize;
 use std::collections::HashMap;
 
 #[derive(Subcommand, Debug)]
 pub enum WhereUsedCmd {
-    /// Where a label is used: ruleset scopes, rules, label groups, and how many workloads carry it
+    /// Where a label is used: ruleset scopes, rules, label groups, pairing profiles, and how many workloads carry it
     Label(TargetArg),
     /// Where a label group is used: scopes, rules, and the groups holding it
     LabelGroup(TargetArg),
@@ -46,9 +48,9 @@ impl WhereUsedCmd {
 }
 
 /// The CSV columns, in order (`columns::csv_columns`).
-pub const HEADERS: [&str; 13] = [
+pub const HEADERS: [&str; 14] = [
     "kind", "ruleset", "rule", "side", "action", "excluded", "pending", "disabled", "via", "name",
-    "count", "exact", "href",
+    "count", "exact", "locked", "href",
 ];
 
 /// One row per reference, the workload count of a label last.
@@ -62,6 +64,15 @@ fn opt(s: &Option<String>) -> String {
 
 fn yes(b: bool) -> String {
     if b { "yes".into() } else { String::new() }
+}
+
+/// `yes`, `no`, or empty when it does not apply.
+fn yes_no(b: Option<bool>) -> String {
+    match b {
+        Some(true) => "yes".into(),
+        Some(false) => "no".into(),
+        None => String::new(),
+    }
 }
 
 impl TableRows for Rows {
@@ -93,11 +104,8 @@ impl TableRows for Rows {
                     opt(&r.via),
                     opt(&r.name),
                     count.unwrap_or_default(),
-                    match r.exact {
-                        Some(true) => "yes".into(),
-                        Some(false) => "no".into(),
-                        None => String::new(),
-                    },
+                    yes_no(r.exact),
+                    yes_no(r.locked),
                     r.href.clone(),
                 ]
             })
@@ -122,6 +130,7 @@ impl TableRows for Rows {
                     opt(&r.name),
                     r.count.map(|n| n.to_string()).unwrap_or_default(),
                     r.exact.map(|b| b.to_string()).unwrap_or_default(),
+                    r.locked.map(|b| b.to_string()).unwrap_or_default(),
                     r.href.clone(),
                 ]
             })
@@ -163,6 +172,8 @@ pub async fn run(ctx: &Context, cmd: &WhereUsedCmd) -> Result<(), CliError> {
     let mut truncated = false;
     // The label groups once read to find a group: the search reuses them.
     let mut read_groups = None;
+    // A label's key: which pairing profile lock applies.
+    let mut label_key = None;
     // The object's own list: it is found there, by name or href.
     let (href, name, hit) = match kind {
         ObjectType::Label => {
@@ -176,6 +187,7 @@ pub async fn run(ctx: &Context, cmd: &WhereUsedCmd) -> Result<(), CliError> {
                 |l| format!("{}={}", l.key, l.value),
                 label_in,
             )?;
+            label_key = c.value.iter().find(|l| l.href == h).map(|l| l.key.clone());
             (h, n, c.hit)
         }
         ObjectType::LabelGroup => {
@@ -247,8 +259,18 @@ pub async fn run(ctx: &Context, cmd: &WhereUsedCmd) -> Result<(), CliError> {
             deny_apart: sets.value.iter().all(|rs| rs.deny_rules.is_empty()),
         },
     );
-    let total = found.refs.len();
     let mut rows = found.refs;
+    // Only a label sits in pairing profiles: one read, whatever the cache mode.
+    if kind == ObjectType::Label {
+        let p = ctx.pce.pairing_profiles(ctx.cache_mode).await?;
+        truncated |= p.truncated;
+        rows.extend(pairing_profiles(
+            &href,
+            label_key.as_deref().unwrap_or_default(),
+            &p.value,
+        ));
+    }
+    let total = rows.len();
     let workloads = if kind == ObjectType::Label {
         let n = ctx.pce.label_workload_probe(&href, ctx.cache_mode).await?;
         rows.push(Reference::workloads(&href, n.value));

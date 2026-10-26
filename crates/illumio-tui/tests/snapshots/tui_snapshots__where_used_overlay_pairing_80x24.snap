@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+  ╭ where used: role=web ────────────────────────────────────── 3 references ╮
+╭ │Rules 2 · Pairing profiles 1 · Workloads 1                                │ ╮
+│ │not searched: virtual services, boundaries, container profiles            │ │
+│▸│                                                                          │ │
+│ │  section         reference                                               │ │
+│ │▸ rule            Shop-Prod · #2 · consumer · allow                       │ │
+│ │  rule            Shop-Prod · #3 · provider · allow · pending update      │ │
+│ │  pairing profile shop-prod · locked · disabled                           │ │
+│ │  workloads       1 workload                                              │ │
+│ │                                                                          │ │
+│ │                                                                          │ │
+│ │                                                                          │ │
+│ │                                                                          │ │
+│ │                                                                          │ │
+│ │                                                                          │ │
+│ │                                                                          │ │
+│ │                                                                          │ │
+│ │                                                                          │ │
+│ │Enter open (rule, ruleset, group, workloads) · / search · Esc close       │ │
+│ ╰──────────────────────────────────────────────────────────────────────────╯ │
+╰──────────────────────────────────────────────────────────────────────────────╯
+where used: role=web · 3 references            │ Enter open  / search  Esc back

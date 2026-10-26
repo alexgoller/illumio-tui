@@ -1,11 +1,12 @@
 //! `W` / `:used` on the Objects screen: the where-used overlay. It reads
 //! what is loaded (the draft rulesets as the Policy screen loads them, the
 //! label groups, the workload list) and loads what is missing once, on the
-//! key press, through the cache: the draft rulesets, and for a label with
-//! no workload list a one-row probe. Its rows follow every answer; nothing
-//! runs on a timer, and reopening it loads nothing again.
+//! key press, through the cache: the draft rulesets, and for a label the
+//! pairing profiles and, with no workload list, a one-row probe. Its rows
+//! follow every answer; nothing runs on a timer, and reopening it loads
+//! nothing again.
 use super::*;
-use crate::tui::where_used::{WAIT_COUNT, WAIT_RULESETS, WhereUsedView};
+use crate::tui::where_used::{WAIT_COUNT, WAIT_PROFILES, WAIT_RULESETS, WhereUsedView};
 use pce::where_used::{Inputs, ObjectType, RefKind, Reference, Target, WorkloadCount};
 
 /// The selected object of the Objects tab on screen, as a target and its
@@ -42,8 +43,9 @@ fn selected_target(model: &Model) -> Option<(Target, String)> {
 
 /// `W` / `:used`: the overlay for the selected row. The draft rulesets are
 /// loaded when neither held nor on their way (one cached request, as a `w`
-/// form loads them); a label without the workload list gets one cached
-/// probe, unless one answered already. `u` is left as it is.
+/// form loads them); a label gets the pairing profiles once (one cached
+/// request) and, without the workload list, one cached probe, unless one
+/// answered already. `u` is left as it is.
 pub(super) fn open_where_used(model: &mut Model) -> Vec<Cmd> {
     if model.screen != Screen::Objects {
         model.status = StatusLine::info("where-used: W on a row of the Objects screen");
@@ -58,12 +60,21 @@ pub(super) fn open_where_used(model: &mut Model) -> Vec<Cmd> {
         return Vec::new();
     };
     let label = (target.kind == ObjectType::Label).then(|| target.href.clone());
+    let label_target = label.is_some();
     model.objects.where_used = Some(WhereUsedView::new(target, name));
     model.overlay = Overlay::WhereUsed;
     let mut cmds = Vec::new();
     if model.draft_rulesets().is_none() {
         // As a `w` form loads them (its status line is replaced below).
         cmds.extend(load_form_drafts(model));
+    }
+    if label.is_some()
+        && model.objects.pairing_profiles.is_none()
+        && !model.objects.pairing_loading
+        && model.is_connected()
+    {
+        model.objects.pairing_loading = true;
+        cmds.push(Cmd::LoadPairingProfiles(CacheMode::Use));
     }
     if let Some(href) = label {
         let o = &model.objects;
@@ -91,8 +102,10 @@ pub(super) fn open_where_used(model: &mut Model) -> Vec<Cmd> {
         .where_used
         .as_ref()
         .is_some_and(|v| model.objects.probes_loading.contains(&v.target.href));
+    let profiles_coming = label_target && model.objects.pairing_loading;
     if let Some(v) = model.objects.where_used.as_mut() {
-        v.requests = usize::from(rulesets_coming) + usize::from(probe_coming);
+        v.requests =
+            usize::from(rulesets_coming) + usize::from(profiles_coming) + usize::from(probe_coming);
     }
     refresh_where_used(model);
     model.status = where_used_status(model);
@@ -174,8 +187,22 @@ pub(super) fn refresh_where_used(model: &mut Model) {
         },
     );
     let mut rows = found.refs;
+    let mut profiles_failed = None;
     let mut count_failed = None;
     if target.kind == ObjectType::Label {
+        match &model.objects.pairing_profiles {
+            Some(list) => {
+                // The key says which lock applies; the index has it.
+                let key = model
+                    .index()
+                    .and_then(|i| i.label(&target.href))
+                    .map(|l| l.key.clone())
+                    .unwrap_or_default();
+                rows.extend(pce::where_used::pairing_profiles(&target.href, &key, list));
+            }
+            None if model.objects.pairing_loading => waiting.push(WAIT_PROFILES),
+            None => profiles_failed = Some("pairing profiles not loaded (W again asks)"),
+        }
         let w = &model.workloads;
         let count = if w.loaded_at.is_some() {
             Some(WorkloadCount::from_loaded(
@@ -200,11 +227,29 @@ pub(super) fn refresh_where_used(model: &mut Model) {
     v.set_rows(rows);
     v.deny_unread = found.deny_unread;
     v.waiting = waiting;
-    v.failed = match (rulesets_missing, count_failed) {
-        (true, _) => Some("the draft rulesets are not loaded (W again asks)".to_string()),
-        (false, Some(e)) => Some(e.to_string()),
-        (false, None) => None,
+    v.failed = if rulesets_missing {
+        Some("the draft rulesets are not loaded (W again asks)".to_string())
+    } else {
+        profiles_failed.or(count_failed).map(str::to_string)
     };
+}
+
+/// The pairing profiles answered: kept for every later `W` on a label, the
+/// overlay rebuilt.
+pub(super) fn pairing_answered(
+    model: &mut Model,
+    result: Result<Vec<pce::models::PairingProfile>, String>,
+) {
+    model.objects.pairing_loading = false;
+    match result {
+        Ok(list) => model.objects.pairing_profiles = Some(list),
+        Err(e) => model.status = StatusLine::warn(format!("pairing profiles: {e}")),
+    }
+    let open = model.overlay == Overlay::WhereUsed;
+    refresh_where_used(model);
+    if open {
+        model.status = where_used_status(model);
+    }
 }
 
 /// A label's probe answered: kept for the next `W` on it, the overlay
@@ -282,7 +327,8 @@ pub(super) fn where_used_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
 
 /// `Enter`: a rule or a ruleset on the Policy screen, selected; a label
 /// group on the Label groups tab; the Workloads screen filtered by the
-/// label.
+/// label. A pairing profile has no screen: the status names the command
+/// that lists it, and the overlay stays.
 fn open_reference(model: &mut Model) -> Vec<Cmd> {
     let Some(v) = model.objects.where_used.as_ref() else {
         return Vec::new();
@@ -292,6 +338,13 @@ fn open_reference(model: &mut Model) -> Vec<Cmd> {
         return Vec::new();
     };
     let label = v.target.href.clone();
+    if r.kind == RefKind::PairingProfile {
+        model.status = StatusLine::info(format!(
+            "pairing profile {}: illumio-tui pairing-profiles list",
+            r.name.unwrap_or_default()
+        ));
+        return Vec::new();
+    }
     // The active policy on its way: the draft cannot be shown yet. The
     // overlay stays, so Enter works once it is in.
     let to_policy = matches!(r.kind, RefKind::Rule | RefKind::Scope);
@@ -325,6 +378,8 @@ fn open_reference(model: &mut Model) -> Vec<Cmd> {
             };
             Vec::new()
         }
+        // Answered above, the overlay kept.
+        RefKind::PairingProfile => Vec::new(),
         RefKind::Workloads => {
             let Some((key, value)) = model
                 .index()

@@ -1,10 +1,10 @@
 {
   "type": "array",
-  "description": "one row per reference: scopes, rules, label groups, then (labels only) the workload count",
+  "description": "one row per reference: scopes, rules, label groups, then (labels only) the pairing profiles giving the label and the workload count",
   "items": {
     "type": "object",
     "properties": {
-      "kind": {"enum": ["scope", "rule", "label_group", "workloads"]},
+      "kind": {"enum": ["scope", "rule", "label_group", "pairing_profile", "workloads"]},
       "ruleset": {"type": ["string", "null"], "description": "scope, rule: the ruleset's name"},
       "ruleset_href": {"type": ["string", "null"]},
       "rule": {
@@ -21,12 +21,18 @@
         "type": ["string", "null"],
         "description": "a draft change not provisioned yet, the PCE's update_type (create, update, delete) of the rule, else its ruleset (scope: the ruleset; label_group: the group); null when provisioned as it is"
       },
-      "disabled": {"type": "boolean", "description": "the rule or its ruleset is disabled"},
+      "disabled": {
+        "type": "boolean",
+        "description": "the rule or its ruleset is disabled; pairing_profile: the profile is disabled"
+      },
       "via": {
         "type": ["string", "null"],
         "description": "the label group it is reached through, when not named directly"
       },
-      "name": {"type": ["string", "null"], "description": "label_group: the group's name"},
+      "name": {
+        "type": ["string", "null"],
+        "description": "label_group: the group's name; pairing_profile: the profile's name"
+      },
       "count": {
         "type": ["integer", "null"],
         "description": "workloads: how many workloads carry the label"
@@ -35,9 +41,13 @@
         "type": ["boolean", "null"],
         "description": "workloads: false when count is a lower bound (at least)"
       },
+      "locked": {
+        "type": ["boolean", "null"],
+        "description": "pairing_profile: whether the profile locks the label's key (role, app, env, loc); null for other kinds, for keys with no lock and when the profile does not say"
+      },
       "href": {
         "type": "string",
-        "description": "the rule's, the ruleset's (scope), the group's, or the label's (workloads)"
+        "description": "the rule's, the ruleset's (scope), the group's, the pairing profile's, or the label's (workloads)"
       }
     },
     "required": [
@@ -54,6 +64,7 @@
       "name",
       "count",
       "exact",
+      "locked",
       "href"
     ],
     "additionalProperties": false

@@ -6,7 +6,8 @@ use crate::tui::commands;
 use crate::tui::model::{Model, Overlay, Screen};
 use crate::tui::msg::{Cmd, Msg};
 use crate::tui::test_support::{
-    model_with_ip_lists, model_with_objects, on_ip_lists_tab, with_policy, with_workloads,
+    model_with_ip_lists, model_with_objects, on_ip_lists_tab, with_pairing_profiles, with_policy,
+    with_workloads,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use pce::where_used::{RefKind, WorkloadCount};
@@ -56,7 +57,7 @@ fn rule_sets_loaded(scope: PolicyScope) -> Msg {
 
 #[test]
 fn w_on_a_label_with_everything_loaded_asks_for_nothing_and_leaves_u_alone() {
-    let mut m = with_workloads(with_policy(on_labels()));
+    let mut m = with_pairing_profiles(with_workloads(with_policy(on_labels())));
     select_label(&mut m, PROD);
     let cmds = press(&mut m, KeyCode::Char('W'));
     assert_eq!(cmds, Vec::<Cmd>::new());
@@ -98,6 +99,7 @@ fn what_is_missing_loads_once_through_the_cache_and_reopening_loads_nothing() {
                 scope: PolicyScope::Draft,
                 mode: CacheMode::Use
             },
+            Cmd::LoadPairingProfiles(CacheMode::Use),
             Cmd::CountLabelWorkloads {
                 href: PROD.into(),
                 mode: CacheMode::Use
@@ -105,9 +107,16 @@ fn what_is_missing_loads_once_through_the_cache_and_reopening_loads_nothing() {
         ]
     );
     let v = m.objects.where_used.as_ref().unwrap();
-    assert_eq!(v.requests, 2, "the api counter's share, shown in the title");
-    assert_eq!(v.waiting, ["rulesets", "workload count"]);
-    assert!(m.status.text.contains("loading rulesets, workload count…"));
+    assert_eq!(v.requests, 3, "the api counter's share, shown in the title");
+    assert_eq!(
+        v.waiting,
+        ["rulesets", "pairing profiles", "workload count"]
+    );
+    assert!(
+        m.status
+            .text
+            .contains("loading rulesets, pairing profiles, workload count…")
+    );
     // Only the group is known before the rulesets land.
     assert_eq!(rows(&m), ["label_group All prod envs"]);
     // A second W while they are on their way sends nothing more.
@@ -115,8 +124,8 @@ fn what_is_missing_loads_once_through_the_cache_and_reopening_loads_nothing() {
     assert_eq!(press(&mut m, KeyCode::Char('W')), Vec::<Cmd>::new());
     assert_eq!(
         m.objects.where_used.as_ref().unwrap().requests,
-        2,
-        "still waiting for both: the title keeps counting them"
+        3,
+        "still waiting for all three: the title keeps counting them"
     );
 
     assert_eq!(
@@ -124,6 +133,14 @@ fn what_is_missing_loads_once_through_the_cache_and_reopening_loads_nothing() {
         Vec::<Cmd>::new()
     );
     assert_eq!(rows(&m).len(), 3);
+    let profiles: Vec<pce::models::PairingProfile> = serde_json::from_str(include_str!(
+        "../../../../../fixtures/pairing_profiles.json"
+    ))
+    .unwrap();
+    assert_eq!(
+        update(&mut m, Msg::PairingProfilesLoaded(Ok(profiles))),
+        Vec::<Cmd>::new()
+    );
     let cmds = update(
         &mut m,
         Msg::LabelWorkloadsCounted {
@@ -156,7 +173,7 @@ fn what_is_missing_loads_once_through_the_cache_and_reopening_loads_nothing() {
 
 #[test]
 fn a_workload_list_on_its_way_is_waited_for_instead_of_a_probe() {
-    let mut m = with_policy(on_labels());
+    let mut m = with_pairing_profiles(with_policy(on_labels()));
     m.workloads.loading = true;
     select_label(&mut m, PROD);
     assert_eq!(press(&mut m, KeyCode::Char('W')), Vec::<Cmd>::new());
@@ -477,7 +494,7 @@ fn enter_on_the_workloads_line_before_the_list_says_it_is_loading() {
 
 #[test]
 fn the_footer_shows_the_overlay_keys_and_not_searched_stays_whole() {
-    let mut m = with_workloads(with_policy(on_labels()));
+    let mut m = with_pairing_profiles(with_workloads(with_policy(on_labels())));
     select_label(&mut m, "/orgs/5/labels/5");
     press(&mut m, KeyCode::Char('W'));
     let screen = crate::tui::test_support::render_to_string(&m, 80, 24);
@@ -487,7 +504,7 @@ fn the_footer_shows_the_overlay_keys_and_not_searched_stays_whole() {
     );
     assert!(!screen.contains("Tab type"), "{screen}");
     assert!(
-        screen.contains("not searched: virtual services, boundaries, pairing/container profiles"),
+        screen.contains("not searched: virtual services, boundaries, container profiles"),
         "{screen}"
     );
     // With the deny note too, both show.
@@ -497,5 +514,103 @@ fn the_footer_shows_the_overlay_keys_and_not_searched_stays_whole() {
     assert!(
         screen.contains("2 rulesets may hold deny rules"),
         "{screen}"
+    );
+}
+
+#[test]
+fn w_on_a_label_reads_the_pairing_profiles_once_and_lists_them_with_locked() {
+    // role=web: given by shop-prod, which locks role and is disabled.
+    let mut m = with_workloads(with_policy(on_labels()));
+    select_label(&mut m, "/orgs/5/labels/1");
+    assert_eq!(
+        press(&mut m, KeyCode::Char('W')),
+        vec![Cmd::LoadPairingProfiles(CacheMode::Use)]
+    );
+    let v = m.objects.where_used.as_ref().unwrap();
+    assert_eq!(v.requests, 1);
+    assert_eq!(v.waiting, ["pairing profiles"]);
+    // A second W, or a reopen, while it is on its way: nothing more.
+    assert_eq!(press(&mut m, KeyCode::Char('W')), Vec::<Cmd>::new());
+    press(&mut m, KeyCode::Esc);
+    assert_eq!(press(&mut m, KeyCode::Char('W')), Vec::<Cmd>::new());
+    assert_eq!(m.objects.where_used.as_ref().unwrap().requests, 1);
+    let profiles: Vec<pce::models::PairingProfile> = serde_json::from_str(include_str!(
+        "../../../../../fixtures/pairing_profiles.json"
+    ))
+    .unwrap();
+    update(&mut m, Msg::PairingProfilesLoaded(Ok(profiles)));
+    assert_eq!(
+        rows(&m),
+        [
+            "rule Shop-Prod · #2 · consumer · allow",
+            "rule Shop-Prod · #3 · provider · allow · pending update",
+            "pairing_profile shop-prod · locked · disabled",
+            "workloads 1 workload",
+        ]
+    );
+    let v = m.objects.where_used.as_ref().unwrap();
+    assert_eq!(v.total(), 3);
+    assert!(
+        v.sections().contains("Pairing profiles 1"),
+        "{}",
+        v.sections()
+    );
+    assert!(m.status.text.contains("3 references"), "{}", m.status.text);
+    let screen = crate::tui::test_support::render_to_string(&m, 80, 24);
+    assert!(
+        screen.contains("pairing profile shop-prod · locked · disabled"),
+        "{screen}"
+    );
+
+    // Reopened, and on another label: held, never read again.
+    press(&mut m, KeyCode::Esc);
+    assert_eq!(press(&mut m, KeyCode::Char('W')), Vec::<Cmd>::new());
+    press(&mut m, KeyCode::Esc);
+    select_label(&mut m, "/orgs/5/labels/3");
+    assert_eq!(press(&mut m, KeyCode::Char('W')), Vec::<Cmd>::new());
+    assert!(rows(&m).contains(&"pairing_profile shop-prod · locked · disabled".to_string()));
+
+    // Other kinds never read them.
+    let mut m = with_policy(on_labels());
+    for kind in [ObjectKind::LabelGroups, ObjectKind::Services] {
+        m.objects.kind = kind;
+        assert_eq!(press(&mut m, KeyCode::Char('W')), Vec::<Cmd>::new());
+        press(&mut m, KeyCode::Esc);
+    }
+    assert!(!m.objects.pairing_loading && m.objects.pairing_profiles.is_none());
+}
+
+#[test]
+fn a_failed_pairing_profiles_read_is_said_and_w_again_asks() {
+    let mut m = with_workloads(with_policy(on_labels()));
+    select_label(&mut m, PROD);
+    press(&mut m, KeyCode::Char('W'));
+    update(&mut m, Msg::PairingProfilesLoaded(Err("HTTP 500".into())));
+    let v = m.objects.where_used.as_ref().unwrap();
+    assert_eq!(
+        v.failed.as_deref(),
+        Some("pairing profiles not loaded (W again asks)")
+    );
+    press(&mut m, KeyCode::Esc);
+    assert_eq!(
+        press(&mut m, KeyCode::Char('W')),
+        vec![Cmd::LoadPairingProfiles(CacheMode::Use)]
+    );
+}
+
+#[test]
+fn enter_on_a_pairing_profile_names_the_command_and_keeps_the_overlay() {
+    let mut m = with_pairing_profiles(with_workloads(with_policy(on_labels())));
+    select_label(&mut m, "/orgs/5/labels/1");
+    press(&mut m, KeyCode::Char('W'));
+    let v = m.objects.where_used.as_mut().unwrap();
+    v.table.select_where(|r| r.kind == RefKind::PairingProfile);
+    assert_eq!(press(&mut m, KeyCode::Enter), Vec::<Cmd>::new());
+    assert_eq!(m.overlay, Overlay::WhereUsed);
+    assert_eq!(m.screen, Screen::Objects);
+    assert!(m.objects.where_used.is_some());
+    assert_eq!(
+        m.status.text,
+        "pairing profile shop-prod: illumio-tui pairing-profiles list"
     );
 }

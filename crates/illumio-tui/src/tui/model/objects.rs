@@ -423,6 +423,10 @@ pub struct ObjectsState {
     pub workload_probes: HashMap<String, pce::where_used::WorkloadCount>,
     /// Probes on their way, by label href.
     pub probes_loading: HashSet<String>,
+    /// The pairing profiles, read once by the first `W` on a label: no
+    /// reload by a second `W`, a reopen or a timer.
+    pub pairing_profiles: Option<Vec<pce::models::PairingProfile>>,
+    pub pairing_loading: bool,
 }
 
 impl ObjectsState {
@@ -451,6 +455,8 @@ impl ObjectsState {
             where_used: None,
             workload_probes: HashMap::new(),
             probes_loading: HashSet::new(),
+            pairing_profiles: None,
+            pairing_loading: false,
         }
     }
 

@@ -384,6 +384,7 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
                 "where used: scopes, rules, label groups, workloads",
             ),
             more("", "draft policy; rulesets loaded once if missing (1 req)"),
+            more("", "a label: also pairing profiles (read once, 1 req)"),
             more("", "Enter: the rule, ruleset, group, or Workloads filtered"),
         ],
     },

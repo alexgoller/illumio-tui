@@ -4,12 +4,12 @@ expression: out
 ---
  illumio-tui pce.example · org 5 ●                                            api 5 calls · 20.8 KB
   1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
-  ╭ where used: env=prod ────────────────────────────────────────────────── 1 reference · 2 reqs ╮
+  ╭ where used: env=prod ────────────────────────────────────────────────── 1 reference · 3 reqs ╮
 ╭ │Label groups 1                                                                                │ ╮
-│ │not searched: virtual services, boundaries, pairing/container profiles                        │ │
-│ │loading rulesets, workload count…                                                             │ │
-│ │  section     reference                                                                       │ │
-│ │▸ label group All prod envs                                                                   │ │
+│ │not searched: virtual services, enforcement boundaries, container workload profiles           │ │
+│ │loading rulesets, pairing profiles, workload count…                                           │ │
+│ │  section         reference                                                                   │ │
+│ │▸ label group     All prod envs                                                               │ │
 │▸│                                                                                              │ │
 │ │                                                                                              │ │
 │ │                                                                                              │ │
@@ -31,4 +31,4 @@ expression: out
 │ │Enter open (rule, ruleset, group, workloads) · / search · Esc close                           │ │
 │ ╰──────────────────────────────────────────────────────────────────────────────────────────────╯ │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-where used: env=prod · loading rulesets, workload count…           │ Enter open  / search  Esc back
+where used: env=prod · loading rulesets, pairing profiles, workloa │ Enter open  / search  Esc back

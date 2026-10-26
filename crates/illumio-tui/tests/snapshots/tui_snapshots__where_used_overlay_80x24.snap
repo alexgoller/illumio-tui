@@ -6,13 +6,13 @@ expression: "render_to_string(&m, 80, 24)"
   1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
   ╭ where used: env=prod ────────────────────────────────────── 3 references ╮
 ╭ │Rulesets 1 · Rules 1 · Label groups 1 · Workloads 2                       │ ╮
-│ │not searched: virtual services, boundaries, pairing/container profiles    │ │
+│ │not searched: virtual services, boundaries, container profiles            │ │
 │ │                                                                          │ │
-│ │  section     reference                                                   │ │
-│ │▸ scope       Shop-Prod                                                   │ │
-│▸│  rule        Global-Infra · #1 · consumer · allow · pending create disabl│ │
-│ │  label group All prod envs                                               │ │
-│ │  workloads   2 workloads                                                 │ │
+│ │  section         reference                                               │ │
+│ │▸ scope           Shop-Prod                                               │ │
+│▸│  rule            Global-Infra · #1 · consumer · allow · pending create di│ │
+│ │  label group     All prod envs                                           │ │
+│ │  workloads       2 workloads                                             │ │
 │ │                                                                          │ │
 │ │                                                                          │ │
 │ │                                                                          │ │

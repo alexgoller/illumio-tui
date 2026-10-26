@@ -200,6 +200,16 @@ pub fn with_workloads(mut m: Model) -> Model {
     m
 }
 
+/// `m` with the fixture pairing profiles loaded (as a first `W` on a label
+/// leaves them).
+pub fn with_pairing_profiles(mut m: Model) -> Model {
+    m.objects.pairing_profiles = Some(
+        serde_json::from_str(include_str!("../../../../fixtures/pairing_profiles.json"))
+            .expect("pairing profiles fixture"),
+    );
+    m
+}
+
 /// A connected model with the three fixture object lists loaded (ages of 3 s).
 pub fn model_with_objects() -> Model {
     let mut m = model_fixture();

@@ -152,6 +152,8 @@ pub enum Msg {
         href: String,
         result: Result<pce::where_used::WorkloadCount, String>,
     },
+    /// The pairing profiles (`Cmd::LoadPairingProfiles`).
+    PairingProfilesLoaded(Result<Vec<pce::models::PairingProfile>, String>),
     /// The draft IP lists with the cache age in seconds.
     IpListsLoaded(Result<(Vec<IpList>, u64), String>),
     /// Workloads with the cache age in seconds.
@@ -286,6 +288,8 @@ pub enum Cmd {
         href: String,
         mode: CacheMode,
     },
+    /// Where-used on a label: the pairing profiles, one cached read.
+    LoadPairingProfiles(CacheMode),
     LoadWorkloads(CacheMode),
     /// The app overlay's workloads: one read filtered by the app's labels.
     LoadAppWorkloads {
@@ -463,6 +467,7 @@ impl PartialEq for Cmd {
                 Cmd::CountLabelWorkloads { href: ha, mode: ma },
                 Cmd::CountLabelWorkloads { href: hb, mode: mb },
             ) => ha == hb && ma == mb,
+            (Cmd::LoadPairingProfiles(a), Cmd::LoadPairingProfiles(b)) => a == b,
             (Cmd::LoadWorkloads(a), Cmd::LoadWorkloads(b)) => a == b,
             (
                 Cmd::LoadAppWorkloads {

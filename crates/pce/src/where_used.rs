@@ -2,24 +2,29 @@
 //! label, label group, IP list or service. Ruleset scopes (labels and label
 //! groups), rule providers and consumers (labels, label groups, IP lists),
 //! rule services, and the label groups that hold it, directly or through a
-//! nested group (`via`). A label group the target reaches through is
+//! nested group (`via`); for a label also the pairing profiles that give it
+//! ([`pairing_profiles`]). A label group the target reaches through is
 //! followed into scopes and rules too: a rule naming a group that holds the
 //! label is listed `via` that group. Pure: the TUI and the CLI hand in what
 //! they loaded; how many workloads carry a label is theirs to count
 //! ([`WorkloadCount`]).
 //!
 //! Not searched: virtual services, enforcement boundaries as their own
-//! objects, pairing profiles and container workload profiles
-//! ([`NOT_SEARCHED`]).
-use crate::models::{Actor, DenyRule, IngressService, LabelGroup, RuleSet, Workload};
+//! objects and container workload profiles ([`NOT_SEARCHED`]). A pairing
+//! profile holds labels only, so for the other kinds there is nothing in
+//! them to find.
+use crate::models::pairing_profiles::LOCKS;
+use crate::models::{
+    Actor, DenyRule, IngressService, LabelGroup, PairingProfile, RuleSet, Workload,
+};
 use crate::resolve::{RuleKind, canon, pane_order};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
 /// What where-used leaves out, in one line, so an empty result is not read
 /// as "unused everywhere".
-pub const NOT_SEARCHED: &str = "not searched: virtual services, enforcement boundaries, \
-     pairing profiles, container workload profiles";
+pub const NOT_SEARCHED: &str =
+    "not searched: virtual services, enforcement boundaries, container workload profiles";
 
 /// The kind of object searched for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -69,35 +74,42 @@ pub enum RefKind {
     Rule,
     /// A label group holding it.
     LabelGroup,
+    /// A pairing profile giving a label to the workloads it pairs.
+    PairingProfile,
     /// The workloads carrying a label (their count).
     Workloads,
 }
 
 impl RefKind {
     /// The sections, in the order they are listed.
-    pub const ALL: [RefKind; 4] = [
+    pub const ALL: [RefKind; 5] = [
         RefKind::Scope,
         RefKind::Rule,
         RefKind::LabelGroup,
+        RefKind::PairingProfile,
         RefKind::Workloads,
     ];
 
-    /// The section's title: `Rulesets`, `Rules`, `Label groups`, `Workloads`.
+    /// The section's title: `Rulesets`, `Rules`, `Label groups`, `Pairing
+    /// profiles`, `Workloads`.
     pub fn title(self) -> &'static str {
         match self {
             RefKind::Scope => "Rulesets",
             RefKind::Rule => "Rules",
             RefKind::LabelGroup => "Label groups",
+            RefKind::PairingProfile => "Pairing profiles",
             RefKind::Workloads => "Workloads",
         }
     }
 
-    /// `scope`, `rule`, `label_group`, `workloads`, as JSON names it.
+    /// `scope`, `rule`, `label_group`, `pairing_profile`, `workloads`, as
+    /// JSON names it.
     pub fn as_str(self) -> &'static str {
         match self {
             RefKind::Scope => "scope",
             RefKind::Rule => "rule",
             RefKind::LabelGroup => "label_group",
+            RefKind::PairingProfile => "pairing_profile",
             RefKind::Workloads => "workloads",
         }
     }
@@ -178,7 +190,8 @@ impl WorkloadCount {
 }
 
 /// One reference. `href` is the rule's (`Rule`), the ruleset's (`Scope`),
-/// the group's (`LabelGroup`) or the label's (`Workloads`).
+/// the group's (`LabelGroup`), the profile's (`PairingProfile`) or the
+/// label's (`Workloads`).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Reference {
     pub kind: RefKind,
@@ -197,16 +210,20 @@ pub struct Reference {
     pub pending: Option<String>,
     /// The rule or scope names it as an exclusion (`exclusion: true`).
     pub excluded: bool,
-    /// The rule or its ruleset is disabled (a scope: the ruleset).
+    /// The rule or its ruleset is disabled (a scope: the ruleset; a
+    /// pairing profile: `enabled: false`).
     pub disabled: bool,
     /// The label group it is reached through, when not named directly.
     pub via: Option<String>,
-    /// The label group's name (`LabelGroup`).
+    /// The label group's or the pairing profile's name.
     pub name: Option<String>,
     /// How many workloads carry the label (`Workloads`).
     pub count: Option<usize>,
     /// Whether `count` is exact (`Workloads`).
     pub exact: Option<bool>,
+    /// Whether the pairing profile locks the label's key (`PairingProfile`
+    /// of a key with a lock: role, app, env, loc; `None` otherwise).
+    pub locked: Option<bool>,
     pub href: String,
 }
 
@@ -226,6 +243,7 @@ impl Reference {
             name: None,
             count: None,
             exact: None,
+            locked: None,
             href: href.to_string(),
         }
     }
@@ -264,8 +282,8 @@ impl Reference {
     }
 
     /// The row without its `via`: `Shop-Prod · #2 · provider · allow` (a
-    /// rule), `Shop-Prod` (a scope), the group's name, `2 workloads`; then
-    /// the flags.
+    /// rule), `Shop-Prod` (a scope), the group's name, the profile's name
+    /// (with `locked`), `2 workloads`; then the flags.
     pub fn what(&self) -> String {
         let mut parts: Vec<String> = Vec::new();
         match self.kind {
@@ -277,6 +295,12 @@ impl Reference {
             }
             RefKind::Scope => parts.push(self.ruleset.clone().unwrap_or_default()),
             RefKind::LabelGroup => parts.push(self.name.clone().unwrap_or_default()),
+            RefKind::PairingProfile => {
+                parts.push(self.name.clone().unwrap_or_default());
+                if self.locked == Some(true) {
+                    parts.push("locked".to_string());
+                }
+            }
             RefKind::Workloads => {
                 let n = WorkloadCount {
                     count: self.count.unwrap_or(0),
@@ -326,6 +350,33 @@ impl WhereUsed {
     pub fn count(&self, kind: RefKind) -> usize {
         self.refs.iter().filter(|r| r.kind == kind).count()
     }
+}
+
+/// The pairing profile field locking label key `key` (`role_label_lock`
+/// for `role`), as [`LOCKS`] names it; `None` for a key with no lock.
+pub fn label_lock_field(key: &str) -> Option<&'static str> {
+    LOCKS
+        .iter()
+        .find(|(name, field)| *name == key && field.ends_with("_label_lock"))
+        .map(|(_, field)| *field)
+}
+
+/// The pairing profiles giving label `href` (of key `key`), in list order:
+/// one row each, `locked` from the profile's lock of that key (`None` when
+/// the key has no lock or the profile does not say).
+pub fn pairing_profiles(href: &str, key: &str, profiles: &[PairingProfile]) -> Vec<Reference> {
+    let want = canon(href);
+    let lock = label_lock_field(key);
+    profiles
+        .iter()
+        .filter(|p| p.labels.iter().any(|l| canon(&l.href) == want))
+        .map(|p| Reference {
+            name: Some(p.name.clone()),
+            disabled: p.enabled == Some(false),
+            locked: lock.and_then(|f| p.extra.get(f)).and_then(|v| v.as_bool()),
+            ..Reference::blank(RefKind::PairingProfile, &p.href)
+        })
+        .collect()
 }
 
 /// The groups holding `target`, directly (`via: None`) or through a nested
@@ -793,6 +844,78 @@ mod tests {
             },
         );
         assert_eq!(w.deny_unread, 0, "inline lists: an empty one means none");
+    }
+
+    fn profiles() -> Vec<PairingProfile> {
+        serde_json::from_str(include_str!("../../../fixtures/pairing_profiles.json")).unwrap()
+    }
+
+    #[test]
+    fn a_label_in_a_pairing_profile_with_its_lock() {
+        // shop-prod gives role=web and app=shop, both locked, and is off.
+        let rows = pairing_profiles("/orgs/5/labels/1", "role", &profiles());
+        assert_eq!(rows.len(), 1);
+        let r = &rows[0];
+        assert_eq!(r.kind, RefKind::PairingProfile);
+        assert_eq!(r.name.as_deref(), Some("shop-prod"));
+        assert_eq!(r.href, "/orgs/5/pairing_profiles/7");
+        assert_eq!(r.locked, Some(true));
+        assert!(r.disabled);
+        assert_eq!(r.line(), "shop-prod · locked · disabled");
+        assert_eq!(
+            (
+                r.ruleset.as_ref(),
+                r.rule,
+                r.side,
+                r.action,
+                r.count,
+                r.exact
+            ),
+            (None, None, None, None, None, None)
+        );
+        // Not in any profile: no row.
+        assert!(pairing_profiles("/orgs/5/labels/4", "env", &profiles()).is_empty());
+    }
+
+    #[test]
+    fn locked_is_the_keys_lock_true_false_or_unknown() {
+        let p = |extra: serde_json::Value| -> PairingProfile {
+            let mut v = json!({
+                "href": "/orgs/5/pairing_profiles/3", "name": "eu",
+                "enabled": true,
+                "labels": [{"href": "/orgs/5/labels/5"}],
+            });
+            v.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            serde_json::from_value(v).unwrap()
+        };
+        let locked = |key: &str, extra: serde_json::Value| {
+            pairing_profiles("/orgs/5/labels/5", key, &[p(extra)])[0].locked
+        };
+        assert_eq!(locked("loc", json!({"loc_label_lock": true})), Some(true));
+        assert_eq!(locked("loc", json!({"loc_label_lock": false})), Some(false));
+        assert_eq!(locked("loc", json!({})), None, "the profile does not say");
+        // A key with no lock field: never locked or not.
+        assert_eq!(locked("bu", json!({"loc_label_lock": true})), None);
+        let r = &pairing_profiles(
+            "/orgs/5/labels/5",
+            "loc",
+            &[p(json!({"loc_label_lock": false}))],
+        )[0];
+        assert!(!r.disabled);
+        assert_eq!(r.line(), "eu");
+        assert_eq!(label_lock_field("env"), Some("env_label_lock"));
+        assert_eq!(label_lock_field("enforcement"), None);
+    }
+
+    #[test]
+    fn pairing_profiles_follow_label_groups_in_the_section_order() {
+        let order = |k: RefKind| RefKind::ALL.iter().position(|x| *x == k).unwrap();
+        assert!(order(RefKind::LabelGroup) < order(RefKind::PairingProfile));
+        assert!(order(RefKind::PairingProfile) < order(RefKind::Workloads));
+        assert_eq!(RefKind::PairingProfile.as_str(), "pairing_profile");
+        assert!(!NOT_SEARCHED.contains("pairing"));
     }
 
     #[test]

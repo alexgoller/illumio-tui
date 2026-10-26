@@ -1,7 +1,8 @@
 //! `where-used` (#75): the references to a label, label group, IP list or
 //! service, and a label's workload count. Every request is pinned with
 //! `.expect`: the object's own list, the draft rulesets, the label groups
-//! (labels and groups only) and the one-row workload probe (labels only).
+//! (labels and groups only), the pairing profiles and the one-row workload
+//! probe (labels only).
 #[path = "common/schema_check.rs"]
 mod schema_check;
 use assert_cmd::Command;
@@ -63,6 +64,19 @@ const GROUPS: &str = "/api/v2/orgs/5/sec_policy/draft/label_groups";
 const IP_LISTS: &str = "/api/v2/orgs/5/sec_policy/draft/ip_lists";
 const SERVICES: &str = "/api/v2/orgs/5/sec_policy/draft/services";
 const RULE_SETS: &str = "/api/v2/orgs/5/sec_policy/draft/rule_sets";
+const PAIRING: &str = "/api/v2/orgs/5/pairing_profiles";
+
+/// The pairing profiles, read `times` times (0: never, for the kinds no
+/// profile can hold).
+async fn expect_pairing(server: &MockServer, times: u64) {
+    expect(
+        server,
+        PAIRING,
+        include_str!("../../../fixtures/pairing_profiles.json"),
+        times,
+    )
+    .await;
+}
 
 /// The one-row workload probe for label `href`, answering `rows`.
 async fn expect_probe(server: &MockServer, href: &str, rows: &str) {
@@ -83,6 +97,11 @@ async fn expect_probe(server: &MockServer, href: &str, rows: &str) {
 }
 
 async fn label_server() -> MockServer {
+    label_server_for("/orgs/5/labels/4").await
+}
+
+/// A label's five reads, the probe for `href`.
+async fn label_server_for(href: &str) -> MockServer {
     let server = MockServer::start().await;
     expect(
         &server,
@@ -105,17 +124,13 @@ async fn label_server() -> MockServer {
         1,
     )
     .await;
-    expect_probe(
-        &server,
-        "/orgs/5/labels/4",
-        r#"[{"href": "/orgs/5/workloads/aaaa-1"}]"#,
-    )
-    .await;
+    expect_pairing(&server, 1).await;
+    expect_probe(&server, href, r#"[{"href": "/orgs/5/workloads/aaaa-1"}]"#).await;
     server
 }
 
 #[tokio::test]
-async fn a_label_lists_its_scopes_rules_groups_and_workloads_in_four_reads() {
+async fn a_label_lists_its_scopes_rules_groups_and_workloads_in_five_reads() {
     let server = label_server().await;
     let a = cmd(&server)
         .args(["--json", "where-used", "label", "env=prod"])
@@ -123,7 +138,7 @@ async fn a_label_lists_its_scopes_rules_groups_and_workloads_in_four_reads() {
         .success();
     let v = schema_check::envelope(&a.get_output().stdout);
     assert_eq!(v["meta"]["schema"], "where-used");
-    assert_eq!(v["meta"]["api_calls"], 4);
+    assert_eq!(v["meta"]["api_calls"], 5);
     let kinds: Vec<&str> = v["data"]
         .as_array()
         .unwrap()
@@ -180,7 +195,7 @@ async fn the_table_shows_rule_numbers_and_the_meta_line_the_calls() {
     );
     assert!(out.contains("≥1"), "{out}");
     let err = stderr(&a);
-    assert!(err.contains("4 api calls"), "{err}");
+    assert!(err.contains("5 api calls"), "{err}");
     assert!(err.contains("3 references to label env=prod"), "{err}");
     assert!(err.contains("≥1 workloads"), "{err}");
     assert!(err.contains("not searched: virtual services"), "{err}");
@@ -198,15 +213,15 @@ async fn csv_prints_one_row_per_reference_and_fields_picks_columns() {
     let mut lines = out.lines();
     assert_eq!(
         lines.next().unwrap(),
-        "kind,ruleset,rule,side,action,excluded,pending,disabled,via,name,count,exact,href"
+        "kind,ruleset,rule,side,action,excluded,pending,disabled,via,name,count,exact,locked,href"
     );
     assert_eq!(
         lines.nth(1).unwrap(),
-        "rule,Global-Infra,1,consumer,allow,false,create,true,All prod envs,,,,/orgs/5/sec_policy/draft/rule_sets/101/sec_rules/3"
+        "rule,Global-Infra,1,consumer,allow,false,create,true,All prod envs,,,,,/orgs/5/sec_policy/draft/rule_sets/101/sec_rules/3"
     );
     assert_eq!(
         out.lines().last().unwrap(),
-        "workloads,,,,,false,,false,,,1,false,/orgs/5/labels/4"
+        "workloads,,,,,false,,false,,,1,false,,/orgs/5/labels/4"
     );
     server.verify().await;
 
@@ -309,6 +324,7 @@ async fn an_ip_list_reads_its_list_and_the_rulesets_only() {
         1,
     )
     .await;
+    expect_pairing(&server, 0).await;
     let a = cmd(&server)
         .args(["--json", "where-used", "iplist", "Corp"])
         .assert()
@@ -340,6 +356,7 @@ async fn a_service_and_a_label_group_by_name() {
         1,
     )
     .await;
+    expect_pairing(&server, 0).await;
     let a = cmd(&server)
         .args(["--json", "where-used", "service", "PostgreSQL"])
         .assert()
@@ -364,6 +381,7 @@ async fn a_service_and_a_label_group_by_name() {
         1,
     )
     .await;
+    expect_pairing(&server, 0).await;
     let a = cmd(&server)
         .args(["--json", "where-used", "label-group", "All prod envs"])
         .assert()
@@ -490,6 +508,89 @@ async fn an_unknown_service_lists_the_known_ones_when_few() {
     assert!(
         err.contains("known: All Services, PostgreSQL, Web"),
         "{err}"
+    );
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn a_label_in_a_pairing_profile_lists_it_with_its_lock() {
+    // role=web: given by shop-prod (disabled, role locked).
+    let server = label_server_for("/orgs/5/labels/1").await;
+    let a = cmd(&server)
+        .args(["--json", "where-used", "label", "role=web"])
+        .assert()
+        .success();
+    let v = schema_check::envelope(&a.get_output().stdout);
+    assert_eq!(v["meta"]["api_calls"], 5);
+    let data = v["data"].as_array().unwrap();
+    let kinds: Vec<&str> = data.iter().map(|r| r["kind"].as_str().unwrap()).collect();
+    assert_eq!(kinds, ["rule", "rule", "pairing_profile", "workloads"]);
+    let p = &data[2];
+    assert_eq!(p["name"], "shop-prod");
+    assert_eq!(p["href"], "/orgs/5/pairing_profiles/7");
+    assert_eq!(p["locked"], true);
+    assert_eq!(p["disabled"], true);
+    for k in [
+        "ruleset", "rule", "side", "action", "pending", "via", "count", "exact",
+    ] {
+        assert_eq!(p[k], Value::Null, "{k}");
+    }
+    assert_eq!(data[0]["locked"], Value::Null, "only a profile row has it");
+    assert_eq!(v["meta"]["where_used"]["total"], 3, "the profile counts");
+    server.verify().await;
+
+    let server = label_server_for("/orgs/5/labels/1").await;
+    let a = cmd(&server)
+        .args([
+            "--csv",
+            "--fields",
+            "kind,name,locked",
+            "where-used",
+            "label",
+            "role=web",
+        ])
+        .assert()
+        .success();
+    let out = stdout(&a);
+    assert_eq!(out.lines().next().unwrap(), "kind,name,locked");
+    assert!(out.contains("pairing_profile,shop-prod,true"), "{out}");
+    assert_eq!(
+        out.lines().nth(1),
+        Some("rule,,"),
+        "only a profile row has it"
+    );
+    server.verify().await;
+
+    let server = label_server_for("/orgs/5/labels/1").await;
+    let a = cmd(&server)
+        .args(["--table", "where-used", "label", "role=web"])
+        .assert()
+        .success();
+    let out = stdout(&a);
+    assert!(
+        out.contains("pairing_profile") && out.contains("shop-prod"),
+        "{out}"
+    );
+    assert!(stderr(&a).contains("3 references"), "{}", stderr(&a));
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn a_label_under_no_cache_reads_the_pairing_profiles_once() {
+    let server = label_server().await;
+    let a = cmd(&server)
+        .args(["--json", "--no-cache", "where-used", "label", "env=prod"])
+        .assert()
+        .success();
+    let v = schema_check::envelope(&a.get_output().stdout);
+    assert_eq!(v["meta"]["api_calls"], 5);
+    assert!(
+        v["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["kind"] != "pairing_profile"),
+        "env=prod is in no profile"
     );
     server.verify().await;
 }
