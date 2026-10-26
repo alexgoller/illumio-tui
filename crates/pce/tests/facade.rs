@@ -855,6 +855,121 @@ async fn traffic_slots_do_not_evict_each_other() {
     );
 }
 
+/// Compare mode's baseline has its own slot: it never evicts the recent
+/// result (nor the focused ones, nor a focused baseline), and the same
+/// filter and window again is a hit.
+#[tokio::test]
+async fn the_baseline_slot_evicts_no_other_and_hits_on_the_same_window() {
+    use pce::traffic::{Focus, TrafficQueryBuilder};
+    use tokio_util::sync::CancellationToken;
+    let server = MockServer::start().await;
+    let flows = include_str!("../../../fixtures/traffic_flows.json");
+    let labels = shop_labels();
+    mount_query(
+        &server,
+        "q-recent",
+        json!({"start_date": "2026-10-09T00:00:00Z", "end_date": "2026-10-10T00:00:00Z"}),
+        "[]",
+        1,
+    )
+    .await;
+    mount_query(
+        &server,
+        "q-base-in",
+        json!({"start_date": "2026-10-02T00:00:00Z", "destinations": {"include": [labels.clone()]}}),
+        flows,
+        1,
+    )
+    .await;
+    mount_query(
+        &server,
+        "q-base-out",
+        json!({"start_date": "2026-10-02T00:00:00Z", "sources": {"include": [labels]}}),
+        flows,
+        1,
+    )
+    .await;
+    // The baseline: exactly the 7 days before the recent start (mounted
+    // after the focused ones, which it would match too).
+    mount_query(
+        &server,
+        "q-base",
+        json!({
+            "start_date": "2026-10-02T00:00:00Z",
+            "end_date": "2026-10-09T00:00:00Z",
+            "max_results": 500
+        }),
+        flows,
+        1,
+    )
+    .await;
+    let mut p = pce_for(&server);
+    fast_poll(&mut p);
+    let idx = fixture_index();
+    let recent = TrafficQueryBuilder::between(
+        "2026-10-09T00:00:00Z".parse().unwrap(),
+        "2026-10-10T00:00:00Z".parse().unwrap(),
+    )
+    .max_results(500)
+    .build()
+    .unwrap();
+    let base = recent.baseline(Duration::from_secs(7 * 86400)).unwrap();
+    let cancel = CancellationToken::new();
+    let hit = |r: pce::Result<pce::Cached<pce::traffic::TrafficResult>>| r.unwrap().hit;
+    assert!(!hit(p
+        .traffic(&recent, CacheMode::Use, &cancel, None)
+        .await));
+    let b = p
+        .baseline_traffic(&base, CacheMode::Use, &cancel, None)
+        .await
+        .unwrap();
+    assert!(!b.hit);
+    assert_eq!(b.value.flows.len(), 4);
+    let focus = Focus::new(
+        vec!["shop".into(), "prod".into()],
+        vec!["app".into(), "env".into()],
+    );
+    let f = p
+        .focused_traffic(
+            pce::FOCUS_BASELINE_SLOT,
+            &focus,
+            &base,
+            &idx,
+            CacheMode::Use,
+            &cancel,
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(!f.hit);
+    assert!(
+        hit(p.traffic(&recent, CacheMode::Use, &cancel, None).await),
+        "the baselines left the recent slot alone"
+    );
+    assert!(
+        hit(p
+            .baseline_traffic(&base, CacheMode::Use, &cancel, None)
+            .await),
+        "the same filter and window again: a hit"
+    );
+    assert!(
+        p.focused_traffic(
+            pce::FOCUS_BASELINE_SLOT,
+            &focus,
+            &base,
+            &idx,
+            CacheMode::Use,
+            &cancel,
+            None,
+        )
+        .await
+        .unwrap()
+        .hit,
+        "the focused baseline is kept apart from the unfocused one"
+    );
+    server.verify().await;
+}
+
 #[tokio::test]
 async fn labels_with_usage_asks_for_usage_and_caches_apart_from_the_plain_list() {
     let server = MockServer::start().await;

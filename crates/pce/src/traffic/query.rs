@@ -59,6 +59,28 @@ impl TrafficQuery {
         }
     }
 
+    /// The baseline before this query (compare mode): the same body over
+    /// exactly `[start − length, start)`, its end this query's start.
+    pub fn baseline(&self, length: Duration) -> Result<TrafficQuery> {
+        let start: Timestamp = self
+            .start_date
+            .parse()
+            .map_err(|e| PceError::Invalid(format!("bad start {:?}: {e}", self.start_date)))?;
+        let span = Span::try_from(length)
+            .map_err(|e| PceError::Invalid(format!("baseline too long: {e}")))?;
+        if length.is_zero() {
+            return Err(PceError::Invalid("baseline must be longer than 0".into()));
+        }
+        let from = start
+            .checked_sub(span)
+            .map_err(|e| PceError::Invalid(format!("baseline too long: {e}")))?;
+        Ok(TrafficQuery {
+            start_date: format_timestamp(from),
+            end_date: self.start_date.clone(),
+            ..self.clone()
+        })
+    }
+
     /// A reason the caller should confirm before running, if any.
     pub fn needs_confirmation(&self) -> Option<String> {
         let c = self.cost();
@@ -499,6 +521,32 @@ mod tests {
                 .build()
                 .unwrap();
         assert!(big.needs_confirmation().unwrap().contains("20000"));
+    }
+
+    #[test]
+    fn the_baseline_ends_where_the_query_starts() {
+        let q =
+            TrafficQueryBuilder::between(ts("2026-10-23T18:00:00Z"), ts("2026-10-26T09:00:00Z"))
+                .source(vec![ActorMatch::IpAddress {
+                    ip_address: "10.0.0.1".into(),
+                }])
+                .max_results(500)
+                .build()
+                .unwrap();
+        let b = q.baseline(Duration::from_secs(30 * 86400)).unwrap();
+        assert_eq!(b.start_date, "2026-09-23T18:00:00Z");
+        assert_eq!(b.end_date, "2026-10-23T18:00:00Z");
+        let (mut a, mut c) = (
+            serde_json::to_value(&q).unwrap(),
+            serde_json::to_value(&b).unwrap(),
+        );
+        for v in [&mut a, &mut c] {
+            v.as_object_mut().unwrap().remove("start_date");
+            v.as_object_mut().unwrap().remove("end_date");
+        }
+        assert_eq!(a, c, "the same filters and cap");
+        assert!(b.needs_confirmation().unwrap().contains("30d"));
+        assert!(q.baseline(Duration::ZERO).is_err());
     }
 
     #[test]

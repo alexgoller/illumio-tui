@@ -259,6 +259,11 @@ pub struct PeerRow {
     /// flattened into JSON as `mark`, `marks` and `squelched`.
     #[serde(flatten)]
     pub marks: Option<crate::marks::RowMarks>,
+    /// Compare mode: the row's change against the baseline
+    /// (`traffic::compare`); flattened into JSON as `change` and
+    /// `baseline_decision`.
+    #[serde(flatten)]
+    pub change: Option<super::compare::RowChange>,
 }
 
 /// The one name when there is one host, else `N hosts`.
@@ -427,6 +432,7 @@ pub fn app_sections(
                         app_hosts: 0,
                         last_detected: None,
                         marks: None,
+                        change: None,
                     },
                     Seen::default(),
                 )

@@ -1,6 +1,7 @@
 //! The Explorer traffic query: build it, run it, make the rows readable,
 //! and aggregate them. Nothing here touches the network except `poll`.
 pub mod aggregate;
+pub mod compare;
 pub mod duration;
 pub mod filter;
 pub mod focus;
@@ -17,6 +18,11 @@ pub use aggregate::{
     ConnsByDecision, Dominant, DraftCounts, FlowGroup, compact_count, dominant, group_by_labels,
     group_by_service, group_by_service_refs, group_key, group_text, group_values, keys_or_default,
     keys_seen,
+};
+pub use compare::{
+    Change, ChangeSet, CompareCounts, Compared, DecisionSet, FlowKey, RowChange, compare_by,
+    compare_flows, compare_groups, compare_mesh, compare_sections, flow_key, keep_changes,
+    keep_section_changes,
 };
 pub use duration::compact_duration;
 pub use filter::{FilterExpr, ServiceExpr, parse_service, resolve_actor, resolve_service};

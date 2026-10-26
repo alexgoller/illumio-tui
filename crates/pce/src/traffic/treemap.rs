@@ -331,6 +331,7 @@ mod tests {
             conns: Default::default(),
             draft: None,
             marks: None,
+            change: None,
         }
     }
 

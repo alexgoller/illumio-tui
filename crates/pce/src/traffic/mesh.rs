@@ -35,6 +35,11 @@ pub struct MeshRow {
     /// flattened into JSON as `mark`, `marks` and `squelched`.
     #[serde(flatten)]
     pub marks: Option<crate::marks::RowMarks>,
+    /// Compare mode: the row's change against the baseline
+    /// (`traffic::compare`); flattened into JSON as `change` and
+    /// `baseline_decision`.
+    #[serde(flatten)]
+    pub change: Option<super::compare::RowChange>,
 }
 
 /// Which optional columns take part in the grouping.
@@ -155,6 +160,7 @@ pub fn mesh(flows: &[ResolvedFlow], keys: &[String], cols: MeshColumns) -> Vec<M
             blocked: 0,
             draft: None,
             marks: None,
+            change: None,
         });
         row.flows += 1;
         DraftCounts::add(&mut row.draft, f);

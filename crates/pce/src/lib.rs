@@ -104,6 +104,13 @@ impl Default for CacheTtls {
 
 pub const DEFAULT_MAX_RESULTS: u32 = 10_000;
 
+/// The cache slot of compare mode's baseline query (`Pce::baseline_traffic`).
+pub const BASELINE_SLOT: &str = "baseline";
+/// The slot prefix of a focused baseline (`{slot}:in`, `{slot}:out`): no
+/// prefix of, nor prefixed by, `focus` or `baseline`, so no slot evicts
+/// another.
+pub const FOCUS_BASELINE_SLOT: &str = "focus-baseline";
+
 /// How long a draft traffic result is reused: draft policy changes outside
 /// this tool must show soon.
 pub const DRAFT_TTL: Duration = Duration::from_secs(120);
@@ -460,6 +467,20 @@ impl Pce {
             hit: false,
             truncated: false,
         })
+    }
+
+    /// Runs (or reuses) the baseline query of compare mode in its own slot
+    /// (`BASELINE_SLOT`): it never evicts the recent result, and the same
+    /// filter and window again is a cache hit.
+    pub async fn baseline_traffic(
+        &self,
+        query: &models::TrafficQuery,
+        mode: CacheMode,
+        cancel: &tokio_util::sync::CancellationToken,
+        progress: Option<&tokio::sync::mpsc::UnboundedSender<traffic::QueryProgress>>,
+    ) -> Result<Cached<traffic::TrafficResult>> {
+        self.traffic_slot(BASELINE_SLOT, query, mode, cancel, progress)
+            .await
     }
 
     /// Runs (or reuses) one Explorer query in the `main` slot: the

@@ -1891,6 +1891,7 @@ mod tests {
             conns: Default::default(),
             draft: None,
             marks: None,
+            change: None,
         }
     }
 
@@ -1915,6 +1916,7 @@ mod tests {
             blocked: 0,
             draft: None,
             marks: None,
+            change: None,
         };
         assert_eq!(
             vec![row].rows()[0],

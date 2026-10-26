@@ -215,6 +215,11 @@ pub struct FlowGroup {
     /// flattened into JSON as `mark`, `marks` and `squelched`.
     #[serde(flatten)]
     pub marks: Option<crate::marks::RowMarks>,
+    /// Compare mode: the row's change against the baseline
+    /// (`traffic::compare`); flattened into JSON as `change` and
+    /// `baseline_decision`.
+    #[serde(flatten)]
+    pub change: Option<super::compare::RowChange>,
 }
 
 impl FlowGroup {
@@ -280,6 +285,7 @@ fn group<'a>(
             conns: ConnsByDecision::default(),
             draft: None,
             marks: None,
+            change: None,
         });
         g.flows += 1;
         DraftCounts::add(&mut g.draft, f);
