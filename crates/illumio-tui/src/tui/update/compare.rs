@@ -174,6 +174,7 @@ pub(super) fn start_baseline(
         });
         t.rebuild_views();
     }
+    t.compare_ended = false;
     let (seq, cancel) = t.start_baseline_run(Instant::now());
     model.status = StatusLine::info(format!(
         "baseline query running: {length} before the window"

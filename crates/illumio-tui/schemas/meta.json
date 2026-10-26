@@ -102,9 +102,15 @@
             "truncated": {"type": "boolean"},
             "incomplete": {"type": "boolean"},
             "cap": {"type": "integer"},
+            "cap_steps": {
+              "type": "array",
+              "items": {"type": "integer"},
+              "description": "with --backfill: every cap the side tried"
+            },
+            "queries": {"type": "integer", "description": "the Explorer queries the side took"},
             "cache": {"enum": ["hit", "miss", "bypass", "none"]}
           },
-          "required": ["start", "end", "truncated", "incomplete", "cap", "cache"],
+          "required": ["start", "end", "truncated", "incomplete", "cap", "queries", "cache"],
           "additionalProperties": false
         },
         "baseline": {
@@ -115,9 +121,15 @@
             "truncated": {"type": "boolean"},
             "incomplete": {"type": "boolean"},
             "cap": {"type": "integer"},
+            "cap_steps": {
+              "type": "array",
+              "items": {"type": "integer"},
+              "description": "with --backfill: every cap the side tried"
+            },
+            "queries": {"type": "integer", "description": "the Explorer queries the side took"},
             "cache": {"enum": ["hit", "miss", "bypass", "none"]}
           },
-          "required": ["start", "end", "truncated", "incomplete", "cap", "cache"],
+          "required": ["start", "end", "truncated", "incomplete", "cap", "queries", "cache"],
           "additionalProperties": false
         },
         "counts": {

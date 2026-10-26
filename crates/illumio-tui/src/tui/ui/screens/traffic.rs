@@ -180,14 +180,32 @@ fn render_stats(model: &Model, f: &mut Frame, area: Rect) {
     let meta = query_meta(model);
     // Compare mode leads the header; a truncated side in the warning
     // colour, in place of the result's own meta (the line below counts).
+    // The longest that fits beside the title: the baseline's end time and
+    // the result's meta go first.
     let block = match model.traffic.compare_meta() {
         Some(cmp) => {
+            let room = area.width.saturating_sub(12) as usize;
+            let short = model.traffic.compare_meta_with(false).unwrap_or_default();
+            let fits = |s: &str| Span::raw(s).width() <= room;
             let spans = match model.traffic.compare_warning() {
-                Some(w) => vec![
-                    Span::styled(format!("{cmp} · "), t.dim_style()),
-                    Span::styled(w, Style::new().fg(t.warn)),
-                ],
-                None => vec![Span::styled(format!("{cmp} · {meta}"), t.dim_style())],
+                Some(w) => {
+                    let head = [cmp, short]
+                        .into_iter()
+                        .find(|h| fits(&format!("{h} · {w}")))
+                        .unwrap_or_else(|| "vs baseline".into());
+                    vec![
+                        Span::styled(format!("{head} · "), t.dim_style()),
+                        Span::styled(w, Style::new().fg(t.warn)),
+                    ]
+                }
+                None => {
+                    let full = format!("{cmp} · {meta}");
+                    let text = [full, cmp, short.clone()]
+                        .into_iter()
+                        .find(|s| fits(s))
+                        .unwrap_or(short);
+                    vec![Span::styled(text, t.dim_style())]
+                }
             };
             panel_spans("Result", spans, t, false)
         }

@@ -20,9 +20,9 @@ pub use aggregate::{
     keys_seen,
 };
 pub use compare::{
-    Change, ChangeSet, CompareCounts, Compared, DecisionSet, FlowKey, RowChange, compare_by,
-    compare_flows, compare_groups, compare_mesh, compare_sections, flow_key, keep_changes,
-    keep_section_changes,
+    Change, ChangeSet, CompareCounts, Compared, DecisionSet, FlowKey, RowChange, Sides, compare_by,
+    compare_flows, compare_groups, compare_mesh, compare_pairs, compare_sections, flow_key,
+    keep_changes, keep_section_changes, squelched_keys, without_keys,
 };
 pub use duration::compact_duration;
 pub use filter::{FilterExpr, ServiceExpr, parse_service, resolve_actor, resolve_service};

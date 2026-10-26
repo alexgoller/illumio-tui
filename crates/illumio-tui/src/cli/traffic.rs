@@ -16,11 +16,11 @@ use pce::models::{
 use pce::traffic::{
     AppSection, CONFIRM_MAX_RESULTS, ChangeSet, CompareCounts, Decisions, Direction, DraftCounts,
     DraftSummary, FilterExpr, FlowGroup, Focus, FocusDirection, MAX_TRAFFIC_MAX_RESULTS,
-    MeshColumns, MeshRow, ResolvedFlow, RowChange, ServiceExpr, TrafficQueryBuilder, app_header,
-    app_sections, app_sections_both, backfill_cap, compact_duration, compare_flows, compare_groups,
-    compare_mesh, compare_sections, group_by_labels, group_by_service, in_app, keep_changes,
-    keep_section_changes, keys_or_default, mesh, parse_app, parse_service, parse_window,
-    resolve_actor, resolve_flows, resolve_service,
+    MeshColumns, MeshRow, ResolvedFlow, RowChange, ServiceExpr, Sides, TrafficQueryBuilder,
+    app_header, app_sections, app_sections_both, backfill_cap, compact_duration, compare_flows,
+    compare_groups, compare_mesh, compare_pairs, compare_sections, group_by_labels,
+    group_by_service, in_app, keep_changes, keep_section_changes, keys_or_default, mesh, parse_app,
+    parse_service, parse_window, resolve_actor, resolve_flows, resolve_service, without_keys,
 };
 use pce::{Evaluation, KeyOrder, NameIndex};
 use serde::Serialize;
@@ -260,14 +260,14 @@ pub struct FilterArgs {
     /// Relative window ending now, e.g. 1h, 24h, 7d (default from profile, 24h)
     #[arg(long, conflicts_with_all = ["from", "to", "since"])]
     pub window: Option<String>,
-    /// Start, RFC 3339 or YYYY-MM-DD (UTC)
+    /// Start: RFC 3339, 2026-10-09T08:00 (local time) or YYYY-MM-DD (UTC)
     #[arg(long, requires = "to", group = "start")]
     pub from: Option<String>,
-    /// End, RFC 3339 or YYYY-MM-DD (end of that day, UTC)
+    /// End: RFC 3339, 2026-10-09T08:00 (local time) or YYYY-MM-DD (end of that day, UTC)
     #[arg(long, requires = "start")]
     pub to: Option<String>,
-    /// Start, as --from, with --to defaulting to now: "what is new since"
-    /// (2026-10-23T18:00:00Z, 2026-10-23T18:00 in UTC, or a date)
+    /// Start, as --from, with --to defaulting to now: "what is new since". RFC 3339, or
+    /// 2026-10-23T18:00 or 2026-10-23 in the local time zone
     #[arg(long, group = "start")]
     pub since: Option<String>,
     /// Compare mode: also query the baseline, the same filter over this long before the
@@ -600,21 +600,37 @@ impl FilterArgs {
     }
 }
 
-/// RFC 3339, a date and time without an offset (UTC), or a date; a
-/// date-only `--to` means 23:59:59 of that day.
+/// `--from` / `--to`: RFC 3339; a date and time without an offset
+/// (`2026-10-23T18:00`) in the local time zone; or a date, in UTC (a
+/// date-only `--to` means 23:59:59 of that day).
 pub fn parse_time(s: &str, end_of_day: bool) -> Result<Timestamp, CliError> {
+    parse_time_in(s, end_of_day, false, &jiff::tz::TimeZone::system())
+}
+
+/// `--since`: as `--from`, but a date alone is local midnight too: "since
+/// Friday" means the user's Friday.
+pub fn parse_since(s: &str) -> Result<Timestamp, CliError> {
+    parse_time_in(s, false, true, &jiff::tz::TimeZone::system())
+}
+
+/// `parse_time` in time zone `tz` (the system's, `TZ`, in use); dates in
+/// it too when `local_dates`, else in UTC.
+pub fn parse_time_in(
+    s: &str,
+    end_of_day: bool,
+    local_dates: bool,
+    tz: &jiff::tz::TimeZone,
+) -> Result<Timestamp, CliError> {
     let s = s.trim();
+    let bad = |e: jiff::Error| CliError::Args(format!("bad time {s:?}: {e}"));
     if let Ok(t) = s.parse::<Timestamp>() {
         return Ok(t);
     }
-    // `2026-10-23T18:00`: a date and time without an offset, in UTC.
+    // `2026-10-23T18:00`: a date and time without an offset, local.
     if s.contains('T')
         && let Ok(dt) = s.parse::<jiff::civil::DateTime>()
     {
-        return dt
-            .to_zoned(jiff::tz::TimeZone::UTC)
-            .map(|z| z.timestamp())
-            .map_err(|e| CliError::Args(format!("bad time {s:?}: {e}")));
+        return dt.to_zoned(tz.clone()).map(|z| z.timestamp()).map_err(bad);
     }
     if let Ok(d) = s.parse::<Date>() {
         let dt = if end_of_day {
@@ -622,13 +638,15 @@ pub fn parse_time(s: &str, end_of_day: bool) -> Result<Timestamp, CliError> {
         } else {
             d.at(0, 0, 0, 0)
         };
-        return dt
-            .to_zoned(jiff::tz::TimeZone::UTC)
-            .map(|z| z.timestamp())
-            .map_err(|e| CliError::Args(format!("bad time {s:?}: {e}")));
+        let zone = if local_dates {
+            tz.clone()
+        } else {
+            jiff::tz::TimeZone::UTC
+        };
+        return dt.to_zoned(zone).map(|z| z.timestamp()).map_err(bad);
     }
     Err(CliError::Args(format!(
-        "bad time {s:?}: use RFC 3339 (2026-10-09T08:00:00Z), 2026-10-09T08:00 (UTC) or YYYY-MM-DD"
+        "bad time {s:?}: use RFC 3339 (2026-10-09T08:00:00Z), 2026-10-09T08:00 (local time) or YYYY-MM-DD"
     )))
 }
 
@@ -642,6 +660,18 @@ fn parse_groups(values: &[String]) -> Result<Vec<Vec<FilterExpr>>, CliError> {
                 .collect()
         })
         .collect()
+}
+
+/// ` (--app runs it as 2 queries)` for a query run once per side.
+fn runs_text(queries: u32) -> String {
+    if queries > 1 {
+        format!(
+            " (--app runs it as {})",
+            pce::traffic::queries_text(queries)
+        )
+    } else {
+        String::new()
+    }
 }
 
 /// The query plus the name index when filter resolution already loaded it,
@@ -673,7 +703,7 @@ async fn build_query(
         }
         // `--since`: `--from` with `--to` now unless given.
         (None, Some(since), to) => TrafficQueryBuilder::between(
-            parse_time(since, false)?,
+            parse_since(since)?,
             match to {
                 Some(t) => parse_time(t, true)?,
                 None => Timestamp::now(),
@@ -755,16 +785,9 @@ async fn build_query(
         && !args.yes
         && let Some(reason) = bounds.needs_confirmation()
     {
-        let runs = if queries > 1 {
-            format!(
-                " (--app runs it as {})",
-                pce::traffic::queries_text(queries)
-            )
-        } else {
-            String::new()
-        };
         return Err(CliError::Args(format!(
-            "expensive query: {reason}{runs}; re-run with --yes to confirm"
+            "expensive query: {reason}{}; re-run with --yes to confirm",
+            runs_text(queries)
         )));
     }
     // Compare mode: the baseline through the same guard, on its own.
@@ -775,7 +798,8 @@ async fn build_query(
             && let Some(reason) = base.needs_confirmation()
         {
             return Err(CliError::Args(format!(
-                "expensive baseline query: {reason}; re-run with --yes to confirm"
+                "expensive baseline query: {reason}{}; re-run with --yes to confirm",
+                runs_text(queries)
             )));
         }
     }
@@ -1587,7 +1611,17 @@ pub fn sections_for(
     keys: &[String],
     args: &GroupsArgs,
 ) -> Option<Sections> {
-    let decisions = Decisions::from(args.show);
+    sections_with(flows, keys, args, Decisions::from(args.show))
+}
+
+/// `sections_for` with `decisions` in place of `--show` (compare mode
+/// judges each key on every decision).
+fn sections_with(
+    flows: &[ResolvedFlow],
+    keys: &[String],
+    args: &GroupsArgs,
+    decisions: Decisions,
+) -> Option<Sections> {
     let mut sections = match args.by {
         ByArg::Pairs => return None,
         ByArg::In => app_sections(flows, keys, Direction::In, decisions),
@@ -1973,23 +2007,59 @@ pub(crate) struct CompareRun {
     pub(crate) length: String,
 }
 
+/// What compare mode compares, squelch applied to both sides alike.
+pub(crate) struct CompareSides {
+    /// The recent records the views show and compare: squelch's kept ones
+    /// without `hidden`.
+    pub(crate) recent: Vec<ResolvedFlow>,
+    /// The baseline's, likewise, merged on their own.
+    pub(crate) baseline: Vec<ResolvedFlow>,
+    /// The keys with a squelched record on either side (`squelched_keys`).
+    pub(crate) hidden: std::collections::BTreeSet<pce::traffic::FlowKey>,
+}
+
+/// The Explorer queries a side took: each cap step (`--backfill`), one
+/// per side of `--app`.
+fn side_queries(f: &Fetched) -> u32 {
+    let steps = f.cap_steps.as_ref().map_or(1, |s| s.len() as u32);
+    steps * f.queries.unwrap_or(1)
+}
+
 impl CompareRun {
-    /// The baseline's flows squelch keeps, as it keeps the recent ones:
-    /// a squelched flow is hidden on both sides alike, so it is never gone.
-    /// Merged on their own (`merge_flows`: one row per record, never
-    /// summed), never with the recent side.
-    fn kept(&self, act: Option<&ActiveMarks<'_>>, show: bool) -> Vec<ResolvedFlow> {
-        let kept = match act {
-            Some(a) => partition(&self.baseline.flows, a, show).kept.into_owned(),
-            None => self.baseline.flows.clone(),
+    /// Both sides as the views compare them: squelch (unless
+    /// `--show-squelched`) leaves out every key with a squelched record on
+    /// either side, so a mark matching one side only (a draft decision the
+    /// baseline never carries, a decision that changed) never makes a row
+    /// new or gone. The baseline is merged on its own (`merge_flows`: one
+    /// row per record, never summed), never with the recent side.
+    fn sides(
+        &self,
+        kept: &[ResolvedFlow],
+        part: Option<&pce::marks::Partition>,
+        act: Option<&ActiveMarks<'_>>,
+        show: bool,
+    ) -> CompareSides {
+        let base_part = act.map(|a| partition(&self.baseline.flows, a, show));
+        let base_kept: &[ResolvedFlow] =
+            base_part.as_ref().map_or(&self.baseline.flows, |p| &p.kept);
+        let hidden = match (part, &base_part) {
+            (Some(r), Some(b)) if !show => {
+                pce::traffic::squelched_keys(r.marked.squelched(), b.marked.squelched())
+            }
+            _ => Default::default(),
         };
-        let mut merged = Vec::with_capacity(kept.len());
-        pce::traffic::merge_flows(&mut merged, kept);
-        merged
+        let mut merged = Vec::with_capacity(base_kept.len());
+        pce::traffic::merge_flows(&mut merged, without_keys(base_kept, &hidden));
+        CompareSides {
+            recent: without_keys(kept, &hidden),
+            baseline: merged,
+            hidden,
+        }
     }
 
-    /// `meta.compare`, the cost of both sides, a warning (stderr and
-    /// `meta.warnings`) for each truncated side; the exit code stays 0.
+    /// `meta.compare`, the cost of both sides (`meta.queries`, `meta.cost`),
+    /// a warning (stderr and `meta.warnings`) for each truncated side; the
+    /// exit code stays 0.
     fn fill(&self, meta: &mut Meta, recent: &Fetched, counts: CompareCounts) {
         let side = |f: &Fetched| CompareSide {
             start: f
@@ -2001,6 +2071,8 @@ impl CompareRun {
             truncated: f.truncated,
             incomplete: f.incomplete,
             cap: f.cap,
+            cap_steps: f.cap_steps.clone(),
+            queries: side_queries(f),
             cache: f.cache,
         };
         for (name, f) in [("recent", recent), ("baseline", &self.baseline)] {
@@ -2013,9 +2085,14 @@ impl CompareRun {
                 meta.warnings.get_or_insert_with(Vec::new).push(w);
             }
         }
-        meta.queries = Some(recent.queries.unwrap_or(1) + self.baseline.queries.unwrap_or(1));
+        let (r, b) = (side_queries(recent), side_queries(&self.baseline));
+        meta.queries = Some(r + b);
         meta.cost = Some(
-            "the recent window's query, then the baseline's (each: 1 POST, status polls, 1 download; one per side with --app)",
+            format!(
+                "{} Explorer queries: {r} for the recent window, {b} for the baseline (each 1 POST, status polls, 1 download)",
+                r + b
+            )
+            .into(),
         );
         meta.compare = Some(CompareMeta {
             length: self.length.clone(),
@@ -2075,17 +2152,21 @@ async fn query(ctx: &Context, args: &QueryArgs) -> Result<(), CliError> {
         return Ok(());
     };
     // Marks: classify, then aggregate the records kept (all of them with
-    // --show-squelched); the marks join the rows by their keys. The
-    // baseline keeps what squelch keeps, alike.
+    // --show-squelched); the marks join the rows by their keys. Compare
+    // mode squelches both sides alike (`CompareRun::sides`).
     let cm = CliMarks::load(ctx, args.filter.no_marks, args.filter.show_squelched);
     let act = cm.active(args.filter.draft);
     let part = act.as_ref().map(|a| partition(&f.flows, a, cm.show));
-    let flows: &[ResolvedFlow] = part.as_ref().map_or(&f.flows, |p| &p.kept);
-    let base = cmp.as_ref().map(|c| c.kept(act.as_ref(), cm.show));
+    let kept: &[ResolvedFlow] = part.as_ref().map_or(&f.flows, |p| &p.kept);
+    let both = cmp
+        .as_ref()
+        .map(|c| c.sides(kept, part.as_ref(), act.as_ref(), cm.show));
+    let flows: &[ResolvedFlow] = both.as_ref().map_or(kept, |b| &b.recent);
     let mut meta = f.meta(ctx);
     if args.blocked {
         let keys = keys_or_profile(ctx, &[]);
-        let agg = |x: &[ResolvedFlow]| app_sections(x, &keys, Direction::In, Decisions::Blocked);
+        let sec = |x: &[ResolvedFlow], d| app_sections(x, &keys, Direction::In, d);
+        let agg = |x: &[ResolvedFlow]| sec(x, Decisions::Blocked);
         let mut sections = Sections {
             sections: agg(flows),
             both: false,
@@ -2097,8 +2178,21 @@ async fn query(ctx: &Context, args: &QueryArgs) -> Result<(), CliError> {
             |x| Decisions::Blocked.keeps(x),
         );
         cm.fill(&mut meta, act.as_ref(), sq);
-        if let (Some(c), Some(b)) = (&cmp, &base) {
-            let counts = compare_sections(&mut sections.sections, &agg(b));
+        if let (Some(c), Some(b)) = (&cmp, &both) {
+            // Each key judged on every decision, then Blocked's rows.
+            let (all_r, all_b, kept_b) = (
+                sec(&b.recent, Decisions::All),
+                sec(&b.baseline, Decisions::All),
+                agg(&b.baseline),
+            );
+            let counts = compare_sections(
+                &mut sections.sections,
+                Sides {
+                    all_recent: &all_r,
+                    all_baseline: &all_b,
+                    kept_baseline: &kept_b,
+                },
+            );
             keep_section_changes(&mut sections.sections, c.show);
             c.fill(&mut meta, &f, counts);
         }
@@ -2113,8 +2207,15 @@ async fn query(ctx: &Context, args: &QueryArgs) -> Result<(), CliError> {
             |_| true,
         );
         cm.fill(&mut meta, act.as_ref(), sq);
-        if let (Some(c), Some(b)) = (&cmp, &base) {
-            let counts = compare_groups(&mut groups, &agg(b));
+        if let (Some(c), Some(b)) = (&cmp, &both) {
+            let by_service = |x: &[ResolvedFlow]| group_by_service(x, &args.group);
+            let counts = compare_pairs_of(
+                &mut groups,
+                (&b.recent, &b.baseline),
+                (&b.recent, &b.baseline),
+                by_service,
+                &agg(&b.baseline),
+            );
             keep_changes(&mut groups, c.show, |g| g.change.as_ref());
             c.fill(&mut meta, &f, counts);
         }
@@ -2122,7 +2223,7 @@ async fn query(ctx: &Context, args: &QueryArgs) -> Result<(), CliError> {
     } else {
         let order = ctx.config.key_order();
         // Flows: rows are flows.
-        let (marks, sq) = match (&part, &act) {
+        let (marks, sq): (Option<Vec<Option<FlowMark>>>, _) = match (&part, &act) {
             (Some(p), Some(a)) => {
                 let n = p.marked.squelched_where(|_| true);
                 (
@@ -2141,7 +2242,7 @@ async fn query(ctx: &Context, args: &QueryArgs) -> Result<(), CliError> {
             _ => (None, None),
         };
         cm.fill(&mut meta, act.as_ref(), sq);
-        let (Some(c), Some(b)) = (&cmp, &base) else {
+        let (Some(c), Some(b)) = (&cmp, &both) else {
             let rows = FlowRows {
                 flows,
                 order: &order,
@@ -2150,7 +2251,16 @@ async fn query(ctx: &Context, args: &QueryArgs) -> Result<(), CliError> {
             };
             return ctx.emit_meta(&rows, &meta);
         };
-        let rows = compared_flows(flows, b, marks, c.show);
+        // The marks of the records `sides` kept (`kept` without the hidden
+        // keys), in their order.
+        let marks = marks.map(|m| {
+            kept.iter()
+                .zip(m)
+                .filter(|(fl, _)| !b.hidden.contains(&pce::traffic::flow_key(fl)))
+                .map(|(_, m)| m)
+                .collect()
+        });
+        let rows = compared_flows(&b.recent, &b.baseline, marks, c.show);
         c.fill(&mut meta, &f, rows.counts);
         let out = FlowRows {
             flows: &rows.flows,
@@ -2160,6 +2270,32 @@ async fn query(ctx: &Context, args: &QueryArgs) -> Result<(), CliError> {
         };
         ctx.emit_meta(&out, &meta)
     }
+}
+
+/// Plain pairs in compare mode (`compare_pairs`): their service keys
+/// compared, each on every decision (`all`: both sides unfiltered), the
+/// view's own rows through its filter (`kept`: both sides filtered);
+/// `pairs` (built from the kept recent flows) annotated, the gone pairs
+/// from `kept_baseline_pairs`. The service keys' counts.
+fn compare_pairs_of(
+    pairs: &mut Vec<FlowGroup>,
+    all: (&[ResolvedFlow], &[ResolvedFlow]),
+    kept: (&[ResolvedFlow], &[ResolvedFlow]),
+    by_service: impl Fn(&[ResolvedFlow]) -> Vec<FlowGroup>,
+    kept_baseline_pairs: &[FlowGroup],
+) -> CompareCounts {
+    let mut services = by_service(kept.0);
+    let (all_r, all_b, kept_b) = (by_service(all.0), by_service(all.1), by_service(kept.1));
+    let counts = compare_groups(
+        &mut services,
+        Sides {
+            all_recent: &all_r,
+            all_baseline: &all_b,
+            kept_baseline: &kept_b,
+        },
+    );
+    compare_pairs(pairs, kept_baseline_pairs, &services);
+    counts
 }
 
 /// Flow records in compare mode: the recent ones then the gone ones (each
@@ -2212,8 +2348,11 @@ async fn groups(ctx: &Context, args: &GroupsArgs) -> Result<(), CliError> {
     let cm = CliMarks::load(ctx, args.filter.no_marks, args.filter.show_squelched);
     let act = cm.active(args.filter.draft);
     let part = act.as_ref().map(|a| partition(&f.flows, a, cm.show));
-    let flows: &[ResolvedFlow] = part.as_ref().map_or(&f.flows, |p| &p.kept);
-    let base = cmp.as_ref().map(|c| c.kept(act.as_ref(), cm.show));
+    let kept: &[ResolvedFlow] = part.as_ref().map_or(&f.flows, |p| &p.kept);
+    let both = cmp
+        .as_ref()
+        .map(|c| c.sides(kept, part.as_ref(), act.as_ref(), cm.show));
+    let flows: &[ResolvedFlow] = both.as_ref().map_or(kept, |b| &b.recent);
     let decisions = Decisions::from(args.show);
     let mut meta = f.meta(ctx);
     match sections_for(flows, &keys, args) {
@@ -2246,8 +2385,22 @@ async fn groups(ctx: &Context, args: &GroupsArgs) -> Result<(), CliError> {
             let squelched_only = sections.sections.is_empty()
                 && part.as_ref().is_some_and(|p| p.kept.len() < f.flows.len())
                 && sections_for(&f.flows, &keys, args).is_some_and(|s| !s.sections.is_empty());
-            if let (Some(c), Some(b)) = (&cmp, &base) {
-                let counts = compare_sections(&mut sections.sections, &agg(b));
+            if let (Some(c), Some(b)) = (&cmp, &both) {
+                // Each key judged on every decision, then `--show`'s rows.
+                let all = |x: &[ResolvedFlow]| {
+                    sections_with(x, &keys, args, Decisions::All)
+                        .map(|s| s.sections)
+                        .unwrap_or_default()
+                };
+                let (all_r, all_b, kept_b) = (all(&b.recent), all(&b.baseline), agg(&b.baseline));
+                let counts = compare_sections(
+                    &mut sections.sections,
+                    Sides {
+                        all_recent: &all_r,
+                        all_baseline: &all_b,
+                        kept_baseline: &kept_b,
+                    },
+                );
                 c.fill(&mut meta, &f, counts);
             }
             if let Some(miss) = app_miss(args, &sections, squelched_only) {
@@ -2268,8 +2421,32 @@ async fn groups(ctx: &Context, args: &GroupsArgs) -> Result<(), CliError> {
                 |x| decisions.keeps(x),
             );
             cm.fill(&mut meta, act.as_ref(), sq);
-            if let (Some(c), Some(b)) = (&cmp, &base) {
-                let counts = compare_groups(&mut pairs, &agg(b));
+            if let (Some(c), Some(b)) = (&cmp, &both) {
+                let by_service = |x: &[ResolvedFlow]| group_by_service(x, &keys);
+                let (kr, kb) = (decisions.kept(&b.recent), decisions.kept(&b.baseline));
+                let counts = if args.services {
+                    let (all_r, all_b, kept_b) = (
+                        by_service(&b.recent),
+                        by_service(&b.baseline),
+                        agg(&b.baseline),
+                    );
+                    compare_groups(
+                        &mut pairs,
+                        Sides {
+                            all_recent: &all_r,
+                            all_baseline: &all_b,
+                            kept_baseline: &kept_b,
+                        },
+                    )
+                } else {
+                    compare_pairs_of(
+                        &mut pairs,
+                        (&b.recent, &b.baseline),
+                        (&kr, &kb),
+                        by_service,
+                        &agg(&b.baseline),
+                    )
+                };
                 keep_changes(&mut pairs, c.show, |g| g.change.as_ref());
                 c.fill(&mut meta, &f, counts);
             }
@@ -2295,8 +2472,11 @@ async fn mesh_cmd(ctx: &Context, args: &MeshArgs) -> Result<(), CliError> {
     let cm = CliMarks::load(ctx, args.filter.no_marks, args.filter.show_squelched);
     let act = cm.active(args.filter.draft);
     let part = act.as_ref().map(|a| partition(&f.flows, a, cm.show));
-    let flows: &[ResolvedFlow] = part.as_ref().map_or(&f.flows, |p| &p.kept);
-    let base = cmp.as_ref().map(|c| c.kept(act.as_ref(), cm.show));
+    let kept: &[ResolvedFlow] = part.as_ref().map_or(&f.flows, |p| &p.kept);
+    let both = cmp
+        .as_ref()
+        .map(|c| c.sides(kept, part.as_ref(), act.as_ref(), cm.show));
+    let flows: &[ResolvedFlow] = both.as_ref().map_or(kept, |b| &b.recent);
     let agg = |x: &[ResolvedFlow]| mesh(x, &keys, cols);
     let mut rows = agg(flows);
     let sq = squelched(
@@ -2307,8 +2487,8 @@ async fn mesh_cmd(ctx: &Context, args: &MeshArgs) -> Result<(), CliError> {
     );
     let mut meta = f.meta(ctx);
     cm.fill(&mut meta, act.as_ref(), sq);
-    if let (Some(c), Some(b)) = (&cmp, &base) {
-        let counts = compare_mesh(&mut rows, &agg(b));
+    if let (Some(c), Some(b)) = (&cmp, &both) {
+        let counts = compare_mesh(&mut rows, &agg(&b.baseline));
         keep_changes(&mut rows, c.show, |r| r.change.as_ref());
         c.fill(&mut meta, &f, counts);
     }
@@ -2335,6 +2515,33 @@ mod tests {
             marks: None,
             change: None,
         }
+    }
+
+    #[test]
+    fn times_without_an_offset_are_local_and_dates_utc_except_for_since() {
+        let berlin = jiff::tz::TimeZone::get("Europe/Berlin").unwrap();
+        let t = |s: &str, end: bool, local: bool| {
+            pce::traffic::format_timestamp(parse_time_in(s, end, local, &berlin).unwrap())
+        };
+        // CEST (UTC+2) on 2026-10-23.
+        assert_eq!(t("2026-10-23T18:00", false, false), "2026-10-23T16:00:00Z");
+        assert_eq!(t("2026-10-23T18:00", false, true), "2026-10-23T16:00:00Z");
+        assert_eq!(
+            t("2026-10-23T18:00:00Z", false, true),
+            "2026-10-23T18:00:00Z"
+        );
+        assert_eq!(
+            t("2026-10-23T18:00:00+01:00", false, false),
+            "2026-10-23T17:00:00Z"
+        );
+        // --from / --to: a date in UTC, as before.
+        assert_eq!(t("2026-10-23", false, false), "2026-10-23T00:00:00Z");
+        assert_eq!(t("2026-10-23", true, false), "2026-10-23T23:59:59Z");
+        // --since: local midnight.
+        assert_eq!(t("2026-10-23", false, true), "2026-10-22T22:00:00Z");
+        // After the switch to CET (UTC+1).
+        assert_eq!(t("2026-11-02T09:00", false, true), "2026-11-02T08:00:00Z");
+        assert!(parse_time_in("friday", false, true, &berlin).is_err());
     }
 
     #[test]

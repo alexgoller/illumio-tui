@@ -263,6 +263,6 @@ pub async fn run(ctx: &Context, args: &ExplainArgs) -> Result<(), CliError> {
             .collect(),
     };
     let mut meta = f.meta(ctx);
-    meta.cost = Some(EXPLAIN_COST);
+    meta.cost = Some(EXPLAIN_COST.into());
     ctx.emit_meta(&data, &meta)
 }

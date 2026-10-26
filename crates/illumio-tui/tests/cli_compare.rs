@@ -23,6 +23,8 @@ fn cmd(server: &MockServer, home: &Path) -> Command {
         .env("PCE_ORG_ID", "5")
         .env("API_KEY", "key")
         .env("API_SECRET", "s3cr3t-compare-test")
+        // A time without an offset is local: the tests' zone is fixed.
+        .env("TZ", "Europe/Berlin")
         .env("XDG_CONFIG_HOME", home);
     c
 }
@@ -321,16 +323,41 @@ async fn a_dry_run_prints_both_bodies_and_since_ends_now() {
             .success(),
     );
     assert_eq!(out["data"]["end_date"], RECENT_END);
-    // A date and time without an offset is UTC.
+    // A date and time without an offset is local (TZ Europe/Berlin, CEST
+    // on 2026-10-10); so is a date alone for --since, while --from and
+    // --to keep a date in UTC.
     let out = json_out(
         cmd(&quiet, home.path())
-            .args(["traffic", "query", "--since", "2026-10-10T06:00"])
-            .args(["--to", "2026-10-10T08:00", "--dry-run"])
+            .args(["traffic", "query", "--since", "2026-10-10T08:00"])
+            .args(["--to", "2026-10-10T10:00", "--dry-run"])
             .assert()
             .success(),
     );
     assert_eq!(out["data"]["start_date"], RECENT_START);
     assert_eq!(out["data"]["end_date"], RECENT_END);
+    let out = json_out(
+        cmd(&quiet, home.path())
+            .args(["traffic", "query", "--since", "2026-10-10", "--dry-run"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"]["start_date"], "2026-10-09T22:00:00Z");
+    let out = json_out(
+        cmd(&quiet, home.path())
+            .args([
+                "traffic",
+                "query",
+                "--from",
+                "2026-10-10",
+                "--to",
+                "2026-10-10",
+            ])
+            .arg("--dry-run")
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["data"]["start_date"], "2026-10-10T00:00:00Z");
+    assert_eq!(out["data"]["end_date"], "2026-10-10T23:59:59Z");
     cmd(&quiet, home.path())
         .args(["traffic", "query", "--since", RECENT_START])
         .args(WINDOW)
@@ -477,6 +504,18 @@ async fn a_truncated_baseline_warns_and_backfill_raises_both_sides() {
     let out = json_out(a);
     assert_eq!(out["meta"]["compare"]["baseline"]["cap"], 10_000);
     assert_eq!(out["meta"]["compare"]["recent"]["cap"], 4);
+    // Each side's cap steps are counted: 1 recent, 2 baseline.
+    assert_eq!(
+        out["meta"]["compare"]["baseline"]["cap_steps"],
+        json!([4, 10_000])
+    );
+    assert_eq!(out["meta"]["compare"]["recent"]["cap_steps"], json!([4]));
+    assert_eq!(out["meta"]["queries"], 3);
+    let cost = out["meta"]["cost"].as_str().unwrap();
+    assert!(
+        cost.starts_with("3 Explorer queries: 1 for the recent window, 2 for the baseline"),
+        "{cost}"
+    );
     server.verify().await;
 }
 
@@ -608,4 +647,166 @@ dst = "any"
         json!({"new": 1, "changed": 0, "gone": 0, "same": 2})
     );
     server.verify().await;
+}
+
+/// A decision filter picks rows after each key is judged on every
+/// decision: the 8443 flow, allowed then and potentially blocked now, is
+/// `changed` in the blocked sections, not new.
+#[tokio::test(flavor = "multi_thread")]
+async fn show_blocked_reports_a_decision_change_as_changed() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    for (name, start, end, body) in [
+        ("recent", RECENT_START, RECENT_END, recent()),
+        ("base", BASE_START, RECENT_START, baseline()),
+    ] {
+        mount_window(&server, name, start, end, 10_000, 4, &body, 2).await;
+    }
+    let home = tempfile::tempdir().unwrap();
+    for argv in [
+        &["groups", "--by", "in", "--show", "blocked"][..],
+        &["query", "--blocked"],
+    ] {
+        let out = json_out(
+            cmd(&server, home.path())
+                .arg("traffic")
+                .args(argv)
+                .args(WINDOW)
+                .args(["--baseline", "7d", "--changes", "new,changed"])
+                .assert()
+                .success(),
+        );
+        let rows: Vec<(String, String, Value)> = out["data"]["sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|s| s["rows"].as_array().unwrap().clone())
+            .map(|r| {
+                (
+                    r["service"].as_str().unwrap().to_string(),
+                    r["change"].as_str().unwrap().to_string(),
+                    r["baseline_decision"].clone(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            vec![("8443/tcp".into(), "changed".into(), json!("allowed"))],
+            "{argv:?}"
+        );
+    }
+    server.verify().await;
+}
+
+/// Plain pairs compare their service keys: shop/prod → shop/prod keeps
+/// 5432 and lost 22 (gone), so the pair is changed; the counts are the
+/// service keys'.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plain_pair_is_judged_by_its_service_keys() {
+    let server = compare_server().await;
+    let home = tempfile::tempdir().unwrap();
+    let out = json_out(
+        cmd(&server, home.path())
+            .args(["traffic", "groups", "--keys", "app,env"])
+            .args(WINDOW)
+            .args(["--baseline", "7d", "--changes", "new,changed,gone,same"])
+            .assert()
+            .success(),
+    );
+    let pair = out["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|g| g["src"] == json!(["shop", "prod"]) && g["dst"] == json!(["shop", "prod"]))
+        .unwrap()
+        .clone();
+    assert_eq!(pair["change"], "changed");
+    assert_eq!(pair["baseline_decision"], "allowed");
+    // 5432 same, 8443 changed, icmp same, 443 new, 22 gone: service keys.
+    assert_eq!(
+        out["meta"]["compare"]["counts"],
+        json!({"new": 1, "changed": 1, "gone": 1, "same": 2})
+    );
+    server.verify().await;
+}
+
+/// `--app` with `--baseline`: one query per side for each window, 4 POSTs,
+/// pinned; `meta.queries` counts them; the baseline guard names the runs.
+#[tokio::test(flavor = "multi_thread")]
+async fn app_and_baseline_run_one_query_per_side_for_each_window() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    mount_window(
+        &server,
+        "recent",
+        RECENT_START,
+        RECENT_END,
+        10_000,
+        4,
+        &recent(),
+        2,
+    )
+    .await;
+    mount_window(
+        &server,
+        "base",
+        BASE_START,
+        RECENT_START,
+        10_000,
+        4,
+        &baseline(),
+        2,
+    )
+    .await;
+    let home = tempfile::tempdir().unwrap();
+    let out = json_out(
+        cmd(&server, home.path())
+            .args([
+                "traffic",
+                "query",
+                "--group",
+                "app,env",
+                "--app",
+                "shop/prod",
+            ])
+            .args(WINDOW)
+            .args(["--baseline", "7d"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["meta"]["queries"], 4);
+    assert_eq!(out["meta"]["compare"]["recent"]["queries"], 2);
+    assert_eq!(out["meta"]["compare"]["baseline"]["queries"], 2);
+    let posts: Vec<Value> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.method.as_str() == "POST")
+        .map(|r| serde_json::from_slice(&r.body).unwrap())
+        .collect();
+    assert_eq!(posts.len(), 4);
+    for p in &posts[2..] {
+        assert_eq!(p["start_date"], BASE_START);
+        assert_eq!(p["end_date"], RECENT_START);
+    }
+    // The same labels on the same side in both windows.
+    for i in 0..2 {
+        assert_eq!(posts[i]["sources"], posts[i + 2]["sources"]);
+        assert_eq!(posts[i]["destinations"], posts[i + 2]["destinations"]);
+    }
+    server.verify().await;
+
+    let quiet = MockServer::start().await;
+    let a = cmd(&quiet, home.path())
+        .args(["traffic", "query", "--app", "shop/prod"])
+        .args(WINDOW)
+        .args(["--baseline", "30d"])
+        .assert()
+        .code(2);
+    let err = stderr(&a);
+    assert!(
+        err.contains("expensive baseline query") && err.contains("(--app runs it as 2 queries)"),
+        "{err}"
+    );
 }

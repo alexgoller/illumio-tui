@@ -360,6 +360,8 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 && model.traffic.end_compare();
             let cmds = start_query(model, f, CacheMode::Use);
             if ended {
+                // Said while it runs and with its result (`compare_ended`).
+                model.traffic.compare_ended = true;
                 model.status = StatusLine::info(COMPARE_ENDED);
             }
             cmds
@@ -457,6 +459,9 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     let count = crate::tui::traffic_marks::flows_text(n - z, n, z);
                     if let Some(d) = model.traffic.data.as_ref() {
                         model.status = result_status(d, &count, "", &focus_hint);
+                    }
+                    if std::mem::take(&mut model.traffic.compare_ended) {
+                        model.status.text.push_str(&format!(" · {COMPARE_ENDED}"));
                     }
                 }
                 Err(e) => {

@@ -184,12 +184,15 @@ fn every_view_but_the_treemap_gains_the_delta_and_the_header_its_counts() {
     assert_eq!((c.new, c.changed, c.gone), (1, 1, 1));
     assert_eq!(
         t.compare_meta().as_deref(),
-        Some("vs 7d before · 1 new · 1 changed · 1 gone")
+        Some("vs 7d before 10-09 08:00 · 1 new · 1 changed · 1 gone")
     );
-    assert_eq!(m.status.text, "vs 7d before · 1 new · 1 changed · 1 gone");
+    assert_eq!(
+        m.status.text,
+        "vs 7d before 10-09 08:00 · 1 new · 1 changed · 1 gone"
+    );
     let out = render_to_string(&m, 160, 48);
     assert!(
-        out.contains("vs 7d before · 1 new · 1 changed · 1 gone"),
+        out.contains("vs 7d before 10-09 08:00 · 1 new · 1 changed · 1 gone"),
         "{out}"
     );
     // The gone flow comes last, below the screen's rows.
@@ -199,7 +202,10 @@ fn every_view_but_the_treemap_gains_the_delta_and_the_header_its_counts() {
         quiet(&mut m, key('v'));
         assert_eq!(m.traffic.view.title(), view);
         let meta = m.traffic.compare_meta().unwrap();
-        assert!(meta.starts_with("vs 7d before · "), "{view}: {meta}");
+        assert!(
+            meta.starts_with("vs 7d before 10-09 08:00 · "),
+            "{view}: {meta}"
+        );
         let counts = m.traffic.view_counts().unwrap();
         assert!(
             counts.new + counts.changed + counts.gone >= 1,
@@ -213,7 +219,7 @@ fn every_view_but_the_treemap_gains_the_delta_and_the_header_its_counts() {
     assert_eq!(m.traffic.view, TrafficView::Treemap);
     assert_eq!(
         m.traffic.compare_meta().as_deref(),
-        Some("vs 7d before · no Δ here")
+        Some("vs 7d before 10-09 08:00 · no Δ here")
     );
     let out = render_to_string(&m, 160, 48);
     assert!(!out.contains("GONE") && !out.contains("CHG"), "{out}");
@@ -223,13 +229,23 @@ fn every_view_but_the_treemap_gains_the_delta_and_the_header_its_counts() {
 fn app_to_app_pairs_by_service_and_sections_compare_too() {
     let mut m = compared();
     quiet(&mut m, key('v'));
-    let gone_pair = m
+    // The plain pair from its service keys: 5432 the same, 9999 gone.
+    let pair = m
         .traffic
         .groups
         .rows()
         .iter()
-        .find(|g| g.change.is_some_and(|c| c.change == Change::Gone));
-    assert!(gone_pair.is_none(), "9999 shares its pair with 5432: same");
+        .find(|g| g.src.join("/") == "shop/prod" && g.dst.join("/") == "shop/prod")
+        .and_then(|g| g.change)
+        .unwrap();
+    assert_eq!(
+        pair.change,
+        Change::Changed,
+        "a gone service of a pair still talking"
+    );
+    // The header counts service keys, plain pairs or by service alike.
+    let pairs = m.traffic.view_counts().unwrap();
+    assert!(pairs.gone >= 1, "{pairs:?}");
     quiet(&mut m, key('o'));
     let gone: Vec<String> = m
         .traffic
@@ -240,6 +256,7 @@ fn app_to_app_pairs_by_service_and_sections_compare_too() {
         .filter_map(|g| g.service.clone())
         .collect();
     assert_eq!(gone, vec!["9999/tcp".to_string()]);
+    assert_eq!(m.traffic.view_counts().unwrap(), pairs);
     quiet(&mut m, key('o'));
     quiet(&mut m, key('x'));
     let peers: Vec<(String, Change)> = m
@@ -531,4 +548,279 @@ fn compare_refuses_a_focused_result_and_a_focused_answer_ends_it() {
             .starts_with("compare works on the unfocused result")
     );
     assert_eq!(m.overlay, Overlay::None);
+}
+
+#[test]
+fn blocked_judges_a_key_on_every_decision_so_a_decision_change_is_chg() {
+    // 8443 crm/prod → erp/prod: allowed then, potentially blocked now.
+    let mut m = compared();
+    for _ in 0..3 {
+        quiet(&mut m, key('v'));
+    }
+    assert_eq!(m.traffic.view, TrafficView::Blocked);
+    let row = m
+        .traffic
+        .blocked
+        .rows()
+        .iter()
+        .filter_map(|r| r.peer().map(|(_, p)| p))
+        .find(|p| p.service == "8443/tcp" && p.peer.join("/") == "crm/prod")
+        .unwrap();
+    assert_eq!(row.change.unwrap().change, Change::Changed);
+    assert_eq!(row.change.unwrap().short_text(), "allowed→pot.blocked");
+    // App-to-app `d` blocked: the same.
+    let mut m = compared();
+    quiet(&mut m, key('v'));
+    quiet(&mut m, key('o'));
+    quiet(&mut m, key('d'));
+    let row = m
+        .traffic
+        .services
+        .rows()
+        .iter()
+        .find(|g| g.service.as_deref() == Some("8443/tcp") && g.src.join("/") == "crm/prod")
+        .unwrap();
+    assert_eq!(row.change.unwrap().text(), "allowed→potentially_blocked");
+}
+
+#[test]
+fn fixed_by_draft_compares_unfiltered_and_shows_no_gone_row() {
+    let mut m = crate::tui::test_support::with_draft_loaded(model());
+    compare_with(&mut m, baseline_flows_rich(), false);
+    quiet(&mut m, key('v'));
+    quiet(&mut m, key('o'));
+    for _ in 0..4 {
+        if m.traffic.apps_state.decisions == pce::traffic::Decisions::FixedByDraft {
+            break;
+        }
+        quiet(&mut m, key('d'));
+    }
+    assert_eq!(
+        m.traffic.apps_state.decisions,
+        pce::traffic::Decisions::FixedByDraft
+    );
+    let rows = m.traffic.services.rows();
+    assert!(!rows.is_empty());
+    assert!(
+        rows.iter()
+            .all(|g| g.change.is_some_and(|c| c.change != Change::Gone)),
+        "the baseline carries no draft: nothing passes as gone"
+    );
+    assert!(
+        rows.iter()
+            .any(|g| g.change.is_some_and(|c| c.change != Change::New)),
+        "keys are judged unfiltered, not all new"
+    );
+}
+
+#[test]
+fn the_compare_ended_note_stays_while_the_query_runs_and_with_its_result() {
+    let mut m = compared();
+    let mut f = m.traffic.filter.clone();
+    f.src = "app=shop".into();
+    let _ = update(&mut m, Msg::ApplyFilter(f.clone()));
+    let seq = m.traffic.seq;
+    quiet(
+        &mut m,
+        Msg::QueryProgress {
+            seq,
+            progress: pce::traffic::QueryProgress::Polling {
+                status: "running".into(),
+                elapsed: Duration::from_secs(1),
+            },
+        },
+    );
+    assert!(
+        m.status.text.starts_with("query running"),
+        "{}",
+        m.status.text
+    );
+    assert!(
+        m.status
+            .text
+            .ends_with("· filter changed: c compares again")
+    );
+    quiet(
+        &mut m,
+        Msg::QueryDone {
+            seq,
+            result: Ok(crate::tui::msg::QueryOutcome {
+                flows: fixture_flows_rich(),
+                truncated: false,
+                incomplete: false,
+                elapsed: Duration::from_millis(10),
+                hit: false,
+                filter: f,
+                bounds: Some((ts("2026-10-09T08:00:00Z"), ts(FIXTURE_END))),
+                hrefs: Vec::new(),
+            }),
+        },
+    );
+    assert!(
+        m.status
+            .text
+            .ends_with("· filter changed: c compares again"),
+        "{}",
+        m.status.text
+    );
+    assert!(!m.traffic.compare_ended, "said once with the result");
+    // A running baseline names itself.
+    let mut m = model();
+    quiet(&mut m, key('c'));
+    let _ = update(&mut m, code(KeyCode::Enter));
+    let seq = m.traffic.seq;
+    quiet(
+        &mut m,
+        Msg::QueryProgress {
+            seq,
+            progress: pce::traffic::QueryProgress::Submitted { href: "/q".into() },
+        },
+    );
+    assert!(
+        m.status.text.starts_with("baseline query running"),
+        "{}",
+        m.status.text
+    );
+}
+
+#[test]
+fn headers_count_recent_rows_and_a_section_of_gone_rows_reads_gone() {
+    // A gone flow from a source no recent flow has: its own section.
+    let mut base = baseline_flows_rich();
+    let mut lone = base[3].clone();
+    lone.src = pce::traffic::ResolvedEndpoint {
+        ip: Some("10.9.9.9".into()),
+        ..Default::default()
+    };
+    base.push(lone);
+    let plain = model();
+    let mut m = model();
+    compare_with(&mut m, base, false);
+    // Flows by src app: shop/prod's header counts its recent flows only.
+    let header = |m: &Model, app: &str| -> String {
+        m.traffic
+            .flows_grouped
+            .rows()
+            .iter()
+            .filter_map(|r| r.header_line())
+            .find(|h| h.contains(&format!(" {app}  ")))
+            .unwrap_or_default()
+    };
+    let mut p = plain;
+    quiet(&mut p, key('x'));
+    quiet(&mut m, key('x'));
+    let shop = header(&m, "shop/prod");
+    assert!(!shop.is_empty());
+    assert_eq!(
+        shop,
+        header(&p, "shop/prod"),
+        "the gone 9999 flow is not counted"
+    );
+    assert!(
+        header(&m, "10.9.9.9/-").ends_with("gone"),
+        "{}",
+        header(&m, "10.9.9.9/-")
+    );
+    // App-to-app `out`: the same section reads `out · gone`.
+    quiet(&mut m, key('v'));
+    quiet(&mut m, key('x'));
+    quiet(&mut m, key('x'));
+    assert_eq!(m.traffic.apps_state.by, crate::tui::model::By::Out);
+    let line = m
+        .traffic
+        .apps
+        .rows()
+        .iter()
+        .filter_map(|r| r.header_line())
+        .find(|h| h.contains("10.9.9.9"))
+        .unwrap();
+    assert!(line.ends_with("out · gone"), "{line}");
+}
+
+#[test]
+fn a_mark_on_the_draft_decision_squelches_the_key_on_both_sides() {
+    let dir = tempfile::tempdir().unwrap();
+    // with_draft: the allowed 3306 flow at index 3 is blocked in draft.
+    let marks = r#"
+[[mark]]
+id = "m-sqdraft"
+action = "squelch"
+src = "any"
+dst = "any"
+service = "3306/tcp"
+draft_decision = "blocked"
+comment = "noise in draft"
+"#;
+    let mut m = crate::tui::test_support::model_with_marks(dir.path(), marks);
+    m.traffic.filter.window = "1d".into();
+    if let Some(d) = m.traffic.data.as_mut() {
+        d.filter = m.traffic.filter.clone();
+        d.range = Some(crate::tui::model::Range {
+            start: ts("2026-10-09T08:00:00Z"),
+            end: ts(FIXTURE_END),
+        });
+    }
+    let mut m = crate::tui::test_support::with_draft_loaded(m);
+    let hidden = m.traffic.squelched_hidden();
+    assert!(hidden >= 1, "the draft mark hides a recent record");
+    compare_with(&mut m, baseline_flows_rich(), false);
+    let gone: Vec<Option<u16>> = m
+        .traffic
+        .flows
+        .rows()
+        .iter()
+        .filter(|r| r.change.is_some_and(|c| c.change == Change::Gone))
+        .map(|r| r.port)
+        .collect();
+    assert_eq!(gone, vec![Some(9999)], "the squelched 3306 key is not gone");
+}
+
+#[test]
+fn a_cancelled_first_baseline_ends_compare_and_an_incomplete_one_warns() {
+    let mut m = model();
+    quiet(&mut m, key('c'));
+    let _ = update(&mut m, code(KeyCode::Enter));
+    assert!(m.traffic.compare.is_some());
+    // Another cap of the same filter (`:load`): the baseline run goes.
+    let mut f = m.traffic.filter.clone();
+    f.max_results = 2000;
+    let _ = update(&mut m, Msg::ApplyFilter(f));
+    assert!(
+        m.traffic.compare.is_none(),
+        "never `baseline running` forever"
+    );
+
+    let mut m = model();
+    quiet(&mut m, key('c'));
+    let cmds = update(&mut m, code(KeyCode::Enter));
+    let Some(Cmd::RunBaseline {
+        seq,
+        filter,
+        start,
+        end,
+        ..
+    }) = cmds.into_iter().next()
+    else {
+        panic!()
+    };
+    quiet(
+        &mut m,
+        Msg::BaselineDone {
+            seq,
+            result: Ok(BaselineOutcome {
+                flows: baseline_flows_rich(),
+                truncated: false,
+                incomplete: true,
+                hit: false,
+                filter,
+                start,
+                end,
+            }),
+        },
+    );
+    assert_eq!(
+        m.traffic.compare_warning().as_deref(),
+        Some("baseline incomplete: a PCE region did not respond")
+    );
+    assert_eq!(m.status.kind, StatusKind::Warn);
 }

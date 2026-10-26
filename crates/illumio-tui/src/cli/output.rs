@@ -117,7 +117,7 @@ pub struct Meta {
     /// `traffic explain`, and traffic with `--baseline`: the requests it
     /// makes, in words.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cost: Option<&'static str>,
+    pub cost: Option<std::borrow::Cow<'static, str>>,
     /// Traffic with `--baseline`: both windows, each side's truncation
     /// and the rows per change.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -170,6 +170,12 @@ pub struct CompareSide {
     pub incomplete: bool,
     /// The cap the side was fetched at (the last with `--backfill`).
     pub cap: u32,
+    /// `--backfill`: every cap the side tried, in order.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cap_steps: Option<Vec<u32>>,
+    /// The Explorer queries the side took (its cap steps, each one per
+    /// side of `--app`).
+    pub queries: u32,
     pub cache: &'static str,
 }
 

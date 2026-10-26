@@ -222,11 +222,23 @@ impl TrafficState {
     /// changed · 5 gone` (`· gone only` while `n` narrows), `vs 7d before
     /// · baseline running`, or on the Treemap `vs 7d before · no Δ here`.
     pub fn compare_meta(&self) -> Option<String> {
+        self.compare_meta_with(true)
+    }
+
+    /// `compare_meta`, without where the baseline ends unless `end` (a
+    /// narrow header).
+    pub fn compare_meta_with(&self, end: bool) -> Option<String> {
         let cmp = self.compare.as_ref()?;
-        let head = format!("vs {} before", cmp.length);
-        if cmp.baseline.is_none() {
-            return Some(format!("{head} · baseline running"));
-        }
+        let Some(b) = &cmp.baseline else {
+            return Some(format!("vs {} before · baseline running", cmp.length));
+        };
+        // Where the baseline ends: after `r` the recent start has moved on.
+        let head = if end {
+            let end = short_time_narrow(&pce::traffic::format_timestamp(b.range.end));
+            format!("vs {} before {end}", cmp.length)
+        } else {
+            format!("vs {} before", cmp.length)
+        };
         let Some(counts) = self.view_counts() else {
             return Some(format!("{head} · no Δ here"));
         };
@@ -238,16 +250,24 @@ impl TrafficState {
     }
 
     /// `baseline truncated: new/gone over-report` (or `recent`, or both)
-    /// while compare mode has a truncated side.
+    /// while compare mode has a truncated side; `baseline incomplete: a PCE
+    /// region did not respond` too.
     pub fn compare_warning(&self) -> Option<String> {
         let b = self.compare.as_ref()?.baseline.as_ref()?;
         let recent = self.data.as_ref().is_some_and(|d| d.truncated);
+        let mut parts = Vec::new();
         let side = match (recent, b.truncated) {
-            (true, true) => "recent and baseline",
-            (true, false) => "recent",
-            (false, true) => "baseline",
-            (false, false) => return None,
+            (true, true) => Some("recent and baseline"),
+            (true, false) => Some("recent"),
+            (false, true) => Some("baseline"),
+            (false, false) => None,
         };
-        Some(format!("{side} truncated: new/gone over-report"))
+        if let Some(side) = side {
+            parts.push(format!("{side} truncated: new/gone over-report"));
+        }
+        if b.incomplete {
+            parts.push("baseline incomplete: a PCE region did not respond".to_string());
+        }
+        (!parts.is_empty()).then(|| parts.join(" · "))
     }
 }

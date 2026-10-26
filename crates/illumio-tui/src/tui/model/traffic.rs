@@ -206,10 +206,18 @@ pub struct TrafficState {
     pub(crate) marks_announced: bool,
     /// `c`: compare mode, the baseline and what it shows; `None` off.
     pub compare: Option<CompareState>,
+    /// A filter or window change ended compare mode: the running and the
+    /// result status say so until the result is in.
+    pub compare_ended: bool,
     /// The baseline's flows as the views compare them: the focus keeps
     /// them, squelch hides them as it hides the recent ones (unless `M`),
     /// merged on their own. Computed at `rebuild_views`, never per draw.
     baseline_view: Option<Vec<ResolvedFlow>>,
+    /// Compare mode: the keys with a squelched record on either side, left
+    /// out of both (`squelched_keys`), and `view_flows` without them when
+    /// there are any (`shown_flows`).
+    compare_hidden: BTreeSet<pce::traffic::FlowKey>,
+    recent_view: Option<Vec<ResolvedFlow>>,
 }
 
 /// Both optional Mesh columns shown.
@@ -396,7 +404,10 @@ impl TrafficState {
             marks_notice: None,
             marks_announced: false,
             compare: None,
+            compare_ended: false,
             baseline_view: None,
+            compare_hidden: BTreeSet::new(),
+            recent_view: None,
         }
     }
 
@@ -836,23 +847,32 @@ impl TrafficState {
         self.refresh_baseline();
         let (shown, tree, mesh_rows, counts, compared) = {
             let keys = &self.keys;
-            let flows = self.view_flows();
+            let flows = self.shown_flows();
             let hits = self.marked.as_ref().map(|m| m.hits.as_slice());
             let drilled = |f: &ResolvedFlow| self.drill.as_ref().is_none_or(|d| d.matches(f, keys));
             let changes = self
                 .baseline_view
                 .as_ref()
                 .map(|b| pce::traffic::compare_flows(flows, b));
-            let mut shown: Vec<FlowRow> = flows
-                .iter()
-                .enumerate()
-                .filter(|(_, f)| drilled(f))
-                .map(|(i, f)| FlowRow {
-                    mark: hits.and_then(|h| h.get(i).copied().flatten()),
-                    change: changes.as_ref().map(|c| c.recent[i]),
-                    ..FlowRow::new(f.clone(), keys)
-                })
-                .collect();
+            // The hits are by `view_flows`' index; compare mode's keys
+            // squelched on either side leave the table.
+            let hidden = &self.compare_hidden;
+            let mut at = 0;
+            let mut shown: Vec<FlowRow> = Vec::new();
+            for (i, f) in self.view_flows().iter().enumerate() {
+                if !hidden.is_empty() && hidden.contains(&pce::traffic::flow_key(f)) {
+                    continue;
+                }
+                let change = changes.as_ref().map(|c| c.recent[at]);
+                at += 1;
+                if drilled(f) {
+                    shown.push(FlowRow {
+                        mark: hits.and_then(|h| h.get(i).copied().flatten()),
+                        change,
+                        ..FlowRow::new(f.clone(), keys)
+                    });
+                }
+            }
             // Gone flows, under the drill too, with the baseline's values.
             for (f, rc) in changes.into_iter().flat_map(|c| c.gone) {
                 if drilled(&f) {
@@ -910,9 +930,15 @@ impl TrafficState {
     }
 
     /// The baseline's flows the views compare with (`baseline_view`): the
-    /// focus and squelch applied as to the recent flows, merged on their
-    /// own (one row per record, never with the recent side).
+    /// focus applied as to the recent flows, merged on their own (one row
+    /// per record, never with the recent side). Squelch (unless `M`)
+    /// leaves out every key with a squelched record on either side, from
+    /// both (`compare_hidden`, `recent_view`): a mark matching one side
+    /// only (a draft decision the baseline never carries, a decision that
+    /// changed) never makes a row new or gone.
     fn refresh_baseline(&mut self) {
+        self.recent_view = None;
+        self.compare_hidden.clear();
         let Some(b) = self.compare.as_ref().and_then(|c| c.baseline.as_ref()) else {
             self.baseline_view = None;
             return;
@@ -921,15 +947,35 @@ impl TrafficState {
             Some(f) => b.flows.iter().filter(|x| f.keeps(x)).cloned().collect(),
             None => b.flows.clone(),
         };
-        let kept = match self.active_marks().filter(|a| !a.is_empty()) {
-            Some(a) => pce::marks::partition(&focused, &a, self.show_squelched)
-                .kept
-                .into_owned(),
-            None => focused,
+        let keep = self.show_squelched;
+        let (kept, hidden) = match self.active_marks().filter(|a| !a.is_empty()) {
+            Some(a) => {
+                let p = pce::marks::partition(&focused, &a, keep);
+                let hidden = if keep {
+                    BTreeSet::new()
+                } else {
+                    let recent = self.marked.as_ref().map(|m| m.marked.squelched());
+                    pce::traffic::squelched_keys(recent.into_iter().flatten(), p.marked.squelched())
+                };
+                (p.kept.into_owned(), hidden)
+            }
+            None => (focused, BTreeSet::new()),
         };
         let mut merged = Vec::with_capacity(kept.len());
-        pce::traffic::merge_flows(&mut merged, kept);
+        pce::traffic::merge_flows(&mut merged, pce::traffic::without_keys(&kept, &hidden));
+        if !hidden.is_empty() {
+            self.recent_view = Some(pce::traffic::without_keys(self.view_flows(), &hidden));
+        }
+        self.compare_hidden = hidden;
         self.baseline_view = Some(merged);
+    }
+
+    /// The flows the views aggregate: `view_flows`, in compare mode
+    /// without the keys squelched on either side.
+    pub fn shown_flows(&self) -> &[ResolvedFlow] {
+        self.recent_view
+            .as_deref()
+            .unwrap_or_else(|| self.view_flows())
     }
 
     /// Compare mode shows its `Δ` column (a baseline is loaded).
@@ -1046,7 +1092,7 @@ impl TrafficState {
         let (groups, services, counts) = {
             let st = &self.apps_state;
             let keys = &self.keys;
-            let flows = self.view_flows();
+            let flows = self.shown_flows();
             let kept = st.decisions.kept(flows);
             let mut groups = group_by_labels(&kept, keys);
             let mut services = if st.by_service {
@@ -1074,18 +1120,44 @@ impl TrafficState {
             mv.services = services;
         }
         let (mut groups, mut services) = (groups, services);
-        if let (Some(cmp), Some(b)) = (self.compare.as_mut(), self.baseline_view.as_ref()) {
+        if let Some(b) = self.baseline_view.as_ref() {
+            // Every service key judged on every decision, then `d`'s rows;
+            // a plain pair from its service keys (`compare_pairs`). The
+            // counts are the service keys' either way.
             let (keys, d) = (&self.keys, self.apps_state.decisions);
-            let kept = d.kept(b);
-            cmp.counts.pairs =
-                pce::traffic::compare_groups(&mut groups, &group_by_labels(&kept, keys));
-            if self.apps_state.by_service {
-                cmp.counts.services =
-                    pce::traffic::compare_groups(&mut services, &group_by_service(&kept, keys));
+            let recent = self.shown_flows();
+            let (kr, kb) = (d.kept(recent), d.kept(b));
+            let mut by_service = if self.apps_state.by_service {
+                services
+            } else {
+                group_by_service(&kr, keys)
+            };
+            let (all_r, all_b, kept_b) = (
+                group_by_service(recent, keys),
+                group_by_service(b, keys),
+                group_by_service(&kb, keys),
+            );
+            let counts = pce::traffic::compare_groups(
+                &mut by_service,
+                pce::traffic::Sides {
+                    all_recent: &all_r,
+                    all_baseline: &all_b,
+                    kept_baseline: &kept_b,
+                },
+            );
+            pce::traffic::compare_pairs(&mut groups, &group_by_labels(&kb, keys), &by_service);
+            services = if self.apps_state.by_service {
+                by_service
+            } else {
+                Vec::new()
+            };
+            if let Some(cmp) = self.compare.as_mut() {
+                cmp.counts.pairs = counts;
+                cmp.counts.services = counts;
+                let show = cmp.show.set();
+                pce::traffic::keep_changes(&mut groups, show, |g| g.change.as_ref());
+                pce::traffic::keep_changes(&mut services, show, |g| g.change.as_ref());
             }
-            let show = cmp.show.set();
-            pce::traffic::keep_changes(&mut groups, show, |g| g.change.as_ref());
-            pce::traffic::keep_changes(&mut services, show, |g| g.change.as_ref());
         }
         self.groups.set_rows(groups);
         self.services.set_rows(services);
@@ -1119,7 +1191,7 @@ impl TrafficState {
 
     /// App-to-app's sections and their squelched counts, then its rows.
     pub fn rebuild_apps(&mut self) {
-        let mut sections = self.apps_sections(self.view_flows());
+        let mut sections = self.apps_sections(self.shown_flows());
         let d = self.apps_state.decisions;
         let sq = self
             .marks_ctx()
@@ -1133,9 +1205,19 @@ impl TrafficState {
             mv.sections = sq;
         }
         if let Some(b) = self.baseline_view.as_ref() {
-            let base = self.apps_sections(b);
+            // Each key judged on every decision, then `d`'s rows.
+            let all = |f: &[ResolvedFlow]| self.apps_sections_with(f, Decisions::All);
+            let (all_r, all_b, kept_b) = (all(self.shown_flows()), all(b), self.apps_sections(b));
+            let counts = pce::traffic::compare_sections(
+                &mut sections,
+                pce::traffic::Sides {
+                    all_recent: &all_r,
+                    all_baseline: &all_b,
+                    kept_baseline: &kept_b,
+                },
+            );
             if let Some(cmp) = self.compare.as_mut() {
-                cmp.counts.apps = pce::traffic::compare_sections(&mut sections, &base);
+                cmp.counts.apps = counts;
                 pce::traffic::keep_section_changes(&mut sections, cmp.show.set());
             }
         }
@@ -1150,7 +1232,7 @@ impl TrafficState {
     pub fn rebuild_blocked(&mut self) {
         let keys = &self.keys;
         let blocked = |f: &[ResolvedFlow]| app_sections(f, keys, Direction::In, Decisions::Blocked);
-        let mut sections = blocked(self.view_flows());
+        let mut sections = blocked(self.shown_flows());
         let mut accepted: BTreeMap<Vec<String>, u64> = BTreeMap::new();
         let mut sq = Squelch::default();
         if let Some((a, mv)) = self.marks_ctx() {
@@ -1178,9 +1260,22 @@ impl TrafficState {
             mv.blocked_open = open;
             mv.accepted = accepted.values().sum();
         }
-        if let (Some(cmp), Some(b)) = (self.compare.as_mut(), self.baseline_view.as_ref()) {
-            cmp.counts.blocked = pce::traffic::compare_sections(&mut sections, &blocked(b));
-            pce::traffic::keep_section_changes(&mut sections, cmp.show.set());
+        if let Some(b) = self.baseline_view.as_ref() {
+            // Each key judged on every decision, then Blocked's rows.
+            let all = |f: &[ResolvedFlow]| app_sections(f, keys, Direction::In, Decisions::All);
+            let (all_r, all_b, kept_b) = (all(self.shown_flows()), all(b), blocked(b));
+            let counts = pce::traffic::compare_sections(
+                &mut sections,
+                pce::traffic::Sides {
+                    all_recent: &all_r,
+                    all_baseline: &all_b,
+                    kept_baseline: &kept_b,
+                },
+            );
+            if let Some(cmp) = self.compare.as_mut() {
+                cmp.counts.blocked = counts;
+                pce::traffic::keep_section_changes(&mut sections, cmp.show.set());
+            }
         }
         self.blocked_cache = (sections, accepted);
         let rows = self.blocked_rows(&self.blocked_folded);
@@ -1207,12 +1302,29 @@ impl TrafficState {
         let keys = &self.keys;
         let rows = self.flows.rows();
         let shown = self.flows.visible();
-        let sections = flow_sections(
+        let mut sections = flow_sections(
             shown.iter().map(|&i| &*rows[i].flow),
             keys,
             dir,
             self.flows_state.order,
         );
+        // Compare mode: a header counts its recent flows only; one of gone
+        // flows only reads `gone` (`Totals::flows_text`).
+        let gone = |i: &usize| is_gone(rows[*i].change.as_ref());
+        if shown.iter().any(gone) {
+            let recent: BTreeMap<Vec<String>, Totals> = flow_sections(
+                shown.iter().filter(|i| !gone(i)).map(|&i| &*rows[i].flow),
+                keys,
+                dir,
+                self.flows_state.order,
+            )
+            .into_iter()
+            .map(|(s, _)| (s.app, s.totals))
+            .collect();
+            for (s, _) in &mut sections {
+                s.totals = recent.get(&s.app).cloned().unwrap_or_default();
+            }
+        }
         let ctx = self.marks_ctx();
         let mut hidden: BTreeMap<Vec<String>, u64> = BTreeMap::new();
         if let Some((_, mv)) = &ctx
@@ -1291,13 +1403,18 @@ impl TrafficState {
 
     /// App-to-app's sections in force (none in `pairs`), from `flows`.
     fn apps_sections(&self, flows: &[ResolvedFlow]) -> Vec<AppSection> {
+        self.apps_sections_with(flows, self.apps_state.decisions)
+    }
+
+    /// `apps_sections` with `decisions` in place of `d`'s.
+    fn apps_sections_with(&self, flows: &[ResolvedFlow], decisions: Decisions) -> Vec<AppSection> {
         let keys = &self.keys;
         let st = &self.apps_state;
         let sections = match st.by {
             By::Pairs => Vec::new(),
-            By::In => app_sections(flows, keys, Direction::In, st.decisions),
-            By::Out => app_sections(flows, keys, Direction::Out, st.decisions),
-            By::Both => app_sections_both(flows, keys, st.decisions),
+            By::In => app_sections(flows, keys, Direction::In, decisions),
+            By::Out => app_sections(flows, keys, Direction::Out, decisions),
+            By::Both => app_sections_both(flows, keys, decisions),
         };
         order_sections(sections, st.order, |s| s)
     }
@@ -1581,6 +1698,7 @@ impl TrafficState {
     /// Cancels a running query without starting another: its answer is
     /// stale from here on.
     pub fn cancel_query(&mut self) {
+        self.drop_waiting_compare();
         if let QueryState::Running { cancel, .. } = &self.query {
             cancel.cancel();
             self.seq += 1;
@@ -1590,6 +1708,7 @@ impl TrafficState {
 
     /// Cancels a running query (if any) and returns the next sequence number.
     pub fn start_query(&mut self, now: Instant) -> (u64, CancellationToken) {
+        self.drop_waiting_compare();
         if let QueryState::Running { cancel, .. } = &self.query {
             cancel.cancel();
         }
@@ -1620,6 +1739,15 @@ impl TrafficState {
             *baseline = true;
         }
         started
+    }
+
+    /// A first baseline run about to be cancelled: compare mode, waiting
+    /// for it, goes too (it would read `baseline running` forever).
+    fn drop_waiting_compare(&mut self) {
+        if self.is_baseline_running() && self.compare.as_ref().is_some_and(|c| c.baseline.is_none())
+        {
+            self.compare = None;
+        }
     }
 
     /// The baseline query is on its way.

@@ -183,8 +183,12 @@ impl Totals {
         s
     }
 
-    /// `12 flows · 412 conns · 1 blocked`: a Flows section's header.
+    /// `12 flows · 412 conns · 1 blocked`: a Flows section's header;
+    /// `gone` for a section of compare mode's gone rows only.
     pub fn flows_text(&self) -> String {
+        if self.flows == 0 {
+            return "gone".into();
+        }
         format!(
             "{} flow{} · {}",
             self.flows,
@@ -319,12 +323,22 @@ impl AppSection {
 /// The header of one app's sections: `in · 7 groups · 412 conns · 1
 /// blocked` for one direction; with both, `← 1545 conns · 2 blocked  →
 /// 1004 conns` (no group counts, so it fits 80 columns).
+/// A direction without a recent flow (compare mode: gone rows only)
+/// reads `gone`.
 pub fn app_header(parts: &[(Direction, &Totals)]) -> String {
+    let gone = |t: &Totals| t.flows == 0;
     match parts {
+        [(d, t)] if gone(t) => format!("{} · gone", d.as_str()),
         [(d, t)] => format!("{} · {}", d.as_str(), t.text()),
         _ => parts
             .iter()
-            .map(|(d, t)| format!("{} {}", d.arrow(), t.counts_text()))
+            .map(|(d, t)| {
+                if gone(t) {
+                    format!("{} gone", d.arrow())
+                } else {
+                    format!("{} {}", d.arrow(), t.counts_text())
+                }
+            })
             .collect::<Vec<_>>()
             .join("  "),
     }
@@ -738,6 +752,7 @@ mod tests {
     fn the_both_header_drops_the_group_counts_to_fit() {
         let t_in = Totals {
             groups: 4,
+            flows: 5,
             connections: 1545,
             blocked: 2,
             potentially_blocked: 1,
@@ -745,6 +760,7 @@ mod tests {
         };
         let t_out = Totals {
             groups: 3,
+            flows: 3,
             connections: 1004,
             ..Totals::default()
         };
@@ -756,6 +772,14 @@ mod tests {
             app_header(&[(Direction::In, &t_in), (Direction::Out, &t_out)]),
             "← 1545 conns · 2 blocked · 1 pot.blocked  → 1004 conns"
         );
+        // Compare mode: a direction of gone rows only.
+        let gone = Totals::default();
+        assert_eq!(app_header(&[(Direction::Out, &gone)]), "out · gone");
+        assert_eq!(
+            app_header(&[(Direction::In, &t_in), (Direction::Out, &gone)]),
+            "← 1545 conns · 2 blocked · 1 pot.blocked  → gone"
+        );
+        assert_eq!(gone.flows_text(), "gone");
     }
 
     #[test]

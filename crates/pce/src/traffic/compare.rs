@@ -11,7 +11,7 @@ use super::resolved::{ResolvedEndpoint, ResolvedFlow};
 use super::sections::{AppSection, Direction};
 use crate::models::PolicyDecision;
 use serde::{Serialize, Serializer};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// A row's status against the baseline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -382,24 +382,66 @@ pub fn compare_flows(recent: &[ResolvedFlow], baseline: &[ResolvedFlow]) -> Comp
     })
 }
 
-/// `rows` with each recent row's change set (`set`) and the gone rows
-/// appended after them; the counts.
+/// The input of one view's comparison. A view may filter by decision
+/// (App-to-app's `d`, Blocked, `--show`): the status of a key comes from
+/// the unfiltered sides (`all_recent`, `all_baseline`: every decision, so
+/// `allowed→potentially_blocked` reads as changed in Blocked too), and the
+/// filter then picks the rows: the recent ones the view built, and a gone
+/// key's row only when its baseline records pass the filter
+/// (`kept_baseline`, the baseline built through the same filter).
+#[derive(Debug, Clone, Copy)]
+pub struct Sides<'a, T> {
+    pub all_recent: &'a [T],
+    pub all_baseline: &'a [T],
+    pub kept_baseline: &'a [T],
+}
+
+impl<'a, T> Sides<'a, T> {
+    /// A view without a decision filter: both sides as they are.
+    pub fn unfiltered(recent: &'a [T], baseline: &'a [T]) -> Self {
+        Self {
+            all_recent: recent,
+            all_baseline: baseline,
+            kept_baseline: baseline,
+        }
+    }
+}
+
+/// Each row of `rows` (the view's recent rows) gets its key's change from
+/// the unfiltered comparison (`set`); the gone keys' rows of
+/// `sides.kept_baseline` are appended. The counts are those of the rows
+/// that result.
 fn annotate<T: Clone, K: Ord + Clone>(
     rows: &mut Vec<T>,
-    baseline: &[T],
+    sides: Sides<'_, T>,
     key: impl Fn(&T) -> K,
     decisions: impl Fn(&T) -> DecisionSet,
     set: impl Fn(&mut T, RowChange),
 ) -> CompareCounts {
-    let c = compare_by(rows.iter(), baseline, key, decisions);
-    for (r, rc) in rows.iter_mut().zip(c.recent) {
-        set(r, rc);
+    let c = compare_by(sides.all_recent, sides.all_baseline, &key, &decisions);
+    let status: BTreeMap<K, RowChange> = sides
+        .all_recent
+        .iter()
+        .zip(c.recent)
+        .map(|(r, rc)| (key(r), rc))
+        .collect();
+    let mut gone: BTreeMap<K, RowChange> = c.gone.iter().map(|(r, rc)| (key(r), *rc)).collect();
+    let mut counts = CompareCounts::default();
+    for r in rows.iter_mut() {
+        if let Some(rc) = status.get(&key(r)) {
+            set(r, *rc);
+            counts.add(rc.change);
+        }
     }
-    for (mut g, rc) in c.gone {
-        set(&mut g, rc);
-        rows.push(g);
+    for b in sides.kept_baseline {
+        if let Some(rc) = gone.remove(&key(b)) {
+            let mut g = b.clone();
+            set(&mut g, rc);
+            counts.add(Change::Gone);
+            rows.push(g);
+        }
     }
-    c.counts
+    counts
 }
 
 /// The decisions of a group's flow records.
@@ -407,25 +449,84 @@ pub fn group_decisions(g: &FlowGroup) -> DecisionSet {
     DecisionSet::from_counts(g.allowed, g.potentially_blocked, g.blocked, g.flows)
 }
 
-/// Pairs (or pairs by service) compared on their source group,
-/// destination group and service: `rows` (built from the recent flows)
-/// annotated, the baseline's gone pairs appended.
-pub fn compare_groups(rows: &mut Vec<FlowGroup>, baseline: &[FlowGroup]) -> CompareCounts {
+/// Pairs by service compared on their source group, destination group
+/// and service: `rows` (the view's recent rows) annotated, the gone ones
+/// appended. The service keys' counts.
+pub fn compare_groups(rows: &mut Vec<FlowGroup>, sides: Sides<'_, FlowGroup>) -> CompareCounts {
     annotate(
         rows,
-        baseline,
+        sides,
         |g| (g.src.clone(), g.dst.clone(), g.service.clone()),
         group_decisions,
         |g, c| g.change = Some(c),
     )
 }
 
+/// Plain pairs (no service) from their service keys: `services` are the
+/// same view's pairs by service, already compared (`compare_groups`, gone
+/// ones included). A pair is new when every one of its service keys is,
+/// gone when every one is, changed when any is new, gone or changed, else
+/// the same; its decisions are the union of its service keys'. A pair
+/// whose every key is gone is appended from `kept_baseline_pairs` (the
+/// baseline's pairs through the view's filter). The counts stay the
+/// service keys' (those of `compare_groups`).
+pub fn compare_pairs(
+    pairs: &mut Vec<FlowGroup>,
+    kept_baseline_pairs: &[FlowGroup],
+    services: &[FlowGroup],
+) {
+    type Pair = (Vec<String>, Vec<String>);
+    let mut by_pair: BTreeMap<Pair, Vec<RowChange>> = BTreeMap::new();
+    for s in services {
+        if let Some(c) = s.change {
+            by_pair
+                .entry((s.src.clone(), s.dst.clone()))
+                .or_default()
+                .push(c);
+        }
+    }
+    let join = |cs: &[RowChange]| -> RowChange {
+        let all = |c: Change| cs.iter().all(|x| x.change == c);
+        let change = if all(Change::New) {
+            Change::New
+        } else if all(Change::Gone) {
+            Change::Gone
+        } else if cs.iter().any(|x| x.change != Change::Same) {
+            Change::Changed
+        } else {
+            Change::Same
+        };
+        let union = |f: fn(&RowChange) -> Option<DecisionSet>| {
+            cs.iter().filter_map(f).reduce(DecisionSet::union)
+        };
+        RowChange {
+            change,
+            baseline_decision: union(|c| c.baseline_decision),
+            recent_decision: union(|c| c.recent_decision),
+        }
+    };
+    for p in pairs.iter_mut() {
+        if let Some(cs) = by_pair.remove(&(p.src.clone(), p.dst.clone())) {
+            p.change = Some(join(&cs));
+        }
+    }
+    for b in kept_baseline_pairs {
+        if let Some(cs) = by_pair.remove(&(b.src.clone(), b.dst.clone())) {
+            let mut g = b.clone();
+            g.change = Some(join(&cs));
+            g.marks = None;
+            pairs.push(g);
+        }
+    }
+}
+
 /// Mesh rows compared on `MeshKey` (the columns shown take part, as in
-/// the grouping).
+/// the grouping); the mesh has no decision filter.
 pub fn compare_mesh(rows: &mut Vec<MeshRow>, baseline: &[MeshRow]) -> CompareCounts {
+    let recent = rows.clone();
     annotate(
         rows,
-        baseline,
+        Sides::unfiltered(&recent, baseline),
         MeshRow::key,
         |r| DecisionSet::from_counts(r.allowed, r.potentially_blocked, r.blocked, r.flows),
         |r, c| r.change = Some(c),
@@ -436,10 +537,15 @@ pub fn compare_mesh(rows: &mut Vec<MeshRow>, baseline: &[MeshRow]) -> CompareCou
 /// service, i.e. the source group, destination group and service. A gone
 /// peer row joins its app's section in that direction (the header keeps
 /// the recent totals), or a new section after that app's others (the
-/// app's sections stay adjacent), with empty totals.
-pub fn compare_sections(sections: &mut Vec<AppSection>, baseline: &[AppSection]) -> CompareCounts {
+/// app's sections stay adjacent), with empty totals (its header reads
+/// `gone`).
+pub fn compare_sections(
+    sections: &mut Vec<AppSection>,
+    sides: Sides<'_, AppSection>,
+) -> CompareCounts {
     type Key = (Vec<String>, Direction, Vec<String>, String);
-    let flat = |s: &[AppSection]| -> Vec<(Key, super::sections::PeerRow)> {
+    type Flat = (Key, super::sections::PeerRow);
+    let flat = |s: &[AppSection]| -> Vec<Flat> {
         s.iter()
             .flat_map(|sec| {
                 sec.rows.iter().map(|r| {
@@ -456,28 +562,34 @@ pub fn compare_sections(sections: &mut Vec<AppSection>, baseline: &[AppSection])
             })
             .collect()
     };
-    let recent = flat(sections);
-    let base = flat(baseline);
-    let peer_decisions = |(_, r): &(Key, super::sections::PeerRow)| {
-        DecisionSet::from_counts(r.allowed, r.potentially_blocked, r.blocked, r.flows)
-    };
-    let c = compare_by(
-        recent.iter(),
-        base.iter(),
-        |(k, _)| k.clone(),
-        peer_decisions,
+    let (all_recent, all_base, kept_base) = (
+        flat(sides.all_recent),
+        flat(sides.all_baseline),
+        flat(sides.kept_baseline),
     );
-    let mut changes = c.recent.into_iter();
+    let mut rows = flat(sections);
+    let counts = annotate(
+        &mut rows,
+        Sides {
+            all_recent: &all_recent,
+            all_baseline: &all_base,
+            kept_baseline: &kept_base,
+        },
+        |(k, _): &Flat| k.clone(),
+        |(_, r): &Flat| {
+            DecisionSet::from_counts(r.allowed, r.potentially_blocked, r.blocked, r.flows)
+        },
+        |(_, r): &mut Flat, c| r.change = Some(c),
+    );
+    let mut rows = rows.into_iter();
     for sec in sections.iter_mut() {
         for r in &mut sec.rows {
-            r.change = changes.next();
+            if let Some((_, x)) = rows.next() {
+                r.change = x.change;
+            }
         }
     }
-    for ((app, direction, _, _), mut row) in c.gone.into_iter().map(|((k, r), rc)| {
-        let mut r = r;
-        r.change = Some(rc);
-        (k, r)
-    }) {
+    for ((app, direction, _, _), mut row) in rows {
         row.marks = None;
         match sections
             .iter_mut()
@@ -501,7 +613,28 @@ pub fn compare_sections(sections: &mut Vec<AppSection>, baseline: &[AppSection])
             }
         }
     }
-    c.counts
+    counts
+}
+
+/// Squelch on both sides alike: the keys (`flow_key`) of every squelched
+/// record of either side. Leaving these keys out of both sides is
+/// symmetric by construction: a mark that matches one side only (a draft
+/// decision the baseline never carries, a reported decision that changed)
+/// hides the key on both, so it is never new nor gone.
+pub fn squelched_keys<'a>(
+    recent: impl IntoIterator<Item = &'a ResolvedFlow>,
+    baseline: impl IntoIterator<Item = &'a ResolvedFlow>,
+) -> BTreeSet<FlowKey> {
+    recent.into_iter().chain(baseline).map(flow_key).collect()
+}
+
+/// `flows` without the records of `keys` (`squelched_keys`).
+pub fn without_keys(flows: &[ResolvedFlow], keys: &BTreeSet<FlowKey>) -> Vec<ResolvedFlow> {
+    flows
+        .iter()
+        .filter(|f| !keys.contains(&flow_key(f)))
+        .cloned()
+        .collect()
 }
 
 /// Keeps the rows `show` keeps: flows by their change, `None` rows always.
@@ -727,8 +860,9 @@ mod tests {
         ];
         let baseline = vec![flow("a", "b", 443, Allowed), flow("x", "b", 443, Allowed)];
         let mut rows = group_by_service(&recent, &k);
+        let all = rows.clone();
         let base = group_by_service(&baseline, &k);
-        let counts = compare_groups(&mut rows, &base);
+        let counts = compare_groups(&mut rows, Sides::unfiltered(&all, &base));
         let by = |src: &str, dst: &str| {
             rows.iter()
                 .find(|g| g.src == [src] && g.dst == [dst])
@@ -745,12 +879,141 @@ mod tests {
         assert_eq!((counts.new, counts.changed, counts.gone), (1, 1, 1));
         // Another service on the same pair is another row.
         let mut rows = group_by_service(&[flow("a", "b", 80, Allowed)], &k);
-        compare_groups(&mut rows, &group_by_service(&baseline, &k));
+        let all = rows.clone();
+        let base = group_by_service(&baseline, &k);
+        compare_groups(&mut rows, Sides::unfiltered(&all, &base));
         assert_eq!(rows[0].change.unwrap().change, Change::New);
-        // Plain pairs ignore the service.
-        let mut rows = group_by_labels(&[flow("a", "b", 80, Allowed)], &k);
-        compare_groups(&mut rows, &group_by_labels(&baseline, &k));
-        assert_eq!(rows[0].change.unwrap().change, Change::Same);
+    }
+
+    /// The plain pairs of `recent` against `baseline`, through
+    /// `compare_pairs`: (the pairs, the service keys' counts).
+    fn pairs_of(
+        recent: &[ResolvedFlow],
+        baseline: &[ResolvedFlow],
+    ) -> (Vec<FlowGroup>, CompareCounts) {
+        let k = app_keys();
+        let mut services = group_by_service(recent, &k);
+        let all = services.clone();
+        let base = group_by_service(baseline, &k);
+        let counts = compare_groups(&mut services, Sides::unfiltered(&all, &base));
+        let mut pairs = group_by_labels(recent, &k);
+        compare_pairs(&mut pairs, &group_by_labels(baseline, &k), &services);
+        (pairs, counts)
+    }
+
+    #[test]
+    fn a_pair_is_new_gone_or_changed_by_its_service_keys() {
+        let pair = |rows: &[FlowGroup], src: &str| {
+            rows.iter()
+                .find(|g| g.src == [src])
+                .unwrap()
+                .change
+                .unwrap()
+        };
+        let (rows, counts) = pairs_of(
+            &[
+                // a → b: 443 the same, 80 new: changed.
+                flow("a", "b", 443, Allowed),
+                flow("a", "b", 80, Allowed),
+                // c → b: everything new.
+                flow("c", "b", 22, Allowed),
+                // d → b: the same.
+                flow("d", "b", 25, Blocked),
+                // e → b: 53 the same, 9999 gone (below): changed.
+                flow("e", "b", 53, Allowed),
+            ],
+            &[
+                flow("a", "b", 443, Allowed),
+                flow("d", "b", 25, Blocked),
+                flow("e", "b", 53, Allowed),
+                flow("e", "b", 9999, Blocked),
+                // x → b: everything gone.
+                flow("x", "b", 1, Pot),
+                flow("x", "b", 2, Allowed),
+            ],
+        );
+        assert_eq!(pair(&rows, "a").change, Change::Changed);
+        assert_eq!(pair(&rows, "a").text(), "allowed→allowed");
+        assert_eq!(pair(&rows, "c").change, Change::New);
+        assert_eq!(pair(&rows, "c").baseline_decision, None);
+        assert_eq!(pair(&rows, "d").change, Change::Same);
+        let e = pair(&rows, "e");
+        assert_eq!(
+            e.change,
+            Change::Changed,
+            "a gone service of a pair still talking"
+        );
+        assert_eq!(e.baseline_text(), "allowed,blocked", "the union");
+        let x = pair(&rows, "x");
+        assert_eq!(x.change, Change::Gone);
+        assert_eq!(x.baseline_text(), "allowed,potentially_blocked");
+        assert_eq!(rows.last().unwrap().src, ["x"], "gone pairs come last");
+        // The counts are the service keys'.
+        assert_eq!(
+            (counts.new, counts.changed, counts.gone, counts.same),
+            (2, 0, 3, 3)
+        );
+    }
+
+    #[test]
+    fn a_decision_filter_picks_rows_after_the_unfiltered_comparison() {
+        let k = app_keys();
+        // 8443 was allowed, is potentially blocked now; 22 was blocked and
+        // is allowed now; 25 was blocked and is gone.
+        let recent = vec![flow("a", "b", 8443, Pot), flow("c", "b", 22, Allowed)];
+        let baseline = vec![
+            flow("a", "b", 8443, Allowed),
+            flow("c", "b", 22, Blocked),
+            flow("d", "b", 25, Blocked),
+        ];
+        let sec = |f: &[ResolvedFlow], d| app_sections(f, &k, Direction::In, d);
+        let mut blocked = sec(&recent, Decisions::Blocked);
+        let (all_r, all_b, kept_b) = (
+            sec(&recent, Decisions::All),
+            sec(&baseline, Decisions::All),
+            sec(&baseline, Decisions::Blocked),
+        );
+        let counts = compare_sections(
+            &mut blocked,
+            Sides {
+                all_recent: &all_r,
+                all_baseline: &all_b,
+                kept_baseline: &kept_b,
+            },
+        );
+        let rows: Vec<(String, String)> = blocked
+            .iter()
+            .flat_map(|s| &s.rows)
+            .map(|r| (r.service.clone(), r.change.unwrap().short_text()))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                ("8443/tcp".into(), "allowed→pot.blocked".into()),
+                // 22 is allowed now: not a Blocked row, and not gone (it
+                // still talks).
+                ("25/tcp".into(), "gone".into()),
+            ]
+        );
+        assert_eq!((counts.new, counts.changed, counts.gone), (0, 1, 1));
+        // The same with pairs by service and a filter that keeps nothing
+        // of the baseline (fixed by draft): no row is gone.
+        let kept = Decisions::Blocked.kept(&recent);
+        let mut rows = group_by_service(&kept, &k);
+        let (all_r, all_b) = (
+            group_by_service(&recent, &k),
+            group_by_service(&baseline, &k),
+        );
+        compare_groups(
+            &mut rows,
+            Sides {
+                all_recent: &all_r,
+                all_baseline: &all_b,
+                kept_baseline: &[],
+            },
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].change.unwrap().change, Change::Changed);
     }
 
     #[test]
@@ -789,8 +1052,10 @@ mod tests {
         ];
         let agg = |f: &[ResolvedFlow]| app_sections(f, &k, Direction::In, Decisions::Blocked);
         let mut sections = agg(&recent);
+        let all = sections.clone();
+        let base = agg(&baseline);
         let totals = sections[0].totals.clone();
-        let counts = compare_sections(&mut sections, &agg(&baseline));
+        let counts = compare_sections(&mut sections, Sides::unfiltered(&all, &base));
         assert_eq!((counts.new, counts.same, counts.gone), (1, 1, 2));
         let b = sections.iter().find(|s| s.app == ["b"]).unwrap();
         assert_eq!(b.totals, totals, "the header keeps the recent totals");
@@ -823,10 +1088,9 @@ mod tests {
         // Gone: a as a destination (a's `in` section, which recent lacks).
         let baseline = vec![flow("z", "a", 80, Allowed)];
         let mut sections = app_sections_both(&recent, &k, Decisions::All);
-        compare_sections(
-            &mut sections,
-            &app_sections_both(&baseline, &k, Decisions::All),
-        );
+        let all = sections.clone();
+        let base = app_sections_both(&baseline, &k, Decisions::All);
+        compare_sections(&mut sections, Sides::unfiltered(&all, &base));
         let order: Vec<(String, Direction)> = sections
             .iter()
             .map(|s| (s.app_text(), s.direction))
@@ -839,6 +1103,31 @@ mod tests {
             .collect();
         assert_eq!(a.len(), 2, "{order:?}");
         assert_eq!(a[1], a[0] + 1, "adjacent: {order:?}");
+    }
+
+    #[test]
+    fn a_key_squelched_on_one_side_leaves_both() {
+        // A draft-decision mark hid the recent record only (the baseline
+        // carries no draft decision): its key leaves both sides.
+        let recent = vec![flow("a", "b", 443, Allowed), flow("x", "y", 53, Allowed)];
+        let baseline = vec![flow("a", "b", 443, Allowed), flow("x", "y", 53, Allowed)];
+        let hidden = squelched_keys(&recent[1..], std::iter::empty());
+        let (r, b) = (
+            without_keys(&recent, &hidden),
+            without_keys(&baseline, &hidden),
+        );
+        let c = compare_flows(&r, &b);
+        assert_eq!(c.counts.gone + c.counts.new, 0);
+        assert_eq!((r.len(), b.len()), (1, 1));
+        // A mark on the baseline's decision only (it changed): the same.
+        let mut then = flow("a", "b", 443, Blocked);
+        then.first_detected = Some("2026-10-18T00:00:00Z".into());
+        let hidden = squelched_keys(std::iter::empty(), std::iter::once(&then));
+        let c = compare_flows(
+            &without_keys(&recent[..1], &hidden),
+            &without_keys(&[then], &hidden),
+        );
+        assert_eq!(c.counts.new + c.counts.gone, 0, "neither new nor gone");
     }
 
     #[test]

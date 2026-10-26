@@ -85,15 +85,22 @@ pub(super) fn refresh_running_status_at(model: &mut Model, now: Instant) {
         started,
         status,
         draft,
+        baseline,
         ..
     } = &model.traffic.query
     {
         let secs = now.saturating_duration_since(*started).as_secs_f64();
-        model.status = StatusLine::info(if *draft {
+        let mut text = if *draft {
             format!("draft re-evaluation {secs:.1}s · {status} · Esc cancels")
+        } else if *baseline {
+            format!("baseline query running {secs:.1}s · {status}")
         } else {
             format!("query running {secs:.1}s · {status}")
-        });
+        };
+        if model.traffic.compare_ended {
+            text.push_str(&format!(" · {COMPARE_ENDED}"));
+        }
+        model.status = StatusLine::info(text);
     }
 }
 
