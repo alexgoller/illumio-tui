@@ -1123,7 +1123,7 @@ impl TrafficState {
         if let Some(b) = self.baseline_view.as_ref() {
             // Every service key judged on every decision, then `d`'s rows;
             // a plain pair from its service keys (`compare_pairs`). The
-            // counts are the service keys' either way.
+            // counts are the rows each table shows: pairs, service keys.
             let (keys, d) = (&self.keys, self.apps_state.decisions);
             let recent = self.shown_flows();
             let (kr, kb) = (d.kept(recent), d.kept(b));
@@ -1145,14 +1145,15 @@ impl TrafficState {
                     kept_baseline: &kept_b,
                 },
             );
-            pce::traffic::compare_pairs(&mut groups, &group_by_labels(&kb, keys), &by_service);
+            let pair_counts =
+                pce::traffic::compare_pairs(&mut groups, &group_by_labels(&kb, keys), &by_service);
             services = if self.apps_state.by_service {
                 by_service
             } else {
                 Vec::new()
             };
             if let Some(cmp) = self.compare.as_mut() {
-                cmp.counts.pairs = counts;
+                cmp.counts.pairs = pair_counts;
                 cmp.counts.services = counts;
                 let show = cmp.show.set();
                 pce::traffic::keep_changes(&mut groups, show, |g| g.change.as_ref());

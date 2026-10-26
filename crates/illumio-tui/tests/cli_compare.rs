@@ -700,7 +700,7 @@ async fn show_blocked_reports_a_decision_change_as_changed() {
 
 /// Plain pairs compare their service keys: shop/prod → shop/prod keeps
 /// 5432 and lost 22 (gone), so the pair is changed; the counts are the
-/// service keys'.
+/// pair rows' (#79).
 #[tokio::test(flavor = "multi_thread")]
 async fn a_plain_pair_is_judged_by_its_service_keys() {
     let server = compare_server().await;
@@ -722,11 +722,67 @@ async fn a_plain_pair_is_judged_by_its_service_keys() {
         .clone();
     assert_eq!(pair["change"], "changed");
     assert_eq!(pair["baseline_decision"], "allowed");
-    // 5432 same, 8443 changed, icmp same, 443 new, 22 gone: service keys.
+    // shop/prod → shop/prod changed (22 gone), Corp → shop/prod changed
+    // (8443), nas icmp the same, the FQDN 443 new: pair rows.
     assert_eq!(
         out["meta"]["compare"]["counts"],
-        json!({"new": 1, "changed": 1, "gone": 1, "same": 2})
+        json!({"new": 1, "changed": 2, "gone": 0, "same": 1})
     );
+    server.verify().await;
+}
+
+/// #79: `meta.compare.counts` counts the rows printed: pair rows without
+/// `--services`, service rows with it, under every `--changes`.
+#[tokio::test(flavor = "multi_thread")]
+async fn groups_counts_equal_the_rows_printed_with_and_without_services() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    let sets = ["new", "changed", "gone", "new,changed,gone,same"];
+    let runs = 2 * sets.len() as u64;
+    for (name, start, end, body) in [
+        ("recent", RECENT_START, RECENT_END, recent()),
+        ("base", BASE_START, RECENT_START, baseline()),
+    ] {
+        mount_window(&server, name, start, end, 10_000, 4, &body, runs).await;
+    }
+    let home = tempfile::tempdir().unwrap();
+    for services in [false, true] {
+        let mut first: Option<Value> = None;
+        for set in sets {
+            let mut c = cmd(&server, home.path());
+            c.args(["traffic", "groups", "--keys", "app,env"])
+                .args(WINDOW)
+                .args(["--baseline", "7d", "--changes", set]);
+            if services {
+                c.arg("--services");
+            }
+            let out = json_out(c.assert().success());
+            let counts = out["meta"]["compare"]["counts"].clone();
+            let what = format!("services={services} --changes {set}");
+            // `--changes` picks rows, never the counts.
+            match &first {
+                Some(f) => assert_eq!(&counts, f, "{what}"),
+                None => first = Some(counts.clone()),
+            }
+            let rows = out["data"].as_array().unwrap();
+            for change in ["new", "changed", "gone", "same"] {
+                let printed = rows.iter().filter(|r| r["change"] == change).count() as u64;
+                let want = if set.split(',').any(|s| s == change) {
+                    counts[change].as_u64().unwrap()
+                } else {
+                    0
+                };
+                assert_eq!(printed, want, "{what}: {change}");
+            }
+        }
+        let want = if services {
+            // 5432 same, 8443 changed, icmp same, 443 new, 22 gone.
+            json!({"new": 1, "changed": 1, "gone": 1, "same": 2})
+        } else {
+            json!({"new": 1, "changed": 2, "gone": 0, "same": 1})
+        };
+        assert_eq!(first.unwrap(), want, "services={services}");
+    }
     server.verify().await;
 }
 

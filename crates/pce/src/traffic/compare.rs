@@ -468,13 +468,13 @@ pub fn compare_groups(rows: &mut Vec<FlowGroup>, sides: Sides<'_, FlowGroup>) ->
 /// gone when every one is, changed when any is new, gone or changed, else
 /// the same; its decisions are the union of its service keys'. A pair
 /// whose every key is gone is appended from `kept_baseline_pairs` (the
-/// baseline's pairs through the view's filter). The counts stay the
-/// service keys' (those of `compare_groups`).
+/// baseline's pairs through the view's filter). The counts are the pair
+/// rows' (#79: the rows the view shows), not the service keys'.
 pub fn compare_pairs(
     pairs: &mut Vec<FlowGroup>,
     kept_baseline_pairs: &[FlowGroup],
     services: &[FlowGroup],
-) {
+) -> CompareCounts {
     type Pair = (Vec<String>, Vec<String>);
     let mut by_pair: BTreeMap<Pair, Vec<RowChange>> = BTreeMap::new();
     for s in services {
@@ -518,6 +518,11 @@ pub fn compare_pairs(
             pairs.push(g);
         }
     }
+    let mut counts = CompareCounts::default();
+    for c in pairs.iter().filter_map(|p| p.change) {
+        counts.add(c.change);
+    }
+    counts
 }
 
 /// Mesh rows compared on `MeshKey` (the columns shown take part, as in
@@ -886,19 +891,20 @@ mod tests {
     }
 
     /// The plain pairs of `recent` against `baseline`, through
-    /// `compare_pairs`: (the pairs, the service keys' counts).
+    /// `compare_pairs`: (the pairs, the pair rows' counts, the service
+    /// keys' counts).
     fn pairs_of(
         recent: &[ResolvedFlow],
         baseline: &[ResolvedFlow],
-    ) -> (Vec<FlowGroup>, CompareCounts) {
+    ) -> (Vec<FlowGroup>, CompareCounts, CompareCounts) {
         let k = app_keys();
         let mut services = group_by_service(recent, &k);
         let all = services.clone();
         let base = group_by_service(baseline, &k);
-        let counts = compare_groups(&mut services, Sides::unfiltered(&all, &base));
+        let keys = compare_groups(&mut services, Sides::unfiltered(&all, &base));
         let mut pairs = group_by_labels(recent, &k);
-        compare_pairs(&mut pairs, &group_by_labels(baseline, &k), &services);
-        (pairs, counts)
+        let counts = compare_pairs(&mut pairs, &group_by_labels(baseline, &k), &services);
+        (pairs, counts, keys)
     }
 
     #[test]
@@ -910,7 +916,7 @@ mod tests {
                 .change
                 .unwrap()
         };
-        let (rows, counts) = pairs_of(
+        let (rows, counts, keys) = pairs_of(
             &[
                 // a → b: 443 the same, 80 new: changed.
                 flow("a", "b", 443, Allowed),
@@ -948,11 +954,13 @@ mod tests {
         assert_eq!(x.change, Change::Gone);
         assert_eq!(x.baseline_text(), "allowed,potentially_blocked");
         assert_eq!(rows.last().unwrap().src, ["x"], "gone pairs come last");
-        // The counts are the service keys'.
+        // #79: the counts are the pair rows' (a, e changed; c new; x gone;
+        // d the same), not the service keys'.
         assert_eq!(
             (counts.new, counts.changed, counts.gone, counts.same),
-            (2, 0, 3, 3)
+            (1, 2, 1, 1)
         );
+        assert_eq!((keys.new, keys.changed, keys.gone, keys.same), (2, 0, 3, 3));
     }
 
     #[test]

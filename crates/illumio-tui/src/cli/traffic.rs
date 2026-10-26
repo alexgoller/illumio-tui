@@ -2276,7 +2276,7 @@ async fn query(ctx: &Context, args: &QueryArgs) -> Result<(), CliError> {
 /// compared, each on every decision (`all`: both sides unfiltered), the
 /// view's own rows through its filter (`kept`: both sides filtered);
 /// `pairs` (built from the kept recent flows) annotated, the gone pairs
-/// from `kept_baseline_pairs`. The service keys' counts.
+/// from `kept_baseline_pairs`. The pair rows' counts (#79).
 fn compare_pairs_of(
     pairs: &mut Vec<FlowGroup>,
     all: (&[ResolvedFlow], &[ResolvedFlow]),
@@ -2286,7 +2286,7 @@ fn compare_pairs_of(
 ) -> CompareCounts {
     let mut services = by_service(kept.0);
     let (all_r, all_b, kept_b) = (by_service(all.0), by_service(all.1), by_service(kept.1));
-    let counts = compare_groups(
+    compare_groups(
         &mut services,
         Sides {
             all_recent: &all_r,
@@ -2294,8 +2294,7 @@ fn compare_pairs_of(
             kept_baseline: &kept_b,
         },
     );
-    compare_pairs(pairs, kept_baseline_pairs, &services);
-    counts
+    compare_pairs(pairs, kept_baseline_pairs, &services)
 }
 
 /// Flow records in compare mode: the recent ones then the gone ones (each

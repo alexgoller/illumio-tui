@@ -243,9 +243,14 @@ fn app_to_app_pairs_by_service_and_sections_compare_too() {
         Change::Changed,
         "a gone service of a pair still talking"
     );
-    // The header counts service keys, plain pairs or by service alike.
+    // #79: the header counts the rows shown: pairs here (the pair with a
+    // gone service is one changed row, no gone one) ...
     let pairs = m.traffic.view_counts().unwrap();
-    assert!(pairs.gone >= 1, "{pairs:?}");
+    assert_eq!(
+        (pairs.new, pairs.changed, pairs.gone),
+        (0, 2, 0),
+        "{pairs:?}"
+    );
     quiet(&mut m, key('o'));
     let gone: Vec<String> = m
         .traffic
@@ -256,7 +261,10 @@ fn app_to_app_pairs_by_service_and_sections_compare_too() {
         .filter_map(|g| g.service.clone())
         .collect();
     assert_eq!(gone, vec!["9999/tcp".to_string()]);
-    assert_eq!(m.traffic.view_counts().unwrap(), pairs);
+    // ... and service rows by service.
+    let services = m.traffic.view_counts().unwrap();
+    assert_eq!(services.gone, 1, "{services:?}");
+    assert_ne!(services, pairs);
     quiet(&mut m, key('o'));
     quiet(&mut m, key('x'));
     let peers: Vec<(String, Change)> = m
@@ -873,4 +881,87 @@ comment = "allowed then"
     assert_eq!(m.traffic.squelched_hidden(), 0);
     let out = render_to_string(&m, 160, 48);
     assert!(out.contains(&format!("│{n} flows ")), "{out}");
+}
+
+/// The rows of the view on screen with `c`, as its table holds them.
+fn shown_with(m: &Model, c: Change) -> u64 {
+    let t = &m.traffic;
+    let is = |x: Option<&pce::traffic::RowChange>| x.is_some_and(|x| x.change == c);
+    let n = match t.view {
+        TrafficView::Flows => t
+            .flows
+            .rows()
+            .iter()
+            .filter(|r| is(r.change.as_ref()))
+            .count(),
+        TrafficView::Aggregate if t.apps_state.by != crate::tui::model::By::Pairs => {
+            t.apps.rows().iter().filter(|r| is(r.change())).count()
+        }
+        TrafficView::Aggregate => t
+            .pairs_table()
+            .rows()
+            .iter()
+            .filter(|r| is(r.change.as_ref()))
+            .count(),
+        TrafficView::Mesh => t
+            .mesh
+            .rows()
+            .iter()
+            .filter(|r| is(r.change.as_ref()))
+            .count(),
+        TrafficView::Blocked => t.blocked.rows().iter().filter(|r| is(r.change())).count(),
+        TrafficView::Treemap => 0,
+    };
+    n as u64
+}
+
+/// #79: the header counts the rows the view shows, in every view, App-to-app
+/// with `o` off (pair rows) and on (service rows), under every `n`.
+#[test]
+fn the_header_counts_equal_the_rows_each_view_shows_under_every_n() {
+    let mut m = compared();
+    let mut seen = Vec::new();
+    for step in 0..6 {
+        match step {
+            0 => {}
+            // App-to-app pairs, then by service, then the sections.
+            1 => quiet(&mut m, key('v')),
+            2 => quiet(&mut m, key('o')),
+            3 => {
+                quiet(&mut m, key('o'));
+                quiet(&mut m, key('x'));
+            }
+            _ => quiet(&mut m, key('v')),
+        }
+        let what = format!(
+            "{} by={:?} o={}",
+            m.traffic.view.title(),
+            m.traffic.apps_state.by,
+            m.traffic.apps_state.by_service
+        );
+        let counts = m.traffic.view_counts().unwrap();
+        for c in [Change::New, Change::Changed, Change::Gone] {
+            assert_eq!(counts.of(c), shown_with(&m, c), "{what}: {c:?} (n all)");
+        }
+        // Each `n` narrows the rows to what its count says.
+        for _ in 0..4 {
+            quiet(&mut m, key('n'));
+            let show = m.traffic.compare.as_ref().unwrap().show;
+            assert_eq!(
+                m.traffic.view_counts().unwrap(),
+                counts,
+                "{what}: n keeps them"
+            );
+            for c in [Change::New, Change::Changed, Change::Gone] {
+                let want = if show == ShowChanges::All || show.set().contains(c) {
+                    counts.of(c)
+                } else {
+                    0
+                };
+                assert_eq!(shown_with(&m, c), want, "{what}: {c:?} under {show:?}");
+            }
+        }
+        seen.push(what);
+    }
+    assert_eq!(seen.len(), 6, "{seen:?}");
 }

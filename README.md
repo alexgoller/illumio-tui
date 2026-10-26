@@ -704,9 +704,10 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   decision filter picks its rows: Blocked shows a flow allowed then and potentially blocked now
   as `CHG`, and a gone row only when it was blocked. A plain App-to-app pair (`o` off) is judged
   by its service keys: `NEW` when all are new, `GONE` when all are gone, `CHG` when any is new,
-  gone or changed (`o` shows which); the header counts service keys there. The Result header
+  gone or changed (`o` shows which). The Result header
   says `vs 7d before 10-26 09:00 · 12 new · 3 changed · 5 gone` (where the baseline ends, UTC)
-  for the view on screen; a section of gone rows only reads `gone`, and section headers count
+  for the view on screen, counting the rows that view shows (App-to-app: pairs with `o` off,
+  service rows with it on), so `n` shows exactly as many rows as it names; a section of gone rows only reads `gone`, and section headers count
   recent rows only. `n` cycles all → new → changed → gone, `C` leaves.
   New means not seen in the baseline window at Explorer's record granularity: a record whose
   lifetime spans the cut-off comes back from both queries and reads as the same (or changed),
@@ -1129,7 +1130,8 @@ baseline's) or `same`. Rows are matched on the view's key without the decision a
 and direction; `--services` and sections on source group, destination group and service;
 plain pairs (`groups` without `--services`, `query --group`) by their service keys (`new` when
 all are new, `gone` when all are gone, `changed` when any is new, gone or changed;
-`baseline_decision` the union; the counts are service keys); the mesh on its row key. Each key
+`baseline_decision` the union); the mesh on its row key. `meta.compare.counts` counts the rows
+of the output (pairs without `--services`, service rows with it), before `--changes` picks them. Each key
 is judged on every decision, then `--show` / `--blocked` pick the rows: a flow allowed then and
 potentially blocked now is `changed` in the blocked sections, and a gone row shows only when its
 baseline records pass the filter. "New" means not seen in the baseline window at Explorer's
