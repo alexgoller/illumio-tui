@@ -655,3 +655,54 @@ pub fn model_with_marks(dir: &std::path::Path, marks: &str) -> Model {
     m.traffic.rebuild_views();
     m
 }
+
+/// A baseline for the rich fixture: without its first flow (so recent's
+/// is new), its 8443 flow (index 5) allowed then (changed), and one flow
+/// only it holds, 9999/tcp (gone). The rest the very same records.
+pub fn baseline_flows_rich() -> Vec<ResolvedFlow> {
+    let mut flows = fixture_flows_rich();
+    flows[5].policy_decision = pce::models::PolicyDecision::Allowed;
+    let mut gone = flows[1].clone();
+    gone.port = Some(9999);
+    gone.process_name = Some("legacy".into());
+    flows.remove(0);
+    flows.push(gone);
+    flows
+}
+
+/// `c`, Enter on the default `7d`, then the baseline's answer: `flows`,
+/// `truncated` or not. `m` holds a result with a range
+/// (`model_with_window`).
+pub fn compare_with(m: &mut Model, flows: Vec<ResolvedFlow>, truncated: bool) {
+    use crate::tui::msg::{BaselineOutcome, Cmd, Msg};
+    use crate::tui::update;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let key = |c| Msg::Key(KeyEvent::new(c, KeyModifiers::NONE));
+    update(m, key(KeyCode::Char('c')));
+    let cmds = update(m, key(KeyCode::Enter));
+    let Some(Cmd::RunBaseline {
+        seq,
+        filter,
+        start,
+        end,
+        ..
+    }) = cmds.into_iter().next()
+    else {
+        panic!("no baseline query: {:?}", m.status);
+    };
+    update(
+        m,
+        Msg::BaselineDone {
+            seq,
+            result: Ok(BaselineOutcome {
+                flows,
+                truncated,
+                incomplete: false,
+                hit: false,
+                filter,
+                start,
+                end,
+            }),
+        },
+    );
+}

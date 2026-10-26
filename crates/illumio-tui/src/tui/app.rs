@@ -514,6 +514,52 @@ impl Runtime {
         });
     }
 
+    /// `c`: compare mode's baseline (`Cmd::RunBaseline`) in its own cache
+    /// slot, answered with `Msg::BaselineDone`.
+    fn run_baseline(
+        &mut self,
+        seq: u64,
+        filter: TrafficFilter,
+        (start, end): (jiff::Timestamp, jiff::Timestamp),
+        cancel: CancellationToken,
+    ) {
+        self.model.busy += 1;
+        let (pce, tx) = self.task_ctx();
+        tokio::spawn(async move {
+            let (ptx, mut prx) = tokio::sync::mpsc::unbounded_channel();
+            let forward_tx = tx.clone();
+            let forward = tokio::spawn(async move {
+                while let Some(p) = prx.recv().await {
+                    let _ = forward_tx.send(Msg::QueryProgress { seq, progress: p });
+                }
+            });
+            let result = async {
+                let query = filter
+                    .to_query_between(start, end, &pce, CacheMode::Use)
+                    .await?;
+                let cached = pce
+                    .baseline_traffic(&query, CacheMode::Use, &cancel, Some(&ptx))
+                    .await?;
+                let idx = pce.name_index(CacheMode::Use).await?;
+                Ok::<_, pce::PceError>(crate::tui::msg::BaselineOutcome {
+                    flows: pce::traffic::resolve_flows(&cached.value.flows, &idx),
+                    truncated: cached.value.truncated,
+                    incomplete: cached.value.incomplete,
+                    hit: cached.hit,
+                    filter,
+                    start,
+                    end,
+                })
+            }
+            .await
+            .map_err(|e| e.to_string());
+            drop(ptx);
+            let _ = forward.await;
+            let _ = tx.send(Msg::BaselineDone { seq, result });
+            let _ = tx.send(Msg::Stats(pce.stats()));
+        });
+    }
+
     /// `D`: the result on screen against the draft policy (`Cmd::RunDraft`),
     /// answered with `Msg::DraftDone`. Through the cache's draft slot.
     fn run_draft(
@@ -1007,6 +1053,13 @@ impl Runtime {
                 hrefs,
                 cancel,
             } => self.run_draft(seq, filter, focus, hrefs, cancel),
+            Cmd::RunBaseline {
+                seq,
+                filter,
+                start,
+                end,
+                cancel,
+            } => self.run_baseline(seq, filter, (start, end), cancel),
             Cmd::LoadRuleSets { scope, mode } => {
                 self.model.busy += 1;
                 let (pce, tx) = self.task_ctx();
@@ -1232,6 +1285,7 @@ impl Runtime {
                 | Msg::QueryDone { .. }
                 | Msg::FocusedDone { .. }
                 | Msg::DraftDone { .. }
+                | Msg::BaselineDone { .. }
                 | Msg::RuleSetsLoaded { .. }
                 | Msg::DenyRulesLoaded { .. }
                 | Msg::PendingLoaded(_)

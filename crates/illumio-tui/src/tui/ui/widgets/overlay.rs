@@ -170,6 +170,25 @@ pub fn render_prompt(model: &Model, input: &str, f: &mut Frame, area: Rect) {
     f.render_widget(Paragraph::new(line).style(t.base()), r);
 }
 
+/// `c` on Traffic: the baseline's length on the bottom line, with its keys.
+pub fn render_baseline_prompt(model: &Model, input: &str, f: &mut Frame, area: Rect) {
+    let t = &model.theme;
+    let r = Rect::new(
+        area.x,
+        area.y + area.height.saturating_sub(1),
+        area.width,
+        1,
+    );
+    f.render_widget(Clear, r);
+    let line = Line::from(vec![
+        Span::styled("compare, baseline length: ", t.header_style()),
+        Span::styled(input.to_string(), t.base()),
+        Span::styled("▏", t.dim_style()),
+        Span::styled("  Ctrl-N/P step · Enter run · Esc", t.dim_style()),
+    ]);
+    f.render_widget(Paragraph::new(line).style(t.base()), r);
+}
+
 /// The `g` picker: a checkbox per key (the cursor row highlighted), `all
 /// labels`, the editable `keys:` line and the key hints. The rows scroll
 /// when the box is shorter than the list; the last three lines stay.
@@ -1523,7 +1542,7 @@ pub fn screen_hint_more(screen: Screen, view: TrafficView) -> &'static str {
         (Screen::Traffic, TrafficView::Aggregate) => {
             "+/- window  ]/[ cap  x mode  o service  d decision"
         }
-        (Screen::Traffic, _) => "+/- window  ]/[ cap  D draft  :fl saved",
+        (Screen::Traffic, _) => "+/- window  ]/[ cap  D draft  c compare  :fl saved",
         (Screen::Workloads, _) => "h/H/v health  :ven  E/m/o/u  c clear",
         (Screen::Events, _) => "S severity  r refresh  a auto  :fl saved",
         (Screen::Policy, _) => ":fl saved",

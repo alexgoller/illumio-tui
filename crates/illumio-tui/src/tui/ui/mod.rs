@@ -42,6 +42,9 @@ pub fn view(model: &Model, f: &mut Frame) {
         Overlay::None => {}
         Overlay::Help => widgets::overlay::render_help(model, f, area),
         Overlay::Prompt { input } => widgets::overlay::render_prompt(model, input, f, area),
+        Overlay::Baseline { input } => {
+            widgets::overlay::render_baseline_prompt(model, input, f, area)
+        }
         Overlay::GroupKeys(picker) => widgets::overlay::render_key_picker(model, picker, f, area),
         Overlay::AppPicker(p) => widgets::overlay::render_app_picker(model, p, f, area),
         Overlay::FilterPicker(p) => widgets::overlay::render_filter_picker(model, p, f, area),

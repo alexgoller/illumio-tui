@@ -108,12 +108,14 @@ impl<T> TableView<T> {
         self
     }
 
-    /// Other columns (a view gaining or losing one): the sort stays when
-    /// its column still exists.
+    /// Other columns (a view gaining or losing one): the sort stays on its
+    /// column (by title) when it still exists, wherever it moved.
     pub fn set_columns(&mut self, columns: Vec<Column<T>>) {
-        if self.sort.is_some_and(|(i, _)| i >= columns.len()) {
-            self.sort = None;
-        }
+        self.sort = self.sort.and_then(|(i, desc)| {
+            let title = self.columns.get(i)?.title;
+            let at = columns.iter().position(|c| c.title == title)?;
+            Some((at, desc))
+        });
         self.columns = columns;
         self.apply();
     }

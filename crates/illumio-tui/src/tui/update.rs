@@ -34,6 +34,7 @@ use std::time::Instant;
 mod app_overlay;
 mod bulk;
 mod cmdline;
+mod compare;
 #[cfg(test)]
 mod default_filter_tests;
 mod enforce;
@@ -65,6 +66,7 @@ pub use saved::apply_defaults;
 pub(crate) use workloads::apply_workload_labels;
 
 use app_overlay::*;
+use compare::*;
 use events::*;
 use explain::*;
 use keys::*;
@@ -349,7 +351,18 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 return Vec::new();
             }
             model.traffic.filter = f.clone();
-            start_query(model, f, CacheMode::Use)
+            // Another filter or window ends compare mode (a cap step does not).
+            let ended = model
+                .traffic
+                .compare
+                .as_ref()
+                .is_some_and(|c| !c.same_filter(&f))
+                && model.traffic.end_compare();
+            let cmds = start_query(model, f, CacheMode::Use);
+            if ended {
+                model.status = StatusLine::info(COMPARE_ENDED);
+            }
+            cmds
         }
         Msg::RunNow => {
             model.traffic.cancel_draft_run();
@@ -410,6 +423,16 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     });
                     let (n, truncated, cap) =
                         (data.flows.len(), data.truncated, data.filter.max_results);
+                    // Compare mode stays for its filter at any cap (`r`,
+                    // `B`); the baseline is not queried again.
+                    let other = model
+                        .traffic
+                        .compare
+                        .as_ref()
+                        .is_some_and(|c| !c.same_filter(&data.filter));
+                    if other {
+                        model.traffic.compare = None;
+                    }
                     model.traffic.data = Some(data);
                     model.traffic.drill = None;
                     model.traffic.treemap.zoom = None;
@@ -463,6 +486,8 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     let data = outcome_data(outcome);
                     let app = focus.app_text();
                     model.traffic.show_detail = false;
+                    // Compare mode is the unfocused result's.
+                    model.traffic.compare = None;
                     model.traffic.apply_focused(focus, queries, data);
                     let t = &model.traffic;
                     let (n, z) = (t.focus_flows().len(), t.squelched_hidden());
@@ -480,6 +505,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             Vec::new()
         }
         Msg::DraftDone { seq, result } => draft_done(model, seq, result),
+        Msg::BaselineDone { seq, result } => baseline_done(model, seq, result),
         // Draft rulesets while the Policy screen shows the active ones (a
         // `w` form's load, or the screen's own from before a `d`): held for
         // forms, the screen's list untouched.
@@ -1192,6 +1218,8 @@ mod app_tests;
 mod backfill_tests;
 #[cfg(test)]
 mod batch_tests;
+#[cfg(test)]
+mod compare_tests;
 #[cfg(test)]
 mod ctrl_u_tests;
 #[cfg(test)]

@@ -204,6 +204,12 @@ pub struct TrafficState {
     pub(crate) marks_notice: Option<StatusLine>,
     /// The startup line on marks expiring soon was considered.
     pub(crate) marks_announced: bool,
+    /// `c`: compare mode, the baseline and what it shows; `None` off.
+    pub compare: Option<CompareState>,
+    /// The baseline's flows as the views compare them: the focus keeps
+    /// them, squelch hides them as it hides the recent ones (unless `M`),
+    /// merged on their own. Computed at `rebuild_views`, never per draw.
+    baseline_view: Option<Vec<ResolvedFlow>>,
 }
 
 /// Both optional Mesh columns shown.
@@ -389,6 +395,8 @@ impl TrafficState {
             unsquelched: None,
             marks_notice: None,
             marks_announced: false,
+            compare: None,
+            baseline_view: None,
         }
     }
 
@@ -825,23 +833,39 @@ impl TrafficState {
         self.keys = self.resolve_keys();
         self.refresh_focused();
         self.refresh_marks();
-        let (shown, tree, mesh_rows, counts) = {
+        self.refresh_baseline();
+        let (shown, tree, mesh_rows, counts, compared) = {
             let keys = &self.keys;
             let flows = self.view_flows();
             let hits = self.marked.as_ref().map(|m| m.hits.as_slice());
             let drilled = |f: &ResolvedFlow| self.drill.as_ref().is_none_or(|d| d.matches(f, keys));
-            let shown: Vec<FlowRow> = flows
+            let changes = self
+                .baseline_view
+                .as_ref()
+                .map(|b| pce::traffic::compare_flows(flows, b));
+            let mut shown: Vec<FlowRow> = flows
                 .iter()
                 .enumerate()
                 .filter(|(_, f)| drilled(f))
                 .map(|(i, f)| FlowRow {
                     mark: hits.and_then(|h| h.get(i).copied().flatten()),
+                    change: changes.as_ref().map(|c| c.recent[i]),
                     ..FlowRow::new(f.clone(), keys)
                 })
                 .collect();
-            let mut tree = group_by_labels(flows, keys);
+            // Gone flows, under the drill too, with the baseline's values.
+            for (f, rc) in changes.into_iter().flat_map(|c| c.gone) {
+                if drilled(&f) {
+                    shown.push(FlowRow {
+                        change: Some(rc),
+                        ..FlowRow::new(f, keys)
+                    });
+                }
+            }
+            let tree = group_by_labels(flows, keys);
             let cols = self.mesh_cols;
             let mut mesh_rows = mesh(flows, keys, cols);
+            let mut tree = tree;
             let counts = self.marks_ctx().map(|(a, mv)| {
                 annotate_groups(&mut tree, &mv.marked, &a, |f| group_by_labels(f, keys));
                 let gone = annotate_mesh(&mut mesh_rows, &mv.marked, &a, |f| mesh(f, keys, cols));
@@ -852,12 +876,30 @@ impl TrafficState {
                     self.squelch(0, |_| true),
                 )
             });
-            (shown, tree, mesh_rows, counts)
+            let compared = self.baseline_view.as_ref().map(|b| {
+                let mesh_counts = pce::traffic::compare_mesh(&mut mesh_rows, &mesh(b, keys, cols));
+                let mut flow_counts = pce::traffic::CompareCounts::default();
+                for r in &shown {
+                    if let Some(c) = &r.change {
+                        flow_counts.add(c.change);
+                    }
+                }
+                (flow_counts, mesh_counts)
+            });
+            (shown, tree, mesh_rows, counts, compared)
         };
         if let (Some(mv), Some((flows, mesh, treemap))) = (self.marked.as_mut(), counts) {
             mv.flows = flows;
             mv.mesh = mesh;
             mv.treemap = treemap;
+        }
+        let (mut shown, mut mesh_rows) = (shown, mesh_rows);
+        if let (Some(cmp), Some((flows, mesh))) = (self.compare.as_mut(), compared) {
+            cmp.counts.flows = flows;
+            cmp.counts.mesh = mesh;
+            let show = cmp.show.set();
+            shown.retain(|r| show.keeps(r.change.as_ref()));
+            mesh_rows.retain(|r| show.keeps(r.change.as_ref()));
         }
         self.flows.set_rows(shown);
         self.treemap.groups = tree;
@@ -865,6 +907,34 @@ impl TrafficState {
         self.rebuild_pairs();
         self.rebuild_sections();
         self.relayout_treemap();
+    }
+
+    /// The baseline's flows the views compare with (`baseline_view`): the
+    /// focus and squelch applied as to the recent flows, merged on their
+    /// own (one row per record, never with the recent side).
+    fn refresh_baseline(&mut self) {
+        let Some(b) = self.compare.as_ref().and_then(|c| c.baseline.as_ref()) else {
+            self.baseline_view = None;
+            return;
+        };
+        let focused: Vec<ResolvedFlow> = match &self.focus {
+            Some(f) => b.flows.iter().filter(|x| f.keeps(x)).cloned().collect(),
+            None => b.flows.clone(),
+        };
+        let kept = match self.active_marks().filter(|a| !a.is_empty()) {
+            Some(a) => pce::marks::partition(&focused, &a, self.show_squelched)
+                .kept
+                .into_owned(),
+            None => focused,
+        };
+        let mut merged = Vec::with_capacity(kept.len());
+        pce::traffic::merge_flows(&mut merged, kept);
+        self.baseline_view = Some(merged);
+    }
+
+    /// Compare mode shows its `Δ` column (a baseline is loaded).
+    pub fn comparing(&self) -> bool {
+        self.compare.as_ref().is_some_and(|c| c.baseline.is_some())
     }
 
     /// The flows column of the tables that show `~N` (pairs, by service,
@@ -891,52 +961,82 @@ impl TrafficState {
 
     /// The `draft` columns while draft decisions are loaded, none
     /// otherwise; `fixed by draft` falls back to `all` without them.
+    /// The `Δ` columns too, first, in compare mode with a baseline.
     fn sync_draft_columns(&mut self) {
         let draft = self.draft_loaded();
+        let cmp = self.comparing();
         if !draft && self.apps_state.decisions == Decisions::FixedByDraft {
             self.apps_state.decisions = Decisions::All;
         }
-        if shows_draft(&self.flows) != draft {
-            self.flows.set_columns(with_draft(
-                if draft {
-                    make_room_for_draft(flow_columns())
-                } else {
-                    flow_columns()
-                },
-                draft_flow_column(),
-                draft,
-            ));
-            self.flows_grouped.set_columns(with_draft(
-                if draft {
-                    make_room_for_draft(flow_columns_of())
-                } else {
-                    flow_columns_of()
-                },
-                draft_flow_column_of(),
-                draft,
+        fn stale<T>(t: &TableView<T>, draft: bool, cmp: bool) -> bool {
+            shows_draft(t) != draft || shows_delta(t) != cmp
+        }
+        if stale(&self.flows, draft, cmp) {
+            self.flows.set_columns(with_delta(
+                with_draft(
+                    make_room_for_delta(
+                        if draft {
+                            make_room_for_draft(flow_columns())
+                        } else {
+                            flow_columns()
+                        },
+                        cmp,
+                    ),
+                    draft_flow_column(),
+                    draft,
+                ),
+                delta_flow_column(),
+                cmp,
             ));
         }
-        if shows_draft(&self.groups) != draft {
-            self.groups
-                .set_columns(with_draft(group_columns(), draft_group_column(), draft));
-            self.services.set_columns(with_draft(
-                service_group_columns(),
-                draft_group_column(),
-                draft,
+        if stale(&self.flows_grouped, draft, cmp) {
+            self.flows_grouped.set_columns(with_delta(
+                with_draft(
+                    make_room_for_delta(
+                        if draft {
+                            make_room_for_draft(flow_columns_of())
+                        } else {
+                            flow_columns_of()
+                        },
+                        cmp,
+                    ),
+                    draft_flow_column_of(),
+                    draft,
+                ),
+                delta_section_column(),
+                cmp,
             ));
         }
-        if shows_draft(&self.mesh) != draft {
-            self.mesh.set_columns(with_draft(
-                mesh_columns(self.mesh_cols),
-                draft_mesh_column(),
-                draft,
+        if stale(&self.groups, draft, cmp) {
+            self.groups.set_columns(with_delta(
+                with_draft(group_columns(), draft_group_column(), draft),
+                delta_group_column(),
+                cmp,
+            ));
+            self.services.set_columns(with_delta(
+                with_draft(service_group_columns(), draft_group_column(), draft),
+                delta_group_column(),
+                cmp,
             ));
         }
-        if shows_draft(&self.apps) != draft {
-            self.apps
-                .set_columns(with_draft(app_columns(), draft_section_column(), draft));
-            self.blocked
-                .set_columns(with_draft(blocked_columns(), draft_section_column(), draft));
+        if stale(&self.mesh, draft, cmp) {
+            self.mesh.set_columns(with_delta(
+                with_draft(mesh_columns(self.mesh_cols), draft_mesh_column(), draft),
+                delta_mesh_column(),
+                cmp,
+            ));
+        }
+        if stale(&self.apps, draft, cmp) {
+            self.apps.set_columns(with_delta(
+                with_draft(app_columns(), draft_section_column(), draft),
+                delta_section_column(),
+                cmp,
+            ));
+            self.blocked.set_columns(with_delta(
+                with_draft(blocked_columns(), draft_section_column(), draft),
+                delta_section_column(),
+                cmp,
+            ));
         }
     }
 
@@ -972,6 +1072,20 @@ impl TrafficState {
         if let (Some(mv), Some((pairs, services))) = (self.marked.as_mut(), counts) {
             mv.pairs = pairs;
             mv.services = services;
+        }
+        let (mut groups, mut services) = (groups, services);
+        if let (Some(cmp), Some(b)) = (self.compare.as_mut(), self.baseline_view.as_ref()) {
+            let (keys, d) = (&self.keys, self.apps_state.decisions);
+            let kept = d.kept(b);
+            cmp.counts.pairs =
+                pce::traffic::compare_groups(&mut groups, &group_by_labels(&kept, keys));
+            if self.apps_state.by_service {
+                cmp.counts.services =
+                    pce::traffic::compare_groups(&mut services, &group_by_service(&kept, keys));
+            }
+            let show = cmp.show.set();
+            pce::traffic::keep_changes(&mut groups, show, |g| g.change.as_ref());
+            pce::traffic::keep_changes(&mut services, show, |g| g.change.as_ref());
         }
         self.groups.set_rows(groups);
         self.services.set_rows(services);
@@ -1018,6 +1132,13 @@ impl TrafficState {
         if let Some(mv) = self.marked.as_mut() {
             mv.sections = sq;
         }
+        if let Some(b) = self.baseline_view.as_ref() {
+            let base = self.apps_sections(b);
+            if let Some(cmp) = self.compare.as_mut() {
+                cmp.counts.apps = pce::traffic::compare_sections(&mut sections, &base);
+                pce::traffic::keep_section_changes(&mut sections, cmp.show.set());
+            }
+        }
         self.apps_cache = sections;
         let rows = self.apps_rows(&self.apps_state.folded);
         self.apps.set_rows(rows);
@@ -1056,6 +1177,10 @@ impl TrafficState {
             mv.blocked = sq;
             mv.blocked_open = open;
             mv.accepted = accepted.values().sum();
+        }
+        if let (Some(cmp), Some(b)) = (self.compare.as_mut(), self.baseline_view.as_ref()) {
+            cmp.counts.blocked = pce::traffic::compare_sections(&mut sections, &blocked(b));
+            pce::traffic::keep_section_changes(&mut sections, cmp.show.set());
         }
         self.blocked_cache = (sections, accepted);
         let rows = self.blocked_rows(&self.blocked_folded);
@@ -1479,8 +1604,40 @@ impl TrafficState {
             cancel: cancel.clone(),
             focus: None,
             draft: false,
+            baseline: false,
         };
         (self.seq, cancel)
+    }
+
+    /// `start_query` for compare mode's baseline (`c`, `B` on a truncated
+    /// baseline): the result on screen stays.
+    pub fn start_baseline_run(&mut self, now: Instant) -> (u64, CancellationToken) {
+        let last_run = self.auto.last_run;
+        let started = self.start_query(now);
+        // Not a refresh of the result: the auto-refresh clock keeps its time.
+        self.auto.last_run = last_run;
+        if let QueryState::Running { baseline, .. } = &mut self.query {
+            *baseline = true;
+        }
+        started
+    }
+
+    /// The baseline query is on its way.
+    pub fn is_baseline_running(&self) -> bool {
+        matches!(self.query, QueryState::Running { baseline: true, .. })
+    }
+
+    /// Compare mode off (`C`, a filter or window change, a focused
+    /// result), a baseline run cancelled; whether it was on. Rebuilds.
+    pub fn end_compare(&mut self) -> bool {
+        if self.is_baseline_running() {
+            self.cancel_query();
+        }
+        let was = self.compare.take().is_some();
+        if was {
+            self.rebuild_views();
+        }
+        was
     }
 
     /// `start_query` for `D`: a draft re-evaluation of the result on

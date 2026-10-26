@@ -3623,3 +3623,84 @@ async fn a_switch_applies_the_new_profiles_defaults_and_sends_only_the_startup_s
     assert!(a.received_requests().await.unwrap_or_default().is_empty());
     assert_eq!(b.received_requests().await.unwrap().len(), 5);
 }
+
+/// Compare mode through the runtime (#77): `c` Enter runs the baseline
+/// over exactly the window before the result's start, in its own cache
+/// slot; `C` then `c` Enter again is a cache hit (no POST); `r` re-runs the
+/// recent query only, the baseline kept.
+#[tokio::test]
+async fn compare_runs_the_baseline_once_and_r_keeps_it() {
+    use illumio_tui::tui::filter::TrafficFilter;
+    use illumio_tui::tui::msg::Msg;
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    const QHREF: &str = "/orgs/5/traffic_flows/async_queries/q-1";
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/traffic_flows/async_queries"))
+        .respond_with(
+            ResponseTemplate::new(202).set_body_json(json!({"href": QHREF, "status": "queued"})),
+        )
+        .expect(3)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "completed", "result": {"href": format!("{QHREF}/download")}, "flows_count": 4})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}/download")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/traffic_flows.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .mount(&server)
+        .await;
+    let pce = pce_for(&server);
+    let mut m = model();
+    m.connection = Connection::Connected {
+        index: Some(pce.name_index(pce::CacheMode::Use).await.unwrap()),
+        index_age_secs: 0,
+    };
+    let (mut rt, tx) = Runtime::new(pce, m);
+    let mut f = TrafficFilter::defaults("1h", 50);
+    f.src = "app=shop".into();
+    tx.send(Msg::ApplyFilter(f)).unwrap();
+    let keys = [
+        (1200u64, KeyCode::Char('c')),
+        (10, KeyCode::Enter),
+        (1200, KeyCode::Char('C')),
+        (10, KeyCode::Char('c')),
+        (10, KeyCode::Enter),
+        (300, KeyCode::Char('r')),
+        (1200, KeyCode::Char('q')),
+    ];
+    let events = stream::iter(keys).then(|(ms, code)| async move {
+        tokio::time::sleep(Duration::from_millis(ms)).await;
+        Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
+    });
+    let model = run_loop(&mut rt, Box::pin(events), &mut |_| {}).await;
+    let cmp = model.traffic.compare.as_ref().expect("compare mode on");
+    let base = cmp.baseline.as_ref().expect("the baseline kept");
+    assert!(base.hit, "the second baseline came from the cache");
+    assert_eq!(base.flows.len(), 4);
+    let posts: Vec<serde_json::Value> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.method.as_str() == "POST")
+        .map(|r| serde_json::from_slice(&r.body).unwrap())
+        .collect();
+    assert_eq!(posts.len(), 3, "recent, baseline, recent again");
+    // The baseline ends exactly where the first recent query starts and
+    // spans the default 7 days; the same filter otherwise.
+    assert_eq!(posts[1]["end_date"], posts[0]["start_date"]);
+    let start: jiff::Timestamp = posts[1]["start_date"].as_str().unwrap().parse().unwrap();
+    let end: jiff::Timestamp = posts[1]["end_date"].as_str().unwrap().parse().unwrap();
+    assert_eq!(end.duration_since(start).as_secs(), 7 * 86400);
+    assert_eq!(posts[1]["sources"], posts[0]["sources"]);
+    assert_eq!(posts[1]["max_results"], 50);
+    server.verify().await;
+}

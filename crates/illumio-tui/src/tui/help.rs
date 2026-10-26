@@ -145,6 +145,19 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
                 "1 PUT on the query, polls, 1 download; no policy change",
             ),
             more("", "Esc cancels it; no known query: asks, then re-runs"),
+            key(
+                "c",
+                "compare with a baseline before the window (default 7d)",
+            ),
+            more("", "Ctrl-N Ctrl-P step its length; > 7d or cap > 10k asks"),
+            more("", "Δ: NEW CHG GONE (dim) · not in the Treemap"),
+            key("n / C", "show all · new · changed · gone / compare off"),
+            more(
+                "",
+                "r keeps the baseline; f, +, - end compare; B: either side",
+            ),
+            more("", "new: not in the baseline at Explorer's record level;"),
+            more("", "counts stay each side's lifetime counts, never diffed"),
             key("w", "draft allow rule from a blocked flow or row (writes)"),
             key(
                 "m",

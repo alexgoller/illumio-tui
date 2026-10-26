@@ -40,6 +40,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
+mod compare;
 mod events;
 mod flows;
 mod objects;
@@ -47,6 +48,7 @@ mod policy;
 mod traffic;
 mod workloads;
 
+pub use compare::*;
 pub use events::*;
 pub use flows::*;
 pub use objects::*;
@@ -204,6 +206,11 @@ pub enum Overlay {
     Prompt {
         input: String,
     },
+    /// `c` on Traffic: the baseline's length, one line (`7d`; Ctrl-N /
+    /// Ctrl-P step through the window steps).
+    Baseline {
+        input: String,
+    },
     FilterEditor(FilterEditor),
     /// `f` on Workloads: the label filter, one line.
     LabelFilter(LabelFilterEditor),
@@ -318,6 +325,7 @@ impl PartialEq for Overlay {
             | (Overlay::Matched, Overlay::Matched)
             | (Overlay::WhereUsed, Overlay::WhereUsed) => true,
             (Overlay::Prompt { input: a }, Overlay::Prompt { input: b })
+            | (Overlay::Baseline { input: a }, Overlay::Baseline { input: b })
             | (Overlay::Error(a), Overlay::Error(b)) => a == b,
             (Overlay::GroupKeys(a), Overlay::GroupKeys(b))
             | (Overlay::LabelKeys(a), Overlay::LabelKeys(b)) => a == b,
@@ -425,6 +433,14 @@ pub enum PendingAction {
         filter: TrafficFilter,
         focus: Option<pce::traffic::Focus>,
         hrefs: Vec<String>,
+    },
+    /// `c` (or `B` on a truncated baseline) past a cost threshold: the
+    /// baseline query, `filter` (its window the baseline's length) over
+    /// `[start, end)`.
+    RunBaseline {
+        filter: TrafficFilter,
+        start: jiff::Timestamp,
+        end: jiff::Timestamp,
     },
     /// `r` in the app overlay: the workloads and the rulesets again, past the cache.
     ReloadApp,

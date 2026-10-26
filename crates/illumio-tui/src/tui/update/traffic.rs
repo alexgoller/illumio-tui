@@ -454,6 +454,9 @@ pub(super) fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         }
         KeyCode::Char('r') => return update(model, Msg::RunNow),
         KeyCode::Char('D') => return draft_key(model),
+        KeyCode::Char('c') => return compare_key(model),
+        KeyCode::Char('C') => leave_compare(model),
+        KeyCode::Char('n') => cycle_changes(model),
         KeyCode::Char('+') => return widen_window(model),
         KeyCode::Char('B') => return backfill_key(model),
         KeyCode::Char('-') => return narrow_window(model),
@@ -1017,6 +1020,9 @@ pub(super) fn backfill_key(model: &mut Model) -> Vec<Cmd> {
         return Vec::new();
     };
     if !d.truncated {
+        if let Some(cmds) = backfill_baseline(model) {
+            return cmds;
+        }
         model.status = StatusLine::info("nothing to backfill: the result is complete");
         return Vec::new();
     }
@@ -1128,6 +1134,7 @@ pub(super) fn narrow_window(model: &mut Model) -> Vec<Cmd> {
         ));
         return Vec::new();
     };
+    let ended = model.traffic.end_compare();
     let t = &mut model.traffic;
     t.cancel_query();
     t.filter.window = step.to_string();
@@ -1174,6 +1181,9 @@ pub(super) fn narrow_window(model: &mut Model) -> Vec<Cmd> {
         Some(n) => format!("window {step} · {n} older flows dropped"),
         None => format!("window {step} · r runs it"),
     });
+    if ended {
+        model.status = StatusLine::info(format!("{} · {COMPARE_ENDED}", model.status.text));
+    }
     Vec::new()
 }
 

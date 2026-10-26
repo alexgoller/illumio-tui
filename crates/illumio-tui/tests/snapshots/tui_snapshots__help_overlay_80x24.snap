@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ Keys · Flows ─────────────────────────────────────────────────── 1-21 of 32 ╮
+╭ Keys · Flows ─────────────────────────────────────────────────── 1-21 of 34 ╮
 │FLOWS                                                                        │
 │x / X          flat · by src app · by dst app · back (focused: X: direction) │╮
 │Enter          the flow's detail                                             ││
@@ -22,7 +22,7 @@ expression: out
 │F / X          focus on the row's app (again: other side) · in/out/both      ││
 │A              app overlay: peers, policy, workloads                         ││
 │D              draft decision per flow (PCE draft view; again: clear)        ││
-│w              draft allow rule from a blocked flow or row (writes)          ││
-│m              mark the row: squelch · reviewed · critical … (marks.toml)    ││
+│c              compare with a baseline before the window (default 7d)        ││
+│n / C          show all · new · changed · gone / compare off                 ││
 │more: Commands · App-to-app · Blocked · Mesh · Treemap · Marks +11           │╯
 ╰─────────────────────────── Tab next · S-Tab prev · a all · j/k scroll · Esc ╯

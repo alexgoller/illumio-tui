@@ -31,6 +31,21 @@ pub struct QueryOutcome {
     pub hrefs: Vec<String>,
 }
 
+/// Compare mode's baseline answer (`Cmd::RunBaseline`).
+#[derive(Debug)]
+pub struct BaselineOutcome {
+    pub flows: Vec<ResolvedFlow>,
+    pub truncated: bool,
+    pub incomplete: bool,
+    pub hit: bool,
+    /// The filter it ran with: the recent one, its window the baseline's
+    /// length, its cap the baseline's.
+    pub filter: TrafficFilter,
+    /// The window it covered: `[recent start − length, recent start)`.
+    pub start: jiff::Timestamp,
+    pub end: jiff::Timestamp,
+}
+
 /// A focused re-query's answer: the merged flows (as one query's outcome),
 /// the focus they were queried for and the number of Explorer queries.
 #[derive(Debug)]
@@ -124,6 +139,11 @@ pub enum Msg {
     FocusedDone {
         seq: u64,
         result: Result<FocusedOutcome, String>,
+    },
+    /// The answer to `Cmd::RunBaseline`.
+    BaselineDone {
+        seq: u64,
+        result: Result<BaselineOutcome, String>,
     },
     /// The answer to `Cmd::RunDraft`.
     DraftDone {
@@ -250,6 +270,17 @@ pub enum Cmd {
         filter: TrafficFilter,
         focus: Focus,
         mode: CacheMode,
+        cancel: CancellationToken,
+    },
+    /// `c`: compare mode's baseline, `filter` over exactly `[start, end)`
+    /// (the window before the recent result's start), in the cache's own
+    /// `baseline` slot: the same filter and window again is a hit.
+    /// Answered with `Msg::BaselineDone`.
+    RunBaseline {
+        seq: u64,
+        filter: TrafficFilter,
+        start: jiff::Timestamp,
+        end: jiff::Timestamp,
         cancel: CancellationToken,
     },
     /// `D`: the result on screen evaluated against the draft policy:
@@ -427,6 +458,22 @@ impl PartialEq for Cmd {
                     ..
                 },
             ) => a == b && fa == fb && xa == xb && ma == mb,
+            (
+                Cmd::RunBaseline {
+                    seq: a,
+                    filter: fa,
+                    start: sa,
+                    end: ea,
+                    ..
+                },
+                Cmd::RunBaseline {
+                    seq: b,
+                    filter: fb,
+                    start: sb,
+                    end: eb,
+                    ..
+                },
+            ) => a == b && fa == fb && sa == sb && ea == eb,
             (
                 Cmd::RunDraft {
                     seq: a,

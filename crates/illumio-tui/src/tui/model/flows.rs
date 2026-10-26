@@ -17,6 +17,8 @@ pub enum QueryState {
         /// of that result (a new query, a focus change, a cap step, a
         /// profile switch) or `Esc` cancels it.
         draft: bool,
+        /// `c`: compare mode's baseline query; `C` cancels it.
+        baseline: bool,
     },
     Failed(String),
 }
@@ -86,6 +88,8 @@ pub struct FlowRow {
     pub dst_group: Arc<str>,
     /// The flow's winning mark, while marks are active.
     pub mark: Option<Hit>,
+    /// Compare mode: the flow's change against the baseline.
+    pub change: Option<pce::traffic::RowChange>,
 }
 
 impl FlowRow {
@@ -95,6 +99,7 @@ impl FlowRow {
             dst_group: group_text(&flow.dst, keys).into(),
             flow: Arc::new(flow),
             mark: None,
+            change: None,
         }
     }
 }
@@ -1182,6 +1187,15 @@ impl SectionRow {
         match &self.kind {
             RowKind::Peer { direction, row, .. } => Some((*direction, row)),
             RowKind::Header { .. } | RowKind::Flow { .. } => None,
+        }
+    }
+
+    /// Compare mode: a peer's or a flow's change; `None` on a header.
+    pub fn change(&self) -> Option<&pce::traffic::RowChange> {
+        match &self.kind {
+            RowKind::Peer { row, .. } => row.change.as_ref(),
+            RowKind::Flow { row } => row.change.as_ref(),
+            RowKind::Header { .. } => None,
         }
     }
 

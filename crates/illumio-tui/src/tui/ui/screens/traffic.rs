@@ -1,5 +1,7 @@
 //! The Traffic screen: filter bar, result stats, flow table and detail pane.
-use crate::tui::model::{By, Model, QueryState, SectionRow, TrafficView, TreemapState};
+use crate::tui::model::{
+    By, Model, QueryState, SectionRow, TrafficView, TreemapState, is_gone as gone,
+};
 use crate::tui::table::TableView;
 use crate::tui::ui::theme::Theme;
 use crate::tui::ui::widgets::bars;
@@ -176,7 +178,21 @@ fn result_meta(model: &Model) -> String {
 fn render_stats(model: &Model, f: &mut Frame, area: Rect) {
     let t = &model.theme;
     let meta = query_meta(model);
-    let block = panel("Result", &meta, t, false);
+    // Compare mode leads the header; a truncated side in the warning
+    // colour, in place of the result's own meta (the line below counts).
+    let block = match model.traffic.compare_meta() {
+        Some(cmp) => {
+            let spans = match model.traffic.compare_warning() {
+                Some(w) => vec![
+                    Span::styled(format!("{cmp} · "), t.dim_style()),
+                    Span::styled(w, Style::new().fg(t.warn)),
+                ],
+                None => vec![Span::styled(format!("{cmp} · {meta}"), t.dim_style())],
+            };
+            panel_spans("Result", spans, t, false)
+        }
+        None => panel("Result", &meta, t, false),
+    };
     let inner = block.inner(area);
     f.render_widget(block, area);
     let Some(d) = &model.traffic.data else {
@@ -284,8 +300,11 @@ fn render_flows(model: &Model, f: &mut Frame, area: Rect) {
         };
     }
     let theme = t.clone();
-    // A flow whose verdict the draft changes is drawn in its draft colour, bold.
-    let style = move |fl: &ResolvedFlow| match fl.draft_change() {
+    let dim = t.dim_style();
+    // A flow whose verdict the draft changes is drawn in its draft colour,
+    // bold; a gone one (compare mode) dim.
+    let style = move |fl: &crate::tui::model::FlowRow| match fl.draft_change() {
+        _ if gone(fl.change.as_ref()) => dim,
         Some(d) => theme
             .decision_style(d.class())
             .add_modifier(ratatui::style::Modifier::BOLD),
@@ -299,13 +318,13 @@ fn render_flows(model: &Model, f: &mut Frame, area: Rect) {
             &title,
             &meta,
             &tr.flows_grouped,
-            &move |r| r.flow().map_or_else(Style::new, |fl| style(fl)),
+            &move |r| r.flow().map_or_else(Style::new, &style),
         );
         return;
     }
     let title = unit_title(&title, &meta, area.width);
     let block = panel(&title, &meta, t, true);
-    crate::tui::ui::widgets::table::render(f, area, &tr.flows, t, block, &move |fl| style(fl));
+    crate::tui::ui::widgets::table::render(f, area, &tr.flows, t, block, &style);
 }
 
 /// The count unit beside a traffic table's title, where it fits.
@@ -392,9 +411,10 @@ fn render_groups(model: &Model, f: &mut Frame, area: Rect) {
             TrafficView::Aggregate.title(),
             &meta,
             &model.traffic.apps,
-            &move |r| {
-                r.peer()
-                    .map_or_else(Style::new, |(_, p)| theme.decision_style(p.dominant()))
+            &move |r| match r.peer() {
+                Some((_, p)) if gone(p.change.as_ref()) => theme.dim_style(),
+                Some((_, p)) => theme.decision_style(p.dominant()),
+                None => Style::new(),
             },
         );
         return;
@@ -410,7 +430,11 @@ fn render_groups(model: &Model, f: &mut Frame, area: Rect) {
     let block = panel(&title, &meta, t, true);
     let theme = t.clone();
     crate::tui::ui::widgets::table::render(f, area, table, t, block, &move |g| {
-        theme.decision_style(g.dominant())
+        if gone(g.change.as_ref()) {
+            theme.dim_style()
+        } else {
+            theme.decision_style(g.dominant())
+        }
     });
 }
 
@@ -433,7 +457,11 @@ fn render_mesh(model: &Model, f: &mut Frame, area: Rect) {
     let block = panel(&title, &meta, t, true);
     let theme = t.clone();
     crate::tui::ui::widgets::table::render(f, area, &model.traffic.mesh, t, block, &move |r| {
-        theme.decision_style(r.dominant())
+        if gone(r.change.as_ref()) {
+            theme.dim_style()
+        } else {
+            theme.decision_style(r.dominant())
+        }
     });
 }
 
@@ -587,6 +615,7 @@ fn draw_fill(
 fn render_blocked(model: &Model, f: &mut Frame, area: Rect) {
     let meta = view_meta(model, "in", &model.traffic.blocked);
     let bad = Style::new().fg(model.theme.bad);
+    let dim = model.theme.dim_style();
     render_sections(
         model,
         f,
@@ -594,7 +623,7 @@ fn render_blocked(model: &Model, f: &mut Frame, area: Rect) {
         TrafficView::Blocked.title(),
         &meta,
         &model.traffic.blocked,
-        &move |_| bad,
+        &move |r| if gone(r.change()) { dim } else { bad },
     );
 }
 
@@ -650,16 +679,17 @@ fn labels_line(e: &ResolvedEndpoint, order: &KeyOrder) -> String {
 /// or stacked rows.
 fn render_detail(model: &Model, f: &mut Frame, area: Rect, columns: bool) {
     let t = &model.theme;
-    let block = panel(
-        "Detail",
-        if model.traffic.show_detail {
-            "Enter hides"
-        } else {
-            "Enter shows"
-        },
-        t,
-        false,
-    );
+    let toggle = if model.traffic.show_detail {
+        "Enter hides"
+    } else {
+        "Enter shows"
+    };
+    // Compare mode: the selected flow's change (`allowed→pot.blocked`).
+    let meta = match model.traffic.selected_flow().and_then(|r| r.change) {
+        Some(c) => format!("vs baseline: {} · {toggle}", c.short_text()),
+        None => toggle.to_string(),
+    };
+    let block = panel("Detail", &meta, t, false);
     // A Flows section's header: what it holds and what the keys do.
     if let Some(line) = model
         .traffic

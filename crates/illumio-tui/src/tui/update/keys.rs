@@ -128,6 +128,7 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             }
             _ => Vec::new(),
         },
+        Overlay::Baseline { input } => baseline_prompt_key(model, input, k),
         Overlay::GroupKeys(picker) => {
             match picker.key(k) {
                 PickerOutcome::Open(p) => model.overlay = Overlay::GroupKeys(p),
@@ -254,6 +255,9 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 match action {
                     PendingAction::RunQuery(f) => update(model, Msg::ApplyFilter(f)),
                     PendingAction::RunNow(f) => run_now(model, f),
+                    PendingAction::RunBaseline { filter, start, end } => {
+                        start_baseline(model, filter, start, end)
+                    }
                     PendingAction::LoadLabelUsage => load_label_usage(model),
                     PendingAction::RunFocused(f, focus, mode) => {
                         start_focused(model, f, focus, mode)

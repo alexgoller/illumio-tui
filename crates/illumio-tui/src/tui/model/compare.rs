@@ -1,0 +1,253 @@
+//! Compare mode on the Traffic screen (`c`): the baseline result, which
+//! rows each view shows (`n`), the counts the Result header names, and the
+//! `Δ` column of every view but the Treemap.
+use super::*;
+use pce::traffic::{Change, ChangeSet, CompareCounts, RowChange};
+
+/// `n`: every row, or one change only.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ShowChanges {
+    #[default]
+    All,
+    New,
+    Changed,
+    Gone,
+}
+
+impl ShowChanges {
+    /// `n`: all → new → changed → gone → all.
+    pub fn next(self) -> Self {
+        match self {
+            ShowChanges::All => ShowChanges::New,
+            ShowChanges::New => ShowChanges::Changed,
+            ShowChanges::Changed => ShowChanges::Gone,
+            ShowChanges::Gone => ShowChanges::All,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ShowChanges::All => "all",
+            ShowChanges::New => "new",
+            ShowChanges::Changed => "changed",
+            ShowChanges::Gone => "gone",
+        }
+    }
+
+    pub fn set(self) -> ChangeSet {
+        match self {
+            ShowChanges::All => ChangeSet::ALL,
+            ShowChanges::New => ChangeSet::of(&[Change::New]),
+            ShowChanges::Changed => ChangeSet::of(&[Change::Changed]),
+            ShowChanges::Gone => ChangeSet::of(&[Change::Gone]),
+        }
+    }
+}
+
+/// The baseline's answer as loaded.
+#[derive(Debug, Clone)]
+pub struct BaselineData {
+    pub flows: Vec<ResolvedFlow>,
+    pub truncated: bool,
+    pub incomplete: bool,
+    pub hit: bool,
+    /// The filter it ran with (its cap: `B` raises it).
+    pub filter: TrafficFilter,
+    /// The window it covered: `[recent start − length, recent start)`.
+    pub range: Range,
+}
+
+/// The rows per change of each view, before `n`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ViewCounts {
+    pub flows: CompareCounts,
+    pub pairs: CompareCounts,
+    pub services: CompareCounts,
+    pub apps: CompareCounts,
+    pub mesh: CompareCounts,
+    pub blocked: CompareCounts,
+}
+
+/// Compare mode: on from `c` until `C`, a filter or window change, or a
+/// focused result. The baseline is queried only by `c` (and `B` on a
+/// truncated one); `r` keeps it.
+#[derive(Debug, Clone)]
+pub struct CompareState {
+    /// The baseline's length as typed (`7d`).
+    pub length: String,
+    /// The filter compare mode is for, whatever its cap: another one ends
+    /// it.
+    pub filter: TrafficFilter,
+    /// `None` while the baseline query runs.
+    pub baseline: Option<BaselineData>,
+    pub show: ShowChanges,
+    pub counts: ViewCounts,
+}
+
+impl CompareState {
+    /// Whether `f` is the filter compare mode is for (any cap).
+    pub fn same_filter(&self, f: &TrafficFilter) -> bool {
+        TrafficFilter {
+            max_results: self.filter.max_results,
+            ..f.clone()
+        } == self.filter
+    }
+}
+
+/// The title of the column every view but the Treemap gains in compare
+/// mode.
+pub const DELTA_COLUMN: &str = "Δ";
+
+fn delta_cell(c: Option<&RowChange>) -> String {
+    c.map(|c| c.change.tag().to_string()).unwrap_or_default()
+}
+
+fn delta_key(c: Option<&RowChange>) -> SortKey {
+    SortKey::Text(c.map(|c| c.change.as_str().to_string()).unwrap_or_default())
+}
+
+/// `:export`'s cell: `allowed→potentially_blocked` for a changed row, else
+/// the change.
+fn delta_full(c: Option<&RowChange>) -> String {
+    c.map(RowChange::text).unwrap_or_default()
+}
+
+/// A `Δ` column over `change`.
+macro_rules! delta_column {
+    ($t:ty, $change:expr) => {
+        Column::<$t> {
+            title: DELTA_COLUMN,
+            width: 4,
+            cell: |r| delta_cell($change(r)),
+            key: |r| delta_key($change(r)),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 4,
+            full_title: Some("change"),
+            full: Some(|r| delta_full($change(r))),
+        }
+    };
+}
+
+fn flow_change(r: &FlowRow) -> Option<&RowChange> {
+    r.change.as_ref()
+}
+
+fn section_change(r: &SectionRow) -> Option<&RowChange> {
+    r.change()
+}
+
+fn group_change(g: &FlowGroup) -> Option<&RowChange> {
+    g.change.as_ref()
+}
+
+fn mesh_change(r: &MeshRow) -> Option<&RowChange> {
+    r.change.as_ref()
+}
+
+pub fn delta_flow_column() -> Column<FlowRow> {
+    delta_column!(FlowRow, flow_change)
+}
+
+/// Sections' rows: a peer's change, a flow's (Flows by app); none on a
+/// header.
+pub fn delta_section_column() -> Column<SectionRow> {
+    delta_column!(SectionRow, section_change)
+}
+
+pub fn delta_group_column() -> Column<FlowGroup> {
+    delta_column!(FlowGroup, group_change)
+}
+
+pub fn delta_mesh_column() -> Column<MeshRow> {
+    delta_column!(MeshRow, mesh_change)
+}
+
+/// The Flows columns with `src` and `dst` narrowed to make room for the
+/// `Δ` column (5 cells with its gap).
+pub(super) fn make_room_for_delta<T>(mut cols: Vec<Column<T>>, on: bool) -> Vec<Column<T>> {
+    if on {
+        for c in &mut cols {
+            if matches!(c.title, "src" | "dst") {
+                c.width = c.width.saturating_sub(3);
+            }
+        }
+    }
+    cols
+}
+
+/// `cols` with `delta` first when `on`.
+pub(super) fn with_delta<T>(
+    mut cols: Vec<Column<T>>,
+    delta: Column<T>,
+    on: bool,
+) -> Vec<Column<T>> {
+    if on {
+        cols.insert(0, delta);
+    }
+    cols
+}
+
+/// Whether `table` shows the `Δ` column.
+pub(super) fn shows_delta<T>(table: &TableView<T>) -> bool {
+    table
+        .columns
+        .first()
+        .is_some_and(|c| c.title == DELTA_COLUMN)
+}
+
+/// A gone row: drawn dim, with the baseline's values.
+pub fn is_gone(c: Option<&RowChange>) -> bool {
+    c.is_some_and(|c| c.change == Change::Gone)
+}
+
+impl TrafficState {
+    /// The rows per change of the view on screen; `None` on the Treemap
+    /// (it has no `Δ`).
+    pub fn view_counts(&self) -> Option<CompareCounts> {
+        let c = &self.compare.as_ref()?.counts;
+        Some(match self.view {
+            TrafficView::Flows => c.flows,
+            TrafficView::Aggregate if self.apps_state.by != By::Pairs => c.apps,
+            TrafficView::Aggregate if self.apps_state.by_service => c.services,
+            TrafficView::Aggregate => c.pairs,
+            TrafficView::Mesh => c.mesh,
+            TrafficView::Blocked => c.blocked,
+            TrafficView::Treemap => return None,
+        })
+    }
+
+    /// The Result header's compare part: `vs 7d before · 12 new · 3
+    /// changed · 5 gone` (`· gone only` while `n` narrows), `vs 7d before
+    /// · baseline running`, or on the Treemap `vs 7d before · no Δ here`.
+    pub fn compare_meta(&self) -> Option<String> {
+        let cmp = self.compare.as_ref()?;
+        let head = format!("vs {} before", cmp.length);
+        if cmp.baseline.is_none() {
+            return Some(format!("{head} · baseline running"));
+        }
+        let Some(counts) = self.view_counts() else {
+            return Some(format!("{head} · no Δ here"));
+        };
+        let mut s = format!("{head} · {}", counts.text());
+        if cmp.show != ShowChanges::All {
+            s.push_str(&format!(" · {} only", cmp.show.label()));
+        }
+        Some(s)
+    }
+
+    /// `baseline truncated: new/gone over-report` (or `recent`, or both)
+    /// while compare mode has a truncated side.
+    pub fn compare_warning(&self) -> Option<String> {
+        let b = self.compare.as_ref()?.baseline.as_ref()?;
+        let recent = self.data.as_ref().is_some_and(|d| d.truncated);
+        let side = match (recent, b.truncated) {
+            (true, true) => "recent and baseline",
+            (true, false) => "recent",
+            (false, true) => "baseline",
+            (false, false) => return None,
+        };
+        Some(format!("{side} truncated: new/gone over-report"))
+    }
+}

@@ -1,0 +1,34 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: "render_to_string(&m, 120, 30)"
+---
+ illumio-tui pce.example · org 5 ●                                                                api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭ Filters ─────────────────────────────────────────────────────────────────────────── window 1d · cap 1000 · unbounded ╮
+│window 1d  src *  dst *  svc *  decision all                                                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭ Result ───────── vs 7d before · 1 new · 1 changed · 1 gone · changed only · baseline truncated: new/gone over-report ╮
+│30 flows allowed 15 pot.blocked 7 blocked 7  █████████████████████████████████████████████████████████████████████████│
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭ Flows · conns: lifetime ─────────────────────────────────────────────────────────────────────────────────────────────╮
+│  Δ    src              src group          dst              dst group          service    conns   decision            │
+│▸ CHG  crm-web-p.exampl crm/prod           erp-api-p.exampl erp/prod           8443/tcp        35 potentially_blocked │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭ Detail ────────────────────────────────────────────────────────────── vs baseline: allowed→pot.blocked · Enter shows ╮
+│select a flow and press Enter                                                                                         │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+compare: changed rows                                 f filter  r run  a auto  v view  g group  / search  : cmd  ? help

@@ -2,15 +2,15 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
-╭ Keys · Flows ────────────────────────────────────────────────── 12-32 of 32 ╮
-│f              edit filter: window src dst svc decision transmission         │
-│+ / -          widen (re-runs the window) / narrow (no request)              │╮
-│B              re-run a truncated result at a larger cap                     ││
-│] / [          raise / lower the result cap (re-runs the query)              │╯
-│g              pick the label keys every view groups by                      │╮
-│F / X          focus on the row's app (again: other side) · in/out/both      ││
-│A              app overlay: peers, policy, workloads                         │╯
-│D              draft decision per flow (PCE draft view; again: clear)        │╮
+╭ Keys · Flows ────────────────────────────────────────────────── 14-34 of 34 ╮
+│B              re-run a truncated result at a larger cap                     │
+│] / [          raise / lower the result cap (re-runs the query)              │╮
+│g              pick the label keys every view groups by                      ││
+│F / X          focus on the row's app (again: other side) · in/out/both      │╯
+│A              app overlay: peers, policy, workloads                         │╮
+│D              draft decision per flow (PCE draft view; again: clear)        ││
+│c              compare with a baseline before the window (default 7d)        │╯
+│n / C          show all · new · changed · gone / compare off                 │╮
 │w              draft allow rule from a blocked flow or row (writes)          ││
 │m              mark the row: squelch · reviewed · critical … (marks.toml)    ││
 │M              show or hide squelched rows (~)                               ││

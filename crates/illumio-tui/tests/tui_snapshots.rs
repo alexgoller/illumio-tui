@@ -3536,3 +3536,39 @@ fn where_used_overlay_pairing_profile_120x40_80x24() {
     assert!(out.contains("shop-prod · locked · disabled"), "{out}");
     insta::assert_snapshot!("where_used_overlay_pairing_80x24", out);
 }
+
+/// Compare mode (#77): the `Δ` column and the header's counts in Flows,
+/// App-to-app, Mesh and Blocked, at 80x24 and 160x48; the prompt; a
+/// truncated baseline's warning.
+#[test]
+fn traffic_compare_80x24_and_160x48() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use illumio_tui::tui::msg::Msg;
+    use illumio_tui::tui::test_support::{baseline_flows_rich, compare_with};
+    use illumio_tui::tui::update;
+    let key = |c| Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+    let mut m = model_with_window("1d");
+    update(&mut m, key('c'));
+    insta::assert_snapshot!("traffic_compare_prompt_80x24", render_to_string(&m, 80, 24));
+    let mut m = model_with_window("1d");
+    compare_with(&mut m, baseline_flows_rich(), false);
+    for view in ["flows", "pairs", "mesh", "blocked"] {
+        insta::assert_snapshot!(
+            format!("traffic_compare_{view}_80x24"),
+            render_to_string(&m, 80, 24)
+        );
+        insta::assert_snapshot!(
+            format!("traffic_compare_{view}_160x48"),
+            render_to_string(&m, 160, 48)
+        );
+        update(&mut m, key('v'));
+    }
+    let mut m = model_with_window("1d");
+    compare_with(&mut m, baseline_flows_rich(), true);
+    update(&mut m, key('n'));
+    update(&mut m, key('n'));
+    insta::assert_snapshot!(
+        "traffic_compare_truncated_changed_120x30",
+        render_to_string(&m, 120, 30)
+    );
+}

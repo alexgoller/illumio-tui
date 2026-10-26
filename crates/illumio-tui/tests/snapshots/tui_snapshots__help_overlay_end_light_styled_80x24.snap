@@ -2,23 +2,23 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: "render_styled(&m, 80, 24)"
 ---
-╭ Keys · Flows ────────────────────────────────────────────────── 12-32 of 32 ╮
+╭ Keys · Flows ────────────────────────────────────────────────── 14-34 of 34 ╮
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @2:Rgb(150, 50, 180)/Rgb(250, 250, 247) @14:Rgb(0, 102, 204)/Rgb(250, 250, 247) @66:Rgb(120, 124, 136)/Rgb(250, 250, 247) @77:Rgb(0, 102, 204)/Rgb(250, 250, 247) @79:Rgb(120, 124, 136)/Rgb(250, 250, 247)
-│f              edit filter: window src dst svc decision transmission         │
+│B              re-run a truncated result at a larger cap                     │
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @16:Rgb(40, 42, 48)/Rgb(250, 250, 247) @78:Rgb(0, 102, 204)/Rgb(250, 250, 247) @79:Rgb(120, 124, 136)/Rgb(250, 250, 247)
-│+ / -          widen (re-runs the window) / narrow (no request)              │╮
+│] / [          raise / lower the result cap (re-runs the query)              │╮
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @16:Rgb(40, 42, 48)/Rgb(250, 250, 247) @78:Rgb(0, 102, 204)/Rgb(250, 250, 247) @79:Rgb(180, 184, 196)/Rgb(250, 250, 247)
-│B              re-run a truncated result at a larger cap                     ││
+│g              pick the label keys every view groups by                      ││
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @16:Rgb(40, 42, 48)/Rgb(250, 250, 247) @78:Rgb(0, 102, 204)/Rgb(250, 250, 247) @79:Rgb(180, 184, 196)/Rgb(250, 250, 247)
-│] / [          raise / lower the result cap (re-runs the query)              │╯
+│F / X          focus on the row's app (again: other side) · in/out/both      │╯
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @16:Rgb(40, 42, 48)/Rgb(250, 250, 247) @78:Rgb(0, 102, 204)/Rgb(250, 250, 247) @79:Rgb(180, 184, 196)/Rgb(250, 250, 247)
-│g              pick the label keys every view groups by                      │╮
+│A              app overlay: peers, policy, workloads                         │╮
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @16:Rgb(40, 42, 48)/Rgb(250, 250, 247) @78:Rgb(0, 102, 204)/Rgb(250, 250, 247) @79:Rgb(180, 184, 196)/Rgb(250, 250, 247)
-│F / X          focus on the row's app (again: other side) · in/out/both      ││
+│D              draft decision per flow (PCE draft view; again: clear)        ││
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @16:Rgb(40, 42, 48)/Rgb(250, 250, 247) @78:Rgb(0, 102, 204)/Rgb(250, 250, 247) @79:Rgb(180, 184, 196)/Rgb(250, 250, 247)
-│A              app overlay: peers, policy, workloads                         │╯
+│c              compare with a baseline before the window (default 7d)        │╯
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @16:Rgb(40, 42, 48)/Rgb(250, 250, 247) @78:Rgb(0, 102, 204)/Rgb(250, 250, 247) @79:Rgb(180, 184, 196)/Rgb(250, 250, 247)
-│D              draft decision per flow (PCE draft view; again: clear)        │╮
+│n / C          show all · new · changed · gone / compare off                 │╮
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @16:Rgb(40, 42, 48)/Rgb(250, 250, 247) @78:Rgb(0, 102, 204)/Rgb(250, 250, 247)
 │w              draft allow rule from a blocked flow or row (writes)          ││
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @16:Rgb(40, 42, 48)/Rgb(250, 250, 247) @78:Rgb(0, 102, 204)/Rgb(250, 250, 247)

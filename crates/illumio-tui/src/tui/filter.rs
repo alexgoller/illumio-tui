@@ -291,6 +291,19 @@ impl TrafficFilter {
             .await
     }
 
+    /// `to_query` over exactly `[start, end)` instead of the window ending
+    /// now: compare mode's baseline.
+    pub async fn to_query_between(
+        &self,
+        start: jiff::Timestamp,
+        end: jiff::Timestamp,
+        pce: &Pce,
+        mode: CacheMode,
+    ) -> pce::Result<TrafficQuery> {
+        self.build(TrafficQueryBuilder::between(start, end), pce, mode)
+            .await
+    }
+
     async fn build(
         &self,
         mut b: TrafficQueryBuilder,
