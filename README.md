@@ -411,7 +411,7 @@ PCE: https://alexgoller.github.io/illumio-tui/#workflows
 9. **What is new since? (compare, `c`).** `c` on Traffic asks for a baseline length (`7d`;
    `Ctrl-N` / `Ctrl-P` step) and queries the same filter over the window just before the
    result's start. Every view but the Treemap marks its rows `NEW`, `CHG` (another set of
-   decisions, its decision cell saying `allowed→pot.blocked`) or `GONE` (dim, only in the
+   decisions, the `was→now` column saying `allow→pot.bl`) or `GONE` (dim, only in the
    baseline), the Result header counts the rows the view shows: `vs 7d before · 12 new · 3
    changed · 5 gone`, `n` shows only one kind, `C`
    leaves. Change checks, new talkers, new blocked flows (Blocked view). CLI:
@@ -699,10 +699,11 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   Rows are matched on each view's key without the decision and without `first_detected`
   (Flows: both endpoints by workload, else IP, port/proto, process, user, direction; App-to-app
   and Blocked: source group, destination group, service; Mesh: its row key) and the views
-  gain a first `Δ` column: `NEW` (only recent), `CHG` (in both, another set of decisions; its
-  decision cell, in every view with one, says `baseline→recent` in the warning colour, such as
-  `allowed→allowed,blocked`, cut with `…` to the column, and so does the Flows detail's
-  title; `:export` keeps the decision, its `change` column has the transition), `GONE` (only in the baseline, dim, with the
+  gain a first `Δ` column: `NEW` (only recent), `CHG` (in both, another set of decisions; the
+  `was→now` column after `Δ` says which, on `CHG` rows only and in the warning colour, with
+  short names: `allow→pot.bl`, `allow→allow,block` (`allow`, `pot.bl`, `block`, `unk`); it is as
+  wide as the longest one, the other columns giving up room so the table fits at 80 columns,
+  cut with `…` beyond that; the Flows detail's title says it too), `GONE` (only in the baseline, dim, with the
   baseline's values), blank for the same. A key is judged on every decision, then the view's
   decision filter picks its rows: Blocked shows a flow allowed then and potentially blocked now
   as `CHG`, and a gone row only when it was blocked. A plain App-to-app pair (`o` off) is judged

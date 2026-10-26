@@ -140,7 +140,19 @@ fn row_cells<T>(
                 (true, Some(n)) => n(item),
                 _ => view.cell(item, ci),
             };
-            if w == 0 { text } else { fit(&text, w, c.right) }
+            let cut = Span::raw(text.as_str()).width() > w;
+            if w == 0 {
+                text
+            } else if cut && view.warn_cell.is_some_and(|(t, _)| t == c.title) {
+                // The warned column says it is cut: `…` in its last cell.
+                fit(
+                    &format!("{}…", clip_width(&text, w.saturating_sub(1))),
+                    w,
+                    c.right,
+                )
+            } else {
+                fit(&text, w, c.right)
+            }
         })
         .collect()
 }

@@ -11,18 +11,18 @@ expression: "render_to_string(&m, 80, 24)"
 │30 flows allowed 15 pot.blocked 7 blocked 7  █████████████████████████████████│
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭ Mesh · conns: lifetime ──── keys app,env · u user · p process · Enter drills ╮
-│  Δ    user     process    src          dst          service   conns  decision│
-│▸      -        -          ipl:Corp/-   shop/prod    443/tcp      700 allowed │
-│       -        -          crm/prod     crm/prod     3306/tcp     610 allowed │
-│       -        -          ipl:Corp/-   crm/prod     443/tcp      520 allowed │
-│  NEW  -        -          shop/prod    shop/prod    5432/tcp     420 allowed │
-│       app      java       shop/prod    shop/prod    5432/tcp     380 allowed │
-│       -        -          erp/prod     erp/prod     1521/tcp     300 allowed │
-│       erp      java       erp/prod     erp/prod     1521/tcp     290 allowed │
-│       www      node       crm/prod     crm/prod     3306/tcp     240 allowed │
-│       app      java       shop/prod    crm/prod     443/tcp      150 allowed │
-│       -        -          shop/dev     shop/dev     5432/tcp      90 allowed │
-│       -        -          ipl:Corp/-   hr/prod      443/tcp       75 pot.blk │
-│       root     curl       hr/prod      crm/prod     443/tcp       60 allowed │
+│  Δ    was→now   user     process  src      dst      service   conns  decision│
+│▸                -        -        ipl:Corp shop/pro 443/tcp      700 allowed │
+│                 -        -        crm/prod crm/prod 3306/tcp     610 allowed │
+│                 -        -        ipl:Corp crm/prod 443/tcp      520 allowed │
+│  NEW            -        -        shop/pro shop/pro 5432/tcp     420 allowed │
+│                 app      java     shop/pro shop/pro 5432/tcp     380 allowed │
+│                 -        -        erp/prod erp/prod 1521/tcp     300 allowed │
+│                 erp      java     erp/prod erp/prod 1521/tcp     290 allowed │
+│                 www      node     crm/prod crm/prod 3306/tcp     240 allowed │
+│                 app      java     shop/pro crm/prod 443/tcp      150 allowed │
+│                 -        -        shop/dev shop/dev 5432/tcp      90 allowed │
+│                 -        -        ipl:Corp hr/prod  443/tcp       75 pot.blk │
+│                 root     curl     hr/prod  crm/prod 443/tcp       60 allowed │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 vs 7d before  f filter  r run  a auto  v view  g group  / search  : cmd  ? help

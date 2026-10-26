@@ -11,35 +11,35 @@ expression: "render_to_string(&m, 160, 48)"
 │30 flows allowed 15 pot.blocked 7 blocked 7  █████████████████████████████████████████████████████████████████████████████████████████████████████████████████│
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭ Flows · conns: lifetime ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│  Δ    last seen        src              src group          dst              dst group          service    conns   decision                                   │
-│▸ NEW  10-10 07:31:02   shop-web-p.examp shop/prod          shop-db-p.exampl shop/prod          5432/tcp       420 allowed                                    │
-│       10-10 07:30:40   shop-web-p.examp shop/prod          shop-db-p.exampl shop/prod          5432/tcp       380 allowed                                    │
-│       10-10 07:29:10   shop-web-p.examp shop/prod          crm-web-p.exampl crm/prod           443/tcp        150 allowed                                    │
-│       10-10 07:31:00   crm-web-p.exampl crm/prod           crm-db-p.example crm/prod           3306/tcp       610 allowed                                    │
-│       10-10 07:28:00   crm-web-p.exampl crm/prod           crm-db-p.example crm/prod           3306/tcp       240 allowed                                    │
-│  CHG  10-10 07:25:00   crm-web-p.exampl crm/prod           erp-api-p.exampl erp/prod           8443/tcp        35 allowed→pot.blocked                        │
-│       10-10 07:20:00   crm-api-d.exampl crm/dev            crm-db-p.example crm/prod           3306/tcp        12 blocked                                    │
-│       10-10 07:31:05   erp-api-p.exampl erp/prod           erp-db-p.example erp/prod           1521/tcp       300 allowed                                    │
-│       10-10 07:30:05   erp-api-p.exampl erp/prod           erp-db-p.example erp/prod           1521/tcp       290 allowed                                    │
-│       10-10 07:22:00   erp-web-d.exampl erp/dev            erp-api-p.exampl erp/prod           8443/tcp        44 potentially_blocked                        │
-│       10-10 07:21:00   erp-web-d.exampl erp/dev            erp-db-p.example erp/prod           1521/tcp         8 blocked                                    │
-│       10-10 07:15:00   hr-web-p.example hr/prod            hr-db-d.example  hr/dev             5432/tcp        20 blocked                                    │
-│       10-10 07:16:00   hr-web-p.example hr/prod            shop-db-p.exampl shop/prod          5432/tcp        16 potentially_blocked                        │
-│       10-10 07:18:00   hr-web-p.example hr/prod            crm-web-p.exampl crm/prod           443/tcp         60 allowed                                    │
-│       10-10 07:10:00   shop-web-d.examp shop/dev           shop-db-d.exampl shop/dev           5432/tcp        90 allowed                                    │
-│       10-10 07:12:00   shop-web-d.examp shop/dev           shop-db-p.exampl shop/prod          5432/tcp         6 blocked                                    │
-│       10-10 07:05:00   shop-web-d.examp shop/dev           shop-db-d.exampl shop/dev           22/tcp           3 potentially_blocked                        │
-│       10-10 07:31:10   10.1.4.9         -/-                shop-web-p.examp shop/prod          443/tcp        700 allowed                                    │
-│       10-10 07:31:08   10.1.4.9         -/-                crm-web-p.exampl crm/prod           443/tcp        520 allowed                                    │
-│       10-10 07:26:00   10.1.4.9         -/-                hr-web-p.example hr/prod            443/tcp         75 potentially_blocked                        │
-│       10-10 07:02:00   10.1.4.9         -/-                erp-api-p.exampl erp/prod           22/tcp           4 blocked                                    │
-│       10-10 07:01:00   10.1.4.9         -/-                shop-db-p.exampl shop/prod          5432/tcp         2 blocked                                    │
-│       10-10 07:27:00   shop-web-p.examp shop/prod          api.partner.exam -/-                443/tcp         33 allowed                                    │
-│       10-10 07:19:00   crm-api-d.exampl crm/dev            api.partner.exam -/-                443/tcp         18 potentially_blocked                        │
-│       10-10 07:24:00   erp-api-p.exampl erp/prod           api.partner.exam -/-                443/tcp         27 allowed                                    │
-│       10-10 07:00:30   hr-db-d.example  hr/dev             hr-web-p.example hr/prod            icmp             5 blocked                                    │
-│       10-10 07:08:00   shop-web-p.examp shop/prod          shop-db-p.exampl shop/prod          5432/tcp        14 allowed                                    │
-│       10-10 07:03:00   erp-db-p.example erp/prod           crm-db-p.example crm/prod           53/udp           9 unknown                                    │
+│  Δ    was→now      last seen        src           src group       dst           dst group       service    conns   decision                                  │
+│▸ NEW               10-10 07:31:02   shop-web-p.ex shop/prod       shop-db-p.exa shop/prod       5432/tcp       420 allowed                                   │
+│                    10-10 07:30:40   shop-web-p.ex shop/prod       shop-db-p.exa shop/prod       5432/tcp       380 allowed                                   │
+│                    10-10 07:29:10   shop-web-p.ex shop/prod       crm-web-p.exa crm/prod        443/tcp        150 allowed                                   │
+│                    10-10 07:31:00   crm-web-p.exa crm/prod        crm-db-p.exam crm/prod        3306/tcp       610 allowed                                   │
+│                    10-10 07:28:00   crm-web-p.exa crm/prod        crm-db-p.exam crm/prod        3306/tcp       240 allowed                                   │
+│  CHG  allow→pot.bl 10-10 07:25:00   crm-web-p.exa crm/prod        erp-api-p.exa erp/prod        8443/tcp        35 potentially_blocked                       │
+│                    10-10 07:20:00   crm-api-d.exa crm/dev         crm-db-p.exam crm/prod        3306/tcp        12 blocked                                   │
+│                    10-10 07:31:05   erp-api-p.exa erp/prod        erp-db-p.exam erp/prod        1521/tcp       300 allowed                                   │
+│                    10-10 07:30:05   erp-api-p.exa erp/prod        erp-db-p.exam erp/prod        1521/tcp       290 allowed                                   │
+│                    10-10 07:22:00   erp-web-d.exa erp/dev         erp-api-p.exa erp/prod        8443/tcp        44 potentially_blocked                       │
+│                    10-10 07:21:00   erp-web-d.exa erp/dev         erp-db-p.exam erp/prod        1521/tcp         8 blocked                                   │
+│                    10-10 07:15:00   hr-web-p.exam hr/prod         hr-db-d.examp hr/dev          5432/tcp        20 blocked                                   │
+│                    10-10 07:16:00   hr-web-p.exam hr/prod         shop-db-p.exa shop/prod       5432/tcp        16 potentially_blocked                       │
+│                    10-10 07:18:00   hr-web-p.exam hr/prod         crm-web-p.exa crm/prod        443/tcp         60 allowed                                   │
+│                    10-10 07:10:00   shop-web-d.ex shop/dev        shop-db-d.exa shop/dev        5432/tcp        90 allowed                                   │
+│                    10-10 07:12:00   shop-web-d.ex shop/dev        shop-db-p.exa shop/prod       5432/tcp         6 blocked                                   │
+│                    10-10 07:05:00   shop-web-d.ex shop/dev        shop-db-d.exa shop/dev        22/tcp           3 potentially_blocked                       │
+│                    10-10 07:31:10   10.1.4.9      -/-             shop-web-p.ex shop/prod       443/tcp        700 allowed                                   │
+│                    10-10 07:31:08   10.1.4.9      -/-             crm-web-p.exa crm/prod        443/tcp        520 allowed                                   │
+│                    10-10 07:26:00   10.1.4.9      -/-             hr-web-p.exam hr/prod         443/tcp         75 potentially_blocked                       │
+│                    10-10 07:02:00   10.1.4.9      -/-             erp-api-p.exa erp/prod        22/tcp           4 blocked                                   │
+│                    10-10 07:01:00   10.1.4.9      -/-             shop-db-p.exa shop/prod       5432/tcp         2 blocked                                   │
+│                    10-10 07:27:00   shop-web-p.ex shop/prod       api.partner.e -/-             443/tcp         33 allowed                                   │
+│                    10-10 07:19:00   crm-api-d.exa crm/dev         api.partner.e -/-             443/tcp         18 potentially_blocked                       │
+│                    10-10 07:24:00   erp-api-p.exa erp/prod        api.partner.e -/-             443/tcp         27 allowed                                   │
+│                    10-10 07:00:30   hr-db-d.examp hr/dev          hr-web-p.exam hr/prod         icmp             5 blocked                                   │
+│                    10-10 07:08:00   shop-web-p.ex shop/prod       shop-db-p.exa shop/prod       5432/tcp        14 allowed                                   │
+│                    10-10 07:03:00   erp-db-p.exam erp/prod        crm-db-p.exam crm/prod        53/udp           9 unknown                                   │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭ Detail ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── vs baseline: new · Enter shows ╮
 │select a flow and press Enter                                                                                                                                 │

@@ -112,53 +112,49 @@ fn delta_full(c: Option<&RowChange>) -> String {
     c.map(RowChange::text).unwrap_or_default()
 }
 
-/// A decision in a decision cell: `pot.blocked` (`pot.blk` when narrow).
-fn decision_word(d: pce::models::PolicyDecision, narrow: bool) -> &'static str {
+/// The title of the column after `Δ` in compare mode: a `CHG` row's
+/// decisions then and now (#79).
+pub const TRANSITION_COLUMN: &str = "was→now";
+
+/// The transition column's width at least: its title.
+const TRANSITION_MIN: u16 = 7;
+
+/// A decision in the transition: `allow`, `pot.bl`, `block`, `unk`.
+fn decision_word(d: pce::models::PolicyDecision) -> &'static str {
     use pce::models::PolicyDecision as D;
-    match (d, narrow) {
-        (D::PotentiallyBlocked, false) => "pot.blocked",
-        (D::PotentiallyBlocked, true) => "pot.blk",
-        (D::Allowed, true) => "allow",
-        (D::Blocked, true) => "block",
-        (d, _) => d.as_str(),
+    match d {
+        D::Allowed => "allow",
+        D::PotentiallyBlocked => "pot.bl",
+        D::Blocked => "block",
+        D::Unknown => "unk",
     }
 }
 
-/// `s` cut to `width` characters, the last one `…` when cut.
-fn ellipsize(s: &str, width: usize) -> String {
-    if s.chars().count() <= width {
-        return s.to_string();
-    }
-    let mut out: String = s.chars().take(width.saturating_sub(1)).collect();
-    out.push('…');
-    out
-}
-
-/// Whether a row is `CHG`: its decision cell shows the transition, in the
-/// warning colour.
+/// Whether a row is `CHG`: its transition cell is filled, in the warning
+/// colour.
 pub fn is_changed(c: Option<&RowChange>) -> bool {
     c.is_some_and(|c| c.change == Change::Changed)
 }
 
-/// A decision cell (#79): for a `CHG` row `baseline set→recent set`
-/// (`allowed→allowed,pot.blocked`) ellipsized to `width`, else `plain`.
-pub fn decision_cell(c: Option<&RowChange>, plain: String, narrow: bool, width: u16) -> String {
+/// A `CHG` row's `baseline set→recent set` (`allow→allow,block`); empty
+/// on any other row.
+pub fn transition_text(c: Option<&RowChange>) -> String {
     let Some((b, r)) = c
         .filter(|c| c.change == Change::Changed)
         .and_then(|c| c.baseline_decision.zip(c.recent_decision))
     else {
-        return plain;
+        return String::new();
     };
     let set = |d: pce::traffic::DecisionSet| {
         d.decisions()
-            .map(|d| decision_word(d, narrow))
+            .map(decision_word)
             .collect::<Vec<_>>()
             .join(",")
     };
-    ellipsize(&format!("{}→{}", set(b), set(r)), width as usize)
+    format!("{}→{}", set(b), set(r))
 }
 
-/// A `CHG` pair or service row (its decision cell in the warning colour).
+/// A `CHG` pair or service row (its transition cell in the warning colour).
 pub(super) fn changed_group(g: &FlowGroup) -> bool {
     is_changed(g.change.as_ref())
 }
@@ -168,9 +164,157 @@ pub(super) fn changed_section_row(r: &SectionRow) -> bool {
     is_changed(r.change())
 }
 
-/// The Mesh view's table for `cols`, its `CHG` decision cells warned.
+/// A `CHG` mesh row.
+pub(super) fn changed_mesh_row(r: &MeshRow) -> bool {
+    is_changed(r.change.as_ref())
+}
+
+/// A `CHG` flow.
+pub(super) fn changed_flow(r: &FlowRow) -> bool {
+    is_changed(r.change.as_ref())
+}
+
+/// The Mesh view's table for `cols`, its `CHG` transition cells warned.
 pub(super) fn mesh_table(cols: MeshColumns) -> TableView<MeshRow> {
-    TableView::new(mesh_columns(cols)).with_warn_cell("decision", |r| is_changed(r.change.as_ref()))
+    TableView::new(mesh_columns(cols)).with_warn_cell(TRANSITION_COLUMN, changed_mesh_row)
+}
+
+/// The transition column over `change`, as narrow as its title until
+/// `fit_columns` sizes it to the rows.
+macro_rules! transition_column {
+    ($t:ty, $change:expr) => {
+        Column::<$t> {
+            title: TRANSITION_COLUMN,
+            width: TRANSITION_MIN,
+            cell: |r| transition_text($change(r)),
+            key: |r| SortKey::Text(transition_text($change(r))),
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: TRANSITION_MIN,
+            full_title: None,
+            full: None,
+        }
+    };
+}
+
+pub fn transition_flow_column() -> Column<FlowRow> {
+    transition_column!(FlowRow, flow_change)
+}
+
+pub fn transition_section_column() -> Column<SectionRow> {
+    transition_column!(SectionRow, section_change)
+}
+
+pub fn transition_group_column() -> Column<FlowGroup> {
+    transition_column!(FlowGroup, group_change)
+}
+
+pub fn transition_mesh_column() -> Column<MeshRow> {
+    transition_column!(MeshRow, mesh_change)
+}
+
+/// The width `visible_columns` draws `c` at: its narrow one below 120.
+fn drawn_width<T>(c: &mut Column<T>, narrow: bool) -> &mut u16 {
+    if narrow && c.narrow_width > 0 {
+        &mut c.narrow_width
+    } else {
+        &mut c.width
+    }
+}
+
+/// The narrowest a column gives up room to the transition column.
+const ROOM_FLOOR: u16 = 8;
+
+/// `cols` laid out for a table `area` cells wide (borders and the cursor
+/// taken off): the transition column as wide as `longest`, the `takers`
+/// narrowed (one cell at a time, in turn, never below 8) to make room, the
+/// transition cut where they cannot give more. A fill column counts as 8.
+fn fit_at<T>(cols: &mut [Column<T>], area: u16, longest: u16, takers: &[&str]) {
+    let narrow = area < 120;
+    let budget = area.saturating_sub(4);
+    let vis = crate::tui::ui::widgets::table::visible_columns(cols, area);
+    let Some(at) = cols.iter().position(|c| c.title == TRANSITION_COLUMN) else {
+        return;
+    };
+    let others: u16 = vis
+        .iter()
+        .filter(|v| v.0 != at)
+        .map(|v| if v.1 == 0 { 8 } else { v.1 })
+        .sum::<u16>()
+        + vis.len().saturating_sub(1) as u16;
+    let mut want = longest.max(TRANSITION_MIN);
+    let mut over = (others + want).saturating_sub(budget);
+    let shown: Vec<usize> = vis
+        .iter()
+        .map(|v| v.0)
+        .filter(|&i| takers.contains(&cols[i].title))
+        .collect();
+    while over > 0 {
+        let mut gave = false;
+        for &i in &shown {
+            let w = drawn_width(&mut cols[i], narrow);
+            if over > 0 && *w > ROOM_FLOOR {
+                *w -= 1;
+                over -= 1;
+                gave = true;
+            }
+        }
+        if !gave {
+            break;
+        }
+    }
+    want = want.saturating_sub(over).max(TRANSITION_MIN);
+    *drawn_width(&mut cols[at], narrow) = want;
+}
+
+/// `cols` (built afresh) with the transition column, if any, sized to the
+/// longest transition among `table`'s rows, so the table fits at 80
+/// columns (and at 120 wide); set on `table` when they differ from its own
+/// (the sort stays).
+pub(super) fn fit_columns<T>(
+    table: &mut TableView<T>,
+    mut cols: Vec<Column<T>>,
+    takers: &[&str],
+    change: fn(&T) -> Option<&RowChange>,
+) {
+    if cols.iter().any(|c| c.title == TRANSITION_COLUMN) {
+        let longest = table
+            .rows()
+            .iter()
+            .map(|r| transition_text(change(r)).chars().count())
+            .max()
+            .unwrap_or(0)
+            .min(u16::MAX as usize) as u16;
+        fit_at(&mut cols, 80, longest, takers);
+        fit_at(&mut cols, 120, longest, takers);
+    }
+    let same = table.columns.len() == cols.len()
+        && table.columns.iter().zip(&cols).all(|(a, b)| {
+            a.title == b.title
+                && a.width == b.width
+                && a.narrow_width == b.narrow_width
+                && a.narrow.is_some() == b.narrow.is_some()
+        });
+    if !same {
+        table.set_columns(cols);
+    }
+}
+
+pub(super) fn flow_change(r: &FlowRow) -> Option<&RowChange> {
+    r.change.as_ref()
+}
+
+pub(super) fn section_change(r: &SectionRow) -> Option<&RowChange> {
+    r.change()
+}
+
+pub(super) fn group_change(g: &FlowGroup) -> Option<&RowChange> {
+    g.change.as_ref()
+}
+
+pub(super) fn mesh_change(r: &MeshRow) -> Option<&RowChange> {
+    r.change.as_ref()
 }
 
 /// A `Δ` column over `change`.
@@ -189,22 +333,6 @@ macro_rules! delta_column {
             full: Some(|r| delta_full($change(r))),
         }
     };
-}
-
-fn flow_change(r: &FlowRow) -> Option<&RowChange> {
-    r.change.as_ref()
-}
-
-fn section_change(r: &SectionRow) -> Option<&RowChange> {
-    r.change()
-}
-
-fn group_change(g: &FlowGroup) -> Option<&RowChange> {
-    g.change.as_ref()
-}
-
-fn mesh_change(r: &MeshRow) -> Option<&RowChange> {
-    r.change.as_ref()
 }
 
 pub fn delta_flow_column() -> Column<FlowRow> {
@@ -238,24 +366,18 @@ pub(super) fn make_room_for_delta<T>(mut cols: Vec<Column<T>>, on: bool) -> Vec<
     cols
 }
 
-/// `cols` with `delta` first when `on`.
+/// `cols` with `delta` first and the transition column after it when
+/// `on`.
 pub(super) fn with_delta<T>(
     mut cols: Vec<Column<T>>,
-    delta: Column<T>,
+    (delta, transition): (Column<T>, Column<T>),
     on: bool,
 ) -> Vec<Column<T>> {
     if on {
         cols.insert(0, delta);
+        cols.insert(1, transition);
     }
     cols
-}
-
-/// Whether `table` shows the `Δ` column.
-pub(super) fn shows_delta<T>(table: &TableView<T>) -> bool {
-    table
-        .columns
-        .first()
-        .is_some_and(|c| c.title == DELTA_COLUMN)
 }
 
 /// A gone row: drawn dim, with the baseline's values.

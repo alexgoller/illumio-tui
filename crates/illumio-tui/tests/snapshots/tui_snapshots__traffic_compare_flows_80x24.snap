@@ -11,11 +11,11 @@ expression: "render_to_string(&m, 80, 24)"
 │30 flows allowed 15 pot.blocked 7 blocked 7  █████████████████████████████████│
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭ Flows · conns: lifetime ─────────────────────────────────────────────────────╮
-│  Δ    src        src group  dst           dst group  service   conns decision│
-│▸ NEW  shop-web-p shop/prod  shop-db-p.exa shop/prod  5432/tcp    420 allowed │
-│       shop-web-p shop/prod  shop-db-p.exa shop/prod  5432/tcp    380 allowed │
-│       shop-web-p shop/prod  crm-web-p.exa crm/prod   443/tcp     150 allowed │
-│       crm-web-p. crm/prod   crm-db-p.exam crm/prod   3306/tcp    610 allowed │
+│  Δ    was→now    src      src grou dst      dst grou service   conns decision│
+│▸ NEW             shop-web shop/pro shop-db- shop/pro 5432/tcp    420 allowed │
+│                  shop-web shop/pro shop-db- shop/pro 5432/tcp    380 allowed │
+│                  shop-web shop/pro crm-web- crm/prod 443/tcp     150 allowed │
+│                  crm-web- crm/prod crm-db-p crm/prod 3306/tcp    610 allowed │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭ Detail ────────────────────────────────────── vs baseline: new · Enter shows ╮
 │select a flow and press Enter                                                 │

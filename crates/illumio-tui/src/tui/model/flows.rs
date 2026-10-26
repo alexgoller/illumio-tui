@@ -242,32 +242,19 @@ pub fn flow_columns_of<T: FlowCells>() -> Vec<Column<T>> {
         Column {
             title: "decision",
             width: 19,
-            cell: |r| {
-                on_flow(r, |f| {
-                    decision_cell(
-                        f.change.as_ref(),
-                        f.policy_decision.as_str().to_string(),
-                        false,
-                        19,
-                    )
-                })
-            },
+            cell: |r| on_flow(r, |f| f.policy_decision.as_str().to_string()),
             key: |r| flow_key(r, |f| SortKey::Text(f.policy_decision.as_str().to_string())),
             right: false,
             hide_below: 0,
             narrow: Some(|r| {
-                on_flow(r, |f| {
-                    let plain = match f.policy_decision.as_str() {
-                        "potentially_blocked" => "pot.blk".to_string(),
-                        other => other.to_string(),
-                    };
-                    decision_cell(f.change.as_ref(), plain, true, 8)
+                on_flow(r, |f| match f.policy_decision.as_str() {
+                    "potentially_blocked" => "pot.blk".to_string(),
+                    other => other.to_string(),
                 })
             }),
             narrow_width: 8,
             full_title: None,
-            // `:export`: the decision (the `change` column has the transition).
-            full: Some(|r| on_flow(r, |f| f.policy_decision.as_str().to_string())),
+            full: None,
         },
     ]
 }
@@ -442,14 +429,6 @@ pub(super) fn with_draft<T>(
         cols.push(extra);
     }
     cols
-}
-
-/// Whether `table` shows the draft column.
-pub(super) fn shows_draft<T>(table: &TableView<T>) -> bool {
-    table
-        .columns
-        .last()
-        .is_some_and(|c| c.title == DRAFT_COLUMN)
 }
 
 /// `2026-10-10T07:31:02Z` -> `10-10 07:31:02`
@@ -736,12 +715,13 @@ pub fn mesh_columns(cols: MeshColumns) -> Vec<Column<MeshRow>> {
         Column {
             title: "decision",
             width: 11,
-            cell: |r| decision_cell(r.change.as_ref(), mesh_decision(r), false, 11),
+            cell: mesh_decision,
             key: |r| SortKey::Text(mesh_decision(r)),
             right: false,
             hide_below: 0,
-            narrow: Some(|r| {
-                decision_cell(r.change.as_ref(), narrow_decision(r.dominant()), true, 8)
+            narrow: Some(|r| match r.dominant() {
+                pce::models::PolicyDecision::PotentiallyBlocked => "pot.blk".into(),
+                d => d.as_str().into(),
             }),
             narrow_width: 8,
             full_title: None,
@@ -923,12 +903,13 @@ pub fn service_group_columns() -> Vec<Column<FlowGroup>> {
         Column {
             title: "decision",
             width: 11,
-            cell: |g| decision_cell(g.change.as_ref(), decision_text(g.dominant()), false, 11),
+            cell: |g| decision_text(g.dominant()),
             key: |g| SortKey::Text(decision_text(g.dominant())),
             right: false,
             hide_below: 0,
-            narrow: Some(|g| {
-                decision_cell(g.change.as_ref(), narrow_decision(g.dominant()), true, 8)
+            narrow: Some(|g| match g.dominant() {
+                pce::models::PolicyDecision::PotentiallyBlocked => "pot.blk".into(),
+                d => d.as_str().into(),
             }),
             narrow_width: 8,
             full_title: None,
@@ -1282,14 +1263,6 @@ pub(super) fn section_matches(r: &SectionRow, needle: &str) -> bool {
     needle.is_empty() || r.haystack.text().contains(needle)
 }
 
-/// `allowed`, `pot.blk`, `blocked` or `unknown`: the narrow cell.
-pub(super) fn narrow_decision(d: pce::models::PolicyDecision) -> String {
-    match d {
-        pce::models::PolicyDecision::PotentiallyBlocked => "pot.blk".into(),
-        d => d.as_str().into(),
-    }
-}
-
 /// `allowed`, `pot.blocked`, `blocked` or `unknown`.
 pub(super) fn decision_text(d: pce::models::PolicyDecision) -> String {
     match d {
@@ -1611,23 +1584,19 @@ pub fn app_columns() -> Vec<Column<SectionRow>> {
         Column {
             title: "decision",
             width: 11,
-            cell: |r| {
-                r.with_row(|p| {
-                    decision_cell(p.change.as_ref(), decision_text(p.dominant()), false, 11)
-                })
-            },
+            cell: |r| r.with_row(|p| decision_text(p.dominant())),
             key: no_sort,
             right: false,
             hide_below: 0,
             narrow: Some(|r| {
-                r.with_row(|p| {
-                    decision_cell(p.change.as_ref(), narrow_decision(p.dominant()), true, 8)
+                r.with_row(|p| match p.dominant() {
+                    pce::models::PolicyDecision::PotentiallyBlocked => "pot.blk".into(),
+                    d => d.as_str().into(),
                 })
             }),
             narrow_width: 8,
             full_title: None,
-            // `:export`: the decision (the `change` column has the transition).
-            full: Some(|r| r.with_row(|p| decision_text(p.dominant()))),
+            full: None,
         },
     ]
 }

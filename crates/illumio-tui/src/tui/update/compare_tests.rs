@@ -966,42 +966,77 @@ fn the_header_counts_equal_the_rows_each_view_shows_under_every_n() {
     assert_eq!(seen.len(), 6, "{seen:?}");
 }
 
-/// The decision cell's text and its first cell's foreground at `w`×48 on
-/// the line holding `text`.
-fn decision_fg(m: &Model, w: u16, text: &str) -> Option<ratatui::style::Color> {
+/// The foreground of the first cell of `text` at `w`×`h`, if it is on
+/// screen.
+fn fg_of(m: &Model, w: u16, h: u16, text: &str) -> Option<ratatui::style::Color> {
     let mut term =
-        ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, 48)).expect("test terminal");
+        ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).expect("test terminal");
     term.draw(|f| crate::tui::ui::view(m, f)).expect("draw");
     let buf = term.backend().buffer();
-    for y in 0..buf.area.height {
+    let want: Vec<String> = text.chars().map(|c| c.to_string()).collect();
+    (0..buf.area.height).find_map(|y| {
         let cells: Vec<&ratatui::buffer::Cell> =
             (0..buf.area.width).map(|x| &buf[(x, y)]).collect();
         let line: Vec<String> = cells.iter().map(|c| c.symbol().to_string()).collect();
-        let want: Vec<String> = text.chars().map(|c| c.to_string()).collect();
-        if let Some(at) = line.windows(want.len()).position(|w| w == want.as_slice()) {
-            return cells[at].fg.into();
-        }
-    }
-    None
+        let at = line
+            .windows(want.len())
+            .position(|w| w == want.as_slice())?;
+        Some(cells[at].fg)
+    })
 }
 
-/// #79: a CHG row's decision cell shows `baseline→recent` in the warning
-/// colour, ellipsized to the column, in every view with a decision column;
-/// `:export` keeps the decision.
-#[test]
-fn a_changed_rows_decision_cell_shows_the_transition_in_the_warning_colour() {
-    let mut m = compared();
-    // Changed rows only, so they are on screen.
-    for _ in 0..2 {
-        quiet(&mut m, key('n'));
+/// The `was→now` cells of the CHG rows of the table on screen, and
+/// whether its columns have `was→now` second (after `Δ`).
+fn transitions(m: &Model) -> (Vec<String>, bool) {
+    fn of<T>(
+        v: &crate::tui::table::TableView<T>,
+        change: impl Fn(&T) -> Option<&pce::traffic::RowChange>,
+    ) -> (Vec<String>, bool) {
+        let has = v.columns.get(1).is_some_and(|c| c.title == "was→now");
+        let Some(col) = v.columns.iter().position(|c| c.title == "was→now") else {
+            return (Vec::new(), has);
+        };
+        let cells = v
+            .rows()
+            .iter()
+            .filter(|r| change(r).is_some_and(|c| c.change == Change::Changed))
+            .map(|r| v.cell(r, col))
+            .collect();
+        (cells, has)
     }
-    assert_eq!(
-        m.traffic.compare.as_ref().unwrap().show,
-        ShowChanges::Changed
-    );
+    let t = &m.traffic;
+    match t.view {
+        TrafficView::Flows => of(&t.flows, |r| r.change.as_ref()),
+        TrafficView::Aggregate if t.apps_state.by != crate::tui::model::By::Pairs => {
+            of(&t.apps, |r| r.change())
+        }
+        TrafficView::Aggregate => of(t.pairs_table(), |r| r.change.as_ref()),
+        TrafficView::Mesh => of(&t.mesh, |r| r.change.as_ref()),
+        TrafficView::Blocked => of(&t.blocked, |r| r.change()),
+        TrafficView::Treemap => (Vec::new(), false),
+    }
+}
+
+/// #79 (fix round 1): in compare mode every view but the Treemap has a
+/// `was→now` column after `Δ`, filled on CHG rows only with the short
+/// decisions (`allow→pot.bl`), in the warning colour, fitting at 80
+/// columns; the decision cells stay as they are; compare off, no column.
+#[test]
+fn every_view_shows_was_now_after_delta_on_changed_rows_only() {
+    let mut m = compared();
     let warn = m.theme.warn;
-    let mut seen = Vec::new();
-    for step in 0..5 {
+    let want = [
+        ("Flows", vec!["allow→pot.bl"]),
+        (
+            "App-to-app pairs",
+            vec!["allow→allow", "allow,pot.bl→pot.bl"],
+        ),
+        ("App-to-app by service", vec!["allow→pot.bl"]),
+        ("App-to-app sections", vec!["allow→pot.bl"]),
+        ("Mesh", vec!["allow→pot.bl"]),
+        ("Blocked", vec!["allow→pot.bl"]),
+    ];
+    for (step, (what, cells)) in want.iter().enumerate() {
         match step {
             0 => {}
             1 => quiet(&mut m, key('v')),
@@ -1010,71 +1045,74 @@ fn a_changed_rows_decision_cell_shows_the_transition_in_the_warning_colour() {
                 quiet(&mut m, key('o'));
                 quiet(&mut m, key('x'));
             }
-            _ => {
-                quiet(&mut m, key('v'));
-                assert_eq!(m.traffic.view, TrafficView::Mesh);
-            }
+            _ => quiet(&mut m, key('v')),
         }
-        let t = &m.traffic;
-        if step == 1 {
-            // Plain pairs have per-decision counts, no decision cell.
-            assert!(!t.groups.columns.iter().any(|c| c.title == "decision"));
-            continue;
-        }
-        // (the decision cell of the first CHG row, its change)
-        fn first<T>(
-            v: &crate::tui::table::TableView<T>,
-            change: impl Fn(&T) -> Option<&pce::traffic::RowChange>,
-        ) -> (String, String, pce::traffic::RowChange) {
-            let col = v
-                .columns
-                .iter()
-                .position(|c| c.title == "decision")
-                .unwrap();
-            let row = v
+        let (got, has) = transitions(&m);
+        assert!(has, "{what}: was→now after Δ");
+        assert_eq!(&got, cells, "{what}");
+        // Blank on every other row.
+        let blank = match m.traffic.view {
+            TrafficView::Mesh => m
+                .traffic
+                .mesh
                 .rows()
                 .iter()
-                .find(|r| change(r).is_some_and(|c| c.change == Change::Changed))
-                .expect("a changed row");
-            (
-                v.cell(row, col),
-                v.full_cells(row)[col].clone(),
-                *change(row).unwrap(),
-            )
-        }
-        let (cell, exported, rc) = match t.view {
-            TrafficView::Flows => first(&t.flows, |r| r.change.as_ref()),
-            TrafficView::Aggregate if t.apps_state.by != crate::tui::model::By::Pairs => {
-                first(&t.apps, |r| r.change())
+                .filter(|r| !r.change.is_some_and(|c| c.change == Change::Changed))
+                .all(|r| crate::tui::model::transition_text(r.change.as_ref()).is_empty()),
+            _ => true,
+        };
+        assert!(blank, "{what}");
+        // Changed rows only, so they are on screen; then each fits and is
+        // in the warning colour at 160×48 and at 80×24 (cut with … there
+        // when the table cannot give more room).
+        let show = |m: &mut Model| {
+            while m.traffic.compare.as_ref().unwrap().show != ShowChanges::Changed {
+                quiet(m, key('n'));
             }
-            TrafficView::Aggregate => first(t.pairs_table(), |r| r.change.as_ref()),
-            TrafficView::Mesh => first(&t.mesh, |r| r.change.as_ref()),
-            _ => unreachable!(),
         };
-        let what = format!("{} step {step}", t.view.title());
-        let full = format!(
-            "{}→{}",
-            rc.baseline_decision.unwrap().text(),
-            rc.recent_decision.unwrap().text()
-        )
-        .replace("potentially_blocked", "pot.blocked");
-        let width = if t.view == TrafficView::Flows { 19 } else { 11 };
-        let want = if full.chars().count() > width {
-            format!("{}…", full.chars().take(width - 1).collect::<String>())
-        } else {
-            full.clone()
-        };
-        assert_eq!(cell, want, "{what}");
-        assert!(cell.contains('→'), "{what}: {cell}");
-        assert!(
-            !exported.contains('→'),
-            "{what}: :export keeps the decision: {exported}"
-        );
-        assert_eq!(decision_fg(&m, 160, &cell), Some(warn), "{what}: {cell}");
-        seen.push(cell);
+        show(&mut m);
+        for (w, h) in [(160, 48), (80, 24)] {
+            let out = render_to_string(&m, w, h);
+            for line in out.lines() {
+                assert!(
+                    ratatui::text::Span::raw(line).width() <= w as usize,
+                    "{what} {w}x{h}: {line}"
+                );
+            }
+            assert!(transitions(&m).1);
+            let col = cells[0].to_string();
+            let shown = if out.contains(&col) {
+                col
+            } else {
+                // Cut to its column: the head and `…`.
+                let line = out
+                    .lines()
+                    .find(|l| l.contains("CHG"))
+                    .unwrap_or_else(|| panic!("{what} {w}x{h}: no CHG row\n{out}"));
+                let start = line.find(&col[..5]).expect("the transition's head");
+                let tail = &line[start..];
+                let end = tail.find('…').expect("cut with …") + '…'.len_utf8();
+                tail[..end].to_string()
+            };
+            assert_eq!(
+                fg_of(&m, w, h, &shown),
+                Some(warn),
+                "{what} {w}x{h}: {shown}"
+            );
+        }
+        while m.traffic.compare.as_ref().unwrap().show != ShowChanges::All {
+            quiet(&mut m, key('n'));
+        }
     }
-    assert_eq!(seen.len(), 4, "{seen:?}");
-    // Narrow (below 120 columns): the short words, ellipsized to 8.
-    assert_eq!(m.traffic.view, TrafficView::Mesh);
-    assert_eq!(decision_fg(&m, 100, "allow→p…"), Some(warn));
+    // The decision cells keep the decision.
+    let out = render_to_string(&m, 160, 48);
+    assert!(!out.contains("allowed→"), "{out}");
+    // Compare off: no column in any view, layouts as before.
+    quiet(&mut m, key('C'));
+    for _ in 0..5 {
+        quiet(&mut m, key('v'));
+        let (_, has) = transitions(&m);
+        assert!(!has, "{}", m.traffic.view.title());
+        assert!(!render_to_string(&m, 160, 48).contains("was→now"));
+    }
 }

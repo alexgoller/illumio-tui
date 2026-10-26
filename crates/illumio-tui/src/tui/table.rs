@@ -79,7 +79,8 @@ pub struct TableView<T> {
     /// default sort, search and `:export` do not see it.
     pub marker: Option<fn(&T) -> Option<pce::marks::Marker>>,
     /// The column (by title) whose cell is drawn in the warning colour on
-    /// the rows the predicate picks (compare mode's `CHG` decision cell).
+    /// the rows the predicate picks, and cut with `…` where it does not
+    /// fit (compare mode's `was→now`).
     pub warn_cell: Option<WarnCell<T>>,
 }
 

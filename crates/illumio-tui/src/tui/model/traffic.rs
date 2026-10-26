@@ -357,12 +357,11 @@ impl TrafficState {
             query: QueryState::Idle,
             data: None,
             seq: 0,
-            flows: TableView::new(flow_columns())
-                .with_warn_cell("decision", |r| is_changed(r.change.as_ref())),
+            flows: TableView::new(flow_columns()).with_warn_cell(TRANSITION_COLUMN, changed_flow),
             flows_grouped: TableView::new(flow_columns_of())
                 .with_matcher(section_matches)
                 .with_match_group(section_group)
-                .with_warn_cell("decision", changed_section_row),
+                .with_warn_cell(TRANSITION_COLUMN, changed_section_row),
             flows_state: FlowsState::default(),
             apps_cache: Vec::new(),
             blocked_cache: (Vec::new(), BTreeMap::new()),
@@ -374,19 +373,21 @@ impl TrafficState {
             all_keys: false,
             key_order: KeyOrder::default(),
             keys: keys_or_default(keys),
-            groups: TableView::new(group_columns()).with_warn_cell("decision", changed_group),
+            groups: TableView::new(group_columns())
+                .with_warn_cell(TRANSITION_COLUMN, changed_group),
             services: TableView::new(service_group_columns())
-                .with_warn_cell("decision", changed_group),
+                .with_warn_cell(TRANSITION_COLUMN, changed_group),
             mesh: mesh_table(MESH_ALL),
             mesh_cols: MESH_ALL,
             apps: TableView::new(app_columns())
                 .with_matcher(section_matches)
                 .with_match_group(section_group)
-                .with_warn_cell("decision", changed_section_row),
+                .with_warn_cell(TRANSITION_COLUMN, changed_section_row),
             apps_state: AppState::default(),
             blocked: TableView::new(blocked_columns())
                 .with_matcher(section_matches)
-                .with_match_group(section_group),
+                .with_match_group(section_group)
+                .with_warn_cell(TRANSITION_COLUMN, changed_section_row),
             blocked_folded: BTreeSet::new(),
             treemap: TreemapState::new(TreemapRect::default()),
             drill: None,
@@ -928,6 +929,8 @@ impl TrafficState {
         self.flows.set_rows(shown);
         self.treemap.groups = tree;
         self.mesh.set_rows(mesh_rows);
+        self.sync_flows_columns();
+        self.sync_mesh_columns();
         self.rebuild_pairs();
         self.rebuild_sections();
         self.relayout_treemap();
@@ -991,103 +994,120 @@ impl TrafficState {
     /// sections, Blocked): 10 cells (7 narrow, `flows_cell_narrow`) while
     /// marks are active, else the usual 6 (5).
     pub(crate) fn sync_marks_columns(&mut self, on: bool) {
-        fn set<T>(t: &mut TableView<T>, on: bool, narrow: fn(&T) -> String) {
-            if let Some(c) = t.columns.iter_mut().find(|c| c.title == "flows") {
-                (c.width, c.narrow_width, c.narrow) = if on {
-                    (10, FLOWS_NARROW_MARKED as u16, Some(narrow))
-                } else {
-                    (6, 5, None)
-                };
-            }
-        }
         let group: fn(&FlowGroup) -> String = |g| flows_cell_narrow(g.flows, g.marks.as_ref());
-        let section: fn(&SectionRow) -> String =
-            |r| r.with_row(|p| flows_cell_narrow(p.flows, p.marks.as_ref()));
-        set(&mut self.groups, on, group);
-        set(&mut self.services, on, group);
-        set(&mut self.apps, on, section);
-        set(&mut self.blocked, on, section);
+        marks_flows_column(&mut self.groups.columns, on, group);
+        marks_flows_column(&mut self.services.columns, on, group);
+        marks_flows_column(&mut self.apps.columns, on, section_flows_narrow);
+        marks_flows_column(&mut self.blocked.columns, on, section_flows_narrow);
     }
 
     /// The `draft` columns while draft decisions are loaded, none
     /// otherwise; `fixed by draft` falls back to `all` without them.
-    /// The `Δ` columns too, first, in compare mode with a baseline.
+    /// The `Δ` and `was→now` columns too, first, in compare mode with a
+    /// baseline, `was→now` sized to the rows (`fit_columns`); the marks'
+    /// `flows` width (`sync_marks_columns`) kept.
     fn sync_draft_columns(&mut self) {
         let draft = self.draft_loaded();
-        let cmp = self.comparing();
         if !draft && self.apps_state.decisions == Decisions::FixedByDraft {
             self.apps_state.decisions = Decisions::All;
         }
-        fn stale<T>(t: &TableView<T>, draft: bool, cmp: bool) -> bool {
-            shows_draft(t) != draft || shows_delta(t) != cmp
-        }
-        if stale(&self.flows, draft, cmp) {
-            self.flows.set_columns(with_delta(
-                with_draft(
-                    make_room_for_delta(
-                        if draft {
-                            make_room_for_draft(flow_columns())
-                        } else {
-                            flow_columns()
-                        },
-                        cmp,
-                    ),
-                    draft_flow_column(),
-                    draft,
-                ),
-                delta_flow_column(),
-                cmp,
-            ));
-        }
-        if stale(&self.flows_grouped, draft, cmp) {
-            self.flows_grouped.set_columns(with_delta(
-                with_draft(
-                    make_room_for_delta(
-                        if draft {
-                            make_room_for_draft(flow_columns_of())
-                        } else {
-                            flow_columns_of()
-                        },
-                        cmp,
-                    ),
-                    draft_flow_column_of(),
-                    draft,
-                ),
-                delta_section_column(),
-                cmp,
-            ));
-        }
-        if stale(&self.groups, draft, cmp) {
-            self.groups.set_columns(with_delta(
-                with_draft(group_columns(), draft_group_column(), draft),
-                delta_group_column(),
-                cmp,
-            ));
-            self.services.set_columns(with_delta(
-                with_draft(service_group_columns(), draft_group_column(), draft),
-                delta_group_column(),
-                cmp,
-            ));
-        }
-        if stale(&self.mesh, draft, cmp) {
-            self.mesh.set_columns(with_delta(
-                with_draft(mesh_columns(self.mesh_cols), draft_mesh_column(), draft),
-                delta_mesh_column(),
-                cmp,
-            ));
-        }
-        if stale(&self.apps, draft, cmp) {
-            self.apps.set_columns(with_delta(
-                with_draft(app_columns(), draft_section_column(), draft),
-                delta_section_column(),
-                cmp,
-            ));
-            self.blocked.set_columns(with_delta(
-                with_draft(blocked_columns(), draft_section_column(), draft),
-                delta_section_column(),
-                cmp,
-            ));
-        }
+        self.sync_flows_columns();
+        self.sync_flows_grouped_columns();
+        self.sync_pairs_columns();
+        self.sync_mesh_columns();
+        self.sync_apps_columns();
+        self.sync_blocked_columns();
+    }
+
+    /// Whether the marks' gutter (and its wider `flows` column) is drawn.
+    fn marks_on(&self) -> bool {
+        self.marked.as_ref().is_some_and(|m| m.active > 0)
+    }
+
+    fn sync_flows_columns(&mut self) {
+        let (draft, cmp) = (self.draft_loaded(), self.comparing());
+        let base = if draft {
+            make_room_for_draft(flow_columns())
+        } else {
+            flow_columns()
+        };
+        let cols = with_delta(
+            with_draft(make_room_for_delta(base, cmp), draft_flow_column(), draft),
+            (delta_flow_column(), transition_flow_column()),
+            cmp,
+        );
+        fit_columns(&mut self.flows, cols, FLOW_TAKERS, flow_change);
+    }
+
+    fn sync_flows_grouped_columns(&mut self) {
+        let (draft, cmp) = (self.draft_loaded(), self.comparing());
+        let base = if draft {
+            make_room_for_draft(flow_columns_of())
+        } else {
+            flow_columns_of()
+        };
+        let cols = with_delta(
+            with_draft(
+                make_room_for_delta(base, cmp),
+                draft_flow_column_of(),
+                draft,
+            ),
+            (delta_section_column(), transition_section_column()),
+            cmp,
+        );
+        fit_columns(&mut self.flows_grouped, cols, FLOW_TAKERS, section_change);
+    }
+
+    fn sync_pairs_columns(&mut self) {
+        let (draft, cmp, on) = (self.draft_loaded(), self.comparing(), self.marks_on());
+        let compare = || (delta_group_column(), transition_group_column());
+        let mut groups = with_delta(
+            with_draft(group_columns(), draft_group_column(), draft),
+            compare(),
+            cmp,
+        );
+        let mut services = with_delta(
+            with_draft(service_group_columns(), draft_group_column(), draft),
+            compare(),
+            cmp,
+        );
+        let narrow: fn(&FlowGroup) -> String = |g| flows_cell_narrow(g.flows, g.marks.as_ref());
+        marks_flows_column(&mut groups, on, narrow);
+        marks_flows_column(&mut services, on, narrow);
+        fit_columns(&mut self.groups, groups, PAIR_TAKERS, group_change);
+        fit_columns(&mut self.services, services, PAIR_TAKERS, group_change);
+    }
+
+    fn sync_mesh_columns(&mut self) {
+        let (draft, cmp) = (self.draft_loaded(), self.comparing());
+        let cols = with_delta(
+            with_draft(mesh_columns(self.mesh_cols), draft_mesh_column(), draft),
+            (delta_mesh_column(), transition_mesh_column()),
+            cmp,
+        );
+        fit_columns(&mut self.mesh, cols, MESH_TAKERS, mesh_change);
+    }
+
+    fn sync_apps_columns(&mut self) {
+        let (draft, cmp, on) = (self.draft_loaded(), self.comparing(), self.marks_on());
+        let mut cols = with_delta(
+            with_draft(app_columns(), draft_section_column(), draft),
+            (delta_section_column(), transition_section_column()),
+            cmp,
+        );
+        marks_flows_column(&mut cols, on, section_flows_narrow);
+        fit_columns(&mut self.apps, cols, &[], section_change);
+    }
+
+    fn sync_blocked_columns(&mut self) {
+        let (draft, cmp, on) = (self.draft_loaded(), self.comparing(), self.marks_on());
+        let mut cols = with_delta(
+            with_draft(blocked_columns(), draft_section_column(), draft),
+            (delta_section_column(), transition_section_column()),
+            cmp,
+        );
+        marks_flows_column(&mut cols, on, section_flows_narrow);
+        fit_columns(&mut self.blocked, cols, &[], section_change);
     }
 
     /// App-to-app's pairs, and by service while `o` is on (none while off),
@@ -1166,6 +1186,7 @@ impl TrafficState {
         }
         self.groups.set_rows(groups);
         self.services.set_rows(services);
+        self.sync_pairs_columns();
     }
 
     /// App-to-app `pairs`' table: by service when `o` is on, else the pairs.
@@ -1229,6 +1250,7 @@ impl TrafficState {
         self.apps_cache = sections;
         let rows = self.apps_rows(&self.apps_state.folded);
         self.apps.set_rows(rows);
+        self.sync_apps_columns();
     }
 
     /// Blocked's sections, its squelched counts and its records still
@@ -1285,6 +1307,7 @@ impl TrafficState {
         self.blocked_cache = (sections, accepted);
         let rows = self.blocked_rows(&self.blocked_folded);
         self.blocked.set_rows(rows);
+        self.sync_blocked_columns();
     }
 
     /// The Flows view's sections, while it shows them; otherwise none,
@@ -1376,6 +1399,7 @@ impl TrafficState {
         self.flows_cache = cache;
         let rows = flow_section_rows(&self.flows_cache, self.flows_state.folded());
         self.flows_grouped.set_rows(rows);
+        self.sync_flows_grouped_columns();
     }
 
     /// The Flows sections, if the Flows view shows them and they were
@@ -1840,4 +1864,28 @@ impl TrafficState {
         }
         started
     }
+}
+
+/// The columns that give up room to `was→now` (`fit_columns`): the Flows
+/// view's endpoints and groups, the pairs' groups, the mesh's endpoints,
+/// user and process. The sections have a fill column instead.
+const FLOW_TAKERS: &[&str] = &["src", "dst", "src group", "dst group"];
+const PAIR_TAKERS: &[&str] = &["src", "dst"];
+const MESH_TAKERS: &[&str] = &["src", "dst", "process", "user"];
+
+/// The `flows` column of `cols`: 10 cells (7 narrow, `narrow`) while the
+/// marks' gutter is drawn, else the usual 6 (5).
+fn marks_flows_column<T>(cols: &mut [Column<T>], on: bool, narrow: fn(&T) -> String) {
+    if let Some(c) = cols.iter_mut().find(|c| c.title == "flows") {
+        (c.width, c.narrow_width, c.narrow) = if on {
+            (10, FLOWS_NARROW_MARKED as u16, Some(narrow))
+        } else {
+            (6, 5, None)
+        };
+    }
+}
+
+/// A section row's narrow `flows` cell while marks are active.
+fn section_flows_narrow(r: &SectionRow) -> String {
+    r.with_row(|p| flows_cell_narrow(p.flows, p.marks.as_ref()))
 }
