@@ -345,7 +345,7 @@ https://alexgoller.github.io/illumio-tui/#recipes
 
 ## Workflows
 
-Eight everyday jobs as keys and commands. Screenshots and recordings of each, taken on a demo
+Nine everyday jobs as keys and commands. Screenshots and recordings of each, taken on a demo
 PCE: https://alexgoller.github.io/illumio-tui/#workflows
 
 1. **Find and silence noise (marks).** `m` on a row of any traffic view opens a mark form
@@ -407,6 +407,16 @@ PCE: https://alexgoller.github.io/illumio-tui/#workflows
    complete without a request; `:export <path>` writes the table on screen as CSV; shell
    completions for bash, zsh and fish; Apple Terminal gets the theme in 256 colours by itself
    (`ILLUMIO_TUI_COLORS=256|truecolor` overrides).
+
+9. **What is new since? (compare, `c`).** `c` on Traffic asks for a baseline length (`7d`;
+   `Ctrl-N` / `Ctrl-P` step) and queries the same filter over the window just before the
+   result's start. Every view but the Treemap marks its rows `NEW`, `CHG` (another set of
+   decisions: `allowed→potentially_blocked`) or `GONE` (dim, only in the baseline), the Result
+   header says `vs 7d before · 12 new · 3 changed · 5 gone`, `n` shows only one kind, `C`
+   leaves. Change checks, new talkers, new blocked flows (Blocked view). CLI:
+
+       illumio-tui traffic groups --by pairs --services --since 2026-10-23T18:00 --baseline 30d --yes
+       illumio-tui traffic query --window 24h --baseline 7d --changes new --csv > new-flows.csv
 
 **One app, start to finish:** `readiness` (infra-mgmt/Production is closest, 90% covered) →
 `readiness --app` (two gaps, two pending rulesets) → TUI: `r`, `m` the noise, `D` → `E` on the
@@ -681,6 +691,27 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   accepted`). `:marks` lists every mark with its hits (`Enter` edit, `x` delete, `e` 30 more
   days, asking why again); expired marks stay in the file, greyed. The generator's rules
   ignore marks; its header counts the squelched flows.
+  `c` **compares** the result with a baseline: a one-line prompt for its length (`7d`;
+  `Ctrl-N` / `Ctrl-P` step through the window steps, `Ctrl-U` clears) and `Enter` runs the same
+  filter over exactly `[start − 7d, start)` of the result on screen, one query in its own cache
+  slot (the same filter and window again is a cache hit; above 7d or a 10k cap it asks first).
+  Rows are matched on each view's key without the decision and without `first_detected`
+  (Flows: both endpoints by workload, else IP, port/proto, process, user, direction; App-to-app
+  and Blocked: source group, destination group, service; Mesh: its row key) and the views
+  gain a first `Δ` column: `NEW` (only recent), `CHG` (in both, another set of decisions; the
+  Flows detail's title says `allowed→pot.blocked`), `GONE` (only in the baseline, dim, with the
+  baseline's values), blank for the same. The Result header says `vs 7d before · 12 new · 3
+  changed · 5 gone` for the view on screen; `n` cycles all → new → changed → gone, `C` leaves.
+  New means not seen in the baseline window at Explorer's record granularity: a record whose
+  lifetime spans the cut-off comes back from both queries and reads as the same (or changed),
+  and the counts stay each side's own lifetime counters, never subtracted. Nothing refreshes
+  on its own: `r` re-runs the recent query and keeps the baseline; another filter or window (`f`,
+  `+`, `-`, a saved filter) ends compare mode (`filter changed: c compares again`); only `c`
+  queries the baseline. A truncated side shows in the header in the warning colour (`baseline
+  truncated: new/gone over-report`) and `B` backfills whichever side is truncated, each rung
+  asked as usual. Squelch hides rows on both sides alike (`M` shows them on both), so a
+  squelched flow is never gone; a focus narrows both sides; a focused result (`r` on a partial
+  focus) refuses `c` and ends compare mode. The Treemap has no `Δ`.
 - **Policy**: `d` toggle draft / active, `p` pending changes (`Enter` on one shows its diff against active), `Tab` switch panes, `Enter` rule
   detail, or on a ruleset load its deny rules. Rules are listed in evaluation order: override
   deny, allow, deny; the allow rules intra-scope first, then extra-scope (the `scope` column,
@@ -931,6 +962,10 @@ the API call and byte counters at all times.
     illumio-tui traffic mesh --window 1h --no-user --json
     illumio-tui traffic query --window 30d --dry-run
     illumio-tui traffic query --window 24h --backfill --json
+    illumio-tui traffic query --window 24h --baseline 7d --json
+    illumio-tui traffic groups --by pairs --since 2026-10-23T18:00 --baseline 30d --yes
+    illumio-tui traffic groups --by in --show blocked --since 2026-10-24 --baseline 7d --changes new
+    illumio-tui traffic mesh --window 24h --baseline 7d --changes new,changed,gone,same --csv
     illumio-tui traffic explain --src app=web --dst app=db --port 5432 --proto tcp --json
     illumio-tui workloads --csv > workloads.csv
     illumio-tui traffic groups --window 24h --by in --csv > peers.csv
@@ -1076,6 +1111,31 @@ summary (workloader) therefore match `conns`, not `flows`. Every CLI traffic tab
 the line above it, and the TUI's traffic tables add `conns: lifetime` to their title where it
 fits; JSON and CSV carry the per-decision connections for pairs, `--services` and
 sections (sections: as the last four CSV columns).
+
+**Compare (what is new since).** `--baseline DURATION` on `traffic query`, `groups` and `mesh`
+also runs the same filter over the window just before the recent one, exactly `[start −
+DURATION, start)` of the recent query's bounds, and marks every row `new` (only recent),
+`changed` (in both, another set of decisions), `gone` (only in the baseline; its values the
+baseline's) or `same`. Rows are matched on the view's key without the decision and without
+`first_detected`: flows on both endpoints (workload href, else IP), port/proto, process, user
+and direction; pairs, `--services` and sections on source group, destination group and
+service; the mesh on its row key. "New" means not seen in the baseline window at Explorer's
+record granularity: a record spanning the cut-off is returned by both queries and reads as the
+same (or changed, and an old record overlapping the recent start can make the recent set
+`allowed,potentially_blocked`); connection and byte counts stay each side's lifetime counters,
+never per window and never subtracted. The recent window is `--window`, `--from`/`--to`, or
+`--since TIME` (`--from` with `--to` defaulting to now; RFC 3339, `2026-10-23T18:00` in UTC, or a date). `--changes new,changed,gone,same` picks
+the rows (default `new,changed,gone`; only with `--baseline`, else exit 2). Table and CSV gain
+`change` and `baseline_decision` (the baseline's decisions for the key, `allowed,blocked`)
+columns, JSON the same two fields per row and `meta.compare` with both exact windows, each
+side's truncation, cap and cache, and the counts per change (before `--changes`); `meta.queries`
+and `meta.cost` count both queries. `--dry-run` prints both bodies (recent first). The cost
+guard judges each query on its own (`expensive baseline query: window is 30d (> 7d)`); `--yes`
+covers both. `--backfill` climbs each side on its own. A truncated side is a warning on stderr
+and in `meta.warnings` (`baseline truncated, capped at 10000: new/gone over-report`); the exit
+code stays 0. `--show-squelched` and `--no-marks` act on both sides alike, so a squelched flow is
+never gone. `--draft` evaluates the recent side only. `traffic explain` takes no `--baseline`;
+a saved filter keeps no baseline.
 
 **Draft decision.** `--draft` (on `traffic query`/`groups`/`mesh` and `app`) also asks for
 each flow's decision under the draft policy, the PCE's own Explorer draft view: after the
