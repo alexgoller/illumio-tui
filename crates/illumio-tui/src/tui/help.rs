@@ -151,6 +151,7 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
             ),
             more("", "Ctrl-N Ctrl-P step its length; > 7d or cap > 10k asks"),
             more("", "Δ: NEW CHG GONE (dim) · not in the Treemap"),
+            more("", "CHG: the decision cell says baseline→recent"),
             key("n / C", "show all · new · changed · gone / compare off"),
             more(
                 "",

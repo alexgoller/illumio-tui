@@ -6,6 +6,9 @@ pub enum SortKey {
     Num(u64),
 }
 
+/// A column (by title) and the rows whose cell in it is warned.
+pub type WarnCell<T> = (&'static str, fn(&T) -> bool);
+
 pub struct Column<T> {
     pub title: &'static str,
     /// Preferred width in cells; 0 means "take the remaining space".
@@ -75,6 +78,9 @@ pub struct TableView<T> {
     /// while set (marks active). Not a column: column indices, `s`, the
     /// default sort, search and `:export` do not see it.
     pub marker: Option<fn(&T) -> Option<pce::marks::Marker>>,
+    /// The column (by title) whose cell is drawn in the warning colour on
+    /// the rows the predicate picks (compare mode's `CHG` decision cell).
+    pub warn_cell: Option<WarnCell<T>>,
 }
 
 impl<T> TableView<T> {
@@ -92,7 +98,22 @@ impl<T> TableView<T> {
             matcher: None,
             match_group: None,
             marker: None,
+            warn_cell: None,
         }
+    }
+
+    /// The table with `column`'s cell in the warning colour on the rows
+    /// `pick` picks.
+    pub fn with_warn_cell(mut self, column: &'static str, pick: fn(&T) -> bool) -> Self {
+        self.warn_cell = Some((column, pick));
+        self
+    }
+
+    /// Whether the cell of column `ci` on `row` is drawn in the warning
+    /// colour.
+    pub fn warns(&self, row: &T, ci: usize) -> bool {
+        self.warn_cell
+            .is_some_and(|(title, pick)| self.columns[ci].title == title && pick(row))
     }
 
     /// The table with its own row filter in place of the substring search.

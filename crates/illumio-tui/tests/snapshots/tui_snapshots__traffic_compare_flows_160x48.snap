@@ -17,7 +17,7 @@ expression: "render_to_string(&m, 160, 48)"
 │       10-10 07:29:10   shop-web-p.examp shop/prod          crm-web-p.exampl crm/prod           443/tcp        150 allowed                                    │
 │       10-10 07:31:00   crm-web-p.exampl crm/prod           crm-db-p.example crm/prod           3306/tcp       610 allowed                                    │
 │       10-10 07:28:00   crm-web-p.exampl crm/prod           crm-db-p.example crm/prod           3306/tcp       240 allowed                                    │
-│  CHG  10-10 07:25:00   crm-web-p.exampl crm/prod           erp-api-p.exampl erp/prod           8443/tcp        35 potentially_blocked                        │
+│  CHG  10-10 07:25:00   crm-web-p.exampl crm/prod           erp-api-p.exampl erp/prod           8443/tcp        35 allowed→pot.blocked                        │
 │       10-10 07:20:00   crm-api-d.exampl crm/dev            crm-db-p.example crm/prod           3306/tcp        12 blocked                                    │
 │       10-10 07:31:05   erp-api-p.exampl erp/prod           erp-db-p.example erp/prod           1521/tcp       300 allowed                                    │
 │       10-10 07:30:05   erp-api-p.exampl erp/prod           erp-db-p.example erp/prod           1521/tcp       290 allowed                                    │

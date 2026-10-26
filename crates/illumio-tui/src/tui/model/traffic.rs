@@ -357,10 +357,12 @@ impl TrafficState {
             query: QueryState::Idle,
             data: None,
             seq: 0,
-            flows: TableView::new(flow_columns()),
+            flows: TableView::new(flow_columns())
+                .with_warn_cell("decision", |r| is_changed(r.change.as_ref())),
             flows_grouped: TableView::new(flow_columns_of())
                 .with_matcher(section_matches)
-                .with_match_group(section_group),
+                .with_match_group(section_group)
+                .with_warn_cell("decision", changed_section_row),
             flows_state: FlowsState::default(),
             apps_cache: Vec::new(),
             blocked_cache: (Vec::new(), BTreeMap::new()),
@@ -372,13 +374,15 @@ impl TrafficState {
             all_keys: false,
             key_order: KeyOrder::default(),
             keys: keys_or_default(keys),
-            groups: TableView::new(group_columns()),
-            services: TableView::new(service_group_columns()),
-            mesh: TableView::new(mesh_columns(MESH_ALL)),
+            groups: TableView::new(group_columns()).with_warn_cell("decision", changed_group),
+            services: TableView::new(service_group_columns())
+                .with_warn_cell("decision", changed_group),
+            mesh: mesh_table(MESH_ALL),
             mesh_cols: MESH_ALL,
             apps: TableView::new(app_columns())
                 .with_matcher(section_matches)
-                .with_match_group(section_group),
+                .with_match_group(section_group)
+                .with_warn_cell("decision", changed_section_row),
             apps_state: AppState::default(),
             blocked: TableView::new(blocked_columns())
                 .with_matcher(section_matches)
@@ -1668,7 +1672,7 @@ impl TrafficState {
         } else {
             self.mesh_cols.process = !self.mesh_cols.process;
         }
-        self.mesh = TableView::new(mesh_columns(self.mesh_cols));
+        self.mesh = mesh_table(self.mesh_cols);
         self.rebuild_views();
     }
 

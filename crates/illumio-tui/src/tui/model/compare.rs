@@ -112,6 +112,67 @@ fn delta_full(c: Option<&RowChange>) -> String {
     c.map(RowChange::text).unwrap_or_default()
 }
 
+/// A decision in a decision cell: `pot.blocked` (`pot.blk` when narrow).
+fn decision_word(d: pce::models::PolicyDecision, narrow: bool) -> &'static str {
+    use pce::models::PolicyDecision as D;
+    match (d, narrow) {
+        (D::PotentiallyBlocked, false) => "pot.blocked",
+        (D::PotentiallyBlocked, true) => "pot.blk",
+        (D::Allowed, true) => "allow",
+        (D::Blocked, true) => "block",
+        (d, _) => d.as_str(),
+    }
+}
+
+/// `s` cut to `width` characters, the last one `…` when cut.
+fn ellipsize(s: &str, width: usize) -> String {
+    if s.chars().count() <= width {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(width.saturating_sub(1)).collect();
+    out.push('…');
+    out
+}
+
+/// Whether a row is `CHG`: its decision cell shows the transition, in the
+/// warning colour.
+pub fn is_changed(c: Option<&RowChange>) -> bool {
+    c.is_some_and(|c| c.change == Change::Changed)
+}
+
+/// A decision cell (#79): for a `CHG` row `baseline set→recent set`
+/// (`allowed→allowed,pot.blocked`) ellipsized to `width`, else `plain`.
+pub fn decision_cell(c: Option<&RowChange>, plain: String, narrow: bool, width: u16) -> String {
+    let Some((b, r)) = c
+        .filter(|c| c.change == Change::Changed)
+        .and_then(|c| c.baseline_decision.zip(c.recent_decision))
+    else {
+        return plain;
+    };
+    let set = |d: pce::traffic::DecisionSet| {
+        d.decisions()
+            .map(|d| decision_word(d, narrow))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    ellipsize(&format!("{}→{}", set(b), set(r)), width as usize)
+}
+
+/// A `CHG` pair or service row (its decision cell in the warning colour).
+pub(super) fn changed_group(g: &FlowGroup) -> bool {
+    is_changed(g.change.as_ref())
+}
+
+/// A `CHG` peer or flow row of a sectioned table.
+pub(super) fn changed_section_row(r: &SectionRow) -> bool {
+    is_changed(r.change())
+}
+
+/// The Mesh view's table for `cols`, its `CHG` decision cells warned.
+pub(super) fn mesh_table(cols: MeshColumns) -> TableView<MeshRow> {
+    TableView::new(mesh_columns(cols)).with_warn_cell("decision", |r| is_changed(r.change.as_ref()))
+}
+
 /// A `Δ` column over `change`.
 macro_rules! delta_column {
     ($t:ty, $change:expr) => {

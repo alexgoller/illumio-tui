@@ -187,9 +187,17 @@ pub fn render<T>(
         .iter()
         .map(|&i| {
             let item = &view.rows()[i];
+            let warn = Style::new().fg(theme.warn);
             let mut cells: Vec<Cell> = row_cells(view, item, &cols, &widths)
                 .into_iter()
-                .map(Cell::from)
+                .zip(&cols)
+                .map(|(text, &(ci, _, _))| {
+                    if view.warns(item, ci) {
+                        Cell::from(text).style(warn)
+                    } else {
+                        Cell::from(text)
+                    }
+                })
                 .collect();
             let Some(marker) = view.marker else {
                 return Row::new(cells).style(row_style(item));
@@ -266,6 +274,22 @@ fn clip_spans(spans: Vec<Span<'static>>, w: usize) -> Vec<Span<'static>> {
     out
 }
 
+/// `spans` without the trailing whitespace of their joined text.
+fn trim_end_spans(mut spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
+    while let Some(last) = spans.last_mut() {
+        let t = last.content.trim_end();
+        if t.is_empty() {
+            spans.pop();
+        } else {
+            if t.len() != last.content.len() {
+                last.content = t.to_string().into();
+            }
+            break;
+        }
+    }
+    spans
+}
+
 /// `render_spanning` whose spanning rows are styled spans, laid out for
 /// the width they get (`spanning(row, width)`): each span's style on top
 /// of the row's.
@@ -336,14 +360,27 @@ pub fn render_spanning_spans<T>(
                 );
             }
             None => {
-                let text = line_of(row_cells(view, item, &cols, &widths));
-                let name = widths.first().copied().unwrap_or(0);
-                // A highlight colours the name cell (the first column) only.
-                let split = clip_width(&text, name).len();
-                let (head, tail) = text.split_at(split);
+                // A highlight colours the name cell (the first column)
+                // only; a warned cell (`warn_cell`) is in the warning colour.
+                let warn = style.patch(Style::new().fg(theme.warn));
                 let head_style = name_style(m, theme).map_or(style, |s| style.patch(s));
-                spans.push(Span::styled(head.to_string(), head_style));
-                spans.push(Span::styled(tail.to_string(), style));
+                let cells: Vec<Span<'static>> = row_cells(view, item, &cols, &widths)
+                    .into_iter()
+                    .zip(&cols)
+                    .enumerate()
+                    .map(|(k, (text, &(ci, _, _)))| {
+                        let s = if view.warns(item, ci) {
+                            warn
+                        } else if k == 0 {
+                            head_style
+                        } else {
+                            style
+                        };
+                        let text = if k == 0 { text } else { format!(" {text}") };
+                        Span::styled(text, s)
+                    })
+                    .collect();
+                spans.extend(trim_end_spans(clip_spans(cells, avail)));
             }
         }
         if selected {

@@ -25,7 +25,7 @@ expression: "render_to_string(&m, 160, 48)"
 │       -            -              ipl:Corp/-         hr/prod            443/tcp    httpd              75 pot.blocked                                         │
 │       root         curl           hr/prod            crm/prod           443/tcp    -                  60 allowed                                             │
 │       www-data     nginx          erp/dev            erp/prod           8443/tcp   -                  44 pot.blocked                                         │
-│  CHG  www          node           crm/prod           erp/prod           8443/tcp   -                  35 pot.blocked                                         │
+│  CHG  www          node           crm/prod           erp/prod           8443/tcp   -                  35 allowed→po…                                         │
 │       root         curl           shop/prod          api.partner.exampl 443/tcp    -                  33 allowed                                             │
 │       erp          java           erp/prod           api.partner.exampl 443/tcp    -                  27 allowed                                             │
 │       www          php-fpm        hr/prod            hr/dev             5432/tcp   -                  20 blocked                                             │

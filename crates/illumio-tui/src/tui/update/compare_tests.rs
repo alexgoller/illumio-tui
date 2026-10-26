@@ -965,3 +965,116 @@ fn the_header_counts_equal_the_rows_each_view_shows_under_every_n() {
     }
     assert_eq!(seen.len(), 6, "{seen:?}");
 }
+
+/// The decision cell's text and its first cell's foreground at `w`×48 on
+/// the line holding `text`.
+fn decision_fg(m: &Model, w: u16, text: &str) -> Option<ratatui::style::Color> {
+    let mut term =
+        ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, 48)).expect("test terminal");
+    term.draw(|f| crate::tui::ui::view(m, f)).expect("draw");
+    let buf = term.backend().buffer();
+    for y in 0..buf.area.height {
+        let cells: Vec<&ratatui::buffer::Cell> =
+            (0..buf.area.width).map(|x| &buf[(x, y)]).collect();
+        let line: Vec<String> = cells.iter().map(|c| c.symbol().to_string()).collect();
+        let want: Vec<String> = text.chars().map(|c| c.to_string()).collect();
+        if let Some(at) = line.windows(want.len()).position(|w| w == want.as_slice()) {
+            return cells[at].fg.into();
+        }
+    }
+    None
+}
+
+/// #79: a CHG row's decision cell shows `baseline→recent` in the warning
+/// colour, ellipsized to the column, in every view with a decision column;
+/// `:export` keeps the decision.
+#[test]
+fn a_changed_rows_decision_cell_shows_the_transition_in_the_warning_colour() {
+    let mut m = compared();
+    // Changed rows only, so they are on screen.
+    for _ in 0..2 {
+        quiet(&mut m, key('n'));
+    }
+    assert_eq!(
+        m.traffic.compare.as_ref().unwrap().show,
+        ShowChanges::Changed
+    );
+    let warn = m.theme.warn;
+    let mut seen = Vec::new();
+    for step in 0..5 {
+        match step {
+            0 => {}
+            1 => quiet(&mut m, key('v')),
+            2 => quiet(&mut m, key('o')),
+            3 => {
+                quiet(&mut m, key('o'));
+                quiet(&mut m, key('x'));
+            }
+            _ => {
+                quiet(&mut m, key('v'));
+                assert_eq!(m.traffic.view, TrafficView::Mesh);
+            }
+        }
+        let t = &m.traffic;
+        if step == 1 {
+            // Plain pairs have per-decision counts, no decision cell.
+            assert!(!t.groups.columns.iter().any(|c| c.title == "decision"));
+            continue;
+        }
+        // (the decision cell of the first CHG row, its change)
+        fn first<T>(
+            v: &crate::tui::table::TableView<T>,
+            change: impl Fn(&T) -> Option<&pce::traffic::RowChange>,
+        ) -> (String, String, pce::traffic::RowChange) {
+            let col = v
+                .columns
+                .iter()
+                .position(|c| c.title == "decision")
+                .unwrap();
+            let row = v
+                .rows()
+                .iter()
+                .find(|r| change(r).is_some_and(|c| c.change == Change::Changed))
+                .expect("a changed row");
+            (
+                v.cell(row, col),
+                v.full_cells(row)[col].clone(),
+                *change(row).unwrap(),
+            )
+        }
+        let (cell, exported, rc) = match t.view {
+            TrafficView::Flows => first(&t.flows, |r| r.change.as_ref()),
+            TrafficView::Aggregate if t.apps_state.by != crate::tui::model::By::Pairs => {
+                first(&t.apps, |r| r.change())
+            }
+            TrafficView::Aggregate => first(t.pairs_table(), |r| r.change.as_ref()),
+            TrafficView::Mesh => first(&t.mesh, |r| r.change.as_ref()),
+            _ => unreachable!(),
+        };
+        let what = format!("{} step {step}", t.view.title());
+        let full = format!(
+            "{}→{}",
+            rc.baseline_decision.unwrap().text(),
+            rc.recent_decision.unwrap().text()
+        )
+        .replace("potentially_blocked", "pot.blocked");
+        let width = if t.view == TrafficView::Flows { 19 } else { 11 };
+        let want = if full.chars().count() > width {
+            format!("{}…", full.chars().take(width - 1).collect::<String>())
+        } else {
+            full.clone()
+        };
+        assert_eq!(cell, want, "{what}");
+        assert!(cell.contains('→'), "{what}: {cell}");
+        assert!(
+            !exported.contains('→'),
+            "{what}: :export keeps the decision: {exported}"
+        );
+        assert_eq!(decision_fg(&m, 160, &cell), Some(warn), "{what}: {cell}");
+        seen.push(cell);
+    }
+    assert_eq!(seen.len(), 4, "{seen:?}");
+    // Narrow (below 120 columns): the short words, ellipsized to 8.
+    assert_eq!(m.traffic.view, TrafficView::Mesh);
+    assert_eq!(decision_fg(&m, 100, "allow→p…"), Some(warn));
+}
