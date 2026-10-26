@@ -593,9 +593,9 @@ counts   rule_sets=9, services=2</code></pre>
 <span class="p">$ </span>illumio-tui traffic groups --window 1h --keys app,env,role
 <span class="p">$ </span>illumio-tui traffic mesh --window 1h --no-user --json
 <span class="p">$ </span>illumio-tui traffic query --window 30d --dry-run
-<span class="c"># what is new since Friday's change window, against the 30 days before it</span>
+<span class="c"># what is new since Friday's change window (local time), against the 30 days before it</span>
 <span class="p">$ </span>illumio-tui traffic groups --by pairs --since 2026-10-23T18:00 --baseline 30d --yes
-<span class="p">$ </span>illumio-tui traffic groups --by in --show blocked --since 2026-10-24 --baseline 7d --changes new
+<span class="p">$ </span>illumio-tui traffic groups --by in --show blocked --since 2026-10-24 --baseline 7d --changes new,changed
 <span class="p">$ </span>illumio-tui traffic explain --src app=web --dst app=db --port 5432 --proto tcp
 
 <span class="c"># one app: its profile, and the allow rules its traffic needs (never written)</span>
