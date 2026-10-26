@@ -985,27 +985,35 @@ fn fg_of(m: &Model, w: u16, h: u16, text: &str) -> Option<ratatui::style::Color>
     })
 }
 
-/// The `was→now` cells of the CHG rows of the table on screen, and
-/// whether its columns have `was→now` second (after `Δ`).
-fn transitions(m: &Model) -> (Vec<String>, bool) {
+/// The `was→now` cells of the CHG rows of the table on screen, whether
+/// its columns have `was→now` second (after `Δ`), and how many other rows
+/// have a non-blank `was→now` cell.
+fn transitions(m: &Model) -> (Vec<String>, bool, usize) {
     fn of<T>(
         v: &crate::tui::table::TableView<T>,
         change: impl Fn(&T) -> Option<&pce::traffic::RowChange>,
-    ) -> (Vec<String>, bool) {
+    ) -> (Vec<String>, bool, usize) {
         let has = v.columns.get(1).is_some_and(|c| c.title == "was→now");
         let Some(col) = v.columns.iter().position(|c| c.title == "was→now") else {
-            return (Vec::new(), has);
+            return (Vec::new(), has, 0);
         };
+        let chg = |r: &T| change(r).is_some_and(|c| c.change == Change::Changed);
         let cells = v
             .rows()
             .iter()
-            .filter(|r| change(r).is_some_and(|c| c.change == Change::Changed))
+            .filter(|r| chg(r))
             .map(|r| v.cell(r, col))
             .collect();
-        (cells, has)
+        let filled = v
+            .rows()
+            .iter()
+            .filter(|r| !chg(r) && !v.cell(r, col).is_empty())
+            .count();
+        (cells, has, filled)
     }
     let t = &m.traffic;
     match t.view {
+        TrafficView::Flows if t.flows_grouped() => of(&t.flows_grouped, |r| r.change()),
         TrafficView::Flows => of(&t.flows, |r| r.change.as_ref()),
         TrafficView::Aggregate if t.apps_state.by != crate::tui::model::By::Pairs => {
             of(&t.apps, |r| r.change())
@@ -1013,7 +1021,7 @@ fn transitions(m: &Model) -> (Vec<String>, bool) {
         TrafficView::Aggregate => of(t.pairs_table(), |r| r.change.as_ref()),
         TrafficView::Mesh => of(&t.mesh, |r| r.change.as_ref()),
         TrafficView::Blocked => of(&t.blocked, |r| r.change()),
-        TrafficView::Treemap => (Vec::new(), false),
+        TrafficView::Treemap => (Vec::new(), false, 0),
     }
 }
 
@@ -1027,6 +1035,7 @@ fn every_view_shows_was_now_after_delta_on_changed_rows_only() {
     let warn = m.theme.warn;
     let want = [
         ("Flows", vec!["allow→pot.bl"]),
+        ("Flows by app", vec!["allow→pot.bl"]),
         (
             "App-to-app pairs",
             vec!["allow→allow", "allow,pot.bl→pot.bl"],
@@ -1039,29 +1048,28 @@ fn every_view_shows_was_now_after_delta_on_changed_rows_only() {
     for (step, (what, cells)) in want.iter().enumerate() {
         match step {
             0 => {}
-            1 => quiet(&mut m, key('v')),
-            2 => quiet(&mut m, key('o')),
-            3 => {
+            1 => quiet(&mut m, key('x')),
+            2 => {
+                // Flows flat again, on to App-to-app.
+                quiet(&mut m, key('x'));
+                quiet(&mut m, key('x'));
+                quiet(&mut m, key('v'));
+            }
+            3 => quiet(&mut m, key('o')),
+            4 => {
                 quiet(&mut m, key('o'));
                 quiet(&mut m, key('x'));
             }
             _ => quiet(&mut m, key('v')),
         }
-        let (got, has) = transitions(&m);
+        assert_eq!(m.traffic.flows_grouped(), step == 1, "{what}");
+        let (got, has, filled) = transitions(&m);
         assert!(has, "{what}: was→now after Δ");
         assert_eq!(&got, cells, "{what}");
-        // Blank on every other row.
-        let blank = match m.traffic.view {
-            TrafficView::Mesh => m
-                .traffic
-                .mesh
-                .rows()
-                .iter()
-                .filter(|r| !r.change.is_some_and(|c| c.change == Change::Changed))
-                .all(|r| crate::tui::model::transition_text(r.change.as_ref()).is_empty()),
-            _ => true,
-        };
-        assert!(blank, "{what}");
+        assert_eq!(filled, 0, "{what}: blank on every other row");
+        // `:export` leaves it out (the `change` column has the transition).
+        let (titles, _) = crate::tui::export::current_table(&m).unwrap();
+        assert!(!titles.contains(&"was→now"), "{what}: {titles:?}");
         // Changed rows only, so they are on screen; then each fits and is
         // in the warning colour at 160×48 and at 80×24 (cut with … there
         // when the table cannot give more room).
@@ -1111,8 +1119,83 @@ fn every_view_shows_was_now_after_delta_on_changed_rows_only() {
     quiet(&mut m, key('C'));
     for _ in 0..5 {
         quiet(&mut m, key('v'));
-        let (_, has) = transitions(&m);
+        let (_, has, _) = transitions(&m);
         assert!(!has, "{}", m.traffic.view.title());
         assert!(!render_to_string(&m, 160, 48).contains("was→now"));
+    }
+}
+
+/// Whether `v`'s columns fit a table `w` cells wide: borders, cursor and
+/// the marks' gutter (when drawn) taken off, a fill column counted as 8.
+fn fits<T>(v: &crate::tui::table::TableView<T>, w: u16) -> (bool, u16) {
+    let vis = crate::tui::ui::widgets::table::visible_columns(&v.columns, w);
+    let used: u16 = vis
+        .iter()
+        .map(|c| if c.1 == 0 { 8 } else { c.1 })
+        .sum::<u16>()
+        + vis.len().saturating_sub(1) as u16
+        + if v.marker.is_some() { 6 } else { 4 };
+    (used <= w, used)
+}
+
+/// #79 review M1: with a mark active (its gutter drawn) every compare view
+/// still fits at 80 columns, `was→now` included.
+#[test]
+fn compare_views_fit_at_80_with_the_marks_gutter() {
+    let dir = tempfile::tempdir().unwrap();
+    let marks = r#"
+[[mark]]
+id = "m-rev8443"
+action = "revisit"
+src = "any"
+dst = "any"
+service = "8443/tcp"
+comment = "look again"
+"#;
+    let mut m = crate::tui::test_support::model_with_marks(dir.path(), marks);
+    m.traffic.filter.window = "1d".into();
+    if let Some(d) = m.traffic.data.as_mut() {
+        d.filter = m.traffic.filter.clone();
+        d.range = Some(crate::tui::model::Range {
+            start: ts("2026-10-09T08:00:00Z"),
+            end: ts(FIXTURE_END),
+        });
+    }
+    m.traffic.rebuild_views();
+    compare_with(&mut m, baseline_flows_rich(), false);
+    assert!(m.traffic.flows.marker.is_some(), "the gutter is drawn");
+    for step in 0..8 {
+        match step {
+            0 => {}
+            1 => quiet(&mut m, key('x')),
+            2 => {
+                quiet(&mut m, key('x'));
+                quiet(&mut m, key('x'));
+                quiet(&mut m, key('v'));
+            }
+            3 => quiet(&mut m, key('o')),
+            4 => {
+                quiet(&mut m, key('o'));
+                quiet(&mut m, key('x'));
+            }
+            _ => quiet(&mut m, key('v')),
+        }
+        let t = &m.traffic;
+        let what = format!("{} step {step}", t.view.title());
+        let (ok, used) = match t.view {
+            TrafficView::Flows if t.flows_grouped() => fits(&t.flows_grouped, 80),
+            TrafficView::Flows => fits(&t.flows, 80),
+            TrafficView::Aggregate if t.apps_state.by != crate::tui::model::By::Pairs => {
+                fits(&t.apps, 80)
+            }
+            TrafficView::Aggregate => fits(t.pairs_table(), 80),
+            TrafficView::Mesh => fits(&t.mesh, 80),
+            TrafficView::Blocked => fits(&t.blocked, 80),
+            TrafficView::Treemap => (true, 0),
+        };
+        assert!(ok, "{what}: {used} cells at 80");
+        if t.view != TrafficView::Treemap {
+            assert!(transitions(&m).1, "{what}: was→now shown");
+        }
     }
 }

@@ -23,10 +23,12 @@ pub fn current_table(model: &Model) -> Result<Csv, String> {
         Screen::Traffic => {
             let t = &model.traffic;
             match (t.view, t.unfolded_section_rows()) {
-                (TrafficView::Flows, Some(rows)) => flow_sections(&t.flows_grouped, &rows),
+                (TrafficView::Flows, Some(rows)) => {
+                    without_transition(flow_sections(&t.flows_grouped, &rows))
+                }
                 (_, Some(rows)) => sections(&rows),
-                (TrafficView::Flows, _) => t.flows.export(),
-                (TrafficView::Mesh, _) => t.mesh.export(),
+                (TrafficView::Flows, _) => without_transition(t.flows.export()),
+                (TrafficView::Mesh, _) => without_transition(t.mesh.export()),
                 (TrafficView::Treemap, _) => {
                     return Err("the treemap has no table to export".into());
                 }
@@ -50,6 +52,23 @@ pub fn current_table(model: &Model) -> Result<Csv, String> {
         Screen::Workloads => model.workloads.table.export(),
         Screen::Events => model.events.table.export(),
     })
+}
+
+/// `csv` without compare mode's `was→now` column: the `change` column
+/// has the transition with the whole decision names.
+fn without_transition((mut titles, mut rows): Csv) -> Csv {
+    if let Some(at) = titles
+        .iter()
+        .position(|t| *t == crate::tui::model::TRANSITION_COLUMN)
+    {
+        titles.remove(at);
+        for r in &mut rows {
+            if at < r.len() {
+                r.remove(at);
+            }
+        }
+    }
+    (titles, rows)
 }
 
 /// Sectioned rows one row per peer, as `traffic groups --by ... --csv`

@@ -227,12 +227,13 @@ fn drawn_width<T>(c: &mut Column<T>, narrow: bool) -> &mut u16 {
 const ROOM_FLOOR: u16 = 8;
 
 /// `cols` laid out for a table `area` cells wide (borders and the cursor
-/// taken off): the transition column as wide as `longest`, the `takers`
+/// taken off, and the marks' gutter when `gutter`): the transition column as wide as `longest`, the `takers`
 /// narrowed (one cell at a time, in turn, never below 8) to make room, the
 /// transition cut where they cannot give more. A fill column counts as 8.
-fn fit_at<T>(cols: &mut [Column<T>], area: u16, longest: u16, takers: &[&str]) {
+fn fit_at<T>(cols: &mut [Column<T>], area: u16, longest: u16, takers: &[&str], gutter: bool) {
     let narrow = area < 120;
-    let budget = area.saturating_sub(4);
+    // Borders and the cursor; the gutter is one cell and a gap.
+    let budget = area.saturating_sub(if gutter { 6 } else { 4 });
     let vis = crate::tui::ui::widgets::table::visible_columns(cols, area);
     let Some(at) = cols.iter().position(|c| c.title == TRANSITION_COLUMN) else {
         return;
@@ -270,7 +271,7 @@ fn fit_at<T>(cols: &mut [Column<T>], area: u16, longest: u16, takers: &[&str]) {
 
 /// `cols` (built afresh) with the transition column, if any, sized to the
 /// longest transition among `table`'s rows, so the table fits at 80
-/// columns (and at 120 wide); set on `table` when they differ from its own
+/// columns (and at 120 wide), its marks' gutter included; set on `table` when they differ from its own
 /// (the sort stays).
 pub(super) fn fit_columns<T>(
     table: &mut TableView<T>,
@@ -286,8 +287,9 @@ pub(super) fn fit_columns<T>(
             .max()
             .unwrap_or(0)
             .min(u16::MAX as usize) as u16;
-        fit_at(&mut cols, 80, longest, takers);
-        fit_at(&mut cols, 120, longest, takers);
+        let gutter = table.marker.is_some();
+        fit_at(&mut cols, 80, longest, takers, gutter);
+        fit_at(&mut cols, 120, longest, takers, gutter);
     }
     let same = table.columns.len() == cols.len()
         && table.columns.iter().zip(&cols).all(|(a, b)| {

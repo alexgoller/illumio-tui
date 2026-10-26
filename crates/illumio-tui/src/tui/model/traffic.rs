@@ -993,30 +993,27 @@ impl TrafficState {
     /// The flows column of the tables that show `~N` (pairs, by service,
     /// sections, Blocked): 10 cells (7 narrow, `flows_cell_narrow`) while
     /// marks are active, else the usual 6 (5).
-    pub(crate) fn sync_marks_columns(&mut self, on: bool) {
-        let group: fn(&FlowGroup) -> String = |g| flows_cell_narrow(g.flows, g.marks.as_ref());
-        marks_flows_column(&mut self.groups.columns, on, group);
-        marks_flows_column(&mut self.services.columns, on, group);
-        marks_flows_column(&mut self.apps.columns, on, section_flows_narrow);
-        marks_flows_column(&mut self.blocked.columns, on, section_flows_narrow);
-    }
-
-    /// The `draft` columns while draft decisions are loaded, none
-    /// otherwise; `fixed by draft` falls back to `all` without them.
-    /// The `Δ` and `was→now` columns too, first, in compare mode with a
-    /// baseline, `was→now` sized to the rows (`fit_columns`); the marks'
-    /// `flows` width (`sync_marks_columns`) kept.
-    fn sync_draft_columns(&mut self) {
-        let draft = self.draft_loaded();
-        if !draft && self.apps_state.decisions == Decisions::FixedByDraft {
-            self.apps_state.decisions = Decisions::All;
-        }
+    /// The tables' columns again (`sync_*_columns`): the `flows` width and
+    /// `was→now`'s room follow the gutter just set or cleared.
+    pub(crate) fn sync_marks_columns(&mut self) {
         self.sync_flows_columns();
         self.sync_flows_grouped_columns();
         self.sync_pairs_columns();
         self.sync_mesh_columns();
         self.sync_apps_columns();
         self.sync_blocked_columns();
+    }
+
+    /// `fixed by draft` falls back to `all` without draft decisions. The
+    /// columns themselves (`draft` while draft decisions are loaded; `Δ`
+    /// and `was→now` first in compare mode, `was→now` sized to the rows;
+    /// the marks' `flows` width) are set by each table's `sync_*_columns`
+    /// once its rows are in, so each is fitted once per rebuild.
+    fn sync_draft_columns(&mut self) {
+        let draft = self.draft_loaded();
+        if !draft && self.apps_state.decisions == Decisions::FixedByDraft {
+            self.apps_state.decisions = Decisions::All;
+        }
     }
 
     /// Whether the marks' gutter (and its wider `flows` column) is drawn.
@@ -1324,6 +1321,7 @@ impl TrafficState {
             self.flows_cache = Vec::new();
             self.flows_grouped.set_rows(Vec::new());
             self.flows_stale = dir.is_some();
+            self.sync_flows_grouped_columns();
             return;
         };
         self.flows_stale = false;

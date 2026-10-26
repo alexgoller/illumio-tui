@@ -266,7 +266,7 @@ impl TrafficState {
         self.apps.marker = sections;
         self.blocked.marker = sections;
         self.flows_grouped.marker = sections;
-        self.sync_marks_columns(on);
+        self.sync_marks_columns();
     }
 
     /// A status the marks file asked for (invalid, valid again, marks

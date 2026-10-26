@@ -413,8 +413,8 @@ PCE: https://alexgoller.github.io/illumio-tui/#workflows
    result's start. Every view but the Treemap marks its rows `NEW`, `CHG` (another set of
    decisions, the `was→now` column saying `allow→pot.bl`) or `GONE` (dim, only in the
    baseline), the Result header counts the rows the view shows: `vs 7d before · 12 new · 3
-   changed · 5 gone`, `n` shows only one kind, `C`
-   leaves. Change checks, new talkers, new blocked flows (Blocked view). CLI:
+   changed · 5 gone`, `n` shows only one kind, `C` leaves. Change checks, new talkers, new
+   blocked flows (Blocked view). CLI:
 
        illumio-tui traffic groups --by pairs --services --since 2026-10-23T18:00 --baseline 30d --yes
        illumio-tui traffic query --window 24h --baseline 7d --changes new --csv > new-flows.csv
@@ -701,18 +701,21 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   and Blocked: source group, destination group, service; Mesh: its row key) and the views
   gain a first `Δ` column: `NEW` (only recent), `CHG` (in both, another set of decisions; the
   `was→now` column after `Δ` says which, on `CHG` rows only and in the warning colour, with
-  short names: `allow→pot.bl`, `allow→allow,block` (`allow`, `pot.bl`, `block`, `unk`); it is as
-  wide as the longest one, the other columns giving up room so the table fits at 80 columns,
-  cut with `…` beyond that; the Flows detail's title says it too), `GONE` (only in the baseline, dim, with the
-  baseline's values), blank for the same. A key is judged on every decision, then the view's
-  decision filter picks its rows: Blocked shows a flow allowed then and potentially blocked now
-  as `CHG`, and a gone row only when it was blocked. A plain App-to-app pair (`o` off) is judged
-  by its service keys: `NEW` when all are new, `GONE` when all are gone, `CHG` when any is new,
-  gone or changed (`o` shows which). The Result header
-  says `vs 7d before 10-26 09:00 · 12 new · 3 changed · 5 gone` (where the baseline ends, UTC)
-  for the view on screen, counting the rows that view shows (App-to-app: pairs with `o` off,
-  service rows with it on), so `n` shows exactly as many rows as it names; a section of gone rows only reads `gone`, and section headers count
-  recent rows only. `n` cycles all → new → changed → gone, `C` leaves.
+  short names: `allow→pot.bl`, `allow→allow,block` (`allow`, `pot.bl`, `block`, `unk`); it is
+  as wide as the longest one, the other columns giving up room so the table fits at 80
+  columns, cut with `…` beyond that; the Flows detail's title says it too; `:export` leaves
+  it out, its `change` column has the transition), `GONE` (only in the baseline, dim, with
+  the baseline's values), blank for the same. A key is judged on every decision, then the
+  view's decision filter picks its rows: Blocked shows a flow allowed then and potentially
+  blocked now as `CHG`, and a gone row only when it was blocked. A plain App-to-app pair (`o`
+  off) is judged by its service keys: `NEW` when all are new, `GONE` when all are gone, `CHG`
+  when any is new, gone or changed (`o` shows which), so a pair's `CHG` can also mean a
+  service came or went with the decisions the same (`allow→allow`). The Result header says
+  `vs 7d before 10-26 09:00 · 12 new · 3 changed · 5 gone` (where the baseline ends, UTC) for
+  the view on screen, counting the rows that view shows (App-to-app: pairs with `o` off,
+  service rows with it on), so `n` shows exactly as many rows as it names; a section of gone
+  rows only reads `gone`, and section headers count recent rows only. `n` cycles all → new →
+  changed → gone, `C` leaves.
   New means not seen in the baseline window at Explorer's record granularity: a record whose
   lifetime spans the cut-off comes back from both queries and reads as the same (or changed),
   and the counts stay each side's own lifetime counters, never subtracted. Nothing refreshes
@@ -1131,12 +1134,12 @@ DURATION, start)` of the recent query's bounds, and marks every row `new` (only 
 `changed` (in both, another set of decisions), `gone` (only in the baseline; its values the
 baseline's) or `same`. Rows are matched on the view's key without the decision and without
 `first_detected`: flows on both endpoints (workload href, else IP), port/proto, process, user
-and direction; `--services` and sections on source group, destination group and service;
-plain pairs (`groups` without `--services`, `query --group`) by their service keys (`new` when
-all are new, `gone` when all are gone, `changed` when any is new, gone or changed;
-`baseline_decision` the union); the mesh on its row key. `meta.compare.counts` counts the rows
-of the output (pairs without `--services`, service rows with it), before `--changes` picks them. Each key
-is judged on every decision, then `--show` / `--blocked` pick the rows: a flow allowed then and
+and direction; `--services` and sections on source group, destination group and service; plain
+pairs (`groups` without `--services`, `query --group`) by their service keys (`new` when all are
+new, `gone` when all are gone, `changed` when any is new, gone or changed; `baseline_decision`
+the union); the mesh on its row key. `meta.compare.counts` counts the rows of the output (pairs
+without `--services`, service rows with it), before `--changes` picks them. Each key is judged
+on every decision, then `--show` / `--blocked` pick the rows: a flow allowed then and
 potentially blocked now is `changed` in the blocked sections, and a gone row shows only when its
 baseline records pass the filter. "New" means not seen in the baseline window at Explorer's
 record granularity: a record spanning the cut-off is returned by both queries and reads as the
@@ -1144,21 +1147,21 @@ same (or changed, and an old record overlapping the recent start can make the re
 `allowed,potentially_blocked`); connection and byte counts stay each side's lifetime counters,
 never per window and never subtracted. The recent window is `--window`, `--from`/`--to`, or
 `--since TIME` (`--from` with `--to` defaulting to now; RFC 3339, or `2026-10-23T18:00` and
-`2026-10-23` in the local time zone, `TZ`; `--from`/`--to` read `2026-10-23T18:00` as local
-time too and a date alone in UTC; `meta` windows are always UTC). `--changes new,changed,gone,same` picks
-the rows (default `new,changed,gone`; only with `--baseline`, else exit 2). Table and CSV gain
-`change` and `baseline_decision` (the baseline's decisions for the key, `allowed,blocked`)
+`2026-10-23` in the local time zone, `TZ`; `--from`/`--to` read `2026-10-23T18:00` as local time
+too and a date alone in UTC; `meta` windows are always UTC). `--changes new,changed,gone,same`
+picks the rows (default `new,changed,gone`; only with `--baseline`, else exit 2). Table and CSV
+gain `change` and `baseline_decision` (the baseline's decisions for the key, `allowed,blocked`)
 columns, JSON the same two fields per row and `meta.compare` with both exact windows, each
 side's truncation, cap, cap steps, queries and cache, and the counts per change (before
 `--changes`); `meta.queries` and `meta.cost` count every query of both sides (each backfill
-step, each side of `--app`). `--dry-run` prints both bodies (recent first). The cost
-guard judges each query on its own (`expensive baseline query: window is 30d (> 7d)`); `--yes`
-covers both. `--backfill` climbs each side on its own. A truncated side is a warning on stderr
-and in `meta.warnings` (`baseline truncated, capped at 10000: new/gone over-report`); the exit
-code stays 0. Squelch acts on both sides alike: a key with a squelched record on either side
-leaves both (a mark on the draft decision, which the baseline never carries, cannot make it
-gone), and `--show-squelched` and `--no-marks` act on both. `--draft` evaluates the recent side only. `traffic explain` takes no `--baseline`;
-a saved filter keeps no baseline.
+step, each side of `--app`). `--dry-run` prints both bodies (recent first). The cost guard
+judges each query on its own (`expensive baseline query: window is 30d (> 7d)`); `--yes` covers
+both. `--backfill` climbs each side on its own. A truncated side is a warning on stderr and in
+`meta.warnings` (`baseline truncated, capped at 10000: new/gone over-report`); the exit code
+stays 0. Squelch acts on both sides alike: a key with a squelched record on either side leaves
+both (a mark on the draft decision, which the baseline never carries, cannot make it gone), and
+`--show-squelched` and `--no-marks` act on both. `--draft` evaluates the recent side only.
+`traffic explain` takes no `--baseline`; a saved filter keeps no baseline.
 
 **Draft decision.** `--draft` (on `traffic query`/`groups`/`mesh` and `app`) also asks for
 each flow's decision under the draft policy, the PCE's own Explorer draft view: after the
