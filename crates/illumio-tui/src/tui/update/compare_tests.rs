@@ -824,3 +824,53 @@ fn a_cancelled_first_baseline_ends_compare_and_an_incomplete_one_warns() {
     );
     assert_eq!(m.status.kind, StatusKind::Warn);
 }
+
+#[test]
+fn the_result_line_counts_the_rows_the_tables_show_in_compare_mode() {
+    let dir = tempfile::tempdir().unwrap();
+    // Matches the 8443 flow's baseline record only (allowed then,
+    // potentially blocked now): its key leaves both sides.
+    let marks = r#"
+[[mark]]
+id = "m-sq8443"
+action = "squelch"
+src = "any"
+dst = "any"
+service = "8443/tcp"
+decision = "allowed"
+comment = "allowed then"
+"#;
+    let mut m = crate::tui::test_support::model_with_marks(dir.path(), marks);
+    m.traffic.filter.window = "1d".into();
+    if let Some(d) = m.traffic.data.as_mut() {
+        d.filter = m.traffic.filter.clone();
+        d.range = Some(crate::tui::model::Range {
+            start: ts("2026-10-09T08:00:00Z"),
+            end: ts(FIXTURE_END),
+        });
+    }
+    m.traffic.rebuild_views();
+    let n = fixture_flows_rich().len();
+    assert_eq!(m.traffic.squelched_hidden(), 0, "no recent record matches");
+    compare_with(&mut m, baseline_flows_rich(), false);
+    assert_eq!(m.traffic.squelched_hidden(), 1);
+    let recent_rows = m
+        .traffic
+        .flows
+        .rows()
+        .iter()
+        .filter(|r| r.change.is_some_and(|c| c.change != Change::Gone))
+        .count();
+    assert_eq!(recent_rows, n - 1, "the table without the hidden key");
+    assert_eq!(m.traffic.shown_flows().len(), n - 1);
+    let out = render_to_string(&m, 160, 48);
+    assert!(
+        out.contains(&format!("{} of {n} flows (1 squelched)", n - 1)),
+        "{out}"
+    );
+    // Compare off: as before.
+    quiet(&mut m, key('C'));
+    assert_eq!(m.traffic.squelched_hidden(), 0);
+    let out = render_to_string(&m, 160, 48);
+    assert!(out.contains(&format!("│{n} flows ")), "{out}");
+}

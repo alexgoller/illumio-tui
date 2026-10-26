@@ -223,7 +223,9 @@ fn render_stats(model: &Model, f: &mut Frame, area: Rect) {
         );
         return;
     };
-    let shown = model.traffic.view_flows();
+    // The rows the tables aggregate (compare mode: without the keys
+    // squelched on either side).
+    let shown = model.traffic.shown_flows();
     let (mut a, mut p, mut b) = (0u64, 0u64, 0u64);
     for fl in shown.iter() {
         match fl.policy_decision {

@@ -131,7 +131,9 @@ pub fn flows_text(shown: usize, total: usize, squelched: usize) -> String {
 impl TrafficState {
     /// The focused flows squelch leaves out of every view (0 with `M`).
     pub fn squelched_hidden(&self) -> usize {
-        self.focus_flows().len() - self.view_flows().len()
+        // Compare mode: with the keys squelched on the baseline's side
+        // too (`shown_flows`), as the tables show them.
+        self.focus_flows().len() - self.shown_flows().len()
     }
 
     /// The marks in force for the result on screen: valid file, in scope
