@@ -74,6 +74,7 @@ pub(super) fn open_where_used(model: &mut Model) -> Vec<Cmd> {
         && model.is_connected()
     {
         model.objects.pairing_loading = true;
+        model.objects.pairing_error = None;
         cmds.push(Cmd::LoadPairingProfiles(CacheMode::Use));
     }
     if let Some(href) = label {
@@ -201,7 +202,12 @@ pub(super) fn refresh_where_used(model: &mut Model) {
                 rows.extend(pce::where_used::pairing_profiles(&target.href, &key, list));
             }
             None if model.objects.pairing_loading => waiting.push(WAIT_PROFILES),
-            None => profiles_failed = Some("pairing profiles not loaded (W again asks)"),
+            None => {
+                profiles_failed = Some(match &model.objects.pairing_error {
+                    Some(e) => format!("pairing profiles: {e} (W again asks)"),
+                    None => "pairing profiles not loaded (W again asks)".to_string(),
+                })
+            }
         }
         let w = &model.workloads;
         let count = if w.loaded_at.is_some() {
@@ -227,11 +233,14 @@ pub(super) fn refresh_where_used(model: &mut Model) {
     v.set_rows(rows);
     v.deny_unread = found.deny_unread;
     v.waiting = waiting;
-    v.failed = if rulesets_missing {
-        Some("the draft rulesets are not loaded (W again asks)".to_string())
-    } else {
-        profiles_failed.or(count_failed).map(str::to_string)
-    };
+    // Every load that failed, each said.
+    let failed: Vec<String> = rulesets_missing
+        .then(|| "the draft rulesets are not loaded (W again asks)".to_string())
+        .into_iter()
+        .chain(profiles_failed)
+        .chain(count_failed.map(str::to_string))
+        .collect();
+    v.failed = (!failed.is_empty()).then(|| failed.join(" · "));
 }
 
 /// The pairing profiles answered: kept for every later `W` on a label, the
@@ -243,7 +252,10 @@ pub(super) fn pairing_answered(
     model.objects.pairing_loading = false;
     match result {
         Ok(list) => model.objects.pairing_profiles = Some(list),
-        Err(e) => model.status = StatusLine::warn(format!("pairing profiles: {e}")),
+        Err(e) => {
+            model.status = StatusLine::warn(format!("pairing profiles: {e}"));
+            model.objects.pairing_error = Some(e);
+        }
     }
     let open = model.overlay == Overlay::WhereUsed;
     refresh_where_used(model);

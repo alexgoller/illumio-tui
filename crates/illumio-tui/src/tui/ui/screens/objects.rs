@@ -442,7 +442,8 @@ pub fn render_where_used(model: &Model, f: &mut Frame, area: Rect) {
         }
     });
     let foot = cut_to(
-        "Enter open (rule, ruleset, group, workloads) · / search · Esc close",
+        // Fits the 74 columns of the box at 80.
+        "Enter (rule, ruleset, group, profile, workloads) · / search · Esc close",
         l.foot.width as usize,
     );
     f.render_widget(

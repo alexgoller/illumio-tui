@@ -28,7 +28,7 @@ expression: out
 │ │                                                                                              │ │
 │ │                                                                                              │ │
 │ │                                                                                              │ │
-│ │Enter open (rule, ruleset, group, workloads) · / search · Esc close                           │ │
+│ │Enter (rule, ruleset, group, profile, workloads) · / search · Esc close                       │ │
 │ ╰──────────────────────────────────────────────────────────────────────────────────────────────╯ │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 where used: env=prod · loading rulesets, pairing profiles, workloa │ Enter open  / search  Esc back

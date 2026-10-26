@@ -22,7 +22,7 @@ expression: out
 │ │                                                                          │ │
 │ │                                                                          │ │
 │ │                                                                          │ │
-│ │Enter open (rule, ruleset, group, workloads) · / search · Esc close       │ │
+│ │Enter (rule, ruleset, group, profile, workloads) · / search · Esc close   │ │
 │ ╰──────────────────────────────────────────────────────────────────────────╯ │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 where used: role=web · 3 references            │ Enter open  / search  Esc back

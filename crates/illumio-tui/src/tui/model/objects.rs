@@ -427,6 +427,8 @@ pub struct ObjectsState {
     /// reload by a second `W`, a reopen or a timer.
     pub pairing_profiles: Option<Vec<pce::models::PairingProfile>>,
     pub pairing_loading: bool,
+    /// Why the last read of them failed, for the overlay (until W asks again).
+    pub pairing_error: Option<String>,
 }
 
 impl ObjectsState {
@@ -457,6 +459,7 @@ impl ObjectsState {
             probes_loading: HashSet::new(),
             pairing_profiles: None,
             pairing_loading: false,
+            pairing_error: None,
         }
     }
 

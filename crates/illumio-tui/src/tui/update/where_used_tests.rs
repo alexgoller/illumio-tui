@@ -572,9 +572,26 @@ fn w_on_a_label_reads_the_pairing_profiles_once_and_lists_them_with_locked() {
 
     // Other kinds never read them.
     let mut m = with_policy(on_labels());
-    for kind in [ObjectKind::LabelGroups, ObjectKind::Services] {
+    let lists: Vec<pce::models::IpList> =
+        serde_json::from_str(include_str!("../../../../../fixtures/ip_lists.json")).unwrap();
+    m.objects.ip_lists.set_lists(lists, &m.policy);
+    m.objects.ip_lists.loaded_at = Some(std::time::Instant::now());
+    for kind in [
+        ObjectKind::LabelGroups,
+        ObjectKind::Services,
+        ObjectKind::IpLists,
+    ] {
         m.objects.kind = kind;
-        assert_eq!(press(&mut m, KeyCode::Char('W')), Vec::<Cmd>::new());
+        assert_eq!(
+            press(&mut m, KeyCode::Char('W')),
+            Vec::<Cmd>::new(),
+            "{kind:?}"
+        );
+        assert_eq!(
+            m.overlay,
+            Overlay::WhereUsed,
+            "{kind:?}: the overlay opened"
+        );
         press(&mut m, KeyCode::Esc);
     }
     assert!(!m.objects.pairing_loading && m.objects.pairing_profiles.is_none());
@@ -585,16 +602,39 @@ fn a_failed_pairing_profiles_read_is_said_and_w_again_asks() {
     let mut m = with_workloads(with_policy(on_labels()));
     select_label(&mut m, PROD);
     press(&mut m, KeyCode::Char('W'));
-    update(&mut m, Msg::PairingProfilesLoaded(Err("HTTP 500".into())));
+    update(&mut m, Msg::PairingProfilesLoaded(Err("HTTP 403".into())));
     let v = m.objects.where_used.as_ref().unwrap();
     assert_eq!(
         v.failed.as_deref(),
-        Some("pairing profiles not loaded (W again asks)")
+        Some("pairing profiles: HTTP 403 (W again asks)"),
+        "the cause is shown"
     );
+    let screen = crate::tui::test_support::render_to_string(&m, 100, 30);
+    assert!(screen.contains("pairing profiles: HTTP 403"), "{screen}");
     press(&mut m, KeyCode::Esc);
     assert_eq!(
         press(&mut m, KeyCode::Char('W')),
         vec![Cmd::LoadPairingProfiles(CacheMode::Use)]
+    );
+    assert!(m.objects.pairing_error.is_none(), "asked again");
+
+    // Both the profiles and the probe failing: both are said.
+    let mut m = with_policy(on_labels());
+    select_label(&mut m, PROD);
+    press(&mut m, KeyCode::Char('W'));
+    update(&mut m, Msg::PairingProfilesLoaded(Err("HTTP 403".into())));
+    update(
+        &mut m,
+        Msg::LabelWorkloadsCounted {
+            href: PROD.into(),
+            result: Err("HTTP 500".into()),
+        },
+    );
+    assert_eq!(
+        m.objects.where_used.as_ref().unwrap().failed.as_deref(),
+        Some(
+            "pairing profiles: HTTP 403 (W again asks) · workload count not loaded (W again asks)"
+        )
     );
 }
 

@@ -138,7 +138,9 @@ pub struct WhereUsedMeta {
     pub workloads: Option<pce::where_used::WorkloadCount>,
     /// Rulesets whose deny rules were not searched.
     pub deny_unread: usize,
-    pub not_searched: &'static str,
+    /// What is not searched; for a label, the pairing profiles too when
+    /// their read failed.
+    pub not_searched: String,
 }
 
 /// `meta.matched`.

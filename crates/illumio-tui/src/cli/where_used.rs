@@ -260,15 +260,26 @@ pub async fn run(ctx: &Context, cmd: &WhereUsedCmd) -> Result<(), CliError> {
         },
     );
     let mut rows = found.refs;
-    // Only a label sits in pairing profiles: one read, whatever the cache mode.
+    let mut warnings = Vec::new();
+    let mut not_searched = NOT_SEARCHED.to_string();
+    // Only a label sits in pairing profiles: one read, whatever the cache
+    // mode. Best effort: a role that may not list them (403) or a failed
+    // read keeps the other rows, warned and named as not searched.
     if kind == ObjectType::Label {
-        let p = ctx.pce.pairing_profiles(ctx.cache_mode).await?;
-        truncated |= p.truncated;
-        rows.extend(pairing_profiles(
-            &href,
-            label_key.as_deref().unwrap_or_default(),
-            &p.value,
-        ));
+        match ctx.pce.pairing_profiles(ctx.cache_mode).await {
+            Ok(p) => {
+                truncated |= p.truncated;
+                rows.extend(pairing_profiles(
+                    &href,
+                    label_key.as_deref().unwrap_or_default(),
+                    &p.value,
+                ));
+            }
+            Err(e) => {
+                warnings.push(format!("pairing profiles not searched: {e}"));
+                not_searched.push_str(&format!(", pairing profiles (read failed: {e})"));
+            }
+        }
     }
     let total = rows.len();
     let workloads = if kind == ObjectType::Label {
@@ -286,18 +297,22 @@ pub async fn run(ctx: &Context, cmd: &WhereUsedCmd) -> Result<(), CliError> {
         total,
         workloads,
         deny_unread: found.deny_unread,
-        not_searched: NOT_SEARCHED,
+        not_searched,
     });
     if found.deny_unread > 0 {
         let n = found.deny_unread;
-        let w = format!(
+        warnings.push(format!(
             "{n} ruleset{} may hold deny rules not searched: this PCE lists none inline (policy rules <ruleset> reads them)",
             if n == 1 { "" } else { "s" }
-        );
+        ));
+    }
+    if !warnings.is_empty() {
         if ctx.format != OutputFormat::Json {
-            eprintln!("warning: {w}");
+            for w in &warnings {
+                eprintln!("warning: {w}");
+            }
         }
-        meta.warnings = Some(vec![w]);
+        meta.warnings = Some(warnings);
     }
     ctx.emit_meta(&Rows(rows), &meta)
 }

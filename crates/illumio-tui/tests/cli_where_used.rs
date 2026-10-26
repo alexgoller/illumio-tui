@@ -594,3 +594,94 @@ async fn a_label_under_no_cache_reads_the_pairing_profiles_once() {
     );
     server.verify().await;
 }
+
+/// A label's reads with `/pairing_profiles` answering `status` once.
+async fn label_server_pairing_fails(status: u16) -> MockServer {
+    let server = MockServer::start().await;
+    expect(
+        &server,
+        LABELS,
+        include_str!("../../../fixtures/labels.json"),
+        1,
+    )
+    .await;
+    expect(
+        &server,
+        GROUPS,
+        include_str!("../../../fixtures/label_groups.json"),
+        1,
+    )
+    .await;
+    expect(
+        &server,
+        RULE_SETS,
+        include_str!("../../../fixtures/rule_sets.json"),
+        1,
+    )
+    .await;
+    Mock::given(method("GET"))
+        .and(path(PAIRING))
+        .respond_with(ResponseTemplate::new(status).set_body_string("{}"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    expect_probe(
+        &server,
+        "/orgs/5/labels/4",
+        r#"[{"href": "/orgs/5/workloads/aaaa-1"}]"#,
+    )
+    .await;
+    server
+}
+
+#[tokio::test]
+async fn a_failed_pairing_profiles_read_keeps_the_other_rows_and_says_so() {
+    for status in [403, 500] {
+        let server = label_server_pairing_fails(status).await;
+        let a = cmd(&server)
+            .args(["--json", "where-used", "label", "env=prod"])
+            .assert()
+            .success();
+        let v = schema_check::envelope(&a.get_output().stdout);
+        let kinds: Vec<&str> = v["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["kind"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            kinds,
+            ["scope", "rule", "label_group", "workloads"],
+            "{status}"
+        );
+        let warnings = v["meta"]["warnings"].as_array().expect("a warning");
+        assert!(
+            warnings.iter().any(|w| {
+                let w = w.as_str().unwrap();
+                w.starts_with("pairing profiles not searched: ") && w.contains(&status.to_string())
+            }),
+            "{warnings:?}"
+        );
+        let ns = v["meta"]["where_used"]["not_searched"].as_str().unwrap();
+        assert!(
+            ns.contains("pairing profiles (read failed: ") && ns.contains(&status.to_string()),
+            "{ns}"
+        );
+        assert_eq!(v["meta"]["where_used"]["total"], 3);
+        server.verify().await;
+
+        let server = label_server_pairing_fails(status).await;
+        let a = cmd(&server)
+            .args(["--table", "where-used", "label", "env=prod"])
+            .assert()
+            .success();
+        let err = stderr(&a);
+        assert!(
+            err.contains("warning: pairing profiles not searched: "),
+            "{err}"
+        );
+        assert!(err.contains("pairing profiles (read failed: "), "{err}");
+        assert!(stdout(&a).contains("All prod envs"), "{}", stdout(&a));
+        server.verify().await;
+    }
+}
