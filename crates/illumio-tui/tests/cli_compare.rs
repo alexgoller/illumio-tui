@@ -910,7 +910,7 @@ async fn plain_pairs_carry_what_changed_in_change_detail() {
                     .unwrap()
                     .to_string(),
                 g["change"].as_str().unwrap().to_string(),
-                g["change_detail"].as_str().unwrap().to_string(),
+                g["change_detail"].to_string(),
             )
         })
         .collect();
@@ -923,10 +923,12 @@ async fn plain_pairs_carry_what_changed_in_change_detail() {
     };
     let mut changed = detail("changed");
     changed.sort();
-    assert_eq!(changed, vec!["allow→pot.bl", "−1 svc"], "{rows:?}");
+    assert_eq!(changed, vec!["\"allow→pot.bl\"", "\"−1 svc\""], "{rows:?}");
+    // Fix round 1: null on every other pair row.
     for other in ["new", "same"] {
+        let d = detail(other);
         assert!(
-            detail(other).iter().all(String::is_empty),
+            !d.is_empty() && d.iter().all(|d| d == "null"),
             "{other}: {rows:?}"
         );
     }
@@ -950,6 +952,12 @@ async fn plain_pairs_carry_what_changed_in_change_detail() {
     );
     assert!(
         text.lines().any(|l| l.ends_with(",changed,allowed,−1 svc")),
+        "{text}"
+    );
+    // Empty on the other rows: the new pair's, the same ones'.
+    assert!(text.lines().any(|l| l.ends_with(",new,,")), "{text}");
+    assert!(
+        text.lines().any(|l| l.ends_with(",same,blocked,")),
         "{text}"
     );
     // The table.

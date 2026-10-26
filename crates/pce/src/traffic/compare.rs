@@ -144,20 +144,22 @@ impl DecisionSet {
 }
 
 /// A plain pair's service keys against the baseline (#80): the keys that
-/// came and went, and the decisions of the keys on both sides, baseline
-/// then recent.
+/// came and went, the keys on both sides whose decisions changed, and the
+/// decisions of the keys on both sides, baseline then recent.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PairDelta {
     pub added: u32,
     pub removed: u32,
+    pub changed: u32,
     pub baseline: DecisionSet,
     pub recent: DecisionSet,
 }
 
 impl PairDelta {
     /// `+2 svc −1 svc`, `allow→block`, `+1 svc · allow→block`: what
-    /// changed; the decisions only when their sets differ. Empty when
-    /// nothing did.
+    /// changed; the decisions as sets when they differ, else `~2 svc` for
+    /// the keys whose decisions changed with the sets the same (one went
+    /// allow→block, another block→allow). Empty when nothing did.
     pub fn text(&self) -> String {
         let mut svc = Vec::new();
         if self.added > 0 {
@@ -176,6 +178,8 @@ impl PairDelta {
                 self.baseline.short_text(),
                 self.recent.short_text()
             ));
+        } else if self.changed > 0 {
+            parts.push(format!("~{} svc", self.changed));
         }
         parts.join(" · ")
     }
@@ -203,22 +207,19 @@ impl Serialize for RowChange {
         st.serialize_field("change", &self.change)?;
         st.serialize_field("baseline_decision", &self.baseline_decision)?;
         if self.pair.is_some() {
-            st.serialize_field("change_detail", &self.detail().unwrap_or_default())?;
+            st.serialize_field("change_detail", &self.detail())?;
         }
         st.end()
     }
 }
 
 impl RowChange {
-    /// A changed plain pair's `PairDelta::text` (`+1 svc · allow→block`);
-    /// `Some("")` on a plain pair's other rows, `None` on any other row.
+    /// A changed plain pair's `PairDelta::text` (`+1 svc · allow→block`,
+    /// never empty); `None` on any other row. In JSON `change_detail` on
+    /// every plain pair row, `null` but on a changed one.
     pub fn detail(&self) -> Option<String> {
-        let p = self.pair?;
-        Some(if self.change == Change::Changed {
-            p.text()
-        } else {
-            String::new()
-        })
+        let p = self.pair.filter(|_| self.change == Change::Changed)?;
+        Some(p.text())
     }
 
     /// `allowed→potentially_blocked` for a changed row; else the change.
@@ -592,6 +593,7 @@ pub fn compare_pairs(
         let pair = PairDelta {
             added: count(Change::New),
             removed: count(Change::Gone),
+            changed: count(Change::Changed),
             baseline: both
                 .clone()
                 .filter_map(|x| x.baseline_decision)
@@ -1097,6 +1099,10 @@ mod tests {
                 // f → b: 1 allow→block, 2 block→allow: the union is equal.
                 flow("f", "b", 1, Blocked),
                 flow("f", "b", 2, Allowed),
+                // h → b: the f swap, and 3 new.
+                flow("h", "b", 1, Blocked),
+                flow("h", "b", 2, Allowed),
+                flow("h", "b", 3, Allowed),
                 // n → b: new; s → b: the same.
                 flow("n", "b", 443, Allowed),
                 flow("s", "b", 443, Allowed),
@@ -1110,6 +1116,8 @@ mod tests {
                 flow("e", "b", 443, Blocked),
                 flow("f", "b", 1, Allowed),
                 flow("f", "b", 2, Blocked),
+                flow("h", "b", 1, Allowed),
+                flow("h", "b", 2, Blocked),
                 flow("s", "b", 443, Allowed),
                 // g → b: gone.
                 flow("g", "b", 443, Allowed),
@@ -1132,15 +1140,31 @@ mod tests {
             (Change::Changed, Some("+1 svc".into())),
             "an equal set is never shown"
         );
-        assert_eq!(detail(&rows, "f"), (Change::Changed, Some(String::new())));
-        // Every other pair row: an empty detail.
-        assert_eq!(detail(&rows, "n"), (Change::New, Some(String::new())));
-        assert_eq!(detail(&rows, "s"), (Change::Same, Some(String::new())));
-        assert_eq!(detail(&rows, "g"), (Change::Gone, Some(String::new())));
-        // In JSON: `change_detail` on a pair row, none on a service row.
-        let d = rows.iter().find(|g| g.src == ["d"]).unwrap();
-        let v = serde_json::to_value(d.change.unwrap()).unwrap();
-        assert_eq!(v["change_detail"], "+1 svc · allow→block");
+        // Fix round 1: a swap keeps the union; the keys that changed are
+        // counted, never an empty cell.
+        assert_eq!(detail(&rows, "f"), (Change::Changed, Some("~2 svc".into())));
+        assert_eq!(
+            detail(&rows, "h"),
+            (Change::Changed, Some("+1 svc · ~2 svc".into()))
+        );
+        // Every other pair row: none.
+        assert_eq!(detail(&rows, "n"), (Change::New, None));
+        assert_eq!(detail(&rows, "s"), (Change::Same, None));
+        assert_eq!(detail(&rows, "g"), (Change::Gone, None));
+        // In JSON: `change_detail` on a pair row (null but on a changed
+        // one), none on a service row.
+        let json = |src: &str| {
+            let g = rows.iter().find(|g| g.src == [src]).unwrap();
+            serde_json::to_value(g.change.unwrap()).unwrap()
+        };
+        assert_eq!(json("d")["change_detail"], "+1 svc · allow→block");
+        for src in ["n", "s", "g"] {
+            assert_eq!(
+                json(src).get("change_detail"),
+                Some(&serde_json::Value::Null),
+                "{src}"
+            );
+        }
         let k = app_keys();
         let mut by_service = group_by_service(&[flow("a", "b", 443, Blocked)], &k);
         let all = by_service.clone();

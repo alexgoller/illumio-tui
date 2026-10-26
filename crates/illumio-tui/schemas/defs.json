@@ -366,8 +366,8 @@
           "description": "with --baseline: the decisions the baseline saw for the row's key (allowed,blocked), null for a new row"
         },
         "change_detail": {
-          "type": "string",
-          "description": "with --baseline, plain pairs only (not --services): what changed on a changed pair: services that came or went (+2 svc −1 svc) and, when the decisions of the services on both sides differ, baseline→recent (allow→block), joined with ' · '; empty on every other row"
+          "type": ["string", "null"],
+          "description": "with --baseline, plain pairs only (not --services): what changed on a changed pair: services that came or went (+2 svc −1 svc) and, for the services on both sides, baseline→recent when their decision sets differ (allow→block), else ~N svc for those whose decisions changed; joined with ' · '; null on every other row"
         }
       },
       "required": [

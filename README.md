@@ -711,9 +711,10 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   blocked now as `CHG`, and a gone row only when it was blocked. A plain App-to-app pair (`o`
   off) is judged by its service keys: `NEW` when all are new, `GONE` when all are gone, `CHG`
   when any is new, gone or changed (`o` shows which); its `was→now` says what changed instead
-  of the sets: services that came or went (`+2 svc −1 svc`) and, when the decisions of the
-  services on both sides differ, `allow→block`, joined with ` · ` (`+1 svc · allow→block`),
-  never two equal sides. A table none of whose rows has a transition (Flows with nothing
+  of the sets: services that came or went (`+2 svc −1 svc`) and, for the services on both
+  sides, `allow→block` when their decision sets differ, else `~2 svc` for those whose
+  decisions changed (one allow→block, another block→allow), joined with ` · ` (`+1 svc ·
+  allow→block`), never two equal sides and never empty. A table none of whose rows has a transition (Flows with nothing
   changed) has no `was→now` column, so the others keep their widths. The Result header says
   `vs 7d before 10-26 09:00 · 12 new · 3 changed · 5 gone` (where the baseline ends, UTC) for
   the view on screen, counting the rows that view shows (App-to-app: pairs with `o` off,
@@ -1142,8 +1143,9 @@ and direction; `--services` and sections on source group, destination group and 
 pairs (`groups` without `--services`, `query --group`) by their service keys (`new` when all are
 new, `gone` when all are gone, `changed` when any is new, gone or changed; `baseline_decision`
 the union; a last `change_detail` column / JSON field says what changed on a changed pair:
-`+2 svc −1 svc` for the services that came or went, `allow→block` when the decisions of the
-services on both sides differ, both joined with ` · `, empty on every other row); the mesh on its row key. `meta.compare.counts` counts the rows of the output (pairs
+`+2 svc −1 svc` for the services that came or went, `allow→block` when the decision sets of
+the services on both sides differ, else `~2 svc` for those whose decisions changed, joined
+with ` · `; empty in table and CSV, `null` in JSON on every other pair row); the mesh on its row key. `meta.compare.counts` counts the rows of the output (pairs
 without `--services`, service rows with it), before `--changes` picks them. Each key is judged
 on every decision, then `--show` / `--blocked` pick the rows: a flow allowed then and
 potentially blocked now is `changed` in the blocked sections, and a gone row shows only when its

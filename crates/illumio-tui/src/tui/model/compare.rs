@@ -132,8 +132,8 @@ pub fn transition_text(c: Option<&RowChange>) -> String {
     let Some(c) = c.filter(|c| c.change == Change::Changed) else {
         return String::new();
     };
-    if let Some(d) = c.detail() {
-        return d;
+    if c.pair.is_some() {
+        return c.detail().unwrap_or_default();
     }
     c.baseline_decision
         .zip(c.recent_decision)
