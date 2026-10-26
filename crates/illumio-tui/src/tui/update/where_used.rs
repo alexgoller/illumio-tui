@@ -315,10 +315,10 @@ pub(super) fn where_used_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         model.overlay = Overlay::None;
         return Vec::new();
     };
-    let before = (v.table.selected_pos(), v.selected_id());
     if v.table.is_searching() {
+        // A search filters; it is not a move: rows landing still put the
+        // cursor on the first match.
         drive_table(&mut v.table, k, page);
-        v.moved |= before != (v.table.selected_pos(), v.selected_id());
         return Vec::new();
     }
     match k.code {
@@ -333,8 +333,21 @@ pub(super) fn where_used_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         }
         KeyCode::Enter => open_reference(model),
         _ => {
+            // Only a cursor key that moves the cursor is a move (`s` sorts,
+            // `/` starts a search).
+            let cursor = matches!(
+                k.code,
+                KeyCode::Up
+                    | KeyCode::Down
+                    | KeyCode::Char('j' | 'k')
+                    | KeyCode::PageUp
+                    | KeyCode::PageDown
+                    | KeyCode::Home
+                    | KeyCode::End
+            );
+            let before = (v.table.selected_pos(), v.selected_id());
             drive_table(&mut v.table, k, page);
-            v.moved |= before != (v.table.selected_pos(), v.selected_id());
+            v.moved |= cursor && before != (v.table.selected_pos(), v.selected_id());
             Vec::new()
         }
     }

@@ -752,3 +752,30 @@ fn a_moved_cursor_stays_on_its_row_as_rows_land_above_it() {
         assert_eq!(selected(&m), want, "rulesets_first={rulesets_first}");
     }
 }
+
+/// #79 review M2: a `/` search filters, it is not a move: rows landing
+/// after it still put the cursor on the first match.
+#[test]
+fn a_search_before_the_rulesets_land_keeps_the_cursor_on_the_first_match() {
+    const WEB: &str = "/orgs/5/labels/1";
+    let mut m = on_labels();
+    select_label(&mut m, WEB);
+    press(&mut m, KeyCode::Char('W'));
+    update(&mut m, profiles_loaded());
+    update(&mut m, probe_answered(WEB));
+    // `w`: the workloads line now; the rules (`allow`) once they land.
+    press(&mut m, KeyCode::Char('/'));
+    press(&mut m, KeyCode::Char('w'));
+    press(&mut m, KeyCode::Enter);
+    assert_eq!(rows(&m), ["workloads ≥1 workloads"]);
+    assert!(!m.objects.where_used.as_ref().unwrap().moved);
+    update(&mut m, rule_sets_loaded(PolicyScope::Draft));
+    assert_eq!(rows(&m)[0], "rule Shop-Prod · #2 · consumer · allow");
+    assert_eq!(selected(&m), rows(&m)[0]);
+    // `s` sorts, it is not a move either.
+    press(&mut m, KeyCode::Char('s'));
+    assert!(!m.objects.where_used.as_ref().unwrap().moved);
+    // A cursor key is.
+    press(&mut m, KeyCode::Down);
+    assert!(m.objects.where_used.as_ref().unwrap().moved);
+}
