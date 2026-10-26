@@ -273,8 +273,8 @@ pub struct FilterArgs {
     /// Compare mode: also query the baseline, the same filter over this long before the
     /// window's start ([start - DURATION, start), e.g. 7d, 30d), and mark each row new,
     /// changed (another set of decisions), gone (only in the baseline) or same. A second query,
-    /// through the same cost guard (> 7d needs --yes); JSON: change, baseline_decision per row,
-    /// meta.compare. New means not seen in the baseline window at Explorer's record
+    /// through the same cost guard (> 7d needs --yes); JSON: change, baseline_decision per row
+    /// (plain pairs also change_detail: +1 svc · allow→block), meta.compare. New means not seen in the baseline window at Explorer's record
     /// granularity (a record spanning the cut-off is in both); counts stay each side's lifetime
     /// counters, never per window, never subtracted
     #[arg(long, value_name = "DURATION")]
@@ -1103,6 +1103,19 @@ fn groups_compared(groups: &[FlowGroup]) -> bool {
     groups.iter().any(|g| g.change.is_some())
 }
 
+/// Compare mode on plain pairs: a last `change_detail` column (#80).
+fn groups_detailed(groups: &[FlowGroup]) -> bool {
+    groups
+        .iter()
+        .any(|g| g.change.is_some_and(|c| c.pair.is_some()))
+}
+
+/// A plain pair's `change_detail` cell: `+1 svc · allow→block` on a
+/// changed one, else empty.
+fn detail_cell(c: Option<&RowChange>) -> String {
+    c.and_then(RowChange::detail).unwrap_or_default()
+}
+
 fn group_cells(groups: &[FlowGroup]) -> Vec<Vec<String>> {
     let any = groups.iter().any(|g| g.bytes > 0);
     groups
@@ -1148,12 +1161,16 @@ impl TableRows for Vec<FlowGroup> {
         if groups_compared(self) {
             h.extend(COMPARE_COLUMNS);
         }
+        if groups_detailed(self) {
+            h.push(CHANGE_DETAIL);
+        }
         h
     }
     fn rows(&self) -> Vec<Vec<String>> {
         let draft = groups_draft(self);
         let marked = groups_marked(self);
         let compared = groups_compared(self);
+        let detailed = groups_detailed(self);
         self.iter()
             .zip(group_cells(self))
             .map(|(g, mut row)| {
@@ -1166,6 +1183,9 @@ impl TableRows for Vec<FlowGroup> {
                 if compared {
                     row.extend(change_cells(g.change.as_ref()));
                 }
+                if detailed {
+                    row.push(detail_cell(g.change.as_ref()));
+                }
                 row
             })
             .collect()
@@ -1175,7 +1195,7 @@ impl TableRows for Vec<FlowGroup> {
     /// then compare mode's columns.
     fn full_headers(&self) -> Vec<&'static str> {
         let mut h = self.headers();
-        h.retain(|c| !["draft", "mark"].contains(c) && !COMPARE_COLUMNS.contains(c));
+        h.retain(|c| !["draft", "mark", CHANGE_DETAIL].contains(c) && !COMPARE_COLUMNS.contains(c));
         h.extend(CONNS_BY_DECISION);
         if groups_draft(self) {
             h.extend(DRAFT_COUNTS);
@@ -1185,6 +1205,9 @@ impl TableRows for Vec<FlowGroup> {
         }
         if groups_compared(self) {
             h.extend(COMPARE_COLUMNS);
+        }
+        if groups_detailed(self) {
+            h.push(CHANGE_DETAIL);
         }
         h
     }
@@ -1205,6 +1228,9 @@ impl TableRows for Vec<FlowGroup> {
                 }
                 if groups_compared(self) {
                     row.extend(change_cells(g.change.as_ref()));
+                }
+                if groups_detailed(self) {
+                    row.push(detail_cell(g.change.as_ref()));
                 }
                 row
             })
@@ -1997,6 +2023,11 @@ pub fn baseline_length(args: &FilterArgs) -> Result<Option<Duration>, CliError> 
 
 /// The `--csv` columns compare mode adds to every traffic view.
 pub const COMPARE_COLUMNS: [&str; 2] = ["change", "baseline_decision"];
+
+/// The column compare mode adds after `COMPARE_COLUMNS` on plain pairs
+/// (`traffic groups` without `--services`, `query --group`): what changed
+/// on a changed pair (#80).
+pub const CHANGE_DETAIL: &str = "change_detail";
 
 /// Compare mode's other half: the baseline's result and what to print.
 pub(crate) struct CompareRun {

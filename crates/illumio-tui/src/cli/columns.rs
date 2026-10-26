@@ -5,7 +5,9 @@
 //! print. `output::write_table_csv` checks (debug builds) that every
 //! column printed is listed here, so a new column cannot be left out.
 use super::Command;
-use super::traffic::{COMPARE_COLUMNS, CONNS_BY_DECISION, DRAFT_COUNTS, SECTION_CSV_HEADERS};
+use super::traffic::{
+    CHANGE_DETAIL, COMPARE_COLUMNS, CONNS_BY_DECISION, DRAFT_COUNTS, SECTION_CSV_HEADERS,
+};
 
 const FLOWS: &[&str] = &[
     "last seen",
@@ -81,6 +83,7 @@ fn traffic_views() -> Vec<&'static str> {
         &["mark"],
         &SECTION_CSV_HEADERS,
         &COMPARE_COLUMNS,
+        &[CHANGE_DETAIL],
     ])
 }
 

@@ -1036,10 +1036,10 @@ fn every_view_shows_was_now_after_delta_on_changed_rows_only() {
     let want = [
         ("Flows", vec!["allow→pot.bl"]),
         ("Flows by app", vec!["allow→pot.bl"]),
-        (
-            "App-to-app pairs",
-            vec!["allow→allow", "allow,pot.bl→pot.bl"],
-        ),
+        // #80: a pair says what changed: shop → shop lost 9999 (its 5432
+        // the same), the other's keys on both sides went allow,pot.bl →
+        // pot.bl.
+        ("App-to-app pairs", vec!["−1 svc", "allow,pot.bl→pot.bl"]),
         ("App-to-app by service", vec!["allow→pot.bl"]),
         ("App-to-app sections", vec!["allow→pot.bl"]),
         ("Mesh", vec!["allow→pot.bl"]),
@@ -1198,4 +1198,49 @@ comment = "look again"
             assert!(transitions(&m).1, "{what}: was→now shown");
         }
     }
+}
+
+/// #80: a table none of whose rows has a transition (Flows with nothing
+/// changed) has no `was→now` column, and every other column keeps the
+/// width it has with compare mode off (`src` and `dst` less the 3 cells
+/// `Δ` takes, as before #79).
+#[test]
+fn a_table_without_a_transition_has_no_was_now_column() {
+    let mut m = model();
+    let off: Vec<(&str, u16, u16)> = m
+        .traffic
+        .flows
+        .columns
+        .iter()
+        .map(|c| (c.title, c.width, c.narrow_width))
+        .collect();
+    // The baseline lacks the first flow only: one new, nothing changed.
+    let mut baseline = fixture_flows_rich();
+    baseline.remove(0);
+    compare_with(&mut m, baseline, false);
+    let c = m.traffic.view_counts().unwrap();
+    assert_eq!((c.new, c.changed, c.gone), (1, 0, 0), "{c:?}");
+    let t = &m.traffic;
+    let titles: Vec<&str> = t.flows.columns.iter().map(|c| c.title).collect();
+    assert_eq!(titles.first(), Some(&"Δ"));
+    assert!(!titles.contains(&"was→now"), "{titles:?}");
+    let on: Vec<(&str, u16, u16)> = t.flows.columns[1..]
+        .iter()
+        .map(|c| (c.title, c.width, c.narrow_width))
+        .collect();
+    let want: Vec<(&str, u16, u16)> = off
+        .iter()
+        .map(|&(title, w, n)| match title {
+            "src" | "dst" => (title, w - 3, n),
+            _ => (title, w, n),
+        })
+        .collect();
+    assert_eq!(on, want);
+    for (w, h) in [(160, 48), (80, 24)] {
+        assert!(!render_to_string(&m, w, h).contains("was→now"), "{w}x{h}");
+    }
+    // A changed row brings the column back.
+    quiet(&mut m, key('C'));
+    compare_with(&mut m, baseline_flows_rich(), false);
+    assert_eq!(m.traffic.flows.columns[1].title, "was→now");
 }

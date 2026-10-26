@@ -866,3 +866,104 @@ async fn app_and_baseline_run_one_query_per_side_for_each_window() {
         "{err}"
     );
 }
+
+/// #80: plain pairs carry `change_detail`, what changed on a changed pair
+/// (shop/prod → shop/prod lost 22, Corp → shop/prod's 8443 went allowed →
+/// potentially blocked), empty on the others; in JSON (schema-checked),
+/// CSV and the table. Pairs by service have none.
+#[tokio::test(flavor = "multi_thread")]
+async fn plain_pairs_carry_what_changed_in_change_detail() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    for (name, start, end, body) in [
+        ("recent", RECENT_START, RECENT_END, recent()),
+        ("base", BASE_START, RECENT_START, baseline()),
+    ] {
+        mount_window(&server, name, start, end, 10_000, 4, &body, 4).await;
+    }
+    let home = tempfile::tempdir().unwrap();
+    let run = |extra: &[&str]| {
+        cmd(&server, home.path())
+            .args(["traffic", "groups"])
+            .args(extra)
+            .args(WINDOW)
+            .args([
+                "--baseline",
+                "7d",
+                "--keys",
+                "app,env",
+                "--changes",
+                "new,changed,gone,same",
+            ])
+            .assert()
+            .success()
+    };
+    let out = json_out(run(&[]));
+    let mut rows: Vec<(String, String, String)> = out["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|g| {
+            (
+                g["src"].as_array().unwrap()[0]
+                    .as_str()
+                    .unwrap()
+                    .to_string(),
+                g["change"].as_str().unwrap().to_string(),
+                g["change_detail"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    rows.sort();
+    let detail = |change: &str| -> Vec<String> {
+        rows.iter()
+            .filter(|r| r.1 == change)
+            .map(|r| r.2.clone())
+            .collect()
+    };
+    let mut changed = detail("changed");
+    changed.sort();
+    assert_eq!(changed, vec!["allow→pot.bl", "−1 svc"], "{rows:?}");
+    for other in ["new", "same"] {
+        assert!(
+            detail(other).iter().all(String::is_empty),
+            "{other}: {rows:?}"
+        );
+    }
+    // Pairs by service: no change_detail.
+    let out = json_out(run(&["--services"]));
+    assert!(
+        out["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|g| g.get("change_detail").is_none()),
+        "{out}"
+    );
+    // CSV: last, after baseline_decision.
+    let a = run(&["--csv"]);
+    let text = stdout(&a);
+    let header = text.lines().next().unwrap();
+    assert!(
+        header.ends_with(",change,baseline_decision,change_detail"),
+        "{header}"
+    );
+    assert!(
+        text.lines().any(|l| l.ends_with(",changed,allowed,−1 svc")),
+        "{text}"
+    );
+    // The table.
+    let a = cmd(&server, home.path())
+        .args(["traffic", "groups"])
+        .args(WINDOW)
+        .args(["--baseline", "7d", "--keys", "app,env", "--table"])
+        .assert()
+        .success();
+    let text = stdout(&a);
+    assert!(text.contains("change_detail"), "{text}");
+    assert!(
+        text.contains("allow→pot.bl") && text.contains("−1 svc"),
+        "{text}"
+    );
+    server.verify().await;
+}

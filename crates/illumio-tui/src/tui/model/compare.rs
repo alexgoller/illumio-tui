@@ -119,39 +119,26 @@ pub const TRANSITION_COLUMN: &str = "was→now";
 /// The transition column's width at least: its title.
 const TRANSITION_MIN: u16 = 7;
 
-/// A decision in the transition: `allow`, `pot.bl`, `block`, `unk`.
-fn decision_word(d: pce::models::PolicyDecision) -> &'static str {
-    use pce::models::PolicyDecision as D;
-    match d {
-        D::Allowed => "allow",
-        D::PotentiallyBlocked => "pot.bl",
-        D::Blocked => "block",
-        D::Unknown => "unk",
-    }
-}
-
 /// Whether a row is `CHG`: its transition cell is filled, in the warning
 /// colour.
 pub fn is_changed(c: Option<&RowChange>) -> bool {
     c.is_some_and(|c| c.change == Change::Changed)
 }
 
-/// A `CHG` row's `baseline set→recent set` (`allow→allow,block`); empty
-/// on any other row.
+/// A `CHG` row's `baseline set→recent set` (`allow→allow,block`); a
+/// `CHG` plain pair's what changed instead (`+1 svc · allow→block`, #80);
+/// empty on any other row.
 pub fn transition_text(c: Option<&RowChange>) -> String {
-    let Some((b, r)) = c
-        .filter(|c| c.change == Change::Changed)
-        .and_then(|c| c.baseline_decision.zip(c.recent_decision))
-    else {
+    let Some(c) = c.filter(|c| c.change == Change::Changed) else {
         return String::new();
     };
-    let set = |d: pce::traffic::DecisionSet| {
-        d.decisions()
-            .map(decision_word)
-            .collect::<Vec<_>>()
-            .join(",")
-    };
-    format!("{}→{}", set(b), set(r))
+    if let Some(d) = c.detail() {
+        return d;
+    }
+    c.baseline_decision
+        .zip(c.recent_decision)
+        .map(|(b, r)| format!("{}→{}", b.short_text(), r.short_text()))
+        .unwrap_or_default()
 }
 
 /// A `CHG` pair or service row (its transition cell in the warning colour).
@@ -270,7 +257,8 @@ fn fit_at<T>(cols: &mut [Column<T>], area: u16, longest: u16, takers: &[&str], g
 }
 
 /// `cols` (built afresh) with the transition column, if any, sized to the
-/// longest transition among `table`'s rows, so the table fits at 80
+/// longest transition among `table`'s rows (left out when every row's is
+/// empty), so the table fits at 80
 /// columns (and at 120 wide), its marks' gutter included; set on `table` when they differ from its own
 /// (the sort stays).
 pub(super) fn fit_columns<T>(
@@ -287,9 +275,15 @@ pub(super) fn fit_columns<T>(
             .max()
             .unwrap_or(0)
             .min(u16::MAX as usize) as u16;
-        let gutter = table.marker.is_some();
-        fit_at(&mut cols, 80, longest, takers, gutter);
-        fit_at(&mut cols, 120, longest, takers, gutter);
+        if longest == 0 {
+            // #80: no row has a transition: no column, the others keep
+            // their widths.
+            cols.retain(|c| c.title != TRANSITION_COLUMN);
+        } else {
+            let gutter = table.marker.is_some();
+            fit_at(&mut cols, 80, longest, takers, gutter);
+            fit_at(&mut cols, 120, longest, takers, gutter);
+        }
     }
     let same = table.columns.len() == cols.len()
         && table.columns.iter().zip(&cols).all(|(a, b)| {

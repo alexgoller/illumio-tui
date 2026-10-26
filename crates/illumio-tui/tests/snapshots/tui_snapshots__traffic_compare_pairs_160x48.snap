@@ -13,7 +13,7 @@ expression: "render_to_string(&m, 160, 48)"
 ╭ App-to-app · conns: lifetime ─────────────────────────────────────────────────────────────────────────────────────────── pairs · keys app,env · Enter drills ╮
 │  Δ    was→now             src                       dst                        flows  conns    allowed pot.bl blocked allow.c  pot.c    block.c              │
 │▸                          crm/prod                  crm/prod                        2      850       2      0       0      850        0        0             │
-│  CHG  allow→allow         shop/prod                 shop/prod                       4      821       4      0       0      821        0        0             │
+│  CHG  −1 svc              shop/prod                 shop/prod                       4      821       4      0       0      821        0        0             │
 │                           ipl:Corp/-                shop/prod                       2      702       1      0       1      700        0        2             │
 │                           erp/prod                  erp/prod                        2      590       2      0       0      590        0        0             │
 │                           ipl:Corp/-                crm/prod                        1      520       1      0       0      520        0        0             │

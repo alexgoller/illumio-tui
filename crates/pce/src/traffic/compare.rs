@@ -127,19 +127,100 @@ impl Serialize for DecisionSet {
     }
 }
 
+impl DecisionSet {
+    /// `allow,block`: the short names (`allow`, `pot.bl`, `block`, `unk`)
+    /// of the TUI's `was→now` and of `change_detail`.
+    pub fn short_text(self) -> String {
+        self.decisions()
+            .map(|d| match d {
+                PolicyDecision::Allowed => "allow",
+                PolicyDecision::PotentiallyBlocked => "pot.bl",
+                PolicyDecision::Blocked => "block",
+                PolicyDecision::Unknown => "unk",
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+}
+
+/// A plain pair's service keys against the baseline (#80): the keys that
+/// came and went, and the decisions of the keys on both sides, baseline
+/// then recent.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PairDelta {
+    pub added: u32,
+    pub removed: u32,
+    pub baseline: DecisionSet,
+    pub recent: DecisionSet,
+}
+
+impl PairDelta {
+    /// `+2 svc −1 svc`, `allow→block`, `+1 svc · allow→block`: what
+    /// changed; the decisions only when their sets differ. Empty when
+    /// nothing did.
+    pub fn text(&self) -> String {
+        let mut svc = Vec::new();
+        if self.added > 0 {
+            svc.push(format!("+{} svc", self.added));
+        }
+        if self.removed > 0 {
+            svc.push(format!("−{} svc", self.removed));
+        }
+        let mut parts = Vec::new();
+        if !svc.is_empty() {
+            parts.push(svc.join(" "));
+        }
+        if self.baseline != self.recent && !self.baseline.is_empty() && !self.recent.is_empty() {
+            parts.push(format!(
+                "{}→{}",
+                self.baseline.short_text(),
+                self.recent.short_text()
+            ));
+        }
+        parts.join(" · ")
+    }
+}
+
 /// A row's change, carried by the row while compare mode is on. In JSON
 /// (flattened into the row) `change` and `baseline_decision`: the
-/// decisions the baseline saw for the row's key, `null` for a new row.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+/// decisions the baseline saw for the row's key, `null` for a new row;
+/// on a plain pair also `change_detail` (`RowChange::detail`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RowChange {
     pub change: Change,
     pub baseline_decision: Option<DecisionSet>,
     /// The recent window's decisions for the key; none for a gone row.
-    #[serde(skip)]
     pub recent_decision: Option<DecisionSet>,
+    /// A plain pair's service keys (`compare_pairs`); none on any other
+    /// row.
+    pub pair: Option<PairDelta>,
+}
+
+impl Serialize for RowChange {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut st = s.serialize_struct("RowChange", 3)?;
+        st.serialize_field("change", &self.change)?;
+        st.serialize_field("baseline_decision", &self.baseline_decision)?;
+        if self.pair.is_some() {
+            st.serialize_field("change_detail", &self.detail().unwrap_or_default())?;
+        }
+        st.end()
+    }
 }
 
 impl RowChange {
+    /// A changed plain pair's `PairDelta::text` (`+1 svc · allow→block`);
+    /// `Some("")` on a plain pair's other rows, `None` on any other row.
+    pub fn detail(&self) -> Option<String> {
+        let p = self.pair?;
+        Some(if self.change == Change::Changed {
+            p.text()
+        } else {
+            String::new()
+        })
+    }
+
     /// `allowed→potentially_blocked` for a changed row; else the change.
     pub fn text(&self) -> String {
         match (self.change, self.baseline_decision, self.recent_decision) {
@@ -295,6 +376,7 @@ pub fn compare_by<'a, T: Clone + 'a, K: Ord + Clone>(
                     change: Change::New,
                     baseline_decision: None,
                     recent_decision: Some(now),
+                    pair: None,
                 },
                 Some((then, _)) => RowChange {
                     change: if *then == now {
@@ -304,6 +386,7 @@ pub fn compare_by<'a, T: Clone + 'a, K: Ord + Clone>(
                     },
                     baseline_decision: Some(*then),
                     recent_decision: Some(now),
+                    pair: None,
                 },
             };
             counts.add(rc.change);
@@ -323,6 +406,7 @@ pub fn compare_by<'a, T: Clone + 'a, K: Ord + Clone>(
                     change: Change::Gone,
                     baseline_decision: Some(then),
                     recent_decision: None,
+                    pair: None,
                 },
             ));
         }
@@ -499,10 +583,28 @@ pub fn compare_pairs(
         let union = |f: fn(&RowChange) -> Option<DecisionSet>| {
             cs.iter().filter_map(f).reduce(DecisionSet::union)
         };
+        // #80: the keys that came and went, and the decisions of those on
+        // both sides.
+        let count = |c: Change| cs.iter().filter(|x| x.change == c).count() as u32;
+        let both = cs
+            .iter()
+            .filter(|x| matches!(x.change, Change::Changed | Change::Same));
+        let pair = PairDelta {
+            added: count(Change::New),
+            removed: count(Change::Gone),
+            baseline: both
+                .clone()
+                .filter_map(|x| x.baseline_decision)
+                .fold(DecisionSet::default(), DecisionSet::union),
+            recent: both
+                .filter_map(|x| x.recent_decision)
+                .fold(DecisionSet::default(), DecisionSet::union),
+        };
         RowChange {
             change,
             baseline_decision: union(|c| c.baseline_decision),
             recent_decision: union(|c| c.recent_decision),
+            pair: Some(pair),
         }
     };
     for p in pairs.iter_mut() {
@@ -963,6 +1065,97 @@ mod tests {
         assert_eq!((keys.new, keys.changed, keys.gone, keys.same), (2, 0, 3, 3));
     }
 
+    /// #80: a changed pair says what changed: the service keys that came
+    /// and went, the decisions of the keys on both sides when their sets
+    /// differ, both joined with ` · `; never an equal-set transition.
+    #[test]
+    fn a_changed_pair_says_which_services_came_or_went_and_its_decision_change() {
+        let detail = |rows: &[FlowGroup], src: &str| {
+            let c = rows
+                .iter()
+                .find(|g| g.src == [src])
+                .unwrap()
+                .change
+                .unwrap();
+            (c.change, c.detail())
+        };
+        let (rows, _, _) = pairs_of(
+            &[
+                // a → b: 443 the same, 80 and 81 new, 22 gone.
+                flow("a", "b", 443, Allowed),
+                flow("a", "b", 80, Allowed),
+                flow("a", "b", 81, Blocked),
+                // c → b: 443 allowed then, blocked now.
+                flow("c", "b", 443, Blocked),
+                // d → b: 443 allowed then, blocked now; 80 new.
+                flow("d", "b", 443, Blocked),
+                flow("d", "b", 80, Allowed),
+                // e → b: 443 allowed and blocked on both sides, 80 new.
+                flow("e", "b", 443, Allowed),
+                flow("e", "b", 443, Blocked),
+                flow("e", "b", 80, Allowed),
+                // f → b: 1 allow→block, 2 block→allow: the union is equal.
+                flow("f", "b", 1, Blocked),
+                flow("f", "b", 2, Allowed),
+                // n → b: new; s → b: the same.
+                flow("n", "b", 443, Allowed),
+                flow("s", "b", 443, Allowed),
+            ],
+            &[
+                flow("a", "b", 443, Allowed),
+                flow("a", "b", 22, Allowed),
+                flow("c", "b", 443, Allowed),
+                flow("d", "b", 443, Allowed),
+                flow("e", "b", 443, Allowed),
+                flow("e", "b", 443, Blocked),
+                flow("f", "b", 1, Allowed),
+                flow("f", "b", 2, Blocked),
+                flow("s", "b", 443, Allowed),
+                // g → b: gone.
+                flow("g", "b", 443, Allowed),
+            ],
+        );
+        assert_eq!(
+            detail(&rows, "a"),
+            (Change::Changed, Some("+2 svc −1 svc".into()))
+        );
+        assert_eq!(
+            detail(&rows, "c"),
+            (Change::Changed, Some("allow→block".into()))
+        );
+        assert_eq!(
+            detail(&rows, "d"),
+            (Change::Changed, Some("+1 svc · allow→block".into()))
+        );
+        assert_eq!(
+            detail(&rows, "e"),
+            (Change::Changed, Some("+1 svc".into())),
+            "an equal set is never shown"
+        );
+        assert_eq!(detail(&rows, "f"), (Change::Changed, Some(String::new())));
+        // Every other pair row: an empty detail.
+        assert_eq!(detail(&rows, "n"), (Change::New, Some(String::new())));
+        assert_eq!(detail(&rows, "s"), (Change::Same, Some(String::new())));
+        assert_eq!(detail(&rows, "g"), (Change::Gone, Some(String::new())));
+        // In JSON: `change_detail` on a pair row, none on a service row.
+        let d = rows.iter().find(|g| g.src == ["d"]).unwrap();
+        let v = serde_json::to_value(d.change.unwrap()).unwrap();
+        assert_eq!(v["change_detail"], "+1 svc · allow→block");
+        let k = app_keys();
+        let mut by_service = group_by_service(&[flow("a", "b", 443, Blocked)], &k);
+        let all = by_service.clone();
+        let base = group_by_service(&[flow("a", "b", 443, Allowed)], &k);
+        compare_groups(&mut by_service, Sides::unfiltered(&all, &base));
+        let c = by_service[0].change.unwrap();
+        assert_eq!(c.detail(), None);
+        assert!(
+            serde_json::to_value(c)
+                .unwrap()
+                .get("change_detail")
+                .is_none()
+        );
+    }
+
     #[test]
     fn a_decision_filter_picks_rows_after_the_unfiltered_comparison() {
         let k = app_keys();
@@ -1167,6 +1360,7 @@ mod tests {
             change: c,
             baseline_decision: None,
             recent_decision: None,
+            pair: None,
         };
         assert!(s.keeps(Some(&rc(Change::New))));
         assert!(!s.keeps(Some(&rc(Change::Same))));
@@ -1190,6 +1384,7 @@ mod tests {
             change: Change::Changed,
             baseline_decision: Some(DecisionSet::of(Allowed)),
             recent_decision: Some(DecisionSet::of(Blocked)),
+            pair: None,
         };
         assert_eq!(
             serde_json::to_value(rc).unwrap(),
@@ -1199,6 +1394,7 @@ mod tests {
             change: Change::New,
             baseline_decision: None,
             recent_decision: None,
+            pair: None,
         };
         assert_eq!(
             serde_json::to_value(new).unwrap(),

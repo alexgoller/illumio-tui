@@ -411,7 +411,8 @@ PCE: https://alexgoller.github.io/illumio-tui/#workflows
 9. **What is new since? (compare, `c`).** `c` on Traffic asks for a baseline length (`7d`;
    `Ctrl-N` / `Ctrl-P` step) and queries the same filter over the window just before the
    result's start. Every view but the Treemap marks its rows `NEW`, `CHG` (another set of
-   decisions, the `was→now` column saying `allow→pot.bl`) or `GONE` (dim, only in the
+   decisions, the `was→now` column saying `allow→pot.bl`; on a plain pair what changed:
+   `+1 svc · allow→block`) or `GONE` (dim, only in the
    baseline), the Result header counts the rows the view shows: `vs 7d before · 12 new · 3
    changed · 5 gone`, `n` shows only one kind, `C` leaves. Change checks, new talkers, new
    blocked flows (Blocked view). CLI:
@@ -709,8 +710,11 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   view's decision filter picks its rows: Blocked shows a flow allowed then and potentially
   blocked now as `CHG`, and a gone row only when it was blocked. A plain App-to-app pair (`o`
   off) is judged by its service keys: `NEW` when all are new, `GONE` when all are gone, `CHG`
-  when any is new, gone or changed (`o` shows which), so a pair's `CHG` can also mean a
-  service came or went with the decisions the same (`allow→allow`). The Result header says
+  when any is new, gone or changed (`o` shows which); its `was→now` says what changed instead
+  of the sets: services that came or went (`+2 svc −1 svc`) and, when the decisions of the
+  services on both sides differ, `allow→block`, joined with ` · ` (`+1 svc · allow→block`),
+  never two equal sides. A table none of whose rows has a transition (Flows with nothing
+  changed) has no `was→now` column, so the others keep their widths. The Result header says
   `vs 7d before 10-26 09:00 · 12 new · 3 changed · 5 gone` (where the baseline ends, UTC) for
   the view on screen, counting the rows that view shows (App-to-app: pairs with `o` off,
   service rows with it on), so `n` shows exactly as many rows as it names; a section of gone
@@ -1137,7 +1141,9 @@ baseline's) or `same`. Rows are matched on the view's key without the decision a
 and direction; `--services` and sections on source group, destination group and service; plain
 pairs (`groups` without `--services`, `query --group`) by their service keys (`new` when all are
 new, `gone` when all are gone, `changed` when any is new, gone or changed; `baseline_decision`
-the union); the mesh on its row key. `meta.compare.counts` counts the rows of the output (pairs
+the union; a last `change_detail` column / JSON field says what changed on a changed pair:
+`+2 svc −1 svc` for the services that came or went, `allow→block` when the decisions of the
+services on both sides differ, both joined with ` · `, empty on every other row); the mesh on its row key. `meta.compare.counts` counts the rows of the output (pairs
 without `--services`, service rows with it), before `--changes` picks them. Each key is judged
 on every decision, then `--show` / `--blocked` pick the rows: a flow allowed then and
 potentially blocked now is `changed` in the blocked sections, and a gone row shows only when its
