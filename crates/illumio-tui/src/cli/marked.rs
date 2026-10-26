@@ -133,14 +133,17 @@ impl FlowMark {
     }
 }
 
-/// A flow record with its mark (`traffic query`): `ResolvedFlow` itself
-/// is unchanged.
+/// A flow record with its mark (`traffic query`) and its change (compare
+/// mode): `ResolvedFlow` itself is unchanged.
 #[derive(Debug, Serialize)]
 pub struct MarkedFlow<'a> {
     #[serde(flatten)]
     pub flow: &'a ResolvedFlow,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mark: Option<&'a FlowMark>,
+    /// Compare mode: `change` and `baseline_decision`.
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub change: Option<&'a pce::traffic::RowChange>,
 }
 
 /// The `mark` cell of tables and CSV: the row marker's action, `~12` for

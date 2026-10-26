@@ -125,6 +125,7 @@ impl Context {
             marks: None,
             squelched: None,
             cost: None,
+            compare: None,
             matched: None,
             where_used: None,
         }

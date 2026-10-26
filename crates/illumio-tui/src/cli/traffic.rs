@@ -4,23 +4,25 @@
 use super::context::{Context, cache_label};
 use super::error::CliError;
 use super::marked::{CliMarks, FlowMark, MarkedFlow, mark_cell, squelched};
-use super::output::{Meta, SquelchedMeta, TableRows, Window, join_list};
+use super::output::{CompareMeta, CompareSide, Meta, SquelchedMeta, TableRows, Window, join_list};
 use clap::{Args, Subcommand, ValueEnum};
 use jiff::Timestamp;
 use jiff::civil::Date;
-use pce::marks::{annotate_groups, annotate_mesh, annotate_sections, partition};
+use pce::marks::{ActiveMarks, annotate_groups, annotate_mesh, annotate_sections, partition};
 use pce::models::{
     ActorMatch, PolicyDecision, ServiceMatch, TrafficQuery, Transmission, WorkloadFilter,
     proto_number,
 };
 use pce::traffic::{
-    AppSection, CONFIRM_MAX_RESULTS, Decisions, Direction, DraftCounts, DraftSummary, FilterExpr,
-    FlowGroup, Focus, FocusDirection, MAX_TRAFFIC_MAX_RESULTS, MeshColumns, MeshRow, ResolvedFlow,
-    ServiceExpr, TrafficQueryBuilder, app_header, app_sections, app_sections_both, backfill_cap,
-    compact_duration, group_by_labels, group_by_service, in_app, keys_or_default, mesh, parse_app,
-    parse_service, parse_window, resolve_actor, resolve_flows, resolve_service,
+    AppSection, CONFIRM_MAX_RESULTS, ChangeSet, CompareCounts, Decisions, Direction, DraftCounts,
+    DraftSummary, FilterExpr, FlowGroup, Focus, FocusDirection, MAX_TRAFFIC_MAX_RESULTS,
+    MeshColumns, MeshRow, ResolvedFlow, RowChange, ServiceExpr, TrafficQueryBuilder, app_header,
+    app_sections, app_sections_both, backfill_cap, compact_duration, compare_flows, compare_groups,
+    compare_mesh, compare_sections, group_by_labels, group_by_service, in_app, keep_changes,
+    keep_section_changes, keys_or_default, mesh, parse_app, parse_service, parse_window,
+    resolve_actor, resolve_flows, resolve_service,
 };
-use pce::{KeyOrder, NameIndex};
+use pce::{Evaluation, KeyOrder, NameIndex};
 use serde::Serialize;
 use std::sync::Arc;
 use std::time::Duration;
@@ -256,14 +258,31 @@ pub struct MeshArgs {
 #[derive(Args, Debug, Clone, Default)]
 pub struct FilterArgs {
     /// Relative window ending now, e.g. 1h, 24h, 7d (default from profile, 24h)
-    #[arg(long, conflicts_with_all = ["from", "to"])]
+    #[arg(long, conflicts_with_all = ["from", "to", "since"])]
     pub window: Option<String>,
     /// Start, RFC 3339 or YYYY-MM-DD (UTC)
-    #[arg(long, requires = "to")]
+    #[arg(long, requires = "to", group = "start")]
     pub from: Option<String>,
     /// End, RFC 3339 or YYYY-MM-DD (end of that day, UTC)
-    #[arg(long, requires = "from")]
+    #[arg(long, requires = "start")]
     pub to: Option<String>,
+    /// Start, as --from, with --to defaulting to now: "what is new since"
+    /// (2026-10-23T18:00:00Z, or a date)
+    #[arg(long, group = "start")]
+    pub since: Option<String>,
+    /// Compare mode: also query the baseline, the same filter over this long before the
+    /// window's start ([start - DURATION, start), e.g. 7d, 30d), and mark each row new,
+    /// changed (another set of decisions), gone (only in the baseline) or same. A second query,
+    /// through the same cost guard (> 7d needs --yes); JSON: change, baseline_decision per row,
+    /// meta.compare. New means not seen in the baseline window at Explorer's record
+    /// granularity (a record spanning the cut-off is in both); counts stay each side's lifetime
+    /// counters, never per window, never subtracted
+    #[arg(long, value_name = "DURATION")]
+    pub baseline: Option<String>,
+    /// With --baseline: the rows to print, any of new,changed,gone,same (default
+    /// new,changed,gone)
+    #[arg(long, value_name = "LIST", requires = "baseline")]
+    pub changes: Option<String>,
     /// Source filter: key=value, ip:ADDR, ipl:NAME, wl:HOST (fqdn:NAME is destination only).
     /// Comma = AND, repeat = OR
     #[arg(long = "src")]
@@ -458,6 +477,7 @@ impl FilterArgs {
         }
         if self.window.is_none()
             && self.from.is_none()
+            && self.since.is_none()
             && let Some(w) = &s.window
         {
             parse_window(w).map_err(|e| format!("field window: {e}"))?;
@@ -481,9 +501,14 @@ impl FilterArgs {
     pub fn to_saved(&self) -> Result<crate::filters::TrafficSaved, String> {
         for (given, flag, why) in [
             (
-                self.from.is_some(),
-                "--from/--to",
+                self.from.is_some() || self.since.is_some(),
+                "--from/--to/--since",
                 "a saved filter keeps a relative --window",
+            ),
+            (
+                self.baseline.is_some(),
+                "--baseline",
+                "a saved filter keeps no baseline; give --baseline when you load it",
             ),
             (
                 self.process.is_some(),
@@ -632,10 +657,18 @@ async fn build_query(
             "time slices were removed: --backfill raises the cap".into(),
         ));
     }
-    let mut b = match (&args.from, &args.to) {
-        (Some(f), Some(t)) => {
+    let mut b = match (&args.from, &args.since, &args.to) {
+        (Some(f), _, Some(t)) => {
             TrafficQueryBuilder::between(parse_time(f, false)?, parse_time(t, true)?)
         }
+        // `--since`: `--from` with `--to` now unless given.
+        (None, Some(since), to) => TrafficQueryBuilder::between(
+            parse_time(since, false)?,
+            match to {
+                Some(t) => parse_time(t, true)?,
+                None => Timestamp::now(),
+            },
+        ),
         _ => {
             let w = args
                 .window
@@ -723,6 +756,18 @@ async fn build_query(
         return Err(CliError::Args(format!(
             "expensive query: {reason}{runs}; re-run with --yes to confirm"
         )));
+    }
+    // Compare mode: the baseline through the same guard, on its own.
+    if let Some(length) = baseline_length(args)? {
+        let base = bounds.baseline(length)?;
+        if !args.dry_run
+            && !args.yes
+            && let Some(reason) = base.needs_confirmation()
+        {
+            return Err(CliError::Args(format!(
+                "expensive baseline query: {reason}; re-run with --yes to confirm"
+            )));
+        }
     }
 
     let src = parse_groups(&args.src)?;
@@ -858,19 +903,29 @@ struct FlowRows<'a> {
     order: &'a KeyOrder,
     /// Each flow's mark, while marks are active.
     marks: Option<Vec<Option<FlowMark>>>,
+    /// Each flow's change, in compare mode (`--baseline`).
+    changes: Option<Vec<RowChange>>,
 }
 
 impl Serialize for FlowRows<'_> {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        match &self.marks {
-            None => self.flows.serialize(s),
-            Some(marks) => {
-                s.collect_seq(self.flows.iter().zip(marks).map(|(flow, mark)| MarkedFlow {
-                    flow,
-                    mark: mark.as_ref(),
-                }))
-            }
+        if self.marks.is_none() && self.changes.is_none() {
+            return self.flows.serialize(s);
         }
+        s.collect_seq(self.flows.iter().enumerate().map(|(i, flow)| MarkedFlow {
+            flow,
+            mark: self.marks.as_ref().and_then(|m| m[i].as_ref()),
+            change: self.changes.as_ref().map(|c| &c[i]),
+        }))
+    }
+}
+
+/// Compare mode's two cells: the change (`new`, `changed`, `gone`,
+/// `same`) and the baseline's decisions.
+fn change_cells(c: Option<&RowChange>) -> [String; 2] {
+    match c {
+        Some(c) => [c.change.as_str().to_string(), c.baseline_text()],
+        None => [String::new(), String::new()],
     }
 }
 
@@ -904,6 +959,9 @@ impl TableRows for FlowRows<'_> {
         if self.marks.is_some() {
             h.push("mark");
         }
+        if self.changes.is_some() {
+            h.extend(COMPARE_COLUMNS);
+        }
         h
     }
     fn rows(&self) -> Vec<Vec<String>> {
@@ -933,6 +991,9 @@ impl TableRows for FlowRows<'_> {
                             .map(|m| m.action.as_str().to_string())
                             .unwrap_or_default(),
                     );
+                }
+                if let Some(changes) = &self.changes {
+                    row.extend(change_cells(Some(&changes[i])));
                 }
                 row
             })
@@ -990,6 +1051,10 @@ fn mesh_draft(rows: &[MeshRow]) -> bool {
     rows.iter().any(|r| r.draft.is_some())
 }
 
+fn mesh_compared(rows: &[MeshRow]) -> bool {
+    rows.iter().any(|r| r.change.is_some())
+}
+
 fn groups_draft(groups: &[FlowGroup]) -> bool {
     groups.iter().any(|g| g.draft.is_some())
 }
@@ -997,6 +1062,11 @@ fn groups_draft(groups: &[FlowGroup]) -> bool {
 /// Some row carries marks: the tables get a last `mark` column.
 fn groups_marked(groups: &[FlowGroup]) -> bool {
     groups.iter().any(|g| g.marks.is_some())
+}
+
+/// Compare mode: the tables end with `COMPARE_COLUMNS`.
+fn groups_compared(groups: &[FlowGroup]) -> bool {
+    groups.iter().any(|g| g.change.is_some())
 }
 
 fn group_cells(groups: &[FlowGroup]) -> Vec<Vec<String>> {
@@ -1041,11 +1111,15 @@ impl TableRows for Vec<FlowGroup> {
         if groups_marked(self) {
             h.push("mark");
         }
+        if groups_compared(self) {
+            h.extend(COMPARE_COLUMNS);
+        }
         h
     }
     fn rows(&self) -> Vec<Vec<String>> {
         let draft = groups_draft(self);
         let marked = groups_marked(self);
+        let compared = groups_compared(self);
         self.iter()
             .zip(group_cells(self))
             .map(|(g, mut row)| {
@@ -1055,21 +1129,28 @@ impl TableRows for Vec<FlowGroup> {
                 if marked {
                     row.push(mark_cell(g.marks.as_ref()));
                 }
+                if compared {
+                    row.extend(change_cells(g.change.as_ref()));
+                }
                 row
             })
             .collect()
     }
     /// The table's counts, then the connections per decision, then with
-    /// draft decisions `draft_allowed` and `draft_blocked`, then `mark`.
+    /// draft decisions `draft_allowed` and `draft_blocked`, then `mark`,
+    /// then compare mode's columns.
     fn full_headers(&self) -> Vec<&'static str> {
         let mut h = self.headers();
-        h.retain(|c| *c != "draft" && *c != "mark");
+        h.retain(|c| !["draft", "mark"].contains(c) && !COMPARE_COLUMNS.contains(c));
         h.extend(CONNS_BY_DECISION);
         if groups_draft(self) {
             h.extend(DRAFT_COUNTS);
         }
         if groups_marked(self) {
             h.push("mark");
+        }
+        if groups_compared(self) {
+            h.extend(COMPARE_COLUMNS);
         }
         h
     }
@@ -1087,6 +1168,9 @@ impl TableRows for Vec<FlowGroup> {
                 }
                 if groups_marked(self) {
                     row.push(mark_cell(g.marks.as_ref()));
+                }
+                if groups_compared(self) {
+                    row.extend(change_cells(g.change.as_ref()));
                 }
                 row
             })
@@ -1159,24 +1243,31 @@ impl TableRows for Vec<MeshRow> {
         if self.iter().any(|r| r.marks.is_some()) {
             h.push("mark");
         }
+        if mesh_compared(self) {
+            h.extend(COMPARE_COLUMNS);
+        }
         h
     }
     /// The table's, with the draft counts as `draft_allowed` and
-    /// `draft_blocked` numbers, then `mark`.
+    /// `draft_blocked` numbers, then `mark`, then compare mode's columns.
     fn full_headers(&self) -> Vec<&'static str> {
         let mut h = self.headers();
-        let marked = h.last() == Some(&"mark");
-        h.retain(|c| *c != "draft" && *c != "mark");
+        let marked = h.contains(&"mark");
+        h.retain(|c| !["draft", "mark"].contains(c) && !COMPARE_COLUMNS.contains(c));
         if mesh_draft(self) {
             h.extend(DRAFT_COUNTS);
         }
         if marked {
             h.push("mark");
         }
+        if mesh_compared(self) {
+            h.extend(COMPARE_COLUMNS);
+        }
         h
     }
     fn rows(&self) -> Vec<Vec<String>> {
         let draft = mesh_draft(self);
+        let compared = mesh_compared(self);
         let marked = self.iter().any(|r| r.marks.is_some());
         let any = self.iter().any(|r| r.bytes > 0);
         let or_dash = |v: &Option<String>| v.clone().unwrap_or_else(|| "-".into());
@@ -1200,6 +1291,9 @@ impl TableRows for Vec<MeshRow> {
                 if marked {
                     row.push(mark_cell(r.marks.as_ref()));
                 }
+                if compared {
+                    row.extend(change_cells(r.change.as_ref()));
+                }
                 row
             })
             .collect()
@@ -1208,6 +1302,7 @@ impl TableRows for Vec<MeshRow> {
     /// draft counts as numbers.
     fn full_rows(&self) -> Vec<Vec<String>> {
         let draft = mesh_draft(self);
+        let compared = mesh_compared(self);
         let marked = self.iter().any(|r| r.marks.is_some());
         let or_empty = |v: &Option<String>| v.clone().unwrap_or_default();
         self.iter()
@@ -1217,12 +1312,18 @@ impl TableRows for Vec<MeshRow> {
                 row[1] = or_empty(&r.process);
                 row[5] = or_empty(&r.dst_process);
                 row[8] = r.bytes.to_string();
+                if compared {
+                    row.truncate(row.len() - COMPARE_COLUMNS.len());
+                }
                 let mark = if marked { row.pop() } else { None };
                 if draft {
                     row.pop();
                     row.extend(draft_cells(r.draft.as_ref()));
                 }
                 row.extend(mark);
+                if compared {
+                    row.extend(change_cells(r.change.as_ref()));
+                }
                 row
             })
             .collect()
@@ -1264,6 +1365,9 @@ impl TableRows for Sections {
         if self.marked() {
             h.push("mark");
         }
+        if self.compared() {
+            h.extend(COMPARE_COLUMNS);
+        }
         h
     }
     /// A header row is one cell: `render_table` prints it whole in the
@@ -1271,6 +1375,7 @@ impl TableRows for Sections {
     fn rows(&self) -> Vec<Vec<String>> {
         let draft = self.draft();
         let marked = self.marked();
+        let compared = self.compared();
         let any = self
             .sections
             .iter()
@@ -1310,6 +1415,9 @@ impl TableRows for Sections {
                     if marked && let Some(row) = out.last_mut() {
                         row.push(mark_cell(r.marks.as_ref()));
                     }
+                    if compared && let Some(row) = out.last_mut() {
+                        row.extend(change_cells(r.change.as_ref()));
+                    }
                 }
             }
         }
@@ -1322,10 +1430,13 @@ impl TableRows for Sections {
         if self.marked() {
             h.push("mark");
         }
+        if self.compared() {
+            h.extend(COMPARE_COLUMNS);
+        }
         h
     }
     fn full_rows(&self) -> Vec<Vec<String>> {
-        let (draft, marked) = (self.draft(), self.marked());
+        let (draft, marked, compared) = (self.draft(), self.marked(), self.compared());
         self.sections
             .iter()
             .flat_map(|s| {
@@ -1333,6 +1444,9 @@ impl TableRows for Sections {
                     let mut row = section_csv_row(&s.app, s.direction, r, draft);
                     if marked {
                         row.push(mark_cell(r.marks.as_ref()));
+                    }
+                    if compared {
+                        row.extend(change_cells(r.change.as_ref()));
                     }
                     row
                 })
@@ -1356,6 +1470,14 @@ impl Sections {
             .iter()
             .flat_map(|s| &s.rows)
             .any(|r| r.marks.is_some())
+    }
+
+    /// Compare mode: the tables end with `COMPARE_COLUMNS`.
+    fn compared(&self) -> bool {
+        self.sections
+            .iter()
+            .flat_map(|s| &s.rows)
+            .any(|r| r.change.is_some())
     }
 }
 
@@ -1529,6 +1651,30 @@ impl Fetched {
     }
 }
 
+/// Where one side of a command's results is cached, and how its
+/// messages name it: the recent result in `main` (`focus:in|out` with
+/// `--app`), compare mode's baseline in its own slots, so neither evicts
+/// the other.
+#[derive(Debug, Clone, Copy)]
+struct Side {
+    slot: &'static str,
+    focus_slot: &'static str,
+    /// `baseline ` in front of a backfill message.
+    label: &'static str,
+}
+
+const RECENT: Side = Side {
+    slot: "main",
+    focus_slot: "focus",
+    label: "",
+};
+
+const BASELINE: Side = Side {
+    slot: pce::BASELINE_SLOT,
+    focus_slot: pce::FOCUS_BASELINE_SLOT,
+    label: "baseline ",
+};
+
 /// `--backfill` on a truncated result: the same window again at the next
 /// cap (`backfill_cap`: 10000, then 25000 to 200000), each answer replacing
 /// the last, until one is complete or the next cap needs `--yes`. Explorer
@@ -1541,34 +1687,42 @@ async fn backfill(
     href: String,
     idx: &NameIndex,
     f: &mut Fetched,
+    side: Side,
 ) -> Result<(TrafficQuery, String), CliError> {
     let ceiling = if args.yes {
         MAX_TRAFFIC_MAX_RESULTS
     } else {
         CONFIRM_MAX_RESULTS
     };
+    let what = side.label;
     let mut q = q.clone();
     let mut href = href;
     let mut steps = vec![q.max_results];
     while f.truncated {
         let Some(next) = backfill_cap(q.max_results) else {
             eprintln!(
-                "backfill stopped: truncated at the maximum cap of {MAX_TRAFFIC_MAX_RESULTS}; narrow the filter"
+                "{what}backfill stopped: truncated at the maximum cap of {MAX_TRAFFIC_MAX_RESULTS}; narrow the filter"
             );
             break;
         };
         if next > ceiling {
             eprintln!(
-                "backfill stopped: truncated at cap {}; a cap of {next} needs --yes",
+                "{what}backfill stopped: truncated at cap {}; a cap of {next} needs --yes",
                 q.max_results
             );
             break;
         }
-        eprintln!("backfill raises the cap to {next}");
+        eprintln!("{what}backfill raises the cap to {next}");
         q.max_results = next;
         let r = ctx
             .pce
-            .traffic(&q, ctx.cache_mode, &CancellationToken::new(), None)
+            .traffic_slot(
+                side.slot,
+                &q,
+                ctx.cache_mode,
+                &CancellationToken::new(),
+                None,
+            )
             .await?;
         steps.push(next);
         href = r.value.query_href.clone();
@@ -1587,7 +1741,8 @@ async fn backfill(
 /// after the app's labels are checked (an unknown one is exit 2 before any
 /// traffic request). An unfocused query is submitted while the name index
 /// loads, so the PCE computes meanwhile. A dry run prints the request body
-/// (with `--app`, the bodies) and returns `None`.
+/// (with `--app`, the bodies) and returns `None`. `--baseline` is not read
+/// here (`fetch_compare`).
 pub(crate) async fn fetch(
     ctx: &Context,
     args: &FilterArgs,
@@ -1597,43 +1752,114 @@ pub(crate) async fn fetch(
         .filter(|f| f.query)
         .map_or(1, |f| f.focus.direction.query_count());
     let BuiltQuery { query: q, index } = build_query(ctx, args, n).await?;
+    let focus = focus.filter(|f| f.query).map(|f| &f.focus);
+    if args.dry_run {
+        dry_run(ctx, &[q], focus, index).await?;
+        return Ok(None);
+    }
+    run_side(ctx, args, focus, &q, index, RECENT, args.draft)
+        .await
+        .map(Some)
+}
+
+/// Compare mode (`--baseline`): the recent query as `fetch` runs it, then
+/// the baseline, the same body over `[start - length, start)` of the
+/// recent query's bounds, in its own cache slots, backfilled with
+/// `--backfill` too. The draft (`--draft`) is the recent side's only: the
+/// comparison reads the reported decisions. A dry run prints every body,
+/// the recent ones first, and returns `None`.
+pub(crate) async fn fetch_compare(
+    ctx: &Context,
+    args: &FilterArgs,
+    focus: Option<&CliFocus>,
+    length: Duration,
+) -> Result<Option<(Fetched, Fetched)>, CliError> {
+    let n = focus
+        .filter(|f| f.query)
+        .map_or(1, |f| f.focus.direction.query_count());
+    let BuiltQuery { query: q, index } = build_query(ctx, args, n).await?;
+    let base = q.baseline(length)?;
+    let focus = focus.filter(|f| f.query).map(|f| &f.focus);
+    if args.dry_run {
+        dry_run(ctx, &[q, base], focus, index).await?;
+        return Ok(None);
+    }
+    let recent = run_side(ctx, args, focus, &q, index, RECENT, args.draft).await?;
+    let idx = Some(recent.index.clone());
+    let baseline = run_side(ctx, args, focus, &base, idx, BASELINE, false).await?;
+    Ok(Some((recent, baseline)))
+}
+
+/// `--dry-run`: the request bodies, nothing sent. One unfocused query is
+/// its body; with `--app` (one body per side, `in` first) or a baseline,
+/// a list.
+async fn dry_run(
+    ctx: &Context,
+    queries: &[TrafficQuery],
+    focus: Option<&Focus>,
+    index: Option<Arc<NameIndex>>,
+) -> Result<(), CliError> {
+    let window = queries.first().map(|q| Window {
+        start: q.start_date.clone(),
+        end: q.end_date.clone(),
+    });
+    let Some(focus) = focus else {
+        if let [q] = queries {
+            return ctx.emit(&DryRun(q.clone()), "none", false, window);
+        }
+        return ctx.emit(&DryRuns(queries.to_vec()), "none", false, window);
+    };
+    let idx = match index {
+        Some(idx) => idx,
+        None => ctx.pce.name_index(ctx.cache_mode).await?,
+    };
+    let mut bodies = Vec::new();
+    for q in queries {
+        let sides = focus.queries(q, &idx).map_err(CliError::Args)?;
+        bodies.extend(sides.into_iter().map(|(_, q)| q));
+    }
+    ctx.emit(&DryRuns(bodies), "none", false, window)
+}
+
+/// One side's query run (or reused) in `side`'s slots: focused, one query
+/// per side of the app; else one query (with the name index alongside
+/// when `index` is not loaded yet), backfilled with `--backfill`, with the
+/// draft decisions when `draft`.
+async fn run_side(
+    ctx: &Context,
+    args: &FilterArgs,
+    focus: Option<&Focus>,
+    q: &TrafficQuery,
+    index: Option<Arc<NameIndex>>,
+    side: Side,
+    draft: bool,
+) -> Result<Fetched, CliError> {
     let window = Some(Window {
         start: q.start_date.clone(),
         end: q.end_date.clone(),
     });
-    let focus = focus.filter(|f| f.query).map(|f| &f.focus);
-    if args.dry_run && focus.is_none() {
-        ctx.emit(&DryRun(q), "none", false, window)?;
-        return Ok(None);
-    }
     if let Some(focus) = focus {
         let idx = match index {
             Some(idx) => idx,
             None => ctx.pce.name_index(ctx.cache_mode).await?,
         };
-        let queries = focus.queries(&q, &idx).map_err(CliError::Args)?;
-        if args.dry_run {
-            let bodies = DryRuns(queries.into_iter().map(|(_, q)| q).collect());
-            ctx.emit(&bodies, "none", false, window)?;
-            return Ok(None);
-        }
         // `--draft`: each side run and then re-evaluated (no href known).
         let none: &[String] = &[];
         let ft = ctx
             .pce
             .focused_traffic_eval(
-                "focus",
+                side.focus_slot,
                 focus,
-                &q,
+                q,
                 &idx,
-                args.draft.then_some(none),
+                draft.then_some(none),
                 ctx.cache_mode,
                 &CancellationToken::new(),
                 None,
             )
             .await?;
-        return Ok(Some(Fetched {
-            draft: args.draft.then(|| DraftSummary::of(&ft.flows)),
+        return Ok(Fetched {
+            draft: draft.then(|| DraftSummary::of(&ft.flows)),
             queries: Some(ft.query_count()),
             cache: cache_label(ft.hit, ctx.cache_mode),
             truncated: ft.truncated,
@@ -1644,20 +1870,21 @@ pub(crate) async fn fetch(
             cap_steps: None,
             flows: ft.flows,
             index: idx,
-        }));
+        });
     }
     let cancel = CancellationToken::new();
     // `--draft` in one go (POST, polls, PUT, polls, one download), except
     // with `--backfill`: its caps run plain and only the result kept is
     // re-evaluated, by its href.
     let run = async {
-        if args.draft && !args.backfill {
-            ctx.pce
-                .traffic_draft(&q, None, ctx.cache_mode, &cancel, None)
-                .await
+        let eval = if draft && !args.backfill {
+            Evaluation::Draft(None)
         } else {
-            ctx.pce.traffic(&q, ctx.cache_mode, &cancel, None).await
-        }
+            Evaluation::Reported
+        };
+        ctx.pce
+            .traffic_eval(side.slot, q, eval, ctx.cache_mode, &cancel, None)
+            .await
     };
     let (result, idx) = match index {
         Some(idx) => (run.await?, idx),
@@ -1679,22 +1906,143 @@ pub(crate) async fn fetch(
         index: idx.clone(),
     };
     if args.backfill {
-        let (last, href) =
-            backfill(ctx, args, &q, result.value.query_href.clone(), &idx, &mut f).await?;
-        if args.draft {
+        let (last, href) = backfill(
+            ctx,
+            args,
+            q,
+            result.value.query_href.clone(),
+            &idx,
+            &mut f,
+            side,
+        )
+        .await?;
+        if draft {
             let r = ctx
                 .pce
-                .traffic_draft(&last, Some(&href), ctx.cache_mode, &cancel, None)
+                .traffic_eval(
+                    side.slot,
+                    &last,
+                    Evaluation::Draft(Some(&href)),
+                    ctx.cache_mode,
+                    &cancel,
+                    None,
+                )
                 .await?;
             f.flows = resolve_flows(&r.value.flows, &idx);
             f.truncated = r.truncated;
             f.incomplete = r.value.incomplete;
         }
     }
-    if args.draft {
+    if draft {
         f.draft = Some(DraftSummary::of(&f.flows));
     }
-    Ok(Some(f))
+    Ok(f)
+}
+
+/// `--baseline` as a length, checked before any request.
+pub fn baseline_length(args: &FilterArgs) -> Result<Option<Duration>, CliError> {
+    let Some(b) = &args.baseline else {
+        return Ok(None);
+    };
+    let d = parse_window(b).map_err(|e| CliError::Args(format!("--baseline: {e}")))?;
+    if d.is_zero() {
+        return Err(CliError::Args("--baseline must be longer than 0".into()));
+    }
+    Ok(Some(d))
+}
+
+/// The `--csv` columns compare mode adds to every traffic view.
+pub const COMPARE_COLUMNS: [&str; 2] = ["change", "baseline_decision"];
+
+/// Compare mode's other half: the baseline's result and what to print.
+pub(crate) struct CompareRun {
+    pub(crate) baseline: Fetched,
+    /// `--changes`.
+    pub(crate) show: ChangeSet,
+    /// `--baseline` as given.
+    pub(crate) length: String,
+}
+
+impl CompareRun {
+    /// The baseline's flows squelch keeps, as it keeps the recent ones:
+    /// a squelched flow is hidden on both sides alike, so it is never gone.
+    /// Merged on their own (`merge_flows`: one row per record, never
+    /// summed), never with the recent side.
+    fn kept(&self, act: Option<&ActiveMarks<'_>>, show: bool) -> Vec<ResolvedFlow> {
+        let kept = match act {
+            Some(a) => partition(&self.baseline.flows, a, show).kept.into_owned(),
+            None => self.baseline.flows.clone(),
+        };
+        let mut merged = Vec::with_capacity(kept.len());
+        pce::traffic::merge_flows(&mut merged, kept);
+        merged
+    }
+
+    /// `meta.compare`, the cost of both sides, a warning (stderr and
+    /// `meta.warnings`) for each truncated side; the exit code stays 0.
+    fn fill(&self, meta: &mut Meta, recent: &Fetched, counts: CompareCounts) {
+        let side = |f: &Fetched| CompareSide {
+            start: f
+                .window
+                .as_ref()
+                .map(|w| w.start.clone())
+                .unwrap_or_default(),
+            end: f.window.as_ref().map(|w| w.end.clone()).unwrap_or_default(),
+            truncated: f.truncated,
+            incomplete: f.incomplete,
+            cap: f.cap,
+            cache: f.cache,
+        };
+        for (name, f) in [("recent", recent), ("baseline", &self.baseline)] {
+            if f.truncated {
+                let w = format!(
+                    "{name} truncated, capped at {}: new/gone over-report; --backfill raises the cap",
+                    f.cap
+                );
+                eprintln!("warning: {w}");
+                meta.warnings.get_or_insert_with(Vec::new).push(w);
+            }
+        }
+        meta.queries = Some(recent.queries.unwrap_or(1) + self.baseline.queries.unwrap_or(1));
+        meta.cost = Some(
+            "the recent window's query, then the baseline's (each: 1 POST, status polls, 1 download; one per side with --app)",
+        );
+        meta.compare = Some(CompareMeta {
+            length: self.length.clone(),
+            changes: self.show.text(),
+            recent: side(recent),
+            baseline: side(&self.baseline),
+            counts,
+        });
+    }
+}
+
+/// The recent result, and with `--baseline` the baseline too. `--baseline`
+/// and `--changes` are checked before any request.
+async fn fetch_sides(
+    ctx: &Context,
+    args: &FilterArgs,
+    focus: Option<&CliFocus>,
+) -> Result<Option<(Fetched, Option<CompareRun>)>, CliError> {
+    let show = match &args.changes {
+        Some(c) => ChangeSet::parse(c).map_err(|e| CliError::Args(format!("--changes: {e}")))?,
+        None => ChangeSet::default(),
+    };
+    let Some(length) = baseline_length(args)? else {
+        return Ok(fetch(ctx, args, focus).await?.map(|f| (f, None)));
+    };
+    let Some((recent, baseline)) = fetch_compare(ctx, args, focus, length).await? else {
+        return Ok(None);
+    };
+    let length = args.baseline.clone().unwrap_or_default();
+    Ok(Some((
+        recent,
+        Some(CompareRun {
+            baseline,
+            show,
+            length,
+        }),
+    )))
 }
 
 /// `--keys`, else the profile's scope keys.
@@ -1713,15 +2061,17 @@ async fn query(ctx: &Context, args: &QueryArgs) -> Result<(), CliError> {
         args.group.clone()
     };
     let focus = cli_focus(&args.filter, &keys, ByArg::Pairs)?;
-    let Some(f) = fetch(ctx, &args.filter, focus.as_ref()).await? else {
+    let Some((f, cmp)) = fetch_sides(ctx, &args.filter, focus.as_ref()).await? else {
         return Ok(());
     };
     // Marks: classify, then aggregate the records kept (all of them with
-    // --show-squelched); the marks join the rows by their keys.
+    // --show-squelched); the marks join the rows by their keys. The
+    // baseline keeps what squelch keeps, alike.
     let cm = CliMarks::load(ctx, args.filter.no_marks, args.filter.show_squelched);
     let act = cm.active(args.filter.draft);
     let part = act.as_ref().map(|a| partition(&f.flows, a, cm.show));
     let flows: &[ResolvedFlow] = part.as_ref().map_or(&f.flows, |p| &p.kept);
+    let base = cmp.as_ref().map(|c| c.kept(act.as_ref(), cm.show));
     let mut meta = f.meta(ctx);
     if args.blocked {
         let keys = keys_or_profile(ctx, &[]);
@@ -1737,6 +2087,11 @@ async fn query(ctx: &Context, args: &QueryArgs) -> Result<(), CliError> {
             |x| Decisions::Blocked.keeps(x),
         );
         cm.fill(&mut meta, act.as_ref(), sq);
+        if let (Some(c), Some(b)) = (&cmp, &base) {
+            let counts = compare_sections(&mut sections.sections, &agg(b));
+            keep_section_changes(&mut sections.sections, c.show);
+            c.fill(&mut meta, &f, counts);
+        }
         ctx.emit_meta(&sections, &meta)
     } else if !args.group.is_empty() {
         let agg = |x: &[ResolvedFlow]| group_by_labels(x, &args.group);
@@ -1748,6 +2103,11 @@ async fn query(ctx: &Context, args: &QueryArgs) -> Result<(), CliError> {
             |_| true,
         );
         cm.fill(&mut meta, act.as_ref(), sq);
+        if let (Some(c), Some(b)) = (&cmp, &base) {
+            let counts = compare_groups(&mut groups, &agg(b));
+            keep_changes(&mut groups, c.show, |g| g.change.as_ref());
+            c.fill(&mut meta, &f, counts);
+        }
         ctx.emit_meta(&groups, &meta)
     } else {
         let order = ctx.config.key_order();
@@ -1771,25 +2131,79 @@ async fn query(ctx: &Context, args: &QueryArgs) -> Result<(), CliError> {
             _ => (None, None),
         };
         cm.fill(&mut meta, act.as_ref(), sq);
-        let rows = FlowRows {
-            flows,
-            order: &order,
-            marks,
+        let (Some(c), Some(b)) = (&cmp, &base) else {
+            let rows = FlowRows {
+                flows,
+                order: &order,
+                marks,
+                changes: None,
+            };
+            return ctx.emit_meta(&rows, &meta);
         };
-        ctx.emit_meta(&rows, &meta)
+        let rows = compared_flows(flows, b, marks, c.show);
+        c.fill(&mut meta, &f, rows.counts);
+        let out = FlowRows {
+            flows: &rows.flows,
+            order: &order,
+            marks: rows.marks,
+            changes: Some(rows.changes),
+        };
+        ctx.emit_meta(&out, &meta)
     }
+}
+
+/// Flow records in compare mode: the recent ones then the gone ones (each
+/// with its mark, none for a gone one), kept by `show`.
+struct ComparedFlows {
+    flows: Vec<ResolvedFlow>,
+    marks: Option<Vec<Option<FlowMark>>>,
+    changes: Vec<RowChange>,
+    /// Before `show`.
+    counts: CompareCounts,
+}
+
+fn compared_flows(
+    recent: &[ResolvedFlow],
+    baseline: &[ResolvedFlow],
+    marks: Option<Vec<Option<FlowMark>>>,
+    show: ChangeSet,
+) -> ComparedFlows {
+    let c = compare_flows(recent, baseline);
+    let mut marks = marks.map(|m| m.into_iter());
+    let mut out = ComparedFlows {
+        flows: Vec::new(),
+        marks: marks.as_ref().map(|_| Vec::new()),
+        changes: Vec::new(),
+        counts: c.counts,
+    };
+    let gone = c.gone.into_iter().map(|(f, rc)| (f, rc, None));
+    let rows = recent
+        .iter()
+        .cloned()
+        .zip(c.recent)
+        .map(|(f, rc)| (f, rc, marks.as_mut().and_then(Iterator::next).flatten()))
+        .chain(gone);
+    for (f, rc, mark) in rows.filter(|(_, rc, _)| show.contains(rc.change)) {
+        out.flows.push(f);
+        out.changes.push(rc);
+        if let Some(m) = out.marks.as_mut() {
+            m.push(mark);
+        }
+    }
+    out
 }
 
 async fn groups(ctx: &Context, args: &GroupsArgs) -> Result<(), CliError> {
     let keys = keys_or_profile(ctx, &args.keys);
     let focus = cli_focus(&args.filter, &keys, args.by)?;
-    let Some(f) = fetch(ctx, &args.filter, focus.as_ref()).await? else {
+    let Some((f, cmp)) = fetch_sides(ctx, &args.filter, focus.as_ref()).await? else {
         return Ok(());
     };
     let cm = CliMarks::load(ctx, args.filter.no_marks, args.filter.show_squelched);
     let act = cm.active(args.filter.draft);
     let part = act.as_ref().map(|a| partition(&f.flows, a, cm.show));
     let flows: &[ResolvedFlow] = part.as_ref().map_or(&f.flows, |p| &p.kept);
+    let base = cmp.as_ref().map(|c| c.kept(act.as_ref(), cm.show));
     let decisions = Decisions::from(args.show);
     let mut meta = f.meta(ctx);
     match sections_for(flows, &keys, args) {
@@ -1822,8 +2236,15 @@ async fn groups(ctx: &Context, args: &GroupsArgs) -> Result<(), CliError> {
             let squelched_only = sections.sections.is_empty()
                 && part.as_ref().is_some_and(|p| p.kept.len() < f.flows.len())
                 && sections_for(&f.flows, &keys, args).is_some_and(|s| !s.sections.is_empty());
+            if let (Some(c), Some(b)) = (&cmp, &base) {
+                let counts = compare_sections(&mut sections.sections, &agg(b));
+                c.fill(&mut meta, &f, counts);
+            }
             if let Some(miss) = app_miss(args, &sections, squelched_only) {
                 eprintln!("{miss}");
+            }
+            if let Some(c) = &cmp {
+                keep_section_changes(&mut sections.sections, c.show);
             }
             ctx.emit_meta(&sections, &meta)
         }
@@ -1837,6 +2258,11 @@ async fn groups(ctx: &Context, args: &GroupsArgs) -> Result<(), CliError> {
                 |x| decisions.keeps(x),
             );
             cm.fill(&mut meta, act.as_ref(), sq);
+            if let (Some(c), Some(b)) = (&cmp, &base) {
+                let counts = compare_groups(&mut pairs, &agg(b));
+                keep_changes(&mut pairs, c.show, |g| g.change.as_ref());
+                c.fill(&mut meta, &f, counts);
+            }
             if args.services {
                 ctx.emit_meta(&ServiceGroups(pairs), &meta)
             } else {
@@ -1849,7 +2275,7 @@ async fn groups(ctx: &Context, args: &GroupsArgs) -> Result<(), CliError> {
 async fn mesh_cmd(ctx: &Context, args: &MeshArgs) -> Result<(), CliError> {
     let keys = keys_or_profile(ctx, &args.keys);
     let focus = cli_focus(&args.filter, &keys, ByArg::Pairs)?;
-    let Some(f) = fetch(ctx, &args.filter, focus.as_ref()).await? else {
+    let Some((f, cmp)) = fetch_sides(ctx, &args.filter, focus.as_ref()).await? else {
         return Ok(());
     };
     let cols = MeshColumns {
@@ -1860,6 +2286,7 @@ async fn mesh_cmd(ctx: &Context, args: &MeshArgs) -> Result<(), CliError> {
     let act = cm.active(args.filter.draft);
     let part = act.as_ref().map(|a| partition(&f.flows, a, cm.show));
     let flows: &[ResolvedFlow] = part.as_ref().map_or(&f.flows, |p| &p.kept);
+    let base = cmp.as_ref().map(|c| c.kept(act.as_ref(), cm.show));
     let agg = |x: &[ResolvedFlow]| mesh(x, &keys, cols);
     let mut rows = agg(flows);
     let sq = squelched(
@@ -1870,6 +2297,11 @@ async fn mesh_cmd(ctx: &Context, args: &MeshArgs) -> Result<(), CliError> {
     );
     let mut meta = f.meta(ctx);
     cm.fill(&mut meta, act.as_ref(), sq);
+    if let (Some(c), Some(b)) = (&cmp, &base) {
+        let counts = compare_mesh(&mut rows, &agg(b));
+        keep_changes(&mut rows, c.show, |r| r.change.as_ref());
+        c.fill(&mut meta, &f, counts);
+    }
     ctx.emit_meta(&rows, &meta)
 }
 
@@ -1948,6 +2380,7 @@ mod tests {
             flows: &flows,
             order: idx.key_order(),
             marks: None,
+            changes: None,
         };
         let headers = table.headers();
         let col = |h: &str| headers.iter().position(|x| *x == h).unwrap();
@@ -1969,6 +2402,7 @@ mod tests {
             flows: &flows,
             order: &order,
             marks: None,
+            changes: None,
         };
         let headers = table.headers();
         let col = |h: &str| headers.iter().position(|x| *x == h).unwrap();

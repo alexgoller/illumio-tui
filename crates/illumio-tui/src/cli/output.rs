@@ -114,9 +114,14 @@ pub struct Meta {
     /// flows only (its rules include them).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub squelched: Option<SquelchedMeta>,
-    /// `traffic explain`: the requests it makes, in words.
+    /// `traffic explain`, and traffic with `--baseline`: the requests it
+    /// makes, in words.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost: Option<&'static str>,
+    /// Traffic with `--baseline`: both windows, each side's truncation
+    /// and the rows per change.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compare: Option<CompareMeta>,
     /// `policy search`: the rules found of the rules loaded.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub matched: Option<MatchedMeta>,
@@ -141,6 +146,31 @@ pub struct WhereUsedMeta {
     /// What is not searched; for a label, the pairing profiles too when
     /// their read failed.
     pub not_searched: String,
+}
+
+/// `meta.compare`.
+#[derive(Debug, Clone, Serialize)]
+pub struct CompareMeta {
+    /// The baseline's length as given (`7d`).
+    pub length: String,
+    /// The rows printed (`--changes`): `new,changed,gone`.
+    pub changes: String,
+    pub recent: CompareSide,
+    pub baseline: CompareSide,
+    /// Rows per change, before `--changes`.
+    pub counts: pce::traffic::CompareCounts,
+}
+
+/// One side of `meta.compare`: its exact window and what came back.
+#[derive(Debug, Clone, Serialize)]
+pub struct CompareSide {
+    pub start: String,
+    pub end: String,
+    pub truncated: bool,
+    pub incomplete: bool,
+    /// The cap the side was fetched at (the last with `--backfill`).
+    pub cap: u32,
+    pub cache: &'static str,
 }
 
 /// `meta.matched`.
@@ -575,6 +605,9 @@ pub fn meta_line(meta: &Meta) -> String {
     if let Some(n) = meta.queries {
         s.push_str(&format!(" · {}", pce::traffic::queries_text(n)));
     }
+    if let Some(c) = &meta.compare {
+        s.push_str(&format!(" · vs {} before · {}", c.length, c.counts.text()));
+    }
     match meta.usage {
         Some("pce") => s.push_str(" · usage from the PCE"),
         Some(u) => s.push_str(&format!(" · usage from {u}")),
@@ -803,6 +836,7 @@ mod tests {
             marks: None,
             squelched: None,
             cost: None,
+            compare: None,
             matched: None,
             where_used: None,
         };

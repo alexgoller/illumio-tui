@@ -88,7 +88,55 @@
       "additionalProperties": false,
       "description": "rows and flow records squelch removed"
     },
-    "cost": {"type": "string", "description": "traffic explain: the requests it makes, in words"},
+    "cost": {"type": "string", "description": "traffic explain and --baseline: the requests it makes, in words"},
+    "compare": {
+      "type": "object",
+      "properties": {
+        "length": {"type": "string", "description": "--baseline as given"},
+        "changes": {"type": "string", "description": "the rows printed (--changes)"},
+        "recent": {
+          "type": "object",
+          "properties": {
+            "start": {"type": "string"},
+            "end": {"type": "string"},
+            "truncated": {"type": "boolean"},
+            "incomplete": {"type": "boolean"},
+            "cap": {"type": "integer"},
+            "cache": {"enum": ["hit", "miss", "bypass", "none"]}
+          },
+          "required": ["start", "end", "truncated", "incomplete", "cap", "cache"],
+          "additionalProperties": false
+        },
+        "baseline": {
+          "type": "object",
+          "properties": {
+            "start": {"type": "string"},
+            "end": {"type": "string"},
+            "truncated": {"type": "boolean"},
+            "incomplete": {"type": "boolean"},
+            "cap": {"type": "integer"},
+            "cache": {"enum": ["hit", "miss", "bypass", "none"]}
+          },
+          "required": ["start", "end", "truncated", "incomplete", "cap", "cache"],
+          "additionalProperties": false
+        },
+        "counts": {
+          "type": "object",
+          "properties": {
+            "new": {"type": "integer"},
+            "changed": {"type": "integer"},
+            "gone": {"type": "integer"},
+            "same": {"type": "integer"}
+          },
+          "required": ["new", "changed", "gone", "same"],
+          "additionalProperties": false,
+          "description": "rows per change, before --changes"
+        }
+      },
+      "required": ["length", "changes", "recent", "baseline", "counts"],
+      "additionalProperties": false,
+      "description": "traffic with --baseline: both exact windows, each side's truncation, rows per change"
+    },
     "matched": {
       "type": "object",
       "properties": {"matched": {"type": "integer"}, "loaded": {"type": "integer"}},

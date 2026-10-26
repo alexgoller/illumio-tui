@@ -356,7 +356,15 @@
           "additionalProperties": false,
           "description": "flow records per mark action, non-zero only"
         },
-        "squelched": {"type": "integer", "description": "squelched flow records the row hides"}
+        "squelched": {"type": "integer", "description": "squelched flow records the row hides"},
+        "change": {
+          "enum": ["new", "changed", "gone", "same"],
+          "description": "with --baseline: the row against the baseline window"
+        },
+        "baseline_decision": {
+          "type": ["string", "null"],
+          "description": "with --baseline: the decisions the baseline saw for the row's key (allowed,blocked), null for a new row"
+        }
       },
       "required": [
         "src",
@@ -422,6 +430,14 @@
           "required": ["action", "id"],
           "additionalProperties": false,
           "description": "the flow's mark (marks active)"
+        },
+        "change": {
+          "enum": ["new", "changed", "gone", "same"],
+          "description": "with --baseline: the row against the baseline window"
+        },
+        "baseline_decision": {
+          "type": ["string", "null"],
+          "description": "with --baseline: the decisions the baseline saw for the row's key (allowed,blocked), null for a new row"
         }
       },
       "required": [
@@ -495,7 +511,15 @@
           "additionalProperties": false,
           "description": "flow records per mark action, non-zero only"
         },
-        "squelched": {"type": "integer", "description": "squelched flow records the row hides"}
+        "squelched": {"type": "integer", "description": "squelched flow records the row hides"},
+        "change": {
+          "enum": ["new", "changed", "gone", "same"],
+          "description": "with --baseline: the row against the baseline window"
+        },
+        "baseline_decision": {
+          "type": ["string", "null"],
+          "description": "with --baseline: the decisions the baseline saw for the row's key (allowed,blocked), null for a new row"
+        }
       },
       "required": [
         "peer",

@@ -5,7 +5,7 @@
 //! print. `output::write_table_csv` checks (debug builds) that every
 //! column printed is listed here, so a new column cannot be left out.
 use super::Command;
-use super::traffic::{CONNS_BY_DECISION, DRAFT_COUNTS, SECTION_CSV_HEADERS};
+use super::traffic::{COMPARE_COLUMNS, CONNS_BY_DECISION, DRAFT_COUNTS, SECTION_CSV_HEADERS};
 
 const FLOWS: &[&str] = &[
     "last seen",
@@ -80,6 +80,7 @@ fn traffic_views() -> Vec<&'static str> {
         &DRAFT_COUNTS,
         &["mark"],
         &SECTION_CSV_HEADERS,
+        &COMPARE_COLUMNS,
     ])
 }
 
@@ -219,9 +220,9 @@ pub fn csv_columns(command: &Command) -> Vec<&'static str> {
         },
         Command::Traffic(t) => match t {
             _ if t.filter().is_some_and(|f| f.dry_run) => Vec::new(),
-            T::Query(_) => cat(&[FLOWS, &traffic_views()]),
+            T::Query(_) => cat(&[FLOWS, &COMPARE_COLUMNS, &traffic_views()]),
             T::Groups(_) => traffic_views(),
-            T::Mesh(_) => cat(&[MESH, &DRAFT_COUNTS, &["mark"]]),
+            T::Mesh(_) => cat(&[MESH, &DRAFT_COUNTS, &["mark"], &COMPARE_COLUMNS]),
             T::Explain(_) => vec![
                 "src",
                 "dst",

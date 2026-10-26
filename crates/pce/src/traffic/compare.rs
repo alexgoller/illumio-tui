@@ -112,12 +112,12 @@ impl DecisionSet {
         ORDER.into_iter().filter(move |d| self.0 & bit(*d) != 0)
     }
 
-    /// `allowed`, `allowed+blocked`.
+    /// `allowed`, `allowed,blocked`.
     pub fn text(self) -> String {
         self.decisions()
             .map(PolicyDecision::as_str)
             .collect::<Vec<_>>()
-            .join("+")
+            .join(",")
     }
 }
 
@@ -365,9 +365,17 @@ pub fn flow_key(f: &ResolvedFlow) -> FlowKey {
 }
 
 /// Flow records compared on `flow_key`. A gone key is shown once: its
-/// latest baseline record (by `last_detected`), not one per day.
+/// latest baseline record (by `last_detected`), not one per day. Only
+/// presence and decisions are compared, never counts: Explorer returns the
+/// stored records overlapping a window, with lifetime counters, so a
+/// record spanning the cut-off comes back from both queries (and reads as
+/// the same, or changed), and counts of two windows do not subtract.
+/// `recent` is one side's result as shown (one row per record); the
+/// baseline is merged on its own (`merge_flows`), never with `recent`.
 pub fn compare_flows(recent: &[ResolvedFlow], baseline: &[ResolvedFlow]) -> Compared<ResolvedFlow> {
-    let mut latest: Vec<&ResolvedFlow> = baseline.iter().collect();
+    let mut merged = Vec::with_capacity(baseline.len());
+    super::merge::merge_flows(&mut merged, baseline.to_vec());
+    let mut latest: Vec<&ResolvedFlow> = merged.iter().collect();
     latest.sort_by(|a, b| b.last_detected.cmp(&a.last_detected));
     compare_by(recent, latest, flow_key, |f| {
         DecisionSet::of(f.policy_decision)
@@ -612,6 +620,34 @@ mod tests {
     }
 
     #[test]
+    fn a_record_spanning_the_cut_off_comes_back_from_both_and_is_the_same() {
+        // One stored record, the same first_detected, returned by both
+        // queries (it overlaps both windows): same, never new nor gone.
+        let r = flow("a", "b", 443, Allowed);
+        let c = compare_flows(std::slice::from_ref(&r), std::slice::from_ref(&r));
+        assert_eq!(changes(&c), [Change::Same]);
+        assert!(c.gone.is_empty());
+        assert_eq!(c.counts.new + c.counts.gone, 0);
+        // The baseline's own duplicates fold (merge_flows) before keying.
+        let c = compare_flows(&[], &[r.clone(), r]);
+        assert_eq!(c.gone.len(), 1);
+    }
+
+    #[test]
+    fn an_old_record_overlapping_the_recent_start_shows_both_decisions() {
+        // The recent side holds the old record (allowed, overlapping its
+        // start) and the new one (potentially blocked): the sets differ.
+        let mut old = flow("a", "b", 443, Allowed);
+        old.first_detected = Some("2026-10-22T00:00:00Z".into());
+        old.last_detected = Some("2026-10-23T19:00:00Z".into());
+        let new = flow("a", "b", 443, Pot);
+        let c = compare_flows(&[old.clone(), new], &[old]);
+        assert_eq!(changes(&c), [Change::Changed, Change::Changed]);
+        assert_eq!(c.recent[0].text(), "allowed→allowed,potentially_blocked");
+        assert_eq!(c.recent[0].baseline_text(), "allowed");
+    }
+
+    #[test]
     fn every_key_part_but_the_decision_and_first_detected_tells_flows_apart() {
         let base = flow("a", "b", 443, Allowed);
         let mut variants = Vec::new();
@@ -656,7 +692,7 @@ mod tests {
         let recent = vec![flow("a", "b", 443, Allowed), flow("a", "b", 443, Blocked)];
         let c = compare_flows(&recent, &[flow("a", "b", 443, Allowed)]);
         assert_eq!(changes(&c), [Change::Changed, Change::Changed]);
-        assert_eq!(c.recent[0].text(), "allowed→allowed+blocked");
+        assert_eq!(c.recent[0].text(), "allowed→allowed,blocked");
         // The baseline saw both too: the same.
         let both = [flow("a", "b", 443, Blocked), flow("a", "b", 443, Allowed)];
         let c = compare_flows(&recent, &both);
@@ -672,7 +708,7 @@ mod tests {
         let c = compare_flows(&[], &[d1, d2]);
         assert_eq!(c.gone.len(), 1);
         assert_eq!(c.gone[0].0.policy_decision, Blocked, "the latest");
-        assert_eq!(c.gone[0].1.baseline_text(), "allowed+blocked");
+        assert_eq!(c.gone[0].1.baseline_text(), "allowed,blocked");
         assert_eq!(c.counts.gone, 1);
     }
 
@@ -701,7 +737,7 @@ mod tests {
                 .unwrap()
         };
         assert_eq!(by("a", "b").change, Change::Changed);
-        assert_eq!(by("a", "b").text(), "allowed→allowed+blocked");
+        assert_eq!(by("a", "b").text(), "allowed→allowed,blocked");
         assert_eq!(by("a", "c").change, Change::New);
         let gone = by("x", "b");
         assert_eq!(gone.change, Change::Gone);
@@ -848,7 +884,7 @@ mod tests {
     #[test]
     fn decision_sets_from_counts_and_json() {
         let s = DecisionSet::from_counts(1, 0, 2, 4);
-        assert_eq!(s.text(), "allowed+blocked+unknown");
+        assert_eq!(s.text(), "allowed,blocked,unknown");
         assert_eq!(
             DecisionSet::from_counts(0, 1, 0, 1).text(),
             "potentially_blocked"

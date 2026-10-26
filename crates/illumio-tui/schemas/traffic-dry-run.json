@@ -4,7 +4,7 @@
     {
       "type": "array",
       "items": {"$ref": "#/$defs/traffic_query"},
-      "description": "with --app ... both: one query per side"
+      "description": "with --app ... both: one query per side; with --baseline: the recent bodies, then the baseline's"
     }
   ]
 }

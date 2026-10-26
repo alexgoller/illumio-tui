@@ -226,6 +226,7 @@ pub(super) fn emit<T: Serialize + TableRows>(
         marks: None,
         squelched: None,
         cost: None,
+        compare: None,
         matched: None,
         where_used: None,
     };
