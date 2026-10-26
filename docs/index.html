@@ -218,6 +218,22 @@ illumio-tui 0.5.6</code></pre>
       <p><code>m</code> <strong>marks</strong> the row under the cursor: <em>squelch</em> hides known noise, <em>reviewed</em> and <em>accept-blocked</em> dim what you have judged, <em>critical</em>, <em>important</em> and <em>revisit</em> flag what matters. The form is prefilled from the row, previews what it matches, and asks why. Marks live in <code>marks.toml</code> next to the config, apply to every view and the CLI&rsquo;s traffic commands, and change nothing on the PCE. <code>M</code> shows the squelched rows, <code>:marks</code> lists and edits the marks.</p>
     </div>
   </div>
+
+  <figure class="shot tour">
+    <video controls muted playsinline preload="metadata" poster="assets/tour-compare.png" width="2216" height="1352">
+      <source src="assets/tour-compare.mp4" type="video/mp4">
+      <a href="assets/tour-compare.gif">Watch the compare recording as a GIF</a>.
+    </video>
+    <figcaption>One <code>r</code> query over 24h, <code>c</code> and <code>Enter</code> on the offered <code>7d</code>: the &Delta; column and <em>vs 7d before &middot; 678 new &middot; 0 changed &middot; 2217 gone</em>. <code>n</code> shows new, changed and gone in turn, <code>v</code> on to App-to-app and Blocked, and <code>C</code> leaves. Two queries in all. <a href="assets/tour-compare.gif">GIF version</a>.</figcaption>
+  </figure>
+
+  <figure class="shot tour">
+    <video controls muted playsinline preload="metadata" poster="assets/tour-where-used.png" width="2216" height="1352">
+      <source src="assets/tour-where-used.mp4" type="video/mp4">
+      <a href="assets/tour-where-used.gif">Watch the where-used recording as a GIF</a>.
+    </video>
+    <figcaption><code>3</code> Objects, <code>/Production</code>, <code>W</code> on env=Production: 6 ruleset scopes, 26 rules, a pairing profile that locks env (a disabled test profile, made for the recording and deleted after), and the workload count. <code>j</code> down the list and back to <em>3. Dev Prod Separation &middot; override deny</em>, <code>Enter</code> opens it on Policy. <a href="assets/tour-where-used.gif">GIF version</a>.</figcaption>
+  </figure>
 </section>
 
 <section class="panel" id="workflows" aria-labelledby="workflows-h">
@@ -607,6 +623,14 @@ counts   rule_sets=9, services=2</code></pre>
 <span class="p">$ </span>illumio-tui profile add demo --from-env-file path/.env
 <span class="p">$ </span>illumio-tui profile list
 <span class="p">$ </span>illumio-tui profile use prod</code></pre>
+
+  <figure class="shot tour">
+    <video controls muted playsinline preload="metadata" poster="assets/tour-cli-056.png" width="2216" height="1352">
+      <source src="assets/tour-cli-056.mp4" type="video/mp4">
+      <a href="assets/tour-cli-056.gif">Watch the CLI recording as a GIF</a>.
+    </video>
+    <figcaption><code>where-used label env=Production</code>, <code>pairing-profiles list</code>, <code>pairing-profiles create &hellip; --dry-run</code> (the request it would send, nothing sent), and <code>traffic groups --services --window 24h --baseline 7d --changes new,changed</code>: the new and changed service pairs, with the decisions the baseline saw. Lines wider than the terminal are cut at its edge. <a href="assets/tour-cli-056.gif">GIF version</a>.</figcaption>
+  </figure>
 
   <div class="cols">
     <div>
