@@ -726,25 +726,34 @@ false
 
     <article class="recipe" aria-labelledby="r-rdp-h">
       <h3 id="r-rdp-h">RDP from anywhere, as a CI gate</h3>
-      <p>One Explorer query over the RDP ports; <code>--fail-on-exposed</code> exits 8 when any destination takes RDP allowed from outside its own app, after printing the rows and the <code>traffic explain</code> command that names the rule letting it in. A truncated result without an exposed row is exit 4, never a silent pass.</p>
-<!-- real output: illumio-tui exposure --service rdp --fail-on-exposed --table -->
-<pre><code><span class="c"># illustrative output</span>
-<span class="p">$ </span>illumio-tui exposure --service rdp --fail-on-exposed --table &gt; rdp.txt; rc=$?
-<span class="p">$ </span>cat rdp.txt
-exposure · 1d · 3 rows · 1 exposed
-  rdp: 3 destinations · 1 exposed (allowed from other apps) · 1 potentially blocked · 1 blocked
-status       service  ports     dst                 sources        flows  conns  allowed  pot.blocked  blocked
-exposed      rdp      3389/tcp  jump/Production     2 ext (any)    4      61     4        0            0
-pot.blocked  rdp      3389/tcp  hr/Staging          1 app          1      3      0        1            0
-blocked      rdp      3389/tcp  payment/Production  2 apps         2      12     0        0            2
+      <p>One Explorer query over the RDP and SMB ports; <code>--fail-on-exposed</code> exits 8 when any destination takes RDP allowed from outside its own app, after printing the rows and the <code>traffic explain</code> command that names the rule letting it in. A truncated result without an exposed row is exit 4, never a silent pass.</p>
+<pre><code><span class="c"># the demo PCE, 24h; rows and commands trimmed</span>
+<span class="p">$ </span>illumio-tui exposure --window 24h --service rdp,smb --fail-on-exposed --table &gt; exposed.txt; rc=$?
+<span class="p">$ </span>cat exposed.txt
+exposure · 1d · 19 rows · 19 exposed
+  rdp: 8 destinations · 8 exposed (allowed from other apps) · 0 potentially blocked · 0 blocked
+  smb: 11 destinations · 11 exposed (allowed from other apps) · 0 potentially blocked · 0 blocked
+one row per destination group and risky service · flows: flow records · conns: their lifetime counts
+status   service  ports              dst                     sources                         flows  conns   allowed  pot.blocked  blocked
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+exposed  rdp      3389/tcp,3389/udp  jump-infra/Production   2 apps                          118    849316  80       0            38
+exposed  rdp      3389/tcp,3389/udp  ordering/Production     intra, 1 app, 2 ext (internet)  12     83893   7        0            5
+exposed  rdp      3389/tcp,3389/udp  ecomm/Production        intra, 1 app, 1 ext             10     64121   6        0            4
+…
+exposed  smb      445/tcp            ad/Production           7 apps, 1 ext                   30     329963  20       0            10
+exposed  smb      445/tcp            exchange/Production     intra, 1 ext                    4      43495   2        0            2
+exposed  smb      445/tcp            swift/Production        intra, 1 ext                    2      22505   1        0            1
+…
 
 which rule allows it (one Explorer query each, run on demand):
-service  dst
-rdp      jump/Production
-  illumio-tui traffic explain --src ip:203.0.113.7 --dst app=jump,env=Production --port 3389 --proto tcp
+rdp  jump-infra/Production   illumio-tui traffic explain --dst app=jump-infra,env=Production --port 3389 --proto tcp --window 24h
+rdp  ordering/Production     illumio-tui traffic explain --dst app=ordering,env=Production --port 3389 --proto tcp --window 24h
+rdp  ecomm/Production        illumio-tui traffic explain --dst app=ecomm,env=Production --port 3389 --proto tcp --window 24h
+…
+9 more: --json has every command
 <span class="p">$ </span>echo $rc
 8
-<span class="p">$ </span>[ $rc -eq 8 ] &amp;&amp; mail -s "RDP exposed" alex@ryte.de &lt; rdp.txt   <span class="c"># 4: incomplete, 2: arguments</span></code></pre>
+<span class="p">$ </span>[ $rc -eq 8 ] &amp;&amp; mail -s "RDP/SMB exposed" alex@ryte.de &lt; exposed.txt   <span class="c"># 4: incomplete, 2: arguments</span></code></pre>
       <p>Squelch hides rows from the table, never from the gate: an exposed row made only of squelched flows still exits 8, and the output says <em>1 exposed row squelched</em>.</p>
       <p>Your own list goes in the profile: <code>[profiles.prod.exposure] extra = { nfs = ["2049/tcp"] }</code> adds to the defaults, <code>services = {...}</code> replaces them.</p>
     </article>

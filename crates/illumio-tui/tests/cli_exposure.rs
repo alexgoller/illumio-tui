@@ -170,6 +170,15 @@ async fn one_query_over_the_risky_ports_makes_the_rows_and_names_the_explain() {
     );
     assert_eq!(out["meta"]["schema"], "exposure");
     assert_eq!(out["meta"]["cap"], 10_000);
+    assert_eq!(out["meta"]["queries"], 1);
+    assert!(
+        out["meta"]["cost"]
+            .as_str()
+            .unwrap()
+            .starts_with("1 Explorer query (each 1 POST"),
+        "{}",
+        out["meta"]["cost"]
+    );
 
     let data = &out["data"];
     assert_eq!(data["window"], "1d");
@@ -252,7 +261,7 @@ async fn the_table_prints_the_summary_the_rows_and_the_explain_footer() {
     );
     assert!(
         text.contains(
-            "illumio-tui traffic explain --src ip:10.1.4.9 --dst app=shop,env=prod --port 3389 --proto tcp"
+            "rdp  shop/prod  illumio-tui traffic explain --src ip:10.1.4.9 --dst app=shop,env=prod --port 3389 --proto tcp"
         ),
         "{text}"
     );

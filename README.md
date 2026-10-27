@@ -1589,24 +1589,35 @@ too): `rdp: 12 destinations · 4 exposed (allowed from other apps) · 3 potentia
 blocked`, the line the table prints above its rows. `--only` keeps rows of some statuses
 (the summary still counts all). Which rule allows an exposed row is not looked up (a request
 per row): each exposed row's `explain` holds the `traffic explain` arguments that answer it,
-for its busiest exposing flow (`--src` and `--dst`; one query, run when you choose), and the table prints the commands under its rows:
+for its busiest exposing flow (`--dst` and the port, `--src` too when the row has one source
+group; one query, run when you choose), and the table prints them under its rows, one line
+each, at most 10 (`N more: --json has every command`):
 
-<!-- real output: illumio-tui exposure --table -->
-    exposure · 1d · 3 rows · 1 exposed
-      rdp: 1 destination · 1 exposed (allowed from other apps) · 0 potentially blocked · 0 blocked
-      ssh: 1 destination · 0 exposed (allowed from other apps) · 0 potentially blocked · 1 blocked
-      postgres: 1 destination · 0 exposed (allowed from other apps) · 0 potentially blocked · 0 blocked · 1 intra only
-    status   service   ports     dst        sources       flows  conns  allowed  pot.blocked  blocked
-    exposed  rdp       3389/tcp  shop/prod  1 ext         1      4      1        0            0
-    blocked  ssh       22/tcp    shop/prod  1 ext (any)   1      2      0        0            1
-    intra    postgres  5432/tcp  shop/prod  intra         1      310    1        0            0
+    $ illumio-tui exposure --window 24h --service rdp,smb --table     # the demo PCE, trimmed
+    exposure · 1d · 19 rows · 19 exposed
+      rdp: 8 destinations · 8 exposed (allowed from other apps) · 0 potentially blocked · 0 blocked
+      smb: 11 destinations · 11 exposed (allowed from other apps) · 0 potentially blocked · 0 blocked
+    one row per destination group and risky service · flows: flow records · conns: their lifetime counts
+    status   service  ports              dst                     sources                         flows  conns   allowed  pot.blocked  blocked
+    ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    exposed  rdp      3389/tcp,3389/udp  jump-infra/Production   2 apps                          118    849316  80       0            38
+    exposed  rdp      3389/tcp,3389/udp  ordering/Production     intra, 1 app, 2 ext (internet)  12     83893   7        0            5
+    exposed  rdp      3389/tcp,3389/udp  ecomm/Production        intra, 1 app, 1 ext             10     64121   6        0            4
+    …
+    exposed  smb      445/tcp            ad/Production           7 apps, 1 ext                   30     329963  20       0            10
+    exposed  smb      445/tcp            exchange/Production     intra, 1 ext                    4      43495   2        0            2
+    exposed  smb      445/tcp            swift/Production        intra, 1 ext                    2      22505   1        0            1
+    …
 
     which rule allows it (one Explorer query each, run on demand):
-    service  dst
-    rdp      shop/prod
-      illumio-tui traffic explain --src ip:10.1.4.9 --dst app=shop,env=prod --port 3389 --proto tcp
+    rdp  jump-infra/Production   illumio-tui traffic explain --dst app=jump-infra,env=Production --port 3389 --proto tcp --window 24h
+    rdp  ordering/Production     illumio-tui traffic explain --dst app=ordering,env=Production --port 3389 --proto tcp --window 24h
+    rdp  ecomm/Production        illumio-tui traffic explain --dst app=ecomm,env=Production --port 3389 --proto tcp --window 24h
+    …
+    9 more: --json has every command
 
-(Illustrative.) `--csv` prints the rows with full columns (`explain` as the command line).
+Every row there has more than one source group, so each command names no `--src` (it explains
+every source of the row; a row with one source group gets its `--src`). `--csv` prints the rows with full columns (`explain` as the command line).
 Exit 0 always, except `--fail-on-exposed`: exit 8 (`exposed`) after the report when a row is
 exposed, and exit 4 when none is but the result is truncated or incomplete (the answer is not
 complete), for CI and cron:

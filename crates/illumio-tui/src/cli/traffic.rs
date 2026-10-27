@@ -2079,7 +2079,7 @@ pub(crate) struct CompareSides {
 
 /// The Explorer queries a side took: each cap step (`--backfill`), one
 /// per side of `--app`.
-fn side_queries(f: &Fetched) -> u32 {
+pub(crate) fn side_queries(f: &Fetched) -> u32 {
     let steps = f.cap_steps.as_ref().map_or(1, |s| s.len() as u32);
     steps * f.queries.unwrap_or(1)
 }

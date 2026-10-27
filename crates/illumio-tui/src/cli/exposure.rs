@@ -16,6 +16,7 @@ use pce::marks::partition;
 use pce::traffic::exposure::{self, ExposureRow, RiskyService, ServiceSummary, Status};
 use pce::traffic::{ResolvedFlow, compact_duration, group_values, keys_or_default};
 use serde::Serialize;
+use std::io::Write;
 
 /// `exposure --only`: the rows of these statuses.
 #[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -172,8 +173,14 @@ pub fn explain_args(r: &ExposureRow, keys: &[String], window: Option<&str>) -> O
     let proto = matches!(f.proto.as_str(), "tcp" | "udp").then_some(f.proto.clone())?;
     let port = f.port?.to_string();
     let mut args: Vec<String> = vec!["traffic".into(), "explain".into()];
-    // The exposing flow's source, so the answer is about that flow.
-    if let Some(src) = side_term(&f.src, keys) {
+    // One source group: its exposing flow's source, so the answer is
+    // about that flow. Several: none, so it covers every source (dst and
+    // port), never a part of the row.
+    let s = &r.sources;
+    let groups = u64::from(s.intra > 0) + s.apps + s.ip_lists;
+    if groups == 1
+        && let Some(src) = side_term(&f.src, keys)
+    {
         args.extend(["--src".into(), src]);
     }
     args.extend(["--dst", &dst, "--port", &port, "--proto", &proto].map(String::from));
@@ -339,33 +346,50 @@ impl TableRows for Rows<'_> {
     }
 }
 
-/// The footer: which rule allows each exposed row, one query each.
-struct Explains<'a>(&'a [ExposureOut]);
+/// The footer lines printed under the table at most.
+pub const EXPLAIN_LINES: usize = 10;
 
-impl Explains<'_> {
-    fn named(&self) -> impl Iterator<Item = (&ExposureOut, &[String])> {
-        self.0
-            .iter()
-            .filter(|o| !o.squelched)
-            .filter_map(|o| o.explain.as_deref().map(|a| (o, a)))
+/// The footer under the table: which rule allows each exposed row, one
+/// plain line each (`rdp  jump-infra/Production  illumio-tui traffic
+/// explain …`), the first `EXPLAIN_LINES`, then how many more `--json`
+/// holds. Empty without an exposed row shown.
+pub fn explain_footer(rows: &[ExposureOut]) -> Vec<String> {
+    let named: Vec<(&ExposureOut, &[String])> = rows
+        .iter()
+        .filter(|o| !o.squelched)
+        .filter_map(|o| o.explain.as_deref().map(|a| (o, a)))
+        .collect();
+    if named.is_empty() {
+        return Vec::new();
     }
-}
-
-impl TableRows for Explains<'_> {
-    fn headers(&self) -> Vec<&'static str> {
-        vec!["service", "dst"]
+    let shown = &named[..named.len().min(EXPLAIN_LINES)];
+    let sw = shown
+        .iter()
+        .map(|(o, _)| o.row.service.chars().count())
+        .max()
+        .unwrap_or(0);
+    let dw = shown
+        .iter()
+        .map(|(o, _)| o.row.dst_text().chars().count())
+        .max()
+        .unwrap_or(0);
+    let mut lines =
+        vec!["which rule allows it (one Explorer query each, run on demand):".to_string()];
+    for (o, a) in shown {
+        lines.push(format!(
+            "{:sw$}  {:dw$}  {}",
+            o.row.service,
+            o.row.dst_text(),
+            explain_command(a)
+        ));
     }
-    fn rows(&self) -> Vec<Vec<String>> {
-        self.named()
-            .map(|(o, _)| vec![o.row.service.clone(), o.row.dst_text()])
-            .collect()
+    if named.len() > shown.len() {
+        lines.push(format!(
+            "{} more: --json has every command",
+            named.len() - shown.len()
+        ));
     }
-    /// The command under its row, whole.
-    fn notes(&self) -> Vec<Vec<String>> {
-        self.named()
-            .map(|(_, a)| vec![format!("  {}", explain_command(a))])
-            .collect()
-    }
+    lines
 }
 
 /// The profile's risky services narrowed to `--service`: a malformed
@@ -391,6 +415,21 @@ pub async fn run(ctx: &Context, args: &ExposureArgs) -> Result<(), CliError> {
     let kept: &[ResolvedFlow] = part.as_ref().map_or(&f.flows, |p| &p.kept);
     let all = exposure::exposure_rows(kept, &list, &keys);
     let mut meta = f.meta(ctx);
+    // One Explorer query (one per cap step with --backfill), as traffic.
+    let queries = super::traffic::side_queries(&f);
+    meta.queries = Some(queries);
+    meta.cost = Some(
+        format!(
+            "{queries} Explorer {} (each 1 POST, status polls, 1 download{})",
+            if queries == 1 { "query" } else { "queries" },
+            if args.draft {
+                "; the result kept re-evaluated against the draft: 1 PUT update_rules, polls, 1 download"
+            } else {
+                ""
+            }
+        )
+        .into(),
+    );
     let sq = part.as_ref().map(|p| super::output::SquelchedMeta {
         rows: None,
         flows: p
@@ -449,7 +488,6 @@ pub async fn run(ctx: &Context, args: &ExposureArgs) -> Result<(), CliError> {
         rows: &report.rows,
         draft: report.draft,
     };
-    let explains = Explains(&report.rows);
     // The title, then a line per service some flow reached (never clipped
     // as a table cell would be).
     let shown = report.rows.iter().filter(|o| !o.squelched).count();
@@ -468,14 +506,18 @@ pub async fn run(ctx: &Context, args: &ExposureArgs) -> Result<(), CliError> {
         title.push_str(&format!("\n  {}", s.text()));
     }
     // `--csv`: the rows alone, one table per output.
-    let mut tables: Vec<(String, &dyn TableRows)> = vec![(title, &rows)];
-    if ctx.format != OutputFormat::Csv && explains.named().next().is_some() {
-        tables.push((
-            "which rule allows it (one Explorer query each, run on demand):".into(),
-            &explains,
-        ));
-    }
+    let tables: Vec<(String, &dyn TableRows)> = vec![(title, &rows)];
     ctx.emit_report(&report, &tables, &meta)?;
+    if ctx.format == OutputFormat::Table {
+        let footer = explain_footer(&report.rows);
+        if !footer.is_empty() {
+            let mut out = std::io::stdout().lock();
+            writeln!(out)?;
+            for l in footer {
+                writeln!(out, "{l}")?;
+            }
+        }
+    }
     if args.fail_on_exposed {
         if exposed > 0 {
             return Err(CliError::Exposed(format!(
@@ -500,6 +542,95 @@ pub async fn run(ctx: &Context, args: &ExposureArgs) -> Result<(), CliError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use pce::traffic::ResolvedEndpoint;
+    use pce::traffic::default_services;
+    use pce::traffic::exposure::exposure_rows;
+
+    fn wl(app: &str) -> ResolvedEndpoint {
+        ResolvedEndpoint {
+            ip: Some(format!("10.0.0.{}", app.len())),
+            workload_href: Some(format!("/orgs/5/workloads/{app}")),
+            labels: ["app", "env"]
+                .iter()
+                .map(|k| pce::ResolvedLabel {
+                    href: format!("/orgs/5/labels/{k}-{app}"),
+                    key: (*k).into(),
+                    value: if *k == "app" {
+                        app.into()
+                    } else {
+                        "prod".into()
+                    },
+                })
+                .collect(),
+            ..ResolvedEndpoint::default()
+        }
+    }
+
+    fn rdp(src: &str, dst: &str) -> ResolvedFlow {
+        ResolvedFlow {
+            src: wl(src),
+            dst: wl(dst),
+            port: Some(3389),
+            proto: "tcp".into(),
+            process_name: None,
+            user_name: None,
+            num_connections: 1,
+            policy_decision: pce::models::PolicyDecision::Allowed,
+            draft_policy_decision: None,
+            flow_direction: None,
+            first_detected: None,
+            last_detected: None,
+            rules: Vec::new(),
+            side_rules: Vec::new(),
+            bytes_in: None,
+            bytes_out: None,
+        }
+    }
+
+    fn keys() -> Vec<String> {
+        vec!["app".into(), "env".into()]
+    }
+
+    #[test]
+    fn explain_names_the_source_only_when_the_row_has_one() {
+        let list = default_services();
+        let one = &exposure_rows(&[rdp("vdi", "jump")], &list, &keys())[0];
+        let args = explain_args(one, &keys(), Some("24h")).unwrap();
+        assert_eq!(
+            explain_command(&args),
+            "illumio-tui traffic explain --src app=vdi,env=prod --dst app=jump,env=prod --port 3389 --proto tcp --window 24h"
+        );
+        let two = &exposure_rows(&[rdp("vdi", "jump"), rdp("ops", "jump")], &list, &keys())[0];
+        assert_eq!(
+            explain_command(&explain_args(two, &keys(), None).unwrap()),
+            "illumio-tui traffic explain --dst app=jump,env=prod --port 3389 --proto tcp",
+            "two source groups: dst and port only"
+        );
+    }
+
+    #[test]
+    fn the_footer_is_one_line_per_row_capped_at_ten() {
+        let list = default_services();
+        let flows: Vec<ResolvedFlow> = (0..12).map(|i| rdp("vdi", &format!("d{i:02}"))).collect();
+        let rows: Vec<ExposureOut> = exposure_rows(&flows, &list, &keys())
+            .into_iter()
+            .map(|row| ExposureOut {
+                explain: explain_args(&row, &keys(), None),
+                row,
+                squelched: false,
+            })
+            .collect();
+        let footer = explain_footer(&rows);
+        assert_eq!(footer.len(), 1 + EXPLAIN_LINES + 1);
+        assert!(
+            footer[1].starts_with("rdp  d00/prod  illumio-tui traffic explain --src app=vdi"),
+            "{}",
+            footer[1]
+        );
+        assert_eq!(footer[11], "2 more: --json has every command");
+        assert!(explain_footer(&rows[..0]).is_empty());
+    }
 
     #[test]
     fn shell_words_are_quoted_when_needed() {
