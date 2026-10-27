@@ -1844,6 +1844,18 @@ pub(crate) async fn fetch_compare(
     focus: Option<&CliFocus>,
     length: Duration,
 ) -> Result<Option<(Fetched, Fetched)>, CliError> {
+    fetch_compare_checked(ctx, args, focus, length, |_| Ok(())).await
+}
+
+/// `fetch_compare`, with `check` on the recent side before the baseline
+/// is sent: an error there (`gen` on a capped result) sends no baseline.
+pub(crate) async fn fetch_compare_checked(
+    ctx: &Context,
+    args: &FilterArgs,
+    focus: Option<&CliFocus>,
+    length: Duration,
+    check: impl FnOnce(&Fetched) -> Result<(), CliError>,
+) -> Result<Option<(Fetched, Fetched)>, CliError> {
     let n = focus
         .filter(|f| f.query)
         .map_or(1, |f| f.focus.direction.query_count());
@@ -1855,6 +1867,7 @@ pub(crate) async fn fetch_compare(
         return Ok(None);
     }
     let recent = run_side(ctx, args, focus, &q, index, RECENT, args.draft).await?;
+    check(&recent)?;
     let idx = Some(recent.index.clone());
     let baseline = run_side(ctx, args, focus, &base, idx, BASELINE, false).await?;
     Ok(Some((recent, baseline)))

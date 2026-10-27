@@ -639,11 +639,14 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   as Traffic `c` does (`7d`; `Ctrl-N`/`Ctrl-P` step) and runs the generator's own focused query
   (`in`, plus `out` with `o` on) over exactly the window before the result's start, in its own
   cache slots, through the usual cost guard, counted in the header. Each recent flow record is
-  judged as Traffic compare judges it (endpoints, port, proto, process and user, no decision):
+  judged as Traffic compare judges it (endpoints, port, proto, process, user and direction, no decision):
   only those whose key the baseline lacks feed the rows, the rules and the fan-in lines; the
   rest are left out, so a row with no new flows disappears. The header (and a line under the
-  target) says `new since 7d before · 40 flows seen before`, `p` counts them first under `not
-  covered`, a truncated baseline warns (`new over-reports`). Rules already in the draft still
+  target) says `new since 7d before · 40 flows seen before`. Seen-before flows are left out of
+  the proposal, neither covered nor uncovered: the footer reads `covers 3 of 5 new flows · 2 not
+  · 40 seen before` (`nothing new since 7d before: 40 flows seen before` when nothing is), `p`
+  ends with `left out: 40 flows seen before (baseline 7d)`. A truncated baseline warns (`new
+  over-reports`). Rules already in the draft still
   show as `exists`. `N` again shows every flow again without a request; `o` or another filter
   ends it (`N` compares again), `r` keeps it. It needs complete data first.
   `D` shows, next to each flow's reported decision, the one the **draft** policy would make,
@@ -1282,12 +1285,18 @@ through the same cost guard; `--since`/`--from` set the recent window, local tim
 `traffic`), each recent flow record judged as `traffic --baseline` judges it, and only the
 records whose key the baseline lacks feed `rows`, `rules` and `consolidations`;
 `--changes new,changed` also feeds a key whose decisions changed (allowed then, blocked now).
-The others count under `preview.uncovered_by.seen_before`; a row with no flows left is not
-listed, rules already in the draft are still `exists`. `data.compare` is `{length, changes,
+The others are left out of the proposal, neither covered nor uncovered:
+`preview.seen_before_flows` counts them (`covered_flows + uncovered_flows + seen_before_flows`
+is every flow record of the app in force; without `--baseline` the field is absent). A row
+with no flows left is not listed, rules already in the draft are still `exists`. With
+`--table` or `--csv` a line on stderr says `new since 7d before: 40 flows seen before` (or
+`nothing new since …`). `data.compare` is `{length, changes,
 recent, baseline, counts, seen_before}`, as `meta.compare` of `traffic` (`counts` in the app's
 flow records), and `meta.queries`/`meta.cost` count both sides. A truncated baseline warns
-(`baseline truncated, capped at N: new over-reports`), a capped recent side still exits 2;
-`--changes` without `--baseline`, or with `gone` or `same`, exits 2 before any request.
+(`baseline truncated, capped at N: new over-reports`), a capped or incomplete recent
+side still exits 2 (or 4), before any baseline query is sent. `--changes` takes `new` or
+`new,changed` (either order); anything else, or `--changes` without `--baseline`, exits 2
+before any request.
 
 `traffic query --blocked` prints the `--by in --show blocked`
 sections the same way. `mesh` gives one row per source user, source process, source group,

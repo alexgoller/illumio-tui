@@ -5,15 +5,15 @@
 use super::context::{Context, cache_label};
 use super::error::CliError;
 use super::marked::CliMarks;
-use super::output::{CompareMeta, SquelchedMeta, TableRows, join_list};
+use super::output::{CompareMeta, OutputFormat, SquelchedMeta, TableRows, join_list};
 use super::traffic::{
-    ByArg, CompareRun, DirectionArg, FilterArgs, baseline_length, cli_focus, fetch, fetch_compare,
-    warn,
+    ByArg, CompareRun, DirectionArg, Fetched, FilterArgs, baseline_length, cli_focus, fetch,
+    fetch_compare_checked, warn,
 };
 use clap::{Args, ValueEnum};
 use pce::generate::{
     Candidate, Consolidate, Coverage, GenInput, GenRow, Proposal, RuleCounts, Stop, app_ruleset,
-    candidates, feedable, keys_refusal, new_since, propose, rows,
+    candidates, feedable, keys_refusal, new_since, propose, rows, since_text,
 };
 use pce::marks::Action;
 use pce::models::PolicyScope;
@@ -72,7 +72,7 @@ pub struct GenArgs {
     pub since: Option<String>,
     /// New since: also query the baseline, the same queries over this long before the
     /// window's start ([start - DURATION, start), e.g. 7d), and propose only from the flow
-    /// records whose key the baseline lacks; the others count as preview.uncovered_by.seen_before.
+    /// records whose key the baseline lacks; the others are left out, counted in preview.seen_before_flows.
     /// Through the same cost guard (> 7d needs --yes); JSON: data.compare
     #[arg(long, value_name = "DURATION")]
     pub baseline: Option<String>,
@@ -166,8 +166,6 @@ pub struct RuleOut {
 #[derive(Debug, Serialize)]
 pub struct UncoveredBy {
     pub unchecked: u64,
-    /// `--baseline`: left out, their key was in the baseline.
-    pub seen_before: u64,
     pub folded_ips: u64,
     pub unsupported_proto: u64,
     pub broadcast_multicast: u64,
@@ -181,7 +179,6 @@ impl From<Coverage> for UncoveredBy {
     fn from(c: Coverage) -> Self {
         UncoveredBy {
             unchecked: c.unchecked,
-            seen_before: c.seen_before,
             folded_ips: c.folded_ips,
             unsupported_proto: c.unsupported_proto,
             broadcast_multicast: c.broadcast_multicast,
@@ -198,6 +195,10 @@ pub struct Preview {
     pub covered_flows: u64,
     pub uncovered_flows: u64,
     pub uncovered_by: UncoveredBy,
+    /// `--baseline`: the flow records left out, their key was in the
+    /// baseline (neither covered nor uncovered).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seen_before_flows: Option<u64>,
     /// Why the rules cannot be written as shown (a ruleset is ambiguous or
     /// cannot be named).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -499,7 +500,7 @@ fn parse_changes(args: &GenArgs) -> Result<ChangeSet, CliError> {
     let keep = ChangeSet::parse(c).map_err(|e| CliError::Args(format!("--changes: {e}")))?;
     if !feedable(keep) {
         return Err(CliError::Args(format!(
-            "--changes {c}: gen proposes from new or new,changed records only"
+            "--changes {c}: gen takes new or new,changed"
         )));
     }
     Ok(keep)
@@ -541,29 +542,39 @@ pub async fn run(ctx: &Context, args: &GenArgs) -> Result<(), CliError> {
                 .join("/")
         )));
     }
+    let app = focus.focus.app_text();
+    // A capped or incomplete recent side proposes nothing: checked before
+    // any baseline query is sent.
+    let complete = |f: &Fetched| {
+        if f.truncated {
+            return Err(CliError::Args(format!(
+                "traffic capped at {} for {app}: raise --max-results or narrow --window; no rules proposed",
+                f.cap
+            )));
+        }
+        if f.incomplete {
+            return Err(CliError::Incomplete(format!(
+                "a PCE region did not answer the traffic query for {app}: run it again; no rules proposed"
+            )));
+        }
+        Ok(())
+    };
     let (fetched, base) = match baseline_length(&filter)? {
         None => match fetch(ctx, &filter, Some(&focus)).await? {
-            Some(f) => (f, None),
+            Some(f) => {
+                complete(&f)?;
+                (f, None)
+            }
             None => return Ok(()),
         },
-        Some(length) => match fetch_compare(ctx, &filter, Some(&focus), length).await? {
-            Some((f, b)) => (f, Some(b)),
-            None => return Ok(()),
-        },
+        Some(length) => {
+            match fetch_compare_checked(ctx, &filter, Some(&focus), length, complete).await? {
+                Some((f, b)) => (f, Some(b)),
+                None => return Ok(()),
+            }
+        }
     };
     let focus = focus.focus;
-    let app = focus.app_text();
-    if fetched.truncated {
-        return Err(CliError::Args(format!(
-            "traffic capped at {} for {app}: raise --max-results or narrow --window; no rules proposed",
-            fetched.cap
-        )));
-    }
-    if fetched.incomplete {
-        return Err(CliError::Incomplete(format!(
-            "a PCE region did not answer the traffic query for {app}: run it again; no rules proposed"
-        )));
-    }
     let idx = fetched.index.clone();
     if global.is_all() && idx.all_services_href().is_none() {
         return Err(CliError::Args(format!(
@@ -679,6 +690,7 @@ pub async fn run(ctx: &Context, args: &GenArgs) -> Result<(), CliError> {
             covered_flows: p.coverage.covered,
             uncovered_flows: p.coverage.uncovered,
             uncovered_by: p.coverage.into(),
+            seen_before_flows: since.as_ref().map(|s| s.seen_before),
             blocker,
         },
         compare: None,
@@ -708,6 +720,11 @@ pub async fn run(ctx: &Context, args: &GenArgs) -> Result<(), CliError> {
             );
         }
         run.fill_cost(&mut meta, &fetched);
+        // The table and the CSV carry no `data.compare`: the line on stderr.
+        if ctx.format != OutputFormat::Json {
+            let new = p.coverage.covered + p.coverage.uncovered;
+            eprintln!("{}", since_text(&run.length, new, s.seen_before));
+        }
         report.compare = Some(GenCompare {
             compare: run.compare_meta(&fetched, s.counts),
             seen_before: s.seen_before,

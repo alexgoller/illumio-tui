@@ -2536,7 +2536,7 @@ fn generator_new_since_120x40() {
     let out = render_to_string(&m, 120, 40);
     for s in [
         "new since 7d before · 4 flows seen before",
-        "not covered: 4 seen before · ",
+        "left out: 4 flows seen before (baseline 7d)",
     ] {
         assert!(out.contains(s), "missing {s:?}:\n{out}");
     }

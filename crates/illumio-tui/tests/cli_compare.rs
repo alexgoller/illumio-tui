@@ -1019,8 +1019,9 @@ async fn gen_baseline_proposes_only_for_the_new_traffic() {
     assert_eq!(peers(&out), Vec::<String>::new(), "rows without flows go");
     assert_eq!(out["data"]["rules"], json!([]));
     let p = &out["data"]["preview"];
-    assert_eq!(p["uncovered_by"]["seen_before"], 3);
-    assert_eq!(p["uncovered_flows"], 3);
+    assert_eq!(p["seen_before_flows"], 3, "left out, not uncovered");
+    assert_eq!(p["uncovered_flows"], 0);
+    assert_eq!(p["covered_flows"], 0);
     let c = &out["data"]["compare"];
     assert_eq!(c["length"], "7d");
     assert_eq!(c["changes"], "new");
@@ -1056,8 +1057,78 @@ async fn gen_baseline_proposes_only_for_the_new_traffic() {
             .success(),
     );
     assert_eq!(peers(&out), vec!["IP list Corp · 1 IP"], "8443 changed");
-    assert_eq!(out["data"]["preview"]["uncovered_by"]["seen_before"], 2);
+    assert_eq!(out["data"]["preview"]["seen_before_flows"], 2);
     assert_eq!(out["data"]["compare"]["changes"], "new,changed");
+    server.verify().await;
+
+    // `--table`: the new-since line on stderr; `changed,new` in either order.
+    let server = compare_server().await;
+    mount_rule_sets(&server).await;
+    let a = cmd(&server, home.path())
+        .args(["--no-cache", "gen", "shop/prod", "--table"])
+        .args(WINDOW)
+        .args(["--baseline", "7d", "--changes", "changed,new"])
+        .assert()
+        .success();
+    let err = stderr(&a);
+    assert!(
+        err.contains("new since 7d before: 2 flows seen before"),
+        "{err}"
+    );
+    server.verify().await;
+    let server = compare_server().await;
+    mount_rule_sets(&server).await;
+    let a = cmd(&server, home.path())
+        .args(["--no-cache", "gen", "shop/prod", "--csv"])
+        .args(WINDOW)
+        .args(["--baseline", "7d"])
+        .assert()
+        .success();
+    let err = stderr(&a);
+    assert!(
+        err.contains("nothing new since 7d before: 3 flows seen before"),
+        "{err}"
+    );
+    server.verify().await;
+}
+
+/// A capped recent side exits 2 before the baseline is sent.
+#[tokio::test(flavor = "multi_thread")]
+async fn gen_on_a_capped_recent_side_sends_no_baseline() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    mount_rule_sets(&server).await;
+    mount_window(
+        &server,
+        "recent",
+        RECENT_START,
+        RECENT_END,
+        4,
+        4,
+        &recent(),
+        1,
+    )
+    .await;
+    mount_window(
+        &server,
+        "base",
+        BASE_START,
+        RECENT_START,
+        4,
+        4,
+        &baseline(),
+        0,
+    )
+    .await;
+    let home = tempfile::tempdir().unwrap();
+    let a = cmd(&server, home.path())
+        .args(["gen", "shop/prod", "--max-results", "4"])
+        .args(WINDOW)
+        .args(["--baseline", "7d"])
+        .assert()
+        .code(2);
+    assert!(stderr(&a).contains("traffic capped at 4 for shop/prod"));
+    assert!(a.get_output().stdout.is_empty());
     server.verify().await;
 }
 
@@ -1071,6 +1142,7 @@ async fn gen_changes_without_a_baseline_or_with_gone_exits_2_unsent() {
         &["--changes", "new"][..],
         &["--baseline", "7d", "--changes", "new,gone"],
         &["--baseline", "7d", "--changes", "same"],
+        &["--baseline", "7d", "--changes", "changed"],
         &["--baseline", "soon"],
     ] {
         let a = cmd(&quiet, home.path())
@@ -1087,7 +1159,7 @@ async fn gen_changes_without_a_baseline_or_with_gone_exits_2_unsent() {
     }
     assert!(quiet.received_requests().await.unwrap().is_empty());
     // `--fields` reaches the new fields through the schema.
-    let wanted = ["compare.seen_before", "preview.uncovered_by.seen_before"].map(String::from);
+    let wanted = ["compare.seen_before", "preview.seen_before_flows"].map(String::from);
     assert!(illumio_tui::cli::schema::check_fields("gen", None, &wanted).is_ok());
 }
 

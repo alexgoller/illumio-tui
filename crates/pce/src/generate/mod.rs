@@ -20,7 +20,7 @@ pub use rows::{
     seen_text,
 };
 pub use services::{Expr, express, flow_spec, fold_ports};
-pub use since::{Since, feedable, new_since};
+pub use since::{Since, feedable, new_since, since_text};
 pub use target::{
     Covering, DEFAULT_RULESET_NAME, RulesetChoice, check_ruleset_name, default_ruleset_name,
     keys_refusal, narrow, pick_ruleset, render_ruleset_name, rulesets_covering,
@@ -630,7 +630,8 @@ pub struct Coverage {
     pub no_target: u64,
     /// Behind a rule, but an override deny rule blocks them anyway.
     pub override_deny: u64,
-    /// Left out by "new since" (#81): their key was in the baseline.
+    /// Left out by "new since" (#81), their key was in the baseline: not
+    /// part of the proposal, so neither covered nor uncovered.
     pub seen_before: u64,
 }
 
@@ -774,7 +775,6 @@ impl Proposal {
             }
         }
         c.uncovered = c.unchecked
-            + c.seen_before
             + c.folded_ips
             + c.unsupported_proto
             + c.broadcast_multicast

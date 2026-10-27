@@ -345,6 +345,16 @@ fn close_gen(model: &mut Model) {
     }
     let back = std::mem::take(&mut model.gen_from_app) && model.app_view.is_some();
     model.overlay = if back { Overlay::App } else { Overlay::None };
+    // `N`'s baseline still on its way holds the one query slot: say whose.
+    let t = &model.traffic;
+    let waiting = model
+        .gen_view
+        .as_ref()
+        .and_then(|v| v.since.as_ref())
+        .is_some_and(|s| s.baseline.is_none() && t.is_running() && t.seq == s.seq);
+    if waiting {
+        model.status = StatusLine::info("generator baseline running: G shows it when it lands");
+    }
 }
 
 /// The generator's keys. Only `r` (a load or the focused query, through

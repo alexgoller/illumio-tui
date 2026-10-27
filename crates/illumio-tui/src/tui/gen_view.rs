@@ -773,22 +773,33 @@ impl GenView {
             return "planning: reading the drafts fresh…".into();
         }
         let flows: u64 = self.in_force().map(|r| r.flows).sum();
+        // New since, its baseline in: how many were left out.
+        let seen = self
+            .since
+            .as_ref()
+            .filter(|s| s.baseline.is_some())
+            .map(|s| (s, s.result.as_ref().map_or(0, |r| r.seen_before)));
         if flows == 0 {
-            return "no flows in the window: nothing to propose".into();
+            return match seen {
+                Some((s, n)) => pce::generate::since_text(&s.length, 0, n),
+                None => "no flows in the window: nothing to propose".into(),
+            };
         }
         let Some(p) = &self.proposal else {
             return "rules follow when the draft rulesets arrive".into();
         };
         let c = p.counts();
         format!(
-            "{} rules ({} new · {} add services · {} exist) · covers {} of {} flows · {} not",
+            "{} rules ({} new · {} add services · {} exist) · covers {} of {} {}flows · {} not{}",
             c.rules,
             c.create,
             c.add_services,
             c.exists,
             p.coverage.covered,
             p.coverage.covered + p.coverage.uncovered,
-            p.coverage.uncovered
+            if seen.is_some() { "new " } else { "" },
+            p.coverage.uncovered,
+            seen.map_or_else(String::new, |(_, n)| format!(" · {n} seen before"))
         )
     }
 
@@ -879,12 +890,7 @@ impl GenView {
         }
         let c = &p.coverage;
         out.push(format!(
-            "not covered: {}{} unchecked · {} folded IPs · {} unsupported proto · {} broadcast/multicast · {} no target · {} override deny",
-            if self.since.is_some() {
-                format!("{} seen before · ", c.seen_before)
-            } else {
-                String::new()
-            },
+            "not covered: {} unchecked · {} folded IPs · {} unsupported proto · {} broadcast/multicast · {} no target · {} override deny",
             c.unchecked,
             c.folded_ips,
             c.unsupported_proto,
@@ -892,6 +898,12 @@ impl GenView {
             c.no_target,
             c.override_deny
         ));
+        if let Some(s) = self.since.as_ref().filter(|s| s.baseline.is_some()) {
+            out.push(format!(
+                "left out: {} flows seen before (baseline {})",
+                c.seen_before, s.length
+            ));
+        }
         out
     }
 }

@@ -10,8 +10,8 @@ expression: out
 │new since 7d before · 4 flows seen before · N: every flow                                                             │
 │1. create · Shop-Prod: app=hr, env=prod → all workloads on 5432/tcp · unscoped                                        │
 │   generated: hr/prod → shop/prod on 5432/tcp, from 24h of traffic (illumio-tui)                                      │
-│not covered: 4 seen before · 3 unchecked · 0 folded IPs · 0 unsupported proto · 0 broadcast/multicast · 0 no target · │
-│   0 override deny                                                                                                    │
+│not covered: 3 unchecked · 0 folded IPs · 0 unsupported proto · 0 broadcast/multicast · 0 no target · 0 override deny │
+│left out: 4 flows seen before (baseline 7d)                                                                           │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
@@ -38,7 +38,7 @@ expression: out
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
-│1 rules (1 new · 0 add services · 0 exist) · covers 1 of 8 flows · 7 not                                              │
+│1 rules (1 new · 0 add services · 0 exist) · covers 1 of 4 new flows · 3 not · 4 seen before                          │
 │j/k scroll · Esc back to the rows                                                                                     │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 new since 7d: 4 seen before                                           │ ←/→ stop  </> row  R pick  r re-query  Esc back

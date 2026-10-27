@@ -3704,3 +3704,80 @@ async fn compare_runs_the_baseline_once_and_r_keeps_it() {
     assert_eq!(posts[1]["max_results"], 50);
     server.verify().await;
 }
+
+/// `N` in the generator (#81) through the runtime: one focused baseline
+/// query (the app's `in` side) over exactly `[start - 7d, start)` of the
+/// result on screen; its answer turns "new since" on.
+#[tokio::test]
+async fn generator_n_runs_one_focused_baseline_query() {
+    use illumio_tui::tui::commands::Command;
+    use illumio_tui::tui::msg::Msg;
+    use illumio_tui::tui::test_support::{model_with_window, rich_index, with_policy};
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    const QHREF: &str = "/orgs/5/traffic_flows/async_queries/base-1";
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/traffic_flows/async_queries"))
+        .respond_with(
+            ResponseTemplate::new(202).set_body_json(json!({"href": QHREF, "status": "queued"})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "completed", "result": {"href": format!("{QHREF}/download")}, "flows_count": 4})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}/download")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/traffic_flows.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .mount(&server)
+        .await;
+    let pce = pce_for(&server);
+    let mut m = with_policy(model_with_window("24h"));
+    m.connection = Connection::Connected {
+        index: Some(rich_index()),
+        index_age_secs: 0,
+    };
+    let start = m.traffic.data.as_ref().unwrap().range.unwrap().start;
+    let (mut rt, tx) = Runtime::new(pce, m);
+    tx.send(Msg::Command(Command::Gen(Some("shop/prod".into()))))
+        .unwrap();
+    let keys = [
+        (300u64, KeyCode::Char('N')),
+        (100, KeyCode::Enter),
+        (1500, KeyCode::Char('q')),
+        (100, KeyCode::Char('q')),
+    ];
+    let events = stream::iter(keys).then(|(ms, c)| async move {
+        tokio::time::sleep(Duration::from_millis(ms)).await;
+        Event::Key(KeyEvent::new(c, KeyModifiers::NONE))
+    });
+    let model = run_loop(&mut rt, Box::pin(events), &mut |_| {}).await;
+    let v = model.gen_view.as_ref().expect("the generator");
+    let s = v.since.as_ref().expect("new since on");
+    assert!(s.baseline.is_some(), "the answer landed");
+    assert!(!model.traffic.is_running());
+    assert_eq!(model.busy, 0);
+    assert_eq!(v.requests, 1);
+    let posts: Vec<serde_json::Value> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.method.as_str() == "POST")
+        .map(|r| serde_json::from_slice(&r.body).unwrap())
+        .collect();
+    let at = |k: &str| -> jiff::Timestamp { posts[0][k].as_str().unwrap().parse().unwrap() };
+    assert_eq!(at("end_date"), start, "ends where the window starts");
+    assert_eq!(
+        at("start_date"),
+        start.checked_sub(jiff::Span::new().hours(7 * 24)).unwrap()
+    );
+    server.verify().await;
+}

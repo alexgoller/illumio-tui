@@ -24,10 +24,20 @@ pub struct Since {
     pub counts: CompareCounts,
 }
 
-/// The changes the generator can be fed: `new` and `changed`; `gone` and
-/// `same` never are.
+/// The changes the generator can be fed: `new`, or `new` and `changed`;
+/// `gone` and `same` never are.
 pub fn feedable(keep: ChangeSet) -> bool {
-    !keep.contains(Change::Gone) && !keep.contains(Change::Same)
+    keep == ChangeSet::of(&[Change::New]) || keep == ChangeSet::of(&[Change::New, Change::Changed])
+}
+
+/// `new since 7d before: 40 flows seen before`, or with no new record in
+/// force `nothing new since 7d before: …`: the TUI's footer, the CLI's
+/// stderr line.
+pub fn since_text(length: &str, new: u64, seen_before: u64) -> String {
+    format!(
+        "{} since {length} before: {seen_before} flows seen before",
+        if new == 0 { "nothing new" } else { "new" }
+    )
 }
 
 /// `recent` without the app's records `keep` does not keep, against
@@ -147,7 +157,29 @@ mod tests {
     }
 
     #[test]
-    fn coverage_counts_seen_before_as_uncovered() {
+    fn the_text_says_when_nothing_is_new() {
+        assert_eq!(
+            since_text("7d", 3, 40),
+            "new since 7d before: 40 flows seen before"
+        );
+        assert_eq!(
+            since_text("7d", 0, 40),
+            "nothing new since 7d before: 40 flows seen before"
+        );
+    }
+
+    #[test]
+    fn feedable_is_new_or_new_changed_only() {
+        assert!(feedable(new_only()));
+        assert!(feedable(new_changed()));
+        assert!(feedable(ChangeSet::parse("changed,new").unwrap()));
+        for s in ["changed", "new,gone", "same", "new,changed,same"] {
+            assert!(!feedable(ChangeSet::parse(s).unwrap()), "{s}");
+        }
+    }
+
+    #[test]
+    fn coverage_counts_seen_before_apart() {
         let s = new_since(&rich_flows(), &intra(), new_only(), &shop(), false);
         let idx = rich_index();
         let focus = shop();
@@ -168,11 +200,11 @@ mod tests {
         let p = propose(&r, Stop::AppPorts, &input);
         assert_eq!(p.coverage.seen_before, 4);
         assert_eq!(
-            p.coverage.covered + p.coverage.uncovered,
+            p.coverage.covered + p.coverage.uncovered + p.coverage.seen_before,
             8,
-            "every inbound record of the app, the seen before ones uncovered"
+            "every inbound record of the app, the seen before ones apart"
         );
-        assert!(p.coverage.uncovered >= 4);
+        assert_eq!(p.coverage.uncovered, 3, "the unchecked ones only");
     }
 
     /// An IP peer `ip` (no workload) to shop db on 5666/tcp.

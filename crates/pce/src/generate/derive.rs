@@ -44,8 +44,8 @@ pub struct GenInput<'a> {
     /// only. `Off` entries, and Any without the built-in Any IP list, are
     /// ignored.
     pub consolidate: &'a BTreeMap<PortSpec, Consolidate>,
-    /// The app's records "new since" left out of `flows` (`Since`): not
-    /// covered, counted.
+    /// The app's records "new since" left out of `flows` (`Since`):
+    /// counted apart, neither covered nor uncovered.
     pub seen_before: u64,
 }
 
@@ -734,11 +734,8 @@ fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> Proposal {
         *g.seen.entry(SeenFlow::of(f)).or_default() += 1;
         cov.covered += 1;
     }
-    cov.uncovered = cov.unchecked
-        + cov.seen_before
-        + cov.folded_ips
-        + cov.unsupported_proto
-        + cov.broadcast_multicast;
+    cov.uncovered =
+        cov.unchecked + cov.folded_ips + cov.unsupported_proto + cov.broadcast_multicast;
     let mut groups: Vec<Group> = groups.into_values().collect();
     // The app's ruleset first, then by the first row behind the rule.
     groups.sort_by_key(|g| (g.target, g.rows.first().copied()));

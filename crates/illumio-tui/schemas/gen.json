@@ -149,7 +149,6 @@
           "type": "object",
           "properties": {
             "unchecked": {"type": "integer"},
-            "seen_before": {"type": "integer", "description": "--baseline: left out, their key was in the baseline"},
             "folded_ips": {"type": "integer"},
             "unsupported_proto": {"type": "integer"},
             "broadcast_multicast": {"type": "integer"},
@@ -158,7 +157,6 @@
           },
           "required": [
             "unchecked",
-            "seen_before",
             "folded_ips",
             "unsupported_proto",
             "broadcast_multicast",
@@ -167,6 +165,7 @@
           ],
           "additionalProperties": false
         },
+        "seen_before_flows": {"type": "integer", "description": "--baseline: flow records left out, their key was in the baseline (neither covered nor uncovered)"},
         "blocker": {"type": "string"}
       },
       "required": [

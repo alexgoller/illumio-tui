@@ -172,12 +172,17 @@ fn the_answer_leaves_out_what_the_baseline_saw_and_n_again_brings_it_back() {
     );
     let p = v.proposal.as_ref().unwrap();
     assert_eq!(p.coverage.seen_before, 4);
-    assert!(v.footer().contains("of 8 flows"), "{}", v.footer());
     assert!(
-        v.rule_list(m.index().unwrap())
-            .last()
-            .unwrap()
-            .starts_with("not covered: 4 seen before · "),
+        v.footer()
+            .ends_with("· covers 1 of 4 new flows · 3 not · 4 seen before"),
+        "{}",
+        v.footer()
+    );
+    let list = v.rule_list(m.index().unwrap());
+    assert!(list[list.len() - 2].starts_with("not covered: 3 unchecked · "));
+    assert_eq!(
+        list.last().unwrap(),
+        "left out: 4 flows seen before (baseline 7d)"
     );
     assert_eq!(m.status.text, "new since 7d: 4 seen before");
     // `N` again: every flow, no request.
@@ -186,6 +191,18 @@ fn the_answer_leaves_out_what_the_baseline_saw_and_n_again_brings_it_back() {
     assert_eq!(peers(&m), before);
     assert_eq!(view(&m).proposal.as_ref().unwrap().coverage.seen_before, 0);
     assert_eq!(m.status.text, "new since off: every flow of the window");
+}
+
+#[test]
+fn everything_seen_before_says_nothing_new() {
+    let mut m = opened();
+    let (seq, _) = run_baseline(&mut m);
+    let all = m.traffic.flows_for(&view(&m).focus).to_vec();
+    answer(&mut m, seq, all, false);
+    assert_eq!(
+        view(&m).footer(),
+        "nothing new since 7d before: 8 flows seen before"
+    );
 }
 
 #[test]
@@ -205,6 +222,17 @@ fn a_truncated_baseline_warns_in_the_header() {
 fn n_again_while_running_cancels_and_a_late_answer_is_dropped() {
     let mut m = opened();
     let (seq, _) = run_baseline(&mut m);
+    // Closing the generator leaves it running, and says whose it is.
+    quiet(&mut m, code(KeyCode::Esc));
+    assert_eq!(
+        m.status.text,
+        "generator baseline running: G shows it when it lands"
+    );
+    assert!(m.traffic.is_running());
+    quiet(
+        &mut m,
+        Msg::Command(crate::tui::commands::Command::Gen(Some("shop/prod".into()))),
+    );
     quiet(&mut m, shift_n());
     assert!(!m.traffic.is_running(), "cancelled");
     assert!(view(&m).since.is_none());
