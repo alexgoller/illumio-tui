@@ -740,9 +740,12 @@ new  cart/Production → ipl:rfc1918  445/tcp  was unseen
 new  cart/Production → ipl:rfc1918  80/tcp  was unseen</code></pre>
       <p>The status line and any warning (a truncated side) go to <code>new.log</code>. <code>--changes new,changed,gone</code> also lists what went quiet; <code>--show blocked</code> narrows it to new blocked flows, the ones an enforced app owner hears about first. The exit code stays 0 either way, so the test is on the rows, not on <code>$?</code>.</p>
       <p>Propose the rules too: the same baseline in the generator lists only the rules the new traffic needs, for each app worth a look.</p>
-<pre><code><span class="p">$ </span>illumio-tui gen shop/prod --window 24h --baseline 7d --table
-<!-- real output: illumio-tui gen shop/prod --window 24h --baseline 7d --table -->
-<span class="c"># illustrative: the rules only the new flow records need; the rest were seen before</span></code></pre>
+<pre><code><span class="p">$ </span>illumio-tui gen cart/Production --window 24h --baseline 7d --table
+new since 7d before: 33 flows seen before
+rules proposed from flow records; nothing is written
+ruleset             action  consumers → providers          services                            unscoped
+RF-cart-Production  create  all workloads → all workloads  80/tcp, 443/tcp, 445/tcp, 8080/tcp  false
+demo · 13 api calls · 2360.3 KB · cache miss · 8726 ms · covers 1d · 2 queries</code></pre>
     </article>
 
     <article class="recipe" aria-labelledby="r-why-h">
