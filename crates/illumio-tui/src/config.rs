@@ -212,10 +212,16 @@ pub const DEFAULT_TIER_KEY: &str = "role";
 
 /// The label keys hygiene expects on every workload: the label model
 /// (`scope_keys`, then `tier_key`); for the default model (`app`, `env` /
-/// `role`) Illumio's four, `role`, `app`, `env`, `loc`.
-pub fn hygiene_keys(scope_keys: &[String], tier_key: &str) -> Vec<String> {
+/// `role`) Illumio's `role`, `app`, `env`, and `loc` when the PCE has a
+/// `loc` label (`has_loc`): a PCE without one would list every workload.
+/// A profile naming the same three keys is the default model.
+pub fn hygiene_keys(scope_keys: &[String], tier_key: &str, has_loc: bool) -> Vec<String> {
     if scope_keys == DEFAULT_SCOPE_KEYS && tier_key == DEFAULT_TIER_KEY {
-        return ["role", "app", "env", "loc"].map(String::from).to_vec();
+        let mut keys = ["role", "app", "env"].map(String::from).to_vec();
+        if has_loc {
+            keys.push("loc".to_string());
+        }
+        return keys;
     }
     pce::KeyOrder::new(scope_keys, tier_key).first().to_vec()
 }
@@ -284,8 +290,8 @@ impl ResolvedConfig {
     }
 
     /// The label keys hygiene expects on every workload ([`hygiene_keys`]).
-    pub fn hygiene_keys(&self) -> Vec<String> {
-        hygiene_keys(&self.scope_keys, &self.tier_key)
+    pub fn hygiene_keys(&self, has_loc: bool) -> Vec<String> {
+        hygiene_keys(&self.scope_keys, &self.tier_key, has_loc)
     }
 
     pub fn client_config(&self) -> pce::ClientConfig {
@@ -921,16 +927,25 @@ api_secret_cmd = "echo   from-command  "
     }
 
     #[test]
-    fn hygiene_keys_are_the_label_model_or_illumios_four_by_default() {
-        let keys = |scope: &[&str], tier: &str| {
+    fn hygiene_keys_are_the_label_model_or_illumios_by_default_loc_if_the_pce_has_it() {
+        let keys = |scope: &[&str], tier: &str, loc: bool| {
             hygiene_keys(
                 &scope.iter().map(|k| k.to_string()).collect::<Vec<_>>(),
                 tier,
+                loc,
             )
         };
-        assert_eq!(keys(&["app", "env"], "role"), ["role", "app", "env", "loc"]);
-        assert_eq!(keys(&["app", "site"], "tier"), ["app", "site", "tier"]);
-        assert_eq!(keys(&["app"], "app"), ["app"]);
+        assert_eq!(
+            keys(&["app", "env"], "role", true),
+            ["role", "app", "env", "loc"]
+        );
+        assert_eq!(keys(&["app", "env"], "role", false), ["role", "app", "env"]);
+        assert_eq!(
+            keys(&["app", "site"], "tier", false),
+            ["app", "site", "tier"]
+        );
+        assert_eq!(keys(&["app", "loc"], "role", false), ["app", "loc", "role"]);
+        assert_eq!(keys(&["app"], "app", true), ["app"]);
     }
 
     #[test]

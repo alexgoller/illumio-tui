@@ -1,26 +1,52 @@
 {
   "type": "array",
-  "description": "one row per unused label, label group, IP list and service (each kind by name), then one per workload missing label keys (in list order); unused rows are candidates: meta.not_searched names what may still use them",
+  "description": "one row per unused label, label group, IP list and service (each kind by name; a kind a list not read in full may hold is left out, see meta.hygiene.withheld), then one per workload missing label keys (in list order); unused rows are candidates: meta.not_searched names what may still use them",
   "items": {
     "type": "object",
     "properties": {
-      "kind": {"enum": ["label", "label_group", "ip_list", "service", "workload"]},
+      "kind": {
+        "enum": [
+          "label",
+          "label_group",
+          "ip_list",
+          "service",
+          "workload"
+        ]
+      },
       "name": {
         "type": "string",
         "description": "key=value for a label; a workload's hostname, else its name"
       },
-      "href": {"type": "string"},
+      "href": {
+        "type": "string"
+      },
       "reason": {
         "type": "string",
         "description": "unused, or for a workload: missing labels: app,env"
       },
       "missing": {
-        "type": ["array", "null"],
-        "items": {"type": "string"},
+        "type": [
+          "array",
+          "null"
+        ],
+        "items": {
+          "type": "string"
+        },
         "description": "workload: the label keys it lacks; null for the other kinds"
+      },
+      "certain": {
+        "type": "boolean",
+        "description": "false: the verdict rests on rulesets whose deny rules were not read, which may name the object; workloads are always true"
       }
     },
-    "required": ["kind", "name", "href", "reason", "missing"],
+    "required": [
+      "kind",
+      "name",
+      "href",
+      "reason",
+      "missing",
+      "certain"
+    ],
     "additionalProperties": false
   }
 }

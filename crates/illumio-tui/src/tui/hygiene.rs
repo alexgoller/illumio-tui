@@ -12,6 +12,7 @@ use pce::hygiene::{Finding, Kind};
 pub const WAIT_RULESETS: &str = "rulesets";
 pub const WAIT_PROFILES: &str = "pairing profiles";
 pub const WAIT_WORKLOADS: &str = "workloads";
+pub const WAIT_USAGE: &str = "label usage";
 
 /// The object kinds, in their section's order.
 pub const OBJECT_KINDS: [Kind; 4] = [Kind::Label, Kind::LabelGroup, Kind::IpList, Kind::Service];
@@ -46,6 +47,7 @@ pub fn columns() -> Vec<Column<Finding>> {
             key: |r| SortKey::Text(r.reason.clone()),
             ..col("reason", 28, |r| match &r.missing {
                 Some(keys) => format!("missing {}", keys.join(", ")),
+                None if !r.certain => format!("{} (uncertain)", r.reason),
                 None => r.reason.clone(),
             })
         },
@@ -68,6 +70,13 @@ pub struct HygieneView {
     pub unused: Vec<(Kind, usize)>,
     /// Workloads lacking each key, in `keys`' order.
     pub missing: Vec<(String, usize)>,
+    /// Kinds not listed: a list that may hold them was not read in full
+    /// (labels: those the PCE's usage flags do not settle).
+    pub withheld: Vec<Kind>,
+    /// What was not read in full, for the withheld kinds' warning.
+    pub gaps: String,
+    /// Kinds whose rows rest on rulesets whose deny rules were not read.
+    pub uncertain: Vec<Kind>,
     /// The workloads checked; `None` before the list is here.
     pub workloads: Option<usize>,
     /// The workload list was cut short: the rest are not checked, and a
@@ -94,6 +103,9 @@ impl HygieneView {
             keys,
             unused: Vec::new(),
             missing: Vec::new(),
+            withheld: Vec::new(),
+            gaps: String::new(),
+            uncertain: Vec::new(),
             workloads: None,
             workloads_truncated: false,
             waiting: Vec::new(),
@@ -148,6 +160,36 @@ impl HygieneView {
         }
     }
 
+    /// Every warning, each its own entry: a failed load, what is loading,
+    /// the kinds withheld or uncertain, a workload list cut short.
+    pub fn warnings(&self) -> Vec<String> {
+        let words = |ks: &[Kind]| ks.iter().map(|k| k.plural()).collect::<Vec<_>>().join(", ");
+        let mut out = Vec::new();
+        out.extend(self.failed.clone());
+        if !self.waiting.is_empty() {
+            out.push(format!("loading {}…", self.waiting.join(", ")));
+        }
+        if !self.withheld.is_empty() {
+            out.push(format!(
+                "not listed: {} ({} not read in full; never guessed unused)",
+                words(&self.withheld),
+                self.gaps
+            ));
+        }
+        if !self.uncertain.is_empty() {
+            out.push(format!(
+                "uncertain: {} ({} ruleset{} may hold deny rules not loaded; selecting one on Policy loads them)",
+                words(&self.uncertain),
+                self.deny_unread,
+                if self.deny_unread == 1 { "" } else { "s" }
+            ));
+        }
+        if self.workloads_truncated {
+            out.push("the workload list was cut short: the rest are not checked".to_string());
+        }
+        out
+    }
+
     /// The selected row's identity: kind and href.
     pub fn selected_id(&self) -> Option<(Kind, String)> {
         self.table.selected_item().map(|r| (r.kind, r.href.clone()))
@@ -182,6 +224,7 @@ mod tests {
                 None => "unused".into(),
             },
             missing: missing.map(|m| m.iter().map(|k| k.to_string()).collect()),
+            certain: true,
         }
     }
 

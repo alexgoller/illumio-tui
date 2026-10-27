@@ -7,17 +7,17 @@ expression: out
   Lab╭ hygiene ──────────────────────────────────────────────────────────── 2 unused · 4 workloads missing labels ╮
 ╭ Lab│Unused: labels 1 · label groups 0 · IP lists 0 · services 1                                                 │ows ╮
 │  ke│Missing labels: role 2 · app 2 · env 2 · loc 4 (of 4 workloads)                                             │    │
-│▸ ro│not searched: virtual services, boundaries, container profiles, RBAC scopes, firewall settings              │    │
-│  ro│                                                                                                            │    │
-│  ap│  kind         name                                                             reason                      │    │
-│  en│▸ label        loc=eu                                                           unused                      │    │
-│  lo│  service      Web                                                              unused                      │    │
-│  ap│  workload     host-1.example                                                   missing loc                 │    │
+│▸ ro│not searched: active policy (draft only), virtual services, virtual servers, enforcement boundaries,        │    │
+│  ro│   container workloads and their profiles, cloud resources, label mapping rules, RBAC scopes, firewall      │    │
+│  ap│   settings                                                                                                 │    │
+│  en│                                                                                                            │    │
+│  lo│  kind         name                                                             reason                      │    │
+│  ap│▸ label        loc=eu                                                           unused                      │    │
+│    │  service      Web                                                              unused                      │    │
+│    │  workload     host-1.example                                                   missing loc                 │    │
 │    │  workload     host-2.example                                                   missing loc                 │    │
 │    │  workload     unmanaged-nas                                                    missing role, app, env, loc │    │
 │    │  workload     host-4.example                                                   missing role, app, env, loc │    │
-│    │                                                                                                            │    │
-│    │                                                                                                            │    │
 │    │                                                                                                            │    │
 │    │                                                                                                            │    │
 │    │                                                                                                            │    │

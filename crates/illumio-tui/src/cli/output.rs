@@ -142,8 +142,14 @@ pub struct Meta {
 pub struct HygieneMeta {
     /// The kinds checked (`--kind`, else every kind).
     pub kinds: Vec<pce::hygiene::Kind>,
-    /// Unused rows per object kind checked (zeros included).
+    /// Unused rows per object kind checked and listed (zeros included).
     pub unused: Vec<KindCount>,
+    /// Kinds not listed: a list that may hold them was not read in full
+    /// (labels: those the PCE's usage flags do not settle).
+    pub withheld: Vec<pce::hygiene::Kind>,
+    /// Kinds whose rows rest on rulesets whose deny rules were not read
+    /// (`certain: false`).
+    pub uncertain: Vec<pce::hygiene::Kind>,
     /// The label keys every workload is expected to carry; `null` when
     /// workloads are not checked.
     pub keys: Option<Vec<String>>,
@@ -452,6 +458,14 @@ pub fn hygiene_counts(h: &HygieneMeta) -> String {
             })
             .collect();
         parts.push(format!("unused: {}", kinds.join(", ")));
+    }
+    if !h.withheld.is_empty() {
+        let k: Vec<&str> = h.withheld.iter().map(|k| k.plural()).collect();
+        parts.push(format!("not listed: {}", k.join(", ")));
+    }
+    if !h.uncertain.is_empty() {
+        let k: Vec<&str> = h.uncertain.iter().map(|k| k.plural()).collect();
+        parts.push(format!("uncertain: {}", k.join(", ")));
     }
     if let Some(m) = &h.missing {
         let keys: Vec<String> = m.iter().map(|k| format!("{} {}", k.key, k.count)).collect();

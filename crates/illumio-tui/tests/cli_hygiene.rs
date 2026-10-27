@@ -126,7 +126,7 @@ async fn every_kind_in_seven_reads_unused_objects_then_workloads() {
     assert_eq!(
         v["data"][0],
         json!({"kind": "label", "name": "loc=eu", "href": "/orgs/5/labels/5",
-            "reason": "unused", "missing": null})
+            "reason": "unused", "missing": null, "certain": true})
     );
     assert_eq!(v["data"][4]["reason"], "missing labels: role,app,env,loc");
     assert_eq!(
@@ -157,7 +157,7 @@ async fn every_kind_in_seven_reads_unused_objects_then_workloads() {
     assert_eq!(h["deny_unread"], 0);
     let ns = v["meta"]["not_searched"].as_str().unwrap();
     assert!(
-        ns.starts_with("not searched: virtual services") && ns.contains("RBAC scopes"),
+        ns.starts_with("not searched: active policy") && ns.contains("RBAC scopes"),
         "{ns}"
     );
     server.verify().await;
@@ -191,7 +191,9 @@ async fn kind_reads_only_what_the_kinds_need() {
         .success();
     let v = schema_check::envelope(&a.get_output().stdout);
     assert_eq!(v["meta"]["api_calls"], 1);
-    assert_eq!(v["data"].as_array().unwrap().len(), 4);
+    // No workload carries a loc label: loc is not expected.
+    assert_eq!(v["meta"]["hygiene"]["keys"], json!(["role", "app", "env"]));
+    assert_eq!(v["data"].as_array().unwrap().len(), 2);
     assert_eq!(v["meta"]["hygiene"]["unused"], json!([]));
     server.verify().await;
 
@@ -259,7 +261,7 @@ async fn the_table_and_csv_print_the_rows_and_the_meta_line_the_counts() {
         err.contains("missing labels: role 2, app 2, env 2, loc 4 (of 4 workloads)"),
         "{err}"
     );
-    assert!(err.contains("not searched: virtual services"), "{err}");
+    assert!(err.contains("not searched: active policy"), "{err}");
     server.verify().await;
 
     let server = server_with([0, 0, 1, 1, 1, 0, 1]).await;
@@ -269,18 +271,18 @@ async fn the_table_and_csv_print_the_rows_and_the_meta_line_the_counts() {
         .success();
     let out = stdout(&a);
     let mut lines = out.lines();
-    assert_eq!(lines.next().unwrap(), "kind,name,href,reason,missing");
     assert_eq!(
         lines.next().unwrap(),
-        "service,Web,/orgs/5/sec_policy/draft/services/32,unused,"
-    );
-    assert_eq!(
-        lines.nth(1).unwrap(),
-        "workload,host-2.example,/orgs/5/workloads/aaaa-2,missing labels: loc,loc"
+        "kind,name,href,reason,missing,certain"
     );
     assert_eq!(
         lines.next().unwrap(),
-        r#"workload,unmanaged-nas,/orgs/5/workloads/aaaa-3,"missing labels: role,app,env,loc",role; app; env; loc"#
+        "service,Web,/orgs/5/sec_policy/draft/services/32,unused,,true"
+    );
+    // No labels read and no workload carries loc: role, app and env only.
+    assert_eq!(
+        lines.next().unwrap(),
+        r#"workload,unmanaged-nas,/orgs/5/workloads/aaaa-3,"missing labels: role,app,env",role; app; env,true"#
     );
     server.verify().await;
 }
@@ -344,7 +346,9 @@ async fn a_failed_pairing_profiles_read_keeps_the_report_and_says_so() {
         .assert()
         .success();
     let v = schema_check::envelope(&a.get_output().stdout);
-    assert_eq!(rows(&v), ["label loc=eu"]);
+    // Without the profiles (and no usage flags), labels are withheld.
+    assert_eq!(rows(&v), Vec::<String>::new());
+    assert_eq!(v["meta"]["hygiene"]["withheld"], json!(["label"]));
     let ns = v["meta"]["not_searched"].as_str().unwrap();
     assert!(ns.contains("pairing profiles (read failed: "), "{ns}");
     let w = v["meta"]["warnings"].as_array().expect("a warning");
@@ -359,7 +363,7 @@ async fn a_failed_pairing_profiles_read_keeps_the_report_and_says_so() {
 }
 
 #[tokio::test]
-async fn rulesets_without_inline_deny_rules_are_warned() {
+async fn rulesets_without_inline_deny_rules_mark_their_rows_uncertain() {
     let server = MockServer::start().await;
     expect(
         &server,
@@ -374,13 +378,25 @@ async fn rulesets_without_inline_deny_rules_are_warned() {
     for rs in sets.as_array_mut().unwrap() {
         rs["deny_rules"] = json!([]);
     }
-    expect(&server, RULE_SETS, &sets.to_string(), 1).await;
+    expect(&server, RULE_SETS, &sets.to_string(), 2).await;
+    expect(
+        &server,
+        SERVICES,
+        include_str!("../../../fixtures/services.json"),
+        2,
+    )
+    .await;
     let a = cmd(&server)
-        .args(["--json", "hygiene", "--kind", "ip_list"])
+        .args(["--json", "hygiene", "--kind", "ip_list,service"])
         .assert()
         .success();
     let v = schema_check::envelope(&a.get_output().stdout);
-    assert_eq!(v["meta"]["hygiene"]["deny_unread"], 2);
+    let h = &v["meta"]["hygiene"];
+    assert_eq!(h["deny_unread"], 2);
+    // Still listed, marked: the unread deny rules may name them.
+    assert_eq!(h["uncertain"], json!(["ip_list", "service"]));
+    assert_eq!(rows(&v), ["service Web"]);
+    assert_eq!(v["data"][0]["certain"], false);
     let w = v["meta"]["warnings"].as_array().expect("a warning");
     assert!(
         w[0].as_str()
@@ -388,6 +404,17 @@ async fn rulesets_without_inline_deny_rules_are_warned() {
             .contains("may hold deny rules not searched"),
         "{w:?}"
     );
+    // The CSV for a ticket carries the mark.
+    let a = cmd(&server)
+        .args(["--csv", "hygiene", "--kind", "service"])
+        .assert()
+        .success();
+    assert!(
+        stdout(&a).contains("service,Web,/orgs/5/sec_policy/draft/services/32,unused,,false"),
+        "{}",
+        stdout(&a)
+    );
+    assert!(stderr(&a).contains("uncertain"), "{}", stderr(&a));
     server.verify().await;
 }
 
@@ -403,7 +430,7 @@ fn schema_hygiene_prints_the_schema_and_its_csv_columns() {
     let out = stdout(&a);
     let v: Value = serde_json::from_str(&out).unwrap();
     assert_eq!(
-        v["$comment"], "--csv columns: kind, name, href, reason, missing",
+        v["$comment"], "--csv columns: kind, name, href, reason, missing, certain",
         "{out}"
     );
     let a = Command::cargo_bin("illumio-tui")
@@ -418,4 +445,98 @@ fn schema_hygiene_prints_the_schema_and_its_csv_columns() {
         out.contains("not_searched") && out.contains("deny_unread"),
         "{out}"
     );
+}
+
+#[tokio::test]
+async fn the_pces_usage_flags_settle_labels_in_the_same_one_read() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(LABELS))
+        .and(wiremock::matchers::query_param("usage", "true"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/labels_usage.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    for (p, body) in [
+        (GROUPS, include_str!("../../../fixtures/label_groups.json")),
+        (RULE_SETS, include_str!("../../../fixtures/rule_sets.json")),
+        (
+            PAIRING,
+            include_str!("../../../fixtures/pairing_profiles.json"),
+        ),
+    ] {
+        expect(&server, p, body, 1).await;
+    }
+    // The workload list cut short: the flags still settle every label.
+    Mock::given(method("GET"))
+        .and(path(WORKLOADS))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/workloads.json"))
+                .insert_header("Content-Type", "application/json")
+                .insert_header("X-Total-Count", "50000"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let a = cmd(&server)
+        .args(["--json", "hygiene", "--kind", "label"])
+        .assert()
+        .success();
+    let v = schema_check::envelope(&a.get_output().stdout);
+    assert_eq!(v["meta"]["api_calls"], 5);
+    // loc=eu: a pairing profile and a permission hold it, says the PCE.
+    assert_eq!(rows(&v), ["label os=windows"]);
+    assert_eq!(v["data"][0]["certain"], true);
+    assert_eq!(v["meta"]["hygiene"]["withheld"], json!([]));
+    let ns = v["meta"]["not_searched"].as_str().unwrap();
+    assert!(ns.contains("labels: also the PCE's usage flags"), "{ns}");
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn a_cut_short_workload_list_withholds_labels_without_flags() {
+    let server = MockServer::start().await;
+    for (p, body) in [
+        (LABELS, include_str!("../../../fixtures/labels.json")),
+        (GROUPS, include_str!("../../../fixtures/label_groups.json")),
+        (RULE_SETS, include_str!("../../../fixtures/rule_sets.json")),
+        (
+            PAIRING,
+            include_str!("../../../fixtures/pairing_profiles.json"),
+        ),
+    ] {
+        expect(&server, p, body, 1).await;
+    }
+    Mock::given(method("GET"))
+        .and(path(WORKLOADS))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/workloads.json"))
+                .insert_header("Content-Type", "application/json")
+                .insert_header("X-Total-Count", "50000"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let a = cmd(&server)
+        .args(["--json", "hygiene", "--kind", "label,label_group"])
+        .assert()
+        .success();
+    let v = schema_check::envelope(&a.get_output().stdout);
+    assert_eq!(rows(&v), Vec::<String>::new());
+    let h = &v["meta"]["hygiene"];
+    assert_eq!(h["withheld"], json!(["label"]));
+    assert_eq!(h["unused"], json!([{"kind": "label_group", "count": 0}]));
+    let w = v["meta"]["warnings"].as_array().unwrap();
+    assert!(
+        w.iter()
+            .any(|w| w.as_str().unwrap().starts_with("not listed: labels")),
+        "{w:?}"
+    );
+    server.verify().await;
 }

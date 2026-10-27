@@ -7,7 +7,10 @@ expression: out
   ╭ hygiene ────────────────────────── 2 unused · 4 workloads missing labels ╮
 ╭ │Unused: labels 1 · label groups 0 · IP lists 0 · services 1               │ ╮
 │ │Missing labels: role 2 · app 2 · env 2 · loc 4 (of 4 workloads)           │ │
-│▸│not searched: virtual svcs, boundaries, container profiles, RBAC, firewall│ │
+│▸│not searched: active policy (draft only), virtual services, virtual       │ │
+│ │   servers, enforcement boundaries, container workloads and their         │ │
+│ │   profiles, cloud resources, label mapping rules, RBAC scopes, firewall  │ │
+│ │   settings                                                               │ │
 │ │                                                                          │ │
 │ │  kind         name                           reason                      │ │
 │ │▸ label        loc=eu                         unused                      │ │
@@ -16,9 +19,6 @@ expression: out
 │ │  workload     host-2.example                 missing loc                 │ │
 │ │  workload     unmanaged-nas                  missing role, app, env, loc │ │
 │ │  workload     host-4.example                 missing role, app, env, loc │ │
-│ │                                                                          │ │
-│ │                                                                          │ │
-│ │                                                                          │ │
 │ │                                                                          │ │
 │ │                                                                          │ │
 │ │                                                                          │ │

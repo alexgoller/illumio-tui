@@ -190,17 +190,24 @@ pub enum Command {
     WhereUsed(where_used::WhereUsedCmd),
     /// Unused labels, label groups, IP lists and services, and workloads missing labels (read-only)
     ///
-    /// The reverse of where-used, in one pass: an object nothing in the draft policy (ruleset
-    /// scopes, rule providers, consumers and services, deny rules as the ruleset list carries
-    /// them), the label groups, the pairing profiles (labels) or the workloads (labels) names
-    /// is listed `unused`; PCE built-ins (Any (0.0.0.0/0 and ::/0), All Services, ilo_defaults)
-    /// never are. An unused row is a candidate, not a verdict: meta.not_searched names what may
-    /// still use it (virtual services, enforcement boundaries, container workload profiles,
-    /// RBAC scopes, firewall settings). Workloads, managed and unmanaged, lacking one or more
-    /// of the profile's label keys ([profiles.x.labels] scope and tier keys; role, app, env,
-    /// loc for the default model) are listed with the keys missing. Requests, all cached and
-    /// only for the kinds asked: labels, label groups, IP lists, services, the draft rulesets,
-    /// the pairing profiles and the workload list. Exit 0 whatever it finds.
+    /// The reverse of where-used, in one pass: an object nothing in the draft policy (every href
+    /// a ruleset carries: scopes, rule sides and services, deny rules as the ruleset list
+    /// carries them, custom iptables rules, egress services), the label groups, the pairing
+    /// profiles (labels) or the workloads (labels) names is listed `unused`; a label also only
+    /// when the PCE's own usage flags (labels?usage=true, the same one read) hold it nowhere.
+    /// Never a guess: a kind a list not read in full may hold (cut short, or failed) is not
+    /// listed (meta.hygiene.withheld), and rows that rest on rulesets whose deny rules were not
+    /// read carry certain: false (meta.hygiene.uncertain). Built-ins (Any (0.0.0.0/0 and ::/0),
+    /// All Services, ilo_defaults), deleted labels and objects pending deletion never are. An
+    /// unused row is a candidate, not a verdict: meta.not_searched names what may still use it
+    /// (active policy: draft only; virtual services and servers, enforcement boundaries,
+    /// container workloads and their profiles, cloud resources, label mapping rules, RBAC
+    /// scopes, firewall settings). Workloads, managed and unmanaged, lacking one or more of the
+    /// profile's label keys ([profiles.x.labels] scope and tier keys; role, app, env for the
+    /// default model, and loc when the PCE has a loc label) are listed with the keys missing.
+    /// Requests, all cached and only for the kinds asked: labels, label groups, IP lists,
+    /// services, the draft rulesets, the pairing profiles and the workload list. Exit 0
+    /// whatever it finds.
     Hygiene(hygiene::HygieneArgs),
     /// Explorer traffic queries
     #[command(subcommand)]

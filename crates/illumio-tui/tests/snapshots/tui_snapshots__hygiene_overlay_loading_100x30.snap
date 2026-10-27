@@ -4,14 +4,14 @@ expression: out
 ---
  illumio-tui pce.example · org 5 ●                                            api 5 calls · 20.8 KB
   1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
-╭ ╭ hygiene ─────────────────────────────────────────────────────────────────── loading · 3 reqs ╮ ╮
+╭ ╭ hygiene ─────────────────────────────────────────────────────────────────── loading · 4 reqs ╮ ╮
 │w│Unused: listed once every list it reads is in                                                 │ │
 ╰─│Missing labels: role, app, env, loc                                                           │─╯
-╭ │not searched: virtual services, boundaries, container profiles, RBAC scopes, firewall settings│ ╮
-│r│loading rulesets, pairing profiles, workloads…                                                │ │
-╰─│no rows                                                                                       │─╯
-╭ │                                                                                              │─╮
-│n│                                                                                              │ │
+╭ │not searched: active policy (draft only), virtual services, virtual servers, enforcement      │ ╮
+│r│   boundaries, container workloads and their profiles, cloud resources, label mapping rules,  │ │
+╰─│   RBAC scopes, firewall settings                                                             │─╯
+╭ │loading rulesets, label usage, pairing profiles, workloads…                                   │─╮
+│n│no rows                                                                                       │ │
 │ │                                                                                              │ │
 │ │                                                                                              │ │
 │ │                                                                                              │ │
@@ -31,4 +31,4 @@ expression: out
 │ │Enter (object on its tab, workload) · W where used · / search · Esc close                     │ │
 │ ╰──────────────────────────────────────────────────────────────────────────────────────────────╯ │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-hygiene · loading rulesets, pairing profiles, worklo │ Enter open  W where used  / search  Esc back
+hygiene · loading rulesets, label usage, pairing pro │ Enter open  W where used  / search  Esc back

@@ -4,6 +4,7 @@
 //! nothing.
 use super::*;
 use crate::tui::commands;
+use crate::tui::model::PceUsage;
 use crate::tui::model::{Model, Overlay, Screen};
 use crate::tui::msg::{Cmd, Msg, ObjectsPayload};
 use crate::tui::test_support::{
@@ -20,9 +21,16 @@ fn hygiene(m: &mut Model) -> Vec<Cmd> {
     update(m, Msg::Command(commands::parse("hygiene").unwrap()))
 }
 
-/// Everything the report reads is loaded.
+/// Everything the report reads is loaded, from a PCE that answered the
+/// usage ask without flags (an older one): the scan decides.
 fn loaded() -> Model {
-    with_pairing_profiles(with_workloads(with_policy(model_with_objects())))
+    let mut m = with_pairing_profiles(with_workloads(with_policy(model_with_objects())));
+    m.objects.pce_usage = PceUsage::Unsupported;
+    m
+}
+
+fn usage_labels() -> Vec<pce::models::Label> {
+    serde_json::from_str(include_str!("../../../../../fixtures/labels_usage.json")).unwrap()
 }
 
 /// The overlay's rows as `kind name · reason` lines.
@@ -95,22 +103,26 @@ fn what_is_missing_loads_once_through_the_cache_and_reopening_loads_nothing() {
             },
             Cmd::LoadPairingProfiles(CacheMode::Use),
             Cmd::LoadWorkloads(CacheMode::Use),
+            Cmd::LoadLabelUsage(CacheMode::Use),
         ]
     );
     let v = m.objects.hygiene.as_ref().unwrap();
-    assert_eq!(v.requests, 3);
-    assert_eq!(v.waiting, ["rulesets", "pairing profiles", "workloads"]);
+    assert_eq!(v.requests, 4);
+    assert_eq!(
+        v.waiting,
+        ["rulesets", "label usage", "pairing profiles", "workloads"]
+    );
     assert!(rows(&m).is_empty(), "no candidate before every list is in");
     assert!(
         m.status
             .text
-            .contains("loading rulesets, pairing profiles, workloads…")
+            .contains("loading rulesets, label usage, pairing profiles, workloads…")
     );
     // Closed and reopened while they are on their way: nothing more.
     press(&mut m, KeyCode::Esc);
     assert_eq!(m.overlay, Overlay::None);
     assert_eq!(hygiene(&mut m), Vec::<Cmd>::new());
-    assert_eq!(m.objects.hygiene.as_ref().unwrap().requests, 3);
+    assert_eq!(m.objects.hygiene.as_ref().unwrap().requests, 4);
 
     update(
         &mut m,
@@ -122,6 +134,7 @@ fn what_is_missing_loads_once_through_the_cache_and_reopening_loads_nothing() {
     let raw: Vec<pce::models::Workload> =
         serde_json::from_str(include_str!("../../../../../fixtures/workloads.json")).unwrap();
     update(&mut m, Msg::WorkloadsLoaded(Ok((raw, 0, false))));
+    update(&mut m, Msg::LabelUsageLoaded(Ok(usage_labels())));
     // The workloads are checked already; the objects wait for the profiles.
     assert_eq!(rows(&m).len(), 4);
     assert_eq!(
@@ -134,12 +147,10 @@ fn what_is_missing_loads_once_through_the_cache_and_reopening_loads_nothing() {
     .unwrap();
     update(&mut m, Msg::PairingProfilesLoaded(Ok(profiles)));
     // The lists from the name index: labels, groups, IP lists, services.
-    assert_eq!(
-        rows(&m)[..2],
-        ["label loc=eu · unused", "service Web · unused"]
-    );
+    // loc=eu: the PCE says a pairing profile and a permission hold it.
+    assert_eq!(rows(&m)[..1], ["service Web · unused"]);
     assert!(
-        m.status.text.contains("2 unused objects"),
+        m.status.text.contains("1 unused object"),
         "{}",
         m.status.text
     );
@@ -147,12 +158,65 @@ fn what_is_missing_loads_once_through_the_cache_and_reopening_loads_nothing() {
     press(&mut m, KeyCode::Esc);
     assert!(m.objects.hygiene.is_none());
     assert_eq!(hygiene(&mut m), Vec::<Cmd>::new(), "reopened: all in hand");
-    assert_eq!(rows(&m).len(), 6);
+    assert_eq!(rows(&m).len(), 5);
+}
+
+#[test]
+fn the_pces_usage_flags_settle_labels_even_on_a_cut_short_workload_list() {
+    let mut m = loaded();
+    m.objects.pce_usage = PceUsage::from_labels(usage_labels());
+    m.workloads.truncated = true;
+    hygiene(&mut m);
+    let v = m.objects.hygiene.as_ref().unwrap();
+    // loc=eu is held (pairing profile, permission); none is unused by
+    // the flags among the fixture's labels.
+    assert!(v.withheld.is_empty());
+    assert_eq!(rows(&m)[..1], ["service Web · unused"]);
+    // Without flags, the same cut-short list withholds the labels.
+    let mut m = loaded();
+    m.workloads.truncated = true;
+    hygiene(&mut m);
+    let v = m.objects.hygiene.as_ref().unwrap();
+    assert_eq!(v.withheld, [Kind::Label]);
+    assert!(
+        v.warnings()
+            .iter()
+            .any(|w| w.starts_with("not listed: labels (workloads not read in full")),
+        "{:?}",
+        v.warnings()
+    );
+}
+
+#[test]
+fn unread_deny_rules_mark_rows_uncertain_and_every_warning_shows() {
+    let mut m = loaded();
+    for rs in &mut m.policy.raw {
+        rs.deny_rules.clear();
+    }
+    m.workloads.truncated = true;
+    hygiene(&mut m);
+    let v = m.objects.hygiene.as_ref().unwrap();
+    assert!(v.deny_unread > 0);
+    assert_eq!(v.uncertain, [Kind::LabelGroup, Kind::IpList, Kind::Service]);
+    let web = v.table.rows().iter().find(|r| r.name == "Web").unwrap();
+    assert!(!web.certain);
+    let w = v.warnings();
+    assert!(
+        w.iter().any(|w| w.starts_with("not listed: labels")),
+        "{w:?}"
+    );
+    assert!(w.iter().any(|w| w.starts_with("uncertain: ")), "{w:?}");
+    assert!(
+        w.iter()
+            .any(|w| w.starts_with("the workload list was cut short")),
+        "{w:?}"
+    );
 }
 
 #[test]
 fn a_failed_load_is_said_and_lists_no_candidate() {
     let mut m = with_workloads(with_policy(model_fixture()));
+    m.objects.pce_usage = PceUsage::Unsupported;
     hygiene(&mut m);
     update(&mut m, Msg::PairingProfilesLoaded(Err("HTTP 403".into())));
     let v = m.objects.hygiene.as_ref().unwrap();
@@ -160,8 +224,17 @@ fn a_failed_load_is_said_and_lists_no_candidate() {
         v.failed.as_deref(),
         Some("pairing profiles: HTTP 403 (:hygiene again asks)")
     );
-    assert!(v.unused.is_empty());
-    assert_eq!(rows(&m).len(), 4, "the workloads are still checked");
+    // Labels may sit in the profiles not read: withheld; the rest listed.
+    assert_eq!(v.withheld, [Kind::Label]);
+    assert!(rows(&m).contains(&"service Web · unused".to_string()));
+    assert_eq!(
+        rows(&m)
+            .iter()
+            .filter(|r| r.starts_with("workload"))
+            .count(),
+        4,
+        "the workloads are still checked"
+    );
     assert!(m.status.text.contains("HTTP 403"), "{}", m.status.text);
 }
 
@@ -207,6 +280,7 @@ fn enter_on_an_object_selects_it_on_its_tab() {
 #[test]
 fn enter_on_an_object_whose_tab_is_loading_selects_it_when_it_lands() {
     let mut m = with_pairing_profiles(with_workloads(with_policy(model_fixture())));
+    m.objects.pce_usage = PceUsage::Unsupported;
     hygiene(&mut m);
     select(&mut m, "loc=eu");
     let cmds = press(&mut m, KeyCode::Enter);

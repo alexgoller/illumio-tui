@@ -340,10 +340,55 @@ pub fn where_used_layout(area: Rect) -> WhereUsedLayout {
     report_layout(area, 3)
 }
 
-/// The `:hygiene` box: as where-used's, with four head lines (unused,
-/// missing labels, what is not searched, then what is loading or failed).
-pub fn hygiene_layout(area: Rect) -> WhereUsedLayout {
-    report_layout(area, 4)
+/// The `:hygiene` box: as where-used's, its head as many lines as
+/// [`hygiene_head`] needs at the box's width.
+pub fn hygiene_layout(area: Rect, v: &crate::tui::hygiene::HygieneView) -> WhereUsedLayout {
+    let inner = usize::from(area.width.saturating_sub(4).min(110).saturating_sub(2));
+    let n = hygiene_head(v, inner).len();
+    report_layout(area, u16::try_from(n).unwrap_or(u16::MAX))
+}
+
+/// How a head line of `:hygiene` is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeadTone {
+    Header,
+    Dim,
+    Warn,
+}
+
+/// The `:hygiene` head at `width`: unused objects per kind, workloads
+/// missing each key, what is not searched (whole, wrapped), then every
+/// warning (each wrapped; none: one blank line).
+pub fn hygiene_head(v: &crate::tui::hygiene::HygieneView, width: usize) -> Vec<(String, HeadTone)> {
+    use crate::tui::ui::widgets::generator::wrap_text;
+    let unused = if v.unused.is_empty() && v.withheld.is_empty() {
+        "Unused: listed once every list it reads is in".to_string()
+    } else {
+        v.unused_line()
+    };
+    let mut out = vec![
+        (cut_to(&unused, width), HeadTone::Header),
+        (cut_to(&v.missing_line(), width), HeadTone::Header),
+    ];
+    // Always shown, whole: an unused row is a candidate, not a verdict.
+    for l in wrap_text(pce::hygiene::NOT_SEARCHED, width) {
+        out.push((cut_to(&l, width), HeadTone::Dim));
+    }
+    let warnings = v.warnings();
+    if warnings.is_empty() {
+        out.push((String::new(), HeadTone::Dim));
+    }
+    for w in warnings {
+        let tone = if w.starts_with("loading ") {
+            HeadTone::Dim
+        } else {
+            HeadTone::Warn
+        };
+        for l in wrap_text(&w, width) {
+            out.push((cut_to(&l, width), tone));
+        }
+    }
+    out
 }
 
 /// A report box: centred, at most 110 wide; `head` lines, the table, the
@@ -464,13 +509,6 @@ pub fn render_where_used(model: &Model, f: &mut Frame, area: Rect) {
     );
 }
 
-/// `hygiene::NOT_SEARCHED` where the box is too narrow for it: the
-/// widest that fits, the last one 74 columns (the box at 80).
-const HYGIENE_NOT_SEARCHED_SHORT: [&str; 2] = [
-    "not searched: virtual services, boundaries, container profiles, RBAC scopes, firewall settings",
-    "not searched: virtual svcs, boundaries, container profiles, RBAC, firewall",
-];
-
 /// `:hygiene`: the candidates and the workloads missing labels in the
 /// title; unused objects per kind, workloads missing each key, what is not
 /// searched, what is loading or failed; the rows; the keys.
@@ -480,7 +518,7 @@ pub fn render_hygiene(model: &Model, f: &mut Frame, area: Rect) {
         return;
     };
     let t = &model.theme;
-    let l = hygiene_layout(area);
+    let l = hygiene_layout(area, v);
     f.render_widget(Clear, l.rect);
     // Only what is counted: no `0 unused` before the lists are in.
     let (u, m) = (v.unused_total(), v.missing_total());
@@ -509,50 +547,22 @@ pub fn render_hygiene(model: &Model, f: &mut Frame, area: Rect) {
     let room = (l.rect.width as usize).saturating_sub(7 + meta.chars().count());
     let title = cut_to("hygiene", room);
     f.render_widget(panel(&title, &meta, t, true), l.rect);
-    let width = l.head.width as usize;
-    let unused = if v.unused.is_empty() {
-        "Unused: listed once every list it reads is in".to_string()
-    } else {
-        v.unused_line()
-    };
-    // Always shown, whole: an unused row is a candidate, not a verdict.
-    let not_searched = std::iter::once(pce::hygiene::NOT_SEARCHED)
-        .chain(HYGIENE_NOT_SEARCHED_SHORT)
-        .find(|s| s.chars().count() <= width)
-        .unwrap_or(HYGIENE_NOT_SEARCHED_SHORT[1]);
-    let (fourth, style) = if let Some(e) = &v.failed {
-        (e.clone(), Style::new().fg(t.warn))
-    } else if !v.waiting.is_empty() {
-        (format!("loading {}…", v.waiting.join(", ")), t.dim_style())
-    } else if v.deny_unread > 0 {
-        (
-            format!(
-                "{} ruleset{} may hold deny rules not loaded (selecting one on Policy loads them)",
-                v.deny_unread,
-                if v.deny_unread == 1 { "" } else { "s" },
-            ),
-            Style::new().fg(t.warn),
-        )
-    } else if v.workloads_truncated {
-        (
-            "the workload list was cut short: the rest are not checked".to_string(),
-            Style::new().fg(t.warn),
-        )
-    } else {
-        (String::new(), t.dim_style())
-    };
-    let head = vec![
-        Line::from(Span::styled(cut_to(&unused, width), t.header_style())),
-        Line::from(Span::styled(
-            cut_to(&v.missing_line(), width),
-            t.header_style(),
-        )),
-        Line::from(Span::styled(cut_to(not_searched, width), t.dim_style())),
-        Line::from(Span::styled(cut_to(&fourth, width), style)),
-    ];
+    let head: Vec<Line> = hygiene_head(v, l.head.width as usize)
+        .into_iter()
+        .map(|(text, tone)| {
+            let style = match tone {
+                HeadTone::Header => t.header_style(),
+                HeadTone::Dim => t.dim_style(),
+                HeadTone::Warn => Style::new().fg(t.warn),
+            };
+            Line::from(Span::styled(text, style))
+        })
+        .collect();
     f.render_widget(Paragraph::new(head).style(t.base()), l.head);
-    render(f, l.table, &v.table, t, Block::default(), &|_| {
-        Style::default()
+    let warn = Style::new().fg(t.warn);
+    // An uncertain row: the unread deny rules may name it.
+    render(f, l.table, &v.table, t, Block::default(), &move |r| {
+        if r.certain { Style::default() } else { warn }
     });
     let foot = cut_to(
         // Fits the 74 columns of the box at 80.

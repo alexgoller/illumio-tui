@@ -7,20 +7,26 @@
 //! loads nothing again.
 use super::*;
 use crate::tui::hygiene::{
-    HygieneView, OBJECT_KINDS, WAIT_PROFILES, WAIT_RULESETS, WAIT_WORKLOADS,
+    HygieneView, OBJECT_KINDS, WAIT_PROFILES, WAIT_RULESETS, WAIT_USAGE, WAIT_WORKLOADS,
 };
-use pce::hygiene::{Kind, Objects, Used};
+use pce::hygiene::{Gaps, Kind, Objects, Unused, Used};
 use pce::where_used::{Inputs, ObjectType, Target};
 
 /// `:hygiene`: the report. The draft rulesets (as a `w` form loads them),
-/// the pairing profiles and the workload list are each loaded when neither
-/// held nor on their way: one cached request each.
+/// the pairing profiles, the workload list and the labels with the PCE's
+/// usage flags (as `u` asks) are each loaded when neither held nor on
+/// their way: one cached request each.
 pub(super) fn open_hygiene(model: &mut Model) -> Vec<Cmd> {
     if model.index().is_none() {
         model.status = StatusLine::info("objects are still loading");
         return Vec::new();
     }
-    let keys = crate::config::hygiene_keys(&model.limits.scope_keys, &model.limits.tier_key);
+    // `loc` is expected only when the PCE has that key.
+    let has_loc = model
+        .index()
+        .is_some_and(|i| i.labels().iter().any(|l| !l.is_deleted() && l.key == "loc"));
+    let keys =
+        crate::config::hygiene_keys(&model.limits.scope_keys, &model.limits.tier_key, has_loc);
     model.objects.hygiene = Some(HygieneView::new(keys));
     model.objects.where_used = None;
     model.overlay = Overlay::Hygiene;
@@ -40,6 +46,15 @@ pub(super) fn open_hygiene(model: &mut Model) -> Vec<Cmd> {
     if model.workloads.loaded_at.is_none() && !model.workloads.loading && model.is_connected() {
         cmds.extend(load_workloads(model, CacheMode::Use));
     }
+    // The PCE's own word on what holds each label: holders this tool
+    // cannot read (container workloads, permissions, mapping rules ...).
+    if model.objects.pce_usage == PceUsage::Unknown
+        && !model.objects.pce_usage_loading
+        && model.is_connected()
+    {
+        model.objects.pce_usage_loading = true;
+        cmds.push(Cmd::LoadLabelUsage(CacheMode::Use));
+    }
     // The requests it waits for: those just sent, and those sent before
     // (by the Policy or Workloads screen, a `W`) still on their way.
     let rulesets_coming = if model.policy.scope == PolicyScope::Draft {
@@ -49,7 +64,8 @@ pub(super) fn open_hygiene(model: &mut Model) -> Vec<Cmd> {
     };
     let coming = usize::from(rulesets_coming)
         + usize::from(model.objects.pairing_loading)
-        + usize::from(model.workloads.loading);
+        + usize::from(model.workloads.loading)
+        + usize::from(model.objects.pce_usage_loading);
     if let Some(v) = model.objects.hygiene.as_mut() {
         v.requests = coming;
     }
@@ -127,11 +143,23 @@ pub(super) fn refresh_hygiene(model: &mut Model) {
     // it), else the name index's (the same draft list, read at startup).
     let o = &model.objects;
     let tab = |k: ObjectKind| o.ages[k.index()].is_some();
-    let labels: Vec<pce::models::Label> = if tab(ObjectKind::Labels) {
+    let mut labels: Vec<pce::models::Label> = if tab(ObjectKind::Labels) {
         o.all_labels.clone()
     } else {
         idx.labels().into_iter().cloned().collect()
     };
+    // The PCE's usage flags, once `u` or `:hygiene` asked: they settle a
+    // label whatever this tool could read. A failed or flagless answer
+    // leaves the scan to decide.
+    match &o.pce_usage {
+        PceUsage::Flags(m) => {
+            for l in &mut labels {
+                l.usage = m.get(&l.href).cloned();
+            }
+        }
+        _ if o.pce_usage_loading => waiting.push(WAIT_USAGE),
+        _ => {}
+    }
     let groups: Vec<pce::models::LabelGroup> = if tab(ObjectKind::LabelGroups) {
         o.groups.rows().to_vec()
     } else {
@@ -187,10 +215,16 @@ pub(super) fn refresh_hygiene(model: &mut Model) {
         profiles,
         workloads,
     );
-    // Unused rows wait for every list that may name an object: a partial
-    // answer would list used objects.
-    let complete = waiting.is_empty() && failed.is_empty();
-    let mut rows = if complete {
+    // Unused rows wait for every list that may name an object; a list
+    // that failed or came back cut short withholds the kinds it may hold.
+    let complete = waiting.is_empty();
+    let gaps = Gaps {
+        rule_sets: model.draft_rulesets().is_none(),
+        groups: false,
+        profiles: o.pairing_profiles.is_none(),
+        workloads: w.loaded_at.is_none() || w.truncated,
+    };
+    let found = if complete {
         pce::hygiene::unused(
             &Objects {
                 labels: Some(&labels),
@@ -199,10 +233,12 @@ pub(super) fn refresh_hygiene(model: &mut Model) {
                 services: Some(&services),
             },
             &used,
+            gaps,
         )
     } else {
-        Vec::new()
+        Unused::default()
     };
+    let mut rows = found.rows;
     let keys = model
         .objects
         .hygiene
@@ -210,8 +246,12 @@ pub(super) fn refresh_hygiene(model: &mut Model) {
         .map(|v| v.keys.clone())
         .unwrap_or_default();
     let missing = pce::hygiene::missing_labels(workloads, &keys);
+    let listed: Vec<Kind> = OBJECT_KINDS
+        .into_iter()
+        .filter(|k| !found.withheld.contains(k))
+        .collect();
     let unused = if complete {
-        pce::hygiene::counts_by_kind(&rows, &OBJECT_KINDS)
+        pce::hygiene::counts_by_kind(&rows, &listed)
     } else {
         Vec::new()
     };
@@ -224,6 +264,9 @@ pub(super) fn refresh_hygiene(model: &mut Model) {
     };
     v.set_rows(rows);
     v.unused = unused;
+    v.withheld = found.withheld;
+    v.uncertain = found.uncertain;
+    v.gaps = gaps.text();
     v.missing = per_key;
     v.workloads = loaded;
     v.workloads_truncated = truncated && loaded.is_some();
@@ -248,7 +291,10 @@ pub(super) fn hygiene_answer(model: &mut Model) {
 
 fn hygiene_page(model: &Model) -> usize {
     let area = ratatui::layout::Rect::new(0, 0, model.size.0, model.size.1);
-    crate::tui::ui::screens::objects::hygiene_layout(area)
+    let Some(v) = model.objects.hygiene.as_ref() else {
+        return 1;
+    };
+    crate::tui::ui::screens::objects::hygiene_layout(area, v)
         .table
         .height
         .saturating_sub(1)

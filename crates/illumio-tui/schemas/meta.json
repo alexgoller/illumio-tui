@@ -202,6 +202,16 @@
           },
           "description": "unused rows per object kind checked, zeros included"
         },
+        "withheld": {
+          "type": "array",
+          "items": {"enum": ["label", "label_group", "ip_list", "service"]},
+          "description": "kinds not listed: a list that may hold them (rulesets, label groups, pairing profiles, workloads) was not read in full; labels: those the PCE's usage flags do not settle"
+        },
+        "uncertain": {
+          "type": "array",
+          "items": {"enum": ["label", "label_group", "ip_list", "service"]},
+          "description": "kinds whose rows rest on rulesets whose deny rules were not read (their rows have certain: false)"
+        },
         "keys": {
           "type": ["array", "null"],
           "items": {"type": "string"},
@@ -220,7 +230,7 @@
         "workloads": {"type": ["integer", "null"], "description": "the workloads read; null when none were"},
         "deny_unread": {"type": "integer", "description": "rulesets whose deny rules were not searched"}
       },
-      "required": ["kinds", "unused", "keys", "missing", "workloads", "deny_unread"],
+      "required": ["kinds", "unused", "withheld", "uncertain", "keys", "missing", "workloads", "deny_unread"],
       "additionalProperties": false,
       "description": "hygiene: the kinds checked and the rows per kind and per key"
     }

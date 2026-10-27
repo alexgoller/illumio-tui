@@ -1,0 +1,44 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                                                                api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+  Lab╭ hygiene ──────────────────────────────────────────────────────────── 1 unused · 4 workloads missing labels ╮
+╭ Lab│Unused: label groups 0 · IP lists 0 · services 1                                                            │ows ╮
+│  ke│Missing labels: role 2 · app 2 · env 2 · loc 4 (of 4+ workloads)                                            │    │
+│▸ ro│not searched: active policy (draft only), virtual services, virtual servers, enforcement boundaries,        │    │
+│  ro│   container workloads and their profiles, cloud resources, label mapping rules, RBAC scopes, firewall      │    │
+│  ap│   settings                                                                                                 │    │
+│  en│not listed: labels (workloads not read in full; never guessed unused)                                       │    │
+│  lo│uncertain: label groups, IP lists, services (2 rulesets may hold deny rules not loaded; selecting one on    │    │
+│  ap│   Policy loads them)                                                                                       │    │
+│    │the workload list was cut short: the rest are not checked                                                   │    │
+│    │  kind         name                                                             reason                      │    │
+│    │▸ service      Web                                                              unused (uncertain)          │    │
+│    │  workload     host-1.example                                                   missing loc                 │    │
+│    │  workload     host-2.example                                                   missing loc                 │    │
+│    │  workload     unmanaged-nas                                                    missing role, app, env, loc │    │
+│    │  workload     host-4.example                                                   missing role, app, env, loc │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │                                                                                                            │    │
+│    │Enter (object on its tab, workload) · W where used · / search · Esc close                                   │    │
+│    ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────╯    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+hygiene · 1 unused object · 4 workloads missing labels                   │ Enter open  W where used  / search  Esc back

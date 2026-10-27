@@ -3676,15 +3676,22 @@ fn exposure_view_80x24_and_160x48() {
     insta::assert_snapshot!("traffic_exposure_160x48", out);
 }
 
-/// `:hygiene` (#83): with everything loaded, and with the rulesets, the
-/// pairing profiles and the workloads still on their way.
+/// `:hygiene` (#83): with everything loaded, with the rulesets, the label
+/// usage, the pairing profiles and the workloads still on their way, and
+/// with deny rules unread and the workload list cut short (every warning).
 #[test]
 fn hygiene_overlay_120x40_80x24_and_loading() {
     use illumio_tui::tui::Msg;
     use illumio_tui::tui::commands::Command;
+    use illumio_tui::tui::model::PceUsage;
     use illumio_tui::tui::update;
-    let mut m = with_pairing_profiles(with_workloads(with_policy(model_with_objects())));
-    m.screen = Screen::Objects;
+    let loaded = || {
+        let mut m = with_pairing_profiles(with_workloads(with_policy(model_with_objects())));
+        m.objects.pce_usage = PceUsage::Unsupported;
+        m.screen = Screen::Objects;
+        m
+    };
+    let mut m = loaded();
     update(&mut m, Msg::Command(Command::Hygiene));
     let out = render_to_string(&m, 120, 40);
     for s in [
@@ -3692,7 +3699,8 @@ fn hygiene_overlay_120x40_80x24_and_loading() {
         "2 unused · 4 workloads missing labels",
         "Unused: labels 1 · label groups 0 · IP lists 0 · services 1",
         "Missing labels: role 2 · app 2 · env 2 · loc 4 (of 4 workloads)",
-        "not searched: virtual services, boundaries, container profiles, RBAC scopes, firewall settings",
+        "not searched: active policy (draft only), virtual services",
+        "label mapping rules, RBAC scopes",
         "loc=eu",
         "missing role, app, env, loc",
         "W where used",
@@ -3701,19 +3709,33 @@ fn hygiene_overlay_120x40_80x24_and_loading() {
     }
     insta::assert_snapshot!("hygiene_overlay_120x40", out);
     let out = render_to_string(&m, 80, 24);
-    assert!(
-        out.contains("not searched: virtual svcs, boundaries, container profiles, RBAC, firewall"),
-        "{out}"
-    );
+    assert!(out.contains("RBAC scopes, firewall"), "{out}");
     insta::assert_snapshot!("hygiene_overlay_80x24", out);
 
     let mut m = model_fixture();
     update(&mut m, Msg::Command(Command::Hygiene));
     let out = render_to_string(&m, 100, 30);
     assert!(
-        out.contains("loading rulesets, pairing profiles, workloads…"),
+        out.contains("loading rulesets, label usage, pairing profiles, workloads…"),
         "{out}"
     );
-    assert!(out.contains("3 reqs"), "{out}");
+    assert!(out.contains("4 reqs"), "{out}");
     insta::assert_snapshot!("hygiene_overlay_loading_100x30", out);
+
+    let mut m = loaded();
+    for rs in &mut m.policy.raw {
+        rs.deny_rules.clear();
+    }
+    m.workloads.truncated = true;
+    update(&mut m, Msg::Command(Command::Hygiene));
+    let out = render_to_string(&m, 120, 40);
+    for s in [
+        "not listed: labels (workloads not read in full",
+        "uncertain: label groups, IP lists, services",
+        "the workload list was cut short",
+        "unused (uncertain)",
+    ] {
+        assert!(out.contains(s), "missing {s:?}:\n{out}");
+    }
+    insta::assert_snapshot!("hygiene_overlay_warnings_120x40", out);
 }

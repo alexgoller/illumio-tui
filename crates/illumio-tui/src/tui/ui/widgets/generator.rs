@@ -136,7 +136,7 @@ fn row_line<'a>(
 /// `s` wrapped at `w` cells, word by word; its own indent kept, and
 /// continuation lines indented three cells more; a word wider than a line
 /// is cut into pieces.
-fn wrap_text(s: &str, w: usize) -> Vec<String> {
+pub(crate) fn wrap_text(s: &str, w: usize) -> Vec<String> {
     let width = |x: &str| Span::raw(x).width();
     if w < 8 || width(s) <= w {
         return vec![s.to_string()];

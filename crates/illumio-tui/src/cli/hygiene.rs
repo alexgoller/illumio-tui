@@ -9,7 +9,7 @@ use super::context::{Context, cache_label};
 use super::error::CliError;
 use super::output::{HygieneMeta, KeyCount, KindCount, OutputFormat, TableRows, join_list};
 use clap::{Args, ValueEnum};
-use pce::hygiene::{Finding, Kind, NOT_SEARCHED, Objects, Used};
+use pce::hygiene::{Finding, Gaps, Kind, LABELS_BY_FLAGS, NOT_SEARCHED, Objects, Used};
 use pce::models::{PolicyScope, WorkloadFilter};
 use pce::where_used::Inputs;
 use serde::Serialize;
@@ -61,7 +61,7 @@ impl HygieneArgs {
 }
 
 /// The CSV columns, in order (`columns::csv_columns`).
-pub const HEADERS: [&str; 5] = ["kind", "name", "href", "reason", "missing"];
+pub const HEADERS: [&str; 6] = ["kind", "name", "href", "reason", "missing", "certain"];
 
 /// One row per unused object, then one per workload missing labels.
 #[derive(Debug, Serialize)]
@@ -82,6 +82,7 @@ impl TableRows for Rows {
                     r.href.clone(),
                     r.reason.clone(),
                     r.missing.as_deref().unwrap_or_default().join(", "),
+                    if r.certain { "yes" } else { "no" }.to_string(),
                 ]
             })
             .collect()
@@ -96,10 +97,20 @@ impl TableRows for Rows {
                     r.href.clone(),
                     r.reason.clone(),
                     join_list(r.missing.as_deref().unwrap_or_default()),
+                    r.certain.to_string(),
                 ]
             })
             .collect()
     }
+}
+
+/// `label groups, IP lists`: kinds in words.
+fn kinds_text(kinds: &[Kind]) -> String {
+    kinds
+        .iter()
+        .map(|k| k.plural())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 pub async fn run(ctx: &Context, args: &HygieneArgs) -> Result<(), CliError> {
@@ -113,6 +124,7 @@ pub async fn run(ctx: &Context, args: &HygieneArgs) -> Result<(), CliError> {
     let mut hit = true;
     let mut warnings = Vec::new();
     let mut not_searched = NOT_SEARCHED.to_string();
+    let mut gaps = Gaps::default();
     macro_rules! read {
         ($e:expr) => {{
             let c = $e.await?;
@@ -121,14 +133,19 @@ pub async fn run(ctx: &Context, args: &HygieneArgs) -> Result<(), CliError> {
             c
         }};
     }
+    // With the PCE's usage flags, in the same one request: they name the
+    // holders this tool cannot read (container workloads, permissions,
+    // mapping rules, firewall settings ...).
     let labels = if has(Kind::Label) {
-        Some(read!(ctx.pce.labels(mode)).value)
+        Some(read!(ctx.pce.labels_with_usage(mode)).value)
     } else {
         None
     };
     // Labels and groups sit in label groups.
     let groups = if has(Kind::Label) || has(Kind::LabelGroup) {
-        Some(read!(ctx.pce.label_groups(mode)).value)
+        let c = read!(ctx.pce.label_groups(mode));
+        gaps.groups = c.truncated;
+        Some(c.value)
     } else {
         None
     };
@@ -143,47 +160,43 @@ pub async fn run(ctx: &Context, args: &HygieneArgs) -> Result<(), CliError> {
         None
     };
     let sets = if objects_asked {
-        read!(ctx.pce.rule_sets(PolicyScope::Draft, mode)).value
+        let c = read!(ctx.pce.rule_sets(PolicyScope::Draft, mode));
+        gaps.rule_sets = c.truncated;
+        c.value
     } else {
         Vec::new()
     };
     // Only labels sit in pairing profiles. Best effort, as where-used: a
-    // role that may not list them (403) or a failed read keeps the report,
-    // warned and named as not searched.
+    // role that may not list them (403) or a failed read keeps the report;
+    // labels the PCE's flags do not settle are then withheld.
     let mut profiles = Vec::new();
     if has(Kind::Label) {
         match ctx.pce.pairing_profiles(mode).await {
             Ok(p) => {
                 truncated |= p.truncated;
                 hit &= p.hit;
+                gaps.profiles = p.truncated;
                 profiles = p.value;
             }
             Err(e) => {
-                warnings.push(format!(
-                    "pairing profiles not searched: {e}; a label only they give is listed unused"
-                ));
+                gaps.profiles = true;
+                warnings.push(format!("pairing profiles not searched: {e}"));
                 not_searched.push_str(&format!(", pairing profiles (read failed: {e})"));
             }
         }
     }
-    let (workloads, workloads_cut) = if has(Kind::Label) || has(Kind::Workload) {
+    let workloads = if has(Kind::Label) || has(Kind::Workload) {
         let c = read!(ctx.pce.workloads(&WorkloadFilter::default(), mode));
-        let cut = c.truncated;
-        (c.value, cut)
+        gaps.workloads = c.truncated;
+        c.value
     } else {
-        (Vec::new(), false)
+        Vec::new()
     };
-    if workloads_cut {
+    if gaps.workloads && has(Kind::Workload) {
         warnings.push(format!(
-            "the workload list was cut short at {}: workloads not read are not checked{}",
-            workloads.len(),
-            if has(Kind::Label) {
-                ", and a label only they carry is listed unused"
-            } else {
-                ""
-            }
+            "the workload list was cut short at {}: workloads not read are not checked",
+            workloads.len()
         ));
-        not_searched.push_str(", workloads beyond those read");
     }
     let none = HashMap::new();
     let used = Used::new(
@@ -198,7 +211,7 @@ pub async fn run(ctx: &Context, args: &HygieneArgs) -> Result<(), CliError> {
         &profiles,
         &workloads,
     );
-    let mut rows = pce::hygiene::unused(
+    let found = pce::hygiene::unused(
         &Objects {
             labels: labels.as_deref(),
             groups: groups.as_deref().filter(|_| has(Kind::LabelGroup)),
@@ -206,8 +219,35 @@ pub async fn run(ctx: &Context, args: &HygieneArgs) -> Result<(), CliError> {
             services: services.as_deref(),
         },
         &used,
+        gaps,
     );
-    let keys = ctx.config.hygiene_keys();
+    if labels.iter().flatten().any(|l| l.usage_flags().is_some()) {
+        not_searched.push_str(&format!("; {LABELS_BY_FLAGS}"));
+    }
+    if !found.withheld.is_empty() {
+        warnings.push(format!(
+            "not listed: {} (a list that may hold them was not read in full: {}; never guessed unused)",
+            kinds_text(&found.withheld),
+            gaps.text()
+        ));
+    }
+    if !found.uncertain.is_empty() {
+        let n = used.deny_unread;
+        warnings.push(format!(
+            "uncertain (certain: false): {}: {n} ruleset{} may hold deny rules not searched; this PCE lists none inline (policy rules <ruleset> reads them)",
+            kinds_text(&found.uncertain),
+            if n == 1 { "" } else { "s" }
+        ));
+    }
+    // `loc` is expected only when the PCE has that key: the labels read,
+    // else the workloads' own labels say.
+    let has_loc = match &labels {
+        Some(ls) => ls.iter().any(|l| !l.is_deleted() && l.key == "loc"),
+        None => workloads
+            .iter()
+            .any(|w| w.labels.iter().any(|l| l.key.as_deref() == Some("loc"))),
+    };
+    let keys = ctx.config.hygiene_keys(has_loc);
     let missing = if has(Kind::Workload) {
         pce::hygiene::missing_labels(&workloads, &keys)
     } else {
@@ -216,8 +256,9 @@ pub async fn run(ctx: &Context, args: &HygieneArgs) -> Result<(), CliError> {
     let object_kinds: Vec<Kind> = kinds
         .iter()
         .copied()
-        .filter(|k| *k != Kind::Workload)
+        .filter(|k| *k != Kind::Workload && !found.withheld.contains(k))
         .collect();
+    let mut rows = found.rows;
     let unused_counts = pce::hygiene::counts_by_kind(&rows, &object_kinds)
         .into_iter()
         .map(|(kind, count)| KindCount { kind, count })
@@ -229,18 +270,13 @@ pub async fn run(ctx: &Context, args: &HygieneArgs) -> Result<(), CliError> {
             .collect()
     });
     rows.extend(missing);
-    if used.deny_unread > 0 {
-        let n = used.deny_unread;
-        warnings.push(format!(
-            "{n} ruleset{} may hold deny rules not searched: this PCE lists none inline (policy rules <ruleset> reads them)",
-            if n == 1 { "" } else { "s" }
-        ));
-    }
     let mut meta = ctx.meta(cache_label(hit, mode), truncated, None);
     meta.not_searched = Some(not_searched);
     meta.hygiene = Some(HygieneMeta {
         kinds: kinds.clone(),
         unused: unused_counts,
+        withheld: found.withheld,
+        uncertain: found.uncertain,
         keys: has(Kind::Workload).then_some(keys),
         missing: missing_counts,
         workloads: (has(Kind::Workload) || has(Kind::Label)).then_some(workloads.len()),
@@ -278,6 +314,7 @@ mod tests {
             href: "/orgs/5/workloads/1".into(),
             reason: "missing labels: app,env".into(),
             missing: Some(vec!["app".into(), "env".into()]),
+            certain: true,
         }]);
         assert_eq!(rows.rows()[0][4], "app, env");
         assert_eq!(rows.full_rows()[0][4], join_list(["app", "env"]));

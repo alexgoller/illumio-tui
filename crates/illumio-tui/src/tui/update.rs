@@ -104,8 +104,11 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
     );
     // What the hygiene report reads, the same and the lists only it waits
     // for.
-    let hygiene_data =
-        used_data || matches!(msg, Msg::IpListsLoaded(_) | Msg::PairingProfilesLoaded(_));
+    let hygiene_data = used_data
+        || matches!(
+            msg,
+            Msg::IpListsLoaded(_) | Msg::PairingProfilesLoaded(_) | Msg::LabelUsageLoaded(_)
+        );
     let mut cmds = on_msg(model, msg);
     if used_data {
         where_used_answer(model);
