@@ -210,6 +210,16 @@ pub fn exposure_names(x: Option<&ExposureConfig>) -> Option<Vec<String>> {
 pub const DEFAULT_SCOPE_KEYS: [&str; 2] = ["app", "env"];
 pub const DEFAULT_TIER_KEY: &str = "role";
 
+/// The label keys hygiene expects on every workload: the label model
+/// (`scope_keys`, then `tier_key`); for the default model (`app`, `env` /
+/// `role`) Illumio's four, `role`, `app`, `env`, `loc`.
+pub fn hygiene_keys(scope_keys: &[String], tier_key: &str) -> Vec<String> {
+    if scope_keys == DEFAULT_SCOPE_KEYS && tier_key == DEFAULT_TIER_KEY {
+        return ["role", "app", "env", "loc"].map(String::from).to_vec();
+    }
+    pce::KeyOrder::new(scope_keys, tier_key).first().to_vec()
+}
+
 /// Trimmed, empty entries dropped; `None` when nothing is left.
 fn key_list<'a>(items: impl Iterator<Item = &'a str>) -> Option<Vec<String>> {
     let keys: Vec<String> = items
@@ -271,6 +281,11 @@ impl ResolvedConfig {
     /// the rest alphabetically; `ignore_keys` hidden from label text.
     pub fn key_order(&self) -> pce::KeyOrder {
         pce::KeyOrder::new(&self.scope_keys, &self.tier_key).with_ignored(&self.ignore_keys)
+    }
+
+    /// The label keys hygiene expects on every workload ([`hygiene_keys`]).
+    pub fn hygiene_keys(&self) -> Vec<String> {
+        hygiene_keys(&self.scope_keys, &self.tier_key)
     }
 
     pub fn client_config(&self) -> pce::ClientConfig {
@@ -903,6 +918,19 @@ api_secret_cmd = "echo   from-command  "
 "#,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn hygiene_keys_are_the_label_model_or_illumios_four_by_default() {
+        let keys = |scope: &[&str], tier: &str| {
+            hygiene_keys(
+                &scope.iter().map(|k| k.to_string()).collect::<Vec<_>>(),
+                tier,
+            )
+        };
+        assert_eq!(keys(&["app", "env"], "role"), ["role", "app", "env", "loc"]);
+        assert_eq!(keys(&["app", "site"], "tier"), ["app", "site", "tier"]);
+        assert_eq!(keys(&["app"], "app"), ["app"]);
     }
 
     #[test]

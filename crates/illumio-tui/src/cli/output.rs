@@ -128,6 +128,46 @@ pub struct Meta {
     /// `where-used`: the object, its references and workload count.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub where_used: Option<WhereUsedMeta>,
+    /// `hygiene`: what is not searched, so an unused row reads as a
+    /// candidate.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub not_searched: Option<String>,
+    /// `hygiene`: the kinds checked and the rows per kind and per key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hygiene: Option<HygieneMeta>,
+}
+
+/// `meta.hygiene`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct HygieneMeta {
+    /// The kinds checked (`--kind`, else every kind).
+    pub kinds: Vec<pce::hygiene::Kind>,
+    /// Unused rows per object kind checked (zeros included).
+    pub unused: Vec<KindCount>,
+    /// The label keys every workload is expected to carry; `null` when
+    /// workloads are not checked.
+    pub keys: Option<Vec<String>>,
+    /// Workloads lacking each key, in `keys`' order; `null` when
+    /// workloads are not checked.
+    pub missing: Option<Vec<KeyCount>>,
+    /// The workloads read; `null` when none were.
+    pub workloads: Option<usize>,
+    /// Rulesets whose deny rules were not searched.
+    pub deny_unread: usize,
+}
+
+/// One kind's unused rows.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct KindCount {
+    pub kind: pce::hygiene::Kind,
+    pub count: usize,
+}
+
+/// The workloads lacking one key.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct KeyCount {
+    pub key: String,
+    pub count: usize,
 }
 
 /// `meta.where_used`.
@@ -393,6 +433,37 @@ pub trait TableRows {
     }
 }
 
+/// `unused: 1 label, 0 IP lists · missing labels: loc 4 (of 4 workloads)`:
+/// the kinds checked with their unused rows, the keys with the workloads
+/// lacking each.
+pub fn hygiene_counts(h: &HygieneMeta) -> String {
+    let mut parts = Vec::new();
+    if !h.unused.is_empty() {
+        let kinds: Vec<String> = h
+            .unused
+            .iter()
+            .map(|k| {
+                let word = if k.count == 1 {
+                    k.kind.word()
+                } else {
+                    k.kind.plural()
+                };
+                format!("{} {word}", k.count)
+            })
+            .collect();
+        parts.push(format!("unused: {}", kinds.join(", ")));
+    }
+    if let Some(m) = &h.missing {
+        let keys: Vec<String> = m.iter().map(|k| format!("{} {}", k.key, k.count)).collect();
+        parts.push(format!(
+            "missing labels: {} (of {} workloads)",
+            keys.join(", "),
+            h.workloads.unwrap_or(0)
+        ));
+    }
+    parts.join(" · ")
+}
+
 /// A list as one CSV cell.
 pub fn join_list<S: AsRef<str>>(items: impl IntoIterator<Item = S>) -> String {
     items
@@ -640,6 +711,12 @@ pub fn meta_line(meta: &Meta) -> String {
         }
         s.push_str(&format!(" · {}", w.not_searched));
     }
+    if let Some(h) = &meta.hygiene {
+        s.push_str(&format!(" · {}", hygiene_counts(h)));
+    }
+    if let Some(n) = &meta.not_searched {
+        s.push_str(&format!(" · {n}"));
+    }
     if let Some(f) = &meta.local_filter {
         s.push_str(&format!(" · filtered locally: {}", f.join(", ")));
     }
@@ -879,6 +956,8 @@ mod tests {
             compare: None,
             matched: None,
             where_used: None,
+            not_searched: None,
+            hygiene: None,
         };
         assert!(meta_line(&meta).contains("POST /orgs/5/labels → 201"));
         let m = Meta {

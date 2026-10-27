@@ -127,6 +127,8 @@ impl Context {
             compare: None,
             matched: None,
             where_used: None,
+            not_searched: None,
+            hygiene: None,
         }
     }
 

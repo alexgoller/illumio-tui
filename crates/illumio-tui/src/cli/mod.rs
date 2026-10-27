@@ -12,6 +12,7 @@ pub mod exposure;
 pub mod filters;
 pub mod generate;
 pub mod health;
+pub mod hygiene;
 pub mod marked;
 pub mod marks;
 pub mod names_cache;
@@ -187,6 +188,20 @@ pub enum Command {
     /// boundaries, pairing profiles, container workload profiles.
     #[command(subcommand)]
     WhereUsed(where_used::WhereUsedCmd),
+    /// Unused labels, label groups, IP lists and services, and workloads missing labels (read-only)
+    ///
+    /// The reverse of where-used, in one pass: an object nothing in the draft policy (ruleset
+    /// scopes, rule providers, consumers and services, deny rules as the ruleset list carries
+    /// them), the label groups, the pairing profiles (labels) or the workloads (labels) names
+    /// is listed `unused`; PCE built-ins (Any (0.0.0.0/0 and ::/0), All Services, ilo_defaults)
+    /// never are. An unused row is a candidate, not a verdict: meta.not_searched names what may
+    /// still use it (virtual services, enforcement boundaries, container workload profiles,
+    /// RBAC scopes, firewall settings). Workloads, managed and unmanaged, lacking one or more
+    /// of the profile's label keys ([profiles.x.labels] scope and tier keys; role, app, env,
+    /// loc for the default model) are listed with the keys missing. Requests, all cached and
+    /// only for the kinds asked: labels, label groups, IP lists, services, the draft rulesets,
+    /// the pairing profiles and the workload list. Exit 0 whatever it finds.
+    Hygiene(hygiene::HygieneArgs),
     /// Explorer traffic queries
     #[command(subcommand)]
     Traffic(traffic::TrafficCmd),
@@ -383,6 +398,7 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
         Command::Policy(p) => policy::run(&ctx, &p).await,
         Command::PairingProfiles(p) => pairing_profiles::run(&ctx, &p).await,
         Command::WhereUsed(w) => where_used::run(&ctx, &w).await,
+        Command::Hygiene(a) => hygiene::run(&ctx, &a).await,
         Command::Traffic(t) => traffic::run(&ctx, &t).await,
         Command::Completions(_) => names_cache::refresh(&ctx).await,
         Command::Snapshot(s) => snapshot::run(&ctx, &s).await,

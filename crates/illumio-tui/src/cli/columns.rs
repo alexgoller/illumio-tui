@@ -218,6 +218,7 @@ pub fn csv_columns(command: &Command) -> Vec<&'static str> {
             P::Rulesets(_) | P::DenyRules(_) | P::Provision(_) | P::Revert(_) => Vec::new(),
         },
         Command::WhereUsed(_) => super::where_used::HEADERS.to_vec(),
+        Command::Hygiene(_) => super::hygiene::HEADERS.to_vec(),
         Command::PairingProfiles(c) => match c.write_flags() {
             None => super::pairing_profiles::HEADERS.to_vec(),
             Some(_) => Vec::new(),

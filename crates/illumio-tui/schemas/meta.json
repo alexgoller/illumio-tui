@@ -176,6 +176,53 @@
       "required": ["object", "name", "href", "total", "workloads", "deny_unread", "not_searched"],
       "additionalProperties": false,
       "description": "where-used: the object, its references and workload count"
+    },
+    "not_searched": {
+      "type": "string",
+      "description": "hygiene: what is not searched, so an unused row is a candidate (and pairing profiles or workloads not read)"
+    },
+    "hygiene": {
+      "type": "object",
+      "properties": {
+        "kinds": {
+          "type": "array",
+          "items": {"enum": ["label", "label_group", "ip_list", "service", "workload"]},
+          "description": "the kinds checked (--kind, else every kind)"
+        },
+        "unused": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "kind": {"enum": ["label", "label_group", "ip_list", "service"]},
+              "count": {"type": "integer"}
+            },
+            "required": ["kind", "count"],
+            "additionalProperties": false
+          },
+          "description": "unused rows per object kind checked, zeros included"
+        },
+        "keys": {
+          "type": ["array", "null"],
+          "items": {"type": "string"},
+          "description": "the label keys every workload is expected to carry; null when workloads are not checked"
+        },
+        "missing": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "properties": {"key": {"type": "string"}, "count": {"type": "integer"}},
+            "required": ["key", "count"],
+            "additionalProperties": false
+          },
+          "description": "workloads lacking each key, in keys' order; null when workloads are not checked"
+        },
+        "workloads": {"type": ["integer", "null"], "description": "the workloads read; null when none were"},
+        "deny_unread": {"type": "integer", "description": "rulesets whose deny rules were not searched"}
+      },
+      "required": ["kinds", "unused", "keys", "missing", "workloads", "deny_unread"],
+      "additionalProperties": false,
+      "description": "hygiene: the kinds checked and the rows per kind and per key"
     }
   },
   "required": ["schema", "profile", "elapsed_ms", "api_calls", "bytes", "cache", "truncated"],

@@ -99,6 +99,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("where-used label-group", "where-used"),
     ("where-used iplist", "where-used"),
     ("where-used service", "where-used"),
+    ("hygiene", "hygiene"),
     ("traffic query", "traffic-query"),
     ("traffic query --dry-run", "traffic-dry-run"),
     ("traffic query --save-filter", "saved-filter"),
@@ -180,6 +181,7 @@ const FILES: &[(&str, &str)] = &[
     ),
     ("gen", include_str!("../../schemas/gen.json")),
     ("health", include_str!("../../schemas/health.json")),
+    ("hygiene", include_str!("../../schemas/hygiene.json")),
     ("iplists", include_str!("../../schemas/iplists.json")),
     (
         "label-groups",
@@ -598,6 +600,7 @@ pub fn schema_of(command: &Command) -> Option<&'static str> {
             P::Pending(_) => "policy-pending",
         },
         Command::WhereUsed(_) => "where-used",
+        Command::Hygiene(_) => "hygiene",
         Command::PairingProfiles(c) => match c {
             _ if c.write_flags().is_some_and(|f| f.dry_run) => "write",
             PP::List => "pairing-profiles",
