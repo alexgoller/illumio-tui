@@ -447,6 +447,7 @@ ad/Production          needs_rules  72.2%  37 gaps
       <li><kbd>Ctrl-U</kbd> empties the line in every text input, as in a shell: the filter editor, the mark and rule forms, the <code>:</code> prompt. <kbd>Ctrl-N</kbd> / <kbd>Ctrl-P</kbd> complete labels, IP lists, services and values without a request.</li>
       <li>Shell completions for bash, zsh and fish ship with the Homebrew formula and the <code>.deb</code>/<code>.rpm</code>; otherwise <code>illumio-tui completions zsh &gt; ~/.zfunc/_illumio-tui</code> (PowerShell: <code>illumio-tui completions powershell | Out-String | Invoke-Expression</code> in your profile). Every subcommand, flag and enum value completes, and <code>--profile</code> completes your profile names. Labels, apps, hostnames, services, IP lists and label groups complete from a per-profile names cache that the list commands, the TUI and <code>illumio-tui completions refresh</code> fill (<code>--clear</code> deletes it; <code>completion_cache = false</code> keeps PCE names off disk). The cache needs a profile from the config file with its own <code>host</code> and <code>org_id</code>: a PCE named by <code>--host</code>/<code>--org-id</code> or <code>PCE_HOST</code>/<code>PCE_ORG_ID</code> writes none. Completion never contacts the PCE.</li>
       <li><code>:export &lt;path&gt;</code> writes the table on screen as CSV, the same format as the CLI&rsquo;s <code>--csv</code>.</li>
+      <li><code>:snapshot [label]</code> saves the policy, labels and workloads to a local snapshot file (the reads <code>snapshot save</code> makes, mostly cache hits once the screens loaded); the status line shows the path. <code>illumio-tui snapshot diff</code> compares two of them.</li>
       <li>Apple Terminal garbles 24-bit colour before macOS 26, so there the theme is mapped to the xterm 256 colours by itself; <code>ILLUMIO_TUI_COLORS=256</code> or <code>truecolor</code> overrides it anywhere.</li>
     </ul>
   </article>
@@ -548,6 +549,7 @@ payment/Production,payment/Production,8080/tcp,7,70438,0,0,0,7,0,0,70438,0</code
             <tr><td>5</td><td>rate limited</td><td>429 / 503 after backoff</td></tr>
             <tr><td>6</td><td>write refused</td><td>writes not enabled; <code>enforce</code> on an app that is not ready</td></tr>
             <tr><td>7</td><td>blocked since enforcement</td><td><code>enforce --watch</code> found blocked flows</td></tr>
+            <tr><td>9</td><td>snapshots differ</td><td><code>snapshot diff --fail-on-change</code> found a change</td></tr>
           </tbody>
         </table>
       </div>
@@ -619,6 +621,12 @@ counts   rule_sets=9, services=2</code></pre>
 <span class="p">$ </span>illumio-tui gen shop/prod --granularity role-ports --outbound --table
 <span class="p">$ </span>illumio-tui gen shop/prod --consolidate 5666/tcp=any --json
 
+<span class="c"># snapshots: a local baseline of policy, labels and workloads, compared later at no PCE cost</span>
+<span class="p">$ </span>illumio-tui snapshot save --label "before the Q4 change"
+<span class="p">$ </span>illumio-tui snapshot list
+<span class="p">$ </span>illumio-tui snapshot diff --table    <span class="c"># previous against latest</span>
+<span class="p">$ </span>illumio-tui snapshot diff latest now --section rulesets,workloads
+
 <span class="c"># connection profiles</span>
 <span class="p">$ </span>illumio-tui profile add demo --from-env-file path/.env
 <span class="p">$ </span>illumio-tui profile list
@@ -640,6 +648,7 @@ counts   rule_sets=9, services=2</code></pre>
       <p><code>--group app,env</code> folds flows into label pairs; <code>--blocked</code> keeps blocked and potentially blocked flows, grouped by destination group and port. <code>traffic groups</code> prints one row per source and destination group with connections, bytes and decisions (<code>--services</code>: one per group pair and port/proto); <code>traffic mesh</code> one row per user, process, source, destination, service and destination process, with <code>--no-user</code> and <code>--no-process</code> to merge. <code>--keys</code> picks the label keys (default: the profile's scope keys). <code>--app shop/prod --direction in</code> spends the cap on one app: its labels go into the query (two queries for <code>both</code>, merged). <code>flows</code> counts flow records; <code>conns</code> and <code>bytes</code> are the lifetime counts of those records, as in the PCE UI, and JSON and CSV add them per decision (<code>allowed_conns</code>, <code>pot_blocked_conns</code>, <code>blocked_conns</code>, <code>unknown_conns</code>). <code>--transmission unicast</code> (or <code>broadcast</code>, <code>multicast</code>; <code>:unicast</code> in the TUI) leaves out the other kinds in the query itself; the default keeps every kind, where workloader counts unicast only.</p>
       <p><code>illumio-tui app shop/prod</code> prints the app overlay as one JSON envelope for agents: workloads and VENs, peers and policy; <code>--table</code> and <code>--csv --section</code> print it per section.</p>
       <p><code>illumio-tui gen shop/prod</code> prints the generator's proposal: the target ruleset, one row per peer (<code>kind</code> <code>intra</code>, <code>app</code>, <code>ip_list</code> with its <code>ip_list</code> and <code>ips</code>, <code>ip</code>, <code>workload</code> or <code>folded_ips</code>), the rules with their exact PCE bodies, the IP lists to create, the fan-in ports under <code>consolidations</code> (<code>--consolidate 5666/tcp=any|all</code> switches one to its single rule) and a coverage preview. A capped result exits 2, an incomplete one 4. <code>--baseline 7d</code> proposes only for the flow records the 7 days before the window lacked (<code>--changes new,changed</code> also for a key whose decision changed); the rest are left out, neither covered nor uncovered, and counted in <code>preview.seen_before_flows</code> (with <code>--table</code>/<code>--csv</code>, a <em>new since 7d before: N flows seen before</em> line on stderr), and <code>data.compare</code> holds both windows and the counts, like <code>meta.compare</code> of <code>traffic</code>.</p>
+      <p><code>snapshot save</code> keeps the policy (draft and active rulesets with their rules, label groups, IP lists, services, enforcement boundaries), the labels and the workloads (labels, enforcement mode, the VEN&rsquo;s status and version) in one local JSON file under <code>$XDG_DATA_HOME/illumio-tui/snapshots/&lt;profile&gt;/</code>: the same cached reads as every command, eight GETs, counted in <code>meta</code>. <code>--what</code> picks sections, <code>--with-readiness</code> adds every app&rsquo;s readiness (its one Explorer query, through the cost guard). <code>snapshot diff A B</code> (default <code>previous latest</code>; a time prefix, <code>latest</code>, <code>previous</code> or <code>now</code> for a live read of the sections the other side has) lists what was added, removed or changed per section, with the changed fields and <code>-</code>/<code>+</code> lines; rules read as in <code>policy pending --diff</code>. Snapshots of another profile or PCE are never compared (exit 2). <code>list</code>, <code>rm</code>, <code>prune --keep N</code> and a diff of two files send nothing. The files hold what the reads returned, never credentials. <code>:snapshot [label]</code> saves one from the TUI.</p>
       <p><code>--impact</code> on <code>policy rules</code> counts the workloads each rule matches as providers and consumers, across the ruleset's scopes, label groups and exclusions, from one cached workload read; <code>iplists</code> gives every list its size.</p>
     </div>
     <div>
@@ -676,6 +685,7 @@ counts   rule_sets=9, services=2</code></pre>
         <dt>5</dt><dd>rate limited</dd>
         <dt>6</dt><dd>write refused by the guard, or <code>enforce</code> on an app that is not ready</dd>
         <dt>7</dt><dd>flows blocked since an enforcement (<code>enforce --watch</code>)</dd>
+        <dt>9</dt><dd>two snapshots differ (<code>snapshot diff --fail-on-change</code>)</dd>
         <dt>141</dt><dd>stdout closed by its reader (<code>| head</code>): the command stops quietly, no error printed</dd>
       </dl>
     </div>
@@ -746,6 +756,36 @@ rules proposed from flow records; nothing is written
 ruleset             action  consumers → providers          services                            unscoped
 RF-cart-Production  create  all workloads → all workloads  80/tcp, 443/tcp, 445/tcp, 8080/tcp  false
 demo · 13 api calls · 2360.3 KB · cache miss · 8726 ms · covers 1d · 2 queries</code></pre>
+    </article>
+
+    <article class="recipe" aria-labelledby="r-snap-h">
+      <h3 id="r-snap-h">What changed in the PCE this week</h3>
+      <p>The PCE keeps no history of its rulesets, labels or workloads. A snapshot every night (eight cached GETs) and a diff on Monday answer &ldquo;what changed in policy&rdquo; and &ldquo;which workloads lost labels or changed enforcement&rdquo;; <code>--fail-on-change</code> exits 9 when something did, so a quiet week sends no mail.</p>
+<pre><code><span class="c"># crontab -e: a snapshot at 02:30, the last 60 kept; Monday 07:00 the week's changes</span>
+30 2 * * * illumio-tui snapshot save --label nightly &gt;/dev/null 2&gt;&gt;/var/tmp/snapshot.log &amp;&amp; illumio-tui snapshot prune --keep 60 &gt;/dev/null
+0 7 * * 1 illumio-tui snapshot diff "$(illumio-tui snapshot list --json | jq -r '.data[-8].id')" latest --fail-on-change --table &gt; /var/tmp/week.txt 2&gt;&gt;/var/tmp/snapshot.log; [ $? -eq 9 ] &amp;&amp; mail -s "PCE changes this week" alex@ryte.de &lt; /var/tmp/week.txt
+
+<!-- real output: illumio-tui snapshot diff previous latest --table -->
+<span class="p">$ </span>illumio-tui snapshot diff previous latest --table    <span class="c"># illustrative output</span>
+snapshot diff · 2026-10-20T023000Z → 2026-10-27T023000Z · 3 changes
+section       added  removed  changed
+rulesets      0      0        1
+labels        1      0        0
+workloads     0      1        1
+...
+changes
+section    change   scope  name              fields
+rulesets   changed  draft  Shop-Prod         rules
+  -allow role=db ← role=web PostgreSQL
+  +allow role=db ← role=web PostgreSQL (disabled)
+labels     added           env=Staging
+workloads  changed         host-2.example    labels,enforcement_mode
+  -label env=Development
+  +label env=Staging
+  -enforcement_mode: visibility_only
+  +enforcement_mode: full
+workloads  removed         host-9.example</code></pre>
+      <p><code>.data[-8]</code> is the snapshot seven nights back. <code>--section workloads</code> narrows the mail to the fleet, <code>--json</code> gives the same changes to a script (<code>.data.changes[] | select(.fields | index("labels"))</code>). A diff of two files reads nothing from the PCE; <code>snapshot diff latest now</code> reads only the sections the snapshot holds.</p>
     </article>
 
     <article class="recipe" aria-labelledby="r-why-h">

@@ -437,7 +437,7 @@ Five screens: `1` Traffic, `2` Policy, `3` Objects, `4` Workloads, `5` Events. T
 takes `:traffic`, `:policy`, `:objects`, `:workloads`, `:events`, `:iplists` (Objects on its
 IP lists tab), `:filter <expr>`, `:window <dur>`, `:profile <name>`, `:writes [on|off]`,
 `:export <path>`, `:draft`, `:active`, `:unicast`, `:focus [app]`, `:app [app]`, `:gen [app]`,
-`:readiness`, `:enforce [app]`, `:used` (where the selected object is used, as `W`), `:batch`, `:save <name>`, `:filters` (`:fl`), `:load <name>`,
+`:readiness`, `:enforce [app]`, `:used` (where the selected object is used, as `W`), `:batch`, `:snapshot [label]` (see [Snapshots](#snapshots)), `:save <name>`, `:filters` (`:fl`), `:load <name>`,
 `:default <name>|off`, `:help` and `:q` (each described below; saved filters under [Saved filters](#saved-filters)). `:export <path>` writes the table on
 screen as CSV (the rows shown, with the search and filters applied and in sort order; every
 column, whatever the terminal width, each cell whole; `~/` is the home directory), the same
@@ -995,6 +995,9 @@ the API call and byte counters at all times.
     illumio-tui gen shop/prod --window 24h --baseline 7d --table
     illumio-tui readiness --table
     illumio-tui readiness --app shop/prod --app crm/prod --json
+    illumio-tui snapshot save --label "before the Q4 change"
+    illumio-tui snapshot diff --table
+    illumio-tui snapshot diff latest now --section rulesets,workloads
     illumio-tui traffic mesh --window 1h --no-user --json
     illumio-tui traffic query --window 30d --dry-run
     illumio-tui traffic query --window 24h --backfill --json
@@ -1433,6 +1436,60 @@ With `--app` the output adds each app's `gaps`, the would-block flows as policy 
 group and service, largest first), and its pending changes. `--table` prints the apps table
 (and with `--app` the gaps and pending tables); `--csv` prints the apps table with full
 columns.
+
+### Snapshots
+
+The PCE keeps no history of its object lists. `illumio-tui snapshot save` keeps one locally, so
+"what changed in policy this month" or "which workloads lost labels since last week" has an
+answer later, at no cost to the PCE:
+
+    illumio-tui snapshot save [--what policy,labels,workloads] [--with-readiness [--yes]] [--label TEXT]
+    illumio-tui snapshot list
+    illumio-tui snapshot diff [A] [B] [--section rulesets,labels,label-groups,iplists,services,boundaries,workloads] [--fail-on-change]
+    illumio-tui snapshot rm TIMESTAMP
+    illumio-tui snapshot prune --keep N
+
+`save` makes the same cached reads as every other command (`--no-cache` for fresh ones), one
+after another, counted in `meta`: `policy` is the draft and active rulesets with their rules (and
+the deny rules the ruleset list carries), the label groups, IP lists, services and enforcement
+boundaries (six GETs); `labels` one; `workloads` one unfiltered list (each workload's href,
+name, hostname, labels, enforcement mode, managed flag and the VEN's `agent.status`: status,
+version, heartbeat, health). `--what` picks sections (default all three); `--with-readiness`
+adds every app's [readiness](#readiness) (its one Explorer query and reads, through its cost
+guard; `--yes` confirms an expensive one). It prints the file's path and each section's items
+and bytes. The TUI's `:snapshot [label]` makes the same reads (mostly cache hits after the
+screens loaded) and shows the path in the status line.
+
+Files: `$XDG_DATA_HOME/illumio-tui/snapshots/<profile>/<UTC time>.json` (else
+`~/.local/share/illumio-tui/snapshots/...`), one JSON file each, `{version, profile, pce, org,
+taken_at, label, truncated, sections}`; plain JSON (gzip it yourself if you keep many). They hold
+what the reads returned (rules, object names, hostnames, labels, VEN status), never credentials;
+mind who reads the directory. A read cut by its row cap is named in `truncated` and warned
+about in every diff. A file of a newer format, or one that is not a snapshot, is refused with
+why (`list` shows it with its `problem`).
+
+`diff` compares A (default `previous`) with B (default `latest`); each is a snapshot's time (a
+unique prefix is enough: `2026-10-01`), `latest`, `previous` or `now`, a live read of only the
+sections the other side holds (and `--section` asks for). Per section it lists what was added,
+removed or changed, matched by href, with the changed `fields` and `details` (`-` before, `+`
+after): rulesets in both the draft and the active policy, with each rule as `policy pending
+--diff` shows it; labels (key, value, deleted); label groups, IP lists and services as the
+pending diff shows them; boundaries (name, providers, consumers, services); workloads (name,
+hostname, labels, `enforcement_mode`, managed, `ven_status`, `ven_version`). A section one side
+lacks is listed under `not_compared`. Snapshots of another profile, PCE or org are never
+compared (exit 2, naming both). The exit code is 0 whatever changed; `--fail-on-change` exits 9
+after the report when something did. `--table` prints the counts and the changes with their
+lines; `--csv` prints the changes.
+
+`list`, `rm`, `prune` and a diff of two files read only the files: no request.
+
+A nightly snapshot and a Monday mail of the week's changes:
+
+    30 2 * * * illumio-tui snapshot save --label nightly >/dev/null 2>>/var/tmp/snapshot.log && illumio-tui snapshot prune --keep 60 >/dev/null
+    0 7 * * 1 illumio-tui snapshot diff "$(illumio-tui snapshot list --json | jq -r '.data[-8].id')" latest --fail-on-change --table > /var/tmp/week.txt 2>>/var/tmp/snapshot.log; [ $? -eq 9 ] && mail -s "PCE changes this week" alex@ryte.de < /var/tmp/week.txt
+
+`.data[-8]` is the snapshot seven nights back; exit 9 means something changed, so a quiet week
+sends no mail. The full recipe: https://alexgoller.github.io/illumio-tui/#recipes
 
 ### Flow marks
 
